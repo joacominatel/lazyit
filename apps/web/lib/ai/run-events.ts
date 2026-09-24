@@ -44,3 +44,17 @@ export function streamClosesOn(status: string | null | undefined): boolean {
 export function isTerminalRunStatus(status: string | null | undefined): boolean {
   return streamClosesOn(status) && status !== "AWAITING_APPROVAL";
 }
+
+/**
+ * What the follower does when a connection's body ends without an error: stop when the run waits or is
+ * over (the stream closes as designed); resume at once when the connection delivered events (the server's
+ * maximum stream lifetime); otherwise back off like a failure — a stream that closes empty must never
+ * become a reconnect loop. `status` is the last status known, seeded from the chat state before any event.
+ */
+export function afterStreamEnded(
+  status: string | null | undefined,
+  received: number,
+): "stop" | "resume" | "backoff" {
+  if (streamClosesOn(status)) return "stop";
+  return received > 0 ? "resume" : "backoff";
+}

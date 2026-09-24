@@ -17,14 +17,22 @@ import {
   sendErrorCode,
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
-import { eventSeq, isTerminalRunStatus, parseRunEvent, streamClosesOn } from "@/lib/ai/run-events";
+import {
+  afterStreamEnded,
+  eventSeq,
+  isTerminalRunStatus,
+  parseRunEvent,
+} from "@/lib/ai/run-events";
 import {
   chatReducer,
   initialChatState,
+  runStatusOfConversation,
   type ChatState,
 } from "@/lib/ai/stream-reducer";
 import { hasUnsavedChanges } from "@/lib/ai/unsaved-changes";
 import { ApiError } from "../client";
+import { handleAuthExpiry } from "../handle-auth-expiry";
+import { handlePasswordChangeRequired } from "../handle-password-change-required";
 import {
   cancelAiRun,
   decideAiToolCall,
@@ -103,18 +111,8 @@ export function useAiTurn() {
       }),
   });
   const cancel = useMutation({ mutationFn: (runId: string) => cancelAiRun(runId) });
-  const decide = useMutation({
-    mutationFn: (vars: {
-      runId: string;
-      toolCallId: string;
-      decision: AiApprovalDecisionValue;
-      password?: string;
-    }) =>
-      decideAiToolCall(vars.runId, vars.toolCallId, {
-        decision: vars.decision,
-        ...(vars.password ? { password: vars.password } : {}),
-      }),
-  });
+  // The approval decision is NOT a `useMutation`: its variables would carry the step-up password into
+  // the mutation cache. It is called directly and its auth failures are routed by hand (see decideCall).
 
   const stateRef = useRef<ChatState>(state);
   useEffect(() => {
@@ -134,7 +132,7 @@ export function useAiTurn() {
   }, [queryClient]);
 
   const applyEffects = useCallback(
-    (event: AiRunEvent) => {
+    (event: AiRunEvent, allowNavigate: boolean) => {
       if (event.type === "run.snapshot") {
         const plan = planSnapshotEffects(event, appliedRef.current);
         plan.callIds.forEach((id) => appliedRef.current.add(id));
@@ -143,6 +141,14 @@ export function useAiTurn() {
       }
       if (event.type === "run.finished") {
         void queryClient.invalidateQueries({ queryKey: aiConversationKeys.list() });
+        // The cached transcript is behind the stream now: the next open must read it again.
+        const convo = stateRef.current.conversationId;
+        if (convo) {
+          void queryClient.invalidateQueries({
+            queryKey: aiConversationKeys.detail(convo),
+            refetchType: "none",
+          });
+        }
         const code = event.error?.code;
         if (code === "AI_DISABLED" || code === "FORBIDDEN") {
           void queryClient.invalidateQueries({ queryKey: aiKeys.status() });
@@ -151,7 +157,7 @@ export function useAiTurn() {
       }
       if (event.type !== "tool.result") return;
       const plan = planEffects(event, {
-        live: true,
+        live: allowNavigate,
         unsaved: hasUnsavedChanges(),
         alreadyApplied: appliedRef.current.has(event.toolCallId),
       });
@@ -185,30 +191,55 @@ export function useAiTurn() {
   /**
    * Follows a run's events until the stream closes as designed (awaiting approval or finished). A drop
    * reconnects with `Last-Event-ID` (the server replays or sends a snapshot); `null` asks for a snapshot.
+   * `status` seeds the run status the loop knows before any event arrives; `allowNavigate: false` (a
+   * manual Reconnect) never auto-navigates from replayed navigate results.
    */
   const follow = useCallback(
-    async (runId: string, fromEventId: string | null) => {
+    async (
+      runId: string,
+      fromEventId: string | null,
+      options: { status?: string | null; allowNavigate?: boolean } = {},
+    ) => {
       followRef.current?.abort();
       const controller = new AbortController();
       followRef.current = controller;
       const { signal } = controller;
+      const allowNavigate = options.allowNavigate ?? true;
+      const known = stateRef.current.run;
       let lastEventId = fromEventId;
       let failures = 0;
-      let status: string | null = null;
+      let status: string | null =
+        options.status ?? (known && known.id === runId ? known.status : null);
+
+      /** One more failed connection: back off, or give up with the re-read fallback. Returns false to stop. */
+      const failed = async (): Promise<boolean> => {
+        failures += 1;
+        if (failures > MAX_RECONNECTS) {
+          setConnection("lost");
+          dispatch({ type: "notice", error: { code: "NETWORK", message: "" } });
+          const convo = stateRef.current.conversationId;
+          if (convo) await rehydrate(convo);
+          return false;
+        }
+        setConnection("reconnecting");
+        await sleep(backoffMs(failures), signal);
+        return true;
+      };
 
       while (!signal.aborted) {
+        let received = 0;
         try {
           const stream = await streamAiRunEvents(runId, { lastEventId, signal });
-          failures = 0;
           setConnection("open");
           for await (const message of stream) {
             if (signal.aborted) break;
             const event = parseRunEvent(message);
             if (!event) continue;
+            received += 1;
             const id = eventSeq(message.lastEventId, runId) !== null ? message.lastEventId : null;
             if (id) lastEventId = id;
             dispatch({ type: "event", runId, eventId: id, event });
-            applyEffects(event);
+            applyEffects(event, allowNavigate);
             if (
               event.type === "run.status" ||
               event.type === "run.snapshot" ||
@@ -217,33 +248,34 @@ export function useAiTurn() {
               status = event.status;
             }
           }
-          if (signal.aborted || streamClosesOn(status)) break;
-          // The server closed early (its maximum stream lifetime): resume where we are.
+          if (signal.aborted) break;
+          const next = afterStreamEnded(status, received);
+          if (next === "stop") break;
+          if (next === "resume") {
+            // The server closed early (its maximum stream lifetime): resume where we are.
+            failures = 0;
+            continue;
+          }
+          // A connection that delivered nothing and closed: back off like a failure, never spin.
+          if (!(await failed())) break;
         } catch (error) {
           if (signal.aborted) break;
+          if (error instanceof ApiError && error.status === 401) {
+            // The session is gone: the app-wide sign-out handling, never a chat notice.
+            handleAuthExpiry(error);
+            break;
+          }
           if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 429) {
+            handlePasswordChangeRequired(error);
             dispatch({ type: "notice", error: noticeFrom(error) });
             break;
           }
-          failures += 1;
-          if (failures > MAX_RECONNECTS) {
-            setConnection("lost");
-            dispatch({
-              type: "notice",
-              error: { code: "NETWORK", message: "" },
-            });
-            const convo = stateRef.current.conversationId;
-            if (convo) await rehydrate(convo);
-            if (followRef.current === controller) followRef.current = null;
-            return;
-          }
-          setConnection("reconnecting");
-          await sleep(backoffMs(failures), signal);
+          if (!(await failed())) break;
         }
       }
       if (followRef.current === controller) {
         followRef.current = null;
-        setConnection("idle");
+        setConnection((current) => (current === "lost" ? current : "idle"));
       }
       if (isTerminalRunStatus(status)) {
         void queryClient.invalidateQueries({ queryKey: aiConversationKeys.list() });
@@ -255,16 +287,31 @@ export function useAiTurn() {
   // Hydrate once per opened conversation, then re-subscribe to its active run (snapshot first).
   useEffect(() => {
     const data = detail.data;
-    if (!data || hydratedFor.current === data.id) return;
+    // Only a read made after this mount: a cached copy from an earlier open can be behind.
+    if (!data || !detail.isFetchedAfterMount || hydratedFor.current === data.id) return;
     hydratedFor.current = data.id;
     dispatch({ type: "hydrate", detail: data });
     const runId = data.activeRunId;
     // Subscribing starts network work that reports back through state: begin it after this commit.
-    if (runId) queueMicrotask(() => void follow(runId, null));
-  }, [detail.data, follow]);
+    const seed = runStatusOfConversation(data.status);
+    if (runId) queueMicrotask(() => void follow(runId, null, { status: seed }));
+  }, [detail.data, detail.isFetchedAfterMount, follow]);
 
   // Stop following when the panel unmounts; the run itself continues on the server.
-  useEffect(() => () => followRef.current?.abort(), []);
+  // Its cached transcript is stale from then on, so the next open reads it again.
+  useEffect(
+    () => () => {
+      followRef.current?.abort();
+      const convo = stateRef.current.conversationId;
+      if (convo) {
+        void queryClient.invalidateQueries({
+          queryKey: aiConversationKeys.detail(convo),
+          refetchType: "none",
+        });
+      }
+    },
+    [queryClient],
+  );
 
   const resetTo = useCallback(
     (id: string | null) => {
@@ -337,7 +384,11 @@ export function useAiTurn() {
     }
   }, [cancel, follow]);
 
-  /** Approves or rejects a pending write; on success re-subscribes to the run. */
+  /**
+   * Approves or rejects a pending write; on success re-subscribes to the run. Called directly (not through
+   * `useMutation`) so the step-up password never lands in the mutation cache; the global auth reactions
+   * the mutation cache would run are applied by hand. The STEP_UP_* 403s are neither: they stay inline.
+   */
   const decideCall = useCallback(
     async (
       toolCallId: string,
@@ -347,16 +398,18 @@ export function useAiTurn() {
       const run = stateRef.current.run;
       if (!run) return { ok: false, error: { kind: "notAwaiting" } };
       try {
-        const accepted = await decide.mutateAsync({
-          runId: run.id,
-          toolCallId,
+        const accepted = await decideAiToolCall(run.id, toolCallId, {
           decision,
           ...(password ? { password } : {}),
         });
         dispatch({ type: "runStarted", runId: run.id, status: accepted.status });
-        void follow(run.id, stateRef.current.run?.lastEventId ?? run.lastEventId);
+        void follow(run.id, stateRef.current.run?.lastEventId ?? run.lastEventId, {
+          status: accepted.status,
+        });
         return { ok: true };
       } catch (error) {
+        handleAuthExpiry(error);
+        handlePasswordChangeRequired(error);
         const kind = decisionErrorKind(error);
         if (kind.kind === "aiDisabled") {
           void queryClient.invalidateQueries({ queryKey: aiKeys.status() });
@@ -366,13 +419,14 @@ export function useAiTurn() {
         return { ok: false, error: kind };
       }
     },
-    [decide, follow, queryClient],
+    [follow, queryClient],
   );
 
   /** Reconnects after "connection lost". */
   const reconnect = useCallback(() => {
     const run = stateRef.current.run;
-    if (run) void follow(run.id, run.lastEventId);
+    // Replayed navigate results never move the user after a manual reconnect.
+    if (run) void follow(run.id, run.lastEventId, { allowNavigate: false });
   }, [follow]);
 
   const dismissNotice = useCallback(() => dispatch({ type: "notice", error: null }), []);
@@ -381,7 +435,12 @@ export function useAiTurn() {
     conversationId,
     state,
     connection,
-    loading: conversationId !== null && detail.isPending && state.messages.length === 0,
+    // Opening a conversation waits for a read made after mount, never a cached copy.
+    loading:
+      conversationId !== null &&
+      state.messages.length === 0 &&
+      !detail.isFetchedAfterMount &&
+      !detail.isError,
     loadError: detail.error,
     readOnly: detail.data?.readOnly === true || state.runError?.code === "CONVERSATION_READ_ONLY",
     sending: createConversation.isPending || send.isPending,

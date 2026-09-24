@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { eventSeq, isTerminalRunStatus, parseRunEvent, streamClosesOn } from "./run-events";
+import { afterStreamEnded, eventSeq, isTerminalRunStatus, parseRunEvent, streamClosesOn } from "./run-events";
 import { createSseParser } from "./sse-parser";
 
 describe("parseRunEvent", () => {
@@ -69,5 +69,19 @@ describe("stream closing", () => {
     expect(streamClosesOn(null)).toBe(false);
     expect(isTerminalRunStatus("AWAITING_APPROVAL")).toBe(false);
     expect(isTerminalRunStatus("SUCCEEDED")).toBe(true);
+  });
+});
+
+describe("afterStreamEnded", () => {
+  test("stops when the run waits or is over — even with no event, from the seeded status", () => {
+    expect(afterStreamEnded("AWAITING_APPROVAL", 0)).toBe("stop");
+    expect(afterStreamEnded("SUCCEEDED", 3)).toBe("stop");
+  });
+  test("resumes at once after a connection that delivered events", () => {
+    expect(afterStreamEnded("RUNNING", 4)).toBe("resume");
+  });
+  test("backs off after an empty connection — never a hot reconnect loop", () => {
+    expect(afterStreamEnded("RUNNING", 0)).toBe("backoff");
+    expect(afterStreamEnded(null, 0)).toBe("backoff");
   });
 });

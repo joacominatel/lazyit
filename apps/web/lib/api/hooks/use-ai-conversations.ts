@@ -31,8 +31,11 @@ export function useAiConversations(enabled = true) {
 }
 
 /**
- * One conversation with its messages. Not refetched on focus: the live run stream owns the in-flight
- * state, and a refetch here would re-hydrate over it.
+ * One conversation with its messages. Read FRESH on every mount (`refetchOnMount: "always"`): the panel
+ * remounts when it is reopened, and a cached copy from an earlier open would miss the turns, the pending
+ * approval or the active run added since. The chat hydrates only from a read made after it mounted
+ * (`isFetchedAfterMount`). It is not refetched on focus: while the panel is open the live run stream owns
+ * the state, and `useAiTurn` marks the copy stale when a run finishes and when the panel closes.
  */
 export function useAiConversation(id: string | null) {
   return useQuery({
@@ -40,6 +43,7 @@ export function useAiConversation(id: string | null) {
     queryFn: () => getAiConversation(id!),
     enabled: id !== null,
     staleTime: Infinity,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
 }
