@@ -29,7 +29,9 @@ const MAX_TRACKED = 10_000;
  * constant-time, fail-closed on a missing hash, oversized input refused before the KDF) — against the
  * user's CURRENT stored hash. It is never stored, logged, or passed on.
  *
- * Brute force: the `LoginService` per-account policy (ADR-0086 §3), mirrored here because that service's
+ * Brute force: at most ONE verification in flight per user (a concurrent attempt is answered `locked`
+ * without reaching the KDF), and every attempt is counted as a failure before the KDF runs (cleared by a
+ * success) — then the `LoginService` per-account policy (ADR-0086 §3), mirrored here because that service's
  * backoff map is private to the login flow: no delay for the first {@link AI_STEP_UP_FAILURE_THRESHOLD}
  * failures, then an exponential lock from 1 s up to 15 min, keyed by the user id, cleared by a success.
  * In-memory and per-process, like the login backoff. The caller is already authenticated, so a lock
@@ -41,6 +43,8 @@ const MAX_TRACKED = 10_000;
 @Injectable()
 export class AiStepUpVerifier {
   private readonly attempts = new Map<string, AttemptRecord>();
+  /** Users with a verification running now (at most one per user). */
+  private readonly inFlight = new Set<string>();
   /** The clock (tests move it). */
   now: () => number = Date.now;
 
@@ -54,13 +58,24 @@ export class AiStepUpVerifier {
     if (locked > 0) {
       return { ok: false, reason: 'locked', retryAfterSec: locked };
     }
-    const result = await this.credentials.verify(user.passwordHash, password);
-    if (!result.valid) {
-      this.recordFailure(user.id);
-      return { ok: false, reason: 'invalid' };
+    // One verification in flight per user: a burst of concurrent attempts would otherwise all pass the
+    // lock check above before any of them recorded a failure (N concurrent guesses for one).
+    if (this.inFlight.has(user.id)) {
+      return { ok: false, reason: 'locked', retryAfterSec: 1 };
     }
-    this.attempts.delete(user.id);
-    return { ok: true };
+    this.inFlight.add(user.id);
+    // The attempt counts as a failure BEFORE the KDF runs; a correct password clears it afterwards.
+    this.recordFailure(user.id);
+    try {
+      const result = await this.credentials.verify(user.passwordHash, password);
+      if (!result.valid) {
+        return { ok: false, reason: 'invalid' };
+      }
+      this.attempts.delete(user.id);
+      return { ok: true };
+    } finally {
+      this.inFlight.delete(user.id);
+    }
   }
 
   /** Seconds the account is still locked for (0 = not locked). */
