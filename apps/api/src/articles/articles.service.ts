@@ -547,16 +547,17 @@ export class ArticlesService {
       throw new NotFoundException(`Article ${id} not found`);
     }
     if (article.authorId !== cu) {
-      // #877 authorship bypass: an ADMIN / `article:manage` holder may restore ANY article. A non-admin
-      // manage-holder still passes the folder ACL (ADR-0060 §4; ADMIN → 'ALL' no-op) — mirrors loadOwned.
+      // Visibility BEFORE authorization (SEC-074, INV-9) — mirrors loadOwned: any non-author who can't
+      // read the home folder gets 404 (ADR-0060 §4; ADMIN → 'ALL' no-op), and only then the authorship
+      // 403. #877: an ADMIN / `article:manage` holder may restore ANY article in a folder they can read.
+      await this.assertFolderVisible(article.categoryId, principal, () => {
+        throw new NotFoundException(`Article ${id} not found`);
+      });
       if (!manageAny) {
         throw new ForbiddenException(
           'Only the author can restore this article',
         );
       }
-      await this.assertFolderVisible(article.categoryId, principal, () => {
-        throw new NotFoundException(`Article ${id} not found`);
-      });
     }
     if (article.deletedAt === null) {
       return article; // already live — idempotent
