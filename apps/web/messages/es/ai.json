@@ -332,7 +332,9 @@
     "workflow_connection_update": "Actualizar una conexión de flujo",
     "workflow_create": "Crear un flujo",
     "workflow_set_enabled": "Activar o desactivar un flujo",
-    "workflow_update": "Actualizar un flujo"
+    "workflow_update": "Actualizar un flujo",
+    "kb_folder_create": "Crear una carpeta de la base de conocimiento",
+    "kb_folder_rename": "Renombrar una carpeta de la base de conocimiento"
   },
   "fields": {
     "accessLevel": "Nivel de acceso",
@@ -386,6 +388,7 @@
     "outboundHosts": "Hosts de salida",
     "owners": "Responsables",
     "parent": "Superior",
+    "path": "Ruta",
     "person": "Persona",
     "probe": "Comprobación",
     "prompt": "Instrucción",

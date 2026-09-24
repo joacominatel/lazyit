@@ -332,7 +332,9 @@
     "workflow_connection_update": "Update a workflow connection",
     "workflow_create": "Create a workflow",
     "workflow_set_enabled": "Turn a workflow on or off",
-    "workflow_update": "Update a workflow"
+    "workflow_update": "Update a workflow",
+    "kb_folder_create": "Create a knowledge-base folder",
+    "kb_folder_rename": "Rename a knowledge-base folder"
   },
   "fields": {
     "accessLevel": "Access level",
@@ -386,6 +388,7 @@
     "outboundHosts": "Outbound hosts",
     "owners": "Owners",
     "parent": "Parent",
+    "path": "Path",
     "person": "Person",
     "probe": "Check",
     "prompt": "Prompt",
