@@ -331,6 +331,62 @@ describe('connection lifecycle', () => {
     expect(h.rt.run(runId).status).toBe('QUEUED');
   });
 
+  it.each([
+    [
+      'a logout (session epoch bump)',
+      (hh: HttpHarness) => {
+        hh.rt.loader.user.sessionEpoch += 1;
+      },
+    ],
+    [
+      'a revoked ai:use',
+      (hh: HttpHarness) => {
+        hh.rt.permissions.memberPermissions.delete('ai:use');
+      },
+    ],
+  ])(
+    'closes an open stream at the next heartbeat after %s',
+    async (_label, revoke) => {
+      await setup({ heartbeatMs: 20 });
+      const runId = await startRun([{ text: 'never drained' }]);
+      const stream = await openRaw(runId);
+      let ended = false;
+      stream.res.on('end', () => {
+        ended = true;
+      });
+      await until(() => stream.body().includes(': heartbeat'));
+      expect(ended).toBe(false);
+      revoke(h);
+      await until(() => ended && h.stream.openFor(HUMAN) === 0);
+      expect(listeners(runId)).toBe(0);
+      expect(h.rt.run(runId).status).toBe('QUEUED');
+    },
+  );
+
+  it('attaches nothing when the client left while the run was being loaded', async () => {
+    await setup();
+    const runId = await startRun([{ text: 'never drained' }]);
+    const subscribe = jest.spyOn(h.rt.bus, 'subscribe');
+    const res = {
+      destroyed: false,
+      socket: { destroyed: true },
+      on: jest.fn(),
+      write: jest.fn(),
+      status: jest.fn(),
+    };
+    await h.stream.stream({
+      runId,
+      identity: HUMAN,
+      lastEventId: undefined,
+      req: { destroyed: true, on: jest.fn() } as never,
+      res: res as never,
+    });
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(res.write).not.toHaveBeenCalled();
+    expect(res.on).not.toHaveBeenCalled();
+    expect(h.stream.openFor(HUMAN)).toBe(0);
+  });
+
   it('closes a stream after its maximum lifetime (the client resumes with Last-Event-ID)', async () => {
     await setup({ maxLifetimeMs: 50 });
     const runId = await startRun([{ text: 'never drained' }]);

@@ -19,6 +19,7 @@ import { Test } from '@nestjs/testing';
 import { ZodValidationPipe } from 'nestjs-zod';
 import type { Permission } from '@lazyit/shared';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
+import { PrincipalLoaderService } from '../../auth/principal-loader.service';
 import type { Principal } from '../../auth/principal';
 import { RolesGuard } from '../../auth/roles.guard';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -45,6 +46,7 @@ import {
   AiRunEventStream,
   type AiRunStreamOptions,
 } from './run-event-stream';
+import { AiStreamPrincipalCheck } from './stream-principal-check';
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- a structural in-memory Prisma extended for the HTTP surfaces; intentional for this test harness only. */
 
@@ -225,6 +227,12 @@ export async function buildHttp(
 
   // The role matrix: ADMIN holds everything, a MEMBER what the runtime harness grants members.
   const resolver = {
+    resolve: (role: string) =>
+      Promise.resolve(
+        role === 'ADMIN'
+          ? new Set<Permission>(['ai:use', 'ai:connect', 'settings:manage'])
+          : new Set(rt.permissions.memberPermissions),
+      ),
     hasAll: (role: string, required: readonly Permission[]) =>
       Promise.resolve(
         role === 'ADMIN' ||
@@ -244,6 +252,8 @@ export async function buildHttp(
       AiRunsService,
       AiRunEventStream,
       AiServiceAccountAccessService,
+      AiStreamPrincipalCheck,
+      { provide: PrincipalLoaderService, useValue: rt.loader },
       {
         provide: AI_RUN_STREAM_OPTIONS,
         useValue: { heartbeatMs: 60_000, ...options },

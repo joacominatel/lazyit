@@ -17,6 +17,7 @@ import {
 } from '../runtime/run-event-bus';
 import { describeError } from '../runtime/runtime.constants';
 import { AiRunsService, runStatusOf } from './ai-runs.service';
+import { AiStreamPrincipalCheck } from './stream-principal-check';
 
 /** A comment line every 15 s keeps proxies and the browser from timing the stream out (§4.6). */
 export const AI_RUN_STREAM_HEARTBEAT_MS = 15_000;
@@ -62,6 +63,7 @@ function closesOn(event: AiRunEvent): boolean {
  * Order of operations, each step before the next:
  *   1. OWNERSHIP — the run is loaded through the runtime's `ownedRun`: anyone but its owner gets 404 and
  *      the bus is never touched (a run id is not a capability; the bus does no authorization).
+ *      A client that went away during that load is dropped here, before any slot, listener or timer.
  *   2. The per-principal stream cap (429 `RATE_LIMITED`), then the headers: `Content-Type:
  *      text/event-stream`, `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no` — Caddy leaves
  *      this path unencoded and `reverse_proxy` flushes it (infra/caddy/Caddyfile, #1328) — and `: connected`.
@@ -88,6 +90,7 @@ export class AiRunEventStream {
   constructor(
     private readonly bus: InProcessRunEventBus,
     private readonly runs: AiRunsService,
+    private readonly principals: AiStreamPrincipalCheck,
     @Optional()
     @Inject(AI_RUN_STREAM_OPTIONS)
     options: AiRunStreamOptions | null = null,
@@ -114,6 +117,9 @@ export class AiRunEventStream {
     const { runId, identity, req, res } = input;
     // 1. Ownership before anything touches the bus (404 for everyone else).
     const run = await this.runs.owned(runId, identity);
+    // The client may have gone while the run was loaded: its `close` already fired, so nothing would ever
+    // release a slot, a listener or a timer attached now.
+    if (req.destroyed || res.destroyed || res.socket?.destroyed) return;
 
     // 2. The cap, then the stream.
     const key = keyOf(identity);
@@ -171,7 +177,24 @@ export class AiRunEventStream {
     res.flushHeaders();
     write(': connected\n\n');
 
-    timers.push(setInterval(() => write(': heartbeat\n\n'), this.heartbeatMs));
+    // Each heartbeat re-checks the principal (a logout, a password change, a revoked `ai:use`, a
+    // deactivated or revoked account): a stream the caller could no longer open is closed.
+    let checking = false;
+    timers.push(
+      setInterval(() => {
+        write(': heartbeat\n\n');
+        if (checking || closed) return;
+        checking = true;
+        this.principals
+          .stillAllowed(identity)
+          .catch(() => false)
+          .then((ok) => {
+            checking = false;
+            if (!ok) end();
+          })
+          .catch(() => undefined);
+      }, this.heartbeatMs),
+    );
     timers.push(setTimeout(end, this.maxLifetimeMs));
 
     // 3. Subscribe first; hold what arrives until the replay or the snapshot is out.
