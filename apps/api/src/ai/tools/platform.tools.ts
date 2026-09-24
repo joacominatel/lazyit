@@ -23,6 +23,7 @@ import { ServiceAccountsController } from '../../service-accounts/service-accoun
 import { NotificationPreferencesController } from '../../smtp/notification-preferences.controller';
 import { SmtpController } from '../../smtp/smtp.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
+import { PluginDistributionController } from '../../mcp/distribution/plugin-distribution.controller';
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { AiSettingsController } from '../settings/ai-settings.controller';
 import { AiStatusController } from '../status/ai-status.controller';
@@ -158,7 +159,7 @@ export const platformToolset: AiToolset = {
     // The rest of the workflow engine lives in `workflows.tools.ts` (W2-13) and
     // `workflow-authoring.tools.ts` (W2-14); its secrets stay here, a structural exclusion.
     // `WorkflowsController.findAll` (headers only) is bound by the access toolset (W2-6) for the grant,
-    // revoke and approve previews.
+    // revoke and approve previews, and by the workflow operations toolset (W2-13).
     unexposed(
       WorkflowSecretsController,
       ['findAll', 'findOne', 'create', 'rotate', 'remove'],
@@ -192,6 +193,12 @@ export const platformToolset: AiToolset = {
       McpController,
       ['handle'],
       'Not applicable: /mcp is the channel the tools are served through, not a tool.',
+    ),
+    // The Claude Code plugin distribution (W3-5): a file download for installing a client, not data.
+    unexposed(
+      PluginDistributionController,
+      ['download', 'marketplace', 'publicArchive'],
+      "Excluded: the Claude Code plugin download and marketplace distribute the AI's own client configuration (structural exclusion, INV-AI-14).",
     ),
   ],
 };

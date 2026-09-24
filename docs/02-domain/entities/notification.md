@@ -126,7 +126,7 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   report is still accepted and nothing is auto-merged or auto-split.
 
 - **The first `/mcp` request through a connection** (`McpConnectionNoticeService`,
-  [[ai-assistant/mcp-and-oauth|MCP]] §13; security §6.3) → **`mcp.client_connected`**, a **targeted**
+  [[ai-assistant/mcp-and-oauth|MCP]] §14; security §6.3) → **`mcp.client_connected`**, a **targeted**
   security notice to the account's owner (`recipientUserId` = `targetUserId` = the user) when an OAuth
   grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
   must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to

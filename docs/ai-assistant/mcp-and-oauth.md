@@ -495,7 +495,7 @@ opaque tokens are checked DB-first on every request, so revocation is already im
 | Rate limit | `isError: true`, `code: "RATE_LIMITED"`, retry hint |
 | Unexpected 5xx | `isError: true`, `code: "INTERNAL"`, request id ([[0031-logging-strategy]]), no internals |
 
-> **As built (W3-2, §13):** "MCP disabled" answers **404** (§5.1 wins: off means no surface), before any
+> **As built (W3-2, §14):** "MCP disabled" answers **404** (§5.1 wins: off means no surface), before any
 > token is read; a withdrawn `ai:connect` answers 403 `access_denied`. A tool outside the scope is not
 > listed, and calling it is refused before any handler — no per-call `scopeChallenge` is emitted.
 
@@ -542,6 +542,12 @@ lazyit-plugin.zip
   available while MCP is enabled; it is the only path on `lan`, where the plugin carries
   `userConfig.token`. The public `marketplace.json` + archive exist only when MCP is enabled on an HTTPS
   instance, because Claude Code's `archive` source is HTTPS-only.
+- **As built (W3-5):** §13. The marketplace is named `lazyit-<host>` (install `lazyit@lazyit-<host>`)
+  so two instances never replace each other. Other deviations from the sketch above: the **public**
+  archive leaves `reference/tools.md` out (it ships only in the authenticated download), and the public routes answer
+  `Cache-Control: no-cache` + a strong `ETag` (the archive's SHA-256) instead of `no-store`, so clients
+  revalidate cheaply and a switched-off instance stops answering at once. `reference/domain.md` is the
+  whole MCP `instructions` text (`buildMcpInstructions()`), not the domain part alone.
 - The page also shows a generic `.mcp.json` / `mcp.json` snippet for Cursor/VS Code, and — only when the
   instance is on `real` with a public name — the claude.ai connector URL.
 
@@ -951,7 +957,7 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 
 **Follow-ups** (from the G3 review of #1339; not fixed in W2-4):
 
-1. ~~**"New client connected" notification**~~ — **done in W3-2** (§13): the `mcp.client_connected`
+1. ~~**"New client connected" notification**~~ — **done in W3-2** (§14): the `mcp.client_connected`
    notification, sent on a connection's first use at `/mcp`.
 2. **`sessionEpoch` at consent:** store the epoch on the code row when the schema next opens, so a
    password change between consent and exchange also kills the grant (today the snapshot is taken at
@@ -970,7 +976,118 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 
 ---
 
-## 13. As built — the MCP resource server and personal tokens (W3-2, W3-4, #1315)
+## 13. As built — Claude Code plugin distribution (W3-5, #1315)
+
+Code: `apps/api/src/mcp/distribution/` (`McpDistributionModule`, imported by `McpModule`). It realizes
+§5.5 and R8 as follows.
+
+**Routes** (browser path `/api/ai/claude-code/…`; Caddy strips `/api`).
+
+| Route | Who | Answers |
+| --- | --- | --- |
+| `GET /ai/claude-code/plugin.zip` | human session + `ai:connect` (service accounts refused) | the plugin with the tool index; OAuth variant on a pinned-HTTPS instance, personal-token variant on `lan`; `Cache-Control: private, no-store`; `ETag` = the digest |
+| `GET /ai/claude-code/marketplace.json` | anonymous | the URL marketplace; `no-cache` + `ETag`; 304 on `If-None-Match` |
+| `GET /ai/claude-code/lazyit-plugin.zip` | anonymous | the public archive the marketplace pins; `no-cache` + `ETag`; 304 on `If-None-Match` |
+
+Gating: everything answers **404** while `ai_settings.mcpEnabled` is off (read through
+`OAuthPolicyService.mcpSettings()`, tolerant of an absent row) and in `AUTH_MODE=shim`. The two public
+routes also answer 404 unless the instance has the pinned HTTPS issuer (`resolveOAuthServerConfig`) — so
+on `lan`, or with an `http://` `WEB_ORIGIN`, **no anonymous response exists and none is built from
+`Host`**. The authenticated download takes its origin from the pinned issuer (OAuth), or on `lan` from
+`WEB_ORIGIN`, else — only with `AUTH_TRUST_HOST=true` — from the address the requester reached
+(`resolveResetLinkOrigin`, the #1268 rule); a malformed header or no origin at all answers
+**409 `ORIGIN_UNKNOWN`**. All three routes are `unexposed` in `ai/tools/platform.tools.ts`.
+
+**What is public, what is authenticated (decided in W3-5, G3).** The anonymous archive carries only what
+an unauthenticated visitor of an MCP-enabled HTTPS instance can already learn, or can read in the public
+repository:
+
+| File | Public archive | Authenticated download |
+| --- | --- | --- |
+| `.claude-plugin/plugin.json` — `name`, `displayName` "lazyit (<host>)", `description`, `homepage` = origin; **no `version`** | yes | yes, plus `userConfig.token` (`sensitive`, `required`) on `lan` |
+| `.mcp.json` — `{ "type": "http", "url": "<origin>/mcp" }` | yes (OAuth: no headers; Claude Code discovers the AS from the 401 + PRM) | on `lan`: `"headers": { "Authorization": "Bearer ${user_config.token}" }` — a placeholder, never a token |
+| `skills/lazyit/SKILL.md` — static template (`plugin-templates.ts`) | yes | yes, plus a pointer to `tools.md` |
+| `skills/lazyit/reference/domain.md` — `buildMcpInstructions()` (the primer + MCP channel rules, public by design, T-14) | yes | yes |
+| `skills/lazyit/reference/tools.md` — generated from the live registry: MCP-channel tools, class, required permission, one line each | **no** | yes |
+
+Never rendered anywhere: tokens, secrets, settings (not even the admin prompt addendum), user data, the
+build or prompt version, internal hostnames (only the public origin). The renderer's inputs are only
+the origin, the auth mode and the code-owned catalog. The tool index is left out of the public archive
+because the exact catalog fingerprints the build (the ADR-0083 posture keeps the version
+non-anonymous); a connected client gets the live list from `tools/list`, filtered to the person's
+permissions ∩ granted scopes.
+
+**G3 residuals (accepted, low impact).**
+- *Coarse version fingerprint.* The renderer is deterministic and the repository is public, so anyone can
+  render the public archive of each release for a given origin and match the published digest (or the
+  primer text inside the archive) against those renders. That narrows the instance to the releases that
+  share a primer and template version: a coarse version fingerprint, available only while MCP is on over
+  HTTPS, where the OAuth metadata already announces the capability.
+- *The instance is the plugin's code-signing root.* The plugin is code Claude Code loads on the user's
+  machine (a skill, an MCP server config). Whoever controls the instance or its TLS can change what the
+  next install or update receives — for example, point `.mcp.json` elsewhere or add a component. The
+  `sha256` in `marketplace.json` checks integrity against that same instance, not against a third party.
+  Mitigations: Claude Code's third-party marketplaces do not auto-update by default, so a change reaches
+  a user at their next explicit install or update (or at the next auto-update, if they enabled it); the
+  authenticated download is a manual install.
+- *Service-account refusal message.* `plugin.zip` reuses the shared `ServicePrincipalForbiddenGuard`,
+  whose 403 message mentions service-account and permission-matrix management. It is not specific to this
+  route and reveals nothing about it; it is left shared rather than forked.
+
+**Determinism and versioning.** `plugin-renderer.ts` is pure: fixed entry order, entry timestamps fixed
+at the DOS epoch (jszip encodes them in UTC), DEFLATE level 9. The same input gives the same bytes, so the
+SHA-256 is the marketplace's update signal and the ETag. Renders are cached per process, keyed by
+`PLUGIN_RENDER_REVISION` (`AI_PROMPT_VERSION` + `PLUGIN_TEMPLATE_VERSION`), the variant and the origin
+(at most 16 entries; the registry is fixed after boot). A template edit bumps `PLUGIN_TEMPLATE_VERSION`.
+
+**Fail-closed content guard.** Claude Code pre-processes plugin files: `${…}` is substituted in skill
+markdown and MCP configs — including **sensitive** `${user_config.*}` values, which in a skill would put
+the personal token into model context — `$ARGUMENTS`/`$N` are argument placeholders, and a skill can run
+shell commands when it loads. The renderer refuses all of these: the substitutions and placeholders,
+and shell injection in both of its forms — inline `` !`…` `` and a fenced block whose opening line starts
+with ```` ```! ```` (any fence length, optional indentation). It refuses to build an archive in which any of
+those appears, except the one header placeholder it writes into `.mcp.json`. Tool-index cells are
+flattened to one line (whitespace collapsed, pipes escaped), so catalog text cannot open a block or a row. `plugin-catalog.spec.ts` renders the shipped
+catalog so a tool description that would trip the guard fails CI, not the download.
+
+**Install paths.**
+- HTTPS + MCP on: `claude plugin marketplace add <origin>/api/ai/claude-code/marketplace.json`, then
+  `claude plugin install lazyit@lazyit-<host>` — the marketplace is named after the host
+  (`marketplaceName`: `lazyit-` + the host in kebab-case, port included), because Claude Code keys added
+  marketplaces by name and a second marketplace with an existing name silently **replaces** the first.
+  Third-party marketplaces do **not** auto-update by default; the
+  user enables it in `/plugin` → Marketplaces (or an admin sets `autoUpdate` in managed
+  `extraKnownMarketplaces`). An install with `@lazyit` always refreshes the marketplace first.
+- Any instance (the only path on `lan`): download `plugin.zip`, unzip it into `~/.claude/skills/lazyit/`
+  (loads as `lazyit@skills-dir`, no marketplace), or try it for one session with
+  `claude --plugin-dir ./lazyit-plugin.zip`. The `lan` variant prompts for the personal token when the
+  plugin is enabled.
+
+**External facts verified during the build** (code.claude.com docs, 2026-09-24; synthesis §11 item 3):
+
+| Fact | Finding |
+| --- | --- |
+| `claude plugin marketplace add` accepts the instance URL | Yes — a direct `https://` URL to `marketplace.json`; `http://` is rejected; relative plugin sources do not resolve, so the plugin uses an `archive` source. [E] plugin-marketplaces |
+| `archive` source | `{ "source": "archive", "url", "sha256" }`, **https only, zip only**, ≤ 256 MiB, `.claude-plugin/` at the top level or in one top-level folder; a `sha256` mismatch refuses the install; without a `version` the digest is the version. [E] plugin-marketplaces |
+| `${user_config.*}` inside MCP `headers` | Yes — substituted in MCP `url`, `headers` and `headersHelper` (not inside a `headersHelper` script body); sensitive values live in the OS keychain (fallback `~/.claude/.credentials.json`). It is **also** substituted in skill and agent markdown, hence the content guard. [E] plugins-reference |
+| `userConfig` prompting | At install/enable; a `required` field fails validation when empty; non-sensitive fields are editable in `/config`, sensitive ones by re-enabling. Prompting for `@skills-dir` plugins is not stated explicitly in the docs — **re-verify in W4-3**. [E] plugins-reference |
+| SKILL.md | `name`, `description`, `when_to_use` (description + when_to_use share a 1,536-character listing cap); body under 500 lines; plugin skills are namespaced `/lazyit:lazyit`. [E] skills |
+| Local install | `--plugin-dir` accepts a `.zip`; a folder with `.claude-plugin/plugin.json` under `~/.claude/skills/` loads as `<name>@skills-dir`. [E] plugins |
+
+**Debt and follow-ups.**
+1. Marketplaces no longer collide (named after the host, above), but the **plugin** is still `lazyit` in
+   every marketplace, so two instances installed side by side share the skill namespace `/lazyit:` and
+   the MCP server key `lazyit`. Enable one at a time, or decide on a per-host plugin name with the
+   `/account/ai` install page (W3-9) — a rename changes every installed plugin's id, so decide it before
+   release.
+2. The public routes have no dedicated rate limit: they serve a cached render (no DB work beyond the MCP
+   switch read). Revisit if the switch read ever becomes expensive.
+3. Re-verify Claude Code's behavior with an `http://` MCP URL and the `@skills-dir` `userConfig` prompt in
+   the W4-3 client matrix.
+
+---
+
+## 14. As built — the MCP resource server and personal tokens (W3-2, W3-4, #1315)
 
 Code: `apps/api/src/mcp/` (except `distribution/`, W3-5) and `apps/api/src/oauth/personal-tokens/`.
 §5.1, §5.3 and §5.4 hold; this section records the concrete behavior and the choices the build made.

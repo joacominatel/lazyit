@@ -488,15 +488,19 @@ Settings › AI
 **`/account/ai`**
 
 The Install in Claude Code panel:
-- **HTTPS instance** — one command pair, auto-updating (R8):
+- **HTTPS instance** — one command pair (R8):
   `claude plugin marketplace add <origin>/api/ai/claude-code/marketplace.json` then
-  `claude plugin install lazyit@lazyit`; run `/mcp` in Claude Code to sign in (a browser opens the
-  lazyit consent page).
-- **Any instance, including `lan`** — manual:
-  1. Download the plugin (`.zip`, `apiFetchBlob`) and copy its `skills/lazyit/` into `~/.claude/skills/`.
-  2. `claude mcp add --transport http lazyit <origin>/mcp --scope user`.
-  3. HTTPS: run `/mcp` to sign in. `lan`: create a personal token below and add it with
-     `--header "Authorization: Bearer lzit_pat_…"`.
+  `claude plugin install lazyit@lazyit-<host>` (the marketplace is named after the host — take the name
+  from the served `marketplace.json`, [[ai-assistant/mcp-and-oauth|MCP]] §13); run `/mcp` in Claude Code
+  to sign in (a browser opens the lazyit consent page). Updates are automatic only once the user enables
+  auto-update for the marketplace in `/plugin` → Marketplaces (off by default for third-party
+  marketplaces) — say so in the panel.
+- **Any instance, including `lan`** — manual (as built, W3-5):
+  1. Download the plugin (`GET /api/ai/claude-code/plugin.zip`, `apiFetchBlob`) and unzip the whole
+     archive into `~/.claude/skills/lazyit/` (it loads as `lazyit@skills-dir`, with its `.mcp.json`), or
+     try it for one session with `claude --plugin-dir ./lazyit-plugin.zip`.
+  2. HTTPS: run `/mcp` to sign in. `lan`: create a personal token below; Claude Code asks for it when
+     the plugin is enabled (it is stored in the OS keychain, never in the zip).
 
 A collapsed "Other MCP clients" section shows the endpoint URL and a `.mcp.json` snippet.
 
@@ -689,7 +693,7 @@ while MCP is enabled. On an HTTPS instance with MCP enabled, the public
 - `POST /oauth/personal-tokens { label, expiresInDays, scopes? }` → the token, shown once (`lan` only;
   `scopes` ⊆ `lazyit.read`/`lazyit.write`, default both). 403 `{ code: "OAUTH_INSTANCE" | "AI_DISABLED" }`
   explains why it cannot be minted; `GET /oauth/personal-tokens` lists them, `DELETE
-  /oauth/personal-tokens/:id` revokes one ([[ai-assistant/mcp-and-oauth|MCP]] §13).
+  /oauth/personal-tokens/:id` revokes one ([[ai-assistant/mcp-and-oauth|MCP]] §14).
 - Admin: `GET /oauth/grants?userId=` and `DELETE /oauth/grants/:id` (`settings:manage`, R9).
 - `Scope` is a closed enum — `lazyit.read`, `lazyit.write`, `lazyit.admin` — localized by the web.
 
