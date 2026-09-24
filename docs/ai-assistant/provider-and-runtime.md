@@ -488,7 +488,8 @@ export interface LlmProviderDefinition {
 
 **As built (W2-1, #1315).** The definition is
 `{ kind, requiresApiKey, defaultBaseUrl, createModel(config, modelId, fetch), callSettings(config, modelId),
-listModels(config, fetch), errorPatterns: { contextLimit, auth? }, adaptCall?(fetch, toolChoice) }` in
+listModels(config, fetch), errorPatterns: { contextLimit, auth? }, adaptCall?(fetch, toolChoice),
+webSearchTool?(maxUses), toolStrict? }` in
 `providers/provider.types.ts`. Classification is shared (`provider-errors.ts`): the definition contributes
 only the wording a status code cannot tell apart. Failures are thrown as `AiProviderError` (`code` is an
 `AI_RUN_ERROR_CODES` value: `AI_DISABLED`, `PROVIDER_AUTH`, `PROVIDER_RATE_LIMIT` with `retryAfterSec`,
@@ -552,6 +553,14 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
   trade-off); Gemini answers a bad key with a **400** `API_KEY_INVALID`, matched by `errorPatterns.auth`;
   the compatible provider sends no `effort` (servers differ on `reasoning_effort`) and no `Authorization`
   without a key.
+- **Tool strict mode (#1403).** The definition's optional `toolStrict` is sent as `strict` on every lazyit
+  function tool; absent, no flag is sent. **OpenAI sets `false`**: the Responses API treats an omitted
+  `strict` as strict mode, and strict mode made the model fill **every** property of a tool's input —
+  on the dev server `gpt-6-luna` sent `options`, `optionsFrom`, `min` and `max` on every `request_input`
+  field, whatever its kind, and failed six times in a row. lazyit's tool schemas are loose by design
+  (optional properties) and validated server-side by the executor, so non-strict is the intended mode.
+  Anthropic, Gemini and the compatible provider send no flag (Chat Completions and the others are
+  non-strict by default, and a local server may reject an unknown field).
 - **Model listing** has its own 15 s deadline (`MODEL_LIST_TIMEOUT_MS`, headers and body) instead of the
   600 s step budget, plus an optional caller signal; a timeout is `PROVIDER_UNAVAILABLE`. It is a capped
   (2 MiB, 500 entries) GET through the guarded fetch; the upstream body is
@@ -600,6 +609,8 @@ Per-provider notes [C]:
 - **openai**
   - Responses API with **`store: false`**, so provider-side retention is off by default, plus
     `include: ['reasoning.encrypted_content']` so reasoning replays statelessly.
+  - Function tools sent with **`strict: false`** (#1403): the Responses API's default is strict, which
+    makes the model fill every optional property.
   - `reasoningEffort` comes from `effort`.
   - Model listing via `GET /v1/models`.
 - **google**
@@ -712,6 +723,16 @@ Rules [C]:
   - logs `webSearches` / `webSources` counts on `ai.step.finish` (never the queries, ADR-0031).
   A step with `paused: true` and no tool call continues with another step (counted against the step
   cap) instead of ending the run.
+- **Repeated failing calls (#1403).** A model that keeps sending the same failing call is stopped by the
+  loop's `RepeatedFailureGuard` (`runtime/repeated-failures.ts`), for every tool. It is in memory, one per
+  pass of the loop (a run resumed after a pause starts a fresh one), and never persisted. Once a call has
+  failed the same way `AI_REPEATED_FAILURE_LIMIT` (2) times — the same tool and canonical input, or the
+  same tool and error — that result's `hint` tells the model to stop: fix what the error names, take
+  another approach or tell the user; for an interaction tool (`request_input`), stop calling it and ask
+  the user in plain text instead. A third call identical to one that already failed twice is **not run**:
+  it is answered `INVALID_INPUT` "Not run: this exact … call already failed 2 times in this turn" with the
+  same hint (the UI shows it as a failed call, like any refusal). `RATE_LIMITED` is transient and never
+  counted. Nothing else changes: every call is still answered, and the step cap still bounds the run.
 - **Max steps.** When `maxStepsPerRun − 1` is reached, the last step runs with `toolChoice: 'none'`
   so the model summarizes rather than stopping mid-action. `finishReason = max_steps`.
 - **Refusal or content filter.** The run ends `FAILED` (`refused`) and a message is shown. There
@@ -1125,7 +1146,14 @@ groups: rows of the same columns, `minRows` 0–50, default 1, `maxRows` 1–50;
 `{ key, label, kind: text | textarea | number | date | select | multiselect | checkbox, importance:
 required | recommended | optional, placeholder?, help?, options? | optionsFrom?, min?, max? }`; at most
 **20 fields in total** (top-level plus every group's columns), unique keys, a select has exactly one of
-`options` (≤ 100, strings or `{ value, label }`) or `optionsFrom`, `min`/`max` on numbers only.
+`options` (≤ 100, strings or `{ value, label }`) or `optionsFrom`, `min`/`max` on numbers only. The
+tool's description and the `kind` / property descriptions spell that out per kind, and the model's input
+is **normalized before it is validated** (#1403; the descriptor's `normalizeInput`,
+[[ai-assistant/tools-and-execution|tools]] §8.1–§8.2): `null`, blank strings and empty lists mean absent, a
+property that does not apply to the kind is dropped, and a select with both sources keeps `optionsFrom`;
+a select left without choices still fails, and the error names the fix ("fields.1: (select) needs its
+choices: add `options` … or `optionsFrom` (one of …) — or ask with kind "text" instead"). The stored form
+stays strict (`AiInputFormSchema`).
 `optionsFrom` is a closed list — `manufacturers` (the distinct `AssetModel.manufacturer` names, up to three
 pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)") —
 resolved at call time through the list routes **as the user** (`rt.call`, so a list they cannot read

@@ -689,7 +689,19 @@ path unit (W2-0, #1315):
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
-  `AiRunsController.submitInput` (the user's own answer) as unexposed;
+  `AiRunsController.submitInput` (the user's own answer) as unexposed. Its input is normalized before
+  validation (#1403, `normalizeRequestInput`): `null`, blank strings and empty lists on an optional
+  property mean absent (blank choices are dropped from `options` first); `options` / `optionsFrom` on
+  anything but a select or multiselect and `min` / `max` on anything but a number are dropped; a select
+  given **both** `options` and `optionsFrom` keeps **`optionsFrom`** — lazyit's list is current and
+  complete and its values are the ids the next call needs, where the model's copy may be partial or
+  stale. A select left with neither still fails, as do an unknown kind, a missing required property or
+  anything out of bounds — choices are never invented. Its errors say how to fix the call ("fields.1:
+  (select) needs its choices: add `options` (a list of strings) or `optionsFrom` (one of manufacturers,
+  assetCategories, locations, assetModels) — or ask with kind "text" instead"), and the
+  tool and property descriptions say which properties belong to which kind. A model that repeats a
+  failing form is told to ask in plain text instead ([[ai-assistant/provider-and-runtime|provider]]
+  §6.4, the repeated-failure guard);
   `infra.tools.ts` (W2-10) holds `infra_node_search` and `infra_node_get` and decides every other
   `InfraController` / `AgentDistController` handler as `unexposed` — see *Infra tools as built* below;
   `kb.tools.ts` (W2-8) holds the five KB tools — see *KB tools as built* below;
@@ -1338,6 +1350,10 @@ A tool declares (R4):
 - `class`: `read` | `write` | `elevated` | `navigate`
 - `destructive`, `externalEffects`, `idempotent`, `channels`
 - a zod `input`
+- optionally `normalizeInput(raw)` (#1403) — a pure, total rewrite of the raw model input the executor
+  applies **before** `input` validates it, for harmless noise only (a `null` or blank value meaning
+  absent, a property that does not apply). It never widens what the tool accepts semantically and never
+  changes the listed JSON Schema. `request_input` is the one tool that has it (below)
 - `bindings` (controller + method; `[0]` is primary)
 - `run(input, rt)`
 - `preview(input, rt)` — mandatory for `write` and `elevated`; server-resolved, never model prose
