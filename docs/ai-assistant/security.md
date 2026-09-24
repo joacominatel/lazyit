@@ -380,9 +380,9 @@ the **exfiltration leg** and the **consequential-action leg**.
 | Channel | Zero-click? | v1 posture [C] |
 | --- | --- | --- |
 | The LLM provider itself | yes | Inherent and disclosed (§6.4). It becomes attacker-controlled only if the base URL is; hence INV-AI-6's destination binding and T-38. |
-| Markdown image in chat | yes | **Closed** by reusing `MarkdownView`, which drops external images [R]. No new renderer. |
-| Link in chat | one click | External destination shown in full and not auto-linked, or behind an interstitial. |
-| Mermaid in chat | no | `securityLevel: 'strict'` [R]; keep it. |
+| Markdown image in chat | yes | **Closed** — as built (W3-7), the chat renders through its own sanitize-first renderer `apps/web/components/ai/ai-markdown.tsx` (the `MarkdownView` pipeline order, no KB passes): every image renders as its alt text and nothing is fetched. |
+| Link in chat | one click | As built (W3-7): bare URLs are never auto-linked; an explicit external link opens in a new tab (`noopener noreferrer nofollow`, no referrer) with its **full destination URL** shown beside the text; any scheme but http(s) and in-app paths is plain text. |
+| Mermaid in chat | no | As built (W3-7): not rendered in the chat at all — a mermaid fence is shown as code. |
 | Writes that change visibility (KB public folder, notes, `Application.url`) | no; others read later | Preview shows the full content plus the destination's visibility; SEC-051 fixed first. |
 | Identity or credential changes (email, reset link, SA token mint) | no | T3 elevated confirmation; one-time credentials never enter context (INV-AI-5). |
 | Workflow `WEBHOOK_OUT` / `REST` to configured URLs [R] | no | Authoring definitions and connections is T4 elevated, **chat only**, with the `OUTBOUND_INTEGRATION` warning; secrets and the egress allowlist are never tools. Retry/replay is T2. See §6.9. |
@@ -715,26 +715,27 @@ non-critical application needs no password. The MCP/headless refusal on critical
 each tool detecting `isCritical` and calling `assertChannelAllows` in `run`; the G2 review checks every
 write tool that can reach an application does. When ADR-0055's internal allowlist ships, its entries must
 be an excluded or elevated AI operation. Found while building W2-14 (a route-level gap, not an AI one):
-CSEC-1 guards only `secretId`, so a `workflow:manage`-only principal can re-point a connection whose
-`defaultHeaders` hold a pasted token (the field is documented "never a credential" but not validated) and
-the headers follow to the new host. The AI card names those headers on a re-point and the tool requires
-`workflow:secrets` for it; the route fix is a sentinel follow-up.
+CSEC-1 guarded only `secretId`, so a `workflow:manage`-only principal could re-point a connection whose
+`defaultHeaders` hold a pasted token. Closed by SEC-075: the route now requires `workflow:secrets` for
+that re-point and for any header-value change, and returns header values as `[redacted]` (the AI's
+`keptHeaders` round-trip sends the sentinel back, which keeps the stored values).
 
 Open items recorded by the G2 review of #1354 (W2-14):
 - **Userinfo in URLs.** The AI refuses `https://user:pass@host` in any connection it creates or
-  re-points and in any destination a card describes; the shared `publicHttpsUrl` schema and the route
-  still accept it (follow-up: refuse it there too, write-only, tolerant on read).
-- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`), but a version authored
-  in the UI between that check and the route's write is not detected: closing it needs the route to
-  take an expected version (the §9 TOCTOU follow-up).
+  re-points and in any destination a card describes. Closed at the route by SEC-076: create/patch refuse
+  it (write-only; a legacy row still reads masked, keeps running, and is flagged `legacyUserinfo`).
+- **Enable race.** An approval re-runs the preview (STALE / `PREVIEW_CHANGED`). Closed at the route by
+  SEC-077: `workflow_set_enabled` sends `expectedVersion` and `workflow_author_version` sends
+  `baseVersion` (the version read at run time), and the route 409s under a row lock if another version
+  landed in between.
 - **Literal credentials in templates.** A step path or mapping value may carry a pasted literal
   credential; the card shows mapping templates as written and masks only query values. The engine has
   no way to tell a literal token from ordinary text.
 - **Credential labels.** The card names an attached credential by id only: its label lives behind
   `/workflow-secrets`, a structural exclusion (INV-AI-14), so no guarded read may be bound for it.
-- **Offboarded sample grantees.** The dry-run route resolves a grant's grantee even when offboarded;
-  the enable card is refused in that case (the tool reads the grantee through `GET /users/:id`; without
-  `user:read` it cannot check and shows the card). The route itself is unchanged (follow-up).
+- **Offboarded sample grantees.** Closed at the route by SEC-078: the dry-run refuses (400) a sample
+  grant whose grantee is offboarded or that is revoked, so the card is refused even when the caller
+  lacks `user:read` (the tool's own `GET /users/:id` check stays as a second layer).
 
 **Proposed invariants** (join §7 on the W4-2 security re-review):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
@@ -993,8 +994,11 @@ in [[ai-assistant/_synthesis|the synthesis]] §10 places each gate on its units.
   notification.
 
 **G4 — Frontend (chat UI, preview and approval cards, consent page)**
-- Chat output renders only through `MarkdownView`: no `dangerouslySetInnerHTML`, no second markdown
-  pipeline. External images are dropped and external links are not auto-linked (EchoLeak fixtures).
+- Chat output renders only through the chat renderer `apps/web/components/ai/ai-markdown.tsx` (as built,
+  W3-7): `rehype-sanitize` first, no raw HTML, no `dangerouslySetInnerHTML`, no mermaid or KB passes,
+  `<untrusted_content>` wrappers stripped to plain text. Images are never loaded, bare URLs are never
+  auto-linked, and an explicit external link shows its full destination URL (EchoLeak-style fixtures in
+  `ai-markdown.test.tsx`). Tool summaries and preview values are plain React text.
 - Streaming uses `fetch` with headers and never puts a token in a query string.
 - Preview cards render the server's canonical diff, not model text. Elevated cards are distinct, have no
   default focus on Approve, and allow no batch approval.

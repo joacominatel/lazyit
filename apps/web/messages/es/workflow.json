@@ -129,6 +129,7 @@
     "baseUrlLabel": "URL base",
     "webhookUrlLabel": "URL del webhook",
     "urlHint": "Una URL pública https://.",
+    "legacyUserinfoWarning": "Esta URL lleva credenciales (usuario:contraseña@). Sigue funcionando, pero muévelas a una credencial: quítalas de la URL y añádelas como credencial de esta conexión.",
     "authLabel": "Método de autenticación",
     "authHeaderLabel": "Nombre de la cabecera",
     "healthPathLabel": "Ruta de comprobación",

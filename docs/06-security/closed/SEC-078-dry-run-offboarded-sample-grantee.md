@@ -2,7 +2,7 @@
 id: SEC-078
 title: Dry-run renders an offboarded (soft-deleted) sample grantee's personal details — the user include has no soft-delete filter
 severity: low
-status: open
+status: fixed
 cwe: CWE-359
 discovered: 2026-09-24
 module: workflow-engine (dry-run)
@@ -76,3 +76,30 @@ soft-delete class (summary, top finding 6).
 - CWE-359 (Exposure of Private Personal Information).
 - ADR-0058 §3 · [[SEC-040-soft-deleted-parent-leaks-via-asset-includes|SEC-040]] ·
   [[SEC-071-dashboard-soft-delete-relation-bypass|SEC-071]] · `docs/ai-assistant/security.md` · epic #1315, PR #1354.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `1c84fccb` (`fix(api): dry-run refuses offboarded or revoked samples and redacts header values (#1315)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-24
+
+### Changes
+- `workflow-dry-run.service.ts` `buildContext`: selects `user.deletedAt` on the nested include and
+  returns 400 ("The sample grant's grantee is offboarded — pick a grant of an active user") when set,
+  and 400 for a revoked grant (`revokedAt != null`). Read-only; no data touched. The web dry-run picker
+  already lists only active grants.
+
+### Tests added
+- `workflow-dry-run.service.spec.ts` › "SEC-078 sample grant must be live": offboarded grantee → 400;
+  the include selects `user.deletedAt`; revoked grant → 400; a live grant of an active user still
+  previews. The 400 tests fail without the fix (the preview rendered).
+
+### Verification
+Charter validation block: shared / api / web / agent `tsc --noEmit` clean; api Jest 252 suites, 5328
+tests passed; `packages/shared` (1375) and `apps/web` (1074) `bun test` 0 fail; `apps/agent` has 2
+pre-existing failures that need `pwsh` (unrelated). Changed-file eslint (api, web) clean; manual parity OK.
+With the implementation files reverted to `origin/dev` and the new specs kept, 18 of the new tests fail.
+
+### Residual risk
+None for this route. The AI enable card's own `GET /users/:id` check stays as a second layer.

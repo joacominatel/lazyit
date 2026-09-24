@@ -138,9 +138,15 @@ describe('AiSettingsController — handlers', () => {
     service.updateSettings.mockRejectedValueOnce(
       new EnvelopeKeyMissingError('AI_SECRET_KEY'),
     );
-    await expect(controller.update({} as never, ADMIN)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    const err = await controller
+      .update({} as never, ADMIN)
+      .catch((e: unknown) => e as ConflictException);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      statusCode: 409,
+      code: 'AI_SECRET_KEY_MISSING',
+      message: expect.stringContaining('AI_SECRET_KEY') as unknown,
+    });
   });
 
   it('test and models forward the draft', async () => {

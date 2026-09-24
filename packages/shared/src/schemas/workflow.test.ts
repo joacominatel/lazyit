@@ -4,6 +4,7 @@ import {
   CreateApplicationWorkflowSchema,
   CreateWorkflowConnectionSchema,
   CreateWorkflowSecretSchema,
+  CreateWorkflowVersionSchema,
   DEFAULT_DEPROVISION_POLICY,
   DEFAULT_PROBE_METHOD,
   DEFAULT_RETRY_POLICY,
@@ -32,6 +33,7 @@ import {
   WorkflowStepsSchema,
   WorkflowTriggerSchema,
   publicHttpsUrl,
+  urlHasUserinfo,
 } from "./workflow";
 
 const CUID = "clh1abc0000xyz0000000abcd";
@@ -242,6 +244,64 @@ describe("CreateWorkflowConnectionSchema — config.kind must match", () => {
         config: { kind: "REST", baseUrl: "https://jira.example.com", authScheme: "BEARER" },
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("SEC-076 — connection URLs refuse userinfo on write, stay tolerant on read", () => {
+  const create = (config: Record<string, unknown>) =>
+    CreateWorkflowConnectionSchema.safeParse({
+      applicationId: CUID,
+      kind: config.kind,
+      name: "x",
+      config,
+    }).success;
+
+  test("urlHasUserinfo detects user:pass@ and user@ in the authority only", () => {
+    expect(urlHasUserinfo("https://svc:hunter2@api.example.com")).toBe(true);
+    expect(urlHasUserinfo("https://svc@api.example.com/v1")).toBe(true);
+    expect(urlHasUserinfo("https://api.example.com/users/a@b.com")).toBe(false);
+    expect(urlHasUserinfo("https://api.example.com/?to=a@b.com")).toBe(false);
+    expect(urlHasUserinfo("https://api.example.com")).toBe(false);
+  });
+
+  test("create refuses userinfo for REST and WEBHOOK_OUT", () => {
+    expect(create({ kind: "REST", baseUrl: "https://u:p@api.example.com" })).toBe(false);
+    expect(create({ kind: "REST", baseUrl: "https://u@api.example.com" })).toBe(false);
+    expect(create({ kind: "WEBHOOK_OUT", url: "https://u:p@hooks.example.com/x" })).toBe(false);
+    expect(create({ kind: "WEBHOOK_OUT", url: "https://hooks.example.com/x" })).toBe(true);
+  });
+
+  test("the read/run-time config parse stays tolerant of a legacy row with userinfo", () => {
+    expect(
+      WorkflowConnectionConfigSchema.safeParse({
+        kind: "REST",
+        baseUrl: "https://u:p@api.example.com",
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("SEC-077 — optional version preconditions", () => {
+  test("UpdateApplicationWorkflowSchema accepts an optional expectedVersion", () => {
+    expect(
+      UpdateApplicationWorkflowSchema.safeParse({ enabled: true, expectedVersion: 3 }).success,
+    ).toBe(true);
+    expect(
+      UpdateApplicationWorkflowSchema.safeParse({ enabled: true, expectedVersion: -1 }).success,
+    ).toBe(false);
+  });
+  test("CreateWorkflowVersionSchema accepts an optional baseVersion", () => {
+    const steps = [
+      {
+        kind: "MANUAL",
+        key: "m",
+        prompt: "Do it",
+        inputFields: [{ name: "ok", label: "OK", type: "boolean" }],
+      },
+    ];
+    expect(CreateWorkflowVersionSchema.safeParse({ steps, baseVersion: 0 }).success).toBe(true);
+    expect(CreateWorkflowVersionSchema.safeParse({ steps }).success).toBe(true);
+    expect(CreateWorkflowVersionSchema.safeParse({ steps, baseVersion: 1.5 }).success).toBe(false);
   });
 });
 

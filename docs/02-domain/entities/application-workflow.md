@@ -49,6 +49,13 @@ indexed lookup of overhead, and nothing fires (`WorkflowTriggerService.planForTr
 - **The trigger and application are immutable.** Only `name`, `description`, `enabled`,
   `deprovisionPolicy` and `executedAsServiceAccountId` are mutable (the `UpdateApplicationWorkflow`
   DTO is a `partial`). To change the `(application, trigger)` pair, recreate the binding.
+- **Review-then-enable precondition** (SEC-077). `PATCH` takes an optional `expectedVersion` — the
+  latest [[workflow-version]] number the caller reviewed (`0` = none). When present, the update runs in
+  a transaction that locks the workflow row (`SELECT … FOR UPDATE`), re-reads the latest version and
+  returns **`409`** if it differs, so enabling never makes live a version authored after the review.
+  Version authoring takes the same row lock. Omitted = the unconditioned write (existing clients
+  unchanged). The web list toggle and the AI `workflow_set_enabled` tool send it; the builder does not
+  (it authors its own version on save).
 - **The binding has no creator column.** Author attribution lives on each [[workflow-version]]
   (human-XOR-SA) — the [[article]] / [[article-version]] split.
 - **v1 triggers only.** A workflow may be **created** against `ACCESS_GRANTED` / `ACCESS_REVOKED`
@@ -106,7 +113,8 @@ ADMIN-only in the seed ([[0046-roles-permissions-v2]]):
 - `GET /workflows` · `GET /workflows/:id` — list / detail (detail includes `latestVersion`).
   `@RequirePermission('workflow:read')`.
 - `POST /workflows` — create a binding (disabled by default). `@RequirePermission('workflow:manage')`.
-- `PATCH /workflows/:id` — edit the mutable fields (trigger/app immutable). `workflow:manage`.
+- `PATCH /workflows/:id` — edit the mutable fields (trigger/app immutable); optional `expectedVersion`
+  → `409` on mismatch. `workflow:manage`.
 - `DELETE /workflows/:id` — soft delete. `workflow:manage`.
 - `POST /workflows/:id/versions` — author a new immutable [[workflow-version]] (validates the step
   graph + connection refs). `workflow:manage`.

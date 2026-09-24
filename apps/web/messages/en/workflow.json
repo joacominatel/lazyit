@@ -129,6 +129,7 @@
     "baseUrlLabel": "Base URL",
     "webhookUrlLabel": "Webhook URL",
     "urlHint": "A public https:// URL.",
+    "legacyUserinfoWarning": "This URL carries credentials (user:password@). It still works, but move them to a credential: remove them from the URL and add them as this connection's credential.",
     "authLabel": "Auth method",
     "authHeaderLabel": "Header name",
     "healthPathLabel": "Health check path",

@@ -7,6 +7,12 @@ import {
 } from '@lazyit/shared';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import {
+  marketplaceUrl,
+  mcpUrl,
+  normalizeOrigin,
+} from '../../mcp/distribution/plugin-renderer';
+import { resolveOAuthServerConfig } from '../../oauth/oauth-config';
+import {
   isHumanPrincipal,
   isServicePrincipal,
   type Principal,
@@ -30,6 +36,36 @@ export function resolveMcpAuthMode(
 }
 
 /**
+ * The server-known MCP URLs for `GET /ai/status` `mcp` — derived ONLY from the pinned `WEB_ORIGIN` (the
+ * origin the plugin renderer and the OAuth issuer use), never from the request's `Host` (security.md T-30):
+ *   - `endpoint`       — `<WEB_ORIGIN>/mcp` whenever an http(s) origin is pinned, MCP on or off, so the
+ *                        settings card can show it before the switch is flipped; null on a `lan` instance
+ *                        without `WEB_ORIGIN` (the web then falls back to its own origin) and in shim mode;
+ *   - `marketplaceUrl` — the public Claude Code URL marketplace, only while it is actually served: MCP on,
+ *                        a pinned HTTPS origin, not shim (`PluginDistributionService.requirePublicOrigin`).
+ */
+export function resolveMcpUrls(
+  mcpEnabled: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): { endpoint: string | null; marketplaceUrl: string | null } {
+  const none = { endpoint: null, marketplaceUrl: null };
+  if (isShimMode(env)) return none;
+  const raw = env.WEB_ORIGIN?.trim();
+  if (!raw) return none;
+  let origin: string;
+  try {
+    origin = normalizeOrigin(raw);
+  } catch {
+    return none;
+  }
+  const oauth = resolveOAuthServerConfig(env);
+  return {
+    endpoint: mcpUrl(origin),
+    marketplaceUrl: mcpEnabled && oauth ? marketplaceUrl(oauth.issuer) : null,
+  };
+}
+
+/**
  * `GET /ai/status` (synthesis §4.5) — per caller, no secrets:
  *   - `chat.available` = enabled ∧ the caller holds `ai:use` ∧ the provider is usable — the reader's
  *     `resolveProviderConfig()` resolves (known provider, a model, a stored key that DECRYPTS) and a
@@ -38,7 +74,8 @@ export function resolveMcpAuthMode(
  *   - neither is ever available in shim mode (security.md §12 G1);
  *   - `configRevision` = the settings row's `updatedAt` (`"0"` while none exists), so other shells notice
  *     an enable or disable;
- *   - `retentionDays` only while the chat is available to this caller.
+ *   - `retentionDays` only while the chat is available to this caller;
+ *   - `mcp.endpoint` / `mcp.marketplaceUrl` from the pinned origin only ({@link resolveMcpUrls}).
  * Permissions are resolved DB-first (the role matrix for a human, the direct grants for a service account).
  */
 @Injectable()
@@ -55,7 +92,7 @@ export class AiStatusService {
     if (isShimMode() || !principal) {
       return {
         chat: { available: false },
-        mcp: { available: false, auth },
+        mcp: { available: false, auth, endpoint: null, marketplaceUrl: null },
         configRevision,
         retentionDays: null,
       };
@@ -68,7 +105,11 @@ export class AiStatusService {
 
     return {
       chat: { available: chatAvailable },
-      mcp: { available: mcpAvailable, auth },
+      mcp: {
+        available: mcpAvailable,
+        auth,
+        ...resolveMcpUrls(settings.mcpEnabled),
+      },
       configRevision,
       retentionDays: chatAvailable ? settings.retentionDays : null,
     };

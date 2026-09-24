@@ -200,6 +200,147 @@ export function resolveMcpClientAllowlist(
   return effective;
 }
 
+/**
+ * How far a curated default's identifier has been checked:
+ *   - `verified`    — taken from the client's own source code or its vendor's authoritative
+ *                     documentation, and not flagged for re-verification;
+ *   - `vendor-docs` — taken from vendor documentation only; it is re-verified before general
+ *                     availability (docs/ai-assistant/mcp-and-oauth.md §12).
+ */
+export const MCP_CLIENT_ALLOWLIST_VERIFICATIONS = ["verified", "vendor-docs"] as const;
+export const McpClientAllowlistVerificationSchema = z.enum(MCP_CLIENT_ALLOWLIST_VERIFICATIONS);
+export type McpClientAllowlistVerification = z.infer<typeof McpClientAllowlistVerificationSchema>;
+
+/**
+ * A CURATED DEFAULT: an allowlist entry plus where its identifier comes from. `verification` and
+ * `source` are display metadata for Settings → AI; they never take part in matching.
+ */
+export const McpClientAllowlistDefaultSchema = McpClientAllowlistEntrySchema.extend({
+  verification: McpClientAllowlistVerificationSchema,
+  source: z.string().min(1).max(200),
+});
+export type McpClientAllowlistDefault = z.infer<typeof McpClientAllowlistDefaultSchema>;
+
+/**
+ * The CURATED DEFAULT MCP client allowlist (ADR-0097 decision 13) — data only, shared so the
+ * authorization server enforces it and Settings → AI lists it (and offers "remove this built-in
+ * client", which writes its id to `mcpClientAllowlistRemovedDefaults`). `ai_settings` stores only the
+ * overlay, so a later release can correct an identifier here without undoing the admin's choices. Ids
+ * are STABLE: renaming one would resurrect a default an admin removed.
+ *
+ * Matching is on the CIMD `client_id` URL or an exact redirect URI (loopback `http` port-agnostic),
+ * NEVER on `client_name`. Where several clients share a loopback callback the label names them all.
+ * Where a client's identifier could not be verified (Windsurf, Zed, Pi) it is deliberately NOT seeded —
+ * an admin adds it, and docs/ai-assistant/mcp-and-oauth.md §12 tracks the verification.
+ *
+ * A loopback entry admits any local program that uses that callback path. That is inherent to native
+ * OAuth clients (RFC 8252 §8.3) and why the consent screen always shows the redirect host with a
+ * loopback warning.
+ */
+const CURATED_DEFAULTS: McpClientAllowlistDefault[] = [
+  {
+    id: "claude-code-cimd",
+    label: "Claude Code (client metadata document)",
+    match: { kind: "cimd_url", url: "https://claude.ai/oauth/claude-code-client-metadata" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "loopback-localhost-callback",
+    label: "Claude Code, OpenAI Codex (http://localhost/callback)",
+    match: { kind: "redirect_uri", pattern: "http://localhost/callback" },
+    verification: "verified",
+    source: "Claude Code; OpenAI Codex rmcp-client source",
+  },
+  {
+    id: "loopback-127-callback",
+    label: "Claude Code, OpenAI Codex (http://127.0.0.1/callback)",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/callback" },
+    verification: "verified",
+    source: "Claude Code; OpenAI Codex rmcp-client source",
+  },
+  {
+    id: "claude-ai",
+    label: "Claude (claude.ai, Claude Desktop, Cowork)",
+    match: { kind: "redirect_uri", pattern: "https://claude.ai/api/mcp/auth_callback" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "claude-com",
+    label: "Claude (claude.com callback)",
+    match: { kind: "redirect_uri", pattern: "https://claude.com/api/mcp/auth_callback" },
+    verification: "verified",
+    source: "Claude connector documentation",
+  },
+  {
+    id: "chatgpt",
+    label: "ChatGPT (developer mode connectors)",
+    match: { kind: "redirect_uri", pattern: "https://chatgpt.com/connector_platform_oauth_redirect" },
+    verification: "vendor-docs",
+    source: "OpenAI developer-mode documentation",
+  },
+  {
+    id: "opencode",
+    label: "OpenCode",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/mcp/oauth/callback" },
+    verification: "verified",
+    source: "sst/opencode source (mcp/oauth-provider.ts)",
+  },
+  {
+    id: "gemini-cli",
+    label: "Gemini CLI",
+    match: { kind: "redirect_uri", pattern: "http://localhost/oauth/callback" },
+    verification: "verified",
+    source: "google-gemini/gemini-cli source (utils/oauth-flow.ts)",
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    match: { kind: "redirect_uri", pattern: "cursor://anysphere.cursor-mcp/oauth/callback" },
+    verification: "vendor-docs",
+    source: "Cursor documentation",
+  },
+  {
+    id: "vscode-web",
+    label: "VS Code / GitHub Copilot (vscode.dev)",
+    match: { kind: "redirect_uri", pattern: "https://vscode.dev/redirect" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-insiders-web",
+    label: "VS Code Insiders (insiders.vscode.dev)",
+    match: { kind: "redirect_uri", pattern: "https://insiders.vscode.dev/redirect" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-loopback-127",
+    label: "VS Code / GitHub Copilot (http://127.0.0.1/)",
+    match: { kind: "redirect_uri", pattern: "http://127.0.0.1/" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+  {
+    id: "vscode-loopback-localhost",
+    label: "VS Code / GitHub Copilot (http://localhost/)",
+    match: { kind: "redirect_uri", pattern: "http://localhost/" },
+    verification: "vendor-docs",
+    source: "VS Code dynamic client registration",
+  },
+];
+
+/** Parsed through the schema at load, so a malformed default fails the first test run; deep-frozen. */
+export const MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS: readonly McpClientAllowlistDefault[] =
+  Object.freeze(
+    CURATED_DEFAULTS.map((entry) => {
+      const parsed = McpClientAllowlistDefaultSchema.parse(entry);
+      Object.freeze(parsed.match);
+      return Object.freeze(parsed);
+    }),
+  );
+
 /** Loopback http redirects match on any port (RFC 8252 §7.3); every other part matches exactly. */
 const LOOPBACK_HTTP_PORT = /^(http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])):\d+(?=\/|$)/i;
 const withoutLoopbackPort = (uri: string) => uri.replace(LOOPBACK_HTTP_PORT, "$1");
@@ -292,6 +433,46 @@ export const AiSettingsSchema = z.object({
   updatedAt: z.iso.datetime().nullable(),
 });
 export type AiSettings = z.infer<typeof AiSettingsSchema>;
+
+/**
+ * The stable machine codes of every `/config/ai` refusal (provider-and-runtime.md §9.1). Each refusal
+ * body carries `code` next to its human `message`, so the web matches the code, never the sentence.
+ *   409 — `AI_SETTINGS_CONCURRENT_SAVE` (reload and save again), `AI_SECRET_KEY_MISSING` (a key write,
+ *         or enabling a key-bearing provider, without a usable `AI_SECRET_KEY`), `AI_SHIM_MODE` (test or
+ *         enable while `AUTH_MODE=shim`);
+ *   400 — the base-URL rules (`BASE_URL_*`), `PRIVATE_NETWORK_PROVIDER_MISMATCH`,
+ *         `PROVIDER_OPTIONS_UNSUPPORTED`, and `PROVIDER_NOT_CONFIGURED` for a test without a provider or
+ *         model;
+ *   422 — the enable gate: `DISCLOSURE_REQUIRED`, `PROVIDER_NOT_CONFIGURED`, `API_KEY_REQUIRED` (with
+ *         `reason: "DESTINATION_CHANGED"` when the stored key was just cleared because the provider or
+ *         base URL changed), `CONNECTION_TEST_FAILED` (with `test`).
+ * The list only grows; a web treats an unknown code as a generic refusal and shows `message`.
+ */
+export const AI_SETTINGS_ERROR_CODES = [
+  "AI_SETTINGS_CONCURRENT_SAVE",
+  "AI_SECRET_KEY_MISSING",
+  "AI_SHIM_MODE",
+  "BASE_URL_INVALID",
+  "BASE_URL_CREDENTIALS",
+  "BASE_URL_QUERY_OR_FRAGMENT",
+  "BASE_URL_SCHEME",
+  "BASE_URL_HTTP_NOT_ALLOWED",
+  "BASE_URL_LOOPBACK",
+  "BASE_URL_HTTP_PUBLIC",
+  "BASE_URL_UNREACHABLE_RANGE",
+  "BASE_URL_PRIVATE_NOT_ALLOWED",
+  "PRIVATE_NETWORK_PROVIDER_MISMATCH",
+  "PROVIDER_OPTIONS_UNSUPPORTED",
+  "DISCLOSURE_REQUIRED",
+  "PROVIDER_NOT_CONFIGURED",
+  "API_KEY_REQUIRED",
+  "CONNECTION_TEST_FAILED",
+] as const;
+export type AiSettingsErrorCode = (typeof AI_SETTINGS_ERROR_CODES)[number];
+
+/** Why `API_KEY_REQUIRED` fired, when there is more to say than "no key". */
+export const AI_API_KEY_REQUIRED_REASONS = ["DESTINATION_CHANGED"] as const;
+export type AiApiKeyRequiredReason = (typeof AI_API_KEY_REQUIRED_REASONS)[number];
 
 const aiModelId = z.string().trim().min(1).max(200);
 const aiBaseUrl = z
@@ -399,6 +580,18 @@ export const AiModelListSchema = z.object({
 export type AiModelList = z.infer<typeof AiModelListSchema>;
 
 /**
+ * The body of a `/config/ai` refusal. `code` is kept an open string on read so an older web renders a
+ * newer code generically; the 400/409 bodies also carry Nest's `statusCode` and `error`.
+ */
+export const AiSettingsErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  reason: z.string().optional(),
+  test: AiConnectionTestResultSchema.optional(),
+});
+export type AiSettingsError = z.infer<typeof AiSettingsErrorSchema>;
+
+/**
  * How `/mcp` authenticates on this instance: OAuth 2.1 on an HTTPS instance, personal tokens on a
  * plain-HTTP `lan` instance (CEO, round 2).
  */
@@ -409,12 +602,27 @@ export type AiMcpAuthMode = z.infer<typeof AiMcpAuthModeSchema>;
 /**
  * `GET /ai/status` — per caller, for any authenticated principal (synthesis §4.5). No secrets and no
  * provider credentials. `chat.available` = enabled ∧ provider configured ∧ `ai:use`;
- * `mcp.available` = MCP switch ∧ `ai:connect`. `configRevision` changes whenever the settings change,
+ * `mcp.available` = MCP switch ∧ `ai:connect`; `mcp.endpoint` / `mcp.marketplaceUrl` are the server-known
+ * URLs from the pinned origin. `configRevision` changes whenever the settings change,
  * so other shells notice an enable or disable. The web treats a 404 or any error as "off".
  */
 export const AiStatusSchema = z.object({
   chat: z.object({ available: z.boolean() }),
-  mcp: z.object({ available: z.boolean(), auth: AiMcpAuthModeSchema }),
+  mcp: z.object({
+    available: z.boolean(),
+    auth: AiMcpAuthModeSchema,
+    /**
+     * `<WEB_ORIGIN>/mcp` from the server's PINNED origin (never the request `Host`); null when no origin is
+     * pinned (a `lan` instance without `WEB_ORIGIN` — fall back to the page origin) or in shim mode. Present
+     * whether or not MCP is on. Optional only for tolerance of an older API.
+     */
+    endpoint: z.string().nullable().optional(),
+    /**
+     * The public Claude Code URL marketplace (`claude plugin marketplace add <this>`), only while it is
+     * served: MCP on and a pinned HTTPS origin. Null otherwise. Optional only for an older API.
+     */
+    marketplaceUrl: z.string().nullable().optional(),
+  }),
   configRevision: z.string(),
   retentionDays: int4({ min: 0 }).nullable(),
 });
