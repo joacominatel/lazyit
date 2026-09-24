@@ -866,45 +866,65 @@ Accounts holding the route's permission.
   `defaultsApplied` row (`["status: IN_STORAGE"]`, or `"… (N of M rows)"` on a batch) the person can
   reject and have re-proposed with another status.
 - **`asset_create_batch` (#1387).** Up to **200** rows (`rows[]`, each a single create's fields:
-  name, status, tag, serial, company, notes, dates, cost, model, location, specs) plus optional
-  `common` values every row inherits (a row's own value wins; `specs` are merged). One proposal, one
-  approval. The same planner runs in `preview` and in `run`:
-  - each distinct model / location spelling is resolved once through the single create's resolvers,
-    then read by id for its version; the model's category comes from `GET /asset-categories` (a caller
-    without `category:read` gets the batch with no category shown, not an error). A reference that
-    does not resolve (not found, ambiguous) is **that row's error**, with the way out in the message
-    ("create the model first (asset_model_create)…"); a 403 fails the whole call, as the route would;
-  - duplicates: a tag or serial an existing **live** asset holds (an exact match on one
-    `GET /assets?q=` page per distinct value — when the page is partial and shows no exact match, the
-    route's uniqueness still decides at create), or one an earlier row of the batch uses;
-  - a row with an error is skipped; when **no** row is valid the proposal is refused
-    (`INVALID_INPUT`, the first five row errors) and no card is shown.
+  name, status, tag, serial, company, notes, dates, cost, model, location, specs, plus `skip`) and
+  optional `common` values every row inherits (a row's own value wins; `specs` are merged). One
+  proposal, one approval. The same planner runs in `preview` and in `run`:
+  - each distinct model / location spelling is resolved **once per plan** through the single create's
+    resolvers, then read by id for its version; the model's category comes from
+    `GET /asset-categories` (a caller without `category:read` gets the batch with no category shown,
+    not an error). A reference that does not resolve (not found, ambiguous) is **that row's error**,
+    with the way out in the message ("create the model first (asset_model_create)…"); a 403 fails the
+    whole call, as the route would;
+  - duplicates: **one** `GET /assets?assetTags=…` and **one** `GET /assets?serials=…` per plan (the
+    exact-values list filters, ≤ 200 values, an indexed `IN` — [[asset]]) find a tag or serial a
+    **live** asset already holds; an earlier, not skipped, row using the same value is a duplicate too.
+    The lookups go through `facet()`: a caller without `asset:read` (or a value containing a comma,
+    the filter's separator) gets the batch with a `duplicatesUnchecked: true` row on the card instead
+    of a failure, and the route's uniqueness (409 at create) decides.
+  - **The card is bound to what runs.** A row to create that fails its check refuses the WHOLE
+    proposal (`INVALID_INPUT`, every reason, rows with the same problem grouped) — no card — until the
+    model fixes it (e.g. creates the missing model first) or marks it `skip: true`. A skipped row is
+    shown on the card with its reasons and is **never** created, whatever its state at approval (a
+    model created meanwhile, a duplicate holder archived). So every row a card shows as ready was valid
+    when it was built, and no row it shows as skipped can run. Every row skipped (or no row) is refused.
   - **Preview shape** (fits the existing `AiActionPreview`, no contract change): `changes` =
-    `action` (the sentence: "Create 16 of 17 assets; 1 row with problems will be skipped."),
-    `rowCount`, `validRows`, `invalidRows` (numbers), `defaultsApplied` (when a status was
-    defaulted), and `rows` — `after` is an array, one object per row: `{ row (1-based), name,
-    assetTag|null, serial|null, status, statusDefaulted?, model|null, category|null, location|null
-    (each `{ type, id, label }`), company? notes? purchaseDate? warrantyEnd? purchaseCost?
-    usefulLifeMonths? salvageValue? specs?, valid, errors: string[], duplicates: [{ field, value,
-    existing?: { type: "asset", id, label } | row?: n }] }`. No target, no warnings.
-  - **STALE.** The precondition contract carries one `{ entity, updatedAt }`, so the batch pins the
-    most recently changed entity its rows reference (a model, its category or a location; ties broken
-    by type and id). Editing any referenced entity, or a reference that now resolves differently (a
-    model created after the proposal), changes the newest entity or its version, and the approval is
-    `STALE` instead of creating rows the card did not show. A batch that references nothing has no
-    precondition, like a single create. A new duplicate appearing in between is not `STALE`: that
-    row's create is refused by the route and reported.
+    `action` (the sentence: "Create 16 of 17 assets; 1 row skipped as requested."), `rowCount`,
+    `validRows` (rows to create), `invalidRows` (rows skipped) — numbers —, `defaultsApplied` (when a
+    status was defaulted), `duplicatesUnchecked` (boolean, only when the check was incomplete), and
+    `rows` — `after` is an array, one object per row: `{ row (1-based), name, assetTag|null,
+    serial|null, status, statusDefaulted?, model|null, category|null, location|null (each `{ type, id,
+    label }`), company? notes? purchaseDate? warrantyEnd? purchaseCost? usefulLifeMonths?
+    salvageValue? specs?, skipped, valid, errors: string[], duplicates: [{ field, value, existing?: {
+    type: "asset", id, label } | row?: n }] }`. No target, no warnings.
+  - **STALE.** What can still diverge between the card and the approval is the entities the rows to
+    create reference. The precondition contract carries one `{ entity, updatedAt }`, so the batch pins
+    the most recently changed of them (a model, its category or a location; ties broken by type and
+    id). An entity that starts matching a row's name after the proposal (created, renamed or restored)
+    has a newer `updatedAt` than anything the card saw, and an edited one changes its own — either way
+    the newest entity or its version changes and the approval is `STALE`: a reference never silently
+    resolves to a different record. An entity that stops matching (archived, renamed away, now
+    ambiguous) makes the approval-time preview refuse the batch, so the approval `FAILED` with that
+    reason and nothing is created. A batch whose rows to create reference nothing has no precondition,
+    like a single create. A duplicate appearing in between is refused the same way (or, when the check
+    was incomplete, by the route's 409 for that row, which is reported).
   - **Execution.** Valid rows are created one by one through `rt.call(AssetsController.create)` — the
     single create's route, guards and pipe, and its own transaction, tag allocation, `CREATED`
     history event and search upsert per row (the same partial-success semantics as the bulk receive
     route; `receiveBatch` itself is not used: it creates N units of ONE model with generated names).
     A row the route refuses is reported and the rest continue; a 401/403 stops the batch (it would
-    not change for the next row) and fails the call if nothing was created yet. The result is
-    `{ requested, created, notCreated, stoppedAtRow?, notAttempted?, createdAssets: [{ row, id,
-    assetTag }], problems: [{ row, skipped?, errors }] }` with one `asset` ref per created asset.
+    not change for the next row) and fails the call if nothing was created yet. Over headless and MCP
+    (no card), a row that fails its check is reported and not created, and the others run. The
+    result is `{ requested, created, notCreated, stoppedAtRow?, notAttempted?, createdAssets: [{ row,
+    id, assetTag }], problems: [{ row, skipped?, errors }] }` with one `asset` ref per created asset.
   - **Audit.** No new column: every row's `CREATED` history event is stamped with the invocation id
     (`aiInvocationId`, the shared batch id), and the ledger's one `EXECUTED` event lists every created
     asset in its `entityRefs`.
+  - **Auto-approve.** The batch is an ordinary `write` (not elevated, no step-up warning), so in a
+    conversation with auto-approve on (#1376) it runs without a card: **up to 200 creates** from one
+    call. The same is true of MCP and headless, within the principal's `asset:write`.
+  - **Cost.** Per plan (the proposal, the approval-time preview and the run each plan once): one
+    resolve + one read per distinct model and location, one category list, two exact-value lookups —
+    independent of the row count — then one create per row at execution.
 - **Entity refs** (§8.5): create/update/archive/restore → the asset (or model, location) with its op;
   check-out and check-in → the assignment (`parent` → asset), the asset and the person, all `updated`
   except the new assignment (`created`).
