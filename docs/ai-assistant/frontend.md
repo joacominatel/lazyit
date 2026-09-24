@@ -664,8 +664,12 @@ is always `window.location.origin + "/mcp"`.
 "approve"|"reject", reason?, password? }`:
 - Human sessions only; bound to the caller and the exact pending tool input; single-use; TTL-bound.
   `password` is the step-up for `elevated` actions.
-- Returns JSON; the client re-subscribes to the run's events. `409` = already decided; `410` =
-  expired; `403 STEP_UP_REQUIRED` when the step-up is missing or wrong.
+- Returns JSON `{ runId, status }`; the client re-subscribes to the run's events. As built (W3-1):
+  `409 RUN_NOT_AWAITING_APPROVAL` = the run no longer waits (already decided and resumed, cancelled,
+  finished); core's `409` refusals (already decided, `EXPIRED`, `STALE`) pass through; `409 AI_DISABLED`;
+  `403 STEP_UP_REQUIRED` (no password), `403 STEP_UP_FAILED` (wrong password), `403 STEP_UP_UNAVAILABLE`
+  (no lazyit password in this sign-in mode), `429 STEP_UP_RATE_LIMITED` with `retryAfterSec`. **None of
+  these 403s means the session ended — the web must not treat them as a logout.**
 
 **K6 — Stop** `POST /ai/runs/:id/cancel` → the run is cancelled at the next step boundary; partial
 output is persisted.
