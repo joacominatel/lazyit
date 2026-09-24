@@ -28,7 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { useUpdateAiConfig } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
 import { blankToNull, buildUpdate } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
 
@@ -95,17 +95,27 @@ function numberOf(event: React.ChangeEvent<HTMLInputElement>): number {
  */
 export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.limits");
-  const save = useUpdateAiConfig();
+  const save = useAiConfigSave();
   const form = useForm<LimitsForm>({ defaultValues: formFrom(settings) });
   const { control, reset, handleSubmit, formState } = form;
   const budgetOn = useWatch({ control, name: "budgetOn" });
 
+  // Re-seed only when the LIMITS themselves changed (this card's own save, or another admin's): a save
+  // from another card (the MCP switch, the allowlist) must not wipe what is being typed here.
+  const limitsKey = JSON.stringify(formFrom(settings));
   useEffect(() => {
-    reset(formFrom(settings));
-  }, [settings, reset]);
+    reset(JSON.parse(limitsKey) as LimitsForm);
+  }, [limitsKey, reset]);
+
+  // A stale save error goes away as soon as the admin edits again.
+  const { clearError } = save;
+  const watched = useWatch({ control });
+  useEffect(() => {
+    clearError();
+  }, [watched, clearError]);
 
   const onSubmit = handleSubmit((values) => {
-    save.mutate(
+    save.save(
       buildUpdate(settings, {
         retentionDays: values.retentionDays,
         dailyTokenLimitPerPrincipal: values.budgetOn ? values.dailyTokenLimitPerPrincipal : null,
@@ -115,7 +125,7 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
         contextTokenLimit: values.contextTokenLimit,
         instructions: blankToNull(values.instructions),
       }),
-      { onSuccess: () => toast.success(t("saved")) },
+      () => toast.success(t("saved")),
     );
   });
 

@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
-import { useUpdateAiConfig } from "@/lib/api/hooks/use-ai-config";
+import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config";
 import {
   allowlistEntryRedirectKind,
   allowlistEntryValue,
@@ -48,7 +48,7 @@ import { AiErrorNotice } from "./ai-error-notice";
 export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp.allowlist");
   const id = useId();
-  const save = useUpdateAiConfig();
+  const save = useAiConfigSave();
   const [kind, setKind] = useState<AllowlistMatchKind>("redirect_uri");
   const [label, setLabel] = useState("");
   const [value, setValue] = useState("");
@@ -66,20 +66,18 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
       return;
     }
     setProblem(null);
-    save.mutate(
+    save.save(
       buildUpdate(settings, { mcpClientAllowlistAdded: [...added, built.entry] }),
-      {
-        onSuccess: () => {
-          setLabel("");
-          setValue("");
-          toast.success(t("addedToast", { label: built.entry.label }));
-        },
+      () => {
+        setLabel("");
+        setValue("");
+        toast.success(t("addedToast", { label: built.entry.label }));
       },
     );
   }
 
   function onRemove(entryId: string) {
-    save.mutate(
+    save.save(
       buildUpdate(settings, {
         mcpClientAllowlistAdded: added.filter((entry) => entry.id !== entryId),
       }),
@@ -87,7 +85,7 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
   }
 
   function onRestore(defaultId: string) {
-    save.mutate(
+    save.save(
       buildUpdate(settings, {
         mcpClientAllowlistRemovedDefaults: removed.filter((removedId) => removedId !== defaultId),
       }),
@@ -114,7 +112,7 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
           checked={settings.mcpAllowAnyHttpsClient}
           disabled={save.isPending}
           onCheckedChange={(checked) =>
-            save.mutate(buildUpdate(settings, { mcpAllowAnyHttpsClient: checked }))
+            save.save(buildUpdate(settings, { mcpAllowAnyHttpsClient: checked }))
           }
         />
       </Field>
@@ -190,7 +188,10 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
               id={`${id}-label`}
               value={label}
               maxLength={120}
-              onChange={(event) => setLabel(event.target.value)}
+              onChange={(event) => {
+                setLabel(event.target.value);
+                save.clearError();
+              }}
               placeholder={t("add.labelPlaceholder")}
               autoComplete="off"
             />
@@ -219,6 +220,7 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
             onChange={(event) => {
               setValue(event.target.value);
               setProblem(null);
+              save.clearError();
             }}
             placeholder={
               kind === "cimd_url" ? t("add.cimdPlaceholder") : t("add.redirectPlaceholder")
