@@ -100,10 +100,11 @@ interface StockMovementDialogProps {
 /**
  * Record a stock movement. One dialog for all three directions (IN / OUT / ADJUSTMENT), driven by
  * `type`. A Remove may optionally name ONE recipient — a person, an asset or a location — which makes
- * it a delivery (ADR-0098). Quantity is a positive integer; the API maintains `currentStock` transactionally and
- * returns 409 if an OUT would go negative — surfaced as a toast (and pre-hinted inline). Converged
- * onto react-hook-form + zod + the `Field`/`FieldError`/`aria-invalid` contract (validation
- * onTouched; scroll-to-first-error on submit) — public props unchanged.
+ * it a delivery (ADR-0098). Quantity is a positive integer; the API maintains `currentStock`
+ * transactionally and returns 409 if an OUT would go negative — surfaced as a toast (and pre-hinted
+ * inline). Converged onto react-hook-form + the shared schema + the `Field`/`FieldError`/`aria-invalid`
+ * contract (validation onTouched; scroll-to-first-error on submit). The only prop added for deliveries
+ * is the optional `returnable`.
  */
 export function StockMovementDialog({
   open,
