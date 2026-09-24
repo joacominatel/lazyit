@@ -221,6 +221,12 @@ function contentParts(content: unknown): StoredPart[] {
   );
 }
 
+/** The text of a stored user message as the user typed it (null when unreadable). */
+export function storedUserText(content: unknown): string | null {
+  const message = readModelMessage(content);
+  return message?.role === 'user' ? userText(message.content) : null;
+}
+
 /** The text the user typed: the text parts, without the runtime's turn-context prefix. */
 function userText(content: unknown): string | null {
   const texts = contentParts(content)

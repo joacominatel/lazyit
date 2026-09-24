@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import {
   AI_RUN_EVENT_VERSION,
   AiApprovalPolicySchema,
@@ -20,7 +20,12 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { toPendingAction } from '../core/pending-action';
 import { AiToolRegistry } from '../core/tool-registry';
-import { projectTranscript } from '../conversations/transcript-projection';
+import { ownerWhere } from '../conversations/ai-request-identity';
+import {
+  projectTranscript,
+  storedUserText,
+} from '../conversations/transcript-projection';
+import { neutralizeTurnContext } from '../runtime/limits';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
 import { AiApprovalService } from '../runtime/approval.service';
 import {
@@ -55,6 +60,13 @@ export class AiRunsService {
     idempotencyKey?: string;
     locale?: string;
   }): Promise<{ accepted: AiRunAccepted; replayed: boolean }> {
+    if (input.idempotencyKey) {
+      await this.assertSameRequest(
+        input.identity,
+        input.idempotencyKey,
+        input.body,
+      );
+    }
     const run = await this.orchestrator.submit({
       identity: input.identity,
       channel: input.channel,
@@ -69,6 +81,52 @@ export class AiRunsService {
       accepted: { runId: run.runId, status: run.status },
       replayed: run.replayed,
     };
+  }
+
+  /**
+   * An `Idempotency-Key` names ONE request: reused with another prompt or another conversation it is
+   * refused 422 `IDEMPOTENCY_KEY_MISMATCH` instead of answering an unrelated run. There is no body-hash
+   * column, so the stored run is compared: its first user message (without the runtime's turn context)
+   * and its conversation. An earlier run whose message is gone (its conversation deleted) is compared on
+   * nothing and replays. Two first submissions racing on one key are resolved by the runtime (one run).
+   */
+  private async assertSameRequest(
+    identity: DelegatedIdentity,
+    idempotencyKey: string,
+    body: CreateAiRun,
+  ): Promise<void> {
+    const earlier = await this.prisma.aiRun.findFirst({
+      where: { ...ownerWhere(identity), idempotencyKey },
+      select: { id: true, conversationId: true },
+    });
+    if (!earlier) return;
+    const differentConversation =
+      body.conversationId !== undefined &&
+      earlier.conversationId !== null &&
+      body.conversationId !== earlier.conversationId;
+    let differentPrompt = false;
+    if (earlier.conversationId) {
+      const message = await this.prisma.aiMessage.findFirst({
+        where: {
+          conversationId: earlier.conversationId,
+          runId: earlier.id,
+          format: AI_MESSAGE_FORMAT_MODEL,
+          role: 'user',
+        },
+        orderBy: { seq: 'asc' },
+        select: { content: true },
+      });
+      const stored = message ? storedUserText(message.content) : null;
+      differentPrompt =
+        stored !== null && stored !== neutralizeTurnContext(body.prompt.trim());
+    }
+    if (differentConversation || differentPrompt) {
+      throw new UnprocessableEntityException({
+        code: 'IDEMPOTENCY_KEY_MISMATCH',
+        message:
+          'This Idempotency-Key was used for a different request; use a new key',
+      });
+    }
   }
 
   /** The run, owner only. */

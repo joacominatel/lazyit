@@ -151,6 +151,36 @@ describe('POST /ai/runs — the channel follows the principal', () => {
     await create('SA').set('Idempotency-Key', 'has space').expect(400);
   });
 
+  it('refuses an Idempotency-Key reused for another prompt or conversation (422), replays the same request', async () => {
+    h.rt.model.push({ text: 'ok' });
+    const first = await create('A', { prompt: 'Count the assets' }).set(
+      'Idempotency-Key',
+      'k1',
+    );
+    await h.rt.drain();
+    const conversationId = h.rt.run(first.body.runId).conversationId as string;
+    const other = await create('A', { prompt: 'Delete everything' }).set(
+      'Idempotency-Key',
+      'k1',
+    );
+    expect(other.status).toBe(422);
+    expect(other.body).toMatchObject({ code: 'IDEMPOTENCY_KEY_MISMATCH' });
+    const second = await create('A').set('Idempotency-Key', 'k2');
+    await create('A', {
+      prompt: 'Count the assets',
+      conversationId: h.rt.run(second.body.runId).conversationId,
+    })
+      .set('Idempotency-Key', 'k1')
+      .expect(422);
+    const same = await create('A', {
+      prompt: '  Count the assets ',
+      conversationId,
+    }).set('Idempotency-Key', 'k1');
+    expect(same.status).toBe(202);
+    expect(same.body.runId).toBe(first.body.runId);
+    expect(h.rt.prisma.tables.aiRun.rows).toHaveLength(2);
+  });
+
   it('continues only the caller’s own conversation (404 otherwise) and validates the body', async () => {
     const mine = await create('A');
     h.rt.model.push({ text: 'ok' });

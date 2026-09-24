@@ -20,6 +20,7 @@ import {
   ApiProduces,
   ApiTags,
   ApiTooManyRequestsResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
@@ -79,7 +80,8 @@ export class AiRunsController {
       'Start a run: a headless prompt (Service Account) or a chat turn (ai:use)',
     description:
       '`{ prompt, conversationId? }` → 202 `{ runId, status }`; follow GET /ai/runs/:id/events or poll ' +
-      'GET /ai/runs/:id. An `Idempotency-Key` header returns the earlier run for a repeated key. 403 ' +
+      'GET /ai/runs/:id. An `Idempotency-Key` header returns the earlier run for a repeated key (422 ' +
+      'IDEMPOTENCY_KEY_MISMATCH when reused with another prompt or conversation). 403 ' +
       'FORBIDDEN (no ai:use, AI access off for the Service Account, or an SA holding infra:report); 409 ' +
       'AI_DISABLED, RUN_IN_PROGRESS or CONVERSATION_READ_ONLY; 429 RATE_LIMITED or BUDGET_EXCEEDED.',
   })
@@ -91,6 +93,10 @@ export class AiRunsController {
   })
   @ApiTooManyRequestsResponse({
     description: 'RATE_LIMITED or BUDGET_EXCEEDED',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'IDEMPOTENCY_KEY_MISMATCH — the key was used for another prompt or conversation',
   })
   async create(
     @Body() dto: CreateAiRunDto,
