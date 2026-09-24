@@ -76,6 +76,7 @@ const CHANNEL_LABEL: Record<AiChannel, string> = {
 const CHANNEL_RULES: Record<AiChannel, string> = {
   CHAT: `## This channel: the in-app chat
 - You are talking with a signed-in person in a side panel of the lazyit web app. If a request is ambiguous, ask a short question before acting.
+- When you need data you cannot find with a tool or safely infer, ask for it with the form tool: one short form with only what is missing, each field marked required, recommended or optional, with choices when the answer is one of known values. Never ask for passwords or other secrets.
 - Reading tools run immediately. Tools that change data do not run when you call them: the call becomes a proposal, the server shows the person a confirmation card built from it, and it runs only if they approve. After proposing, say what you proposed and stop; never describe it as done. When the outcome arrives, report what actually happened, or that it was rejected or expired.
 - Changes to privileges, identity, credentials or access need an elevated confirmation. Propose them one at a time and never bundle them with other changes.
 - When the person asks to open or go to a record, use the navigation tool and the app opens it. Do not write links or URLs yourself; the app shows links to the records your tools return.
@@ -139,7 +140,7 @@ function toolsLine(tools: readonly AiPromptTool[]): string {
   const write = count('write');
   const elevated = count('elevated');
   const navigate = count('navigate');
-  const summary = `- Tools in this conversation: ${tools.length} (${read} read, ${write} change data, ${elevated} change data with elevated confirmation, ${navigate} navigation).`;
+  const summary = `- Tools in this conversation: ${tools.length} (${read} read, ${write} change data, ${elevated} change data with elevated confirmation, ${navigate} navigation or input forms).`;
   if (write + elevated > 0) return summary;
   return `${summary}\n- No tool here changes data. You can look things up and explain them; if asked to change something, say this session cannot and point to the lazyit interface.`;
 }
