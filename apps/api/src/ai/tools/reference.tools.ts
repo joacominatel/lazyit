@@ -683,8 +683,10 @@ export const referenceToolset: AiToolset = {
     ),
     unexposed(
       ArticleCategoriesController,
-      ['create', 'update', 'remove', 'restore'],
-      V1_1('Knowledge-base folder writes (a cascading folder delete included)'),
+      ['remove', 'restore'],
+      V1_1(
+        'Knowledge-base folder delete (a cascading one included) and restore; create and rename are kb_folder_create / kb_folder_rename',
+      ),
     ),
     unexposed(
       ArticleCategoriesController,

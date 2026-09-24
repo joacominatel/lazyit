@@ -1,4 +1,8 @@
-import { BadRequestException, HttpException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  NotFoundException,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   ArticleStatusSchema,
@@ -27,8 +31,9 @@ import {
 import { searchText } from './search-text';
 
 /**
- * The KNOWLEDGE BASE toolset (W2-8; tools-and-execution.md §7 rows 32–36): search, read, create (as a
- * DRAFT), update (including a folder MOVE) and publish/unpublish articles.
+ * The KNOWLEDGE BASE toolset (W2-8; tools-and-execution.md §7 rows 32–36b): search, read, create (as a
+ * DRAFT), update (including a folder MOVE) and publish/unpublish articles; create and rename folders
+ * (#1378) — never a folder's access rules, which stay the admin-only `PUT :id/access-rules`.
  *
  * The folder ACL (ADR-0060, INV-9) and draft privacy (ADR-0022) live in `ArticlesService`, so every read
  * and write here goes through `rt.call` on an `ArticlesController` handler — the route's guards, pipe and
@@ -294,6 +299,10 @@ interface FolderView {
   readable: boolean;
   visibility: 'public' | 'restricted' | 'unknown';
   audience: string;
+  /** The folder's own name (the last segment of `name`, which is the whole path). */
+  ownName: string;
+  /** The folder row's version, for a write's precondition. */
+  updatedAt: string | null;
 }
 
 function ruleSummary(rule: Row): string {
@@ -384,7 +393,15 @@ async function folderView(
       ? 'Restricted by folder access rules'
       : 'Everyone who can read the knowledge base';
   }
-  return { id, name, readable, visibility, audience };
+  return {
+    id,
+    name,
+    readable,
+    visibility,
+    audience,
+    ownName: str(row.name) ?? id,
+    updatedAt: iso(row.updatedAt),
+  };
 }
 
 function folderEntity(folder: FolderView): Row {
@@ -996,6 +1013,274 @@ const kbSetPublication = defineTool({
   },
 });
 
+// ─── kb_folder_create / kb_folder_rename (#1378) ─────────────────────────────────────────────────────
+
+/** The audience of a top-level folder: a new folder carries no access rules of its own. */
+const PUBLIC_AUDIENCE = 'Everyone who can read the knowledge base';
+
+/** What the card says about the folder's own access rules: none, and the assistant never sets them. */
+const NO_OWN_RULES =
+  'None of its own: it inherits the audience above. Only an administrator can restrict a folder ' +
+  '(folder access rules), and the assistant never sets them.';
+
+const folderName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(KB_NAME_MAX)
+  .describe('The folder name (unique among the folders beside it).');
+
+function folderRef(row: Row, op: AiEntityRef['op']): AiEntityRef {
+  const name = str(row.name);
+  return {
+    type: 'category',
+    id: String(row.id),
+    op,
+    ...(name ? { label: name } : {}),
+  };
+}
+
+function folderSummary(row: Row): Row {
+  return {
+    id: row.id,
+    // Folder names are free text other people can write: data, never instructions.
+    name: untrusted(clipOrNull(str(row.name), KB_NAME_MAX)),
+    parentFolderId: typeof row.parentId === 'string' ? row.parentId : null,
+    updatedAt: iso(row.updatedAt),
+  };
+}
+
+/**
+ * The folder a NEW folder goes under: live (else the route's own 400 text, before any card) and readable
+ * by the caller — the same blind-write refusal as an article create (ADR-0060 §9): the assistant does not
+ * create a folder inside one the caller cannot open.
+ */
+async function assertUsableParent(
+  rt: AiToolRuntime,
+  id: string,
+): Promise<FolderView> {
+  const parent = await folderView(rt, id);
+  if (!parent) {
+    throw new BadRequestException(
+      `parentId ${id} does not reference a live folder`,
+    );
+  }
+  if (!parent.readable) {
+    throw new BadRequestException(
+      `You cannot read folder ${id}; the assistant does not create folders inside a folder you cannot ` +
+        'read. Choose a folder you can open.',
+    );
+  }
+  return parent;
+}
+
+/** A folder the caller may rename through the assistant: live (else the route's 404) and readable. */
+async function assertRenamableFolder(
+  rt: AiToolRuntime,
+  id: string,
+): Promise<FolderView> {
+  const folder = await folderView(rt, id);
+  if (!folder) throw new NotFoundException(`ArticleCategory ${id} not found`);
+  if (!folder.readable) {
+    throw new BadRequestException(
+      `You cannot read folder ${id}; the assistant does not rename a folder you cannot read.`,
+    );
+  }
+  return folder;
+}
+
+function preconditionOf(
+  folder: FolderView,
+  op: AiEntityRef['op'],
+): NonNullable<AiToolPreview['precondition']> {
+  if (folder.updatedAt === null) {
+    // Never a card without a version check: a row without a timestamp is a tool/handler bug.
+    throw new Error('Folder row carries no updatedAt');
+  }
+  return {
+    entity: { type: 'category', id: folder.id, op, label: folder.name },
+    updatedAt: folder.updatedAt,
+  };
+}
+
+const kbFolderCreate = defineTool({
+  name: 'kb_folder_create',
+  title: 'Create a knowledge-base folder',
+  description:
+    'Create a folder in the knowledge base, at the top level or inside another folder ' +
+    '(`parentFolderId`, found with reference_lookup kind "articleFolder"). The new folder has no access ' +
+    'rules of its own: it is readable by whoever can read its parent (everyone, at the top level). Only ' +
+    'an administrator can restrict a folder, in Settings; this tool never does. Then create articles in ' +
+    'it with kb_create_article.',
+  domain: 'kb',
+  class: 'write',
+  input: z.strictObject({
+    name: folderName,
+    parentFolderId: z
+      .cuid()
+      .optional()
+      .describe(
+        'The folder to create it in (reference_lookup kind "articleFolder"). Omit for a top-level folder.',
+      ),
+    description: z.string().trim().min(1).max(1000).optional(),
+  }),
+  bindings: [
+    bind(ArticleCategoriesController, 'create'),
+    bind(ArticleCategoriesController, 'findAll'),
+  ],
+  async run(input, rt) {
+    if (input.parentFolderId !== undefined) {
+      await assertUsableParent(rt, input.parentFolderId);
+    }
+    const created = asRow(
+      await rt.call(ArticleCategoriesController, 'create', {
+        body: {
+          name: input.name,
+          ...(input.parentFolderId !== undefined
+            ? { parentId: input.parentFolderId }
+            : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+        },
+      }),
+    );
+    return {
+      data: folderSummary(created),
+      summary: 'Folder created.',
+      entityRefs: [folderRef(created, 'created')],
+    };
+  },
+  async preview(input, rt) {
+    const parent =
+      input.parentFolderId !== undefined
+        ? await assertUsableParent(rt, input.parentFolderId)
+        : undefined;
+    return {
+      changes: [
+        { field: 'name', after: input.name, valueKind: 'text' as const },
+        parent
+          ? {
+              field: 'parent folder',
+              after: folderEntity(parent),
+              valueKind: 'entity' as const,
+            }
+          : {
+              field: 'parent folder',
+              after: 'None (top level)',
+              valueKind: 'text' as const,
+            },
+        {
+          field: 'path',
+          after: parent ? `${parent.name} › ${input.name}` : input.name,
+          valueKind: 'text' as const,
+        },
+        // Who will be able to read it and what goes into it: the parent's audience, since a new
+        // folder has no rules of its own (a restricted ancestor narrows the whole subtree, ADR-0060 §1).
+        {
+          field: 'audience',
+          after: parent ? parent.audience : PUBLIC_AUDIENCE,
+          valueKind: 'text' as const,
+        },
+        {
+          field: 'access rules',
+          after: NO_OWN_RULES,
+          valueKind: 'text' as const,
+        },
+        ...(input.description !== undefined
+          ? [
+              {
+                field: 'description',
+                after: input.description,
+                valueKind: 'text' as const,
+              },
+            ]
+          : []),
+      ],
+      warnings: [],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+      // The parent's version: its access rules (or its place in the tree) changed between the card and
+      // the approval make the approval STALE, so the audience shown is the one the folder gets.
+      ...(parent ? { precondition: preconditionOf(parent, 'updated') } : {}),
+    };
+  },
+});
+
+const kbFolderRename = defineTool({
+  name: 'kb_folder_rename',
+  title: 'Rename a knowledge-base folder',
+  description:
+    'Rename a knowledge-base folder (find its id with reference_lookup kind "articleFolder"). Only the ' +
+    'name changes: the folder stays where it is, with the same articles and the same audience. Moving a ' +
+    'folder and its access rules are not available to the assistant.',
+  domain: 'kb',
+  class: 'write',
+  destructive: true,
+  input: z.strictObject({
+    folderId: z
+      .cuid()
+      .describe(
+        'The folder to rename (reference_lookup kind "articleFolder").',
+      ),
+    name: folderName,
+  }),
+  bindings: [
+    bind(ArticleCategoriesController, 'update'),
+    bind(ArticleCategoriesController, 'findAll'),
+  ],
+  async run(input, rt) {
+    await assertRenamableFolder(rt, input.folderId);
+    const updated = asRow(
+      await rt.call(ArticleCategoriesController, 'update', {
+        params: { id: input.folderId },
+        body: { name: input.name },
+      }),
+    );
+    return {
+      data: folderSummary(updated),
+      entityRefs: [folderRef(updated, 'updated')],
+    };
+  },
+  async preview(input, rt) {
+    const folder = await assertRenamableFolder(rt, input.folderId);
+    if (folder.ownName === input.name) {
+      throw new BadRequestException(
+        `Folder ${input.folderId} is already named "${input.name}"; nothing to change.`,
+      );
+    }
+    const parentPath = folder.name.split(' › ').slice(0, -1);
+    const precondition = preconditionOf(folder, 'updated');
+    return {
+      target: precondition.entity,
+      precondition,
+      changes: [
+        {
+          field: 'name',
+          before: folder.ownName,
+          after: input.name,
+          valueKind: 'text',
+        },
+        {
+          field: 'path',
+          before: folder.name,
+          after: [...parentPath, input.name].join(' › '),
+          valueKind: 'text',
+        },
+        // Unchanged by a rename; named so the reader knows who sees the new name.
+        { field: 'audience', after: folder.audience, valueKind: 'text' },
+      ],
+      warnings: [],
+      impacted: [],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+    };
+  },
+});
+
 const V1_1 =
   'Deferred to v1.1: article versions, links, backlinks and aliases (tools-and-execution.md §3, §7).';
 
@@ -1007,6 +1292,8 @@ export const kbToolset: AiToolset = {
     kbCreateArticle,
     kbUpdateArticle,
     kbSetPublication,
+    kbFolderCreate,
+    kbFolderRename,
   ],
   unexposed: [
     unexposed(
