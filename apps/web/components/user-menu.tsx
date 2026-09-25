@@ -2,6 +2,7 @@
 
 import {
   BellAlertIcon,
+  Cog6ToothIcon,
   LockOpenIcon,
   PuzzlePieceIcon,
   QuestionMarkCircleIcon,
@@ -123,6 +124,14 @@ export function UserMenu() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/* Account (#1404): the hub for everything scoped to the caller's own account — identity, the
+            per-user pages below, password & sessions, preferences. Any signed-in user; no gate. */}
+        <DropdownMenuItem asChild>
+          <Link href="/account">
+            <Cog6ToothIcon aria-hidden />
+            {t("chrome.account")}
+          </Link>
+        </DropdownMenuItem>
         {/* My profile (#947): the self-service view of the caller's OWN assets + application access.
             Any authenticated user (esp. a VIEWER) reaches it here — the admin `/users/[id]` 360 view is
             gated on `user:read`. A real link so middle/modifier-click behave; navigates in-app. */}

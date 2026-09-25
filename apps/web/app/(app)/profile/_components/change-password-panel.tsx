@@ -18,14 +18,17 @@ export function ChangePasswordPanel() {
 
   if (status?.authMode !== "local") return null;
 
+  // The wrapper's `id` is the anchor the account hub's "Change password" link targets (#1404).
   return (
-    <DetailPanel title={t("panelTitle")}>
-      <p className="mb-4 max-w-prose text-sm text-muted-foreground">
-        {t("panelDescription")}
-      </p>
-      <div className="max-w-md">
-        <ChangePasswordForm />
-      </div>
-    </DetailPanel>
+    <div id="change-password" className="scroll-mt-20">
+      <DetailPanel title={t("panelTitle")}>
+        <p className="mb-4 max-w-prose text-sm text-muted-foreground">
+          {t("panelDescription")}
+        </p>
+        <div className="max-w-md">
+          <ChangePasswordForm />
+        </div>
+      </DetailPanel>
+    </div>
   );
 }
