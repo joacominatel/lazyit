@@ -14,6 +14,7 @@ import {
   type AiActionLogEvent,
   type AiActionPreview,
   type AiChannel,
+  type AiSentence,
   type AiToolClass,
   type AiToolErrorCode,
   type AiToolInvocationStatus,
@@ -48,6 +49,7 @@ import {
   type AiSettingsReader,
 } from './ports/ai-settings.port';
 import { callKindOf, errorResult } from './result-shaper';
+import { messagePhrase, phrase } from './sentences';
 import { AiToolExecutor } from './tool-executor';
 import { AiToolRegistry } from './tool-registry';
 import type {
@@ -65,6 +67,8 @@ type ToolError = {
   code: AiToolErrorCode;
   status?: number;
   message: string;
+  /** `message` as localizable sentences (#1384). */
+  messageSentences?: AiSentence[];
   hint?: string;
 };
 
@@ -205,21 +209,21 @@ export class AiToolService {
     if (!tool) {
       return errorResult('read', {
         code: 'NOT_AVAILABLE',
-        message: `Unknown tool: ${name}`,
+        ...messagePhrase(phrase('refusal.unknownTool', { tool: name })),
       });
     }
     const kind = callKindOf(tool.descriptor.class);
     if (!tool.channels.includes(ctx.channel)) {
       return errorResult(kind, {
         code: 'NOT_AVAILABLE',
-        message: `${name} is not available on this channel`,
+        ...messagePhrase(phrase('refusal.notOnChannel', { tool: name })),
       });
     }
     if (kind === 'mutation') {
       if (ctx.channel === 'CHAT') {
         return errorResult(kind, {
           code: 'NOT_AVAILABLE',
-          message: `${name} changes data: it must be proposed and approved, not invoked`,
+          ...messagePhrase(phrase('refusal.mustPropose', { tool: name })),
         });
       }
       return this.invokeWrite(tool, input, ctx);
@@ -255,14 +259,14 @@ export class AiToolService {
     if (!tool) {
       return refuse('mutation', {
         code: 'NOT_AVAILABLE',
-        message: `Unknown tool: ${name}`,
+        ...messagePhrase(phrase('refusal.unknownTool', { tool: name })),
       });
     }
     const kind = callKindOf(tool.descriptor.class);
     if (kind !== 'mutation') {
       return refuse(kind, {
         code: 'NOT_AVAILABLE',
-        message: `${name} does not change data: invoke it`,
+        ...messagePhrase(phrase('refusal.notAWrite', { tool: name })),
       });
     }
     if (
@@ -272,7 +276,9 @@ export class AiToolService {
     ) {
       return refuse(kind, {
         code: 'NOT_AVAILABLE',
-        message: `${name} cannot be proposed on this channel`,
+        ...messagePhrase(
+          phrase('refusal.cannotProposeOnChannel', { tool: name }),
+        ),
       });
     }
     const principal = await this.loadPrincipal(ctx);
@@ -311,7 +317,7 @@ export class AiToolService {
       return refuse(kind, {
         code: 'INTERNAL',
         status: 500,
-        message: 'This action cannot be proposed: its preview is invalid.',
+        ...messagePhrase(phrase('refusal.invalidPreview')),
       });
     }
     const preview = shaped.preview;
@@ -522,8 +528,7 @@ export class AiToolService {
               errorResult('mutation', {
                 code: 'INTERNAL',
                 status: 500,
-                message:
-                  'The approval could not be recorded, so the action was not executed.',
+                ...messagePhrase(phrase('refusal.approvalNotRecorded')),
               }),
             ),
           },
@@ -548,9 +553,13 @@ export class AiToolService {
     const result = errorResult('mutation', {
       code: 'FORBIDDEN',
       status: 403,
-      message: reason
-        ? `The user declined this action: ${reason.slice(0, 500)}`
-        : 'The user declined this action',
+      ...messagePhrase(
+        reason
+          ? phrase('refusal.userDeclinedWithReason', {
+              reason: reason.slice(0, 500),
+            })
+          : phrase('refusal.userDeclined'),
+      ),
     });
     const now = new Date();
     const claim = await this.prisma.aiToolInvocation.updateMany({
@@ -586,7 +595,7 @@ export class AiToolService {
   async expire(invocationId: string): Promise<AiPendingAction | null> {
     return this.closePending(invocationId, 'EXPIRED', {
       code: 'EXPIRED',
-      message: 'The approval window for this action has passed',
+      ...messagePhrase(phrase('refusal.approvalExpired')),
     });
   }
 
@@ -612,11 +621,19 @@ export class AiToolService {
    */
   async cancel(
     invocationId: string,
-    reason = 'The run was cancelled',
+    reason?: string,
+    reasonSentences?: AiSentence[],
   ): Promise<AiPendingAction | null> {
     return this.closePending(invocationId, 'CANCELLED', {
       code: 'NOT_AVAILABLE',
-      message: reason.slice(0, 500),
+      ...(reason === undefined
+        ? messagePhrase(phrase('refusal.runCancelled'))
+        : {
+            message: reason.slice(0, 500),
+            ...(reasonSentences && reason.length <= 500
+              ? { messageSentences: reasonSentences }
+              : {}),
+          }),
     });
   }
 
@@ -631,8 +648,7 @@ export class AiToolService {
   ): Promise<AiPendingAction | null> {
     const error = {
       code: 'UNKNOWN_OUTCOME' as const,
-      message:
-        'The action was interrupted; whether it took effect is unknown. It will not be retried.',
+      ...messagePhrase(phrase('refusal.outcomeUnknown')),
     };
     const updated = await this.prisma.aiToolInvocation.updateMany({
       where: { id: invocationId, status: 'EXECUTING' },
@@ -701,7 +717,7 @@ export class AiToolService {
       return errorResult(kind, {
         code: 'INTERNAL',
         status: 500,
-        message: 'The action could not be recorded, so it was not executed.',
+        ...messagePhrase(phrase('refusal.actionNotRecorded')),
       });
     }
 
@@ -752,16 +768,14 @@ export class AiToolService {
       return fail('FAILED', {
         code: 'INTERNAL',
         status: 500,
-        message:
-          'The stored preview of this action is unreadable; it was not executed',
+        ...messagePhrase(phrase('refusal.storedPreviewUnreadable')),
       });
     }
     if (inputHashOf(row.input) !== row.inputHash) {
       return fail('FAILED', {
         code: 'INTERNAL',
         status: 500,
-        message:
-          'The stored input of this action does not match what was approved; it was not executed',
+        ...messagePhrase(phrase('refusal.storedInputMismatch')),
       });
     }
     const tool = this.registry.get(row.toolName);
@@ -770,9 +784,9 @@ export class AiToolService {
         'EXPIRED',
         {
           code: 'EXPIRED',
-          message: tool
-            ? 'The tool changed since this action was proposed; propose it again'
-            : 'The tool is no longer available',
+          ...messagePhrase(
+            phrase(tool ? 'refusal.toolChanged' : 'refusal.toolGone'),
+          ),
         },
         'EXPIRED',
       );
@@ -792,7 +806,10 @@ export class AiToolService {
       return fail(
         'FAILED',
         checked.result.ok
-          ? { code: 'INVALID_INPUT', message: 'Invalid stored input' }
+          ? {
+              code: 'INVALID_INPUT',
+              ...messagePhrase(phrase('refusal.invalidStoredInput')),
+            }
           : checked.result.error,
       );
     }
@@ -808,8 +825,7 @@ export class AiToolService {
       return fail('FAILED', {
         code: 'STALE',
         status: 409,
-        message:
-          'The target changed after this action was proposed; read it again and propose a new action',
+        ...messagePhrase(phrase('refusal.stale')),
       });
     }
 
@@ -1035,7 +1051,7 @@ export class AiToolService {
       return {
         code: 'FORBIDDEN',
         status: 403,
-        message: 'Headless writes run only as a Service Account',
+        ...messagePhrase(phrase('refusal.headlessServiceAccountOnly')),
       };
     }
     const gate = channelPermission(ctx.channel);
@@ -1050,7 +1066,9 @@ export class AiToolService {
         return {
           code: 'FORBIDDEN',
           status: 403,
-          message: `You do not have permission to use ${tool.descriptor.name}`,
+          ...messagePhrase(
+            phrase('refusal.noToolPermission', { tool: tool.descriptor.name }),
+          ),
         };
       }
     }
@@ -1129,8 +1147,7 @@ export class AiToolService {
           error: {
             code: 'INTERNAL',
             status: 500,
-            message:
-              'The preview of this action is invalid; it was not executed',
+            ...messagePhrase(phrase('refusal.freshPreviewInvalid')),
           },
         };
       }
@@ -1208,7 +1225,7 @@ export class AiToolService {
     return {
       code: 'FORBIDDEN',
       status: 403,
-      message: `${name} is outside the access granted to this session`,
+      ...messagePhrase(phrase('refusal.outsideSessionAccess', { tool: name })),
     };
   }
 
@@ -1337,14 +1354,16 @@ type FreshPreview =
 const PRINCIPAL_INVALID: ToolError = {
   code: 'FORBIDDEN',
   status: 401,
-  message: 'The acting principal is no longer valid',
+  ...messagePhrase(phrase('refusal.principalInvalid')),
 };
 
 function gateError(gate: Permission): ToolError {
   return {
     code: 'FORBIDDEN',
     status: 403,
-    message: `The ${gate} permission is required`,
+    ...messagePhrase(
+      phrase('refusal.permissionRequired', { permission: gate }),
+    ),
   };
 }
 

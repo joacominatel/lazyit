@@ -4,6 +4,7 @@ import type {
   AiActionPreview,
   AiChannel,
   AiEntityRef,
+  AiSentence,
   AiToolAnnotations,
   AiToolClass,
   AiTruncation,
@@ -115,6 +116,8 @@ export interface AiToolRuntime {
 export interface AiToolRunOutput<D = unknown> {
   data: D;
   summary?: string;
+  /** `summary` as localizable sentences (#1384) — build both with `summaryPhrase` (`core/sentences.ts`). */
+  summarySentences?: AiSentence[];
   entityRefs?: AiEntityRef[];
   truncated?: AiTruncation;
 }

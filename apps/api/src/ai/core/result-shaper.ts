@@ -1,5 +1,6 @@
 import type {
   AiCallKind,
+  AiSentence,
   AiToolClass,
   AiToolErrorCode,
   AiToolResult,
@@ -46,6 +47,9 @@ export function successResult(
       ? serialized.slice(0, AI_TOOL_RESULT_MAX_CHARS)
       : (output.data ?? null),
     ...(output.summary !== undefined ? { summary: output.summary } : {}),
+    ...(output.summary !== undefined && output.summarySentences !== undefined
+      ? { summarySentences: output.summarySentences }
+      : {}),
     mutated: kind === 'mutation',
     ...(overLimit
       ? {
@@ -68,6 +72,8 @@ export function errorResult(
     code: AiToolErrorCode;
     status?: number;
     message: string;
+    /** `message` as localizable sentences (#1384). */
+    messageSentences?: AiSentence[];
     hint?: string;
   },
 ): AiToolResult {
@@ -78,6 +84,9 @@ export function errorResult(
       code: error.code,
       ...(error.status !== undefined ? { status: error.status } : {}),
       message: error.message,
+      ...(error.messageSentences !== undefined
+        ? { messageSentences: error.messageSentences }
+        : {}),
       ...(error.hint !== undefined ? { hint: error.hint } : {}),
     },
     mutated: false,

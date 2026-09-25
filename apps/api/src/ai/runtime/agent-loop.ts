@@ -33,6 +33,7 @@ import {
 } from '../core/ports/chat-model.port';
 import { isSensitiveKey, redactUrlCredentials } from '../core/redaction';
 import { callKindOf, errorResult } from '../core/result-shaper';
+import { messagePhrase, phrase } from '../core/sentences';
 import type {
   AiExecutionContext,
   RegisteredAiTool,
@@ -690,7 +691,7 @@ export class AgentLoop {
         },
         fallback: {
           code: 'NOT_AVAILABLE',
-          message: 'The AI assistant was turned off; nothing was executed',
+          ...messagePhrase(phrase('refusal.aiTurnedOff')),
         },
       });
       return { ok: false };
@@ -892,7 +893,11 @@ export class AgentLoop {
       return answer(
         errorResult('read', {
           code: 'NOT_AVAILABLE',
-          message: `Unknown tool: ${String(call.toolName).slice(0, 80)}`,
+          ...messagePhrase(
+            phrase('refusal.unknownTool', {
+              tool: String(call.toolName).slice(0, 80),
+            }),
+          ),
           hint: 'Call only the tools you were given.',
         }),
       );
@@ -910,7 +915,7 @@ export class AgentLoop {
     if (typeof call.input === 'string' || call.input === undefined) {
       return refuse({
         code: 'INVALID_INPUT',
-        message: 'The arguments were not a valid JSON object',
+        ...messagePhrase(phrase('refusal.argumentsNotJson')),
         hint: 'Send the arguments as a JSON object matching the tool schema.',
       });
     }
@@ -932,13 +937,13 @@ export class AgentLoop {
     if (state.toolCallsSoFar >= AI_MAX_TOOL_CALLS_PER_RUN) {
       return refuse({
         code: 'RATE_LIMITED',
-        message: 'The tool call limit of this run was reached',
+        ...messagePhrase(phrase('refusal.toolCallLimit')),
       });
     }
     if (!this.limits.toolCalls.take(principalKey(state.who.owner))) {
       return refuse({
         code: 'RATE_LIMITED',
-        message: 'Too many tool calls; wait a moment before calling more',
+        ...messagePhrase(phrase('refusal.tooManyToolCalls')),
       });
     }
 
@@ -977,7 +982,7 @@ export class AgentLoop {
         return refuse({
           code: 'FORBIDDEN',
           status: 403,
-          message: `The mutation cap of this run (${cap}) was reached`,
+          ...messagePhrase(phrase('refusal.mutationCap', { cap })),
         });
       }
     }
@@ -1039,21 +1044,20 @@ export class AgentLoop {
     if (state.ctx.channel !== 'CHAT' || state.ctx.identity.kind !== 'human') {
       return refuse({
         code: 'NOT_AVAILABLE',
-        message: 'Nobody can answer a form on this channel',
+        ...messagePhrase(phrase('refusal.formChannel')),
       });
     }
     if (state.stepWrites) {
       return refuse({
         code: 'INVALID_INPUT',
-        message:
-          'Ask for missing data in a step of its own, before proposing any change',
+        ...messagePhrase(phrase('refusal.formStepWrites')),
         hint: 'Call only this tool (and reads) now; propose the changes after the answer.',
       });
     }
     if ((state.inputCount ?? 0) > 0) {
       return refuse({
         code: 'INVALID_INPUT',
-        message: 'Ask with one form at a time; put every question in it',
+        ...messagePhrase(phrase('refusal.formOneAtATime')),
       });
     }
     const result = await this.tools.invoke(
@@ -1072,7 +1076,7 @@ export class AgentLoop {
     if (!form.success) {
       return refuse({
         code: 'INTERNAL',
-        message: 'The form could not be built',
+        ...messagePhrase(phrase('refusal.formNotBuilt')),
       });
     }
     const row = await this.inputs.open({
@@ -1086,7 +1090,7 @@ export class AgentLoop {
     if (!request) {
       return refuse({
         code: 'INTERNAL',
-        message: 'The form could not be stored',
+        ...messagePhrase(phrase('refusal.formNotStored')),
       });
     }
     this.emitCall(runId, call, tool, 'AWAITING_INPUT');
@@ -1419,9 +1423,9 @@ export class AgentLoop {
 export function pendingLimitResult(): AiToolResult {
   return errorResult('mutation', {
     code: 'RATE_LIMITED',
-    message:
-      `Limit reached: ${AI_MAX_PENDING_PER_STEP} proposals are pending in this step; wait for the ` +
-      "user's decisions and propose the rest in the next step.",
+    ...messagePhrase(
+      phrase('refusal.pendingLimit', { max: AI_MAX_PENDING_PER_STEP }),
+    ),
     hint:
       'Nothing failed and nothing was proposed for this call. Stop proposing now: tell the user how many ' +
       `changes you proposed and how many remain (e.g. "${AI_MAX_PENDING_PER_STEP} of 25"). Once they ` +
@@ -1439,6 +1443,11 @@ export function toolResultEvent(toolCallId: string, result: AiToolResult) {
     ...(result.ok && result.summary !== undefined
       ? { summary: result.summary.slice(0, 500) }
       : {}),
+    ...(result.ok &&
+    result.summary !== undefined &&
+    result.summarySentences !== undefined
+      ? { summarySentences: result.summarySentences }
+      : {}),
     mutated: result.mutated,
     entityRefs: result.entityRefs,
     ...(!result.ok
@@ -1446,6 +1455,9 @@ export function toolResultEvent(toolCallId: string, result: AiToolResult) {
           error: {
             code: result.error.code,
             message: result.error.message.slice(0, 500),
+            ...(result.error.messageSentences !== undefined
+              ? { messageSentences: result.error.messageSentences }
+              : {}),
           },
         }
       : {}),
@@ -1465,5 +1477,5 @@ const CONTEXT_FULL: AiRunError = {
 
 const CANCELLED_ANSWER: FallbackAnswer = {
   code: 'NOT_AVAILABLE',
-  message: 'The run was cancelled; nothing was executed',
+  ...messagePhrase(phrase('refusal.runCancelledNothingExecuted')),
 };

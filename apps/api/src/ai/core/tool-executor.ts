@@ -5,6 +5,7 @@ import { mapToolError } from './error-mapper';
 import { runInAiInvocation } from './invocation-context';
 import { resolveReference } from './reference-resolver';
 import { callKindOf, errorResult, successResult } from './result-shaper';
+import { messagePhrase, phrase } from './sentences';
 import { AiToolDispatcher } from './tool-dispatcher';
 import type {
   AiExecutionContext,
@@ -71,7 +72,7 @@ export class AiToolExecutor {
       ok: false,
       result: errorResult(callKindOf(tool.descriptor.class), {
         code: 'INVALID_INPUT',
-        message: `Invalid input: ${message}`,
+        ...messagePhrase(phrase('refusal.invalidInput', { detail: message })),
       }),
     };
   }

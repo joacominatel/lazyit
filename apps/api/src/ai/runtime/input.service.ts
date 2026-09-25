@@ -24,6 +24,7 @@ import {
   type AiSettingsReader,
 } from '../core/ports/ai-settings.port';
 import { errorResult, successResult, untrusted } from '../core/result-shaper';
+import { phrase, summaryPhrase } from '../core/sentences';
 import { toolResultEvent } from './agent-loop';
 import {
   AiInputRequests,
@@ -164,10 +165,13 @@ export class AiInputService {
         outcome,
         result: successResult('navigate', {
           data,
-          summary:
-            outcome === 'skipped'
-              ? 'The user skipped the form'
-              : 'The user declined the form',
+          ...summaryPhrase(
+            phrase(
+              outcome === 'skipped'
+                ? 'request_input.summarySkipped'
+                : 'request_input.summaryDeclined',
+            ),
+          ),
         }),
       };
     }
@@ -193,7 +197,7 @@ export class AiInputService {
       outcome: 'submitted',
       result: successResult('navigate', {
         data,
-        summary: 'The user answered the form',
+        ...summaryPhrase(phrase('request_input.summaryAnswered')),
       }),
       answer: checked.answer,
     };
