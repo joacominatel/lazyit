@@ -83,8 +83,13 @@ updated: 2026-09-24
   mismatch — the precedent for persisting "panel open" state.
 - **(R)** `apps/web/components/breadcrumb.tsx` humanizes unknown segments (`"ai"` → **"Ai"**); pages
   can pass explicit `items`.
-- **(R)** `apps/web/components/user-menu.tsx` links the per-user self-service pages `/profile` and
-  `/account/notifications` (no permission gate). `/account/**` is the per-user settings home.
+- **(R)** `apps/web/components/user-menu.tsx` links the per-user self-service pages `/account` (the
+  account hub, #1404), `/profile` and `/account/notifications` (no permission gate). `/account/**` is the
+  per-user settings home: `account/layout.tsx` renders a shared sub-navigation (Overview · My profile ·
+  Notification emails · AI & connected apps, the last gated like the menu entry) that `/profile` also
+  renders, and `/account` gathers identity, links to each per-user page, password & sessions (links to
+  and reuses the existing change-password panel and sign-out — no new auth behavior) and the
+  language/theme preferences.
 
 ### 2.2 Data layer, permissions, feature state
 

@@ -94,7 +94,8 @@ updated: 2026-09-24
   keeps an explicit public-path list (incl. `/install.sh`, `/install.ps1` — anonymous instance-served
   artifacts carrying no secret).
 - **[R] Settings is admin-only.** `apps/web/app/(app)/settings/page.tsx` is wrapped in `AdminGate`
-  (`settings:manage`). A per-user area exists at `apps/web/app/(app)/account/` (today: `notifications`).
+  (`settings:manage`). A per-user area exists at `apps/web/app/(app)/account/` (today: the `/account` hub,
+  #1404, plus `notifications` and `ai`).
 - **[R] Egress guard.** `apps/api/src/common/egress/egress-guard.ts` `guardedFetch`: HTTPS-only by default,
   resolves + pins IPs, denies private/loopback/link-local/IMDS, re-validates redirects, strips credentials
   cross-origin. Its header comment says it has no consumer yet.

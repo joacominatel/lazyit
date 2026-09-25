@@ -16,6 +16,26 @@ administrator needed. It answers the two questions every team member eventually 
 Click your **avatar** in the top-right corner and choose **My profile**. It's available to **everyone**,
 including read-only (**Viewer**) accounts — you never need elevated permissions to see your own things.
 
+## Your account hub
+
+**Account** (avatar menu → **Account**, at `/account`) is the one place for everything about **your own**
+account. Everyone can open it; it shows only what applies to you:
+
+- **You** — your name, email, role and join date, with a shortcut to **My profile**.
+- **Your pages** — cards for **My profile**, [Notification emails](/help/notifications-activity-email-preferences),
+  **AI & connected apps** (only if you may connect AI apps and your instance has the assistant — see
+  [Connected apps](/help/ai-assistant-connected-apps)) and the **Secret Manager** (only if you can read
+  secrets — your personal vault password lives there).
+- **Password & sessions** — who owns your password (lazyit, or your organization's sign-in provider),
+  a **Change password** shortcut on local-account instances, and a sign-out button. On local accounts it
+  reads **Sign out on all devices**, because signing out already ends every session you have (see
+  [Signing in and out](#signing-in-and-out)). lazyit does not list your individual sessions or devices.
+- **Preferences** — your **language** and **theme** (light, dark or follow your device). Both are saved in
+  the browser you set them in.
+
+A row of tabs at the top of **Account**, **My profile**, **Notification emails** and **AI & connected
+apps** lets you move between them without going back to the menu.
+
 ## What you'll see
 
 - **Identity** — your name, email, role and the date you joined. This is exactly how you appear to the
