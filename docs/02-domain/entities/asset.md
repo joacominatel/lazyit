@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # Asset
@@ -205,6 +205,9 @@ three stored fields are echoed on create/update.
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+  A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
+  salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
+  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
 - `POST /assets/batch/receive` — **bulk receive** (ADR-0089 Part A, #1029): mint `quantity` assets from
   one [[asset-model]] in a single action (`asset:write` — ADMIN or MEMBER; creating assets is that verb,
   no new permission). Body `{ modelId, quantity (1..200), status, locationId?, company?, purchaseDate?,
