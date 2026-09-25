@@ -465,8 +465,9 @@ apps/api/src/common/crypto/envelope-cipher.ts   # generic AES-256-GCM envelope k
 ```
 
 As built, the runtime's files differ from the sketch above: `system-prompt.ts` lives in `ai/prompt/`, and
-the runtime adds `run-lifecycle.ts`, `run-records.ts`, `run-queue.ts`, `step-up.verifier.ts` and
-`runtime.constants.ts` — the table is in §8.1.
+the runtime adds `run-lifecycle.ts`, `run-records.ts`, `run-queue.ts` and `runtime.constants.ts` — the
+table is in §8.1. The password step-up it calls is `auth/local/password-step-up.verifier.ts`
+(`PasswordStepUpVerifier`, provided by the global `AuthModule` and shared with the OAuth consent — SEC-082).
 
 `packages/shared/src/schemas/` holds **contracts only**: `ai-provider.ts` (provider kinds and
 descriptors), `ai-settings.ts`, `ai-run.ts` (run, conversation and approval wire shapes plus the SSE
@@ -987,7 +988,7 @@ Invariants [C]:
 | `agent-loop.ts` | the loop (`advance(runId)`): claim QUEUED → RUNNING, guardrails, one `ChatModelPort.step` per iteration, resolve every call, pause or continue |
 | `agent-run.worker.ts` | `@Processor('ai-run')`, concurrency `AI_WORKER_CONCURRENCY` (default 4, max 16); `start` and `resume` both call `advance`; never rethrows |
 | `agent-run.sweeper.ts` | the reconciler (every 30 s, off under `NODE_ENV=test`) |
-| `approval.service.ts` + `step-up.verifier.ts` | the runtime side of a decision, with the password step-up |
+| `approval.service.ts` | the runtime side of a decision, with the password step-up (`auth/local/password-step-up.verifier.ts`, shared with the OAuth consent — SEC-082) |
 | `run-lifecycle.ts` | events, append-only rows, answering a step, terminal transitions, the resume hand-off |
 | `principal-context.ts` | re-load and re-authorize the principal (`ai:use`, the per-SA setting, `infra:report`) |
 | `limits.ts` | budget and context queries, token buckets, tool-output cap, turn-context neutralization, toolset hash |
@@ -1131,7 +1132,8 @@ approval whose stored preview requires step-up (core's `requiresStepUp`) needs t
 against the current hash — at most one verification in flight per user (a concurrent attempt is answered
 429 without reaching the KDF) and each attempt counted as a failure before the KDF runs (cleared by a
 success), so a burst of concurrent guesses is one guess; wrong → 403 `STEP_UP_FAILED`; after 5 failures an exponential lock from 1 s to
-15 min (the `LoginService` policy, per user, in memory) → 429 `STEP_UP_RATE_LIMITED` with
+15 min (the `LoginService` policy, per user, in memory; ONE counter shared with the OAuth consent's
+`lazyit.admin` step-up, SEC-082) → 429 `STEP_UP_RATE_LIMITED` with
 `retryAfterSec`; outside `AUTH_MODE=local` → 403 `STEP_UP_UNAVAILABLE` (no lazyit password exists: such
 actions cannot be approved from the chat — fail closed). Only a verified password calls core's
 `approve(…, { stepUpVerified: true })`; a missing or wrong one never consumes the action. A password sent

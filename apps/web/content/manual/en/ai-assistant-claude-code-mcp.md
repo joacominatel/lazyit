@@ -137,7 +137,9 @@ When an app signs in with OAuth, lazyit shows a consent screen before anything i
 - **The account it acts as**, and **what it may do**: **Read only** or **Read & write** (preselected
   when asked for).
 - **Admin actions**, only if the app asked for them. They are never preselected, and ticking them asks
-  for your password.
+  for your password. After several wrong passwords lazyit makes you wait before you can try again — the
+  same wait that applies to password confirmations in the AI chat, so mistakes in either place count
+  together.
 
 Choose **Allow access** or **Deny**. For an app that is **not verified**, lazyit asks you to confirm a
 second time: continue only if you started the connection yourself, just now, and you recognize where
