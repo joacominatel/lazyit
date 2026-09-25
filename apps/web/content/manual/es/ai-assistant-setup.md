@@ -8,9 +8,14 @@ subcategory: setup
 # Asistente de IA — configuración
 
 Todo lo relacionado con IA se configura en **Configuración → IA**, que requiere el permiso **Configurar
-la instancia**. La página tiene cuatro partes: el proveedor del asistente (un asistente de configuración
-mientras está desactivado, un editor una vez activo), **Comportamiento y límites**, **Agentes de IA
-externos (MCP)** y — una vez activo — **Desactivar el asistente de IA**.
+la instancia**. La página tiene cinco partes: el proveedor del asistente (un asistente de configuración
+mientras está desactivado, un editor una vez activo), **Comportamiento y límites**, **Búsqueda web**,
+**Agentes de IA externos (MCP)** y — una vez activo — **Desactivar el asistente de IA**.
+
+La página se limita a etiquetas y controles. Junto a una opción, el **?** abre su explicación: pasa el
+mouse por encima, o haz clic, tócalo o pulsa Enter para dejarla abierta (Escape la cierra). La mayoría de
+las ayudas terminan con **Más información en el Manual**, que abre la sección correspondiente de esta
+página en una pestaña nueva; **Guía de configuración**, arriba en la página, también abre esta página.
 
 ## Antes de empezar: `AI_SECRET_KEY`
 
@@ -30,13 +35,16 @@ ingresaste (todavía desactivado), así que puedes dejarlo y volver — se reabr
    siquiera a los administradores; para cambiarla escribes una nueva. Para un servidor compatible con
    OpenAI también indicas su **URL base** (normalmente terminada en `/v1`); consulta
    [Servidores en red privada](#servidores-en-red-privada).
-3. **Modelo** — elige una sugerencia o escribe cualquier id de modelo que acepte tu proveedor y, si
-   quieres, el **esfuerzo de razonamiento** (y una temperatura para un servidor compatible con OpenAI).
+3. **Modelo** — elige una sugerencia o escribe cualquier id de modelo que acepte tu proveedor (la prueba
+   del paso siguiente lo verifica) y, si quieres, el **esfuerzo de razonamiento** — más esfuerzo responde
+   mejor los pedidos difíciles, pero es más lento y usa más tokens. Para un servidor compatible con
+   OpenAI también puedes definir una **temperatura** entre 0 y 2; déjala en blanco para usar la del
+   servidor.
 4. **Prueba** — lazyit comprueba que el proveedor acepta la clave, conoce el modelo y que el modelo puede
    **llamar herramientas**. El asistente no funciona sin llamadas a herramientas, así que no puedes
    continuar hasta que la prueba pase. Si falla, la página explica por qué (una clave rechazada, un modelo
    desconocido, un host inalcanzable…).
-5. **Activar** — revisa qué sale de tu servidor (consulta
+5. **Activar** — revisa qué sale de tu servidor (el paso lo resume; **Qué se envía exactamente** abre
    [Asistente de IA — visión general](/help/ai-assistant-overview#qué-sale-de-tu-servidor)), confirma que
    puedes enviarlo al proveedor y pulsa **Activar el asistente de IA**. La página se recarga y las personas
    con el permiso **Usar el asistente de IA** ven el asistente en la barra superior — el resto en menos de
@@ -68,15 +76,15 @@ clave va en el campo de clave de API.
 ## Comportamiento y límites
 
 Se aplican a todas las conversaciones y se pueden cambiar en cualquier momento, con el asistente activo o
-no:
+no. Un cambio se aplica a los pedidos nuevos:
 
 | Opción | Por defecto | Qué hace |
 | --- | --- | --- |
 | Guardar las conversaciones durante | 90 días | Las conversaciones más antiguas se borran automáticamente (7–3650 días). El registro de acciones ejecutadas se conserva. |
 | Las tarjetas de aprobación vencen a los | 30 minutos | Un cambio propuesto que nadie aprueba a tiempo ya no se puede aprobar. |
 | Presupuesto diario de tokens por persona | 2.000.000 | El máximo de tokens que una persona o cuenta de servicio puede usar en cualquier período de 24 horas. Desactívalo para no tener presupuesto. |
-| Largo máximo de respuesta, pasos máximos, tamaño de conversación | — | Límites para una respuesta, para cuántas herramientas puede encadenar un pedido y para cuánto puede crecer una conversación. |
-| Instrucciones para el asistente | — | Tus propias indicaciones, agregadas a las de lazyit en cada conversación (convenciones de la casa, idioma preferido). No pueden ampliar lo que el asistente puede hacer. |
+| Largo máximo de respuesta, pasos máximos, tamaño de conversación | — | Límites para una respuesta, para cuántas herramientas puede encadenar un pedido y para cuánto puede crecer una conversación — al superar el tamaño, la persona empieza un chat nuevo. |
+| Instrucciones para el asistente | — | Tus propias indicaciones, agregadas a las de lazyit en cada conversación (convenciones de la casa, idioma preferido). No pueden ampliar lo que el asistente puede hacer. El contador bajo el cuadro muestra cuántos caracteres quedan. |
 
 ## Búsqueda web
 
@@ -114,13 +122,16 @@ externos (MCP)**). Este interruptor es independiente del asistente: funciona sin
 configurado. Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a valer al
 reactivarlo.
 
-La tarjeta muestra el **endpoint MCP** — la dirección pública de `WEB_ORIGIN` en la API seguida de `/mcp`
-(si no hay una dirección fijada, muestra la de la página en la que estás y lo indica) — y explica cómo
+La tarjeta muestra el **endpoint MCP** — la dirección que se le da a un cliente MCP configurado a mano: la
+dirección pública de `WEB_ORIGIN` en la API seguida de `/mcp`. Si no hay una dirección fijada, muestra la
+de la página en la que estás y lo indica; los clientes en otras máquinas pueden necesitar entonces la
+dirección de la instancia en tu red. La tarjeta también dice, en una línea, cómo
 inician sesión los clientes en **esta** instancia. Eso depende de la opción `WEB_ORIGIN` de la API — la
 dirección pública a la que está fijado lazyit —, no solo de si la página se muestra por HTTPS:
 
 - **`WEB_ORIGIN` es una dirección `https://`: OAuth.** El cliente abre una página de lazyit en el navegador donde la persona revisa el
-  acceso y lo aprueba. Si tu certificado lo emite una **autoridad de certificación interna**, Claude Code y
+  acceso y lo aprueba — sin nada que copiar a mano, y cada conexión se puede revocar en **Cuenta → IA y
+  aplicaciones conectadas**. Si tu certificado lo emite una **autoridad de certificación interna**, Claude Code y
   otros clientes Node.js deben iniciarse con ella, por ejemplo
   `export NODE_EXTRA_CA_CERTS=/ruta/a/ca-interna.pem`.
 - **Sin un `WEB_ORIGIN` `https://` (por ejemplo, el modo `lan` por HTTP sin cifrar): tokens personales.**
@@ -153,7 +164,9 @@ Qué clientes pueden conectarse lo deciden dos cosas, ambas en la tarjeta de MCP
   **Docs del proveedor**). **Quita** un cliente incluido para que deje de conectarse (mientras “cualquier
   cliente https://” esté activado, un cliente quitado con callback `https://` todavía puede pedir
   consentimiento), y **Restáuralo** cuando quieras. Pi, Windsurf y Zed no vienen incluidos porque sus
-  identificadores no se pudieron verificar — agrégalos tú si tu equipo los usa.
+  identificadores no se pudieron verificar — agrégalos tú si tu equipo los usa. Si quitaste un cliente
+  incluido que una versión posterior de lazyit ya no trae, aparece en **Clientes quitados que ya no están
+  en la lista incluida**; restaurarlo solo borra tu eliminación.
 
 Para permitir otro cliente, usa **Agregar un cliente** con uno de estos datos:
 
