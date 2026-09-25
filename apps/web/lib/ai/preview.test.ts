@@ -55,3 +55,61 @@ describe("humanizeKey", () => {
     expect(humanizeKey("asset_search")).toBe("Asset search");
   });
 });
+
+describe("presentPreview with sentences (#1384)", () => {
+  /** A stand-in renderer: knows one code, stamps the rest as unrenderable. */
+  const render = (sentences: unknown) => {
+    const list = sentences as { code: string; params: Record<string, string> }[];
+    if (!list.every((s) => s.code === "known")) return null;
+    return { text: list.map((s) => `ES:${s.params.v}`).join(" "), untrusted: list.some((s) => s.params.v === "u") };
+  };
+
+  test("the action and value rows show the localized sentences", () => {
+    const model = presentPreview(
+      {
+        changes: [
+          {
+            field: "action",
+            after: "Add the application \"Jira\" to the catalog.",
+            afterSentences: [{ code: "known", params: { v: "a" } }, { code: "known", params: { v: "b" } }],
+          },
+          {
+            field: "audience",
+            before: "Everyone",
+            after: "Restricted",
+            beforeSentences: [{ code: "known", params: { v: "before" } }],
+            afterSentences: [{ code: "known", params: { v: "u" } }],
+          },
+        ],
+      },
+      render,
+    );
+    expect(model.action).toEqual({ text: "ES:a ES:b", untrusted: false });
+    expect(model.rows[0]).toEqual({
+      field: "audience",
+      before: { kind: "text", text: "ES:before", untrusted: false },
+      after: { kind: "text", text: "ES:u", untrusted: true },
+    });
+  });
+
+  test("the English shows when the sentences do not render, or without a renderer", () => {
+    const preview = {
+      changes: [
+        { field: "action", after: "Add it.", afterSentences: [{ code: "unknown", params: {} }] },
+        { field: "audience", after: "Everyone", afterSentences: [{ code: "unknown", params: {} }] },
+      ],
+    };
+    for (const model of [presentPreview(preview, render), presentPreview(preview)]) {
+      expect(model.action).toEqual({ text: "Add it.", untrusted: false });
+      expect(model.rows[0]!.after).toEqual({ kind: "text", text: "Everyone", untrusted: false });
+    }
+  });
+
+  test("a redacted value is never replaced by sentences", () => {
+    const model = presentPreview(
+      { changes: [{ field: "secret", after: "x", valueKind: "redacted", afterSentences: [{ code: "known", params: { v: "a" } }] }] },
+      render,
+    );
+    expect(model.rows[0]!.after).toEqual({ kind: "redacted" });
+  });
+});

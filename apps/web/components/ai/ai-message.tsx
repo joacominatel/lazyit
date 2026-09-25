@@ -124,7 +124,7 @@ export function AiMessage({
                   key={`approval-${part.request.toolCallId}`}
                   part={part}
                   callStatus={tool?.status}
-                  failureMessage={tool?.result?.error?.message}
+                  failure={tool?.result?.error}
                 />
               );
             }
@@ -133,7 +133,7 @@ export function AiMessage({
                 key={`approval-${part.request.toolCallId}`}
                 part={part}
                 callStatus={tool?.status}
-                failureMessage={tool?.result?.error?.message}
+                failure={tool?.result?.error}
                 onDecide={onDecide}
               />
             );

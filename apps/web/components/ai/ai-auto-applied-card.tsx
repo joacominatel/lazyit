@@ -9,11 +9,13 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { entityHref } from "@/lib/ai/entity-href";
 import { isKnownWarning } from "@/lib/ai/error-kinds";
 import { presentPreview } from "@/lib/ai/preview";
+import { localizedText } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import { cn } from "@/lib/utils";
 import { ApprovalValue, approvalStage, type ApprovalStage } from "./ai-approval-card";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 import { AiPreviewTable } from "./ai-preview-table";
+import { useAiSentences } from "./use-ai-sentences";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 
@@ -32,21 +34,23 @@ const TONE: Partial<Record<ApprovalStage, StatusTone>> = {
 export function AiAutoAppliedCard({
   part,
   callStatus,
-  failureMessage,
+  failure,
 }: {
   part: ApprovalPart;
   callStatus?: AiToolInvocationStatus;
-  failureMessage?: string;
+  /** The call's error, when it failed after approval (its message is localized when it can be, #1384). */
+  failure?: { message: string; messageSentences?: unknown };
 }) {
   const t = useTranslations("ai.approval");
   const tAuto = useTranslations("ai.approval.auto");
   const tWarn = useTranslations("ai.approval.warnings");
   const entityLabel = useEntityTypeLabel();
   const fieldLabel = usePreviewFieldLabel();
+  const sentences = useAiSentences();
   const titleId = useId();
 
   const preview = part.request.preview;
-  const model = presentPreview(preview);
+  const model = presentPreview(preview, sentences);
   // A list of records (a batch's rows, #1387) is a table below the field rows, not a field row.
   const fieldRows = model.rows.filter((row) => row.records === undefined);
   const tableRows = model.rows.filter((row) => row.records !== undefined);
@@ -127,7 +131,7 @@ export function AiAutoAppliedCard({
         )}
         {stage === "failed" ? (
           <p className="text-destructive-text">
-            {t("failedNote", { message: plainText(failureMessage ?? "") || "—" })}
+            {t("failedNote", { message: (localizedText(failure?.message, failure?.messageSentences, sentences)?.text ?? "") || "—" })}
           </p>
         ) : (
           <p className="text-muted-foreground">{tAuto("note")}</p>

@@ -253,17 +253,37 @@ export interface BulkReport {
 
 /* ─── Refused calls ─────────────────────────────────────────────────────────────────────────────── */
 
-/** The refused calls grouped by tool and reason, most frequent first, for "Show details". Pure. */
-export function refusedDetails(
-  parts: readonly ToolPart[],
-): { name: string; message: string; count: number }[] {
-  const groups = new Map<string, { name: string; message: string; count: number }>();
+/** One "Show details" line of the refused calls. */
+export interface RefusedGroup {
+  name: string;
+  /** The English reason — what the group is keyed by. */
+  message: string;
+  /** The same reason as sentences (#1384), from the group's first call; the line DISPLAYS it localized. */
+  messageSentences?: unknown;
+  count: number;
+}
+
+/**
+ * The refused calls grouped by tool and reason, most frequent first, for "Show details". Pure. The group
+ * key is the English reason (the same sentence always has the same English); the line shows the
+ * localized sentence when it renders.
+ */
+export function refusedDetails(parts: readonly ToolPart[]): RefusedGroup[] {
+  const groups = new Map<string, RefusedGroup>();
   for (const part of parts) {
-    const message = part.result?.error?.message ?? part.result?.summary ?? "";
+    const error = part.result?.error;
+    const message = error?.message ?? part.result?.summary ?? "";
+    const sentences = error ? error.messageSentences : part.result?.summarySentences;
     const key = `${part.name}\u0000${message}`;
     const group = groups.get(key);
     if (group) group.count++;
-    else groups.set(key, { name: part.name, message, count: 1 });
+    else
+      groups.set(key, {
+        name: part.name,
+        message,
+        ...(sentences !== undefined ? { messageSentences: sentences } : {}),
+        count: 1,
+      });
   }
   return [...groups.values()].sort((a, b) => b.count - a.count);
 }

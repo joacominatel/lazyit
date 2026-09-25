@@ -10,6 +10,7 @@ import type { TranscriptLabels } from "@/lib/ai/transcript-markdown";
 import { approvalStage } from "./ai-approval-card";
 import { usePreviewFieldLabel, useToolDisplayName } from "./ai-labels";
 import { toolLineText } from "./ai-tool-activity";
+import { useAiSentences } from "./use-ai-sentences";
 
 /**
  * The localized words `/copy` writes into the Markdown transcript (issue #1372) — the same strings the
@@ -20,6 +21,7 @@ export function useTranscriptLabels(): TranscriptLabels {
   const format = useFormatter();
   const toolName = useToolDisplayName();
   const fieldLabel = usePreviewFieldLabel();
+  const sentences = useAiSentences();
 
   return useMemo<TranscriptLabels>(() => {
     const value = (v: PreviewValue | null): string => {
@@ -44,7 +46,7 @@ export function useTranscriptLabels(): TranscriptLabels {
       tool: (part, count) => toolLineText(t, part.status, toolName(part.name), count),
       approval: (part, callStatus) => {
         const preview = part.request.preview;
-        const model = presentPreview(preview);
+        const model = presentPreview(preview, sentences);
         const elevated = part.request.elevated || preview.elevated;
         const stage = approvalStage(part.outcome, callStatus, null);
         const kind = part.auto === true
@@ -105,5 +107,5 @@ export function useTranscriptLabels(): TranscriptLabels {
           : t(`errors.run.${runErrorKind(part.error.code).key}`),
       unsupported: t("message.unsupported"),
     };
-  }, [t, format, toolName, fieldLabel]);
+  }, [t, format, toolName, fieldLabel, sentences]);
 }

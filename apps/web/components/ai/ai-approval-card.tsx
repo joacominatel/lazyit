@@ -22,11 +22,13 @@ import {
   type DecisionErrorKind,
 } from "@/lib/ai/error-kinds";
 import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
+import { localizedText } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { cn } from "@/lib/utils";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 import { AiPreviewTable } from "./ai-preview-table";
+import { useAiSentences } from "./use-ai-sentences";
 
 type ApprovalPart = Extract<AiMessagePart, { type: "approval" }>;
 
@@ -126,8 +128,8 @@ interface ApprovalCardProps {
   part: ApprovalPart;
   /** The execution status of the same call (from its tool line), once approved. */
   callStatus?: AiToolInvocationStatus;
-  /** The failure message of the call, when it failed after approval. */
-  failureMessage?: string;
+  /** The call's error, when it failed after approval (its message is localized when it can be, #1384). */
+  failure?: { message: string; messageSentences?: unknown };
   onDecide: (
     toolCallId: string,
     decision: "approve" | "reject",
@@ -157,7 +159,7 @@ interface ApprovalCardProps {
 export function AiApprovalCard({
   part,
   callStatus,
-  failureMessage,
+  failure,
   onDecide,
   embedded = false,
   locked = false,
@@ -169,12 +171,13 @@ export function AiApprovalCard({
   const format = useFormatter();
   const entityLabel = useEntityTypeLabel();
   const fieldLabel = usePreviewFieldLabel();
+  const sentences = useAiSentences();
   const titleId = useId();
   const passwordId = useId();
 
   const { request, outcome } = part;
   const preview = request.preview;
-  const model = presentPreview(preview);
+  const model = presentPreview(preview, sentences);
   // A list of records (a batch's rows, #1387) is a table below the field rows, not a field row.
   const fieldRows = model.rows.filter((row) => row.records === undefined);
   const tableRows = model.rows.filter((row) => row.records !== undefined);
@@ -444,7 +447,7 @@ export function AiApprovalCard({
         {stage === "executed" && <p className="text-xs text-muted-foreground">{t("executedNote")}</p>}
         {stage === "failed" && (
           <p className="text-xs text-destructive-text">
-            {t("failedNote", { message: plainText(failureMessage ?? "") || "—" })}
+            {t("failedNote", { message: (localizedText(failure?.message, failure?.messageSentences, sentences)?.text ?? "") || "—" })}
           </p>
         )}
         {stage === "rejected" && <p className="text-xs text-muted-foreground">{t("rejectedNote")}</p>}

@@ -372,7 +372,7 @@ export function AiApprovalPager({ parts, tools, navigated, onDecide }: AiApprova
               embedded
               part={part}
               callStatus={tool?.status}
-              failureMessage={result?.error?.message}
+              failure={result?.error}
               onDecide={decideOne}
               locked={bulk !== null}
               busyOverride={

@@ -282,4 +282,20 @@ describe("refusedDetails", () => {
       { name: "asset_create", message: "Invalid input", count: 1 },
     ]);
   });
+
+  test("a group carries its reason as sentences, still keyed by the English (#1384)", () => {
+    const sentences = [{ code: "refusal.toolCallLimit", params: {} }];
+    const refused = (id: string) => {
+      const part = tool(id, "FAILED", "write", "asset_update", "The tool call limit of this run was reached");
+      return { ...part, result: { ...part.result!, error: { ...part.result!.error!, messageSentences: sentences } } };
+    };
+    expect(refusedDetails([refused("r1"), refused("r2")])).toEqual([
+      {
+        name: "asset_update",
+        message: "The tool call limit of this run was reached",
+        messageSentences: sentences,
+        count: 2,
+      },
+    ]);
+  });
 });

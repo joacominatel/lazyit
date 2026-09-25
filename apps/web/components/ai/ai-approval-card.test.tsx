@@ -35,6 +35,47 @@ const pending = (overrides = {}): ApprovalPart => ({
 });
 
 describe("AiApprovalCard", () => {
+  test("server-built sentences render in the user's language; the English stays the fallback (#1384)", () => {
+    const req = approval("w1");
+    req.preview = {
+      ...req.preview,
+      changes: [
+        {
+          field: "action",
+          after: "Add the application \"Jira\" to the catalog.",
+          afterSentences: [{ code: "application_create.action", params: { name: "<untrusted_content>Jira</untrusted_content>" } }],
+        },
+        {
+          field: "usedBy",
+          after: "Unknown to you: asset models, child locations",
+          afterSentences: [{ code: "taxonomy.usedByUnknown", params: { kinds: "asset models, child locations" } }],
+        },
+      ],
+    };
+    const part: ApprovalPart = { type: "approval", request: req, outcome: null };
+    const esHtml = render(part, "es");
+    expect(esHtml).toContain("Agregar la aplicación “Jira” al catálogo.");
+    expect(esHtml).toContain("No lo podés ver: modelos de activo, ubicaciones hijas");
+    expect(esHtml).not.toContain("untrusted_content");
+    expect(render(part, "en")).toContain("Add the application &quot;Jira&quot; to the catalog.");
+
+    // A code this build does not know: the whole row falls back to the English.
+    req.preview = {
+      ...req.preview,
+      changes: [
+        {
+          field: "action",
+          after: "Teleport the asset.",
+          afterSentences: [
+            { code: "application_create.action", params: { name: "Jira" } },
+            { code: "asset_teleport.action", params: {} },
+          ],
+        },
+      ],
+    };
+    expect(render({ type: "approval", request: req, outcome: null }, "es")).toContain("Teleport the asset.");
+  });
+
   test("the action sentence comes first, then target, rows and warnings", () => {
     const html = render(pending());
     const action = html.indexOf("Assign MBP-042 to Juan Pérez.");

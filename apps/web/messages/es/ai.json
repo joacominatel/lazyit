@@ -688,5 +688,314 @@
     },
     "sentNote": "Enviado. Esperando que el asistente continúe…",
     "expiredLocally": "Se terminó el tiempo para responder este formulario. El asistente se detiene en breve; enviá un mensaje nuevo para continuar."
+  },
+  "sentences": {
+    "application_create": {
+      "action": "Agregar la aplicación “{name}” al catálogo.",
+      "actionCritical": "Queda marcada como crítica: cada cambio posterior que haga la IA sobre ella va a pedir tu contraseña en el chat.",
+      "summary": "Se agregó la aplicación “{name}” al catálogo."
+    },
+    "application_update": {
+      "action": "Cambiar {fields} de la aplicación “{name}”.",
+      "actionCritical": "Es una aplicación crítica: confirmá con tu contraseña.",
+      "summary": "Se actualizó la aplicación “{name}” ({fields})."
+    },
+    "access_grant_create": {
+      "actionSelf": "Te estás dando acceso a vos mismo.",
+      "action": "{self, select, yes {Darte} other {Darle a {person}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}{hasUntil, select, yes { hasta el {until}} other {}}.",
+      "summary": "Se {self, select, yes {te dio} other {le dio al usuario {userId}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}."
+    },
+    "access_grant_revoke": {
+      "action": "Quitar {self, select, yes {tu} other {el}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}{self, select, yes {} other { de {person}}}.",
+      "summary": "Se revocó {self, select, yes {tu} other {el}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a la aplicación {applicationId}{self, select, yes {} other { del usuario {userId}}}."
+    },
+    "access_request_create": {
+      "action": "Pedir {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application} para vos. Se avisa a las personas que pueden otorgar el acceso, y ellas lo aprueban o lo rechazan.",
+      "summary": "Se pidió {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}; ahora espera a quien lo apruebe."
+    },
+    "access_request_decide": {
+      "actionSelf": "Estás resolviendo tu propia solicitud.",
+      "actionApprove": "Aprobar la solicitud: {self, select, yes {darte} other {darle a {person}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}. Se crea un acceso otorgado y se {self, select, yes {te avisa} other {le avisa a {person}}}.",
+      "actionDeny": "Rechazar la solicitud {self, select, yes {tuya} other {de {person}}} de {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}. Se {self, select, yes {te avisa} other {le avisa a {person}}} con tu motivo.",
+      "summaryApprove": "Se aprobó la solicitud: {self, select, yes {ahora tenés} other {el usuario {userId} ahora tiene}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a la aplicación {applicationId} (acceso otorgado {grantId}).",
+      "summaryDeny": "Se rechazó la solicitud {self, select, yes {tuya} other {del usuario {userId}}} para la aplicación {applicationId}; se le avisa con el motivo."
+    },
+    "access": {
+      "outlook": {
+        "mayRun": "Esto puede disparar {revoke, select, yes {el desaprovisionamiento automático (quitar la cuenta en {application})} other {el aprovisionamiento automático (crear la cuenta en {application})}} si hay un flujo configurado para esta aplicación.",
+        "none": "No hay un flujo de {revoke, select, yes {desaprovisionamiento} other {aprovisionamiento}} automático configurado para {application}: no cambia nada fuera de lazyit.",
+        "provisions": "Esto dispara el aprovisionamiento automático (crear la cuenta en {application}) después de la aprobación, mediante el flujo configurado para {application}.",
+        "keepsOtherAccess": "El usuario conserva otro acceso a {application}, así que su flujo de desaprovisionamiento no se ejecuta.",
+        "deprovisions": "Esto dispara el desaprovisionamiento automático (quitar la cuenta en {application}), mediante el flujo configurado para {application}.",
+        "deprovisionsIfLast": "Esto dispara el desaprovisionamiento automático (quitar la cuenta en {application}) si es el último acceso del usuario a {application}, mediante el flujo configurado para ella."
+      },
+      "criticalNote": "{application} es una aplicación crítica: confirmá con tu contraseña."
+    },
+    "asset_create": {
+      "summary": "Se creó el activo {asset}."
+    },
+    "asset_create_batch": {
+      "action": "Crear {count} de {total} activos{skipped, plural, =0 {.} one {; se omite # fila, como se pidió.} other {; se omiten # filas, como se pidió.}}",
+      "summary": "Se crearon {count} de {total} activos{failed, plural, =0 {.} one {; # no se creó (ver problemas).} other {; # no se crearon (ver problemas).}}"
+    },
+    "asset_update": {
+      "summary": "Se actualizó el activo {asset}."
+    },
+    "asset_update_batch": {
+      "action": "Actualizar {count} de {total} activos{skipped, plural, =0 {.} one {; se omite # fila, como se pidió.} other {; se omiten # filas, como se pidió.}}",
+      "summary": "Se actualizaron {count} de {total} activos{failed, plural, =0 {.} one {; # no se actualizó (ver problemas).} other {; # no se actualizaron (ver problemas).}}"
+    },
+    "asset_archive": {
+      "summary": "Se archivó el activo {asset}."
+    },
+    "asset_restore": {
+      "summary": "Se restauró el activo {asset}."
+    },
+    "asset_check_out": {
+      "summary": "Se asignó {asset} a {user}."
+    },
+    "asset_check_in": {
+      "summary": "Se devolvió {asset}, que tenía {user}."
+    },
+    "consumable_create": {
+      "summary": "Se creó el consumible {consumable} con 0 {hasUnit, select, yes {{unit}} other {unidades}} en stock."
+    },
+    "consumable_update": {
+      "summary": "Se actualizó el consumible {consumable}."
+    },
+    "consumable_record_movement": {
+      "summary": "Se registró {type, select, IN {una entrada de} OUT {una salida de} ADJUSTMENT {un ajuste de} other {{type}}} {quantity} en {consumable}{hasStock, select, yes {; ahora hay {stock} en stock.} other {.}}"
+    },
+    "asset_model_create": {
+      "summary": "Se creó el modelo de activo {model}."
+    },
+    "location_create": {
+      "summary": "Se creó la ubicación {location}."
+    },
+    "category_create": {
+      "summary": "Se creó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "category_update": {
+      "summary": "Se actualizó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "category_archive": {
+      "summary": "Se archivó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "asset_model_update": {
+      "summary": "Se actualizó el modelo de activo {model}."
+    },
+    "asset_model_archive": {
+      "summary": "Se archivó el modelo de activo {model}."
+    },
+    "asset_model_restore": {
+      "summary": "Se restauró el modelo de activo {model}."
+    },
+    "location_update": {
+      "summary": "Se actualizó la ubicación {location}."
+    },
+    "location_archive": {
+      "summary": "Se archivó la ubicación {location}."
+    },
+    "location_restore": {
+      "summary": "Se restauró la ubicación {location}."
+    },
+    "taxonomy": {
+      "categoryKind": "{kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}}",
+      "usedByUnknown": "No lo podés ver: {kinds}"
+    },
+    "user_create": {
+      "summary": "Se creó a {user} como {role, select, ADMIN {administrador} MEMBER {miembro} VIEWER {lector} other {{role}}}."
+    },
+    "user_update": {
+      "summary": "Se actualizó a {user}."
+    },
+    "user_offboard": {
+      "summary": "Se dio de baja a {user}: se liberaron {released, plural, one {# activo} other {# activos}} y se revocaron {revoked, plural, one {# acceso} other {# accesos}}.",
+      "summaryRotateVaults": "Podía leer {vaults, plural, one {# bóveda} other {# bóvedas}} del Secret Manager: un administrador debería rotar esos secretos desde la interfaz de lazyit.",
+      "criticalRevoked": "revocado",
+      "criticalUnknownGrants": "desconocido: no podés ver los accesos de esta persona, así que se tratan como críticos",
+      "criticalUnknownApplications": "desconocido para {count, plural, one {# aplicación que no podés ver} other {# aplicaciones que no podés ver}}; se trata como crítico",
+      "vaultMembershipsBefore": "las que tenga",
+      "vaultMembershipsAfter": "se quitan (user_restore no las recupera)"
+    },
+    "user_restore": {
+      "summary": "Se restauró a {user}. Los accesos otorgados y las asignaciones de activos no se restauraron."
+    },
+    "kb_create_article": {
+      "summary": "Se creó como borrador."
+    },
+    "kb_update_article": {
+      "summary": "Se actualizó el artículo."
+    },
+    "kb_set_publication": {
+      "summaryPublish": "Publicado: ahora lo ve cualquiera que pueda leer su carpeta.",
+      "summaryUnpublish": "Despublicado: vuelve a ser un borrador, visible solo para quien lo escribió."
+    },
+    "kb_folder_create": {
+      "summary": "Se creó la carpeta.",
+      "topLevel": "Ninguna (nivel superior)",
+      "noOwnRules": "Ninguna propia: hereda el público de arriba. Solo un administrador puede restringir una carpeta (reglas de acceso de carpetas), y el asistente nunca las configura."
+    },
+    "kb_folder_rename": {
+      "summary": "Se renombró la carpeta."
+    },
+    "kb": {
+      "audience": {
+        "unknown": "No lo podés ver: las reglas de acceso de carpetas solo se muestran a quien tiene settings:manage",
+        "everyone": "Todos los que pueden leer la base de conocimiento",
+        "restrictedByRules": "Restringido por reglas de acceso de carpetas",
+        "restricted": "Restringido: solo las personas que cumplen con cada carpeta restringida de la ruta:",
+        "folder": "{folder}:",
+        "rule": "{rule, select, role {el rol {role, select, ADMIN {administrador} MEMBER {miembro} VIEWER {lector} other {{role}}}} users {{count, plural, one {# persona nombrada} other {# personas nombradas}}} appGrant {las personas con acceso a la aplicación {applicationId}} assetAssignment {las personas que tienen asignado el activo {assetId}} other {una regla desconocida (no incluye a nadie)}}{then, select, or { o} semicolon {;} other {}}",
+        "malformed": "{lead, select, yes {; } other {}}una carpeta con reglas ilegibles (no incluye a nadie)"
+      }
+    },
+    "workflow_create": {
+      "whatItDoes": "Crea el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}, DESACTIVADO y sin pasos. No se envía nada hasta que se le agreguen pasos y se active.",
+      "summary": "Se creó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application} (desactivado)."
+    },
+    "workflow_update": {
+      "summary": "Se actualizó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow_archive": {
+      "whatItDoes": "Archiva este flujo: desde ahora no se ejecuta nada cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}. No se puede restaurar desde lazyit.",
+      "summary": "Se archivó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow_author_version": {
+      "enabled": "El flujo está ACTIVADO: esta versión queda en uso apenas se guarda.",
+      "disabled": "El flujo está desactivado: no se ejecuta nada hasta que se active.",
+      "summary": "Se guardó la versión {version} del flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}{live, select, yes { (ya en uso)} other {}}."
+    },
+    "workflow_set_enabled": {
+      "whatItDoesOff": "Desactiva el flujo: desde ahora no se ejecuta nada cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}. Las ejecuciones que ya empezaron terminan.",
+      "summary": "Se {enabled, select, yes {activó} other {desactivó}} el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow": {
+      "outbound": {
+        "manualOnly": "{fromNowOn, select, yes {Desde ahora, cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}} other {Cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}}}, lazyit solo va a crear tareas manuales; no se envía nada fuera de lazyit.",
+        "sends": "{fromNowOn, select, yes {Desde ahora, cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}} other {Cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}}}, lazyit va a enviar",
+        "noData": "solicitudes sin datos de lazyit",
+        "dataWord": "{token, select, event {el nombre del evento} grantee_id {el id de lazyit de la persona} grantee_email {el email de la persona} grantee_firstName {el nombre de la persona} grantee_lastName {el apellido de la persona} grantee_legajo {el legajo de la persona} grantee_username {el nombre de usuario de la persona} grantee_manager_name {el nombre del responsable de la persona} grantee_manager_email {el email del responsable de la persona} grantee_manager_isOffboarded {si el responsable de la persona se fue} application_id {el id de lazyit de la aplicación} application_name {el nombre de la aplicación} grant_id {el id de lazyit del acceso otorgado} grant_accessLevel {el nivel de acceso} grant_grantedAt {cuándo se otorgó el acceso} grant_expiresAt {cuándo vence el acceso} steps {el campo “{field}” que alguien completó en el paso manual “{step}”} other {un valor desconocido (queda vacío)}}{then, select, comma {,} other {}}",
+        "to": "a {hosts}."
+      },
+      "auth": {
+        "webhookSigned": "firmado con el secreto guardado{hasHeader, select, yes { en {header}} other {}}",
+        "webhookUnsigned": "sin firmar (no hay un secreto de firma asociado)",
+        "noCall": "sin llamada externa",
+        "none": "sin autenticación",
+        "rest": "{scheme, select, BEARER {token Bearer} BASIC {autenticación básica} HEADER {cabecera de API key} NONE {sin autenticación} other {{scheme}}}{isHeader, select, yes { en la cabecera {header}} other {}}, {credential, select, yes {con la credencial guardada} other {todavía sin credencial asociada}}"
+      }
+    },
+    "workflow_connection_create": {
+      "summary": "Se creó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}{hasHost, select, yes { hacia {host}} other {}}."
+    },
+    "workflow_connection_update": {
+      "movesPath": "Cambia a qué ruta de {host} envía la conexión.",
+      "repoints": "Cambia el destino de la conexión de {from} a {to}: cada paso de flujo que la use va a enviar ahí.",
+      "credentialToNewHost": "La credencial guardada se va a enviar a {host}.",
+      "attachesCredential": "Asocia la credencial guardada {secretId}: se va a enviar a {hasHost, select, yes {{host}} other {la conexión}} en cada llamada.",
+      "detachesCredential": "Quita la credencial: las llamadas se van a enviar sin ella.",
+      "inFlight": "A partir del próximo paso que la llame —incluso en {count, plural, one {# ejecución que ya está en curso} other {# ejecuciones que ya están en curso}}, esperando a una persona o fallidas y reintentables—, los flujos van a enviar sus datos a {host}.",
+      "settingsOnly": "Cambia la configuración de esta conexión a {hasHost, select, yes {{host}} other {ningún host externo}}.",
+      "runsInFlightUnknown": "No se pudo verificar (hace falta el permiso workflow:read): las ejecuciones que ya empezaron pueden enviar al nuevo host.",
+      "credentialNone": "ninguna",
+      "credentialStored": "credencial guardada {secretId}",
+      "summary": "Se actualizó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}."
+    },
+    "workflow_connection_archive": {
+      "whatItDoes": "Archiva la conexión a {hasHost, select, yes {{host}} other {ningún host externo}}. {users, plural, =0 {Ningún flujo la usa.} one {# flujo todavía la llama y sus pasos van a fallar.} other {# flujos todavía la llaman y sus pasos van a fallar.}}",
+      "summary": "Se archivó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}."
+    },
+    "workflow_connection_test": {
+      "whatItDoes": "Envía una sola solicitud {method} de solo lectura a {host} (ruta {path}){credential, select, yes {, con la credencial guardada} other {, sin credencial}}. No se cambia nada ahí.",
+      "summary": "Se probó la conexión de {application} a {hasHost, select, yes {{host}} other {su host}}: {ok, select, yes {respondió} other {falló}}."
+    },
+    "workflow_run_retry": {
+      "action": "Reintentar la ejecución fallida del flujo {workflow} para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}), retomando en {hasStep, select, yes {el paso {step}} other {el paso que falló}}. Los pasos que ya salieron bien no se repiten; se vuelven a enviar los mismos datos.",
+      "resumesAtUnknown": "el paso que falló (la ejecución está en una versión anterior del flujo, que no se muestra)",
+      "summary": "Se reintentó la ejecución {run} desde el paso {step} (intento {attempt}); volvé a leerla con workflow_run_get para ver el resultado."
+    },
+    "workflow_run_replay": {
+      "action": "Iniciar una nueva ejecución del flujo {workflow} (última versión {version}) para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}), desde el primer paso. La ejecución fallida queda como está.",
+      "summary": "Se inició la ejecución {newRun} con la última versión, en reemplazo de la ejecución fallida {run}; leela con workflow_run_get para ver el resultado."
+    },
+    "workflow_task_resolve": {
+      "action": "{action, select, submit {Enviar el formulario de} skip {Omitir} other {Marcar como fallida}} la tarea manual del flujo {workflow} para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}); después {next, select, END_SUCCESS {la ejecución termina con éxito} STOP_FAIL {la ejecución se detiene como fallida} ESCALATE_TO_MANUAL {se le pide a una persona que la termine como tarea manual} COMPENSATE {se deshacen los pasos ya hechos (compensación) y la ejecución termina} step {sigue en el paso {index} ({key})} key {sigue en {key}} other {la ejecución sigue en su versión fijada (no la última, así que no se muestra el paso siguiente)}}.",
+      "summary": "La tarea {task} se {action, select, submit {envió} skip {omitió} other {marcó como fallida}}; la ejecución {run} se retoma. Leela con workflow_run_get."
+    },
+    "workflows": {
+      "destinationsManualOnly": "sin llamada saliente (solo pasos manuales)",
+      "destinationsNone": "sin llamada saliente",
+      "destinationsUnknown": "desconocido (la ejecución está en una versión anterior del flujo)",
+      "criticalUnknown": "desconocido (no se puede leer la aplicación); se trata como crítico"
+    },
+    "asset_tag_scheme_get": {
+      "summaryNotVisible": "No podés ver el esquema de etiquetas de activos.",
+      "summaryOn": "El esquema de etiquetas de activos está activado; la próxima etiqueta sería {hasNext, select, yes {{tag}} other {ninguna (la secuencia se agotó)}}.",
+      "summaryOff": "El esquema de etiquetas de activos está desactivado: los activos no reciben una etiqueta automática."
+    },
+    "asset_tag_scheme_update": {
+      "summary": "Se actualizó el esquema de etiquetas de activos (etiquetado automático {enabled, select, yes {activado} other {desactivado}}). Las etiquetas existentes no cambian."
+    },
+    "request_input": {
+      "summary": "Se {count, plural, one {pidió # campo} other {pidieron # campos}}",
+      "summaryAnswered": "Completaste el formulario",
+      "summarySkipped": "Omitiste el formulario",
+      "summaryDeclined": "Rechazaste el formulario"
+    },
+    "refusal": {
+      "unknownTool": "Herramienta desconocida: {tool}",
+      "notOnChannel": "{tool} no está disponible en este canal",
+      "mustPropose": "{tool} cambia datos: hay que proponerla y aprobarla, no invocarla",
+      "notAWrite": "{tool} no cambia datos: invocala directamente",
+      "cannotProposeOnChannel": "{tool} no se puede proponer en este canal",
+      "invalidInput": "Datos no válidos: {detail}",
+      "invalidPreview": "Esta acción no se puede proponer: su vista previa no es válida.",
+      "actionNotRecorded": "No se pudo registrar la acción, así que no se ejecutó.",
+      "approvalNotRecorded": "No se pudo registrar la aprobación, así que la acción no se ejecutó.",
+      "userDeclined": "Rechazaste esta acción",
+      "userDeclinedWithReason": "Rechazaste esta acción: {reason}",
+      "approvalExpired": "Venció el plazo para aprobar esta acción",
+      "runCancelled": "Se canceló la respuesta",
+      "runCancelledNothingExecuted": "Se canceló la respuesta; no se ejecutó nada",
+      "runEnded": "La respuesta terminó",
+      "runEndedBeforeCall": "La respuesta terminó antes de que se ejecutara esta llamada",
+      "runInterrupted": "La respuesta se interrumpió; esta llamada no se completó",
+      "aiTurnedOff": "Se desactivó el asistente de IA; no se ejecutó nada",
+      "outcomeUnknown": "La acción se interrumpió; no se sabe si se aplicó. No se va a reintentar.",
+      "storedPreviewUnreadable": "No se puede leer la vista previa guardada de esta acción; no se ejecutó",
+      "storedInputMismatch": "Los datos guardados de esta acción no coinciden con lo que se aprobó; no se ejecutó",
+      "toolChanged": "La herramienta cambió desde que se propuso esta acción; hay que volver a proponerla",
+      "toolGone": "La herramienta ya no está disponible",
+      "invalidStoredInput": "Los datos guardados no son válidos",
+      "freshPreviewInvalid": "La vista previa de esta acción no es válida; no se ejecutó",
+      "stale": "El elemento cambió después de que se propuso esta acción; hay que volver a leerlo y proponer una acción nueva",
+      "headlessServiceAccountOnly": "Los cambios sin interfaz solo se ejecutan como una cuenta de servicio",
+      "noToolPermission": "No tenés permiso para usar {tool}",
+      "outsideSessionAccess": "{tool} está fuera del acceso otorgado a esta sesión",
+      "principalInvalid": "Quien actúa ya no es válido",
+      "permissionRequired": "Hace falta el permiso {permission}",
+      "argumentsNotJson": "Los argumentos no eran un objeto JSON válido",
+      "toolCallLimit": "Se alcanzó el límite de llamadas a herramientas de esta respuesta",
+      "tooManyToolCalls": "Demasiadas llamadas a herramientas; esperá un momento antes de hacer más",
+      "mutationCap": "Se alcanzó el límite de cambios de esta respuesta ({cap})",
+      "mutationCapBatch": "Esta llamada haría {weight, plural, one {# cambio} other {# cambios}}, pero el límite de cambios de esta respuesta ({cap}) permite {left} más",
+      "pendingLimit": "Se alcanzó el límite: hay {max} propuestas pendientes en este paso; hay que esperar tus decisiones y proponer el resto en el paso siguiente.",
+      "repeatedFailure": "No se ejecutó: esta misma llamada a {tool} ya falló {count, plural, one {# vez} other {# veces}} en este turno",
+      "formChannel": "Nadie puede responder un formulario en este canal",
+      "formStepWrites": "Pedí los datos que faltan en un paso aparte, antes de proponer cualquier cambio",
+      "formOneAtATime": "Pedí con un solo formulario a la vez; poné todas las preguntas en él",
+      "formNotBuilt": "No se pudo armar el formulario",
+      "formNotStored": "No se pudo guardar el formulario"
+    }
+  },
+  "sentenceValues": {
+    "taxonomyDependents": {
+      "assetModels": "modelos de activo",
+      "assets": "activos",
+      "applications": "aplicaciones",
+      "consumables": "consumibles",
+      "childLocations": "ubicaciones hijas"
+    }
   }
 }

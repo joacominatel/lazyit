@@ -1090,15 +1090,40 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   registered tool or a preview field has no en + es label — so a backend change that adds one needs a web
   label in the same wave. Warning codes, entity types, run error codes, tool statuses and decision refusals
   are localized as before, with covering-set tests over both catalogs.
-- **Server-built sentences stay as sent (#1377, backend follow-up).** Preview *values* that the tools write
-  as English sentences — the `action` row, the KB `audience` summary ("Restricted — only people matching
-  every restricted folder on the path: …"), `criticalApplicationAccess` explanations, workflow
-  when/outbound sentences, and every result `summary` behind "Show details" — are rendered as the server
-  wrote them. Localizing them needs the API to return codes + params (or to build them in the request
-  locale); the web does not parse English prose. **Since #1384 the API sends them** next to the English
-  (`afterSentences` / `beforeSentences` on preview rows, `summarySentences`, `error.messageSentences`;
-  closed list `AI_SENTENCES`, [[ai-assistant/tools-and-execution|tools]] §9.1); rendering them in the
-  user's locale is the web follow-up — until it lands the web keeps showing the English.
+- **Server-built sentences in the user's language (#1377 → #1384, as built).** Preview *values* that the
+  tools write as English sentences — the `action` row, the KB `audience` summary,
+  `criticalApplicationAccess` explanations, workflow when/outbound sentences — every result `summary`
+  behind "Show details", and the refusals core and the runtime answer, arrive from the API **also** as
+  codes + params (`afterSentences` / `beforeSentences` on preview rows, `summarySentences`,
+  `error.messageSentences`; closed list `AI_SENTENCES`, [[ai-assistant/tools-and-execution|tools]] §9.1).
+  The web never parses the English prose; it renders the codes:
+  - **Catalogs.** `ai.sentences.<code>` in `messages/{en,es}/ai.json` (a code's dots nest, as next-intl
+    reads them). `en` is a verbatim copy of the shared English template; `es` is written for the
+    locale (voseo where it addresses the user), with its own ICU `select` branches where a raw enum value
+    is printed (`Role`, the consumable movement type, a connection's kind and auth scheme).
+    `messages/ai-sentences-coverage.test.ts` fails when a shared code is missing from either catalog, a
+    catalog has a code the list does not, an `en` template drifts from the shared one, or an `es`
+    template names a different set of params than its `en` one.
+  - **Renderer.** `renderAiSentences` (`lib/ai/sentences.ts`, pure, `bun test`ed) renders a list joined
+    by one space, **all or nothing**: only when it is a list of 1–20 well-formed items, every code is in
+    the shared list and this build's catalog, every param the code declares is present with a usable
+    value, and the ICU formatter succeeds; anything else is `null` and the caller shows the English field
+    (`localizedText`). A missing field is the English — a row stored before #1384 reads as before. Params:
+    `text` has its `<untrusted_content>` wrappers stripped (and flags the value as quoted, like any
+    untrusted text); `date` is formatted in the user's locale (a `YYYY-MM-DD` day in UTC, so it never
+    shifts); the two list-valued enums printed as they are — `PreviewFieldList` (mapped through the
+    approval-card field labels) and `TaxonomyDependentList` (`ai.sentenceValues.taxonomyDependents.*`) —
+    are mapped item by item; every other enum is a `select` subject and passes raw.
+  - **Hook.** `useAiSentences()` (`components/ai/use-ai-sentences.ts`) builds the renderer over the
+    loaded `ai.sentences` with next-intl's `createTranslator` and an `onError` that **throws**, so a
+    sentence that cannot be formatted falls back to the English instead of showing a message key.
+  - **Where.** `presentPreview(preview, render)` (the approval card, the auto-applied record, the
+    `/copy` transcript and the pending-approval live announcement) — a `redacted` row is never replaced;
+    the tool line's "Show details" (`detailOf`: summary, else error message); the failed-after-approval
+    note on both cards (`failure` prop, the call's `error`); and the refused-calls line, which still
+    **groups** by the English reason (`refusedDetails`) but **displays** the group's localized sentence.
+  - Error messages that come from the domain (an `HttpException`, a Prisma error) carry no codes and stay
+    English, next to the localized tool error **code** — by design (tools §9.1).
 - **Collapsed tool lines (#1377).** Consecutive READ calls of the same tool with the same status share one
   line with a count ("Done: Search users ×5"; `lib/ai/tool-groups.ts`); their summaries list under "Show
   details". A write, a different status or anything in between breaks the run.
