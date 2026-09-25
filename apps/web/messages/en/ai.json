@@ -224,7 +224,6 @@
     "excluded": {
       "stepUp": "{count, plural, one {# needs your password} other {# need your password}}",
       "elevated": "{count, plural, one {# is a sensitive change} other {# are sensitive changes}}",
-      "untrusted": "{count, plural, one {# is based on content written by others} other {# are based on content written by others}}",
       "needsReview": "{count, plural, one {# needs another look} other {# need another look}}"
     },
     "bulkRunning": "{decision, select, approve {Approving} other {Rejecting}} {done} of {total}…",

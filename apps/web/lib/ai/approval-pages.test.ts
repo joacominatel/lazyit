@@ -213,17 +213,27 @@ describe("bulk eligibility", () => {
     }
   });
 
-  test("never a sensitive change (G4) or one based on other people's content", () => {
+  test("never a sensitive change (G4)", () => {
     expect(bulkExclusion(card("w1", null, { elevated: true }), EMPTY_PAGER_STATE)).toBe("elevated");
     expect(
       bulkExclusion(card("w1", null, { preview: { ...preview, class: "elevated" } }), EMPTY_PAGER_STATE),
     ).toBe("elevated");
+  });
+
+  test("a change based on other people's content IS covered (CEO decision)", () => {
     expect(
       bulkExclusion(
         card("w1", null, { untrustedSources: [{ type: "article", id: "k1", op: "navigate" }] }),
         EMPTY_PAGER_STATE,
       ),
-    ).toBe("untrusted");
+    ).toBeNull();
+    const preview2 = approval("y").preview;
+    expect(
+      bulkExclusion(
+        card("w1", null, { preview: { ...preview2, untrustedSources: [{ type: "article", id: "k1", op: "navigate" }] } }),
+        EMPTY_PAGER_STATE,
+      ),
+    ).toBeNull();
   });
 
   test("never a STALE one (or any change whose last decision was refused)", () => {

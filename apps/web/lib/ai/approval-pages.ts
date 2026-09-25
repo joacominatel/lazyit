@@ -181,13 +181,14 @@ export function clampPage(page: number, count: number): number {
  * - `stepUp`: it needs the user's password (the server asks for it, or a step-up warning is on it —
  *   roles, identity, privileges, credentials, a critical application);
  * - `elevated`: a sensitive change (security.md G4 — no batch approval of elevated cards);
- * - `untrusted`: proposed after reading content other people wrote (the same rule that keeps it out of
- *   auto-approve, #1376);
  * - `needsReview`: a decision on it was refused (STALE, preview changed, expired…) — the page shows why.
+ *
+ * A change proposed after reading content other people wrote IS covered (CEO decision, #1409): each
+ * page still shows its "Based on content written by others" banner.
  */
-export type BulkExclusion = "stepUp" | "elevated" | "untrusted" | "needsReview";
+export type BulkExclusion = "stepUp" | "elevated" | "needsReview";
 
-export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "untrusted", "needsReview"];
+export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "needsReview"];
 
 /** Why a still-waiting change can't be decided in bulk, or null when it can. Pure. */
 export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclusion | null {
@@ -201,7 +202,6 @@ export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclus
     return "stepUp";
   }
   if (request.elevated || preview.elevated || preview.class === "elevated") return "elevated";
-  if (request.untrustedSources.length > 0 || preview.untrustedSources.length > 0) return "untrusted";
   if (state.errors[request.toolCallId] !== undefined) return "needsReview";
   return null;
 }

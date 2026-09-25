@@ -152,7 +152,7 @@ interface ApprovalCardProps {
  * Approve is never autofocused and no global key approves anything; each click disables both buttons
  * until the server answers. One card, one decision — several cards of one step are paged by
  * `AiApprovalPager` (#1409), whose "Approve all" still sends one decision per card and never covers a
- * card that needs the password, is sensitive, or rests on other people's content.
+ * card that needs the password, is sensitive, or whose last decision was refused.
  */
 export function AiApprovalCard({
   part,
