@@ -93,11 +93,10 @@ describe('AssetTagSchemeController', () => {
   it('GET summary is gated by asset:write (read widened, #1315) and stays human-only; the rest stays settings:manage', () => {
     const reflector = new Reflector();
     const proto = AssetTagSchemeController.prototype;
+    const handlerOf = (name: keyof AssetTagSchemeController) =>
+      Object.getOwnPropertyDescriptor(proto, name)!.value as () => unknown;
     const perms = (handler: keyof AssetTagSchemeController) =>
-      reflector.get<string[] | undefined>(
-        PERMISSION_KEY,
-        proto[handler] as () => unknown,
-      );
+      reflector.get<string[] | undefined>(PERMISSION_KEY, handlerOf(handler));
     expect(perms('summary')).toEqual(['asset:write']);
     for (const handler of [
       'get',
@@ -111,7 +110,7 @@ describe('AssetTagSchemeController', () => {
     }
     const guards = Reflect.getMetadata(
       GUARDS_METADATA,
-      Object.getOwnPropertyDescriptor(proto, 'summary')!.value as object,
+      handlerOf('summary'),
     ) as unknown[];
     expect(guards).toContain(ServicePrincipalForbiddenGuard);
   });
