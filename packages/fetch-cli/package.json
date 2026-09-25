@@ -18,6 +18,6 @@
     "hash-wasm": "4.12.0"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0"
+    "@types/bun": "^1.4.2"
   }
 }

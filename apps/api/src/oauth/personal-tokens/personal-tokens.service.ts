@@ -259,7 +259,7 @@ export class PersonalTokensService {
       include: { client: true },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map(toOAuthGrantWire);
+    return rows.map((row) => toOAuthGrantWire(row));
   }
 
   /** Revoke one of the caller's OWN personal tokens; anything else (another user's, an OAuth grant) is 404. */

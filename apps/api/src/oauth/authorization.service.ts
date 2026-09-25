@@ -19,7 +19,10 @@ import type { OAuthClient, User } from '../../generated/prisma/client';
 import { LocalCredentialService } from '../auth/local/local-credential.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { PrismaService } from '../prisma/prisma.service';
+import { CimdClientService } from './cimd/cimd-client.service';
+import { clientIdDomain, looksLikeClientIdUrl } from './cimd/client-id-url';
 import {
+  isCimdListed,
   isClientAllowed,
   isLoopbackRedirect,
   isRedirectAdmitted,
@@ -30,7 +33,10 @@ import { isCanonicalResource, type OAuthServerConfig } from './oauth-config';
 import { isS256Challenge, mintAuthorizationCode } from './oauth-crypto';
 import { OAuthRedirectError } from './oauth-errors';
 import { OAuthAuditService } from './oauth-audit.service';
-import { OAuthPolicyService } from './oauth-policy.service';
+import {
+  OAuthPolicyService,
+  type OAuthMcpSettings,
+} from './oauth-policy.service';
 import { OAuthSubjectService } from './oauth-subject.service';
 import {
   AUTHORIZATION_CODE_TTL_MS,
@@ -40,6 +46,7 @@ import {
 /** A validated authorization request, ready to show consent for or to issue a code. */
 interface ValidatedRequest {
   config: OAuthServerConfig;
+  settings: OAuthMcpSettings;
   user: User;
   client: OAuthClient;
   redirectUri: string;
@@ -84,24 +91,30 @@ export class AuthorizationService {
     private readonly subjects: OAuthSubjectService,
     private readonly credentials: LocalCredentialService,
     private readonly audit: OAuthAuditService,
+    private readonly cimd: CimdClientService,
   ) {}
 
   async validate(
     principal: Principal | undefined,
     rawParams: unknown,
+    ctx: { ip?: string | null } = {},
   ): Promise<OAuthAuthorizeValidation> {
-    const checked = await this.check(principal, rawParams);
+    const checked = await this.check(principal, rawParams, ctx);
     if (checked.kind === 'refusal') {
       return { ok: false, refusal: checked.refusal };
     }
-    const { client, redirectUri, scopes, user } = checked.request;
+    const { client, redirectUri, scopes, user, settings } = checked.request;
+    const isCimd = client.kind !== 'dcr';
     return {
       ok: true,
       client: {
         id: client.clientId,
         name: client.name,
         uri: client.clientUri,
-        verified: client.kind !== 'dcr',
+        // "Verified" = vouched for by the instance (a `cimd_url` allowlist entry). A CIMD client admitted
+        // only through its redirect URIs proves its DOMAIN (`verifiedDomain`), not its self-declared name.
+        verified: isCimd && isCimdListed(client, settings),
+        verifiedDomain: isCimd ? clientIdDomain(client.clientId) : null,
       },
       redirectUri,
       redirectHost: redirectHost(redirectUri),
@@ -121,7 +134,7 @@ export class AuthorizationService {
       throw new BadRequestException('Malformed consent decision');
     }
     const body = parsed.data;
-    const checked = await this.check(principal, body.params);
+    const checked = await this.check(principal, body.params, ctx);
     if (checked.kind === 'refusal') {
       throw new OAuthAuthorizeRefusedException(checked.refusal);
     }
@@ -219,6 +232,7 @@ export class AuthorizationService {
   private async check(
     principal: Principal | undefined,
     rawParams: unknown,
+    ctx: { ip?: string | null },
   ): Promise<CheckResult> {
     const config = this.policy.requireConfig();
     const refuse = (refusal: OAuthAuthorizeRefusal): CheckResult => ({
@@ -241,11 +255,18 @@ export class AuthorizationService {
     if (!this.subjects.isUsable(user)) return refuse('FORBIDDEN');
     if (!(await this.subjects.holdsConnect(user))) return refuse('FORBIDDEN');
 
-    // 1. The client: known, and admitted by the instance's allowlist (never by its name).
+    // 1. The client: known, and admitted by the instance's allowlist (never by its name). An https
+    //    `client_id` is a CIMD Client Identifier URL: its metadata document is fetched (egress guard),
+    //    cached or served from a bundled copy; any other id is a DCR registration.
     if (!params.client_id) return refuse('INVALID_CLIENT');
-    const client = await this.prisma.oAuthClient.findUnique({
-      where: { clientId: params.client_id },
-    });
+    const client = looksLikeClientIdUrl(params.client_id)
+      ? await this.cimd.resolve(params.client_id, {
+          userId: user.id,
+          ip: ctx.ip,
+        })
+      : await this.prisma.oAuthClient.findUnique({
+          where: { clientId: params.client_id },
+        });
     if (!client || !isClientAllowed(client, settings)) {
       return refuse('INVALID_CLIENT');
     }
@@ -295,6 +316,7 @@ export class AuthorizationService {
       kind: 'ok',
       request: {
         config,
+        settings,
         user,
         client,
         redirectUri,

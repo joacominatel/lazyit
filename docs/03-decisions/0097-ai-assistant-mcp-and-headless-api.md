@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 deciders: [Joaquín Minatel]
 ---
 
@@ -131,8 +131,9 @@ The key forks only; each links its analysis.
    >   manual tasks its assignee guard admits (in practice, unassigned ones).
    > - **Authoring, chat only in v1**: workflows and their versions, connections (incl. the connection
    >   test), the dry-run, and enabling or disabling a workflow. Every authoring tool is `elevated` and
-   >   declares `channels: ['CHAT']`. MCP and headless authoring are deferred (#1344). A Service Account
-   >   never authors, connects or enables a workflow.
+   >   declares `channels: ['CHAT']`. MCP authoring is deferred (#1344). A Service Account never
+   >   authors, connects or enables a workflow — a permanent exclusion over headless, not a deferral
+   >   (CEO, #1344; INV-AI-17 in [[ai-assistant/security|security]] §6.9).
    > - **Workflow secrets stay structurally excluded** (INV-AI-5, INV-AI-14): the AI never reads, creates,
    >   rotates or deletes one. It may report "credential configured: yes/no" from a connection's
    >   `secretId`, never a value.
@@ -533,7 +534,7 @@ fallback chains or per-user keys; MCP elicitation (the chat's input forms, decis
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; a lazyit-side
 web search or URL fetch (the provider's own search is allowed, decision 3 as amended 2026-09-24 for #1389); admins reading
 other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
-headless (deferred, #1344); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
+headless (MCP deferred, #1344; headless excluded for good, INV-AI-17); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
 
 ## Adopted by default — CEO to confirm on review
 
