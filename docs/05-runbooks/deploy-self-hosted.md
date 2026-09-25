@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -527,9 +527,10 @@ trust Caddy's root, or the agent refuses the TLS connection before OAuth starts.
    Other Node-based agents honor `NODE_EXTRA_CA_CERTS` the same way; desktop editors (Cursor, VS Code)
    use the OS trust store.
 
-> [!note] Being verified end to end
-> The client × mode table and the CA steps follow each client's current documentation. The end-to-end
-> runs on every mode (issue #1315, wave 4) record the results here once the MCP server ships.
+> [!note] Verified end to end
+> [[ai-mcp-client-matrix]] records which cells of this table were run end to end (2026-09-25: personal
+> tokens on `lan`, OAuth over an internal CA, Claude Code honoring `NODE_EXTRA_CA_CERTS`) and holds the
+> operator checklists for the rest — claude.ai on a public instance, Cursor, the Claude Code sign-in.
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
 [[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·
