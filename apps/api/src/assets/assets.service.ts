@@ -66,6 +66,50 @@ function mergeProvenance(
   return { ...base, ...extra };
 }
 
+/**
+ * The asset's PLAIN fields (#1382): every `UpdateAsset` key that has no discrete history event of its own.
+ * A PATCH that changes any of them writes ONE `UPDATED { fields }` row naming them — field names only, never
+ * the old or new values (ADR-0033 amendment 2026-09-25). `satisfies Record<…, true>` makes it exhaustive: a
+ * field added to `UpdateAsset` without a discrete event fails the type check until it is listed here. Also
+ * the Prisma `select` of the before snapshot.
+ */
+const ASSET_PLAIN_FIELDS_SELECT = {
+  name: true,
+  serial: true,
+  assetTag: true,
+  notes: true,
+  company: true,
+  purchaseDate: true,
+  warrantyEnd: true,
+  purchaseCost: true,
+  usefulLifeMonths: true,
+  salvageValue: true,
+} as const satisfies Record<
+  Exclude<keyof UpdateAsset, 'status' | 'locationId' | 'modelId' | 'specs'>,
+  true
+>;
+
+type AssetPlainField = keyof typeof ASSET_PLAIN_FIELDS_SELECT;
+
+const ASSET_PLAIN_FIELDS = Object.keys(
+  ASSET_PLAIN_FIELDS_SELECT,
+) as AssetPlainField[];
+
+/** A plain field's value for comparison: a Date by its instant, a missing value as null. */
+function plainValue(value: unknown): unknown {
+  return value instanceof Date ? value.getTime() : (value ?? null);
+}
+
+/** The plain fields whose stored value differs between the before snapshot and the updated row. */
+function changedPlainFields(
+  before: Partial<Record<AssetPlainField, unknown>>,
+  after: Partial<Record<AssetPlainField, unknown>>,
+): AssetPlainField[] {
+  return ASSET_PLAIN_FIELDS.filter(
+    (field) => plainValue(before[field]) !== plainValue(after[field]),
+  );
+}
+
 /** Optional filters for listing assets. `categoryId` filters by the asset's model's category. */
 export interface AssetFilters {
   categoryId?: string;
@@ -665,14 +709,14 @@ export class AssetsService {
 
   /**
    * Partial update. Emits a discrete history event per changed dimension (status / location / model
-   * / specs), transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
+   * / specs), plus ONE `UPDATED { fields }` row naming the plain fields that changed (#1382), all
+   * transactionally with the update (ADR-0033). 404 if missing or already soft-deleted.
    *
    * `options` mirrors {@link create}'s bag for the migrator re-import path (#1061): `updatedPayload` stamps
    * `{ source:'import', sessionId, rowIndex }` onto every emitted change event AND — because a re-import
-   * that changes no tracked dimension produces zero change events — guarantees exactly ONE `UPDATED` marker
-   * so "updated via re-import" is always in the AssetHistory timeline. `suppressSearch` skips the per-row
-   * Meili upsert (the bulk commit runs ONE reconcile afterwards). Existing callers pass no options →
-   * behaviour is byte-for-byte unchanged.
+   * that changes nothing produces zero change events — guarantees exactly ONE `UPDATED` row so "updated via
+   * re-import" is always in the AssetHistory timeline. `suppressSearch` skips the per-row Meili upsert (the
+   * bulk commit runs ONE reconcile afterwards). Callers that pass no options are unaffected by either.
    */
   async update(
     id: string,
@@ -692,6 +736,7 @@ export class AssetsService {
         locationId: true,
         modelId: true,
         specs: true,
+        ...ASSET_PLAIN_FIELDS_SELECT,
       },
     });
     if (!before) {
@@ -709,9 +754,24 @@ export class AssetsService {
         },
       });
       const events = this.changeEvents(before, row, actor);
+      // Plain-field edits (#1382, ADR-0033 amendment): ONE `UPDATED` row per PATCH naming the plain fields
+      // that actually changed — names only, never values. A PATCH that also moves a discrete dimension
+      // writes both: its discrete row(s) above, and this row listing ONLY the plain fields. Every path (UI,
+      // API, the AI `asset_update` / `asset_update_batch` tools, which dispatch to this route) lands here,
+      // so an AI edit is stamped with its `aiInvocationId` by AssetHistoryService.
+      const fields = changedPlainFields(before, row);
+      if (fields.length > 0) {
+        events.push({
+          assetId: row.id,
+          eventType: 'UPDATED',
+          payload: { fields },
+          actor,
+        });
+      }
       // Re-import provenance (#1061): stamp it onto every per-dimension change event, and when NONE fired
       // (a no-field-delta re-import) write exactly one UPDATED marker carrying the provenance — so the
-      // re-import always leaves an audit trail. Gated on `updatedPayload`, so normal PATCHes are unchanged.
+      // re-import always leaves an audit trail. A plain-field UPDATED row above is itself a change event: it
+      // takes the provenance and no extra marker is added. Gated on `updatedPayload` (re-import only).
       if (options?.updatedPayload !== undefined) {
         const provenance = options.updatedPayload;
         for (const ev of events) {
