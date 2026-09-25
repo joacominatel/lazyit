@@ -1,23 +1,25 @@
 {
   "page": {
     "title": "AI assistant",
-    "subtitle": "Set up the in-app assistant and let external AI agents (Claude Code and others) work with lazyit over MCP. Off until an administrator turns it on.",
+    "subtitle": "The in-app assistant and external AI agents over MCP.",
     "breadcrumb": "AI",
     "statusOn": "On",
     "statusOff": "Off",
     "loadError": "The AI settings could not be loaded",
     "enabled": {
       "title": "The AI assistant is on",
-      "body": "People with the “Use the AI assistant” permission now see the assistant in the top bar. Everyone else picks it up within a minute, or when they reload."
+      "body": "People with “Use the AI assistant” see it in the top bar within a minute."
     },
     "secretKey": {
       "title": "The server has no AI_SECRET_KEY",
-      "body": "Provider API keys are stored encrypted with the AI_SECRET_KEY environment variable of the API. Until an operator sets it (a 32-byte key, for example from openssl rand -hex 32) and restarts the API, no key can be saved and only a keyless OpenAI-compatible server can be used. MCP does not need it."
+      "body": "Set it on the API (openssl rand -hex 32) and restart it to store provider keys.",
+      "help": "Provider API keys are stored encrypted with the API's AI_SECRET_KEY, a 32-byte key. Until it is set and the API restarted, no key can be saved and only a keyless OpenAI-compatible server can be used. MCP does not need it."
     },
     "serviceAccounts": {
-      "body": "Service accounts use the assistant without a person approving each change. Choose what each one may do — off, read-only or read and write, with an optional cap on writes — from its row menu in",
+      "body": "Service accounts' AI access is set per account in",
       "link": "Settings → Service accounts."
-    }
+    },
+    "manualLink": "Setup guide"
   },
   "provider": {
     "label": "AI provider",
@@ -25,7 +27,7 @@
       "anthropic": "Claude models, through the Anthropic API.",
       "openai": "GPT models, through the OpenAI API.",
       "google": "Gemini models, through the Google Gemini API.",
-      "openai-compatible": "Any server that speaks the OpenAI API — a self-hosted model on your network, a gateway, or another cloud. You give its base URL."
+      "openai-compatible": "Any server that speaks the OpenAI API — self-hosted, a gateway or another cloud."
     }
   },
   "credentials": {
@@ -45,7 +47,8 @@
     },
     "privateNetwork": {
       "label": "Server on a private network",
-      "description": "Allow this one host on a private address (10.x, 172.16–31.x, 192.168.x, or an internal name that resolves to one), plain http:// included. Loopback, link-local and cloud-metadata addresses are always refused."
+      "description": "Allow this one host on a private address (10.x, 172.16–31.x, 192.168.x, or an internal name that resolves to one), plain http:// included. Loopback, link-local and cloud-metadata addresses are always refused.",
+      "short": "Allow a private address, plain http:// included."
     },
     "apiKey": {
       "label": "{provider} API key",
@@ -53,9 +56,9 @@
       "placeholderRequired": "Paste the API key",
       "placeholderOptional": "Optional — leave blank if the server needs no key",
       "hintKeep": "Type a new key only to replace the stored one.",
-      "hintReplaced": "Changing the provider or the base URL discards the stored key, so type the key for the new destination.",
-      "hintRequired": "This provider needs a key.",
-      "hintOptional": "A self-hosted server often needs no key.",
+      "hintReplaced": "A new provider or base URL discards the stored key — type the new one.",
+      "hintRequired": "Required for this provider.",
+      "hintOptional": "A self-hosted server often needs none.",
       "writeOnly": "It is stored encrypted and never shown again — not even to administrators."
     },
     "secretKeyMissing": "This key cannot be saved yet: the API has no AI_SECRET_KEY. Ask the operator to set it and restart the API."
@@ -91,10 +94,10 @@
       "enable": "Enable"
     },
     "provider": {
-      "intro": "The assistant sends what it reads to this provider to answer people. Pick the one your organization already trusts."
+      "intro": "The assistant sends what it reads to this provider."
     },
     "test": {
-      "intro": "Check that {provider} accepts the key, knows the model {model} and can call tools — the assistant cannot work without tool calling.",
+      "intro": "Checks the key, the model {model} and tool calling on {provider}.",
       "run": "Run the test",
       "again": "Test again",
       "continueHint": "The test must pass before you can continue."
@@ -110,11 +113,12 @@
     "disclosure": {
       "title": "What leaves this server",
       "body": "When someone uses the assistant, lazyit sends to {provider}:",
-      "sent": "the messages they type, the page they are on (its address and the record it shows), and the records the assistant reads to answer — assets, people, applications, access, stock and knowledge-base articles, limited to what that person may see;",
-      "notSent": "never vault secrets, passwords or the provider key itself, and nothing from pages the person did not ask about;",
-      "retention": "conversations are also stored on this server for the retention you choose below, and the provider's own data policy applies to what it receives.",
+      "sent": "their messages, the page they are on, and the records the assistant reads — only what that person may see;",
+      "notSent": "never vault secrets, passwords or the provider key;",
+      "retention": "conversations are also kept here for the retention you set; the provider's data policy applies to what it receives.",
       "alreadyAcknowledged": "Acknowledged on {when}.",
-      "checkbox": "I understand that this data is sent to {provider}, and I am allowed to send it there."
+      "checkbox": "I understand that this data is sent to {provider}, and I am allowed to send it there.",
+      "details": "Exactly what is sent"
     },
     "back": "Back",
     "next": "Continue",
@@ -236,7 +240,8 @@
       "instructions": {
         "label": "Instructions for the assistant",
         "placeholder": "For example: our asset tags start with ACME-. Answer in Spanish unless asked otherwise.",
-        "description": "Added to lazyit's own instructions for every conversation. They cannot widen what the assistant may do. {count} / {max} characters."
+        "description": "Added to lazyit's own instructions for every conversation. They cannot widen what the assistant may do.",
+        "counter": "{count} / {max} characters"
       }
     }
   },
@@ -258,9 +263,9 @@
     },
     "disclosure": {
       "title": "What leaves lazyit",
-      "egress": "The provider runs the search on its own servers: lazyit makes no request of its own. The search queries and the conversation context go to the provider, which may pass the queries on to its search backend or a search partner, and may bill searches separately.",
-      "untrusted": "Search results are content written by anyone on the internet. The assistant treats them as data, never as instructions, and cites the pages it used. Once it has searched the web in a conversation, nothing in that conversation is auto-approved anymore — every change it proposes there shows its approval card.",
-      "openai": "With OpenAI, search uses OpenAI's cached and indexed copy of the web, not live pages, so very recent pages may be missing. OpenAI's search can also open pages; that can't be turned off, but it never fetches a page live from its site.",
+      "egress": "Your AI provider runs the search: the queries and the conversation context go to it (and possibly a search partner), and searches may be billed separately.",
+      "untrusted": "Results are untrusted web content: once a conversation has searched, none of its changes are auto-approved.",
+      "openai": "OpenAI searches its cached index of the web, not live pages.",
       "conversations": "The chat only. Headless runs never search the web, because their changes run without anyone approving them."
     },
     "maxUses": {
@@ -275,42 +280,45 @@
     "title": "External AI agents (MCP)",
     "on": "On",
     "off": "Off",
-    "description": "Let AI agents that run outside lazyit — Claude Code, Codex, Cursor, OpenCode and others — read and change lazyit as the person who connects them, with that person's permissions. Independent of the assistant above: it works with no provider configured.",
+    "description": "Let Claude Code, Codex, Cursor and other agents work in lazyit as the person who connects them.",
     "switch": {
       "label": "Allow external AI agents",
       "description": "People also need the “Connect external AI agents (MCP)” permission. Turning this off disconnects every client at once; their authorizations come back when you turn it on again."
     },
     "mode": {
       "oauth": {
-        "title": "This instance's public address is https://: clients sign in with OAuth",
+        "title": "Clients sign in with OAuth",
         "body": "When a person adds lazyit to their client, the client opens a lazyit page in the browser where they review the access and approve it. Nothing to copy by hand, and each connection can be revoked from Account → AI & connected apps. (OAuth is available because the API's WEB_ORIGIN setting is an https:// address.)",
         "internalCa": "If your certificate comes from an internal certificate authority, Claude Code (and other Node.js clients) will not trust it until they are started with the authority's certificate:",
-        "cloud": "Cloud connectors — claude.ai, Claude Desktop connectors and ChatGPT — connect from the provider's servers, not from the person's computer. They only work if this instance is reachable from the internet over HTTPS with a publicly trusted certificate."
+        "cloud": "Cloud connectors — claude.ai, Claude Desktop connectors and ChatGPT — connect from the provider's servers, not from the person's computer. They only work if this instance is reachable from the internet over HTTPS with a publicly trusted certificate.",
+        "why": "This instance's public address (WEB_ORIGIN) is https://."
       },
       "personalToken": {
-        "title": "This instance has no https:// public address: clients use personal tokens",
+        "title": "Clients use personal tokens",
         "body": "Each person creates a personal MCP token in Account → AI & connected apps and gives it to their client (Claude Code asks for it when the lazyit plugin is enabled). Tokens expire and can be revoked there at any time.",
         "whyNoOauth": "OAuth sign-in needs HTTPS and a fixed public address, so the API offers it only when its WEB_ORIGIN setting is an https:// address. A TLS proxy in front of lazyit is not enough on its own: set WEB_ORIGIN to the https:// address people use and restart the API to switch to OAuth.",
-        "cloud": "Cloud connectors (claude.ai, ChatGPT) cannot connect to this instance: they need a publicly reachable HTTPS address."
+        "cloud": "Cloud connectors (claude.ai, ChatGPT) cannot connect to this instance: they need a publicly reachable HTTPS address.",
+        "why": "This instance has no https:// public address (WEB_ORIGIN)."
       },
-      "detectedFromBrowser": "The server's answer was not available, so this was guessed from the address in your browser. The real mode depends on the API's WEB_ORIGIN setting.",
-      "loading": "Checking how clients connect to this instance…"
+      "detectedFromBrowser": "Guessed from your browser's address; the API's WEB_ORIGIN decides.",
+      "loading": "Checking how clients connect to this instance…",
+      "help": "How clients connect"
     },
     "endpoint": {
       "label": "MCP endpoint",
       "copy": "Copy the MCP endpoint",
       "description": "The address to give an MCP client that is set up by hand.",
-      "pageFallback": "The API has no pinned public address (WEB_ORIGIN), so this is the address of the page you are on. Clients on other machines may need the instance's LAN address instead."
+      "pageFallback": "This page's address — the API has no WEB_ORIGIN pinned."
     },
     "install": {
       "link": "AI & connected apps",
-      "description": "Your connected apps and personal tokens are on Account → AI & connected apps; the install steps are below."
+      "description": "Your connected apps, personal tokens and install steps."
     },
     "allowlist": {
       "title": "Allowed clients",
       "description": "Only these clients can connect. A client is recognized by its client-metadata URL or by the exact address it sends people back to after sign-in — never by the name it gives itself.",
       "anyHttps": {
-        "label": "Accept any client with an https:// callback (on by default)",
+        "label": "Accept any client with an https:// callback",
         "description": "Any MCP client whose sign-in callback is an https:// address may ask a person for access, even if it is not listed here. Nothing is granted by this alone: the person still sees the consent page, which shows the client's callback host and warns that the client was not listed. Clients with a loopback or app-scheme callback (such as cursor://) still need an entry. Turn this off to accept only the clients listed below."
       },
       "added": {
@@ -368,11 +376,12 @@
         "verified": "Verified",
         "vendor-docs": "Vendor docs"
       }
-    }
+    },
+    "help": "AI agents that run outside lazyit — Claude Code, Codex, Cursor, OpenCode and others — read and change lazyit as the person who connects them, with that person's permissions. Independent of the assistant above: it works with no provider configured."
   },
   "danger": {
     "title": "Turn off the AI assistant",
-    "description": "Hides the assistant for everyone. The configuration and the key are kept, so turning it back on is one step.",
+    "description": "Hides it for everyone; the configuration and the key are kept.",
     "turnOff": "Turn off the assistant",
     "confirm": {
       "title": "Turn off the AI assistant?",
@@ -384,5 +393,17 @@
       "cancel": "Cancel",
       "action": "Turn off"
     }
+  },
+  "links": {
+    "setup": "/help/ai-assistant-setup",
+    "secretKey": "/help/ai-assistant-setup#before-you-start-ai_secret_key",
+    "wizard": "/help/ai-assistant-setup#the-setup-wizard",
+    "connection": "/help/ai-assistant-setup#changing-the-provider-model-or-key",
+    "privateNetwork": "/help/ai-assistant-setup#private-network-servers",
+    "limits": "/help/ai-assistant-setup#behaviour--limits",
+    "webSearch": "/help/ai-assistant-setup#web-search",
+    "mcp": "/help/ai-assistant-setup#external-ai-agents-mcp",
+    "allowlist": "/help/ai-assistant-setup#allowed-clients",
+    "disclosure": "/help/ai-assistant-overview#what-leaves-your-server"
   }
 }

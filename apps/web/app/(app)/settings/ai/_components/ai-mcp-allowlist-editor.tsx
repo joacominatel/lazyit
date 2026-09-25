@@ -9,13 +9,9 @@ import {
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -39,6 +35,7 @@ import {
   toggleRemovedDefault,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
+import { AiFieldLabel } from "./ai-field-label";
 
 /**
  * The MCP client allowlist (ADR-0097 decision 13): which OAuth clients may connect. lazyit ships a
@@ -53,6 +50,7 @@ import { AiErrorNotice } from "./ai-error-notice";
  */
 export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp.allowlist");
+  const tLinks = useTranslations("aiSettings.links");
   const id = useId();
   const save = useAiConfigSave();
   const [kind, setKind] = useState<AllowlistMatchKind>("redirect_uri");
@@ -103,18 +101,24 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{t("title")}</p>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-        <p className="text-sm text-muted-foreground">{t("notSeeded")}</p>
-      </div>
+      <p className="flex items-center gap-0.5 text-sm font-medium">
+        {t("title")}
+        <HelpTip topic={t("title")} href={tLinks("allowlist")}>
+          <p>{t("description")}</p>
+          <p>{t("notSeeded")}</p>
+        </HelpTip>
+      </p>
 
       <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
         <div className="flex flex-1 flex-col gap-0.5">
-          <FieldLabel htmlFor={`${id}-any`} className="font-medium">
+          <AiFieldLabel
+            htmlFor={`${id}-any`}
+            className="font-medium"
+            help={<p>{t("anyHttps.description")}</p>}
+            href={tLinks("allowlist")}
+          >
             {t("anyHttps.label")}
-          </FieldLabel>
-          <FieldDescription>{t("anyHttps.description")}</FieldDescription>
+          </AiFieldLabel>
         </div>
         <Switch
           id={`${id}-any`}
@@ -127,8 +131,12 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
       </Field>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">{t("builtIn.title")}</p>
-        <p className="text-sm text-muted-foreground">{t("builtIn.description")}</p>
+        <p className="flex items-center gap-0.5 text-sm font-medium">
+          {t("builtIn.title")}
+          <HelpTip topic={t("builtIn.title")}>
+            <p>{t("builtIn.description")}</p>
+          </HelpTip>
+        </p>
         <ul className="divide-y rounded-lg border">
           {curated.defaults.map(({ entry, removed: isRemoved }) => {
             const redirectKind = allowlistEntryRedirectKind(entry);
@@ -231,8 +239,12 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
 
       {curated.unknownRemoved.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-sm font-medium">{t("removed.title")}</p>
-          <p className="text-sm text-muted-foreground">{t("removed.description")}</p>
+          <p className="flex items-center gap-0.5 text-sm font-medium">
+            {t("removed.title")}
+            <HelpTip topic={t("removed.title")}>
+              <p>{t("removed.description")}</p>
+            </HelpTip>
+          </p>
           <ul className="divide-y rounded-lg border">
             {curated.unknownRemoved.map((defaultId) => (
               <li key={defaultId} className="flex items-center gap-3 p-3">
@@ -284,9 +296,12 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
           </Field>
         </div>
         <Field data-invalid={problem ? true : undefined}>
-          <FieldLabel htmlFor={`${id}-value`}>
+          <AiFieldLabel
+            htmlFor={`${id}-value`}
+            help={<p>{kind === "cimd_url" ? t("add.cimdHint") : t("add.redirectHint")}</p>}
+          >
             {kind === "cimd_url" ? t("add.cimdLabel") : t("add.redirectLabel")}
-          </FieldLabel>
+          </AiFieldLabel>
           <Input
             id={`${id}-value`}
             value={value}
@@ -304,13 +319,7 @@ export function AiMcpAllowlistEditor({ settings }: { settings: AiSettings }) {
             className="font-mono"
             aria-invalid={problem ? true : undefined}
           />
-          {problem ? (
-            <FieldError>{t(`errors.${problem}`)}</FieldError>
-          ) : (
-            <FieldDescription>
-              {kind === "cimd_url" ? t("add.cimdHint") : t("add.redirectHint")}
-            </FieldDescription>
-          )}
+          {problem ? <FieldError>{t(`errors.${problem}`)}</FieldError> : null}
         </Field>
         <div className="flex justify-end">
           <Button type="submit" variant="outline" disabled={save.isPending || full}>

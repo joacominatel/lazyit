@@ -12,6 +12,7 @@ import { useTranslations } from "next-intl";
 import { useSyncExternalStore } from "react";
 import { Callout } from "@/components/callout";
 import { CopyButton } from "@/components/copy-button";
+import { HelpTip } from "@/components/help-tip";
 import {
   Card,
   CardContent,
@@ -19,7 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field } from "@/components/ui/field";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -33,6 +34,7 @@ import {
   mcpEndpoint,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
+import { AiFieldLabel } from "./ai-field-label";
 import { AiMcpAllowlistEditor } from "./ai-mcp-allowlist-editor";
 
 const noSubscribe = () => () => {};
@@ -51,7 +53,7 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
  * The MCP switch is independent of the LLM provider — MCP works with no provider configured. The card
  * reads how clients authenticate on THIS instance from `/ai/status` (`mcp.auth`) and says it in plain
  * words: OAuth sign-in on an HTTPS instance; personal tokens on a plain-HTTP `lan` instance, where OAuth
- * cannot work. It also names the two traps operators hit: an internal CA that Claude Code (Node.js) does
+ * cannot work — one line, with the details in its help tip. The tip also names the two traps operators hit: an internal CA that Claude Code (Node.js) does
  * not trust, and cloud connectors (claude.ai, ChatGPT) that need a publicly reachable HTTPS instance.
  * The endpoint is `/ai/status` `mcp.endpoint` (the API's pinned `WEB_ORIGIN` + `/mcp`); only when the
  * server has none is the page's own origin shown, with a note. The install panel itself lives on the
@@ -59,6 +61,7 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
  */
 export function AiMcpSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp");
+  const tLinks = useTranslations("aiSettings.links");
   const save = useAiConfigSave();
   const status = useAiStatus();
   const origin = useLocationPart("origin");
@@ -80,6 +83,9 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
           <div className="flex items-center gap-2">
             <LinkIcon className="size-5 text-muted-foreground" aria-hidden />
             <CardTitle>{t("title")}</CardTitle>
+            <HelpTip topic={t("title")} href={tLinks("mcp")}>
+              <p>{t("help")}</p>
+            </HelpTip>
           </div>
           <StatusBadge tone={settings.mcpEnabled ? "success" : "neutral"}>
             {settings.mcpEnabled ? t("on") : t("off")}
@@ -90,10 +96,13 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
       <CardContent className="space-y-5">
         <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
           <div className="flex flex-1 flex-col gap-0.5">
-            <FieldLabel htmlFor="ai-mcp-enabled" className="font-medium">
+            <AiFieldLabel
+              htmlFor="ai-mcp-enabled"
+              className="font-medium"
+              help={<p>{t("switch.description")}</p>}
+            >
               {t("switch.label")}
-            </FieldLabel>
-            <FieldDescription>{t("switch.description")}</FieldDescription>
+            </AiFieldLabel>
           </div>
           <Switch
             id="ai-mcp-enabled"
@@ -108,29 +117,35 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
 
         {connection ? (
           <Callout tone="info" icon={<InformationCircleIcon />}>
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">
+            <div className="space-y-1 text-sm">
+              <p className="flex items-center gap-1 font-medium">
                 {connection.mode === "oauth" ? t("mode.oauth.title") : t("mode.personalToken.title")}
-              </p>
-              {connection.mode === "oauth" ? (
-                <>
-                  <p>{t("mode.oauth.body")}</p>
-                  <p>{t("mode.oauth.internalCa")}</p>
-                  <pre className="overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
-                    export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem
-                  </pre>
-                </>
-              ) : (
-                <>
-                  <p>{t("mode.personalToken.body")}</p>
-                  <p>{t("mode.personalToken.whyNoOauth")}</p>
-                </>
-              )}
-              <p className="flex items-start gap-1.5">
-                <GlobeAltIcon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
-                <span>
-                  {connection.mode === "oauth" ? t("mode.oauth.cloud") : t("mode.personalToken.cloud")}
-                </span>
+                <HelpTip topic={t("mode.help")} href={tLinks("mcp")}>
+                  {connection.mode === "oauth" ? (
+                    <>
+                      <p>{t("mode.oauth.why")}</p>
+                      <p>{t("mode.oauth.body")}</p>
+                      <p>{t("mode.oauth.internalCa")}</p>
+                      <pre className="overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
+                        export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem
+                      </pre>
+                    </>
+                  ) : (
+                    <>
+                      <p>{t("mode.personalToken.why")}</p>
+                      <p>{t("mode.personalToken.body")}</p>
+                      <p>{t("mode.personalToken.whyNoOauth")}</p>
+                    </>
+                  )}
+                  <p className="flex items-start gap-1.5">
+                    <GlobeAltIcon className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
+                    <span>
+                      {connection.mode === "oauth"
+                        ? t("mode.oauth.cloud")
+                        : t("mode.personalToken.cloud")}
+                    </span>
+                  </p>
+                </HelpTip>
               </p>
               {connection.source === "browser" ? (
                 <p className="text-muted-foreground">{t("mode.detectedFromBrowser")}</p>
@@ -151,14 +166,18 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
         )}
 
         <div className="space-y-2">
-          <p className="text-sm font-medium">{t("endpoint.label")}</p>
+          <p className="flex items-center gap-0.5 text-sm font-medium">
+            {t("endpoint.label")}
+            <HelpTip topic={t("endpoint.label")}>
+              <p>{t("endpoint.description")}</p>
+            </HelpTip>
+          </p>
           <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
             <code className="min-w-0 flex-1 font-mono text-sm break-all">
               {endpoint?.url ?? "…"}
             </code>
             {endpoint ? <CopyButton value={endpoint.url} label={t("endpoint.copy")} /> : null}
           </div>
-          <p className="text-sm text-muted-foreground">{t("endpoint.description")}</p>
           {endpoint?.source === "page" ? (
             <p className="text-sm text-muted-foreground">{t("endpoint.pageFallback")}</p>
           ) : null}

@@ -10,15 +10,15 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
+import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
@@ -29,6 +29,7 @@ import {
   webSearchAvailability,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
+import { AiFieldLabel } from "./ai-field-label";
 
 /**
  * Settings → AI: provider-native web search (#1389; ADR-0097 decision 3 as amended 2026-09-24). The AI
@@ -41,6 +42,7 @@ import { AiErrorNotice } from "./ai-error-notice";
  */
 export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.webSearch");
+  const tLinks = useTranslations("aiSettings.links");
   const save = useAiConfigSave();
   const availability = webSearchAvailability(settings);
   const available = availability === "available";
@@ -65,20 +67,30 @@ export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
           <div className="flex items-center gap-2">
             <GlobeAltIcon className="size-5 text-muted-foreground" aria-hidden />
             <CardTitle>{t("title")}</CardTitle>
+            <HelpTip topic={t("title")} href={tLinks("webSearch")}>
+              <p>{t("description")}</p>
+            </HelpTip>
           </div>
           <StatusBadge tone={active ? "success" : "neutral"}>
             {active ? t("on") : t("off")}
           </StatusBadge>
         </div>
-        <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
           <div className="flex flex-1 flex-col gap-0.5">
-            <FieldLabel htmlFor="ai-web-search-enabled" className="font-medium">
+            <AiFieldLabel
+              htmlFor="ai-web-search-enabled"
+              className="font-medium"
+              help={
+                <>
+                  <p>{t("switch.description")}</p>
+                  <p>{t("disclosure.conversations")}</p>
+                </>
+              }
+            >
               {t("switch.label")}
-            </FieldLabel>
-            <FieldDescription>{t("switch.description")}</FieldDescription>
+            </AiFieldLabel>
           </div>
           <Switch
             id="ai-web-search-enabled"
@@ -105,7 +117,6 @@ export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
             <p>{t("disclosure.egress")}</p>
             <p>{t("disclosure.untrusted")}</p>
             {settings.provider === "openai" ? <p>{t("disclosure.openai")}</p> : null}
-            <p>{t("disclosure.conversations")}</p>
           </div>
         </Callout>
 
@@ -120,7 +131,12 @@ export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
           }}
         >
           <Field data-invalid={parsed === null || undefined} className="max-w-xs">
-            <FieldLabel htmlFor="ai-web-search-max-uses">{t("maxUses.label")}</FieldLabel>
+            <AiFieldLabel
+              htmlFor="ai-web-search-max-uses"
+              help={<p>{t("maxUses.description")}</p>}
+            >
+              {t("maxUses.label")}
+            </AiFieldLabel>
             <Input
               id="ai-web-search-max-uses"
               type="number"
@@ -132,7 +148,6 @@ export function AiWebSearchSection({ settings }: { settings: AiSettings }) {
               aria-invalid={parsed === null || undefined}
               onChange={(event) => setMaxUses(event.target.value)}
             />
-            <FieldDescription>{t("maxUses.description")}</FieldDescription>
             {parsed === null ? (
               <FieldError>
                 {t("maxUses.invalid", {

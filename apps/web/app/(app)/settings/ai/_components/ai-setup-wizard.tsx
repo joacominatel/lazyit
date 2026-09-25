@@ -6,14 +6,15 @@ import {
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { AI_PROVIDER_DESCRIPTORS, type AiSettings } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AiAssistantIcon } from "@/components/ai/ai-icons";
+import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -55,6 +56,8 @@ const ENABLED_URL = "/settings/ai?enabled=1";
  */
 export function AiSetupWizard({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.wizard");
+  const tLinks = useTranslations("aiSettings.links");
+  const tCommon = useTranslations("common");
   const { dateTime } = useFormatters();
   const [step, setStep] = useState<AiWizardStep>(() => initialWizardStep(settings));
   const [draft, setDraft] = useState<ConnectionDraft>(() => draftFromSettings(settings));
@@ -106,12 +109,14 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
           <div className="flex items-center gap-2">
             <AiAssistantIcon className="size-5 text-primary" />
             <CardTitle>{t("title")}</CardTitle>
+            <HelpTip topic={t("title")} href={tLinks("wizard")}>
+              <p>{t("subtitle")}</p>
+            </HelpTip>
           </div>
           <span className="text-sm text-muted-foreground tabular-nums">
             {t("stepOf", { current: index + 1, total: AI_WIZARD_STEPS.length })}
           </span>
         </div>
-        <CardDescription>{t("subtitle")}</CardDescription>
         <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {AI_WIZARD_STEPS.map((name, position) => (
             <li
@@ -205,6 +210,16 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
                 <li>{t("disclosure.notSent")}</li>
                 <li>{t("disclosure.retention")}</li>
               </ul>
+              <Link
+                href={tLinks("disclosure")}
+                prefetch={false}
+                target="_blank"
+                rel="noopener"
+                className="inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {t("disclosure.details")}
+                <span className="sr-only"> {tCommon("helpTip.newTab")}</span>
+              </Link>
               {disclosureDone ? (
                 <p className="text-sm">
                   {t("disclosure.alreadyAcknowledged", {
