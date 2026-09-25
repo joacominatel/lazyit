@@ -321,7 +321,7 @@
       },
       "details": {
         "created": "Asset created",
-        "updated": "Updated via re-import",
+        "updated": "Details updated",
         "locationChanged": "Location updated",
         "modelChanged": "Model updated",
         "specsChanged": "Specs updated",
