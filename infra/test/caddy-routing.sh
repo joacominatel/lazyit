@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# caddy-routing.sh — regression test for the lazyit reverse proxy (issues #1250, #1322).
+# caddy-routing.sh — regression test for the lazyit reverse proxy (issues #1250, #1322, #1315).
 #
 # Two parts, both against the REAL Caddyfile and the digest-pinned image from compose.yaml (the exact
 # Caddy production runs):
@@ -13,6 +13,9 @@
 #      once sent change-password & co. to Auth.js, which 400s "Bad request.");
 #    - the external-agent paths (/mcp, OAuth metadata and protocol endpoints — ADR-0097) reach the
 #      API WITHOUT the /api strip, while /oauth/authorize (the consent page) stays on the web app;
+#    - the paths MCP SDK clients probe when the RFC 8414 metadata is missing — OIDC discovery and the
+#      root fallbacks /authorize, /token, /register — reach the API (its JSON 404), not the web's
+#      /login HTML (#1315, W4-3 finding F1);
 #    - streamed requests (the run event stream, /mcp, `Accept: text/event-stream`) are not wrapped
 #      by `encode`, and ordinary requests still are.
 #
@@ -97,12 +100,21 @@ CORPUS = [
     ("/oauth/token", "api", "/oauth/token"),
     ("/oauth/register", "api", "/oauth/register"),
     ("/oauth/revoke", "api", "/oauth/revoke"),
+    # What MCP SDK clients probe when RFC 8414 metadata is missing (#1315, W4-3 F1): OIDC discovery
+    # and the root OAuth fallbacks reach the API — which answers JSON 404 — never the web's /login HTML.
+    ("/.well-known/openid-configuration", "api", "/.well-known/openid-configuration"),
+    ("/.well-known/openid-configuration/mcp", "api", "/.well-known/openid-configuration/mcp"),
+    ("/authorize", "api", "/authorize"),
+    ("/token", "api", "/token"),
+    ("/register", "api", "/register"),
     # ...and nothing wider: the consent page and any other /oauth or /.well-known path stay on web.
     ("/oauth/authorize", "web", None),
     ("/oauth/other", "web", None),
     ("/mcp/extra", "web", None),
     ("/.well-known/security.txt", "web", None),
-    ("/.well-known/openid-configuration", "web", None),  # no OIDC surface (ADR-0097)
+    ("/authorize/extra", "web", None),
+    ("/registration", "web", None),
+    ("/tokens", "web", None),
     # Web UI — everything else falls to the catch-all:
     ("/", "web", None),
     ("/login", "web", None),
@@ -370,6 +382,10 @@ for path, want in [
     ("/.well-known/oauth-protected-resource/mcp", ("api", "/.well-known/oauth-protected-resource/mcp")),
     ("/oauth/token", ("api", "/oauth/token")),
     ("/oauth/authorize", ("web", "/oauth/authorize")),
+    ("/.well-known/openid-configuration", ("api", "/.well-known/openid-configuration")),
+    ("/token", ("api", "/token")),
+    ("/register", ("api", "/register")),
+    ("/authorize", ("api", "/authorize")),
 ]:
     _, _, fields, _ = exchange("GET", path, {})
     got = (fields.get("x-upstream"), fields.get("x-upstream-path"))

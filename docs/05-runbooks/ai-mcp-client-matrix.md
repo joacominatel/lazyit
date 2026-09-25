@@ -49,7 +49,7 @@ cannot run from a sandbox; the checklist in §4 · **Not possible** = the archit
 | --- | --- | --- |
 | **MCP Inspector CLI** 2.8.0 | **Verified** — `tools/list` (61) in `legacy`, `modern` and `auto` eras; `tools/call session_context` and `asset_search` | **Verified** — its own OAuth client: DCR, consent, token, `tools/list` and `tools/call`; `lazyit.admin` with the password step-up lists 67 tools. Needs an allowlist entry for its callback (§5). |
 | **SDK-v2 client** (`@modelcontextprotocol/client` 2.1.0) | **Verified** with a personal token — `legacy`, `auto` (negotiates 2026-07-28) and pinned `2026-07-28`. **OAuth refused** — see the row below. | **Verified** — full OAuth (DCR, PKCE, `resource`, RFC 9207 `iss`, refresh token issued) in `legacy` and `2026-07-28` eras |
-| **SDK-v2 client, OAuth attempted on `lan`** | **Refused**, but not with the designed message: `SyntaxError: Unexpected token '<'` (finding F1). With OIDC discovery answering 404, a pre-registered v2 client stops at `InsecureTokenEndpointError` — the designed refusal. | — |
+| **SDK-v2 client, OAuth attempted on `lan`** | **Refused.** On the 2026-09-25 run the message was `SyntaxError: Unexpected token '<'` (finding F1, **fixed** in #1315): OIDC discovery and the root OAuth fallbacks now reach the API and answer JSON 404, so a pre-registered v2 client stops at `InsecureTokenEndpointError` — the designed refusal (verified on a scratch Caddyfile in that run; re-run §3.4 to confirm on the shipped one). | — |
 | **MCP conformance suite** 0.1.16, server scenarios | Run — 4 pass, the rest not applicable (§3.5) | Run — same result; DNS-rebinding refused |
 
 Server-side checks run on both modes with `curl` (all **as designed**): GET/DELETE `/mcp` → 405;
@@ -163,9 +163,9 @@ RESOLVE_TO=127.0.0.1 STATIC_CLIENT_ID=x CONSENT_CMD=./dummy.sh node v2-client.mj
 ```
 
 Expected: `RESULT: OK` with `tools: 61` and `callTool session_context … ok true` for the first two;
-`RESULT: REFUSED` for the last two. Today the refusal reads `SyntaxError: Unexpected token '<'`
-(finding F1); once F1 is fixed the pre-registered case must read `InsecureTokenEndpointError - Refusing
-to send credentials to non-https token endpoint 'http://lazyit.lan:<port>/token'`.
+`RESULT: REFUSED` for the last two. The pre-registered case must read `InsecureTokenEndpointError - Refusing
+to send credentials to non-https token endpoint 'http://lazyit.lan:<port>/token'`. `SyntaxError: Unexpected
+token '<'` instead means the Caddyfile predates the F1 fix (#1315) and the probe reached the web app.
 
 ### 3.5 Conformance suite
 
@@ -314,7 +314,7 @@ Still open: whether an **interactive** session **prompts** for the token.
 | Consent 403 `STEP_UP_REQUIRED` | the client asked for `lazyit.admin` | Enter the password on the consent page, or untick admin actions |
 | 403 `The Origin is not allowed.` | a browser-origin request from another host, or `Origin: null` | Expected; agents do not send a foreign `Origin` |
 | 400 "Send the token in the Authorization header, never in the URL." | a token in `?access_token=` / `?token=` | The token is **revoked** on sight; create a new one and use the header |
-| An SDK-v2 client on `lan` fails with `Unexpected token '<'` | finding F1 — it tried OAuth on plain HTTP | Use a personal token; OAuth needs HTTPS |
+| An SDK-v2 client on `lan` fails with `Unexpected token '<'` | it tried OAuth on plain HTTP, and the instance's Caddyfile predates the F1 fix (#1315), so the probe got the web app's HTML | Use a personal token; OAuth needs HTTPS. Update the instance to get the clean `InsecureTokenEndpointError` |
 | `claude plugin install` — "Archive URLs must use https:// and must not point at a loopback…" | a `localhost` instance | Use `--plugin-dir` with the downloaded zip, or a real host name |
 | Another reverse proxy in front of Caddy, and older (2025-era) clients time out | the 2025-era leg answers `text/event-stream` (one event, then closes); a buffering proxy can hold it | Do not buffer or compress `text/event-stream` ([[deploy-self-hosted]] §7a) |
 
@@ -322,16 +322,20 @@ Still open: whether an **interactive** session **prompts** for the token.
 
 ## 6. Findings from the 2026-09-25 run
 
-Reported on the W4-3 PR for the owning lanes; none was fixed here.
+Reported on the W4-3 PR for the owning lanes; none was fixed in that run (F1 has been fixed since).
 
-- **F1 — OIDC discovery answers HTML on every mode (routing).** `/.well-known/openid-configuration` (and
-  the path-suffixed forms) is not in the Caddyfile's agent routes, so it reaches the web app, whose auth
+- **F1 — OIDC discovery answers HTML on every mode (routing). Fixed in #1315.** The Caddyfile's agent
+  routes now send `/.well-known/openid-configuration*`, `/authorize`, `/token` and `/register` to the API,
+  which serves none of them and answers JSON 404 (the web app owns none of them — its consent page is
+  `/oauth/authorize`); `infra/test/caddy-routing.sh` asserts it on every mode. The repro below now answers
+  `404 application/json`. The original report: `/.well-known/openid-configuration` (and the path-suffixed
+  forms) is not in the Caddyfile's agent routes, so it reaches the web app, whose auth
   proxy 302s to `/login`, which answers 200 `text/html`. An MCP client probing OIDC discovery — the
   SDK-v2 client does, after RFC 8414 answers 404 on `lan` — follows the redirect and fails with
   `SyntaxError: Unexpected token '<'` instead of a clean "no authorization server", and never reaches the
   designed `InsecureTokenEndpointError`. The root fallbacks `/register`, `/token`, `/authorize` behave the
   same way. Repro: `curl -sSL -o /dev/null -w '%{http_code} %{content_type}' http://<lan-host>/.well-known/openid-configuration`
-  → `200 text/html`; §3.4's refusal commands. Verified that routing `/.well-known/openid-configuration*`
+  → `200 text/html` (before the fix); §3.4's refusal commands. Verified that routing `/.well-known/openid-configuration*`
   to the API (a scratch Caddyfile, not committed) turns the pre-registered case into
   `InsecureTokenEndpointError`. HTTPS clients are not affected today (RFC 8414 answers first).
 - **F2 — as-built drift: the 2025-era leg streams.** [[ai-assistant/mcp-and-oauth|MCP]] §14 said
