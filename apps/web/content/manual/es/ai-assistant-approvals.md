@@ -42,8 +42,9 @@ como texto plano en *cursiva* para que lo distingas.
 ### "Basado en contenido escrito por otras personas"
 
 Si el asistente leyó contenido que escribieron otras personas antes de proponer el cambio, la tarjeta muestra
-una nota amarilla **Basado en contenido escrito por otras personas** con enlaces a lo que leyó. Un contenido
-puede tener instrucciones pensadas para engañar a una IA. Verificá que el cambio sea realmente lo que **vos**
+una nota amarilla **Basado en contenido escrito por otras personas** con enlaces a lo que leyó (un resultado
+de búsqueda no tiene una única página para enlazar, así que la nota aparece sin enlace). Un contenido puede
+tener instrucciones pensadas para engañar a una IA. Verificá que el cambio sea realmente lo que **vos**
 pediste antes de aprobarlo.
 
 ## Aprobar o rechazar

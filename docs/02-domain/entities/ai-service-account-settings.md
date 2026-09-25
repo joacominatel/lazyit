@@ -35,7 +35,7 @@ Prisma model `AiServiceAccountSettings` → table `ai_service_account_settings`.
 | --- | --- | --- |
 | `serviceAccountId` | `cuid` | PK and FK → [[service-account]], `onDelete: Cascade`. |
 | `access` | `text` | `off` \| `read-only` \| `read-write`; default `read-write`. |
-| `maxMutationsPerRun` | `int?` | null = no cap beyond the step limit. |
+| `maxMutationsPerRun` | `int?` | null = no cap beyond the step limit. Counts **changes**, not calls: a batch tool counts its rows, and a call that would pass the cap is refused whole (SEC-081). Headless: per run; MCP: per rolling hour. |
 | `createdAt` / `updatedAt` | `datetime` | |
 
 Related: [[service-account]] · [[ai-settings]] · [[ai-config-audit-log]]

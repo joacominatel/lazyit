@@ -2,7 +2,7 @@
 id: SEC-080
 title: The chat's untrusted-source tracking never fires for real read tools, so a same-turn write shows no banner and can be auto-approved
 severity: medium
-status: open
+status: fixed
 cwe: CWE-807
 discovered: 2026-09-25
 module: ai (runtime)
@@ -109,3 +109,55 @@ from the tag alone and remove the `entityRefs` dependency.
 - OWASP LLM01 (prompt injection), LLM06 (excessive agency).
 - `docs/ai-assistant/security.md` §6.1, §6.2 "Auto-approve mode", §10 item 10.
 - `docs/03-decisions/0097-ai-assistant-mcp-and-headless-api.md` decision 4 (amended 2026-09-24).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commits `2c5664e6` (`fix(api): mark reads of other-authored text as untrusted sources (SEC-080)`)
+and `3832ba9e` (`fix(web): label the toolResult untrusted-source marker (SEC-080)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-25
+
+### Changes
+- `apps/api/src/ai/runtime/agent-loop.ts`: `untrustedRefsOf(result, toolName)` is driven by the tag alone.
+  A result whose data carries `<untrusted_content>` (which `untrusted()` never produces for empty text)
+  returns its entity refs, or, when it named none, the synthetic `toolResult` ref of the tool. On resume,
+  `seedCounters` also counts the `read`/`navigate` invocations answered while the run was paused
+  (`pausedSources`). A `request_input` answer whose picked lazyit labels are wrapped therefore marks the
+  resumed run (the sweep's sibling observation).
+- `packages/shared/src/schemas/ai-tools.ts`: new entity type `toolResult` and
+  `aiToolResultSourceRef(toolName)` → `{ type: "toolResult", id: <tool>, op: "navigate" }`. This is an
+  additive contract change. The type has no page, so the web shows the banner without a link for it, the
+  same as `webSearch`.
+- `apps/api/src/ai/tools/kb.tools.ts` / `assets.tools.ts`: `kb_get_article` and `asset_get` return the
+  ref of what they read (`op: navigate`), so the banner links to it. The article ref label is clipped to
+  the title limit. `lazyit_search` keeps no refs (one chip per hit would be noise) and is covered by the
+  synthetic ref.
+- `apps/web/messages/{en,es}/ai.json`: `entities.toolResult` label.
+- The conversation-wide web-search marker is unchanged.
+
+### Tests added
+- `apps/api/src/ai/runtime/agent-loop.untrusted-sources.spec.ts`. It runs the REAL `kb_get_article`,
+  `asset_get` and `lazyit_search` over a fake handler runtime, through the real result shaper and agent
+  loop.
+  - `kb_get_article: the next write in the same turn names the article and is not auto-applied`. Without
+    the fix, `untrustedSources` is `[]` and the write is auto-approved.
+  - `asset_get on an asset with notes: the same`. Same failure without the fix.
+  - `lazyit_search with a KB excerpt: …the tool itself is the source`. Same failure without the fix.
+  - `a read with no other-authored text … does not mark the turn`: the control. Auto-approve still
+    applies.
+  - `a form answer whose picked labels are lazyit text marks the resumed run`. Without the fix, the
+    resumed write auto-applies.
+  - 6 of 7 tests in the file fail with the fix reverted.
+
+### Verification
+Full API Jest suite green under Node (265 suites). `tsc` passes for shared, api, web and agent. `bun test`
+passes for shared, web and agent. Scoped eslint is clean. Manual and message parity pass.
+
+### Residual risk
+- Product effect: with auto-approve on, a write proposed after reading free text by others (an article
+  body, a note, a description, a search excerpt, an agent-reported name) now shows a card instead of
+  auto-applying. This is the documented INV-AI-3 behaviour. The marker is conservative: text the user
+  wrote is wrapped too, so a turn that reads it is also marked.
+- The earlier-turn residual that ADR-0097 accepts is unchanged. Only the turn that read the content is
+  marked, except after a web search.

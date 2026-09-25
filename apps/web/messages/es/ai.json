@@ -262,6 +262,7 @@
     "manualTask": "Tarea manual",
     "assetTagScheme": "Esquema de etiquetas de activos",
     "webSearch": "Resultados de búsqueda web",
+    "toolResult": "Contenido leído por el asistente",
     "unknown": "Elemento"
   },
   "errors": {

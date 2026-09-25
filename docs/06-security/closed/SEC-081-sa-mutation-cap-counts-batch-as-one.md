@@ -2,7 +2,7 @@
 id: SEC-081
 title: The per-SA AI mutation cap counts a 200-row batch as one change (headless and MCP)
 severity: low
-status: open
+status: fixed
 cwe: CWE-770
 discovered: 2026-09-25
 module: ai (headless / mcp)
@@ -82,3 +82,48 @@ two-row batch.
 - OWASP LLM06 (excessive agency), LLM10 (unbounded consumption).
 - `docs/ai-assistant/security.md` §6.6, §6.8; `docs/ai-assistant/mcp-and-oauth.md` "The per-SA write cap
   over MCP".
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `e760102b` (`fix(api): count a batch's rows toward the per-SA mutation cap (SEC-081)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-25
+
+### Changes
+- `apps/api/src/ai/core/tool-descriptor.ts`: new optional `mutationWeight(input)` hook on the descriptor.
+  It returns how many changes one call counts for (default 1).
+- `apps/api/src/ai/tools/assets.tools.ts`: `asset_create_batch` and `asset_update_batch` weigh their
+  non-skipped rows.
+- `apps/api/src/ai/core/mutation-weight.ts`: `mutationWeightOf(tool, rawInput)` validates the input with
+  the tool's own schema and returns at least 1. `mutationsUsed(prisma, tools, where, cap)` counts plain
+  writes in the database and weighs the stored input of batch rows. It reads at most `cap` batch rows,
+  because each weighs at least 1.
+- `apps/api/src/ai/runtime/agent-loop.ts` (headless) and `apps/api/src/mcp/mcp-server.factory.ts` (MCP,
+  rolling hour; the factory now injects `AiToolRegistry`): the cap compares `used + weight` with the cap.
+  A call that would pass it is refused whole, with a message naming its weight and what is left.
+- The Settings copy ("Cap the changes…") is now accurate and is unchanged. The Manual
+  (`ai-assistant-setup`, en/es) now says that every changed record counts and that an oversized batch is
+  refused whole.
+
+### Tests added
+- `apps/api/src/ai/runtime/agent-loop.untrusted-sources.spec.ts` › SEC-081. With cap 2:
+  - A 3-row batch is refused before it runs. Without the fix, it runs.
+  - A 2-row batch uses up the cap, so the next write is refused. Without the fix, both run.
+- `apps/api/src/mcp/mcp-server.factory.spec.ts` › `a batch counts its rows, not one call (SEC-081)`:
+  - An oversized batch is refused.
+  - A batch that fits passes.
+  - An earlier 2-row batch weighs 2.
+- `apps/api/src/ai/core/mutation-weight.spec.ts`:
+  - The real batch tools weigh their non-skipped rows.
+  - Single-record, unknown and invalid inputs weigh 1.
+  - The used-changes sum is correct.
+
+### Verification
+The full API Jest suite passes under Node. `tsc` passes for all four packages. Scoped eslint is clean.
+
+### Residual risk
+- The MCP per-minute write limiter (`MCP_WRITE_RATE_LIMIT`) still counts calls. It is a rate bucket, not
+  the admin's blast-radius cap, and a batch is bounded at 200 rows.
+- The cap stays soft under concurrency, as documented: calls racing past the count can overshoot by
+  the number in flight.

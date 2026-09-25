@@ -110,6 +110,7 @@ Snapshot of the security review. Updated each sweep. Method:
    step-up has only a 10-per-minute window, no per-account backoff, and no audit of failures.
    [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] (**Low**): the `/mcp` query-token
    revocation runs one DB lookup per value, unbounded, before the MCP-off 404 and the IP limiter.
+   All four ✅ closed the same day (#1315): SEC-080 and SEC-081 in #1433, SEC-082 and SEC-083 in #1431.
 
 12. **2026-09-25 — Mermaid 12 upgrade follow-up (#1429, born closed).**
    [[SEC-084-mermaid-html-labels-remote-image-load\|SEC-084]] (**Low**): `flowchart.htmlLabels: false`
@@ -129,10 +130,10 @@ consent page, `/account/ai`).
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
-| Low | 12 |
+| Medium | 0 |
+| Low | 11 |
 | Info | 0 |
-| **Total open** | **13** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -152,16 +153,15 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
-| [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools\|SEC-080]] | 🟠 Medium | ai (runtime) | Untrusted-source tracking never fires for real read tools: no banner, and same-turn writes auto-approved |
-| [[SEC-081-sa-mutation-cap-counts-batch-as-one\|SEC-081]] | 🟡 Low | ai (headless / mcp) | Per-SA AI mutation cap counts a 200-row batch as one change |
 
 ## Top findings
 
-0. **SEC-080 🟠 Open (Medium): fix before ADR-0097 is accepted.** The auto-approve eligibility rule
-   (INV-AI-3 as amended) and the CEO's #1409 decision to include untrusted-source proposals in "Approve
-   all" both depend on the untrusted-source banner. Today the banner appears only for web search and
-   the three `workflow_*_get` reads. Fix: derive the marker from the `<untrusted_content>` tag alone, and
-   add a test that uses a real read tool.
+0. **SEC-080 / SEC-081 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315). The untrusted-source
+   marker is now derived from the `<untrusted_content>` wrapping of any read or answered form, using
+   the result's refs or a synthetic `toolResult` ref. A write proposed after reading other-authored text
+   in the same turn therefore shows the banner and is never auto-approved. The per-SA mutation cap now
+   counts a batch's rows through the descriptor's `mutationWeight`, and a call that would pass the cap is
+   refused whole. No data change.
 0. **SEC-082 / SEC-083 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315): the consent's
    `lazyit.admin` password goes through the shared `PasswordStepUpVerifier`, so the chat approvals and
    the consent share one per-account backoff, and each refused attempt is audited

@@ -200,7 +200,8 @@ function articleSummary(row: Row, withExcerpt: boolean): Row {
 
 function articleRef(row: Row, op: AiEntityRef['op']): AiEntityRef {
   const id = String(row.id);
-  const title = str(row.title);
+  // Clipped like the title in the data: a legacy over-long title cannot eat the result budget.
+  const title = clipOrNull(str(row.title) ?? null, KB_TITLE_MAX);
   const slug = str(row.slug);
   return {
     type: 'article',
@@ -689,6 +690,8 @@ const kbGetArticle = defineTool({
           ...(end < body.length ? { nextOffset: end } : {}),
         },
       },
+      // The article it read: the source the untrusted-source banner names (SEC-080).
+      entityRefs: [articleRef(row, 'navigate')],
       ...(end < body.length
         ? {
             truncated: {

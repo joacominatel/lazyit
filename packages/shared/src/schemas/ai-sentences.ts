@@ -746,6 +746,10 @@ export const AI_SENTENCES = {
     en: "The mutation cap of this run ({cap}) was reached",
     params: { cap: "number" },
   },
+  "refusal.mutationCapBatch": {
+    en: "This call would make {weight} changes, but the mutation cap of this run ({cap}) allows {left} more",
+    params: { weight: "number", cap: "number", left: "number" },
+  },
   "refusal.pendingLimit": {
     en: "Limit reached: {max} proposals are pending in this step; wait for the user's decisions and propose the rest in the next step.",
     params: { max: "number" },

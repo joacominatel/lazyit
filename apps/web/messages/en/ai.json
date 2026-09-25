@@ -262,6 +262,7 @@
     "manualTask": "Manual task",
     "assetTagScheme": "Asset tag scheme",
     "webSearch": "Web search results",
+    "toolResult": "Content read by the assistant",
     "unknown": "Item"
   },
   "errors": {
