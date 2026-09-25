@@ -444,6 +444,7 @@ nothing to do: no required env key, no new container, no new port.
   | `/.well-known/oauth-protected-resource[/mcp]` | where to authorize (RFC 9728) | 404 while MCP is off, and always on `lan` |
   | `/.well-known/oauth-authorization-server` | the authorization server's metadata (RFC 8414) | 404 while MCP is off, and always on `lan` |
   | `/oauth/token`, `/oauth/register`, `/oauth/revoke` | OAuth protocol endpoints | 404 while MCP is off, and always on `lan` |
+  | `/.well-known/openid-configuration*`, `/authorize`, `/token`, `/register` | what MCP clients probe when the metadata above is missing | always a JSON 404 — lazyit is OAuth-only, so a client gets a clean "no authorization server" instead of the sign-in page's HTML |
 
   `/oauth/authorize` is the consent page and belongs to the web app. Everything the chat uses stays under
   `/api/*`.

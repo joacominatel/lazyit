@@ -32,6 +32,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
                           │    │ /api/docs*   ─▶ NOT proxied in prod (SEC-009; internal/dev only)
                           │    │ /mcp, /.well-known/oauth-*, /oauth/{token,register,revoke}
                           │    │              ─▶ api :3001 unstripped (AI agents, ADR-0097)
+                          │    │ /.well-known/openid-configuration*, /authorize, /token,
+                          │    │ /register    ─▶ api :3001 unstripped (JSON 404; #1315)
                           │   api ──▶ db :5432 (Postgres 18)               │
                           │   api ──▶ meilisearch :7700 (search, no published port)
                           │   api ──▶ valkey :6379 (BullMQ broker, AOF)    │
@@ -80,6 +82,11 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
     discovery address the bare origin, so these cannot live under `/api`. `/oauth/authorize` is the web
     consent page and stays on web. The API answers 404 on all of them while MCP is off; on a `lan`
     instance the OAuth rows stay 404 (OAuth needs HTTPS — `lan` uses personal tokens on `/mcp`).
+    The same allowlist also sends the paths MCP SDK clients **probe** when the RFC 8414 metadata is
+    missing — OIDC discovery (`/.well-known/openid-configuration*`) and the root fallbacks `/authorize`,
+    `/token`, `/register` — to the API, which serves none of them (OAuth only, no OIDC) and answers a
+    JSON 404. Left on the web app they 302 to `/login` HTML, and a client fails on `Unexpected token '<'`
+    instead of its designed refusal (#1315). The web app owns none of these paths.
   - **Streaming (SSE):** Caddy's `encode` wraps every response **except** streamed ones — the AI run
     event stream (`/api/ai/runs/*/events`), `/mcp`, and any request with `Accept: text/event-stream`. The
     pinned Caddy (v2.11.3) otherwise withholds an SSE response's header until the first event and

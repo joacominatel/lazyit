@@ -35,6 +35,13 @@ external AI agents and streamed responses.
   because the wrapper is in place before the content type is known. Revisit this when the pin moves
   to a release that contains #7905.
 
+**Amended 2026-09-25 (issue #1315, W4-3 finding F1):** the unprefixed allowlist also carries the paths
+MCP SDK clients **probe** when the RFC 8414 metadata is missing (always on `lan`) — OIDC discovery
+`/.well-known/openid-configuration*` and the root fallbacks `/authorize`, `/token`, `/register`. The API
+serves none of them (OAuth only, no OIDC), so they answer its JSON 404; on the web app they 302'd to
+`/login` HTML and a client failed on `Unexpected token '<'` instead of its designed refusal. The web app
+owns none of these paths (its consent page is `/oauth/authorize`). See routing rule 3 below.
+
 ## Context
 
 The prod-like and self-hosted topologies ([[0025-containerization-strategy]]) need one HTTPS entry
@@ -82,7 +89,9 @@ point in front of the web (`:3000`) and API (`:3001`) containers, for both **loc
   3. `/mcp`, `/.well-known/oauth-protected-resource*`, `/.well-known/oauth-authorization-server*`,
      `/oauth/token`, `/oauth/register`, `/oauth/revoke` → `reverse_proxy api:3001` **unstripped**
      (the external-agent surface, [[0097-ai-assistant-mcp-and-headless-api]]; the API answers 404
-     while MCP is off, and on `lan` for the OAuth rows).
+     while MCP is off, and on `lan` for the OAuth rows). Also, so a probing client gets a JSON 404 and
+     not the web's `/login` HTML: `/.well-known/openid-configuration*`, `/authorize`, `/token`,
+     `/register` — paths the API never serves (amendment 2026-09-25).
   4. everything else — including `/oauth/authorize` — → `reverse_proxy web:3000`.
 - **Compression:** `encode zstd gzip` applies to every response except streamed requests (`/mcp`,
   `/api/ai/runs/*/events`, `Accept: text/event-stream`), which pass unbuffered and uncompressed
