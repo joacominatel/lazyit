@@ -1095,7 +1095,10 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   every restricted folder on the path: …"), `criticalApplicationAccess` explanations, workflow
   when/outbound sentences, and every result `summary` behind "Show details" — are rendered as the server
   wrote them. Localizing them needs the API to return codes + params (or to build them in the request
-  locale); the web does not parse English prose.
+  locale); the web does not parse English prose. **Since #1384 the API sends them** next to the English
+  (`afterSentences` / `beforeSentences` on preview rows, `summarySentences`, `error.messageSentences`;
+  closed list `AI_SENTENCES`, [[ai-assistant/tools-and-execution|tools]] §9.1); rendering them in the
+  user's locale is the web follow-up — until it lands the web keeps showing the English.
 - **Collapsed tool lines (#1377).** Consecutive READ calls of the same tool with the same status share one
   line with a count ("Done: Search users ×5"; `lib/ai/tool-groups.ts`); their summaries list under "Show
   details". A write, a different status or anything in between breaks the run.

@@ -32,6 +32,7 @@ import {
   type ChatModelPort,
 } from '../core/ports/chat-model.port';
 import { AiToolRegistry } from '../core/tool-registry';
+import { messagePhrase, phrase } from '../core/sentences';
 import { AiPromptService } from '../prompt/ai-prompt.module';
 import { AgentLoop, frozenToolset } from './agent-loop';
 import {
@@ -354,7 +355,7 @@ export class AgentRunOrchestrator {
       error: { code: 'CANCELLED', message: 'The run was cancelled.' },
       fallback: {
         code: 'NOT_AVAILABLE',
-        message: 'The run was cancelled; nothing was executed',
+        ...messagePhrase(phrase('refusal.runCancelledNothingExecuted')),
       },
     });
     if (!ended) {

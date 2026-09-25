@@ -13,6 +13,7 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiToolService } from '../core/ai-tool.service';
 import { errorResult } from '../core/result-shaper';
+import { messagePhrase, phrase } from '../core/sentences';
 import {
   AI_SETTINGS_READER,
   type AiSettingsReader,
@@ -170,7 +171,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
         finishReason: 'approval_expired',
         fallback: {
           code: 'EXPIRED',
-          message: 'The approval window for this action has passed',
+          ...messagePhrase(phrase('refusal.approvalExpired')),
         },
       });
     }
@@ -258,7 +259,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
           error: refusal,
           fallback: {
             code: 'NOT_AVAILABLE',
-            message: 'The run was cancelled; nothing was executed',
+            ...messagePhrase(phrase('refusal.runCancelledNothingExecuted')),
           },
         });
         if (done) cancelled += 1;
@@ -322,7 +323,7 @@ export class AgentRunSweeper implements OnModuleInit, OnModuleDestroy {
         },
         fallback: {
           code: 'UNKNOWN_OUTCOME',
-          message: 'The run was interrupted; this call was not completed',
+          ...messagePhrase(phrase('refusal.runInterrupted')),
         },
       });
       if (done) {

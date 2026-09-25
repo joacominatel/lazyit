@@ -40,7 +40,10 @@ export const CreateAssetModelSchema = z.strictObject({
   categoryId: z.cuid().optional(),
 });
 
-/** Partial update; any subset of the editable fields (an empty body is rejected). */
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected). `categoryId: null`
+ * clears the model's category (the column is nullable — a model without a category is valid).
+ */
 export const UpdateAssetModelSchema = requireAtLeastOneKey(
   z
     .strictObject({
@@ -49,7 +52,7 @@ export const UpdateAssetModelSchema = requireAtLeastOneKey(
       sku: z.string().trim().min(1).max(100),
       description: z.string().trim().min(1).max(2000),
       specs: ModelSpecsSchema,
-      categoryId: z.cuid(),
+      categoryId: z.cuid().nullable(),
     })
     .partial(),
 );

@@ -21,6 +21,7 @@ import { ConsumablesController } from '../../consumables/consumables.controller'
 import { LocationsController } from '../../locations/locations.controller';
 import { AiReferenceError } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
+import { afterPhrase, phrase, summaryPhrase } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -454,7 +455,11 @@ function archiveChanges(impact: Impact): Change[] {
       ? [
           {
             field: 'usedBy',
-            after: `Unknown to you: ${impact.unknown.join(', ')}`,
+            ...afterPhrase(
+              phrase('taxonomy.usedByUnknown', {
+                kinds: impact.unknown.join(', '),
+              }),
+            ),
             valueKind: 'text' as const,
           },
         ]
@@ -536,7 +541,12 @@ const categoryCreate = defineTool({
     const created = await createCategory(rt, kind, body);
     return {
       data: categoryResult(kind, created),
-      summary: `Created the ${KIND_LABEL[kind]} ${untrusted(str(created.name))}.`,
+      ...summaryPhrase(
+        phrase('category_create.summary', {
+          kind: kind,
+          name: String(untrusted(str(created.name))),
+        }),
+      ),
       entityRefs: [categoryRef(created, 'created')],
     };
   },
@@ -553,7 +563,11 @@ const categoryCreate = defineTool({
       );
     }
     const changes: Change[] = [
-      { field: 'kind', after: KIND_LABEL[kind], valueKind: 'text' },
+      {
+        field: 'kind',
+        ...afterPhrase(phrase('taxonomy.categoryKind', { kind })),
+        valueKind: 'text',
+      },
       { field: 'name', after: input.name, valueKind: 'text' },
     ];
     if (input.description !== undefined) {
@@ -622,7 +636,12 @@ const categoryUpdate = defineTool({
     const updated = await updateCategory(rt, kind, id, body);
     return {
       data: categoryResult(kind, updated),
-      summary: `Updated the ${KIND_LABEL[kind]} ${untrusted(str(updated.name))}.`,
+      ...summaryPhrase(
+        phrase('category_update.summary', {
+          kind: kind,
+          name: String(untrusted(str(updated.name))),
+        }),
+      ),
       entityRefs: [categoryRef(updated, 'updated')],
     };
   },
@@ -699,7 +718,12 @@ const categoryArchive = defineTool({
     const archived = await removeCategory(rt, input.kind, id);
     return {
       data: categoryResult(input.kind, archived),
-      summary: `Archived the ${KIND_LABEL[input.kind]} ${untrusted(str(archived.name))}.`,
+      ...summaryPhrase(
+        phrase('category_archive.summary', {
+          kind: input.kind,
+          name: String(untrusted(str(archived.name))),
+        }),
+      ),
       entityRefs: [categoryRef(archived, 'archived')],
     };
   },
@@ -768,6 +792,9 @@ function mergeSpecs(current: unknown, patch: Record<string, unknown>): Row {
   return merged;
 }
 
+/** The `after` of a cleared model category, shown on the approval card (mirrors `TOP_LEVEL`). */
+const NO_CATEGORY = 'None (no category)';
+
 const MODEL_SCALARS = [
   { field: 'name' },
   { field: 'manufacturer' },
@@ -780,8 +807,9 @@ const assetModelUpdate = defineTool({
   title: 'Update an asset model',
   description:
     'Change an asset model (by id or exact name): rename it, correct its manufacturer or SKU, change ' +
-    'its description, file it under another asset category (by id or exact name), or set / remove ' +
-    'its default attributes (`specs`, merged). Every asset of the model sees the change.',
+    'its description, file it under another asset category (by id or exact name; null removes its ' +
+    'category), or set / remove its default attributes (`specs`, merged). Every asset of the model ' +
+    'sees the change.',
   domain: 'reference',
   class: 'write',
   destructive: true,
@@ -793,7 +821,12 @@ const assetModelUpdate = defineTool({
     description: z.string().trim().min(1).max(2000).optional(),
     category: referenceString(
       'The asset category to file it under: its id or exact name.',
-    ).optional(),
+    )
+      .nullable()
+      .optional()
+      .describe(
+        'The asset category to file it under (id or exact name), or null to remove its category.',
+      ),
     specs: modelSpecsPatch.optional(),
   }),
   bindings: [
@@ -806,7 +839,9 @@ const assetModelUpdate = defineTool({
     const { model, category, specs, ...fields } = input;
     const { id } = await resolveModel(rt, model, false);
     const body: Row = { ...fields };
-    if (category) {
+    if (category === null) {
+      body.categoryId = null;
+    } else if (category) {
       body.categoryId = (await resolveAssetCategory(rt, category, false)).id;
     }
     if (specs) {
@@ -825,7 +860,11 @@ const assetModelUpdate = defineTool({
     );
     return {
       data: modelResult(updated),
-      summary: `Updated the asset model ${untrusted(modelLabel(updated))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_update.summary', {
+          model: String(untrusted(modelLabel(updated))),
+        }),
+      ),
       entityRefs: [modelRef(updated, 'updated')],
     };
   },
@@ -838,24 +877,35 @@ const assetModelUpdate = defineTool({
       }),
     );
     const changes = diff(current, MODEL_SCALARS, fields);
-    if (category) {
-      const after = await resolveAssetCategory(rt, category, true);
-      if (after.id !== current.categoryId) {
-        const before = current.categoryId
-          ? ((await listCategories(rt, 'assetCategory'))
-              .filter((c) => c.id === current.categoryId)
-              .map((c) => ({
-                type: 'category' as const,
-                id: String(c.id),
-                label: String(c.name),
-              }))[0] ?? {
+    const categoryBefore = async () =>
+      current.categoryId
+        ? ((await listCategories(rt, 'assetCategory'))
+            .filter((c) => c.id === current.categoryId)
+            .map((c) => ({
               type: 'category' as const,
-              id: str(current.categoryId) ?? '',
-            })
-          : null;
+              id: String(c.id),
+              label: String(c.name),
+            }))[0] ?? {
+            type: 'category' as const,
+            id: str(current.categoryId) ?? '',
+          })
+        : null;
+    if (category === null) {
+      // Clearing a category the model does not have is not a change (a lone one is a no-op).
+      if (current.categoryId) {
         changes.push({
           field: 'category',
-          before,
+          before: await categoryBefore(),
+          after: NO_CATEGORY,
+          valueKind: 'entity',
+        });
+      }
+    } else if (category) {
+      const after = await resolveAssetCategory(rt, category, true);
+      if (after.id !== current.categoryId) {
+        changes.push({
+          field: 'category',
+          before: await categoryBefore(),
           after: entityValue(after),
           valueKind: 'entity',
         });
@@ -905,7 +955,11 @@ const assetModelArchive = defineTool({
     );
     return {
       data: modelResult(archived),
-      summary: `Archived the asset model ${untrusted(modelLabel(archived))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_archive.summary', {
+          model: String(untrusted(modelLabel(archived))),
+        }),
+      ),
       entityRefs: [modelRef(archived, 'archived')],
     };
   },
@@ -1033,7 +1087,11 @@ const assetModelRestore = defineTool({
     );
     return {
       data: modelResult(restored),
-      summary: `Restored the asset model ${untrusted(modelLabel(restored))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_restore.summary', {
+          model: String(untrusted(modelLabel(restored))),
+        }),
+      ),
       entityRefs: [modelRef(restored, 'restored')],
     };
   },
@@ -1157,7 +1215,11 @@ const locationUpdate = defineTool({
     );
     return {
       data: locationResult(updated),
-      summary: `Updated the location ${untrusted(str(updated.name))}.`,
+      ...summaryPhrase(
+        phrase('location_update.summary', {
+          location: String(untrusted(str(updated.name))),
+        }),
+      ),
       entityRefs: [locationRef(updated, 'updated')],
     };
   },
@@ -1243,7 +1305,11 @@ const locationArchive = defineTool({
     );
     return {
       data: locationResult(archived),
-      summary: `Archived the location ${untrusted(str(archived.name))}.`,
+      ...summaryPhrase(
+        phrase('location_archive.summary', {
+          location: String(untrusted(str(archived.name))),
+        }),
+      ),
       entityRefs: [locationRef(archived, 'archived')],
     };
   },
@@ -1327,7 +1393,11 @@ const locationRestore = defineTool({
     );
     return {
       data: locationResult(restored),
-      summary: `Restored the location ${untrusted(str(restored.name))}.`,
+      ...summaryPhrase(
+        phrase('location_restore.summary', {
+          location: String(untrusted(str(restored.name))),
+        }),
+      ),
       entityRefs: [locationRef(restored, 'restored')],
     };
   },

@@ -33,6 +33,14 @@ import {
 import { assertChannelAllows } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
+  afterPhrase,
+  joinPhrases,
+  phrase,
+  summaryPhrase,
+  yesNo,
+  type Phrase,
+} from '../core/sentences';
+import {
   bind,
   defineTool,
   unexposed,
@@ -133,17 +141,23 @@ function whoId(rt: AiToolRuntime, id: unknown): string {
     : `user ${String(id)}`;
 }
 
-/** `"admin" access` / `access` — the access level as the application names it, when there is one. */
-function accessPhrase(level: unknown): string {
+/**
+ * The sentence params of an access level (#1384): the templates read `"admin" access` / `access` — the
+ * access level as the application names it, when there is one.
+ */
+function accessParams(level: unknown): {
+  hasLevel: 'yes' | 'no';
+  level: string;
+} {
   return typeof level === 'string' && level.length > 0
-    ? `"${level}" access`
-    : 'access';
+    ? { hasLevel: 'yes', level }
+    : { hasLevel: 'no', level: '' };
 }
 
 /** What a grant or a revoke will do outside lazyit, in plain words (ADR-0054). */
 interface ProvisioningOutlook {
   /** The sentence the preview's `action` row ends with. */
-  sentence: string;
+  sentence: Phrase;
   /** Whether to warn EXTERNAL_PROVISIONING / EXTERNAL_DEPROVISIONING: it will, or may, run. */
   external: boolean;
   /** The enabled workflow names the caller may read, as untrusted text (admin-authored). */
@@ -168,9 +182,7 @@ async function provisioningOutlook(
   otherActiveGrants?: number,
 ): Promise<ProvisioningOutlook> {
   const revoke = trigger === 'ACCESS_REVOKED';
-  const what = revoke
-    ? `automatic deprovisioning (removing the account in ${appName})`
-    : `automatic provisioning (creating the account in ${appName})`;
+  const application = appName;
   let enabled: Row[];
   try {
     const page = asRow(
@@ -186,14 +198,20 @@ async function provisioningOutlook(
     return {
       external: true,
       workflows: [],
-      sentence: `This may trigger ${what} if a workflow is configured for this application.`,
+      sentence: phrase('access.outlook.mayRun', {
+        revoke: yesNo(revoke),
+        application,
+      }),
     };
   }
   if (enabled.length === 0) {
     return {
       external: false,
       workflows: [],
-      sentence: `No automatic ${revoke ? 'deprovisioning' : 'provisioning'} workflow is set up for ${appName}: nothing changes outside lazyit.`,
+      sentence: phrase('access.outlook.none', {
+        revoke: yesNo(revoke),
+        application,
+      }),
     };
   }
   const workflows = enabled.map((w) => untrusted(str(w.name)) ?? '(unnamed)');
@@ -201,7 +219,7 @@ async function provisioningOutlook(
     return {
       external: true,
       workflows,
-      sentence: `This triggers ${what} after approval, through the workflow set up for ${appName}.`,
+      sentence: phrase('access.outlook.provisions', { application }),
     };
   }
   const perGrant = enabled.some((w) => w.deprovisionPolicy === 'EACH_GRANT');
@@ -209,7 +227,7 @@ async function provisioningOutlook(
     return {
       external: false,
       workflows,
-      sentence: `The user keeps other access to ${appName}, so its deprovisioning workflow does not run.`,
+      sentence: phrase('access.outlook.keepsOtherAccess', { application }),
     };
   }
   return {
@@ -217,8 +235,8 @@ async function provisioningOutlook(
     workflows,
     sentence:
       perGrant || otherActiveGrants !== undefined
-        ? `This triggers ${what}, through the workflow set up for ${appName}.`
-        : `This triggers ${what} if it is the user's last access to ${appName}, through the workflow set up for it.`,
+        ? phrase('access.outlook.deprovisions', { application })
+        : phrase('access.outlook.deprovisionsIfLast', { application }),
   };
 }
 
@@ -462,10 +480,8 @@ async function assertCriticalAllowed(
 }
 
 /** The sentence a critical application's card ends with. */
-function criticalNote(critical: boolean, app: string): string {
-  return critical
-    ? ` ${app} is a critical application: confirm with your password.`
-    : '';
+function criticalNote(critical: boolean, app: string): Phrase | null {
+  return critical ? phrase('access.criticalNote', { application: app }) : null;
 }
 
 /** The fail-closed refusal of a non-chat write whose application's criticality cannot be read. */
@@ -774,7 +790,9 @@ const applicationCreate = defineTool({
     );
     return {
       data: { application: applicationSummary(app) },
-      summary: `Added the application "${String(app.name)}" to the catalog.`,
+      ...summaryPhrase(
+        phrase('application_create.summary', { name: String(app.name) }),
+      ),
       entityRefs: [applicationEntity(app, 'created')],
     };
   },
@@ -784,11 +802,15 @@ const applicationCreate = defineTool({
       changes: [
         {
           field: 'action',
-          after:
-            `Add the application "${String(values.name)}" to the catalog.` +
-            (values.isCritical === true
-              ? ' It is marked critical: every later AI change to it needs your password in the chat.'
-              : ''),
+          ...afterPhrase(
+            joinPhrases(
+              phrase('application_create.action', {
+                name: String(values.name),
+              }),
+              values.isCritical === true &&
+                phrase('application_create.actionCritical'),
+            ),
+          ),
         },
         ...APPLICATION_WRITABLE.filter((f) => values[f] !== undefined).map(
           (field) => ({ field, after: values[field] }),
@@ -853,7 +875,12 @@ const applicationUpdate = defineTool({
     );
     return {
       data: { application: applicationSummary(app) },
-      summary: `Updated the application "${String(app.name)}" (${Object.keys(input.set).join(', ')}).`,
+      ...summaryPhrase(
+        phrase('application_update.summary', {
+          name: String(app.name),
+          fields: Object.keys(input.set).join(', '),
+        }),
+      ),
       entityRefs: [applicationEntity(app, 'updated')],
     };
   },
@@ -867,11 +894,16 @@ const applicationUpdate = defineTool({
       changes: [
         {
           field: 'action',
-          after:
-            `Change ${Object.keys(set).join(', ')} of the application "${String(current.name)}".` +
-            (current.isCritical === true || set.isCritical === true
-              ? ' It is a critical application: confirm with your password.'
-              : ''),
+          ...afterPhrase(
+            joinPhrases(
+              phrase('application_update.action', {
+                fields: Object.keys(set).join(', '),
+                name: String(current.name),
+              }),
+              (current.isCritical === true || set.isCritical === true) &&
+                phrase('application_update.actionCritical'),
+            ),
+          ),
         },
         ...APPLICATION_WRITABLE.filter((f) => f in set).map((field) => ({
           field,
@@ -1001,7 +1033,14 @@ const accessGrantCreate = defineTool({
     );
     return {
       data: { grant: grantSummary(grant) },
-      summary: `Granted ${who(user)} ${accessPhrase(grant.accessLevel)} to ${application.label ?? `application ${application.id}`}.`,
+      ...summaryPhrase(
+        phrase('access_grant_create.summary', {
+          self: yesNo(who(user) === 'you'),
+          userId: user.id,
+          ...accessParams(grant.accessLevel),
+          application: application.label ?? `application ${application.id}`,
+        }),
+      ),
       entityRefs: [
         {
           type: 'accessGrant',
@@ -1047,16 +1086,26 @@ const accessGrantCreate = defineTool({
       ADMIN_LEVELS.has(input.accessLevel.trim().toLowerCase());
     if (app.isCritical === true || adminLevel) warnings.push('NOTIFIES_USERS');
     if (app.isCritical === true) warnings.push(CRITICAL);
-    const until = input.expiresAt ? ` until ${day(input.expiresAt)}` : '';
+    const until = input.expiresAt ? day(input.expiresAt) : null;
     const self = whoId(rt, user.id) === 'you';
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after:
-          (self ? 'You are granting access to yourself. ' : '') +
-          `Give ${self ? 'yourself' : grantee.display} ${accessPhrase(input.accessLevel)} to ${appName}${until}. ` +
-          outlook.sentence +
-          criticalNote(app.isCritical === true, appName),
+        ...afterPhrase(
+          joinPhrases(
+            self && phrase('access_grant_create.actionSelf'),
+            phrase('access_grant_create.action', {
+              self: yesNo(self),
+              person: grantee.display,
+              ...accessParams(input.accessLevel),
+              application: appName,
+              hasUntil: yesNo(until !== null),
+              until: until ?? '',
+            }),
+            outlook.sentence,
+            criticalNote(app.isCritical === true, appName),
+          ),
+        ),
       },
       {
         field: 'user',
@@ -1164,7 +1213,14 @@ const accessGrantRevoke = defineTool({
     const applicationId = String(grant.applicationId);
     return {
       data: { grant: grantSummary(grant) },
-      summary: `Revoked ${whoId(rt, grant.userId)}'s ${accessPhrase(grant.accessLevel)} to application ${applicationId}.`,
+      ...summaryPhrase(
+        phrase('access_grant_revoke.summary', {
+          self: yesNo(whoId(rt, grant.userId) === 'you'),
+          userId: String(grant.userId),
+          ...accessParams(grant.accessLevel),
+          applicationId,
+        }),
+      ),
       entityRefs: [
         {
           type: 'accessGrant',
@@ -1241,10 +1297,18 @@ const accessGrantRevoke = defineTool({
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after:
-          `Remove ${loser === 'you' ? 'your' : `${loser}'s`} ${accessPhrase(grant.accessLevel)} to ${name}. ` +
-          outlook.sentence +
-          criticalNote(critical, name),
+        ...afterPhrase(
+          joinPhrases(
+            phrase('access_grant_revoke.action', {
+              self: yesNo(loser === 'you'),
+              person: loser,
+              ...accessParams(grant.accessLevel),
+              application: name,
+            }),
+            outlook.sentence,
+            criticalNote(critical, name),
+          ),
+        ),
       },
       { field: 'user', after: loser, valueKind: 'entity' },
       ...('status' in person
@@ -1398,7 +1462,12 @@ const accessRequestCreate = defineTool({
     );
     return {
       data: { request: requestSummary(request) },
-      summary: `Requested ${accessPhrase(request.accessLevel)} to ${application.label ?? `application ${application.id}`}; it now waits for an approver.`,
+      ...summaryPhrase(
+        phrase('access_request_create.summary', {
+          ...accessParams(request.accessLevel),
+          application: application.label ?? `application ${application.id}`,
+        }),
+      ),
       entityRefs: [
         {
           type: 'accessRequest',
@@ -1417,9 +1486,12 @@ const accessRequestCreate = defineTool({
       changes: [
         {
           field: 'action',
-          after:
-            `Ask for ${accessPhrase(input.accessLevel)} to ${appName} for yourself. ` +
-            'The people who can grant access are notified and approve or deny it.',
+          ...afterPhrase(
+            phrase('access_request_create.action', {
+              ...accessParams(input.accessLevel),
+              application: appName,
+            }),
+          ),
         },
         { field: 'application', after: appName, valueKind: 'entity' },
         { field: 'accessLevel', after: input.accessLevel ?? null },
@@ -1543,13 +1615,24 @@ const accessRequestDecide = defineTool({
         parent: { type: 'application', id: applicationId },
       });
     }
+    const requesterSelf = yesNo(whoId(rt, request.requesterId) === 'you');
     const summary =
       input.decision === 'approve'
-        ? `Approved the request: ${whoId(rt, request.requesterId)} now has ${accessPhrase(request.accessLevel)} to application ${applicationId} (grant ${String(request.grantId)}).`
-        : `Denied the request of ${whoId(rt, request.requesterId)} for application ${applicationId}; they are notified with the reason.`;
+        ? phrase('access_request_decide.summaryApprove', {
+            self: requesterSelf,
+            userId: String(request.requesterId),
+            ...accessParams(request.accessLevel),
+            applicationId,
+            grantId: String(request.grantId),
+          })
+        : phrase('access_request_decide.summaryDeny', {
+            self: requesterSelf,
+            userId: String(request.requesterId),
+            applicationId,
+          });
     return {
       data: { request: requestSummary(request) },
-      summary,
+      ...summaryPhrase(summary),
       entityRefs: refs,
     };
   },
@@ -1582,21 +1665,33 @@ const accessRequestDecide = defineTool({
       whoId(rt, request.requesterId) === 'you' ? 'you' : person.display;
     // Nothing stops an approver deciding their own request (route behaviour, ADR-0085); say it plainly.
     const own =
-      requester === 'you' ? 'You are deciding your own request. ' : '';
+      requester === 'you' && phrase('access_request_decide.actionSelf');
+    const decisionParams = {
+      self: yesNo(requester === 'you'),
+      person: requester,
+      ...accessParams(request.accessLevel),
+      application: name,
+    };
     const outlook = approve
       ? await provisioningOutlook(rt, applicationId, name, 'ACCESS_GRANTED')
       : null;
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after: approve
-          ? `${own}Approve the request: give ${requester} ${accessPhrase(request.accessLevel)} to ${name}. ` +
-            `An access grant is created and ${requester} ${requester === 'you' ? 'are' : 'is'} notified. ` +
-            outlook!.sentence +
-            criticalNote(critical, name)
-          : `${own}Deny ${requester === 'you' ? 'your' : `${requester}'s`} request for ${accessPhrase(request.accessLevel)} to ${name}. ` +
-            `${requester === 'you' ? 'You are' : `${requester} is`} notified with your reason.` +
-            criticalNote(critical, name),
+        ...afterPhrase(
+          approve
+            ? joinPhrases(
+                own,
+                phrase('access_request_decide.actionApprove', decisionParams),
+                outlook!.sentence,
+                criticalNote(critical, name),
+              )
+            : joinPhrases(
+                own,
+                phrase('access_request_decide.actionDeny', decisionParams),
+                criticalNote(critical, name),
+              ),
+        ),
       },
       {
         field: 'requester',

@@ -16,6 +16,7 @@ import {
   type AiResolvedReference,
 } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
+import { phrase, summaryPhrase } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -574,7 +575,9 @@ const assetModelCreate = defineTool({
     const row = asRow(model);
     return {
       data: pick(row, [...MODEL_FIELDS, 'createdAt']),
-      summary: `Created the asset model ${modelLabel(row)}.`,
+      ...summaryPhrase(
+        phrase('asset_model_create.summary', { model: modelLabel(row) }),
+      ),
       entityRefs: [
         {
           type: 'assetModel',
@@ -637,7 +640,11 @@ const locationCreate = defineTool({
     );
     return {
       data: pick(location, [...LOCATION_FIELDS, 'createdAt']),
-      summary: `Created the location ${str(location.name)}.`,
+      ...summaryPhrase(
+        phrase('location_create.summary', {
+          location: String(str(location.name)),
+        }),
+      ),
       entityRefs: [
         {
           type: 'location',

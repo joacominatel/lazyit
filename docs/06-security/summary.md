@@ -112,8 +112,16 @@ Snapshot of the security review. Updated each sweep. Method:
    revocation runs one DB lookup per value, unbounded, before the MCP-off 404 and the IP limiter.
    All four ✅ closed the same day (#1315): SEC-080 and SEC-081 in #1433, SEC-082 and SEC-083 in #1431.
 
+12. **2026-09-25 — Mermaid 12 upgrade follow-up (#1429, born closed).**
+   [[SEC-084-mermaid-html-labels-remote-image-load\|SEC-084]] (**Low**): `flowchart.htmlLabels: false`
+   is deprecated and no longer stops flowchart node labels rendering as HTML, so a KB author's `<img>`
+   in a node label loaded a remote image for every reader (a tracking pixel; strict mode still stripped
+   script). **✅ Closed the same day**: the root `htmlLabels: false`, listed in `secure` so a diagram's
+   directive or front matter cannot re-enable it.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
-one-off dependency triage, and sweep 11 covered only the AI web surfaces (chat renderer, approval cards,
+one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
+covered only the AI web surfaces (chat renderer, approval cards,
 consent page, `/account/ai`).
 
 ## Counts by severity (open)
@@ -159,6 +167,10 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    the consent share one per-account backoff, and each refused attempt is audited
    `CONSENT_STEP_UP_FAILED`. The `/mcp` query-token scan is charged to the per-IP limiter first and reads
    at most 4 well-formed values in one query. No data change.
+0. **SEC-084 ✅ Closed.** Born closed (fixed 2026-09-25, after #1429): mermaid is initialised with the
+   root `htmlLabels: false`, and `htmlLabels` is a `secure` key, so every diagram label is SVG text and
+   a KB author can no longer load a remote image in a reader's browser. No data change; HTML tags in
+   existing labels now show as literal text.
 0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
    web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):

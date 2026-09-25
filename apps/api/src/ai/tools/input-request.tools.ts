@@ -21,6 +21,7 @@ import { AssetModelsController } from '../../asset-models/asset-models.controlle
 import { LocationsController } from '../../locations/locations.controller';
 import { UsersController } from '../../users/users.controller';
 import { isSensitiveKey } from '../core/redaction';
+import { phrase, summaryPhrase } from '../core/sentences';
 import { AiRunsController } from '../runs/ai-runs.controller';
 import {
   bind,
@@ -675,7 +676,7 @@ export const requestInput = defineTool({
       form.groups.reduce((n, group) => n + group.fields.length, 0);
     return {
       data: { form, ...(truncated.length > 0 ? { truncated } : {}) },
-      summary: `Asked for ${count} field${count === 1 ? '' : 's'}`,
+      ...summaryPhrase(phrase('request_input.summary', { count })),
     };
   },
 });

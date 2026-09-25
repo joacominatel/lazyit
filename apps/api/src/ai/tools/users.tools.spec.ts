@@ -1858,6 +1858,13 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         field: 'secretVaultMemberships',
         before: 'any held',
         after: 'dropped (not restored by user_restore)',
+        // #1384: the same values as codes the web localizes.
+        beforeSentences: [
+          { code: 'user_offboard.vaultMembershipsBefore', params: {} },
+        ],
+        afterSentences: [
+          { code: 'user_offboard.vaultMembershipsAfter', params: {} },
+        ],
       });
 
       const approved = await tools.approve(proposal.action.id, chat(ADMIN));
@@ -1970,6 +1977,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         field: 'criticalApplicationAccess',
         before: 'Payroll',
         after: 'revoked',
+        afterSentences: [{ code: 'user_offboard.criticalRevoked', params: {} }],
       });
       await expect(
         tools.approve(proposal.action.id, chat(ADMIN)),
@@ -2054,6 +2062,12 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         field: 'criticalApplicationAccess',
         after:
           'unknown for 1 application(s) you cannot read — treated as critical',
+        afterSentences: [
+          {
+            code: 'user_offboard.criticalUnknownApplications',
+            params: { count: 1 },
+          },
+        ],
       });
       expect(applications.findOne).not.toHaveBeenCalled();
       const mcpRefused = await tools.invoke(
@@ -2097,6 +2111,9 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         field: 'criticalApplicationAccess',
         after:
           'unknown: you cannot list this person’s grants, so they are treated as critical',
+        afterSentences: [
+          { code: 'user_offboard.criticalUnknownGrants', params: {} },
+        ],
       });
       const mcpRefused = await tools.invoke(
         'user_offboard',

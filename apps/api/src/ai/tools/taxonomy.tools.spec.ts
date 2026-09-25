@@ -1261,6 +1261,9 @@ describe('taxonomy toolset (#1390)', () => {
       expect(action.preview!.changes).toContainEqual({
         field: 'usedBy',
         after: 'Unknown to you: assets',
+        afterSentences: [
+          { code: 'taxonomy.usedByUnknown', params: { kinds: 'assets' } },
+        ],
         valueKind: 'text',
       });
     });
@@ -1322,6 +1325,39 @@ describe('taxonomy toolset (#1390)', () => {
       expect(modelsService.update).toHaveBeenCalledWith(M.latitude, {
         specs: { ram: '16 GB' },
       });
+    });
+
+    it('clears the category with null: category before → none, the route gets categoryId null', async () => {
+      const action = await propose(
+        'asset_model_update',
+        { model: 'Latitude 7440', category: null },
+        actor('MEMBER'),
+      );
+      expect(action.preview).toMatchObject({
+        target: { type: 'assetModel', id: M.latitude },
+        changes: [
+          {
+            field: 'category',
+            before: { type: 'category', id: C.laptops, label: 'Laptops' },
+            after: 'None (no category)',
+            valueKind: 'entity',
+          },
+        ],
+      });
+      await tools.approve(action.id, chat(actor('MEMBER')));
+      expect(modelsService.update).toHaveBeenCalledWith(M.latitude, {
+        categoryId: null,
+      });
+      expect(models[0].categoryId).toBeNull();
+    });
+
+    it('clearing the category of a model that has none is a no-op', async () => {
+      expect(
+        await refused('asset_model_update', {
+          model: 'Pro 14',
+          category: null,
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
     });
 
     it('refuses a no-op and a category that does not exist', async () => {
@@ -1484,6 +1520,12 @@ describe('taxonomy toolset (#1390)', () => {
       expect(action.preview!.changes).toContainEqual({
         field: 'usedBy',
         after: 'Unknown to you: child locations',
+        afterSentences: [
+          {
+            code: 'taxonomy.usedByUnknown',
+            params: { kinds: 'child locations' },
+          },
+        ],
         valueKind: 'text',
       });
     });

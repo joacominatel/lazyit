@@ -1488,6 +1488,16 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         field: 'credential',
         before: 'none',
         after: `stored credential ${SECRET.jira2}`,
+        // #1384: the same values as codes the web localizes.
+        beforeSentences: [
+          { code: 'workflow_connection_update.credentialNone', params: {} },
+        ],
+        afterSentences: [
+          {
+            code: 'workflow_connection_update.credentialStored',
+            params: { secretId: SECRET.jira2 },
+          },
+        ],
       });
       expect(String(change(preview, 'whatItDoes')!.after)).toContain(
         'https://hooks.jira.example',

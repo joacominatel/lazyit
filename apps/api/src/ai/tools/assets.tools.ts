@@ -27,6 +27,7 @@ import {
 import { mapToolError } from '../core/error-mapper';
 import { requiresStepUp } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
+import { afterPhrase, phrase, summaryPhrase } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -709,7 +710,9 @@ const assetCreate = defineTool({
     const asset = asRow(await rt.call(AssetsController, 'create', { body }));
     return {
       data: writtenAsset(asset),
-      summary: `Created the asset ${assetLabel(asset)}.`,
+      ...summaryPhrase(
+        phrase('asset_create.summary', { asset: assetLabel(asset) }),
+      ),
       entityRefs: [assetRef(asset, 'created')],
     };
   },
@@ -1286,9 +1289,13 @@ const assetCreateBatch = defineTool({
         createdAssets: created,
         problems,
       },
-      summary:
-        `Created ${created.length} of ${plans.length} assets` +
-        (notCreated > 0 ? `; ${notCreated} not created (see problems).` : '.'),
+      ...summaryPhrase(
+        phrase('asset_create_batch.summary', {
+          count: created.length,
+          total: plans.length,
+          failed: notCreated,
+        }),
+      ),
       entityRefs,
     };
   },
@@ -1315,11 +1322,13 @@ const assetCreateBatch = defineTool({
     const changes: Change[] = [
       {
         field: 'action',
-        after:
-          `Create ${toCreate.length} of ${plans.length} assets` +
-          (skipped > 0
-            ? `; ${plural(skipped, 'row', 'rows')} skipped as requested.`
-            : '.'),
+        ...afterPhrase(
+          phrase('asset_create_batch.action', {
+            count: toCreate.length,
+            total: plans.length,
+            skipped,
+          }),
+        ),
         valueKind: 'text',
       },
       { field: 'rowCount', after: plans.length, valueKind: 'number' },
@@ -1523,7 +1532,9 @@ const assetUpdate = defineTool({
     );
     return {
       data: writtenAsset(asset),
-      summary: `Updated the asset ${assetLabel(asset)}.`,
+      ...summaryPhrase(
+        phrase('asset_update.summary', { asset: assetLabel(asset) }),
+      ),
       entityRefs: [assetRef(asset, 'updated')],
     };
   },
@@ -1948,9 +1959,13 @@ const assetUpdateBatch = defineTool({
         updatedAssets: updated,
         problems,
       },
-      summary:
-        `Updated ${updated.length} of ${plans.length} assets` +
-        (notUpdated > 0 ? `; ${notUpdated} not updated (see problems).` : '.'),
+      ...summaryPhrase(
+        phrase('asset_update_batch.summary', {
+          count: updated.length,
+          total: plans.length,
+          failed: notUpdated,
+        }),
+      ),
       entityRefs,
     };
   },
@@ -1989,11 +2004,13 @@ const assetUpdateBatch = defineTool({
       changes: [
         {
           field: 'action',
-          after:
-            `Update ${toApply.length} of ${plans.length} assets` +
-            (skipped > 0
-              ? `; ${plural(skipped, 'row', 'rows')} skipped as requested.`
-              : '.'),
+          ...afterPhrase(
+            phrase('asset_update_batch.action', {
+              count: toApply.length,
+              total: plans.length,
+              skipped,
+            }),
+          ),
           valueKind: 'text',
         },
         { field: 'rowCount', after: plans.length, valueKind: 'number' },
@@ -2060,7 +2077,9 @@ const assetArchive = defineTool({
     );
     return {
       data: writtenAsset(asset),
-      summary: `Archived the asset ${assetLabel(asset)}.`,
+      ...summaryPhrase(
+        phrase('asset_archive.summary', { asset: assetLabel(asset) }),
+      ),
       entityRefs: [assetRef(asset, 'archived')],
     };
   },
@@ -2145,7 +2164,9 @@ const assetRestore = defineTool({
     );
     return {
       data: writtenAsset(asset),
-      summary: `Restored the asset ${assetLabel(asset)}.`,
+      ...summaryPhrase(
+        phrase('asset_restore.summary', { asset: assetLabel(asset) }),
+      ),
       entityRefs: [assetRef(asset, 'restored')],
     };
   },
@@ -2246,7 +2267,12 @@ const assetCheckOut = defineTool({
     );
     return {
       data: pick(assignment, ['id', 'assetId', 'userId', 'assignedAt']),
-      summary: `Checked ${asset.label ?? asset.id} out to ${user.label ?? user.id}.`,
+      ...summaryPhrase(
+        phrase('asset_check_out.summary', {
+          asset: asset.label ?? asset.id,
+          user: user.label ?? user.id,
+        }),
+      ),
       entityRefs: ownershipRefs(String(assignment.id), 'created', asset, user),
     };
   },
@@ -2431,7 +2457,12 @@ const assetCheckIn = defineTool({
         'assignedAt',
         'releasedAt',
       ]),
-      summary: `Checked ${asset.label ?? asset.id} in from ${user.label ?? user.id}.`,
+      ...summaryPhrase(
+        phrase('asset_check_in.summary', {
+          asset: asset.label ?? asset.id,
+          user: user.label ?? user.id,
+        }),
+      ),
       entityRefs: ownershipRefs(String(assignment.id), 'updated', asset, user),
     };
   },
