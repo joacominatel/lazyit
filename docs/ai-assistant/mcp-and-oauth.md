@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -1111,8 +1111,12 @@ catalog so a tool description that would trip the guard fails CI, not the downlo
    release.
 2. The public routes have no dedicated rate limit: they serve a cached render (no DB work beyond the MCP
    switch read). Revisit if the switch read ever becomes expensive.
-3. Re-verify Claude Code's behavior with an `http://` MCP URL and the `@skills-dir` `userConfig` prompt in
-   the W4-3 client matrix.
+3. ~~Re-verify Claude Code's behavior with an `http://` MCP URL and the `@skills-dir` `userConfig` prompt~~ —
+   W4-3 (2026-09-25, Claude Code 2.1.282, [[ai-mcp-client-matrix]]): an `http://` URL with a personal-token
+   header connects; the `lan` plugin connects as `lazyit@skills-dir` and via `--plugin-dir` once
+   `userConfig.token` has a value (without one, the MCP server is absent in `-p` mode). Whether an
+   **interactive** session prompts for it is an operator check (§4.4 there). New: Claude Code refuses a
+   marketplace archive on a loopback host, so the marketplace path cannot work on a `localhost` instance (F3).
 
 ---
 
@@ -1124,8 +1128,10 @@ Code: `apps/api/src/mcp/` (except `distribution/`, W3-5) and `apps/api/src/oauth
 **The route.** `McpController` serves `@All('mcp')` with the SDK v2 `createMcpHandler` (pinned
 `@modelcontextprotocol/server` / `node` 2.1.0) wrapped by `toNodeHandler`, inside Nest: it serves the
 2026-07-28 revision and, statelessly, 2025-era clients (`legacy: 'stateless'`), mints no
-`Mcp-Session-Id`, answers GET/DELETE with 405, and uses `responseMode: 'json'` (no streams through the
-proxy). The controller is `@Public()` towards the global session guards and `@UseGuards(McpAuthGuard)`;
+`Mcp-Session-Id`, answers GET/DELETE with 405, and uses `responseMode: 'json'` (no long-lived streams
+through the proxy). `responseMode` governs the 2026-07-28 leg only: the 2025-era leg answers
+`text/event-stream` with a single `event: message` and closes, and 406 to a client that does not accept
+`text/event-stream` (observed in W4-3, [[ai-mcp-client-matrix]] F2). The controller is `@Public()` towards the global session guards and `@UseGuards(McpAuthGuard)`;
 the handler refuses (401) when the guard's verified caller is missing. `mcp.controller.spec.ts` pins
 both (the §7 checklist rule). A request id from pino reaches the factory for provenance and `INTERNAL`
 answers.
@@ -1270,5 +1276,6 @@ lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_p
 1. Reads over MCP are not written to `ai_tool_invocations` (the metadata access log remains the channel
    units' follow-up, tools-and-execution.md §9).
 2. The rate limits are per replica (the OAuth endpoints' posture).
-3. W4-3 validates the matrix with real clients (Claude Code, Cursor, the MCP Inspector, an SDK-v2 client
-   refused on `lan`).
+3. W4-3 validates the matrix with real clients — results and operator checklists in
+   [[ai-mcp-client-matrix]] (2026-09-25: the MCP Inspector, an SDK-v2 client and Claude Code verified on
+   `lan` and over an internal CA; Cursor, claude.ai and the Claude Code browser sign-in are operator runs).

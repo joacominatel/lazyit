@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # AI assistant — Frontend surfaces
@@ -666,7 +666,8 @@ UI copy say so.
 - "Not you?" signs out and returns to `/login?callbackUrl=<the consent URL>` (`signOutAndRevoke(path)`).
 - Manual install re-verified against code.claude.com (2026-09-24): a folder under `~/.claude/skills/`
   holding `.claude-plugin/plugin.json` loads as `<name>@skills-dir` on the next session; `--plugin-dir`
-  accepts a `.zip`. The `userConfig` prompt for a `@skills-dir` plugin is still a W4-3 re-verify item.
+  accepts a `.zip`. W4-3 ([[ai-mcp-client-matrix]]) verified that the `@skills-dir` plugin connects once
+  `userConfig.token` is set; whether an interactive session prompts for it is an operator check there.
 
 ---
 
