@@ -51,7 +51,7 @@
     "mammoth": "^1.12.3",
     "meilisearch": "^0.60.0",
     "multer": "^2.4.0",
-    "nestjs-pino": "^4.6.1",
+    "nestjs-pino": "^5.2.1",
     "nestjs-zod": "^5.5.0",
     "nodemailer": "^10.0.10",
     "pino": "^10.3.1",
