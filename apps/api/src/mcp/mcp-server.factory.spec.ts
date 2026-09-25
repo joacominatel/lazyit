@@ -12,7 +12,12 @@ jest.mock('jose', () => ({
 }));
 
 import type { AiToolService } from '../ai/core/ai-tool.service';
-import type { AiToolListing } from '../ai/core/tool-descriptor';
+import { z } from 'zod';
+import type {
+  AiToolListing,
+  RegisteredAiTool,
+} from '../ai/core/tool-descriptor';
+import type { AiToolRegistry } from '../ai/core/tool-registry';
 import type { AiPromptService } from '../ai/prompt/ai-prompt.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { McpCaller } from './mcp-caller';
@@ -57,6 +62,8 @@ describe('McpServerFactory', () => {
   let limiter: McpRateLimiter;
   let factory: McpServerFactory;
   let count: jest.Mock;
+  let findMany: jest.Mock;
+  let registered: RegisteredAiTool[];
 
   beforeEach(() => {
     tools = {
@@ -71,11 +78,18 @@ describe('McpServerFactory', () => {
     };
     limiter = new McpRateLimiter();
     count = jest.fn().mockResolvedValue(0);
+    findMany = jest.fn().mockResolvedValue([]);
+    registered = [];
     factory = new McpServerFactory(
       tools as unknown as AiToolService,
       { mcpInstructions: () => 'primer' } as unknown as AiPromptService,
       limiter,
-      { aiToolInvocation: { count } } as unknown as PrismaService,
+      { aiToolInvocation: { count, findMany } } as unknown as PrismaService,
+      {
+        all: () => registered,
+        get: (name: string) =>
+          registered.find((t) => t.descriptor.name === name),
+      } as unknown as AiToolRegistry,
     );
   });
 
@@ -199,6 +213,59 @@ describe('McpServerFactory', () => {
       );
       expect(count).not.toHaveBeenCalled();
       expect(tools.invoke).toHaveBeenCalledTimes(2);
+    });
+
+    describe('a batch counts its rows, not one call (SEC-081)', () => {
+      const batch = {
+        descriptor: {
+          name: 'b',
+          class: 'write',
+          input: z.strictObject({ rows: z.array(z.string()).min(1) }),
+          mutationWeight: (input: { rows: string[] }) => input.rows.length,
+        },
+      } as unknown as RegisteredAiTool;
+
+      beforeEach(() => {
+        registered = [batch];
+      });
+
+      it('refuses a batch with more rows than the cap leaves, before anything runs', async () => {
+        const refused = await factory.call(SA, tool('b', 'write'), {
+          rows: ['x', 'y', 'z'],
+        });
+        expect(refused).toMatchObject({
+          isError: true,
+          structuredContent: { error: { code: 'RATE_LIMITED' } },
+        });
+        expect(JSON.stringify(refused)).toContain('would make 3 changes');
+        expect(tools.invoke).not.toHaveBeenCalled();
+      });
+
+      it('lets a batch that fits through', async () => {
+        await factory.call(SA, tool('b', 'write'), { rows: ['x', 'y'] });
+        expect(tools.invoke).toHaveBeenCalledTimes(1);
+      });
+
+      it('weighs earlier batches by their stored rows: one 2-row batch uses a cap of 2', async () => {
+        // One earlier write in the window, and it is a 2-row batch.
+        count.mockResolvedValue(1);
+        findMany.mockResolvedValue([
+          { toolName: 'b', input: { rows: ['x', 'y'] } },
+        ]);
+        const refused = await factory.call(SA, tool('w', 'write'), {});
+        expect(refused).toMatchObject({ isError: true });
+        expect(tools.invoke).not.toHaveBeenCalled();
+        expect(findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- a jest asymmetric matcher
+            where: expect.objectContaining({
+              serviceAccountId: 'sa-1',
+              toolName: { in: ['b'] },
+            }),
+            take: 2,
+          }),
+        );
+      });
     });
 
     it('fails closed when the cap cannot be counted', async () => {

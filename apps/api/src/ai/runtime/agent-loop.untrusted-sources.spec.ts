@@ -18,10 +18,15 @@ jest.mock('jose', () => ({
 }));
 
 import { Logger } from '@nestjs/common';
+import { z } from 'zod';
 import type { AiToolResult } from '@lazyit/shared';
 import type { AiReferenceSpec } from '../core/reference-resolver';
 import { successResult } from '../core/result-shaper';
-import type { AiToolDescriptor, AiToolRuntime } from '../core/tool-descriptor';
+import type {
+  AiToolDescriptor,
+  AiToolRuntime,
+  RegisteredAiTool,
+} from '../core/tool-descriptor';
 import { assetsToolset } from '../tools/assets.tools';
 import { contextToolset } from '../tools/context.tools';
 import { kbToolset } from '../tools/kb.tools';
@@ -29,6 +34,7 @@ import {
   buildRuntime,
   fakeTool,
   HUMAN,
+  SERVICE,
   TOOLS,
   type Runtime,
 } from './runtime.harness-spec';
@@ -324,5 +330,78 @@ describe('SEC-080: reads of other-authored text mark the turn untrusted (real re
     ]);
     expect(rt.tools.approved).toHaveLength(0);
     expect(rt.run(runId).status).toBe('AWAITING_APPROVAL');
+  });
+});
+
+describe('SEC-081: the per-SA mutation cap counts the rows of a batch (headless)', () => {
+  const BATCH = 'update_assets_batch';
+
+  beforeEach(() => {
+    const base = fakeTool(BATCH, 'write');
+    const tool: RegisteredAiTool = {
+      ...base,
+      descriptor: {
+        ...base.descriptor,
+        input: z.strictObject({ rows: z.array(z.string()).min(1) }),
+        mutationWeight: (input: { rows: string[] }) => input.rows.length,
+      },
+    };
+    rt.registry.tools.set(BATCH, tool);
+    rt.prisma.tables.aiServiceAccountSettings.rows.push({
+      serviceAccountId: 'csa0000000000000000000001',
+      access: 'read-write',
+      maxMutationsPerRun: 2,
+    });
+  });
+
+  function headless() {
+    return rt.orchestrator.submit({
+      identity: SERVICE,
+      channel: 'HEADLESS',
+      text: 'Retire the lab laptops',
+    });
+  }
+
+  function results(conversationId: string) {
+    const tool = rt.transcript(conversationId).find((m) => m.role === 'tool')!;
+    return tool.content as Array<{ output: any; isError: boolean }>;
+  }
+
+  it('refuses a batch with more rows than the cap, before anything runs', async () => {
+    rt.model.push(
+      {
+        toolCalls: [
+          {
+            toolCallId: 'b1',
+            toolName: BATCH,
+            input: { rows: ['a1', 'a2', 'a3'] },
+          },
+        ],
+      },
+      { text: 'Refused.' },
+    );
+    const { conversationId } = await headless();
+    await rt.drain();
+    expect(rt.tools.invoked).toHaveLength(0);
+    const [refused] = results(conversationId);
+    expect(refused.isError).toBe(true);
+    expect(refused.output.error.message).toContain('would make 3 changes');
+  });
+
+  it('counts an earlier batch by its rows: a 2-row batch uses a cap of 2', async () => {
+    rt.model.push(
+      {
+        toolCalls: [
+          { toolCallId: 'b1', toolName: BATCH, input: { rows: ['a1', 'a2'] } },
+          { toolCallId: 'w1', toolName: WRITE, input: { id: 'a3' } },
+        ],
+      },
+      { text: 'One batch done.' },
+    );
+    const { conversationId } = await headless();
+    await rt.drain();
+    expect(rt.tools.invoked.map((call) => call.name)).toEqual([BATCH]);
+    const [, second] = results(conversationId);
+    expect(second.output.error.message).toContain('mutation cap');
   });
 });

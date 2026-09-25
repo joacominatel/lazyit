@@ -32,6 +32,7 @@ import {
   type ChatModelToolCall,
   type ChatModelToolDefinition,
 } from '../core/ports/chat-model.port';
+import { mutationWeightOf, mutationsUsed } from '../core/mutation-weight';
 import { isSensitiveKey, redactUrlCredentials } from '../core/redaction';
 import { callKindOf, errorResult } from '../core/result-shaper';
 import type {
@@ -984,12 +985,25 @@ export class AgentLoop {
 
     if (kind === 'mutation') {
       const cap = state.who.maxMutationsPerRun;
-      if (cap !== null && (await this.mutationsInRun(runId)) >= cap) {
-        return refuse({
-          code: 'FORBIDDEN',
-          status: 403,
-          message: `The mutation cap of this run (${cap}) was reached`,
-        });
+      if (cap !== null) {
+        // The cap counts changes, not calls: a batch weighs its rows (SEC-081).
+        const used = await this.mutationsInRun(runId, cap);
+        const weight = mutationWeightOf(tool, call.input);
+        if (used >= cap) {
+          return refuse({
+            code: 'FORBIDDEN',
+            status: 403,
+            message: `The mutation cap of this run (${cap}) was reached`,
+          });
+        }
+        if (used + weight > cap) {
+          return refuse({
+            code: 'FORBIDDEN',
+            status: 403,
+            message: `This call would make ${weight} changes, but the mutation cap of this run (${cap}) allows ${cap - used} more`,
+            hint: `Change at most ${cap - used} records in this run; nothing was changed.`,
+          });
+        }
       }
     }
     this.emitCall(runId, call, tool, 'EXECUTING');
@@ -1195,15 +1209,21 @@ export class AgentLoop {
     return { kind: 'executed', result: action.result };
   }
 
-  /** Headless writes this run attempted (the per-run mutation cap; refusals do not count). */
-  private mutationsInRun(runId: string): Promise<number> {
-    return this.prisma.aiToolInvocation.count({
-      where: {
+  /**
+   * The changes the headless writes of this run attempted account for (the per-run mutation cap;
+   * refusals do not count) — a batch counts its rows (SEC-081).
+   */
+  private mutationsInRun(runId: string, cap: number): Promise<number> {
+    return mutationsUsed(
+      this.prisma,
+      this.registry.all(),
+      {
         runId,
         toolClass: { in: ['write', 'elevated'] },
         status: { not: 'DENIED' },
       },
-    });
+      cap,
+    );
   }
 
   /**

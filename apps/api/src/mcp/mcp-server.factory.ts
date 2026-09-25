@@ -5,8 +5,10 @@ import {
   type StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server';
 import { AiToolService } from '../ai/core/ai-tool.service';
+import { mutationWeightOf, mutationsUsed } from '../ai/core/mutation-weight';
 import { callKindOf } from '../ai/core/result-shaper';
 import type { AiToolListing } from '../ai/core/tool-descriptor';
+import { AiToolRegistry } from '../ai/core/tool-registry';
 import { AiPromptService } from '../ai/prompt/ai-prompt.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { isMcpListable, toMcpAnnotations } from './annotations';
@@ -72,6 +74,7 @@ export class McpServerFactory {
     private readonly prompt: AiPromptService,
     private readonly rateLimiter: McpRateLimiter,
     private readonly prisma: PrismaService,
+    private readonly registry: AiToolRegistry,
   ) {}
 
   /** The tools this caller may see over MCP, in a deterministic order. */
@@ -117,13 +120,17 @@ export class McpServerFactory {
 
   /**
    * The per-SA `maxMutationsPerRun` cap over MCP (CTO decision, #1315 G3 review F2): MCP has no runs, so
-   * the cap bounds the writes one Service Account attempts through `/mcp` in any rolling hour, counted
-   * from the permanent invocation rows (so it holds across replicas and restarts). Soft under concurrency:
-   * calls racing past the count can overshoot by the number in flight — the runtime's budget posture.
+   * the cap bounds the CHANGES one Service Account attempts through `/mcp` in any rolling hour, counted
+   * from the permanent invocation rows (so it holds across replicas and restarts). A batch counts its rows,
+   * not one (SEC-081), and a call that would pass the cap is refused whole. Soft under concurrency: calls
+   * racing past the count can overshoot by the number in flight — the runtime's budget posture. Null when
+   * the call may run; otherwise the refusal message.
    */
-  private async overServiceAccountWriteCap(
+  private async serviceAccountWriteCapRefusal(
     caller: McpCaller,
-  ): Promise<boolean> {
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<string | null> {
     const cap = caller.maxWritesPerHour;
     if (
       caller.identity.kind !== 'service' ||
@@ -131,19 +138,28 @@ export class McpServerFactory {
       !Number.isInteger(cap) ||
       cap < 1
     ) {
-      return false;
+      return null;
     }
+    const reached = `This Service Account may make at most ${cap} changes per hour over MCP.`;
     const since = new Date(Date.now() - MCP_SA_WRITE_CAP_WINDOW_MS);
     try {
-      const writes = await this.prisma.aiToolInvocation.count({
-        where: {
+      const used = await mutationsUsed(
+        this.prisma,
+        this.registry.all(),
+        {
           channel: 'MCP',
           serviceAccountId: caller.identity.serviceAccountId,
           toolClass: { in: ['write', 'elevated'] },
           createdAt: { gt: since },
         },
-      });
-      return writes >= cap;
+        cap,
+      );
+      if (used >= cap) return reached;
+      const weight = mutationWeightOf(this.registry.get(toolName), args);
+      if (used + weight > cap) {
+        return `${reached} This call would make ${weight} changes; ${cap - used} remain this hour. Nothing was changed.`;
+      }
+      return null;
     } catch (err) {
       // Fail closed: a cap that cannot be checked refuses the write.
       this.logger.error(
@@ -151,7 +167,7 @@ export class McpServerFactory {
           err instanceof Error ? err.message : String(err)
         }`,
       );
-      return true;
+      return reached;
     }
   }
 
@@ -172,14 +188,13 @@ export class McpServerFactory {
         { hint: 'Wait a minute, then retry.' },
       );
     }
-    if (mutation && (await this.overServiceAccountWriteCap(caller))) {
-      return toolError(
-        'RATE_LIMITED',
-        `This Service Account may make at most ${caller.maxWritesPerHour} changes per hour over MCP.`,
-        {
-          hint: 'An administrator sets this cap in the Service Account’s AI access settings.',
-        },
-      );
+    const capRefusal = mutation
+      ? await this.serviceAccountWriteCapRefusal(caller, tool.name, args)
+      : null;
+    if (capRefusal) {
+      return toolError('RATE_LIMITED', capRefusal, {
+        hint: 'An administrator sets this cap in the Service Account’s AI access settings.',
+      });
     }
     try {
       const result = await this.tools.invoke(
