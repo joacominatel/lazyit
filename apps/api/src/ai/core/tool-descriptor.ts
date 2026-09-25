@@ -160,6 +160,12 @@ export interface AiToolDescriptor<
    * not apply). It never widens what the tool accepts semantically and never touches the listed schema.
    */
   normalizeInput?(raw: unknown): unknown;
+  /**
+   * How many changes one call of a `write`/`elevated` tool counts for against the per-Service-Account
+   * mutation cap (SEC-081; `core/mutation-weight.ts`) — the records it writes, from the validated input
+   * (a batch: its rows). Default 1. Values below 1 count as 1.
+   */
+  mutationWeight?(input: z.output<S>): number;
   /** The handlers `run`/`preview` may call. `[0]` is primary: its `@RequirePermission` is the tool's. */
   bindings: readonly [HandlerRef, ...HandlerRef[]];
   run(input: z.output<S>, rt: AiToolRuntime): Promise<AiToolRunOutput<D>>;

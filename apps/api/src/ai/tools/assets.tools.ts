@@ -638,7 +638,8 @@ const assetGet = defineTool({
               ),
             };
     }
-    return { data };
+    // The asset it read: the source the untrusted-source banner names (SEC-080).
+    return { data, entityRefs: [assetRef(row, 'navigate')] };
   },
 });
 
@@ -1216,6 +1217,9 @@ const assetCreateBatch = defineTool({
   domain: 'assets',
   class: 'write',
   input: assetCreateBatchInput,
+  // Every row it would write counts against a Service Account's mutation cap, not the call (SEC-081).
+  mutationWeight: (input) =>
+    input.rows.filter((row) => row.skip !== true).length,
   bindings: [
     bind(AssetsController, 'create'),
     bind(AssetsController, 'findAll'),
@@ -1885,6 +1889,9 @@ const assetUpdateBatch = defineTool({
   destructive: true,
   idempotent: true,
   input: assetUpdateBatchInput,
+  // Every row it would write counts against a Service Account's mutation cap, not the call (SEC-081).
+  mutationWeight: (input) =>
+    input.rows.filter((row) => row.skip !== true).length,
   bindings: [
     bind(AssetsController, 'update'),
     bind(AssetsController, 'findOne'),

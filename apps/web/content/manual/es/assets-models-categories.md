@@ -27,6 +27,9 @@ descripción opcional, una **categoría** opcional y **valores por defecto** opc
   **no** reescribe los campos personalizados de los activos ya creados a partir de él, y los valores
   propios de un activo siempre prevalecen sobre los del modelo.
 - El **SKU** es único entre los modelos activos cuando se completa, igual que la serie en los activos.
+- La **categoría** es opcional y se puede quitar después: al editar un modelo, elige **Sin categoría**
+  al principio de la lista de categorías y guarda. El modelo (y todos sus activos) queda sin categoría,
+  así que ya no coincide con el filtro de categoría de la lista de Activos.
 
 Gestiona los modelos en **Configuración → Taxonomías → Modelos de activo**. El selector de modelo del
 formulario de activo permite buscar, así un catálogo largo sigue siendo cómodo de usar.

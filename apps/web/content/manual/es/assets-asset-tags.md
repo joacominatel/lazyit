@@ -58,8 +58,10 @@ El formulario de creación te dice cuál sería esa etiqueta, en una línea **de
 dejas vacía, este activo recibirá IT-1001."* Esa línea solo aparece con el esquema activado, y es la
 próxima etiqueta realmente disponible, no el contador en bruto. El texto gris **dentro** del campo es
 otra cosa: es solo un ejemplo de formato (`ej. LZ-0001`) y nunca significa "esta es la etiqueta que vas
-a recibir". Si no ves la línea de ayuda, no tienes el permiso de *gestionar configuración* — la
-etiqueta se asigna igual al guardar.
+a recibir". La línea de ayuda la ve cualquiera que pueda crear activos — no hace falta el permiso de
+*gestionar configuración* para verla, solo para cambiar el esquema. Si falta con el esquema activado,
+la secuencia se quedó sin números (mira la configuración del esquema) o la vista previa no pudo
+cargarse; el activo se guarda igual.
 
 ## La regla de saltar las existentes
 

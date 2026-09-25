@@ -2,6 +2,11 @@
 
 import { useMemo } from "react";
 import { Combobox } from "@/components/combobox";
+import {
+  fromNoneAwareValue,
+  NO_CATEGORY_VALUE,
+  toNoneAwareValue,
+} from "./category-combobox-none";
 
 /**
  * A client-filter category picker (issue #199): the {@link Combobox} in client-filter mode over a
@@ -13,6 +18,9 @@ import { Combobox } from "@/components/combobox";
  * clears it (the Combobox's toggle), which is the inline equivalent of the old "— None —" item.
  * Controlled by `value`/`onValueChange` (the category id; `""` clears it); forwards `id` for the
  * `Field`/`FieldError` + `Controller` label association.
+ *
+ * `noneLabel` adds an EXPLICIT "no category" row at the top (#1315) — discoverable, unlike the toggle —
+ * shown selected (and as the trigger text) while there is no category. It still reports `""`.
  */
 export function CategoryCombobox({
   id,
@@ -23,6 +31,7 @@ export function CategoryCombobox({
   placeholder,
   searchPlaceholder,
   emptyText,
+  noneLabel,
 }: {
   id?: string;
   value?: string;
@@ -32,17 +41,25 @@ export function CategoryCombobox({
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  noneLabel?: string;
 }) {
-  const items = useMemo(
-    () => categories.map((category) => ({ value: category.id, label: category.name })),
-    [categories],
-  );
+  const items = useMemo(() => {
+    const options = categories.map((category) => ({
+      value: category.id,
+      label: category.name,
+    }));
+    return noneLabel
+      ? [{ value: NO_CATEGORY_VALUE, label: noneLabel }, ...options]
+      : options;
+  }, [categories, noneLabel]);
 
   return (
     <Combobox
       id={id}
-      value={value}
-      onValueChange={onValueChange}
+      value={noneLabel ? toNoneAwareValue(value) : value}
+      onValueChange={(next) =>
+        onValueChange(noneLabel ? fromNoneAwareValue(next) : next)
+      }
       items={items}
       disabled={disabled}
       placeholder={placeholder}

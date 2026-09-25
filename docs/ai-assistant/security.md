@@ -414,7 +414,11 @@ the **exfiltration leg** and the **consequential-action leg**.
   content" markers. This is spotlighting. It is **defence in depth only** and is never a control
   anything relies on [E: OWASP].
 - The runtime records which untrusted sources were read in the current turn. The preview card lists
-  them. This is cheap provenance, not full taint tracking.
+  them. This is cheap provenance, not full taint tracking. The marker is derived from the wrapping
+  itself (SEC-080): any read (or answered form) whose result data carries `<untrusted_content>` adds its
+  entity refs, or — when it names no entity (a search, a list) — the synthetic
+  `{ type: "toolResult", id: <tool name> }` ref, so what a tool chooses to return cannot switch it off.
+  `kb_get_article` and `asset_get` name what they read, so the banner links to it.
 
 ### 6.2 Confirmation (chat): preview, approve, execute
 

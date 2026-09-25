@@ -1268,7 +1268,9 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   by the provider's search and written by others. `webSourceLink` (`lib/ai/web-sources.ts`) re-checks the
   scheme: only an absolute `http:` / `https:` URL without credentials becomes an `href`. `/copy` writes
   the sources as plain text with the URL in angle brackets (the title is never Markdown link text).
-  Copy: `ai.sources.*`; the untrusted-source banner names the marker as `ai.entities.webSearch`.
+  Copy: `ai.sources.*`; the untrusted-source banner names the marker as `ai.entities.webSearch`. The
+  other synthetic marker, `toolResult` (a read that carried other-authored text but named no entity,
+  SEC-080), has no page either: the banner shows without a link for it (`ai.entities.toolResult`).
 
 ## 12. Implementation units (superseded)
 

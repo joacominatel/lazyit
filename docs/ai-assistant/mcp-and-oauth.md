@@ -1211,9 +1211,10 @@ grant or the SA): 600 authenticated HTTP requests → HTTP 429; 300 `tools/call`
 
 **The per-SA write cap over MCP** (CTO decision, G3 review F2). A Service Account's
 `maxMutationsPerRun` (Settings → AI, per SA) must hold on `/mcp` too, but MCP has no runs: there it caps
-the writes (`write` and `elevated` calls) the SA attempts through `/mcp` in any **rolling hour**, counted
-from the permanent `ai_tool_invocations` rows (`channel = MCP`), so it holds across replicas and
-restarts. Past it a write answers `isError` `RATE_LIMITED`; a count that fails refuses the write (fail
+the changes the SA's writes (`write` and `elevated` calls) through `/mcp` account for in any **rolling
+hour**, counted from the permanent `ai_tool_invocations` rows (`channel = MCP`), so it holds across
+replicas and restarts. A batch counts its rows, not one (the descriptor's `mutationWeight`, SEC-081), and a
+call that would pass the cap is refused whole. Past it a write answers `isError` `RATE_LIMITED`; a count that fails refuses the write (fail
 closed). Soft under concurrency: calls racing past the count can overshoot by the number in flight (the
 runtime's budget posture).
 

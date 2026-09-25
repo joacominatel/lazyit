@@ -196,7 +196,9 @@ uno por uno. En **Configuración → Cuentas de servicio**, abre el menú de la 
 - **Lectura y escritura** — el asistente también puede hacer cambios dentro de los permisos de la cuenta.
   Es el valor por defecto de una cuenta nunca configurada.
 - **Limitar escrituras** (solo con lectura y escritura) — limita los cambios por ejecución sin interfaz y,
-  como MCP no tiene ejecuciones, por hora móvil en MCP.
+  como MCP no tiene ejecuciones, por hora móvil en MCP. Cuenta cada registro que cambia: un lote que
+  actualiza 20 activos son 20 cambios, y un lote más grande que lo que queda del límite se rechaza entero,
+  sin cambiar nada.
 
 El acceso a IA solo restringe lo que permiten los permisos de la cuenta; nunca otorga uno. La cuenta además
 necesita **Usar el asistente de IA** para las ejecuciones sin interfaz y **Conectar agentes de IA externos

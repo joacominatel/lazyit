@@ -56,6 +56,10 @@ export type AiToolName = z.infer<typeof AiToolNameSchema>;
  *
  * `webSearch` is not a lazyit record: it is the marker the runtime adds to a turn's untrusted sources when
  * the provider searched the web in it (#1389, {@link AI_WEB_SEARCH_SOURCE_REF}). It has no page.
+ *
+ * `toolResult` is not a lazyit record either: it is the marker for a read whose result carried
+ * other-authored text but named no entity (a search, a list — SEC-080, {@link aiToolResultSourceRef}). Its
+ * id is the tool name. It has no page.
  */
 export const AI_ENTITY_TYPES = [
   "asset",
@@ -77,6 +81,7 @@ export const AI_ENTITY_TYPES = [
   /** The instance's single asset tag scheme (instance configuration, #1394); id `singleton`. */
   "assetTagScheme",
   "webSearch",
+  "toolResult",
 ] as const;
 export const AiEntityTypeSchema = z.enum(AI_ENTITY_TYPES);
 export type AiEntityType = z.infer<typeof AiEntityTypeSchema>;
@@ -116,6 +121,15 @@ export const AI_WEB_SEARCH_SOURCE_REF: AiEntityRef = Object.freeze({
   op: "updated",
   label: "Web search results",
 });
+
+/**
+ * The untrusted-source marker of a read whose result carried other-authored text (`<untrusted_content>`)
+ * but named no entity (SEC-080): the turn counts as having read untrusted sources — a proposal made in it
+ * shows the untrusted-source banner and is never auto-approved — even when the tool returned no refs.
+ */
+export function aiToolResultSourceRef(toolName: string): AiEntityRef {
+  return { type: "toolResult", id: toolName, op: "navigate" };
+}
 
 /**
  * The READ-TOLERANT list of entity refs used inside every read shape: each item is parsed on its own and

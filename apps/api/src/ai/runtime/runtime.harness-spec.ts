@@ -595,6 +595,11 @@ export class FakeTools {
   approveError: unknown = null;
   /** When set, a headless write is left EXECUTING and never returns (the process died mid-execution). */
   hangOnWrite = false;
+  /** Reads answered by a runner instead of the canned result: a REAL tool's `run` (SEC-080 specs). */
+  readonly readRunners = new Map<
+    string,
+    (input: unknown) => Promise<AiToolResult>
+  >();
   ttlMs = 30 * 60 * 1000;
 
   constructor(
@@ -652,6 +657,8 @@ export class FakeTools {
         entityRefs: [],
       };
     }
+    const runner = this.readRunners.get(name);
+    if (runner && (cls === 'read' || cls === 'navigate')) return runner(input);
     if (cls === 'read' || cls === 'navigate') return readResult(name, input);
     if (ctx.channel === 'CHAT') {
       return errorResult('mutation', {

@@ -32,6 +32,7 @@ import {
 } from '../../test/oauth/oauth-harness';
 import { payloadOf, toolsCall, toolsList } from '../../test/mcp/mcp-rpc';
 import { AiToolService } from '../ai/core/ai-tool.service';
+import { AiToolRegistry } from '../ai/core/tool-registry';
 import { AiPromptService } from '../ai/prompt/ai-prompt.module';
 import { AiRunPrincipals } from '../ai/runtime/principal-context';
 import { PrincipalLoaderService } from '../auth/principal-loader.service';
@@ -173,6 +174,10 @@ describe('/mcp authentication matrix', () => {
         { provide: OAuthTokenService, useValue: h.tokens },
         { provide: PersonalTokensService, useValue: personal },
         { provide: AiToolService, useValue: tools },
+        {
+          provide: AiToolRegistry,
+          useValue: { all: () => [], get: () => undefined },
+        },
         { provide: NotificationsService, useValue: notifications },
         {
           provide: ServiceAccountAuthenticator,
