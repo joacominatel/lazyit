@@ -652,7 +652,16 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
   **custom schemes are allowed** (Cursor registers `cursor://…`), which replaces §5.3's "http/https only".
   The trust signal is the redirect host in large mono type, then the full URI; `client_uri` is plain
   unlinked text labelled "not checked". Unverified clients get a warning callout **and** a second
-  confirmation dialog before the approval is sent. `lazyit.admin` is a separate checkbox, never
+  confirmation dialog before the approval is sent.
+- **Client domain (CIMD, #1413 follow-up)** — when `client.verifiedDomain` is non-null the consent page shows
+  it on its own row under the badge ("Domain: claude.ai" / "Dominio: claude.ai", mono, with a "checked by
+  lazyit" hint), apart from the title that carries the self-declared name; the unverified warning and the
+  confirmation dialog name it too. Connected apps shows the same "Domain" line under an app's name. The
+  green "Verified" badge still follows `client.verified` alone (allowlisted CIMD clients only), so a
+  domain-proven but unlisted client keeps the "Not verified" badge **and** the extra confirmation.
+  `lib/ai/client-domain.ts` `clientDomain` (bun-tested) reads the field tolerantly: absent (older API),
+  null (DCR) or blank → nothing is shown. No admin view of OAuth grants exists yet
+  (`useAllOAuthGrants` has no caller); when one is built it reuses `clientDomain`. `lazyit.admin` is a separate checkbox, never
   preselected, with a password field; `STEP_UP_UNAVAILABLE` unticks it. Nothing is remembered. Framing is
   already denied app-wide (`next.config.ts` `frame-ancestors 'none'` + `X-Frame-Options: DENY`, Caddy),
   so no header change was needed.
@@ -671,11 +680,12 @@ UI copy say so.
   #1366); in OAuth mode on an API without it, the `issuer` of the public
   `/.well-known/oauth-authorization-server`; on a host-agnostic `lan` instance (no pinned origin) the
   page's origin. The marketplace command uses `mcp.marketplaceUrl` when the status reports it
-  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). **Known gap (W4-3 F3, #1315):** the API reports
-  `marketplaceUrl: null` on a loopback origin, but in OAuth mode the panel still renders the marketplace
-  commands, rebuilt from the page origin (`claudePluginCommands` falls back to `marketplaceUrl(origin)`);
-  the download path below them is what works there, and the Manual says so. Hiding the marketplace step
-  when the status reports null is a frontend follow-up. When the server origin differs from the
+  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). **Loopback (W4-3 F3, #1418, closed):** the
+  API reports `marketplaceUrl: null` on a loopback origin, and `claudePluginCommands` then returns null:
+  in OAuth mode the panel hides the marketplace step and leads with the download / `--plugin-dir` path,
+  with a one-line note that Claude Code adds no marketplace from a loopback address. Only an explicit
+  `null` does this; an absent field (an API older than #1418) keeps the commands rebuilt from the origin,
+  as before. When the server origin differs from the
   page's, or cannot be read in OAuth mode, the panel warns and renders the snippets without copy buttons
   (for review, not copy-ready).
 - The personal-token and consent-decision mutations use `gcTime: 0` and are `reset()` as soon as they
@@ -818,12 +828,12 @@ while MCP is enabled. On an HTTPS instance with MCP enabled, the public
 **K8 — OAuth (web-facing parts only)** ([[ai-assistant/mcp-and-oauth|MCP]] §5.1–5.2):
 - The authorization endpoint **is the web page** `/oauth/authorize?<OAuth parameters>`. Its server
   component calls `POST /oauth/authorize/validate` (Bearer) with the raw parameters →
-  `{ client: { id, name, uri?, verified }, redirectUri, redirectHost, loopbackOnly, scopes: Scope[],
+  `{ client: { id, name, uri?, verified, verifiedDomain? }, redirectUri, redirectHost, loopbackOnly, scopes: Scope[],
   user: { email } }` or a typed refusal (`AI_DISABLED`, `FORBIDDEN`, `INVALID_CLIENT`,
   `INVALID_REDIRECT`). An invalid client or redirect renders an error page, never a redirect.
 - `POST /oauth/authorize/decision` (Bearer) with the same raw parameters plus the chosen scope →
   `{ redirectTo }` (code + state + iss, or `error=access_denied`). The API re-validates everything.
-- `GET /oauth/grants/mine` → `Page<{ id, kind: "oauth"|"personal", client?: { name, verified },
+- `GET /oauth/grants/mine` → `Page<{ id, kind: "oauth"|"personal", client?: { name, verified, verifiedDomain? },
   label?, redirectHost?, scopes, createdAt, lastUsedAt, expiresAt? }>`; `DELETE /oauth/grants/:id`
   (own).
 - `POST /oauth/personal-tokens { label, expiresInDays, scopes? }` → the token, shown once (`lan` only;
