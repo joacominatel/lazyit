@@ -183,6 +183,7 @@
       "personal": "Token personal"
     },
     "unverified": "Sin verificar",
+    "domain": "Dominio",
     "redirectHost": "Inicia sesión a través de",
     "created": "Conectada",
     "lastUsed": "Último uso",
@@ -207,6 +208,10 @@
     "verifiedHint": "lazyit confirmó quién publica esta app.",
     "unverified": "Sin verificar",
     "unverifiedHint": "El nombre es lo que la app dice de sí misma.",
+    "domain": {
+      "label": "Dominio",
+      "hint": "Comprobado por lazyit: los datos de esta app se publican en este dominio."
+    },
     "actsAsYou": "Actuará en tu nombre ({email}), con tus permisos, nunca más.",
     "redirect": {
       "heading": "Después de decidir, vuelves a",
@@ -214,6 +219,7 @@
       "statedWebsite": "Sitio web que declara la app (no comprobado):"
     },
     "unverifiedWarning": "lazyit no puede confirmar quién hizo esta app. Continúa solo si iniciaste esta conexión tú mismo hace un momento y reconoces {host}.",
+    "unverifiedWarningDomain": "lazyit no puede confirmar quién hizo esta app, solo que sus datos provienen de {domain}. Continúa solo si iniciaste esta conexión tú mismo hace un momento y reconoces {domain} y {host}.",
     "access": {
       "legend": "Qué puede hacer",
       "read": {
@@ -237,6 +243,7 @@
     "confirmUnverified": {
       "title": "¿Permitir una app sin verificar?",
       "body": "lazyit no puede confirmar que «{name}» sea lo que dice. Si la permites, podrá actuar en tu nombre y lazyit te enviará a {host}. Continúa solo si iniciaste esta conexión tú mismo.",
+      "bodyDomain": "lazyit no puede confirmar que «{name}» sea lo que dice, solo que sus datos provienen de {domain}. Si la permites, podrá actuar en tu nombre y lazyit te enviará a {host}. Continúa solo si iniciaste esta conexión tú mismo.",
       "cancel": "Volver",
       "confirm": "Permitir acceso"
     },

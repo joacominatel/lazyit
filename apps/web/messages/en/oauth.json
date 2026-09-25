@@ -183,6 +183,7 @@
       "personal": "Personal token"
     },
     "unverified": "Unverified",
+    "domain": "Domain",
     "redirectHost": "Signs in through",
     "created": "Connected",
     "lastUsed": "Last used",
@@ -207,6 +208,10 @@
     "verifiedHint": "lazyit confirmed who published this app.",
     "unverified": "Not verified",
     "unverifiedHint": "The name is what the app says about itself.",
+    "domain": {
+      "label": "Domain",
+      "hint": "Checked by lazyit: this app's details are published at this domain."
+    },
     "actsAsYou": "It will act as you ({email}), with your permissions — never more.",
     "redirect": {
       "heading": "After you decide, you return to",
@@ -214,6 +219,7 @@
       "statedWebsite": "Website stated by the app (not checked):"
     },
     "unverifiedWarning": "lazyit can't confirm who made this app. Continue only if you started this connection yourself just now and you recognize {host}.",
+    "unverifiedWarningDomain": "lazyit can't confirm who made this app — only that its details come from {domain}. Continue only if you started this connection yourself just now and you recognize {domain} and {host}.",
     "access": {
       "legend": "What it may do",
       "read": {
@@ -237,6 +243,7 @@
     "confirmUnverified": {
       "title": "Allow an unverified app?",
       "body": "lazyit can't confirm that “{name}” is what it says. If you allow it, it can act as you and lazyit sends you to {host}. Only continue if you started this connection yourself.",
+      "bodyDomain": "lazyit can't confirm that “{name}” is what it says — only that its details come from {domain}. If you allow it, it can act as you and lazyit sends you to {host}. Only continue if you started this connection yourself.",
       "cancel": "Go back",
       "confirm": "Allow access"
     },

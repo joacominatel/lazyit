@@ -3,6 +3,7 @@
 import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
+  GlobeAltIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import type {
@@ -34,6 +35,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { clientDomain } from "@/lib/ai/client-domain";
 import { useOAuthConsentDecision } from "@/lib/api/hooks/use-oauth-grants";
 import { loginCallbackPath } from "@/lib/auth/login-callback";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
@@ -53,8 +55,10 @@ type Consent = Extract<OAuthAuthorizeValidation, { ok: true }>;
 /**
  * The consent screen (docs/ai-assistant/frontend.md §5.3; mcp-and-oauth.md §5.2, §12 follow-up 5; G3).
  *
- * - Identity: the client's name — marked "not verified" unless the API verified it — and, as the trust
- *   signal, the HOST the browser returns to, with the full redirect URI. `client_uri` is self-declared:
+ * - Identity: the client's name — self-declared, marked "not verified" unless the API verified it (a
+ *   CIMD client on the allowlist) — then, set apart from the name, the domain lazyit fetched a CIMD
+ *   client's metadata from (`client.verifiedDomain`; absent on an older API, null for DCR), and, as the
+ *   trust signal, the HOST the browser returns to, with the full redirect URI. `client_uri` is self-declared:
  *   shown as plain text, never as a link that vouches for the client.
  * - Choice: Read only / Read & write (the requested ones only); `lazyit.admin` is an explicit extra,
  *   never preselected, and asks for the password (step-up).
@@ -91,6 +95,8 @@ export function ConsentForm({
   const { client, redirectHost, redirectUri } = consent;
   // The trust signal: the host, or `scheme:// (host)` for a custom-scheme redirect.
   const destination = redirectTrustLabel(redirectUri, redirectHost);
+  // What lazyit proved (the domain), shown apart from what the client says about itself (the name).
+  const domain = clientDomain(client.verifiedDomain);
 
   function handleOutcome(
     outcome: DecisionOutcome,
@@ -213,6 +219,16 @@ export function ConsentForm({
               {client.verified ? t("verifiedHint") : t("unverifiedHint")}
             </span>
           </div>
+          {domain ? (
+            <div className="space-y-0.5 text-sm">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <GlobeAltIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-muted-foreground">{t("domain.label")}</span>
+                <span className="font-mono font-semibold break-all">{domain}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">{t("domain.hint")}</p>
+            </div>
+          ) : null}
           <CardDescription>
             {t("actsAsYou", { email: consent.user.email })}
           </CardDescription>
@@ -239,7 +255,9 @@ export function ConsentForm({
 
           {!client.verified ? (
             <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
-              {t("unverifiedWarning", { host: destination })}
+              {domain
+                ? t("unverifiedWarningDomain", { host: destination, domain })
+                : t("unverifiedWarning", { host: destination })}
             </Callout>
           ) : null}
 
@@ -349,10 +367,16 @@ export function ConsentForm({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("confirmUnverified.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("confirmUnverified.body", {
-                name: client.name,
-                host: destination,
-              })}
+              {domain
+                ? t("confirmUnverified.bodyDomain", {
+                    name: client.name,
+                    host: destination,
+                    domain,
+                  })
+                : t("confirmUnverified.body", {
+                    name: client.name,
+                    host: destination,
+                  })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
