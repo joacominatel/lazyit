@@ -184,7 +184,8 @@ approved one by one. In **Settings → Service accounts**, open an account's row
 - **Read and write** — the assistant may also make changes within the account's permissions. This is
   the default for an account never configured.
 - **Limit writes** (read and write only) — caps the changes per headless run and, since MCP has no runs,
-  per rolling hour over MCP.
+  per rolling hour over MCP. Every record changed counts: a batch that updates 20 assets is 20 changes, and
+  a batch larger than what is left under the cap is refused whole, with nothing changed.
 
 AI access only narrows what the account's permissions allow; it never grants one. The account also
 needs **Use the AI assistant** for headless runs and **Connect external AI agents (MCP)** for MCP. An

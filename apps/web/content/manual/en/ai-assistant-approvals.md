@@ -41,8 +41,8 @@ in *italics* so you can tell it apart.
 ### "Based on content written by others"
 
 If the assistant read content other people wrote before proposing the change, the card shows a yellow
-**Based on content written by others** note with links to what it read. Content can contain instructions
-meant to trick an AI. Check that the change is really what **you** asked for before approving.
+**Based on content written by others** note with links to what it read (a search result has no single
+page to link, so the note appears without one). Content can contain instructions meant to trick an AI. Check that the change is really what **you** asked for before approving.
 
 ## Approve or reject
 
