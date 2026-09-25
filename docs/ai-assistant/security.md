@@ -462,8 +462,11 @@ the **exfiltration leg** and the **consequential-action leg**.
   - **Forbidden classes:** generic outbound HTTP or fetch, free-form email composition, raw
     query or eval.
 - **Confirmation fatigue** [C]. A model can split one harmful goal into many harmless-looking
-  approvals. Mitigations: a per-turn cap on pending mutations; T3/T4 approvals are never
-  auto-accepted; there is no "always allow" setting for T3/T4.
+  approvals. Mitigations: a per-turn cap on pending mutations (as built: `AI_MAX_PENDING_PER_STEP` = 5
+  per step; the rest are deferred to the next step after the user decides, #1409); T3/T4 approvals are
+  never auto-accepted; there is no "always allow" setting for T3/T4. A bulk tool (`asset_create_batch`,
+  `asset_update_batch`) shows one T2 card with every row and the impacted count, is never elevated, and
+  refuses to carry a step-up warning.
 - **Auto-approve mode (#1376; ADR-0097 decision 4 as amended 2026-09-24) — an accepted residual.** A
   conversation's owner may switch on a mode in which ordinary writes (T1/T2: a `write`-class tool whose
   stored and fresh previews are not elevated and carry no step-up warning) execute without a card. The

@@ -157,9 +157,9 @@ Legend:
 | assets | companies (distinct values) | asset:read | R | not exposed (the form's autocomplete; `asset_search` filters by `company`) |
 | assets | `GET mine` | self | R | v1 (`asset_search` `mine:true`; built, W2-5) |
 | assets | `:id/articles` | article:read | R | v1 facet of `asset_get` (built, W2-5) |
-| assets | create / update | asset:write | W | v1 `asset_create` / `asset_update` (built, W2-5) |
+| assets | create / update | asset:write | W | v1 `asset_create` / `asset_update` (built, W2-5); many at once: `asset_create_batch` (#1387) / `asset_update_batch` (#1409), both over the single route per row |
 | assets | delete / restore | asset:delete | D / W | v1 `asset_archive` / `asset_restore` (built, W2-5) |
-| assets | batch delete / restore / status | asset:delete | D | v1.1 (blast radius) |
+| assets | batch delete / restore / status | asset:delete | D | v1.1 (blast radius); a status change on many assets is `asset_update_batch` over the single update route (#1409), not `batchSetStatus` |
 | assets | batch receive | asset:write | W | v1.1 |
 | assets | export CSV | asset:read | R | EXCL (bulk file; use search) |
 | asset-assignments | list / get | asset:read | R | facet of `asset_get` (through `GET /assets/:id/assignments`) / `user_get`; the `/asset-assignments` reads themselves are not exposed |
@@ -465,6 +465,7 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 9 | `asset_create` ✅ built (W2-5; status defaults to `IN_STORAGE`, #1386) | AssetsController.create (+model/location lookups) | asset:write | write | asset created |
 | 9a | `asset_create_batch` ✅ built (#1387, added to the v1 cut) | AssetsController.create per row (+AssetsController.findAll for duplicates, model/location lookups, AssetCategoriesController.findAll) | asset:write | write | one asset created per row |
 | 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups) | asset:write | write·D | asset updated |
+| 10a | `asset_update_batch` ✅ built (#1409, added to the v1 cut) | AssetsController.update per row (+findOne / findAll per asset reference, model/location lookups) | asset:write | write·D | one asset updated per row |
 | 11 | `asset_archive` ✅ built (W2-5) | AssetsController.remove | asset:delete | write·D | asset archived |
 | 12 | `asset_restore` ✅ built (W2-5) | AssetsController.restore (+findAll `deleted=only`) | asset:delete | write | asset restored |
 | 13 | `asset_check_out` ✅ built (W2-5) | AssetAssignmentsController.create (+AssetsController.findOne / findAll, UsersController.findAll / me) | asset:write | write | assetAssignment created (parent asset), asset updated, user updated |
@@ -519,8 +520,8 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
   writes); VIEWER ≈ 16 reads + `access_request_create`.
 - If the catalog grows past about 60, adopt deferred tool loading [E8]. Do not split into multiple
   servers.
-- **v1.1:** batch asset operations other than the batch create (`asset_create_batch`, #1387, is
-  built), bulk receive, KB folder delete and restore (model / location / category update, archive and
+- **v1.1:** batch asset operations other than the batch create and update (`asset_create_batch`,
+  #1387, and `asset_update_batch`, #1409, are built), bulk receive, KB folder delete and restore (model / location / category update, archive and
   restore are built, #1390; the KB folder rename, #1378),
   application/consumable/article archive and restore, grant notes/expiry/batch revoke, article
   links/aliases/versions, user clone, attachments list, notifications, security audit logs, infra
@@ -950,6 +951,59 @@ Accounts holding the route's permission.
   - **Cost.** Per plan (the proposal, the approval-time preview and the run each plan once): one
     resolve + one read per distinct model and location, one category list, two exact-value lookups —
     independent of the row count — then one create per row at execution.
+- **`asset_update_batch` (#1409).** Many edits to existing assets as ONE proposal with one approval
+  — "move these 25 laptops to storage" — instead of 25 cards paged five at a time (*The pending-approval
+  limit*, [[ai-assistant/provider-and-runtime|provider]] §8.1). It follows the batch create's pattern
+  exactly; what differs:
+  - **Input.** Up to **200** rows (`ASSET_BATCH_MAX_ROWS`, the batch create's cap). Each row names its
+    asset (`asset`: id, tag or serial) and may set `name`, `status`, `company`, `notes`, the dates, the
+    cost fields (`null` clears), `model`, `location` and `specs` (merged; `null` removes a key; the
+    reserved `host` / `_`-keys refused), plus `skip`; optional `common` values every row inherits (a
+    row's own value wins; `specs` merged). **Tags and serials are not batch fields** — they are unique
+    physical identifiers and stay one asset at a time on `asset_update`; the strict schema refuses them.
+  - **One diff.** Each row is resolved through the single update's resolver, read by id as the
+    principal, and diffed by the SAME function as `asset_update` (`updateChanges`), so a row shows
+    exactly what a single update would. Each distinct model / location spelling is resolved once per
+    plan. A row errs (the error is that row's) when its asset or a reference does not resolve (not
+    found, ambiguous — e.g. a tag two assets share case-insensitively), when it names an asset an
+    earlier, not skipped, row already names, or when it changes nothing; a 403 fails the whole call.
+    As in the batch create, a row with an error refuses the WHOLE proposal (`INVALID_INPUT`, every
+    reason, each row with its reference) until it is fixed or marked `skip: true`; a skipped row is
+    shown and never runs; every row skipped is refused.
+  - **Step-up never hides in a batch.** `updateChanges` also returns the preview warnings the change
+    carries — none for an asset field today, so the batch is an ordinary `write` with no step-up.
+    Should a row ever carry a step-up warning (`AI_STEP_UP_WARNINGS`), the preview refuses the batch
+    and tells the model to propose those rows with `asset_update`, one at a time.
+  - **Preview shape** (no contract change): `changes` = `action` ("Update 3 of 6 assets; 3 rows
+    skipped as requested."), `rowCount`, `validRows` (rows to apply), `invalidRows` (rows skipped), and
+    `rows` — one object per row: `{ row, asset: { type: "asset", id, label } | the reference text (when
+    it did not resolve), <field>: "before → after" (one key per changed field, `specs.<key>` for an
+    attribute; `—` for empty; entity values by label), skipped, valid, errors }` — rendered by the
+    card's generic table (the `asset` column label is `fields.asset`). `impacted` = `[{ type: "asset",
+    count, sample (≤ 5) }]` (T2: the impacted entities and their count). No target, no warnings,
+    never elevated.
+  - **STALE.** The precondition pins the most recently changed of the rows' assets and the models and
+    locations they set (the batch create's `batchPrecondition`, ties by type and id). ANY of those
+    assets edited after the card was built gets a newer `updatedAt` than everything the card saw, so the
+    newest entity or its version changes and the approval is `STALE` — not only for the pinned asset.
+    An asset archived in between no longer resolves, so the approval-time preview refuses the batch and
+    the approval `FAILED`.
+  - **Execution.** Valid rows run one by one through `rt.call(AssetsController.update)` — the single
+    update's route, guards, pipe, `UPDATED` history event (stamped with the invocation id, the shared
+    batch id) and search upsert per row. A row the route refuses is reported and the rest continue; a
+    401/403 stops the batch and fails the call if nothing was updated yet. Over headless and MCP a row
+    that fails its check is reported and not applied. The result is `{ requested, updated, notUpdated,
+    stoppedAtRow?, notAttempted?, updatedAssets: [{ row, id, label }], problems: [{ row, skipped?,
+    errors }] }` with one `asset` ref (`updated`) per changed asset; the ledger's one `EXECUTED` event
+    lists them all.
+  - **Auto-approve.** Like the batch create it is an ordinary `write`, so a chat with auto-approve on
+    applies it without a card (up to 200 updates from one call), as MCP and headless do within the
+    principal's `asset:write`.
+  - **Cost.** Per plan (proposal, approval-time preview, run): one resolve + one read per distinct asset
+    reference, one resolve + one read per distinct model and location, then one update per row.
+  - **Prompting.** `asset_update` says "for several, use asset_update_batch"; the chat rules
+    (`AI_PROMPT_VERSION` 6) tell the model to prefer a tool that proposes many similar changes as one
+    card over separate proposals.
 - **Entity refs** (§8.5): create/update/archive/restore → the asset (or model, location) with its op;
   check-out and check-in → the assignment (`parent` → asset), the asset and the person, all `updated`
   except the new assignment (`created`).
@@ -966,7 +1020,8 @@ Accounts holding the route's permission.
     `asset:read`, and a Service Account is refused `mine` by the route; `asset_restore` (above) needs the
     ADMIN role for its lookup.
 - **Unexposed with reasons:** batch archive/restore/status and bulk receive (v1.1; the batch create is
-  `asset_create_batch` over the single create route), the CSV export, the
+  `asset_create_batch` over the single create route, and the batch update — status included — is
+  `asset_update_batch` over the single update route), the CSV export, the
   companies autocomplete, the `/asset-assignments` reads (served as facets), assignment notes (v1.1),
   acknowledge (the holder's own act, v1.1), attachments (list/remove v1.1; binary upload/content never),
   folder delete and restore (v1.1; create and rename are `kb_folder_create` / `kb_folder_rename`, #1378),
@@ -1891,6 +1946,11 @@ model AiActionLog {
     lazyit tool**: it is the provider's own server-side search, declared by the provider layer
     ([[ai-assistant/provider-and-runtime|provider]] §6.3), so the catalog and its route parity are
     unchanged;
+  - batches within the pending-approval limit (added by #1409, `AI_PROMPT_VERSION` 6, chat only): at
+    most `AI_MAX_PENDING_PER_STEP` proposals wait at once — propose a batch, report progress ("5 of
+    25"), wait for the decisions, propose the next batch until done; prefer a tool that proposes many
+    similar changes as one card (`asset_update_batch`, `asset_create_batch`; the prompt describes it in
+    words) ([[ai-assistant/provider-and-runtime|provider]] §8.1);
   - out of scope: secrets, credentials.
 
 **As built (W2-11, #1315).** `apps/api/src/ai/prompt/`:
