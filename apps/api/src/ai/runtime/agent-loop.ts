@@ -189,7 +189,12 @@ function untrustedRefsOf(result: AiToolResult): AiEntityRef[] {
  * with `input` — a form the assistant asked them to fill (#1388).
  */
 type CallResolution =
-  | { kind: 'answered'; outcome: StepOutcome }
+  | {
+      kind: 'answered';
+      outcome: StepOutcome;
+      /** A proposal past the per-step limit (#1409): answered, not run, not counted. */
+      deferred?: boolean;
+    }
   | {
       kind: 'pending';
       toolCallId: string;
@@ -517,7 +522,11 @@ export class AgentLoop {
           stepWrites,
           failures,
         });
-        toolCalls += 1;
+        // A proposal deferred past the per-step limit (#1409) ran nothing: it does not use up the run's
+        // tool-call budget, so the model can still propose it in a later step.
+        if (!(resolution.kind === 'answered' && resolution.deferred)) {
+          toolCalls += 1;
+        }
         if (resolution.kind === 'pending') {
           pendingCount += 1;
           if (resolution.input) inputCount += 1;
@@ -911,6 +920,15 @@ export class AgentLoop {
     if (repeated) {
       return refuse(repeated);
     }
+    if (
+      kind === 'mutation' &&
+      state.ctx.channel === 'CHAT' &&
+      state.pendingCount >= AI_MAX_PENDING_PER_STEP
+    ) {
+      // Before the run's tool-call cap and the per-minute bucket: nothing is proposed, so nothing is
+      // spent (#1409).
+      return this.deferProposal(runId, call, tool);
+    }
     if (state.toolCallsSoFar >= AI_MAX_TOOL_CALLS_PER_RUN) {
       return refuse({
         code: 'RATE_LIMITED',
@@ -929,12 +947,6 @@ export class AgentLoop {
     }
 
     if (kind === 'mutation' && state.ctx.channel === 'CHAT') {
-      if (state.pendingCount >= AI_MAX_PENDING_PER_STEP) {
-        return refuse({
-          code: 'RATE_LIMITED',
-          message: `Propose at most ${AI_MAX_PENDING_PER_STEP} changes at a time`,
-        });
-      }
       const proposal = await this.tools.propose(name, call.input, state.ctx, {
         toolUseId: call.toolCallId,
       });
@@ -973,6 +985,36 @@ export class AgentLoop {
     const result = await this.tools.invoke(name, call.input, state.ctx);
     this.emitResult(runId, call.toolCallId, result);
     return answer(result, untrustedRefsOf(result));
+  }
+
+  /**
+   * A chat write past {@link AI_MAX_PENDING_PER_STEP} pending proposals in one step (#1409). It is not
+   * proposed and nothing ran: the model is told the limit was reached and to propose it once the user
+   * has decided on the pending ones — the run pauses on those, and on resume the model reads this answer
+   * and continues with the next batch. It is deliberately NOT a failure: the repeated-failure guard never
+   * records it (#1403), the provider gets it as a plain result rather than an error, it does not use up
+   * the run's tool-call budget, and the step record marks it `deferred` so a resume does not count it
+   * either.
+   */
+  private deferProposal(
+    runId: string,
+    call: ChatModelToolCall,
+    tool: RegisteredAiTool,
+  ): CallResolution {
+    const result = pendingLimitResult();
+    // The stream still shows the call as not run (the card list summarizes it with the others).
+    this.emitCall(runId, call, tool, 'FAILED');
+    this.emitResult(runId, call.toolCallId, result);
+    return {
+      kind: 'answered',
+      deferred: true,
+      outcome: {
+        toolCallId: call.toolCallId,
+        output: capToolOutput(result),
+        isError: false,
+        deferred: true,
+      },
+    };
   }
 
   /**
@@ -1310,7 +1352,11 @@ export class AgentLoop {
     const callIds = new Set<string>();
     let untrusted: AiEntityRef[] = [];
     for (const record of latest.values()) {
-      toolCalls += record.calls.length;
+      // A proposal deferred past the per-step limit ran nothing and is not counted (#1409).
+      const deferred = record.outcomes.filter(
+        (outcome) => 'deferred' in outcome && outcome.deferred === true,
+      ).length;
+      toolCalls += Math.max(0, record.calls.length - deferred);
       for (const call of record.calls) callIds.add(call.toolCallId);
       untrusted = mergeRefs(untrusted, record.untrustedSources);
     }
@@ -1363,6 +1409,24 @@ export class AgentLoop {
   ): void {
     this.lifecycle.emit(runId, toolResultEvent(toolCallId, result));
   }
+}
+
+/**
+ * The answer to a chat write proposed past {@link AI_MAX_PENDING_PER_STEP} in one step (#1409): not a
+ * failure of the call but an instruction to propose it in the next step. `RATE_LIMITED` keeps it a
+ * transient, non-counted refusal on every surface that reads the code.
+ */
+export function pendingLimitResult(): AiToolResult {
+  return errorResult('mutation', {
+    code: 'RATE_LIMITED',
+    message:
+      `Limit reached: ${AI_MAX_PENDING_PER_STEP} proposals are pending in this step; wait for the ` +
+      "user's decisions and propose the rest in the next step.",
+    hint:
+      'Nothing failed and nothing was proposed for this call. Stop proposing now: tell the user how many ' +
+      `changes you proposed and how many remain (e.g. "${AI_MAX_PENDING_PER_STEP} of 25"). Once they ` +
+      `have decided, propose the next ${AI_MAX_PENDING_PER_STEP}, until every change is done.`,
+  });
 }
 
 /** The `tool.result` event of a finished call. */
