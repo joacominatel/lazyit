@@ -12,7 +12,7 @@ context.
 | Framework | Next.js 16 (App Router) + React 19 |
 | Styling | Tailwind CSS v4 |
 | Components | shadcn/ui (`radix-nova` style, `neutral` base color, CSS variables) |
-| Icons | **Heroicons only** (`@heroicons/react`) — see decision below |
+| Icons | **Heroicons** (`@heroicons/react`); Hugeicons for the AI assistant only — see decision below |
 | Fonts | Geist + Geist Mono via `next/font/google` |
 | Theming | `next-themes` (system + manual, persisted) |
 | Data fetching | TanStack Query (`@tanstack/react-query`) + a thin typed `fetch` wrapper |
@@ -237,11 +237,12 @@ cp .env.example .env
 
 ## Decisions
 
-- **Icons — Heroicons only.** App-authored UI uses `@heroicons/react` exclusively; do
-  **not** introduce `lucide-react`, `react-icons` or any other set in our own code.
-  `lucide-react` is installed, but only because the vendored shadcn/ui primitives use
-  it internally (e.g. the dialog close, dropdown chevrons/checks). Treat it as an
-  implementation detail of `components/ui/*` and never import it directly elsewhere.
+- **Icons — Heroicons, with one scoped exception.** App-authored UI uses `@heroicons/react`;
+  do **not** introduce `lucide-react`, `react-icons` or any other set. `lucide-react` is gone
+  entirely, the shadcn/ui primitives included (ADR-0045). The exception: the AI assistant's
+  own chrome uses Hugeicons (`@hugeicons/core-free-icons`, MIT), exported only from
+  `components/ai/ai-icons.tsx` and lint-guarded everywhere else (ADR-0045 amendment,
+  2026-09-25).
 
 - **Typography — Geist (+ Geist Mono).** Sans-serif, neutral and technical, with
   excellent legibility at small sizes — a good fit for the data-dense, "infrastructure"

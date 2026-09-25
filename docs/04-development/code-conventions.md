@@ -76,7 +76,10 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   via Tailwind classes (`size-4` / `size-5`), not by switching SVG variant. **`shadcn add` caveat:**
   shadcn's `iconLibrary` has no heroicons option, so a freshly-generated primitive will import
   `lucide-react` — re-map those imports to heroicons (per ADR-0045's mapping table) before
-  committing.
+  committing. **One scoped exception (ADR-0045 amendment, 2026-09-25):** the AI assistant's own
+  chrome is drawn with Hugeicons (free MIT set), and only through
+  `apps/web/components/ai/ai-icons.tsx` — an ESLint guard fails an `@hugeicons/*` import anywhere
+  else. Everything outside that module stays heroicons.
 - **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
   ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
   unnamed search/filter inputs). Three shared primitives now own them:
