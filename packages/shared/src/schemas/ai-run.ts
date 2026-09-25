@@ -5,6 +5,7 @@ import {
   AiChannelSchema,
   AiEntityRefListSchema,
   AiEntityTypeSchema,
+  AiSentencesFieldSchema,
   AiToolClassSchema,
   AiToolNameSchema,
 } from "./ai-tools";
@@ -695,9 +696,18 @@ export const AiToolResultSummarySchema = z.object({
   kind: AiCallKindSchema,
   status: z.enum(["ok", "error"]),
   summary: z.string().optional(),
+  /** `summary` as localizable sentences (#1384, `AI_SENTENCES`). Optional; the English stays. */
+  summarySentences: AiSentencesFieldSchema,
   mutated: z.boolean(),
   entityRefs: AiEntityRefListSchema,
-  error: z.object({ code: z.string().min(1), message: z.string() }).optional(),
+  error: z
+    .object({
+      code: z.string().min(1),
+      message: z.string(),
+      /** `message` as localizable sentences (#1384). Optional; the English stays. */
+      messageSentences: AiSentencesFieldSchema,
+    })
+    .optional(),
   requestId: z.string().optional(),
 });
 export type AiToolResultSummary = z.infer<typeof AiToolResultSummarySchema>;
