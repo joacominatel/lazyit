@@ -768,6 +768,9 @@ function mergeSpecs(current: unknown, patch: Record<string, unknown>): Row {
   return merged;
 }
 
+/** The `after` of a cleared model category, shown on the approval card (mirrors `TOP_LEVEL`). */
+const NO_CATEGORY = 'None (no category)';
+
 const MODEL_SCALARS = [
   { field: 'name' },
   { field: 'manufacturer' },
@@ -780,8 +783,9 @@ const assetModelUpdate = defineTool({
   title: 'Update an asset model',
   description:
     'Change an asset model (by id or exact name): rename it, correct its manufacturer or SKU, change ' +
-    'its description, file it under another asset category (by id or exact name), or set / remove ' +
-    'its default attributes (`specs`, merged). Every asset of the model sees the change.',
+    'its description, file it under another asset category (by id or exact name; null removes its ' +
+    'category), or set / remove its default attributes (`specs`, merged). Every asset of the model ' +
+    'sees the change.',
   domain: 'reference',
   class: 'write',
   destructive: true,
@@ -793,7 +797,12 @@ const assetModelUpdate = defineTool({
     description: z.string().trim().min(1).max(2000).optional(),
     category: referenceString(
       'The asset category to file it under: its id or exact name.',
-    ).optional(),
+    )
+      .nullable()
+      .optional()
+      .describe(
+        'The asset category to file it under (id or exact name), or null to remove its category.',
+      ),
     specs: modelSpecsPatch.optional(),
   }),
   bindings: [
@@ -806,7 +815,9 @@ const assetModelUpdate = defineTool({
     const { model, category, specs, ...fields } = input;
     const { id } = await resolveModel(rt, model, false);
     const body: Row = { ...fields };
-    if (category) {
+    if (category === null) {
+      body.categoryId = null;
+    } else if (category) {
       body.categoryId = (await resolveAssetCategory(rt, category, false)).id;
     }
     if (specs) {
@@ -838,24 +849,35 @@ const assetModelUpdate = defineTool({
       }),
     );
     const changes = diff(current, MODEL_SCALARS, fields);
-    if (category) {
-      const after = await resolveAssetCategory(rt, category, true);
-      if (after.id !== current.categoryId) {
-        const before = current.categoryId
-          ? ((await listCategories(rt, 'assetCategory'))
-              .filter((c) => c.id === current.categoryId)
-              .map((c) => ({
-                type: 'category' as const,
-                id: String(c.id),
-                label: String(c.name),
-              }))[0] ?? {
+    const categoryBefore = async () =>
+      current.categoryId
+        ? ((await listCategories(rt, 'assetCategory'))
+            .filter((c) => c.id === current.categoryId)
+            .map((c) => ({
               type: 'category' as const,
-              id: str(current.categoryId) ?? '',
-            })
-          : null;
+              id: String(c.id),
+              label: String(c.name),
+            }))[0] ?? {
+            type: 'category' as const,
+            id: str(current.categoryId) ?? '',
+          })
+        : null;
+    if (category === null) {
+      // Clearing a category the model does not have is not a change (a lone one is a no-op).
+      if (current.categoryId) {
         changes.push({
           field: 'category',
-          before,
+          before: await categoryBefore(),
+          after: NO_CATEGORY,
+          valueKind: 'entity',
+        });
+      }
+    } else if (category) {
+      const after = await resolveAssetCategory(rt, category, true);
+      if (after.id !== current.categoryId) {
+        changes.push({
+          field: 'category',
+          before: await categoryBefore(),
           after: entityValue(after),
           valueKind: 'entity',
         });
