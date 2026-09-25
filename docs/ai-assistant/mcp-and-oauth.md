@@ -872,7 +872,7 @@ critical list, but all five AI slices add models, so migrations must be serializ
 
 ## 12. As built — the authorization server core (W2-4, #1315)
 
-Code: `apps/api/src/oauth/` (`cimd/` and `personal-tokens/` belong to W3-3 and W3-4). Everything in §5.1–5.2
+Code: `apps/api/src/oauth/` (`cimd/` and `personal-tokens/` belong to W3-3 and W3-4 — §15 and §14). Everything in §5.1–5.2
 holds; this section records the concrete contracts and the few places the build had to choose.
 
 **Gates.** `OAuthPolicyService` resolves the issuer from `WEB_ORIGIN` only when it is `https:` and
@@ -888,7 +888,7 @@ server must not depend on the provider configuration.
 
 | Route | Answers |
 | --- | --- |
-| `GET /.well-known/oauth-authorization-server` | RFC 8414 document: the §5.1 fields plus `response_modes_supported: ["query"]` and `revocation_endpoint_auth_methods_supported: ["none"]`. `client_id_metadata_document_supported` is **absent until W3-3** ships CIMD (Claude Code would otherwise pick CIMD and fail). |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 document: the §5.1 fields plus `response_modes_supported: ["query"]` and `revocation_endpoint_auth_methods_supported: ["none"]`, and — since W3-3 — `client_id_metadata_document_supported: true` (§15). |
 | `GET /.well-known/oauth-protected-resource[/mcp]` | RFC 9728 document for `{issuer}/mcp` |
 | `POST /oauth/register` | 201 RFC 7591 response, public client (`token_endpoint_auth_method: "none"`, no secret); `invalid_redirect_uri` / `invalid_client_metadata`; 429 per IP (10/h) or past 500 pending registrations |
 | `POST /oauth/token` | form-encoded (JSON tolerated); `authorization_code` and `refresh_token` only; `Cache-Control: no-store` on every answer; errors are exactly `{ error, error_description? }`; a repeated parameter is `invalid_request`; 429 past 60/min per IP |
@@ -1280,3 +1280,131 @@ lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_p
 3. W4-3 validates the matrix with real clients — results and operator checklists in
    [[ai-mcp-client-matrix]] (2026-09-25: the MCP Inspector, an SDK-v2 client and Claude Code verified on
    `lan` and over an internal CA; Cursor, claude.ai and the Claude Code browser sign-in are operator runs).
+
+---
+
+## 15. As built — CIMD client identification (W3-3, #1315)
+
+Code: `apps/api/src/oauth/cimd/`. Spec: the IETF OAuth WG draft *OAuth Client ID Metadata Document*
+(`draft-ietf-oauth-client-id-metadata-document`, editor's copy read 2026-09-25, `-02` changes included) and
+the MCP authorization spec's client-registration priority (§3). DCR (§12) is unchanged and keeps working.
+
+**Switch.** An authorization request whose `client_id` starts with `https://` is a CIMD client; every other
+id is looked up as a DCR row (`lzc_…`, which never starts with `https://`). The AS metadata advertises
+`client_id_metadata_document_supported: true` next to `token_endpoint_auth_methods_supported: ["none"]` —
+the pair Claude requires before it picks CIMD (§3).
+
+**Client Identifier URL** (`client-id-url.ts`). Accepted only when `https`, without userinfo (and without any
+`@` in the authority), without a fragment, with a path other than `/`, at most 2048 characters, and
+**exactly equal to its own WHATWG serialization** — so dot segments (`.`, `..`, `%2e%2e`), an upper-case
+host or an explicit `:443` are refused rather than normalized: the string that is fetched is the string
+that is stored, matched against the document's `client_id` and matched against the allowlist. A query and
+a non-default port are allowed. An unacceptable URL is refused without any fetch.
+
+**Fetch** (`cimd-fetcher.ts`, INV-MCP-6 / INV-AI-7, security T-28). Only through `common/egress`
+`guardedFetch`: `https:` only, userinfo refused, every resolved address public (loopback, RFC 1918, ULA,
+link-local, IMDS, CGNAT and every other special-use range denied; a host is refused if **any** address is),
+the dialed IP pinned, **no** internal-target allowlist, **no redirects** (`maxRedirects: 0` — a 3xx is a
+failure, as the draft requires), a 3 s idle timeout, and a **5 s total deadline over the whole attempt,
+DNS resolution included**. The guard's own deadline starts at connect, and `getaddrinfo` runs before it
+on the libuv threadpool and cannot be cancelled. So the CIMD fetch races the whole attempt against its
+own timer; when that fires, the request is aborted and the authorization request gets `fetch_failed` at
+once, even if a stuck resolver thread finishes later. The guard's behaviour for other callers is
+unchanged. The fetch is a bare `GET` with
+`Accept: application/json` and no credentials. Only a **200** with a JSON media type (`application/json`
+or `application/*+json`) succeeds; the body is read up to **5 KB** (the draft's recommended limit —
+checked on `Content-Length` and again while streaming) and must parse as a JSON object. Nothing the
+document references (`logo_uri`, `jwks_uri`, …) is ever fetched.
+
+**Validation** (`cimd-document.ts`). `client_id` equals the URL by simple string comparison; no
+`client_secret` / `client_secret_expires_at`; `token_endpoint_auth_method` absent or `none` (lazyit has no
+client authentication, so `private_key_jwt` is refused too); `redirect_uris` present, 1–10, each one
+registrable by the same rule as DCR (`isRegistrableRedirectUri`: https, loopback `http`, or a private-use
+scheme; no fragment, no userinfo); `grant_types` / `response_types`, when present, within
+`authorization_code` (+ `refresh_token`) / `code`. Display fields are sanitized like DCR's (the shared
+`client-display.ts`); a document without a usable `client_name` is shown under its host. Everything else is
+dropped. Redirect matching at authorize and token time is the §12 rule (exact; loopback port-agnostic), so
+Claude Code's `http://localhost/callback` matches `http://localhost:53682/callback`.
+
+**Cache** (`cimd-client.service.ts`, `cache-lifetime.ts`). A valid document is stored on the
+`OAuthClient` row (`kind: "cimd"`, `fetchedAt`), with `metadata = { document, cache: { source,
+expiresAt } }`. The lifetime honours `Cache-Control` (`s-maxage`, then `max-age`), then `Expires`, clamped
+to **[5 min, 24 h]**; `no-store` / `no-cache` count as the 5-minute floor (the consent page and its
+decision must see the same registration); no header → 1 h. A fresh row is used as is; a stale one is
+re-fetched at the next authorization request. Errors and invalid documents are **never** cached, and a
+failed re-fetch never falls back to the stale row (the draft's "SHOULD abort"). The token endpoint does
+not re-fetch: an existing grant keeps working on the last validated registration, and the allowlist is
+still re-checked on every refresh (§12).
+
+**Bundled offline copy** (`known-clients/`). Claude Code's document
+(`https://claude.ai/oauth/claude-code-client-metadata`, fetched verbatim on 2026-09-25) ships in the image
+as a TypeScript module (compiled into `dist/`; the API does not enable `resolveJsonModule`). It passes the
+same validation as a fetched copy, and it is used **only on a network failure**, i.e. a failure that says
+nothing about what the host publishes:
+- the host is unreachable (DNS, connect, TLS), or the deadline is exceeded;
+- a transient status: 5xx, 408, 425 or 429;
+- a redirect, or a non-JSON page. Both are what a captive portal or an intercepting proxy answers with;
+- the per-user fetch limit.
+
+A **definitive answer from the host** is refused and audited, even for Claude Code: another 4xx (404,
+410, 403…), or a JSON document that fails validation (mismatched `client_id`, bad redirects, secrets or a
+non-`none` auth method, oversize, malformed JSON). The host's word wins over the image's copy. The
+row is then `kind: "known"`, `fetchedAt: null`, cached for 5 minutes, after which the network is tried
+again and wins once reachable. Any other client without a reachable document is refused.
+
+**Trust.** CIMD does not bypass the client allowlist (ADR-0097 decision 13): the resolved row goes
+through `isClientAllowed` / `isRedirectAdmitted` exactly like a DCR row — at consent, at code exchange and
+at every refresh. A `cimd_url` entry (the curated `claude-code-cimd` default, or an admin's) trusts that
+client's own registrable redirects; otherwise each redirect needs a `redirect_uri` entry or, for https,
+`mcpAllowAnyHttpsClient` (on by default). Loopback and private-use redirects still need an entry.
+
+**Consent** (`POST /oauth/authorize/validate`). `client.verifiedDomain` (additive, optional in the shared
+contract) is the host of the `client_id` URL for a CIMD client — the domain whose document lazyit fetched —
+and `null` for DCR. `client.verified` is **true only for a CIMD client matched by a `cimd_url` allowlist
+entry**: the instance vouches for it (CEO, 2026-09-25: "Solo las de la lista"). A CIMD client admitted
+only through its redirect URIs is **domain-verified**, not verified: it proved its domain, not its
+self-declared name. So it is shown as unverified with its real domain, and the consent page asks for the
+extra confirmation. A DCR client is never verified. **Connected apps** (`GET /oauth/grants/mine` and the
+admin listing) apply the same rule and carry the same optional `client.verifiedDomain` (`OAuthGrantSchema`).
+
+**Abuse bounds.** Only a signed-in user holding `ai:connect` on an instance with MCP on reaches the fetch
+(the checks run first). Network fetches — cache misses — are limited to **20 per user per 10 minutes**
+(in memory, per replica); past it the client is refused (or served from its bundled copy). The sweeper
+hard-deletes unused CIMD and bundled rows (never used, no grant) whose **last refresh** (`updatedAt`) is
+more than 24 h old; they are a cache and are re-fetched on demand. No client row with a pending
+authorization code is collected (DCR included), because the code would cascade and break a sign-in in
+progress.
+
+**Audit** (`oauth_audit_log`, two new actions). `CLIENT_METADATA_FETCHED` on every fetch that yields a
+registration — `detail: { host, source: "network" | "bundled", ttlSeconds | fetchFailure, redirectHosts,
+redirectsChanged }` — and `CLIENT_METADATA_REFUSED` on a failed fetch or an invalid document without a
+bundled copy — `detail: { host, reason }` (`fetch_failed`, `http_status`, `content_type`, `too_large`,
+`malformed`, `client_id_mismatch`, `client_secret`, `auth_method`, `redirect_uris`, `grant_types`). A
+refusal by the per-user fetch limit is logged, not audited. Neither is an unacceptable `client_id` URL:
+it is refused before any work, so auditing it would let anyone with `ai:connect` write rows without
+bound. The user
+whose request triggered the fetch is the row's `userId`/`actorId`.
+
+**Data.** No migration: `OAuthClient.kind` (`dcr | cimd | known`), `fetchedAt` and `metadata` already
+exist (W2-4). Existing rows are all `dcr` and are untouched.
+
+**Tests.** `cimd/cimd.spec.ts` (URL rules, document validation, cache lifetime, the guarded fetch: SSRF
+refusals for loopback, RFC 1918, IMDS, ULA, CGNAT and mixed DNS answers without connecting, no redirect
+following, non-200, content type, oversize declared and streamed, malformed JSON, timeouts, a resolver
+that never answers, network-failure classification) and
+`cimd/cimd-flow.spec.ts` (resolution and caching over the in-memory database, cache expiry and bounds,
+`client_id` mismatch, redirect mismatch, the bundled fallback and its retry, no fallback on a
+definitive or invalid answer, allowlist refusal and the verified badge on consent and in connected apps,
+the per-user fetch limit, the unique-race recovery, the sweeper (refresh-aged, pending-code-safe), and authorize → token → refresh → allowlist cut-off
+end to end with Claude Code's URL, online and offline).
+
+**Follow-ups.**
+
+1. **Web:** the consent page and the connected-apps list render `client.verifiedDomain` next to the
+   client name for every CIMD client, e.g. "domain: claude.ai" (security §6.3; draft §"OAuth Phishing
+   Attacks": "SHOULD display the hostname of the `client_id`"). Until then they show the badge and the
+   redirect host only.
+2. A distinct refusal for "the client's metadata document could not be fetched" (today `INVALID_CLIENT`)
+   would let the consent page explain an offline instance; it needs a new refusal value and its labels.
+3. W4-3 re-verifies Claude Code's document against the bundled copy and exercises the offline path.
+

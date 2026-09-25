@@ -83,19 +83,31 @@ export const OAUTH_AUDIT_ACTIONS = [
   "REFRESH_REUSE_DETECTED",
   "PERSONAL_TOKEN_CREATED",
   "PERSONAL_TOKEN_REVOKED",
+  /** A CIMD client's metadata document was fetched and cached (`detail.source`: `network` or `bundled`). */
+  "CLIENT_METADATA_FETCHED",
+  /** A CIMD client's metadata document could not be fetched or was invalid (`detail.reason`). */
+  "CLIENT_METADATA_REFUSED",
 ] as const;
 export const OAuthAuditActionSchema = z.enum(OAUTH_AUDIT_ACTIONS);
 export type OAuthAuditAction = z.infer<typeof OAuthAuditActionSchema>;
 
 /**
  * One connected app, as `GET /oauth/grants/mine` (and the admin `GET /oauth/grants?userId=`) list it.
- * `client.verified` is true for a CIMD client whose metadata document was fetched from its own https
- * `client_id` URL; a DCR client's name is self-declared.
+ * `client.verified` follows the consent screen's rule: true only for a CIMD client listed by its
+ * `client_id` URL on the instance's allowlist (a curated default or an admin's entry). `client.verifiedDomain`
+ * is the host of a CIMD client's `client_id` URL (null for DCR); a DCR client's name is self-declared.
  */
 export const OAuthGrantSchema = z.object({
   id: z.cuid(),
   kind: OAuthGrantKindSchema,
-  client: z.object({ name: z.string(), verified: z.boolean() }).nullable(),
+  client: z
+    .object({
+      name: z.string(),
+      verified: z.boolean(),
+      /** CIMD clients only: the domain whose metadata document lazyit fetched. Added in W3-3; optional. */
+      verifiedDomain: z.string().min(1).nullable().optional(),
+    })
+    .nullable(),
   /** The personal token's name; null for an OAuth grant. */
   label: z.string().nullable(),
   /** The host the client redirects to; null for a personal token. */
@@ -194,7 +206,18 @@ export const OAuthAuthorizeValidationSchema = z.discriminatedUnion("ok", [
       id: z.string().min(1),
       name: z.string(),
       uri: z.string().nullable(),
+      /**
+       * True when the instance vouches for the client: a CIMD client matched by a `cimd_url` allowlist
+       * entry (a curated default or an admin's). A DCR client, and a CIMD client the allowlist admits only
+       * through its redirect URIs, is not verified — its name is what it says about itself.
+       */
       verified: z.boolean(),
+      /**
+       * CIMD clients only: the host of the `client_id` URL — the domain whose metadata document lazyit
+       * fetched, i.e. the domain proven to publish this client (show it as "verified domain"). Null or
+       * absent for a DCR client. Added in W3-3 (#1315); optional so older consumers keep parsing.
+       */
+      verifiedDomain: z.string().min(1).nullable().optional(),
     }),
     redirectUri: z.string().min(1),
     redirectHost: z.string().min(1),

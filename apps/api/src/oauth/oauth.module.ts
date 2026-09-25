@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthorizeController } from './authorize.controller';
 import { AuthorizationService } from './authorization.service';
+import { CimdClientService } from './cimd/cimd-client.service';
 import { ClientRegistrationService } from './client-registration.service';
 import { GrantsController } from './grants.controller';
 import { GrantsService } from './grants.service';
@@ -31,7 +32,8 @@ import { TokenController } from './token.controller';
  * Exported for the MCP resource server (W3-2) and the sibling units: {@link OAuthTokenService}
  * (`verifyAccessToken`, `revokeGrant`), {@link OAuthPolicyService} (issuer, MCP switch, client
  * allowlist), {@link OAuthAuditService} and {@link PersonalTokensService} (`verify`, the `lan` personal
- * tokens of `personal-tokens/`, W3-4). CIMD (`cimd/`, W3-3) joins this module.
+ * tokens of `personal-tokens/`, W3-4). CIMD (`cimd/`, W3-3) resolves https `client_id`s for the
+ * authorization endpoint ({@link CimdClientService}).
  *
  * `PrismaService`, `PermissionResolverService`, `LocalCredentialService` and `PrincipalLoaderService`
  * come from the global Prisma and Auth modules.
@@ -52,6 +54,7 @@ import { TokenController } from './token.controller';
     OAuthAuditService,
     OAuthTokenService,
     AuthorizationService,
+    CimdClientService,
     ClientRegistrationService,
     GrantsService,
     OAuthSweeper,

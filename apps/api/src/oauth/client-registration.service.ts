@@ -7,13 +7,13 @@ import {
   redirectHost,
 } from './client-policy';
 import { mintClientId } from './oauth-crypto';
+import { sanitizeClientName, sanitizeClientUri } from './client-display';
 import { OAuthProtocolError } from './oauth-errors';
 import { OAuthAuditService } from './oauth-audit.service';
 import { OAuthPolicyService } from './oauth-policy.service';
 import {
   DCR_MAX_PENDING_REGISTRATIONS,
   DCR_MAX_REDIRECT_URIS,
-  DCR_UNNAMED_CLIENT,
   DCR_UNUSED_CLIENT_TTL_MS,
 } from './oauth.constants';
 
@@ -30,10 +30,6 @@ export interface ClientRegistrationResponse {
 }
 
 const SUPPORTED_GRANT_TYPES = ['authorization_code', 'refresh_token'];
-const CONTROL_CHARS =
-  // eslint-disable-next-line no-control-regex -- stripping control characters is the point
-  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
-
 const invalidMetadata = (description: string) =>
   new OAuthProtocolError('invalid_client_metadata', description);
 const invalidRedirect = (description: string) =>
@@ -49,28 +45,6 @@ function optionalStringArray(value: unknown, field: string): string[] | null {
     throw invalidMetadata(`${field} must be an array of strings`);
   }
   return value as string[];
-}
-
-/** A display name: control and bidi characters stripped, trimmed, capped. Self-declared, never trusted. */
-export function sanitizeClientName(value: unknown): string {
-  if (typeof value !== 'string') return DCR_UNNAMED_CLIENT;
-  const cleaned = value.replace(CONTROL_CHARS, '').trim().slice(0, 120);
-  return cleaned.length > 0 ? cleaned : DCR_UNNAMED_CLIENT;
-}
-
-/** An https `client_uri` is kept for display; anything else is dropped rather than refused. */
-function sanitizeClientUri(value: unknown): string | null {
-  if (typeof value !== 'string' || value.length > 2048) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' &&
-      url.username === '' &&
-      url.password === ''
-      ? url.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

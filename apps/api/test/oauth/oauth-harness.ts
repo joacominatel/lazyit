@@ -11,6 +11,7 @@ import type { Permission } from '@lazyit/shared';
 import { PrincipalLoaderService } from '../../src/auth/principal-loader.service';
 import type { HumanPrincipal } from '../../src/auth/principal';
 import { AuthorizationService } from '../../src/oauth/authorization.service';
+import { CimdClientService } from '../../src/oauth/cimd/cimd-client.service';
 import { ClientRegistrationService } from '../../src/oauth/client-registration.service';
 import { GrantsService } from '../../src/oauth/grants.service';
 import { OAuthAuditService } from '../../src/oauth/oauth-audit.service';
@@ -31,6 +32,8 @@ export interface Harness {
   authorization: AuthorizationService;
   registrations: ClientRegistrationService;
   grants: GrantsService;
+  /** CIMD resolution; its `fetchOptions` default to a transport that fails, so no test reaches the network. */
+  cimd: CimdClientService;
   /** Permissions per role; MEMBER holds ai:connect unless a test removes it. */
   rolePermissions: Map<string, Set<Permission>>;
   credentials: { verify: jest.Mock };
@@ -65,15 +68,23 @@ export function buildHarness(): Harness {
     new PrincipalLoaderService(db),
     audit,
   );
+  const cimd = new CimdClientService(db, audit);
+  cimd.fetchOptions = {
+    lookup: async () => [{ address: '93.184.215.14', family: 4 }],
+    transport: async () => {
+      throw new Error('network disabled in tests');
+    },
+  };
   const authorization = new AuthorizationService(
     db,
     policy,
     subjects,
     credentials as any,
     audit,
+    cimd,
   );
   const registrations = new ClientRegistrationService(db, policy, audit);
-  const grants = new GrantsService(db, permissions as any, tokens);
+  const grants = new GrantsService(db, permissions as any, tokens, policy);
   return {
     prisma,
     policy,
@@ -82,6 +93,7 @@ export function buildHarness(): Harness {
     authorization,
     registrations,
     grants,
+    cimd,
     rolePermissions,
     credentials,
   };

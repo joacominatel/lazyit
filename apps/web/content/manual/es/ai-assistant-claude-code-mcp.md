@@ -124,8 +124,9 @@ configuración que contengan un token.
 Cuando una app inicia sesión con OAuth, lazyit muestra una pantalla de consentimiento antes de conceder
 nada. Muestra:
 
-- **El nombre de la app**: marcada como **Verificada** cuando lazyit pudo confirmar quién la publica, o
-  **Sin verificar** cuando el nombre es solo lo que la app dice de sí misma.
+- **El nombre de la app**: marcada como **Verificada** cuando la app está en la lista de apps conocidas
+  de tu instancia y lazyit la confirmó por la dirección en la que se publica a sí misma (Claude Code lo
+  está de serie), o **Sin verificar** cuando el nombre es solo lo que la app dice de sí misma.
 - **A dónde vuelves**: la dirección en la que la app recibe su inicio de sesión, en letra grande. Es la
   señal de confianza real: para una app de escritorio suele ser `localhost` o `127.0.0.1` (tu propio
   equipo). Un sitio web que mencione la app se muestra solo como texto no comprobado.
@@ -142,6 +143,22 @@ recuerdan.
 Si la pantalla dice que la app **no está permitida**, o que pidió una dirección que no registró, lazyit
 se detiene ahí y no te envía a ningún sitio. Inicia la conexión de nuevo desde la app o consulta a tu
 administrador: él decide qué apps pueden conectarse en **Ajustes → IA**.
+
+### Cómo reconoce lazyit una app
+
+Algunas apps —Claude Code entre ellas— se identifican con una **dirección HTTPS** en la que publican una
+breve descripción de sí mismas: su nombre y las direcciones en las que inician sesión. lazyit lee esa
+descripción de internet cuando te conectas y la recuerda un tiempo (hasta un día), así que el nombre de la
+app y sus direcciones de inicio de sesión vienen de quien la publica y no de la propia app. lazyit solo la
+lee desde direcciones públicas de internet —nunca desde tu red interna—, no sigue redirecciones y rechaza
+una descripción que no coincide con la dirección de la que vino.
+
+- **¿Tu servidor de lazyit no tiene acceso a internet?** Claude Code se conecta igual: lazyit incluye una
+  copia de la descripción de Claude Code y la usa siempre que no puede obtener la real. Otras apps que se
+  identifican así necesitan que lazyit llegue a su dirección; si no puede, la pantalla de consentimiento
+  dice que la app no está permitida.
+- **Las apps que se registran solas** (la mayoría de los demás clientes MCP) funcionan como antes.
+- La lista de apps permitidas de tu administrador en **Ajustes → IA** se aplica en ambos casos.
 
 ## Qué pasa después
 
