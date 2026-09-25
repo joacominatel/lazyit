@@ -494,7 +494,7 @@ webSearchTool?(maxUses), toolStrict? }` in
 only the wording a status code cannot tell apart. Failures are thrown as `AiProviderError` (`code` is an
 `AI_RUN_ERROR_CODES` value: `AI_DISABLED`, `PROVIDER_AUTH`, `PROVIDER_RATE_LIMIT` with `retryAfterSec`,
 `PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `CONTEXT_LIMIT`, `EGRESS_DENIED`, `CANCELLED`,
-`CONVERSATION_READ_ONLY`), with a fixed message and no `cause`; it lives in `ai-provider.error.ts`, which
+`CONVERSATION_READ_ONLY`, `WEB_SEARCH_DISABLED`), with a fixed message and no `cause`; it lives in `ai-provider.error.ts`, which
 imports nothing from the SDK, so the runtime can catch it without pulling `ai` into its graph. A refusal
 is not an error: it comes back as the step's `finishReason` (`content-filter`) and the runtime decides.
 
@@ -586,6 +586,18 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
     provider tool with function declarations and would drop lazyit's tools (it only warns). The
     Gemini-3 rule mirrors the SDK's own model detection.
   - OpenAI-compatible — none.
+  - **Web search disabled at the provider (#1315, follow-up of #1389).** An account can turn the
+    provider's search off: Anthropic per organization in the Claude Console (the request then fails with a
+    400 `invalid_request_error` saying web search is not enabled, not with an error inside a search
+    result), OpenAI per organization / project through its hosted-tool permissions (an
+    `invalid_request_error` such as "Web Search tool is not enabled for this organization"). A step that
+    **carried** the search tool and fails with a 4xx (not 429) whose upstream text says web search is not
+    enabled / disabled / not allowed is classified `WEB_SEARCH_DISABLED` (`classifyProviderError(…,
+    { webSearch: true })`, checked before the 401/403 → `PROVIDER_AUTH` mapping) instead of the generic
+    `PROVIDER_BAD_REQUEST`; the run fails with it and the web tells the user an administrator must enable
+    web search at the provider or turn it off in Settings → AI. The same text on a step without the tool,
+    or a model that does not *support* the tool ("… is not supported with …"), stays a bad request. The
+    upstream text is read only to classify, as for every other code; the error keeps its fixed message.
 
   The step result drops provider-executed calls from `toolCalls` (lazyit never answers them) and reports
   `webSearch = { searches, queries, sources }` (`webSearchOf`: provider-executed calls of the search tool,

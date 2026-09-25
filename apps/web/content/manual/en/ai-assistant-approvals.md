@@ -113,9 +113,10 @@ confirms that it's really you at the keyboard; your session stays signed in eith
 ## When the card changes under you
 
 lazyit checks the change again at the moment you approve. If something changed since the card was shown —
-for example, the application was marked critical in the meantime — nothing is applied. The card updates,
-the new warnings are highlighted with a **New** tag, and it asks for your password if it now needs one.
-Review it and decide again.
+for example, the application was marked critical in the meantime, or more assets now use the category it
+archives — nothing is applied. The card updates (with the counts that are true now), the new warnings are
+highlighted with a **New** tag, and it asks for your password if it now needs one. Review it and decide
+again.
 
 Other things you may see:
 
@@ -194,8 +195,9 @@ The assistant follows your instance's [asset tag scheme](/help/configuration-ass
   next tag, and
   always waits for you: [auto-approve](#auto-approve) never skips it. Existing tags are never rewritten.
 
-Only administrators can see or change the scheme; for everyone else the assistant simply lets lazyit assign
-the tag.
+Anyone who can create assets can have the assistant read the scheme (the pattern and the next tag), so it
+follows it for them too; only administrators can change it. For someone who cannot create assets, the
+assistant simply lets lazyit assign the tag.
 
 ## Auto-approve
 

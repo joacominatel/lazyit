@@ -1041,7 +1041,9 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   audience; its delete cascades).
 - **Models and locations:** `asset_model_update`·D (name, manufacturer, SKU, description, category by id
   or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
-  route replaces `specs` whole), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
+  route replaces `specs` whole; the category can be changed but **not cleared**: the domain allows a
+  model without a category, but `PATCH /asset-models/:id` takes `categoryId` as a cuid only, not `null` —
+  a route change, not a tool one, recorded as a follow-up in #1315), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
   top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
   `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to
@@ -1063,7 +1065,9 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   each with up to five named samples. The counts are read through the lists the caller may read: a list the
   caller may not read (403), or a scan past its bound (the applications list and the child locations have
   no filter, so they are scanned, at most 1,000 rows), is shown as a `usedBy` row "Unknown to you: …" —
-  never as zero. Archiving does not detach anything: dependents keep pointing at the archived row
+  never as zero. The counts are re-read at approve: when they moved since the card was shown, the card
+  is refreshed with the current counts and the user decides again (`PREVIEW_CHANGED`, step 0 of
+  "Approve" below, #1315) — the same holds for every tool's `impacted`. Archiving does not detach anything: dependents keep pointing at the archived row
   (ADR-0041; the nested-include exposure of an archived parent is SEC-040).
 - **Restore** is `idempotent`, shows `archived: true → false`, and exists for models and locations only.
   The archived list it resolves through is ADMIN-only by **role** (`assertCanListDeleted`) while the route
@@ -1087,13 +1091,16 @@ pueda leerlo, la idea es seguir el tag de la instancia, si puede modifcar el de 
 settings. Excepto que especificamente se le pida que modifique el asset tag general"* — the assistant
 reads the instance's scheme so it follows it; it may set an individual asset's tag, but it changes the
 instance-wide scheme only when explicitly asked to change the general asset tag scheme.
-`asset-tag-scheme.tools.ts` (domain `platform`) holds two tools; both routes need `settings:manage` and
-are human-only (`ServicePrincipalForbiddenGuard`), so the tools are listed to administrators only and
-never to a Service Account (headless is refused by the route).
-- **`asset_tag_scheme_get`** (read) — the scheme (`enabled`, prefix, suffix, zero-pad width, next number,
-  `updatedAt`) and the tag the next asset created without `assetTag` would get, from the route's own
-  skip-existing preview (`GET /config/asset-tag-scheme/next-tag`, so a preview and an allocation cannot
-  disagree). Its description and result carry the rule the model follows: when the scheme is on, **omit
+`asset-tag-scheme.tools.ts` (domain `platform`) holds two tools; both routes are human-only
+(`ServicePrincipalForbiddenGuard`), so neither is listed to a Service Account (headless is refused by the
+route). The update needs `settings:manage` (administrators); the read needs **`asset:write`** since #1315
+(authorization: read widened — whoever may create assets can follow the instance's tag pattern).
+- **`asset_tag_scheme_get`** (read) — through the member-safe **`GET /config/asset-tag-scheme/summary`**
+  (`asset:write`; [[authorization]]): whether the scheme is on, its prefix, suffix and zero-pad width,
+  and the tag (and its number) the next asset created without `assetTag` would get — the same
+  skip-existing preview as `GET /config/asset-tag-scheme/next-tag`, run on the STORED pattern only, so a
+  preview and an allocation cannot disagree. No counter internals (`nextNumber`, the skip count) and no
+  timestamps: the update tool reads the full scheme through the settings route itself. Its description and result carry the rule the model follows: when the scheme is on, **omit
   `assetTag`** on asset creation unless the person gives a specific tag — the server allocates the next
   free tag (`AssetTagSchemeService.allocateTag`, also per unit in bulk receive) — and **never compose a
   tag** from the pattern (a composed tag bypasses the counter); when it is off, an asset created without
@@ -1626,8 +1633,17 @@ token, never a tool. The request carries only the pending-action id, plus the pa
      preview. Updating the stored preview is not a ledger event (nothing was decided or executed).
      *Choice:* the least invasive way to surface the change that also terminates — returning the
      warnings only in the error would re-detect them on every retry.
+   - **Moved impact counts** (#1315, follow-up of #1390). The `impacted` counts on a card ("N assets use
+     this") are read at propose, like the warnings. If the fresh preview's counts differ from the stored
+     ones (compared as type → count; the samples are illustrative and not compared), the stored preview
+     takes the fresh `impacted` and the action **stays pending** with 409 `PREVIEW_CHANGED`
+     (`addedWarnings: []` when no warning was added) — the user decides again on the numbers that are
+     true now. *Choice:* refresh-and-review over `STALE`: the target itself did not change, so a terminal
+     refusal would only make the model re-propose the same action; the "card changed" path already
+     exists, is not terminal and re-renders the card. A moved impact alone never changes step-up (the
+     warnings are the same), so it answers `PREVIEW_CHANGED`, not `STEP_UP_REQUIRED`.
    - A target whose version changed is **not** reported as `PREVIEW_CHANGED`: it is `STALE` (step 3),
-     terminal, which wins over a refusal that would only defer it.
+     terminal, which wins over a refusal that would only defer it (and over a moved impact).
    - A preview that requires step-up (the union, re-derived) needs `stepUpVerified` from the caller, else
      403 `STEP_UP_REQUIRED` **without consuming the claim** — the user retries with the password.
    - A fresh preview that cannot be built (the tool changed, the input no longer parses, the target is

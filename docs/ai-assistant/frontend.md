@@ -598,6 +598,7 @@ text.
 | `BUDGET_EXCEEDED` | "Daily AI budget reached" + when it resets |
 | `CONVERSATION_READ_ONLY` | "This chat used an earlier AI configuration" + **Start a new chat** |
 | `STEP_UP_REQUIRED` | the approval card asks for the password again |
+| `WEB_SEARCH_DISABLED` | "The AI provider refused web search because it is disabled for this account" — an admin enables it at the provider or turns it off in Settings → AI (#1315; no action button) |
 | `NETWORK` / interrupted | "Connection lost" → reconnect with `Last-Event-ID` (snapshot fallback) |
 | unknown | generic + `RequestIdNote` |
 
@@ -780,7 +781,8 @@ is always `window.location.origin + "/mcp"`.
   these 403s means the session ended — the web must not treat them as a logout.**
 - **The card can change under the user** (#1357): core re-runs the preview at approve time. When a
   warning appeared since the proposal (say, the application became critical), the stored preview gains
-  it, nothing executes, the action stays pending, and the decision answers `409 PREVIEW_CHANGED` — or
+  it (or, since #1315, the card's impact counts moved — the stored preview takes the fresh `impacted` and
+  `addedWarnings` is `[]`), nothing executes, the action stays pending, and the decision answers `409 PREVIEW_CHANGED` — or
   `403 STEP_UP_REQUIRED` when the new warning needs the password — with `addedWarnings: string[]` (the
   warning codes added). The web re-reads the pending card (re-subscribe → `run.snapshot`, or
   `GET /ai/conversations/:id`), highlights the added warnings, and lets the user decide again (with the

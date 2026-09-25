@@ -282,6 +282,7 @@
       "RUN_IN_PROGRESS": "Another window is already answering in this chat. Showing that answer.",
       "CONVERSATION_READ_ONLY": "This chat used an earlier AI configuration and is read-only.",
       "STEP_UP_REQUIRED": "A change needs your password.",
+      "WEB_SEARCH_DISABLED": "The AI provider refused web search because it is disabled for this account. An administrator needs to enable web search at the provider, or turn it off in Settings → AI.",
       "NETWORK": "Connection lost.",
       "RATE_LIMITED": "Too many requests.",
       "EXPIRED": "A proposed change expired before it was decided.",

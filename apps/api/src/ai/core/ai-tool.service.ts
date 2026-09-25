@@ -384,22 +384,35 @@ export class AiToolService {
       fresh = await this.freshPreview(row, ctx);
       // A target that changed version is STALE (decided after the claim, terminal): that outcome wins
       // over "the card changed", which would only defer the same refusal.
-      const added =
+      const comparable =
         fresh?.ok === true && !isStale(storedPreview, fresh.preview)
-          ? fresh.preview.warnings.filter(
-              (w) => !storedPreview.warnings.includes(w),
-            )
-          : [];
-      if (added.length > 0) {
-        // The situation changed since the user saw the card (e.g. the application became critical):
-        // the stored preview gains the new warnings and the action stays pending, so the card
-        // re-renders and the user decides again — with the password if a step-up warning appeared.
-        const updated = await this.addPreviewWarnings(
+          ? fresh.preview
+          : null;
+      const added = comparable
+        ? comparable.warnings.filter((w) => !storedPreview.warnings.includes(w))
+        : [];
+      // The impact counts on the card ("N assets use this") are read at propose; one that moved since is
+      // a changed card too (#1315 follow-up of #1390): the stored preview takes the fresh counts.
+      const impacted =
+        comparable && impactChanged(storedPreview, comparable)
+          ? comparable.impacted
+          : null;
+      if (added.length > 0 || impacted) {
+        // The situation changed since the user saw the card (e.g. the application became critical, or
+        // more assets now use the category being archived): the stored preview gains the new warnings
+        // and the fresh impact, and the action stays pending, so the card re-renders and the user
+        // decides again — with the password if a step-up warning appeared.
+        const updated = await this.refreshStoredPreview(
           row,
           storedPreview,
           added,
+          impacted,
         );
-        const stepUpAdded = !options.stepUpVerified && requiresStepUp(updated);
+        // A moved impact alone never changes step-up (the warnings are the same): it is a new review.
+        const stepUpAdded =
+          added.length > 0 &&
+          !options.stepUpVerified &&
+          requiresStepUp(updated);
         if (stepUpAdded) {
           throw new ForbiddenException({
             ...decisionError(
@@ -1141,18 +1154,21 @@ export class AiToolService {
   }
 
   /**
-   * Add warnings to a pending action's stored preview, re-deriving `stepUpRequired` over the union
-   * (warnings are only ever added: one that disappeared stays, so step-up never relaxes). Conditional on
-   * the row still being pending; not a ledger event — nothing was decided or executed.
+   * Refresh a pending action's stored preview: add warnings, re-deriving `stepUpRequired` over the union
+   * (warnings are only ever added: one that disappeared stays, so step-up never relaxes), and replace the
+   * impact counts with the fresh ones when they moved (`impacted`, else `null`). Conditional on the row
+   * still being pending; not a ledger event — nothing was decided or executed.
    */
-  private async addPreviewWarnings(
+  private async refreshStoredPreview(
     row: AiToolInvocation,
     stored: AiActionPreview,
     added: readonly string[],
+    impacted: AiActionPreview['impacted'] | null,
   ): Promise<AiActionPreview> {
     const warnings = [...stored.warnings, ...added];
     const updated: AiActionPreview = {
       ...stored,
+      ...(impacted ? { impacted } : {}),
       warnings,
       stepUpRequired: requiresStepUp({ ...stored, warnings }),
     };
@@ -1329,10 +1345,25 @@ function isStale(stored: AiActionPreview, fresh: AiActionPreview): boolean {
   );
 }
 
+/**
+ * Whether the impact counts changed since the stored preview: the same entity types with the same counts
+ * (the samples are illustrative and not compared — their order is the list's, not a fact of the card).
+ */
+function impactChanged(
+  stored: AiActionPreview,
+  fresh: AiActionPreview,
+): boolean {
+  const counts = (p: AiActionPreview) =>
+    p.impacted
+      .map((i) => `${i.type}:${i.count}`)
+      .sort()
+      .join(',');
+  return counts(stored) !== counts(fresh);
+}
+
 /** A fresh preview built at approve, or the tool error that building it produced. */
 type FreshPreview =
-  | { ok: true; preview: AiActionPreview }
-  | { ok: false; error: ToolError };
+  { ok: true; preview: AiActionPreview } | { ok: false; error: ToolError };
 
 const PRINCIPAL_INVALID: ToolError = {
   code: 'FORBIDDEN',

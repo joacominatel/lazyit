@@ -24,6 +24,30 @@ import type { ProviderErrorPatterns } from './provider.types';
 const GENERIC_CONTEXT_LIMIT =
   /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long/i;
 
+/**
+ * A provider refusing its server-side web search tool because the account disabled it (#1315, follow-up of
+ * #1389). Read only when the step actually carried the tool. The shapes, per the providers' docs:
+ *   - Anthropic: a 400 `invalid_request_error` "that says web search is not enabled" when an administrator
+ *     disabled it in the Claude Console (web-search-tool docs, "How to use web search");
+ *   - OpenAI: hosted tools are allowed or denied per organization / project (`hosted_tool_permissions`); a
+ *     denied tool is refused with an `invalid_request_error` such as "Web Search tool is not enabled for
+ *     this organization" (the Azure OpenAI wording is the same).
+ * A model that does not SUPPORT the tool ("Hosted tool 'web_search_preview' is not supported with …") is
+ * not a setting the admin can flip at the provider and stays a bad request.
+ */
+const WEB_SEARCH_DISABLED =
+  /web[ _-]?search(?:[ _-]?preview)?\b[^.\n]{0,80}?\b(?:(?:is|was|has been)\s+)?(?:not\s+(?:been\s+)?enabled|disabled|not\s+(?:allowed|permitted))/i;
+
+/** Whether a failed step's upstream text says the web search tool is disabled for the account. */
+export function isWebSearchDisabled(text: string): boolean {
+  return WEB_SEARCH_DISABLED.test(text);
+}
+
+/** Per-call facts the classifier may read: whether the step carried the provider's web search tool. */
+export interface ClassifyContext {
+  webSearch?: boolean;
+}
+
 /** The transient statuses: timeouts, overload and server errors. */
 function isUnavailableStatus(status: number): boolean {
   return status === 408 || status === 529 || status >= 500;
@@ -92,7 +116,18 @@ export function classifyHttpStatus(
   text: string,
   patterns: ProviderErrorPatterns,
   headers?: Record<string, string>,
+  context: ClassifyContext = {},
 ): AiProviderError {
+  // Before the auth mapping: a provider may answer a denied hosted tool with a 403 as well as a 400.
+  if (
+    context.webSearch === true &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 429 &&
+    isWebSearchDisabled(text)
+  ) {
+    return new AiProviderError('WEB_SEARCH_DISABLED', { status });
+  }
   if (status === 401 || status === 403) {
     return new AiProviderError('PROVIDER_AUTH', { status });
   }
@@ -118,6 +153,7 @@ export function classifyProviderError(
   err: unknown,
   patterns: ProviderErrorPatterns,
   signal?: AbortSignal,
+  context: ClassifyContext = {},
 ): AiProviderError {
   if (err instanceof AiProviderError) {
     return err;
@@ -129,7 +165,7 @@ export function classifyProviderError(
     if (err.reason === 'abort') {
       return new AiProviderError('CANCELLED');
     }
-    return classifyProviderError(err.lastError, patterns, signal);
+    return classifyProviderError(err.lastError, patterns, signal, context);
   }
   if (LoadAPIKeyError.isInstance(err)) {
     return new AiProviderError('PROVIDER_AUTH');
@@ -165,6 +201,7 @@ export function classifyProviderError(
       `${err.message} ${err.responseBody ?? ''}`,
       patterns,
       err.responseHeaders,
+      context,
     );
   }
 
@@ -175,6 +212,8 @@ export function classifyProviderError(
         err.statusCode,
         `${err.message} ${String(err.type ?? '')} ${String(err.code ?? '')}`,
         patterns,
+        undefined,
+        context,
       );
     }
     const kind = `${String(err.type ?? '')} ${String(err.code ?? '')}`;
