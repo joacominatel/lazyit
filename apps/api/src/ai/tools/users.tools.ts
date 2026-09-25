@@ -24,6 +24,13 @@ import {
 import { assertChannelAllows } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
+  afterPhrase,
+  beforePhrase,
+  joinPhrases,
+  phrase,
+  summaryPhrase,
+} from '../core/sentences';
+import {
   bind,
   defineTool,
   unexposed,
@@ -632,7 +639,12 @@ const userCreate = defineTool({
     );
     return {
       data: userSummary(created),
-      summary: `Created ${userLabel(created)} as ${String(created.role)}.`,
+      ...summaryPhrase(
+        phrase('user_create.summary', {
+          user: userLabel(created),
+          role: String(created.role),
+        }),
+      ),
       entityRefs: [userRefOf(created, 'created')],
     };
   },
@@ -789,7 +801,9 @@ const userUpdate = defineTool({
     );
     return {
       data: userSummary(updated),
-      summary: `Updated ${userLabel(updated)}.`,
+      ...summaryPhrase(
+        phrase('user_update.summary', { user: userLabel(updated) }),
+      ),
       entityRefs: [userRefOf(updated, 'updated')],
     };
   },
@@ -931,11 +945,7 @@ const userOffboard = defineTool({
     }
     if (current.externalId) warnings.push('EXTERNAL_DEPROVISIONING');
     const exposure = await criticalExposure(rt, String(current.id), grants);
-    const criticalChanges: {
-      field: string;
-      before?: unknown;
-      after: unknown;
-    }[] = [];
+    const criticalChanges: AiToolPreview['changes'] = [];
     if (touchesCritical(exposure)) {
       // Core requires the password for it in the chat; MCP and headless refuse it in `run`.
       warnings.push('CRITICAL_APPLICATION');
@@ -943,15 +953,19 @@ const userOffboard = defineTool({
         criticalChanges.push({
           field: 'criticalApplicationAccess',
           before: exposure.critical.map((a) => a.name).join(', '),
-          after: 'revoked',
+          ...afterPhrase(phrase('user_offboard.criticalRevoked')),
         });
       }
       if (exposure.grantsUnreadable || exposure.unknownApplications > 0) {
         criticalChanges.push({
           field: 'criticalApplicationAccess',
-          after: exposure.grantsUnreadable
-            ? 'unknown: you cannot list this person’s grants, so they are treated as critical'
-            : `unknown for ${exposure.unknownApplications} application(s) you cannot read — treated as critical`,
+          ...afterPhrase(
+            exposure.grantsUnreadable
+              ? phrase('user_offboard.criticalUnknownGrants')
+              : phrase('user_offboard.criticalUnknownApplications', {
+                  count: exposure.unknownApplications,
+                }),
+          ),
         });
       }
     }
@@ -968,8 +982,8 @@ const userOffboard = defineTool({
           { field: 'status', before: 'active', after: 'offboarded' },
           {
             field: 'secretVaultMemberships',
-            before: 'any held',
-            after: 'dropped (not restored by user_restore)',
+            ...beforePhrase(phrase('user_offboard.vaultMembershipsBefore')),
+            ...afterPhrase(phrase('user_offboard.vaultMembershipsAfter')),
           },
           ...criticalChanges,
         ],
@@ -1011,12 +1025,19 @@ const userOffboard = defineTool({
         // Secret Manager adjacency (ADR-0061): the count only, never vault names.
         vaultsToRotate: vaults.length,
       },
-      summary:
-        `Offboarded ${resolved.label ?? resolved.id}: released ${released.length} asset(s), revoked ` +
-        `${revokedGrants} access grant(s).` +
-        (vaults.length > 0
-          ? ` They could read ${vaults.length} Secret Manager vault(s): an administrator should rotate those secrets in the lazyit UI.`
-          : ''),
+      ...summaryPhrase(
+        joinPhrases(
+          phrase('user_offboard.summary', {
+            user: resolved.label ?? resolved.id,
+            released: released.length,
+            revoked: revokedGrants,
+          }),
+          vaults.length > 0 &&
+            phrase('user_offboard.summaryRotateVaults', {
+              vaults: vaults.length,
+            }),
+        ),
+      ),
       entityRefs: [
         {
           type: 'user',
@@ -1096,7 +1117,9 @@ const userRestore = defineTool({
     );
     return {
       data: userSummary(restored),
-      summary: `Restored ${userLabel(restored)}. Access grants and asset assignments were not restored.`,
+      ...summaryPhrase(
+        phrase('user_restore.summary', { user: userLabel(restored) }),
+      ),
       entityRefs: [userRefOf(restored, 'restored')],
     };
   },

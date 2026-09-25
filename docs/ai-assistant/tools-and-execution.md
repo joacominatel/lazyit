@@ -1595,7 +1595,9 @@ Storage and display:
 - `AiActionLog` gets a `PROPOSED` event (redacted input, the target ref, the untrusted sources). The row
   and the event commit in **one transaction**: there is never an approvable row without its record.
 - The card renders **the stored input and the preview, never the model's narrative**. Labels and warning
-  codes are localized on the web ([[0051-i18n-next-intl]]).
+  codes are localized on the web ([[0051-i18n-next-intl]]); the sentences the server builds (the `action`
+  row, an audience, a workflow's "when" and "sends to" sentences…) carry codes the web renders in the
+  user's locale (§9.1).
 
 **Approve.** Only by the requesting user, from any of their **human** sessions — never an MCP or SA
 token, never a tool. The request carries only the pending-action id, plus the password step-up when
@@ -1720,6 +1722,63 @@ Scope: each `tool_use` gets its own card; parallel proposals are decided indepen
 edit-before-approve in v1 — the user rejects and says what to change. **MCP:** no server-side
 confirmation — the client owns it; annotations inform it, and `elevated` tools are listed only under the
 `lazyit.admin` scope (R7). **Headless:** none (settled); bounded by the per-SA AI access setting.
+
+### 9.1 Localizable server-built sentences (#1384, as built)
+
+A few strings are sentences the **API** builds: a preview's `action` row and other explanatory values
+(the KB `audience`, `criticalApplicationAccess`, a workflow's `whatItDoes`, a connection's
+`authentication`…), a result's `summary`, and the refusals core and the runtime answer. Their meaning is
+decided on the server — the card stays honest, nothing in it comes from the model — but the API is
+locale-agnostic (CEO/CTO decision, #1384 option A). So next to each English string it also sends the
+sentence as **codes + params**, and the web renders the code's template in the user's locale:
+
+```jsonc
+{ "field": "action",
+  "after": "Add the application \"Jira\" to the catalog.",
+  "afterSentences": [{ "code": "application_create.action", "params": { "name": "Jira" } }] }
+```
+
+- **Where.** `changes[].beforeSentences` / `changes[].afterSentences` (preview rows), `summarySentences`
+  (a success result and the `tool.result` event / transcript part), `error.messageSentences` (a failed
+  result and its event). All **optional**; the English field is unchanged and stays what the ledger, the
+  model, MCP and headless clients read (MCP's `structuredContent` does not carry them).
+- **A list renders as its sentences joined by one space**, in order — `access_grant_create.actionSelf`,
+  `access_grant_create.action`, an `access.outlook.*` sentence, `access.criticalNote` make up one grant
+  `action` row.
+- **The closed list** is `AI_SENTENCES` in `@lazyit/shared` (`schemas/ai-sentences.ts`): each code carries
+  its English template in ICU MessageFormat (the syntax `next-intl` reads, so the web's `en` catalog can
+  copy it) and the kind of each param — `text` (verbatim; it may carry the same `<untrusted_content>`
+  wrappers the English does, stripped to plain text by the web), `number` (ICU `plural`), `date` (as the
+  English shows it) or `enum:<Name>` (a raw code the template `select`s on; `enum:YesNo` is `yes` / `no`).
+  Codes are `<tool_name>.<part>` for a tool's own sentences, `access.*`, `kb.audience.*`, `taxonomy.*`,
+  `workflow.*`, `workflows.*` for shared parts, and `refusal.*` for core and runtime refusals.
+- **One source for both.** The API builds each sentence with `phrase(code, params)`
+  (`ai/core/sentences.ts`), which renders the English **from the template**, so the English and the codes
+  cannot drift; `afterPhrase` / `beforePhrase` / `summaryPhrase` / `messagePhrase` spread both into the
+  row, the output or the error. An edge case the list does not model is `englishOnly(text)`: the phrase,
+  and any phrase joined with it, then carries no codes and the web shows the English — a sentence is
+  localized whole or not at all.
+- **Web rule (read-tolerant).** Render the localized form only when this build knows **every** code of the
+  list and has every param its template names; otherwise show the English. An older web ignores the
+  fields (zod strips unknown keys); a newer web reading a row stored before #1384 finds none and shows the
+  English. A malformed list is dropped by the schema (`AiSentencesFieldSchema` catches to `undefined`), so
+  it never fails the preview or result it sits in.
+- **Not covered, deliberately.** Error messages that come from the domain (an `HttpException` a route or a
+  tool's own guard throws, a Prisma error) stay English: they are many, owned by each module, and the web
+  already localizes the tool error **code** (`INVALID_INPUT`, `STALE`, …) next to them. Technical list
+  values (a batch's `rows`, `defaultsApplied`, a workflow's `dataSent` / `dryRun` / `usedBy` lines, the
+  request lines of a step) and entity labels stay as they are. Raw enum values in value rows (`status:
+  PENDING → APPROVED`, `COMPLETED`, `CANCELLED`, `DRAFT`, `active → revoked`) are codes the web maps with
+  its own value labels.
+- **Tests.** `ai-sentences.test.ts` (shared) checks every template names exactly its declared params, never
+  uses ICU apostrophe quoting, and renders; `ai/core/sentences.spec.ts` checks every write tool's summary
+  and every `action` row are built from a code, that every listed code is used and every used code is
+  listed, and that a restricted KB audience renders the same English as before.
+- **Upgrade.** No migration and no change to hashing: `isStale` compares only the `precondition`, step 0
+  compares only `warnings`, `inputHash` covers the input and `schemaHash` / the toolset hash the input
+  schemas and descriptions — none of them sees the new fields. An `AWAITING_APPROVAL` row stored before the
+  upgrade keeps parsing and approves as before (it simply has no codes); the prompt version and the toolset
+  hash are unchanged, so no conversation becomes read-only.
 
 ## 10. Audit attribution
 
@@ -2039,6 +2098,8 @@ model AiActionLog {
   - An unknown `toolName` after a rename → `EXPIRED` "tool no longer available".
   - Message `content` is versioned (`v:1`).
   - The web ignores unknown effect types and warning codes.
+  - The localizable sentence fields (§9.1) are optional and read-tolerant: a row stored before them shows
+    its English; an unknown code falls back to the English.
 - **Downgrade:** older images ignore the new tables and columns.
 
 ## 14. Deliberately not built
@@ -2100,12 +2161,14 @@ export const AI_ERROR_CODES = ["INVALID_INPUT","NOT_FOUND","AMBIGUOUS_REFERENCE"
 export const AiToolResultSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), kind: z.enum(AI_CALL_KINDS), data: z.unknown(),
              summary: z.string().optional(), mutated: z.boolean(),
+             summarySentences: AiSentencesFieldSchema,   // #1384, §9.1
              truncated: z.object({ shown: z.number().int(), total: z.number().int().optional(),
                                    nextOffset: z.number().int().optional() }).optional(),
              entityRefs: z.array(AiEntityRefSchema) }),
   z.object({ ok: z.literal(false), kind: z.enum(AI_CALL_KINDS),
              error: z.object({ code: z.enum(AI_ERROR_CODES), status: z.number().int().optional(),
-                               message: z.string(), hint: z.string().optional() }),
+                               message: z.string(), hint: z.string().optional(),
+                               messageSentences: AiSentencesFieldSchema }),   // #1384, §9.1
              mutated: z.literal(false), entityRefs: z.array(AiEntityRefSchema).default([]) }),
 ]);
 
@@ -2114,7 +2177,8 @@ export const AiActionPreviewSchema = z.object({
   elevated: z.boolean(), stepUpRequired: z.boolean(),
   target: AiEntityRefSchema.optional(),
   changes: z.array(z.object({ field: z.string(), before: z.unknown().optional(), after: z.unknown(),
-    valueKind: z.enum(["text","number","date","entity","boolean","redacted"]).optional() })),
+    valueKind: z.enum(["text","number","date","entity","boolean","redacted"]).optional(),
+    beforeSentences: AiSentencesFieldSchema, afterSentences: AiSentencesFieldSchema })),   // #1384, §9.1
   impacted: z.array(z.object({ type: z.enum(AI_ENTITY_TYPES), count: z.number().int(),
     sample: z.array(AiEntityRefSchema).max(5) })).default([]),
   warnings: z.array(z.string()),          // known codes in §9; unknown → generic render

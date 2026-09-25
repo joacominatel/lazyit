@@ -8,6 +8,7 @@ import {
   type AiRunError,
   type AiRunEvent,
   type AiRunStatus,
+  type AiSentence,
   type AiToolErrorCode,
   type AiUsage,
 } from '@lazyit/shared';
@@ -25,6 +26,7 @@ import {
   type RunEventBus,
 } from '../core/ports/run-event-bus.port';
 import { callKindOf, errorResult } from '../core/result-shaper';
+import { messagePhrase, phrase } from '../core/sentences';
 import { AiToolRegistry } from '../core/tool-registry';
 import { AiInputRequests } from './input-requests';
 import { capToolOutput } from './limits';
@@ -54,6 +56,8 @@ export interface AppendRow {
 export interface FallbackAnswer {
   code: AiToolErrorCode;
   message: string;
+  /** `message` as localizable sentences (#1384). */
+  messageSentences?: AiSentence[];
 }
 
 export interface FinalizeOptions {
@@ -67,8 +71,11 @@ export interface FinalizeOptions {
 
 const NOT_EXECUTED: FallbackAnswer = {
   code: 'NOT_AVAILABLE',
-  message: 'The run ended before this call was executed',
+  ...messagePhrase(phrase('refusal.runEndedBeforeCall')),
 };
+
+/** What a call still pending when its run ends is answered, absent a fallback. */
+const RUN_ENDED = messagePhrase(phrase('refusal.runEnded'));
 
 /** Statuses of an invocation that will still change (a resume must wait for them). */
 const UNDECIDED = ['AWAITING_APPROVAL', 'AWAITING_INPUT', 'EXECUTING'];
@@ -307,7 +314,13 @@ export class AiRunLifecycle {
     });
     for (const row of pending) {
       const cancelled = await this.tools
-        .cancel(row.id, options.fallback?.message ?? 'The run ended')
+        .cancel(
+          row.id,
+          options.fallback?.message ?? RUN_ENDED.message,
+          options.fallback
+            ? options.fallback.messageSentences
+            : RUN_ENDED.messageSentences,
+        )
         .catch((err: unknown) => {
           this.logger.error(
             `AI run ${runId}: invocation ${row.id} could not be cancelled: ${describeError(err)}`,
@@ -326,10 +339,17 @@ export class AiRunLifecycle {
           'CANCELLED',
           errorResult('navigate', {
             code: 'NOT_AVAILABLE',
-            message: (options.fallback?.message ?? 'The run ended').slice(
+            message: (options.fallback?.message ?? RUN_ENDED.message).slice(
               0,
               500,
             ),
+            ...((options.fallback?.message ?? RUN_ENDED.message).length <= 500
+              ? {
+                  messageSentences: options.fallback
+                    ? options.fallback.messageSentences
+                    : RUN_ENDED.messageSentences,
+                }
+              : {}),
           }),
         )
         .catch((err: unknown) => {

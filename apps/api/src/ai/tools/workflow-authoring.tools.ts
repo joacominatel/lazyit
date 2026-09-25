@@ -29,6 +29,15 @@ import { assertChannelAllows } from '../core/pending-action';
 import type { AiResolvedReference } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
 import {
+  afterPhrase,
+  beforePhrase,
+  joinPhrases,
+  phrase,
+  summaryPhrase,
+  yesNo,
+  type Phrase,
+} from '../core/sentences';
+import {
   bind,
   defineTool,
   type AiToolPreview,
@@ -95,20 +104,15 @@ import {
 
 type Change = AiActionPreview['changes'][number];
 
-const TRIGGER_WORDS: Record<string, string> = {
-  ACCESS_GRANTED: 'granted access to',
-  ACCESS_REVOKED: 'has their access revoked from',
-};
-
 function triggerLabel(trigger: unknown): string {
   return trigger === 'ACCESS_REVOKED'
     ? 'on access revoked'
     : 'on access granted';
 }
 
-/** "every time someone is granted access to Jira". */
-function whenSentence(trigger: unknown, appName: string): string {
-  return `every time someone is ${TRIGGER_WORDS[String(trigger)] ?? 'granted access to'} ${appName}`;
+/** A workflow trigger as a sentence param (the templates `select` on it). */
+function triggerParam(trigger: unknown): string {
+  return String(trigger);
 }
 
 /** The provisioning warning of a workflow's trigger. */
@@ -367,7 +371,6 @@ function mappingLines(mapping: Record<string, string> | undefined): string[] {
   });
 }
 
-/** The distinct lazyit data a set of steps sends out, in words. */
 /**
  * Whether a step's `dataMapping` is actually sent: a webhook always posts it; a REST step sends a JSON
  * body only for POST / PUT / PATCH (`rest.handler.ts`) — a GET or DELETE mapping is never sent.
@@ -380,8 +383,28 @@ function sendsBody(step: WorkflowStep): boolean {
   );
 }
 
-function dataSentWords(steps: readonly WorkflowStep[]): string[] {
-  const words = new Set<string>();
+/** A value a workflow sends, as a `workflow.outbound.dataWord` sentence names it (#1384). */
+interface DataWord {
+  /** The template path with dots as underscores, `steps` for a manual step's input, or `unknown`. */
+  token: string;
+  step: string;
+  field: string;
+}
+
+function dataWordOf(path: string): DataWord {
+  if (TOKEN_WORDS[path]) {
+    return { token: path.replace(/\./g, '_'), step: '', field: '' };
+  }
+  if (path.startsWith('steps.')) {
+    const [, step, field] = path.split('.');
+    return { token: 'steps', step: step ?? '?', field: field ?? '?' };
+  }
+  return { token: 'unknown', step: '', field: '' };
+}
+
+/** The distinct lazyit data a set of steps sends out, in words (distinct by their English words). */
+function dataSentWords(steps: readonly WorkflowStep[]): DataWord[] {
+  const words = new Map<string, DataWord>();
   for (const step of steps) {
     if (step.kind === 'MANUAL') continue;
     const templates = [
@@ -389,10 +412,13 @@ function dataSentWords(steps: readonly WorkflowStep[]): string[] {
       ...(step.kind === 'REST' ? [step.path] : []),
     ];
     for (const template of templates) {
-      for (const token of tokensOf(template)) words.add(tokenWords(token));
+      for (const token of tokensOf(template)) {
+        const text = tokenWords(token);
+        if (!words.has(text)) words.set(text, dataWordOf(token));
+      }
     }
   }
-  return [...words];
+  return [...words.values()];
 }
 
 // ─── Reads through bound, guarded handlers ────────────────────────────────────────────────────────
@@ -657,21 +683,43 @@ function describeGraph(
   return { hosts, urls, stepLines, sends };
 }
 
-/** "…, lazyit will send the person's email, … to https://a, https://b." */
+/**
+ * "Every time someone is granted access to Jira, lazyit will send the person's email, … to https://a,
+ * https://b." — or, with `fromNowOn`, "From now on, every time …".
+ */
 function outboundSentence(
   trigger: unknown,
   app: Row,
   steps: readonly WorkflowStep[],
   hosts: string[],
-): string {
-  const when = whenSentence(trigger, appName(app));
+  fromNowOn = false,
+): Phrase {
+  const when = {
+    fromNowOn: yesNo(fromNowOn),
+    trigger: triggerParam(trigger),
+    application: appName(app),
+  };
   if (hosts.length === 0) {
-    return `${when[0].toUpperCase()}${when.slice(1)}, lazyit will only create manual tasks; nothing is sent outside lazyit.`;
+    return phrase('workflow.outbound.manualOnly', when);
   }
   const data = dataSentWords(steps);
-  return `${when[0].toUpperCase()}${when.slice(1)}, lazyit will send ${
-    data.length > 0 ? data.join(', ') : 'requests with no lazyit data'
-  } to ${hosts.join(', ')}.`;
+  return joinPhrases(
+    phrase('workflow.outbound.sends', when),
+    ...(data.length > 0
+      ? data.map((word, i) => dataWordPhrase(word, i < data.length - 1))
+      : [phrase('workflow.outbound.noData')]),
+    phrase('workflow.outbound.to', { hosts: hosts.join(', ') }),
+  );
+}
+
+/** One value of {@link dataSentWords} as a sentence, followed by a comma when more follow. */
+function dataWordPhrase(word: DataWord, comma: boolean): Phrase {
+  return phrase('workflow.outbound.dataWord', {
+    token: word.token,
+    field: word.field,
+    step: word.step,
+    then: comma ? 'comma' : 'end',
+  });
 }
 
 // ─── The preview skeleton ─────────────────────────────────────────────────────────────────────────
@@ -765,7 +813,12 @@ const workflowCreate = defineTool({
     const changes: Change[] = [
       {
         field: 'whatItDoes',
-        after: `Creates the ${triggerLabel(input.trigger)} automation of ${appName(app)}, DISABLED and with no steps. Nothing is sent until steps are added and it is enabled.`,
+        ...afterPhrase(
+          phrase('workflow_create.whatItDoes', {
+            trigger: triggerParam(input.trigger),
+            application: appName(app),
+          }),
+        ),
       },
       { field: 'application', after: appName(app) },
       { field: 'trigger', after: input.trigger },
@@ -812,7 +865,12 @@ const workflowCreate = defineTool({
         workflow: workflowSummary(created),
         next: 'It is disabled and has no steps: add them with workflow_author_version, then enable it with workflow_set_enabled.',
       },
-      summary: `Created the ${triggerLabel(input.trigger)} workflow of ${appForModel(app)} (disabled).`,
+      ...summaryPhrase(
+        phrase('workflow_create.summary', {
+          trigger: triggerParam(input.trigger),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -890,7 +948,12 @@ const workflowUpdate = defineTool({
     );
     return {
       data: { workflow: workflowSummary(updated) },
-      summary: `Updated the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
+      ...summaryPhrase(
+        phrase('workflow_update.summary', {
+          trigger: triggerParam(workflow.trigger),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -927,7 +990,12 @@ const workflowArchive = defineTool({
       changes: [
         {
           field: 'whatItDoes',
-          after: `Archives this workflow: from now on nothing runs ${whenSentence(workflow.trigger, appName(app))}. It cannot be restored from lazyit.`,
+          ...afterPhrase(
+            phrase('workflow_archive.whatItDoes', {
+              trigger: triggerParam(workflow.trigger),
+              application: appName(app),
+            }),
+          ),
         },
         { field: 'status', before: 'active', after: 'archived' },
         {
@@ -952,7 +1020,12 @@ const workflowArchive = defineTool({
     });
     return {
       data: { workflowId: workflow.id, archived: true },
-      summary: `Archived the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
+      ...summaryPhrase(
+        phrase('workflow_archive.summary', {
+          trigger: triggerParam(workflow.trigger),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1011,11 +1084,16 @@ const workflowAuthorVersion = defineTool({
     const changes: Change[] = [
       {
         field: 'whatItDoes',
-        after:
-          outboundSentence(workflow.trigger, app, input.steps, next.hosts) +
-          (enabled
-            ? ' The workflow is ENABLED: this version is live as soon as it is saved.'
-            : ' The workflow is disabled: nothing runs until it is enabled.'),
+        ...afterPhrase(
+          joinPhrases(
+            outboundSentence(workflow.trigger, app, input.steps, next.hosts),
+            phrase(
+              enabled
+                ? 'workflow_author_version.enabled'
+                : 'workflow_author_version.disabled',
+            ),
+          ),
+        ),
       },
       { field: 'version', before: version || null, after: version + 1 },
       {
@@ -1066,9 +1144,14 @@ const workflowAuthorVersion = defineTool({
               next: 'The workflow is disabled: enable it with workflow_set_enabled (its preview dry-runs it against a sample grant).',
             }),
       },
-      summary: `Saved version ${String(version.version)} of the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}${
-        workflow.enabled === true ? ' (live now)' : ''
-      }.`,
+      ...summaryPhrase(
+        phrase('workflow_author_version.summary', {
+          version: String(version.version),
+          trigger: triggerParam(workflow.trigger),
+          application: appForModel(app),
+          live: yesNo(workflow.enabled === true),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1201,7 +1284,12 @@ const workflowSetEnabled = defineTool({
         changes: [
           {
             field: 'whatItDoes',
-            after: `Turns the workflow off: from now on nothing runs ${whenSentence(workflow.trigger, appName(app))}. Runs already started finish.`,
+            ...afterPhrase(
+              phrase('workflow_set_enabled.whatItDoesOff', {
+                trigger: triggerParam(workflow.trigger),
+                application: appName(app),
+              }),
+            ),
           },
           {
             field: 'enabled',
@@ -1238,7 +1326,15 @@ const workflowSetEnabled = defineTool({
       changes: [
         {
           field: 'whatItDoes',
-          after: `From now on, ${outboundSentence(workflow.trigger, app, state.steps, graph.hosts).replace(/^./, (c) => c.toLowerCase())}`,
+          ...afterPhrase(
+            outboundSentence(
+              workflow.trigger,
+              app,
+              state.steps,
+              graph.hosts,
+              true,
+            ),
+          ),
         },
         { field: 'enabled', before: false, after: true, valueKind: 'boolean' },
         { field: 'version', after: state.latest.version },
@@ -1265,7 +1361,13 @@ const workflowSetEnabled = defineTool({
     );
     return {
       data: { workflow: workflowSummary(updated) },
-      summary: `${input.enabled ? 'Enabled' : 'Disabled'} the ${triggerLabel(workflow.trigger)} workflow of ${appForModel(app)}.`,
+      ...summaryPhrase(
+        phrase('workflow_set_enabled.summary', {
+          enabled: yesNo(input.enabled),
+          trigger: triggerParam(workflow.trigger),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1296,20 +1398,24 @@ const connectionConfig = z
 const connectionName = z.string().trim().min(1).max(120);
 
 /** Plain words for how a config authenticates. */
-function authWords(config: Row, credentialConfigured: boolean): string {
+function authWords(config: Row, credentialConfigured: boolean): Phrase {
   if (config.kind === 'WEBHOOK_OUT') {
     return credentialConfigured
-      ? `signed with the stored secret${config.signatureHeader ? ` in ${str(config.signatureHeader)}` : ''}`
-      : 'unsigned (no signing secret attached)';
+      ? phrase('workflow.auth.webhookSigned', {
+          hasHeader: yesNo(!!config.signatureHeader),
+          header: String(str(config.signatureHeader)),
+        })
+      : phrase('workflow.auth.webhookUnsigned');
   }
-  if (config.kind !== 'REST') return 'no external call';
+  if (config.kind !== 'REST') return phrase('workflow.auth.noCall');
   const scheme = str(config.authScheme) ?? 'NONE';
-  if (scheme === 'NONE') return 'no authentication';
-  const where =
-    scheme === 'HEADER'
-      ? ` in header ${str(config.authHeaderName) ?? '?'}`
-      : '';
-  return `${scheme}${where}, ${credentialConfigured ? 'with the stored credential' : 'no credential attached yet'}`;
+  if (scheme === 'NONE') return phrase('workflow.auth.none');
+  return phrase('workflow.auth.rest', {
+    scheme,
+    isHeader: yesNo(scheme === 'HEADER'),
+    header: str(config.authHeaderName) ?? '?',
+    credential: yesNo(credentialConfigured),
+  });
 }
 
 const connectionCreate = defineTool({
@@ -1361,7 +1467,10 @@ const connectionCreate = defineTool({
               { field: 'destination', after: displayUrl(endpoint) },
             ]
           : []),
-        { field: 'authentication', after: authWords(config, false) },
+        {
+          field: 'authentication',
+          ...afterPhrase(authWords(config, false)),
+        },
       ],
       warnings: ['OUTBOUND_INTEGRATION'],
     });
@@ -1385,11 +1494,14 @@ const connectionCreate = defineTool({
         connection: connectionSummary(created),
         next: 'Use its id in workflow_author_version steps. A credential, if the destination needs one, is stored by an administrator in the lazyit UI.',
       },
-      summary: `Created the ${input.config.kind} connection of ${appForModel(app)}${
-        endpointOf(created.config)
-          ? ` to ${originOf(endpointOf(created.config))}`
-          : ''
-      }.`,
+      ...summaryPhrase(
+        phrase('workflow_connection_create.summary', {
+          kind: input.config.kind,
+          application: appForModel(app),
+          hasHost: yesNo(!!endpointOf(created.config)),
+          host: String(originOf(endpointOf(created.config))),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1683,7 +1795,7 @@ const connectionUpdate = defineTool({
     }
 
     const changes: Change[] = [];
-    const sentences: string[] = [];
+    const sentences: Phrase[] = [];
     if (input.name !== undefined && input.name !== connection.name) {
       changes.push({
         field: 'name',
@@ -1704,25 +1816,34 @@ const connectionUpdate = defineTool({
       });
       sentences.push(
         beforeHost === afterHost
-          ? `Changes where on ${afterHost} the connection sends.`
-          : `Re-points the connection from ${beforeHost} to ${afterHost}: every workflow step using it will send there instead.`,
+          ? phrase('workflow_connection_update.movesPath', {
+              host: String(afterHost),
+            })
+          : phrase('workflow_connection_update.repoints', {
+              from: String(beforeHost),
+              to: String(afterHost),
+            }),
       );
       const headers = headerNames(nextConfig);
       if (beforeHost !== afterHost && headers.length > 0) {
         changes.push({ field: 'defaultHeadersSentToNewHost', after: headers });
       }
       if (beforeHost !== afterHost && willHaveCredential) {
-        sentences.push(`The stored credential will be sent to ${afterHost}.`);
+        sentences.push(
+          phrase('workflow_connection_update.credentialToNewHost', {
+            host: String(afterHost),
+          }),
+        );
       }
     }
     if (input.config !== undefined) {
       const beforeAuth = authWords(currentConfig, hadCredential);
       const afterAuth = authWords(nextConfig, willHaveCredential);
-      if (beforeAuth !== afterAuth) {
+      if (beforeAuth.text !== afterAuth.text) {
         changes.push({
           field: 'authentication',
-          before: beforeAuth,
-          after: afterAuth,
+          ...beforePhrase(beforeAuth),
+          ...afterPhrase(afterAuth),
         });
       }
       for (const field of [
@@ -1750,15 +1871,29 @@ const connectionUpdate = defineTool({
     ) {
       changes.push({
         field: 'credential',
-        before: hadCredential
-          ? `stored credential ${String(connection.secretId)}`
-          : 'none',
-        after: input.secretId ? `stored credential ${input.secretId}` : 'none',
+        ...beforePhrase(
+          hadCredential
+            ? phrase('workflow_connection_update.credentialStored', {
+                secretId: String(connection.secretId),
+              })
+            : phrase('workflow_connection_update.credentialNone'),
+        ),
+        ...afterPhrase(
+          input.secretId
+            ? phrase('workflow_connection_update.credentialStored', {
+                secretId: input.secretId,
+              })
+            : phrase('workflow_connection_update.credentialNone'),
+        ),
       });
       sentences.push(
         input.secretId
-          ? `Attaches the stored credential ${input.secretId}: it will be sent to ${afterHost ?? 'the connection'} on every call.`
-          : 'Detaches the credential: calls will be sent without it.',
+          ? phrase('workflow_connection_update.attachesCredential', {
+              secretId: input.secretId,
+              hasHost: yesNo(afterHost !== null),
+              host: String(afterHost),
+            })
+          : phrase('workflow_connection_update.detachesCredential'),
       );
     }
     if (changes.length === 0) {
@@ -1776,8 +1911,9 @@ const connectionUpdate = defineTool({
       if (active.lines === null) {
         changes.push({
           field: 'runsInFlight',
-          after:
-            'Could not be checked (needs the workflow:read permission): runs already started may send to the new host.',
+          ...afterPhrase(
+            phrase('workflow_connection_update.runsInFlightUnknown'),
+          ),
         });
       } else if (active.total > 0) {
         changes.push({ field: 'runsInFlight', after: active.lines });
@@ -1785,15 +1921,22 @@ const connectionUpdate = defineTool({
     }
     if (repoint && (sentToNewHost.length > 0 || (active?.total ?? 0) > 0)) {
       sentences.push(
-        `From the next step that calls it — including in ${active?.total ?? 0} run(s) already in flight, waiting for a person or failed and retryable — workflows will send their data to ${afterHost}.`,
+        phrase('workflow_connection_update.inFlight', {
+          count: active?.total ?? 0,
+          host: String(afterHost),
+        }),
       );
     }
     changes.unshift({
       field: 'whatItDoes',
-      after:
+      ...afterPhrase(
         sentences.length > 0
-          ? sentences.join(' ')
-          : `Changes the settings of this connection to ${afterHost ?? 'no external host'}.`,
+          ? joinPhrases(...sentences)
+          : phrase('workflow_connection_update.settingsOnly', {
+              hasHost: yesNo(afterHost !== null),
+              host: String(afterHost),
+            }),
+      ),
     });
     return previewOf({
       app,
@@ -1823,7 +1966,12 @@ const connectionUpdate = defineTool({
     );
     return {
       data: { connection: connectionSummary(updated) },
-      summary: `Updated the ${String(updated.kind)} connection of ${appForModel(app)}.`,
+      ...summaryPhrase(
+        phrase('workflow_connection_update.summary', {
+          kind: String(updated.kind),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1879,10 +2027,13 @@ const connectionArchive = defineTool({
       changes: [
         {
           field: 'whatItDoes',
-          after:
-            users.length > 0
-              ? `Archives the connection to ${originOf(endpointOf(connection.config)) ?? 'no external host'}. ${users.length} workflow(s) still call it and their steps will fail.`
-              : `Archives the connection to ${originOf(endpointOf(connection.config)) ?? 'no external host'}. No workflow uses it.`,
+          ...afterPhrase(
+            phrase('workflow_connection_archive.whatItDoes', {
+              hasHost: yesNo(originOf(endpointOf(connection.config)) !== null),
+              host: String(originOf(endpointOf(connection.config))),
+              users: users.length,
+            }),
+          ),
         },
         { field: 'status', before: 'active', after: 'archived' },
         ...(users.length > 0 ? [{ field: 'usedBy', after: users }] : []),
@@ -1898,7 +2049,12 @@ const connectionArchive = defineTool({
     });
     return {
       data: { connectionId: connection.id, archived: true },
-      summary: `Archived the ${String(connection.kind)} connection of ${appForModel(app)}.`,
+      ...summaryPhrase(
+        phrase('workflow_connection_archive.summary', {
+          kind: String(connection.kind),
+          application: appForModel(app),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },
@@ -1944,15 +2100,21 @@ const connectionTest = defineTool({
       changes: [
         {
           field: 'whatItDoes',
-          after: `Sends one read-only ${method} request to ${originOf(baseUrl)} (path ${path})${
-            credential
-              ? ', with the stored credential'
-              : ', without a credential'
-          }. Nothing is changed there.`,
+          ...afterPhrase(
+            phrase('workflow_connection_test.whatItDoes', {
+              method,
+              host: String(originOf(baseUrl)),
+              path,
+              credential: yesNo(credential),
+            }),
+          ),
         },
         { field: 'outboundHost', after: originOf(baseUrl) },
         { field: 'probe', after: `${method} ${displayUrl(baseUrl)} + ${path}` },
-        { field: 'authentication', after: authWords(config, credential) },
+        {
+          field: 'authentication',
+          ...afterPhrase(authWords(config, credential)),
+        },
       ],
       warnings: ['OUTBOUND_INTEGRATION'],
     });
@@ -1984,9 +2146,14 @@ const connectionTest = defineTool({
         ),
         requestId: outcome.requestId,
       },
-      summary: `Tested the connection of ${appForModel(app)} to ${originOf(endpointOf(connection.config)) ?? 'its host'}: ${
-        outcome.ok === true ? 'it answered' : 'it failed'
-      }.`,
+      ...summaryPhrase(
+        phrase('workflow_connection_test.summary', {
+          application: appForModel(app),
+          hasHost: yesNo(originOf(endpointOf(connection.config)) !== null),
+          host: String(originOf(endpointOf(connection.config))),
+          ok: yesNo(outcome.ok === true),
+        }),
+      ),
       entityRefs: [appTarget(app)],
     };
   },

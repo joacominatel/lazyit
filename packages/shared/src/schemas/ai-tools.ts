@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { PermissionSchema } from "./permission";
+import { AiSentencesFieldSchema } from "./ai-sentences";
 import { int4 } from "./primitives";
+
+// The localizable server-built sentences (#1384) are part of this contract; re-exported here so the
+// barrel reaches them through this file.
+export * from "./ai-sentences";
 
 /**
  * The AI tool contract (ADR-0097 decisions 3 and 6; docs/ai-assistant/_synthesis.md §4.1 and §4.3,
@@ -164,6 +169,8 @@ export const AiToolResultSchema = z.discriminatedUnion("ok", [
     kind: AiCallKindSchema,
     data: z.unknown(),
     summary: z.string().optional(),
+    /** `summary` as localizable sentences (#1384, {@link AI_SENTENCES}). Optional; the English stays. */
+    summarySentences: AiSentencesFieldSchema,
     mutated: z.boolean(),
     truncated: AiTruncationSchema.optional(),
     entityRefs: AiEntityRefListSchema,
@@ -175,6 +182,8 @@ export const AiToolResultSchema = z.discriminatedUnion("ok", [
       code: AiToolErrorCodeSchema,
       status: int4({ min: 100, max: 599 }).optional(),
       message: z.string(),
+      /** `message` as localizable sentences (#1384). Optional; the English stays. */
+      messageSentences: AiSentencesFieldSchema,
       hint: z.string().optional(),
     }),
     mutated: z.literal(false),
@@ -255,6 +264,13 @@ export const AiActionPreviewSchema = z.object({
       before: z.unknown().optional(),
       after: z.unknown(),
       valueKind: AiPreviewValueKindSchema.optional(),
+      /**
+       * A server-built English `before` / `after` sentence (the `action` row, an audience, a workflow's
+       * "when" and "sends to" sentences…) as localizable sentences (#1384, {@link AI_SENTENCES}). Optional:
+       * the English value stays, and an older stored preview has none.
+       */
+      beforeSentences: AiSentencesFieldSchema,
+      afterSentences: AiSentencesFieldSchema,
     }),
   ),
   warnings: z.array(z.string()),

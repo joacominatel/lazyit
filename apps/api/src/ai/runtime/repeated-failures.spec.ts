@@ -35,6 +35,13 @@ describe('RepeatedFailureGuard (#1403)', () => {
       code: 'INVALID_INPUT',
       message:
         'Not run: this exact request_input call already failed 2 times in this turn',
+      // #1384: the same refusal as a code the web localizes.
+      messageSentences: [
+        {
+          code: 'refusal.repeatedFailure',
+          params: { tool: 'request_input', count: 2 },
+        },
+      ],
       hint: hintOf(second),
     });
   });

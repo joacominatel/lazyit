@@ -1556,6 +1556,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           field: 'audience',
           after:
             'Team: Unknown to you: folder access rules are shown only to settings:manage holders',
+          // #1384: the same sentence as codes the web localizes.
+          afterSentences: [
+            { code: 'kb.audience.folder', params: { folder: 'Team' } },
+            { code: 'kb.audience.unknown', params: {} },
+          ],
           valueKind: 'text',
         },
       ]);

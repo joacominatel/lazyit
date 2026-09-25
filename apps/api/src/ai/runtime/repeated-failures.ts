@@ -1,5 +1,6 @@
-import type { AiToolErrorCode, AiToolResult } from '@lazyit/shared';
+import type { AiSentence, AiToolErrorCode, AiToolResult } from '@lazyit/shared';
 import { canonicalJson } from '../core/pending-action';
+import { messagePhrase, phrase } from '../core/sentences';
 
 /**
  * How many times a tool call may fail the same way in one run before the loop stops offering that
@@ -15,6 +16,8 @@ type FailedResult = Extract<AiToolResult, { ok: false }>;
 export interface RepeatedFailureRefusal {
   code: AiToolErrorCode;
   message: string;
+  /** `message` as localizable sentences (#1384). */
+  messageSentences?: AiSentence[];
   hint: string;
 }
 
@@ -42,7 +45,9 @@ export class RepeatedFailureGuard {
     if (count < AI_REPEATED_FAILURE_LIMIT) return null;
     return {
       code: 'INVALID_INPUT',
-      message: `Not run: this exact ${toolName} call already failed ${count} times in this turn`,
+      ...messagePhrase(
+        phrase('refusal.repeatedFailure', { tool: toolName, count }),
+      ),
       hint: stopHint(toolName, options.awaitsInput === true),
     };
   }
