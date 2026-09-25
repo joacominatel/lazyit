@@ -2,7 +2,7 @@
 id: SEC-083
 title: `/mcp` query-token revocation runs unbounded DB lookups for anonymous callers, before the MCP-off 404 and every rate limit
 severity: low
-status: open
+status: closed
 cwe: CWE-770
 discovered: 2026-09-25
 module: mcp
@@ -76,3 +76,30 @@ sit behind a per-IP limiter. Add a test that sends many query tokens and asserts
 
 - CWE-770; OWASP API4:2023 (unrestricted resource consumption).
 - `docs/ai-assistant/security.md` §6.3, INV-AI-12; `docs/ai-assistant/mcp-and-oauth.md` (G3 F1).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `72e45a7e` (`fix(api): bound the /mcp query-token scan behind the per-IP limiter (SEC-083)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-09-25
+
+### Changes
+- `apps/api/src/mcp/mcp-auth.guard.ts`: a request that carries query credentials is charged to the per-IP refused-authentication limiter (`MCP_AUTH_FAILURE_RATE_LIMIT`, 30 per minute) before the scan. An address over the limit gets no scan. The limiter is in memory and never touches the DB, so an instance with MCP off still reads nothing for it. The 404 and 400 answers are unchanged, and a query-credential request now also counts toward the bearer-path block.
+- `apps/api/src/mcp/mcp-exposed-token.service.ts`: a value is a candidate only when it matches the exact credential grammar: a revocable prefix plus the fixed 43-character base64url body, or a parsable `lzit_sa_` token. At most `MCP_QUERY_TOKEN_SCAN_MAX` (4) distinct candidates are examined, and the opaque ones are looked up with one `findMany({ tokenHash: { in } })`, with at most one revoke per distinct grant. Revoke-on-sight (G3 F1) holds for any real token.
+- `apps/api/src/oauth/oauth-crypto.ts`: `hasOpaqueTokenShape(value, prefix)`, derived from `SECRET_BYTES`, the only length ever minted.
+- `apps/api/src/mcp/mcp.constants.ts`: `MCP_QUERY_TOKEN_SCAN_MAX = 4`.
+- `docs/ai-assistant/{mcp-and-oauth,security}.md` are updated.
+
+### Tests added
+- `apps/api/src/mcp/mcp-auth.guard.spec.ts`::"bounds the query-token scan: 200 values cost at most one lookup, even while MCP is off (SEC-083)". It fails without the fix with 200 lookups.
+- `…`::"never looks up a value that is not token-shaped (SEC-083)". It fails without the fix with 3 lookups.
+- `…`::"charges the per-IP limiter and skips the scan once the address is over it (SEC-083)". It fails without the fix.
+- `…`::"still revokes a real exposed token sent alongside malformed junk (SEC-083)" is a regression guard for G3 F1.
+- `apps/api/src/oauth/oauth-crypto.spec.ts`::"hasOpaqueTokenShape — the exact grammar of a minted token (SEC-083)".
+
+### Verification
+The three SEC-083 tests fail with the pre-fix guard and service (200 and 3 lookups, and a scan while blocked) and pass with the fix. The full API Jest suite passes (5864, under Node). `tsc` passes for all four projects, and scoped eslint is clean.
+
+### Residual risk
+An attacker who puts four well-formed fake tokens before a real exposed token can stop that request from revoking it. The real token was still refused, and the attacker would have to hold it already. The limiter is per replica (the accepted `/mcp` posture). A leaked token that arrives from an address already over its limit is not revoked on that request, but it is still refused.
