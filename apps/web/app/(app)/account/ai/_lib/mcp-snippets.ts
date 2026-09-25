@@ -50,15 +50,25 @@ export function marketplaceName(origin: string): string {
   return slug ? `${MCP_SERVER_NAME}-${slug}` : MCP_SERVER_NAME;
 }
 
-/** The two commands of the one-step Claude Code install (HTTPS + OAuth instances only). */
+/**
+ * The two commands of the one-step Claude Code install (HTTPS + OAuth instances only), or null when the
+ * server says there is no marketplace to add.
+ *
+ * `serverMarketplaceUrl` is `GET /ai/status` `mcp.marketplaceUrl`:
+ * - an `https:` URL → used as is;
+ * - `null` → the API serves no marketplace, which on an OAuth instance with MCP on means a loopback
+ *   origin (Claude Code does not add a marketplace from a loopback address) → null: the panel leads with
+ *   the download / `--plugin-dir` path instead;
+ * - absent (an API older than #1418) or unusable → rebuilt from the origin, as before.
+ */
 export function claudePluginCommands(
   origin: string,
-  /** The server-known marketplace URL (`GET /ai/status` `mcp.marketplaceUrl`), when it reports one. */
   serverMarketplaceUrl?: string | null,
 ): {
   marketplaceAdd: string;
   pluginInstall: string;
-} {
+} | null {
+  if (serverMarketplaceUrl === null) return null;
   const url = parseHttpsUrl(serverMarketplaceUrl) ?? marketplaceUrl(origin);
   return {
     marketplaceAdd: `claude plugin marketplace add ${url}`,

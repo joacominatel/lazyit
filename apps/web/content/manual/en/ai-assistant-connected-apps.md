@@ -16,8 +16,10 @@ anything you don't recognize.
 Each row is one connection:
 
 - **Apps** you approved on the [consent screen](/help/ai-assistant-claude-code-mcp#the-consent-screen) —
-  with their name (marked **Unverified** when lazyit couldn't confirm the publisher) and the address
-  they sign in through.
+  with their name (marked **Unverified** when lazyit couldn't confirm the publisher), the **domain**
+  lazyit checked their details at when the app publishes one (for example **Domain: claude.ai**), and
+  the address they sign in through. The name is what the app says about itself; the domain is what
+  lazyit checked.
 - **Personal tokens** you created, by the name you gave them.
 
 For each one you see what it may do (**Read**, **Write**, **Admin**), when it was connected, when it was

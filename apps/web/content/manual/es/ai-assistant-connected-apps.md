@@ -16,8 +16,10 @@ conectado y cortas el acceso a cualquier cosa que no reconozcas.
 Cada fila es una conexión:
 
 - **Apps** que aprobaste en la [pantalla de consentimiento](/help/ai-assistant-claude-code-mcp), con su
-  nombre (marcada **Sin verificar** cuando lazyit no pudo confirmar quién la publica) y la dirección por
-  la que inicia sesión.
+  nombre (marcada **Sin verificar** cuando lazyit no pudo confirmar quién la publica), el **dominio** en
+  el que lazyit comprobó sus datos cuando la app publica uno (por ejemplo **Dominio: claude.ai**) y la
+  dirección por la que inicia sesión. El nombre es lo que la app dice de sí misma; el dominio es lo que
+  lazyit comprobó.
 - **Tokens personales** que creaste, con el nombre que les diste.
 
 Para cada una ves qué puede hacer (**Lectura**, **Escritura**, **Admin**), cuándo se conectó, cuándo se

@@ -71,7 +71,8 @@ work on an internal network too.
 
 **On a `localhost` instance** (an address like `localhost`, `127.0.0.1` or `::1`), install the plugin
 from the [download](#install-from-a-download-any-instance) instead: Claude Code won't install a
-marketplace from a loopback address.
+marketplace from a loopback address. The install panel knows this — on such an instance it hides the
+marketplace commands and starts with the download, with a note saying why.
 
 **Internal certificate authority.** If your instance's HTTPS certificate is issued by a company CA,
 Claude Code (and other Node.js-based apps) must be told to trust it before starting:
@@ -125,6 +126,11 @@ When an app signs in with OAuth, lazyit shows a consent screen before anything i
 - **The app's name** — marked **Verified** when the app is on your instance's list of known apps and
   lazyit confirmed it by the address it publishes itself at (Claude Code is, out of the box), or **Not
   verified** when the name is only what the app says about itself.
+- **The app's domain** — for an app that publishes its details at a web address (Claude Code does, at
+  `claude.ai`), lazyit fetches them from there and shows that domain next to the name, as
+  **Domain: claude.ai**. The name is what the app says about itself; the domain is what lazyit checked.
+  An app can show a domain and still be **Not verified** — it proved where its details come from, but
+  it isn't on your instance's list — so read the domain before you allow it.
 - **Where you'll return to** — the address the app receives its sign-in at, shown in large type. This is
   the real trust signal: for a desktop app it is usually `localhost` or `127.0.0.1` (your own computer).
   A website the app mentions is shown as unchecked text only.
@@ -135,7 +141,7 @@ When an app signs in with OAuth, lazyit shows a consent screen before anything i
 
 Choose **Allow access** or **Deny**. For an app that is **not verified**, lazyit asks you to confirm a
 second time: continue only if you started the connection yourself, just now, and you recognize where
-it sends you. lazyit never forwards you to an app without a click, and it asks every time — approvals
+it sends you (and its domain, when one is shown). lazyit never forwards you to an app without a click, and it asks every time — approvals
 are not remembered.
 
 If the screen says the app **isn't allowed**, or that it asked for an address it didn't register,

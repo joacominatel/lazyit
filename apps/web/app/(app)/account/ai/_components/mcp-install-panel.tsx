@@ -48,7 +48,9 @@ const code = (chunks: ReactNode) => (
  * it only when `GET /ai/status` says `mcp.available`, and passes the instance's `mcp.auth`:
  *
  * - `oauth` (HTTPS): the one-step marketplace install, then `/mcp` to sign in; auto-update is off by
- *   default for third-party marketplaces, and the panel says how to turn it on.
+ *   default for third-party marketplaces, and the panel says how to turn it on. When the status reports
+ *   `mcp.marketplaceUrl: null` (a loopback origin — Claude Code adds no marketplace from one), the
+ *   marketplace step is hidden and the download / `--plugin-dir` path leads, with a note saying why.
  * - `personal-token` (plain-HTTP `lan`): the plugin download only (a marketplace needs HTTPS); Claude Code
  *   asks for the personal token when the plugin is enabled.
  *
@@ -93,6 +95,7 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
   const { origin } = resolved;
   const copyable = resolved.check === "match";
   const snippets = buildMcpClientSnippets(origin, auth);
+  // Null only when the status explicitly reports no marketplace; an older API keeps today's commands.
   const plugin = claudePluginCommands(origin, mcp?.marketplaceUrl);
   const marketplace = marketplaceName(origin);
 
@@ -117,7 +120,7 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
           <CardDescription>{t("claudeCode.description")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 text-sm">
-          {auth === "oauth" ? (
+          {auth === "oauth" && plugin ? (
             <ol className="list-decimal space-y-4 pl-5">
               <li className="space-y-2">
                 <p>{t("claudeCode.oauth.stepInstall")}</p>
@@ -141,13 +144,15 @@ export function McpInstallPanel({ auth }: { auth: AiMcpAuthMode }) {
             </ol>
           ) : (
             <p className="text-muted-foreground">
-              {t("claudeCode.personalToken.noMarketplace")}
+              {auth === "oauth"
+                ? t("claudeCode.oauth.noMarketplaceLoopback")
+                : t("claudeCode.personalToken.noMarketplace")}
             </p>
           )}
 
           <div className="space-y-2 border-t pt-4">
             <p className="font-medium">
-              {auth === "oauth"
+              {auth === "oauth" && plugin
                 ? t("claudeCode.manual.titleAlternative")
                 : t("claudeCode.manual.title")}
             </p>

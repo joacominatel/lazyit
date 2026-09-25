@@ -36,19 +36,27 @@ describe("endpoints", () => {
       claudePluginCommands(
         "https://it.acme.io",
         "https://it.acme.io/api/ai/claude-code/marketplace.json",
-      ).marketplaceAdd,
+      )?.marketplaceAdd,
     ).toBe(
       "claude plugin marketplace add https://it.acme.io/api/ai/claude-code/marketplace.json",
     );
     expect(
       claudePluginCommands("https://it.acme.io", "https://other.example/m.json")
-        .marketplaceAdd,
+        ?.marketplaceAdd,
     ).toBe("claude plugin marketplace add https://other.example/m.json");
-    for (const bad of [null, undefined, "", "http://it.acme.io/m.json", "nope"]) {
-      expect(claudePluginCommands("https://it.acme.io", bad).marketplaceAdd).toBe(
+  });
+
+  test("an absent or unusable server URL (older API) falls back to the origin", () => {
+    for (const bad of [undefined, "", "http://it.acme.io/m.json", "nope"]) {
+      expect(claudePluginCommands("https://it.acme.io", bad)?.marketplaceAdd).toBe(
         "claude plugin marketplace add https://it.acme.io/api/ai/claude-code/marketplace.json",
       );
     }
+  });
+
+  test("an explicit null (no marketplace served, e.g. a loopback origin) offers no marketplace", () => {
+    expect(claudePluginCommands("https://localhost", null)).toBeNull();
+    expect(claudePluginCommands("https://127.0.0.1:8443", null)).toBeNull();
   });
 
   test("the plugin commands name the marketplace the instance serves", () => {
