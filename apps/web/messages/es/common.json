@@ -94,5 +94,10 @@
       "slug": "Slug",
       "excerpt": "Extracto"
     }
+  },
+  "helpTip": {
+    "label": "Más sobre {topic}",
+    "learnMore": "Más información en el Manual",
+    "newTab": "(se abre en una pestaña nueva)"
   }
 }

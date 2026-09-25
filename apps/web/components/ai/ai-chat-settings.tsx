@@ -6,7 +6,6 @@ import {
   type AiModelCatalog,
 } from "@lazyit/shared";
 import {
-  AdjustmentsHorizontalIcon,
   CheckIcon,
   LockClosedIcon,
 } from "@heroicons/react/24/outline";
@@ -41,6 +40,7 @@ import {
   type ChatSettingsView,
 } from "@/lib/ai/chat-settings";
 import { cn } from "@/lib/utils";
+import { AiChatSettingsIcon } from "./ai-icons";
 
 const EFFORT_DEFAULT = "default";
 const MODEL_DEFAULT = "__default__";
@@ -132,7 +132,7 @@ export function AiChatSettings({
           aria-label={t("open", { model: runsOn ?? t("model.defaultShort") })}
           title={view.locked ? t("model.lockedTitle") : t("open", { model: runsOn ?? t("model.defaultShort") })}
         >
-          <AdjustmentsHorizontalIcon />
+          <AiChatSettingsIcon />
           <span className="truncate">{buttonName}</span>
           {view.locked && <LockClosedIcon aria-hidden />}
         </Button>

@@ -69,6 +69,10 @@ desde tu máquina, así que también funcionan en una red interna.
    `/plugin` en Claude Code, ve a **Marketplaces**, selecciona tu marketplace de lazyit y activa la
    actualización automática.
 
+**En una instancia `localhost`** (una dirección como `localhost`, `127.0.0.1` o `::1`), instala el plugin
+desde la [descarga](#instalar-desde-una-descarga-cualquier-instancia): Claude Code no instala un
+marketplace desde una dirección de loopback.
+
 **Autoridad de certificación interna.** Si el certificado HTTPS de tu instancia lo emite una CA de tu
 empresa, hay que indicarle a Claude Code (y a otras apps basadas en Node.js) que confíe en ella antes de
 iniciarlas:

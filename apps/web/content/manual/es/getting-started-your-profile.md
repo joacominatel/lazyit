@@ -16,6 +16,27 @@ haciéndose: *"¿qué notebook (o teléfono, o monitor) tengo?"* y *"¿a qué ap
 Hacé clic en tu **avatar**, arriba a la derecha, y elegí **Mi perfil**. Está disponible para **todos**,
 incluidas las cuentas de solo lectura (**Viewer**): nunca necesitás permisos elevados para ver lo tuyo.
 
+## Tu cuenta
+
+**Cuenta** (menú del avatar → **Cuenta**, en `/account`) es el lugar único para todo lo que tiene que ver
+con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te corresponde:
+
+- **Vos** — tu nombre, email, rol y fecha de alta, con un atajo a **Mi perfil**.
+- **Tus páginas** — tarjetas para **Mi perfil**, [Correos de notificación](/help/notifications-activity-email-preferences),
+  **IA y apps conectadas** (solo si podés conectar apps de IA y tu instancia tiene el asistente — ver
+  [Apps conectadas](/help/ai-assistant-connected-apps)) y el **Secret Manager** (solo si podés leer
+  secretos — ahí está tu contraseña personal de bóveda).
+- **Contraseña y sesiones** — quién gestiona tu contraseña (lazyit o el proveedor de inicio de sesión de
+  tu organización), un atajo a **Cambiar contraseña** en instancias con cuentas locales y un botón para
+  cerrar sesión. Con cuentas locales dice **Cerrar sesión en todos los dispositivos**, porque cerrar
+  sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)). lazyit
+  no lista tus sesiones ni dispositivos uno por uno.
+- **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Ambos se guardan
+  en el navegador donde los elegís.
+
+Una fila de pestañas arriba de **Cuenta**, **Mi perfil**, **Correos de notificación** e **IA y apps
+conectadas** te permite pasar de una a otra sin volver al menú.
+
 ## Qué vas a ver
 
 - **Identidad** — tu nombre, correo, rol y la fecha de alta. Así es exactamente como te ve el resto

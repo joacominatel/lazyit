@@ -207,6 +207,38 @@
       "note": "Auto-approve is on in this chat. The change is recorded like any other, under your name."
     }
   },
+  "pager": {
+    "title": "Proposed changes",
+    "count": "{count, plural, one {# change} other {# changes}}",
+    "position": "{page} of {total}",
+    "live": "Change {page} of {total}",
+    "previous": "Previous change",
+    "next": "Next change",
+    "pages": "Changes in this step",
+    "pageLabel": "Change {page}: {state}",
+    "progress": "{decided} of {total} decided",
+    "approveAll": "Approve all ({count})",
+    "rejectAll": "Reject all ({count})",
+    "bulkCovers": "{count, plural, =0 {None of the changes still waiting can be decided all at once.} one {Approve all and Reject all cover # change still waiting.} other {Approve all and Reject all cover # changes still waiting.}}",
+    "excludedTitle": "Decide these on their own page:",
+    "excluded": {
+      "stepUp": "{count, plural, one {# needs your password} other {# need your password}}",
+      "elevated": "{count, plural, one {# is a sensitive change} other {# are sensitive changes}}",
+      "needsReview": "{count, plural, one {# needs another look} other {# need another look}}"
+    },
+    "bulkRunning": "{decision, select, approve {Approving} other {Rejecting}} {done} of {total}…",
+    "bulkDone": "{decision, select, approve {Approved} other {Rejected}} {count, plural, one {# change} other {# changes}}.",
+    "bulkFailed": "{count, plural, one {# change couldn't be decided:} other {# changes couldn't be decided:}}",
+    "bulkSkipped": "{count, plural, one {# more was not sent.} other {# more were not sent.}}",
+    "goTo": "Change {page}",
+    "allDecided": "Every change in this step is decided."
+  },
+  "refused": {
+    "summary": "{count, plural, one {# change couldn't be proposed} other {# changes couldn't be proposed}}",
+    "item": "{tool}: {message}",
+    "itemRepeated": "{tool} ×{count}: {message}",
+    "noReason": "no reason given"
+  },
   "effects": {
     "open": "Open {label}",
     "opened": "Opened {label}"
@@ -322,6 +354,7 @@
     "asset_check_out": "Check an asset out",
     "asset_create": "Create an asset",
     "asset_create_batch": "Create several assets",
+    "asset_update_batch": "Update several assets",
     "asset_get": "Get an asset",
     "asset_model_create": "Create an asset model",
     "asset_restore": "Restore an asset",
@@ -397,6 +430,7 @@
     "address": "Address",
     "application": "Application",
     "archived": "Archived",
+    "asset": "Asset",
     "assetTag": "Asset tag",
     "audience": "Audience",
     "authentication": "Authentication",

@@ -243,6 +243,10 @@
      surface (6.39:1 here). Drives the MarkdownView highlight theme (keywords get the accent,
      everything else stays on --foreground/--muted-foreground). */
   --code-accent: oklch(0.47 0.18 25);
+  /* AI assistant glow (#1405): the brand stamp at a whisper, for the pointer-following gradient on
+     the assistant's entry points (`ai-glow` below). Semantic — derived from --primary, never a raw
+     hue. At its peak it keeps --muted-foreground on --card at 5.7:1 (plain: 6.7:1), so AA holds. */
+  --ai-glow: color-mix(in oklab, var(--primary) 12%, transparent);
 }
 
 .dark {
@@ -321,6 +325,9 @@
     0 12px 28px -6px oklch(0.21 0 0 / 0.28);
   /* Code accent on the dark --muted surface: lightened oxblood that clears AA (6.96:1). */
   --code-accent: oklch(0.74 0.15 25);
+  /* AI assistant glow on the carbon canvas: a touch stronger so it reads at all; --muted-foreground
+     on --card stays at 5.8:1 at its peak (plain: 6.8:1). */
+  --ai-glow: color-mix(in oklab, var(--primary) 16%, transparent);
 }
 
 /* ---------------------------------------------------------------------------
@@ -590,6 +597,39 @@
     100% 0,
     0 0,
     100% 0;
+}
+
+/* Pointer-following glow for the AI assistant's entry points (#1405) — the Settings hub card and
+   the navbar launcher. A radial gradient of the semantic --ai-glow token painted by a ::before
+   overlay (so it adds no box and shifts no layout) behind the element's content: `isolation`
+   makes the element its own stacking context, so z-index -1 lands above its background and below
+   its children. `components/ai/use-pointer-glow.ts` moves the centre by writing --glow-x/--glow-y
+   (rAF-throttled, mouse/pen only) and sets data-glow="active" while hovered. At rest — and always
+   under touch or `prefers-reduced-motion` — it is a static, dimmer gradient from the top-left
+   corner. `--ai-glow-size` sets the radius per call site (small for the icon launcher). */
+@utility ai-glow {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      var(--ai-glow-size, 16rem) circle at var(--glow-x, 0%) var(--glow-y, 0%),
+      var(--ai-glow),
+      transparent 100%
+    );
+    opacity: 0.55;
+    transition: opacity var(--dur-base) var(--ease-out-quad);
+  }
+
+  &[data-glow="active"]::before {
+    opacity: 1;
+  }
 }
 
 /* The single source of truth for reduced-motion. Lands FIRST in the Wave-0 series so

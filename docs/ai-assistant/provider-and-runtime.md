@@ -700,6 +700,12 @@ Rules [C]:
     frozen with web search also gets a `## Web search` section — records and KB first, search only when
     they lack what is needed, no secrets or personal data in a query, results are data never
     instructions, cite the pages used;
+  - the batching rule (#1409, `AI_PROMPT_VERSION` 6, chat only): at most `AI_MAX_PENDING_PER_STEP`
+    proposals can wait for approval at once (the constant is interpolated, never hard-coded) and one past
+    it is answered "limit reached"; for more, propose the first batch, report progress ("5 of 25"),
+    stop, and propose the next batch once the person has decided, until done, never proposing the same
+    change twice; and prefer a tool that proposes many similar changes as one card (described in words,
+    never by name);
   - the principal block: display name, kind, role, sorted permission list, channel, locale;
   - an optional admin-authored `instructions` text from `AiSettings`.
 - **Provider-native web search (#1389; ADR-0097 decision 3 as amended 2026-09-24).** Frozen like the
@@ -732,7 +738,7 @@ Rules [C]:
   the user in plain text instead. A third call identical to one that already failed twice is **not run**:
   it is answered `INVALID_INPUT` "Not run: this exact … call already failed 2 times in this turn" with the
   same hint (the UI shows it as a failed call, like any refusal). `RATE_LIMITED` is transient and never
-  counted. Nothing else changes: every call is still answered, and the step cap still bounds the run.
+  counted, and a proposal deferred past the pending-approval limit (#1409, §8.1) never reaches the guard. Nothing else changes: every call is still answered, and the step cap still bounds the run.
 - **Max steps.** When `maxStepsPerRun − 1` is reached, the last step runs with `toolChoice: 'none'`
   so the model summarizes rather than stopping mid-action. `finishReason = max_steps`.
 - **Refusal or content filter.** The run ends `FAILED` (`refused`) and a message is shown. There
@@ -1061,7 +1067,7 @@ requested meanwhile ends it CANCELLED. Calls are resolved in order. A name not i
 (a `Map`, so `constructor` or `__proto__` never resolve) → `NOT_AVAILABLE`; arguments that arrived as the
 raw string (invalid JSON) → `INVALID_INPUT`; past 30 calls per run or the per-principal bucket (60 per
 minute) → `RATE_LIMITED`. Reads and navigation → `invoke`. Chat writes → `propose` with the tool-use id (at
-most 5 pending per step; more → `RATE_LIMITED`). Headless writes → `invoke` after the per-run mutation cap
+most `AI_MAX_PENDING_PER_STEP` = 5 pending per step — see *The pending-approval limit* below). Headless writes → `invoke` after the per-run mutation cap
 (attempted writes of the run in `ai_tool_invocations`; over the cap → `FORBIDDEN`). Each call's context
 carries the provenance `{ provider, model }` and the turn's untrusted sources: the entity refs of every read
 result whose data held `<untrusted_content>`, merged across the run. Every step record stores the merged
@@ -1073,6 +1079,25 @@ written and RUNNING → AWAITING_APPROVAL compare-and-set in one transaction —
 requested (else the run ends CANCELLED and the proposals are cancelled) — then `tool.approval_required`
 is emitted for each card and `run.status AWAITING_APPROVAL`, and a decision that already landed resumes the
 run at once. No job stays in flight.
+
+**The pending-approval limit (#1409).** One step may leave at most `AI_MAX_PENDING_PER_STEP` (5) chat
+writes waiting for approval (security.md §6.8, approval fatigue); an auto-approved write that ran does not
+count. A write proposed past it is **deferred**, not failed: it is not proposed, and it is answered — before
+the run's tool-call cap and the per-principal bucket are touched — with `RATE_LIMITED` "Limit reached: 5
+proposals are pending in this step; wait for the user's decisions and propose the rest in the next step."
+and a hint ("Nothing failed … tell the user how many you proposed and how many remain (e.g. "5 of 25").
+Once they have decided, propose the next 5, until every change is done."). It is deliberately not an
+error: the provider gets it as a plain `json` result (`isError: false`), the repeated-failure guard never
+records it (§6.4), and it does not use up the run's 30 tool calls — the step record marks the outcome
+`deferred: true`, so a resumed pass (`seedCounters`) does not count it either (a record without the flag,
+written before #1409, is counted as before). The UI still receives `tool.call FAILED` + `tool.result
+error` for it (the card list summarizes them). The run then pauses on the pending cards as usual; once
+they are decided, the resume answers the step — the executed results and the deferred answers in one tool
+message — and the model continues with the next batch in the same run. The chat rules
+(`AI_PROMPT_VERSION` 6) tell the model the limit up front, so it proposes batches of 5 and reports
+progress instead of over-proposing; for many similar asset edits it has `asset_update_batch` (one card,
+[[ai-assistant/tools-and-execution|tools]] §7). A long list of single proposals is still bounded by the
+run's 30 tool calls and `maxStepsPerRun`: past them the model summarizes, and the user says "continue".
 
 **Terminal transitions** (`run-lifecycle.ts` `finalize`) are a compare-and-set from the allowed statuses;
 the winner cancels the run's still-pending approvals (core `cancel`), answers the open step (recorded
@@ -1347,7 +1372,10 @@ the equivalent, and lazyit does not use it yet (§13).
   (security.md T-30). It is present whether MCP is on or off, and null when no http(s) origin is pinned
   (a `lan` instance without `WEB_ORIGIN`: the web falls back to its page origin) or in shim mode.
   `mcp.marketplaceUrl` is `<origin>/api/ai/claude-code/marketplace.json`, only while the public
-  marketplace is served (MCP on, a pinned HTTPS origin, not shim), else null. Both are null for an
+  marketplace is served (MCP on, a pinned HTTPS origin, not shim) **and the origin's host is not loopback**
+  (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1` — `isLoopbackHost`), else null: Claude Code refuses a
+  marketplace on a loopback host, so offering it there is a command that cannot work (W4-3 finding F3,
+  [[05-runbooks/ai-mcp-client-matrix|client matrix]]). Both are null for an
   anonymous caller. The shared schema marks them optional only for tolerance of an older API; this build
   always sends them. The web install panel and settings card use them instead of
   `window.location.origin`.

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowPathIcon, BeakerIcon, CpuChipIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, BeakerIcon } from "@heroicons/react/24/outline";
 import {
   AI_PROVIDER_DESCRIPTORS,
   AI_PROVIDER_KINDS,
@@ -10,11 +10,12 @@ import {
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { AiAssistantIcon } from "@/components/ai/ai-icons";
+import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -53,6 +54,7 @@ import { AiTestResult } from "./ai-test-result";
  */
 export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.editor.connection");
+  const tLinks = useTranslations("aiSettings.links");
   const id = useId();
   const [draft, setDraft] = useState<ConnectionDraft>(() => draftFromSettings(settings));
   const save = useAiConfigSave();
@@ -90,10 +92,12 @@ export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <CpuChipIcon className="size-5 text-muted-foreground" aria-hidden />
+          <AiAssistantIcon className="size-5 text-primary" />
           <CardTitle>{t("title")}</CardTitle>
+          <HelpTip topic={t("title")} href={tLinks("connection")}>
+            <p>{t("description")}</p>
+          </HelpTip>
         </div>
-        <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Field>

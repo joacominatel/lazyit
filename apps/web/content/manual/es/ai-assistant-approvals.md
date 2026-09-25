@@ -53,8 +53,50 @@ pediste antes de aprobarlo.
 - **Rechazar** hace que no cambie nada. El asistente se entera de que lo rechazaste y puede sugerir otra
   cosa — decile qué cambiar.
 
-Cada tarjeta se decide por separado; no hay "aprobar todo". Nada se aprueba presionando Enter en el cuadro de
+Cada cambio se decide en su propia tarjeta o página. Nada se aprueba presionando Enter en el cuadro de
 mensaje.
+
+## Varios cambios a la vez
+
+**Hasta 5 a la vez.** Como máximo **5** cambios pueden esperar tu aprobación al mismo tiempo. Cuando pedís
+más — "pasá estas 25 notebooks a depósito" — el asistente trabaja por tandas: propone los primeros 5, te dice
+por dónde va (*"5 de 25"*) y espera. Cuando decidiste sobre esos, propone los 5 siguientes por su cuenta, y
+así hasta terminar todos los cambios. Si se detiene antes del final de una lista muy larga, decile que siga.
+
+**Una tarjeta con páginas.** Los cambios de una tanda aparecen como **una tarjeta con páginas** en lugar de
+una pila de tarjetas:
+
+- Arriba, la tarjeta dice **Cambios propuestos · 5 cambios** y en qué página estás (**2 de 5**). Usá las
+  flechas, o elegí un número de página, para moverte entre ellos; sobre los números de página también
+  funcionan las flechas izquierda y derecha del teclado. Una página ya decidida muestra una tilde (aprobado o
+  hecho) o un círculo tachado (rechazado o vencido).
+- Cada página es la misma tarjeta que se describe arriba — qué va a pasar, antes → después, las
+  advertencias, el aviso **Basado en contenido escrito por otras personas** cuando corresponde y, cuando hace
+  falta, tu contraseña — con sus propios **Aprobar** y **Rechazar**. Cuando decidís una página, la tarjeta
+  pasa al siguiente cambio pendiente.
+- **Aprobar todos** y **Rechazar todos** deciden, uno por uno, todos los cambios pendientes salvo los que
+  necesitan una mirada más atenta; el número del botón dice cuántos. **Nunca** incluyen un cambio que
+  necesita tu contraseña (roles, identidad, accesos, inicio de sesión, una aplicación marcada como crítica),
+  un *Cambio sensible*, ni uno cuya última decisión fue rechazada — por ejemplo, porque el elemento cambió
+  mientras tanto. La tarjeta indica cuántos quedaron afuera y por qué; decidilos en su propia página. Un
+  cambio basado en contenido escrito por otras personas **sí** se incluye, así que revisá su página antes si
+  ese aviso te preocupa.
+- Si algunos cambios de una acción masiva no se pueden decidir, los demás sí se deciden, y la tarjeta lista
+  los que fallaron con un enlace a su página.
+
+Si el asistente intentó proponer cambios que se rechazaron antes de convertirse en una tarjeta, aparecen en
+**una sola línea** — por ejemplo *"20 cambios no se pudieron proponer"* — con **Ver detalles** para ver los
+motivos.
+
+**Una tarjeta para muchas ediciones.** Para muchas ediciones parecidas sobre activos existentes, el
+asistente puede proponer en cambio **una sola tarjeta para todos** (hasta 200 activos): el mismo tipo de
+tabla que un [lote de activos nuevos](#crear-muchos-activos-a-la-vez), una fila por activo — primero la
+columna **Activo**, después el antes → después de cada campo que cambia. Aprobás o rechazás la lista
+completa; después cada activo se actualiza por separado, igual que si lo hubieras editado a mano. Si alguien
+edita alguno de esos activos antes de que apruebes, no se aplica nada y el asistente puede volver a proponer
+la lista. Las etiquetas y los números de serie se siguen cambiando de a un activo. Con la [aprobación
+automática](#aprobación-automática) activada, una lista así se aplica sin tarjeta, como los demás cambios
+básicos.
 
 ## Cambios que necesitan tu contraseña
 

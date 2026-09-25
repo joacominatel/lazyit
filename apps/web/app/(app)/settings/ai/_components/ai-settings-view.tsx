@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpenIcon,
   CheckCircleIcon,
   KeyIcon,
   ServerIcon,
@@ -10,8 +11,10 @@ import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Callout } from "@/components/callout";
+import { HelpTip } from "@/components/help-tip";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/resource-table";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAiConfig } from "@/lib/api/hooks/use-ai-config";
@@ -31,10 +34,16 @@ import { AiWebSearchSection } from "./ai-web-search-section";
  *   - always        → behaviour & limits, web search (#1389), and the MCP card (its switch is
  *                     independent of the provider).
  * `AdminGate` hides the page from callers without `settings:manage`; the API is the real gate.
+ *
+ * A configuration page and little more (#1407): each control shows its label and at most one short
+ * line; the explanations live in "?" `HelpTip`s and in the Manual (`ai-assistant-setup`), linked from
+ * the header and from each tip. What leaves the server stays spelled out where it is decided — the
+ * enable step's acknowledgement and the web search card — condensed, never hidden.
  */
 export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
   const t = useTranslations("aiSettings");
   const tSettings = useTranslations("settings");
+  const tCommon = useTranslations("common");
   const { data: settings, isLoading, isError, error, refetch } = useAiConfig();
 
   const breadcrumb = useMemo(
@@ -56,6 +65,15 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
           title={t("page.title")}
           subtitle={t("page.subtitle")}
           breadcrumb={breadcrumb}
+          actions={
+            <Button asChild variant="outline" size="sm">
+              <Link href={t("links.setup")} prefetch={false} target="_blank" rel="noopener">
+                <BookOpenIcon />
+                {t("page.manualLink")}
+                <span className="sr-only">{tCommon("helpTip.newTab")}</span>
+              </Link>
+            </Button>
+          }
           badge={
             settings ? (
               <StatusBadge tone={settings.enabled ? "success" : "neutral"}>
@@ -83,7 +101,12 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
 
             {!settings.keyConfigured ? (
               <Callout tone="warning" icon={<KeyIcon />}>
-                <p className="text-sm font-medium">{t("page.secretKey.title")}</p>
+                <p className="flex items-center gap-1 text-sm font-medium">
+                  {t("page.secretKey.title")}
+                  <HelpTip topic={t("page.secretKey.title")} href={t("links.secretKey")}>
+                    <p>{t("page.secretKey.help")}</p>
+                  </HelpTip>
+                </p>
                 <p className="text-sm">{t("page.secretKey.body")}</p>
               </Callout>
             ) : null}

@@ -3,6 +3,7 @@ import { AI_SETTINGS_DEFAULTS, type AiSettings } from "@lazyit/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NextIntlClientProvider } from "next-intl";
 import { renderToStaticMarkup } from "react-dom/server";
+import common from "@/messages/en/common.json";
 import messages from "@/messages/en/aiSettings.json";
 import { AiWebSearchSection } from "./ai-web-search-section";
 
@@ -33,7 +34,7 @@ const BASE: AiSettings = {
 function render(settings: Partial<AiSettings>): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ aiSettings: messages }}>
+      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ aiSettings: messages, common }}>
         <AiWebSearchSection settings={{ ...BASE, ...settings }} />
       </NextIntlClientProvider>
     </QueryClientProvider>,
@@ -67,6 +68,20 @@ describe("AiWebSearchSection", () => {
     expect(render({ provider: "openai", model: "gpt-6-sol" })).toContain(
       esc(messages.webSearch.disclosure.openai),
     );
+  });
+
+  test("a configuration card: the long explanations sit behind help tips, the egress stays shown", () => {
+    const html = render({});
+    // #1407: the description, the switch detail and the per-step cap explanation are not on the card…
+    expect(html).not.toContain(esc(messages.webSearch.description));
+    expect(html).not.toContain(esc(messages.webSearch.switch.description));
+    expect(html).not.toContain(esc(messages.webSearch.maxUses.description));
+    // …they are one focusable "?" away, each named after what it explains…
+    expect(html).toContain(`aria-label="More about ${messages.webSearch.title}"`);
+    expect(html).toContain(`aria-label="More about ${messages.webSearch.switch.label}"`);
+    // …and what leaves lazyit is still spelled out on the card itself.
+    expect(html).toContain(esc(messages.webSearch.disclosure.title));
+    expect(html).toContain(esc(messages.webSearch.disclosure.egress));
   });
 
   test("on reads as on", () => {

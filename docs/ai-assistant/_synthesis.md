@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -780,7 +780,10 @@ cross-cutting pages and the edits to existing ones.
    `callbackUrl` query. **Verified in W3-5** ([[ai-assistant/mcp-and-oauth|MCP]] §13): `${user_config.*}`
    substitutes inside MCP `headers` (and in skill markdown — hence a content guard); `claude plugin
    marketplace add` accepts a direct `https://` URL to the instance's `marketplace.json` (`http://` is
-   refused), and third-party marketplaces do not auto-update until the user enables it.
+   refused), and third-party marketplaces do not auto-update until the user enables it. **Verified in W4-3**
+   ([[ai-mcp-client-matrix]], 2026-09-25): Claude Code honors `NODE_EXTRA_CA_CERTS` and connects to an
+   `http://` URL with a personal-token header; Caddy does not compress `/mcp` on the pinned image. Still
+   open, as operator runs: Cursor's redirect URI and registration, and the claude.ai connector.
 
 ---
 

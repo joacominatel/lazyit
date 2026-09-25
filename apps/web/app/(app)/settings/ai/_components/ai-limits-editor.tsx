@@ -11,11 +11,11 @@ import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
+import { HelpTip } from "@/components/help-tip";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -23,7 +23,6 @@ import {
   Field,
   FieldDescription,
   FieldError,
-  FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -31,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAiConfigSave } from "@/lib/api/hooks/use-ai-config-save";
 import { blankToNull, buildUpdate } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
+import { AiFieldLabel } from "./ai-field-label";
 
 const INT4_MAX = 2_147_483_647;
 
@@ -95,6 +95,7 @@ function numberOf(event: React.ChangeEvent<HTMLInputElement>): number {
  */
 export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.limits");
+  const tLinks = useTranslations("aiSettings.links");
   const save = useAiConfigSave();
   const form = useForm<LimitsForm>({ defaultValues: formFrom(settings) });
   const { control, reset, handleSubmit, formState } = form;
@@ -137,7 +138,12 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
         rules={{ validate: BOUNDS[name] }}
         render={({ field, fieldState }) => (
           <Field data-invalid={fieldState.invalid || undefined}>
-            <FieldLabel htmlFor={`ai-limit-${name}`}>{t(`fields.${name}.label`)}</FieldLabel>
+            <AiFieldLabel
+              htmlFor={`ai-limit-${name}`}
+              help={<p>{t(`fields.${name}.description`)}</p>}
+            >
+              {t(`fields.${name}.label`)}
+            </AiFieldLabel>
             <div className="flex items-center gap-2">
               <Input
                 id={`ai-limit-${name}`}
@@ -154,11 +160,7 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
               />
               {unit ? <span className="shrink-0 text-sm text-muted-foreground">{unit}</span> : null}
             </div>
-            {fieldState.invalid ? (
-              <FieldError>{t(`fields.${name}.invalid`)}</FieldError>
-            ) : (
-              <FieldDescription>{t(`fields.${name}.description`)}</FieldDescription>
-            )}
+            {fieldState.invalid ? <FieldError>{t(`fields.${name}.invalid`)}</FieldError> : null}
           </Field>
         )}
       />
@@ -171,8 +173,10 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
         <div className="flex items-center gap-2">
           <AdjustmentsHorizontalIcon className="size-5 text-muted-foreground" aria-hidden />
           <CardTitle>{t("title")}</CardTitle>
+          <HelpTip topic={t("title")} href={tLinks("limits")}>
+            <p>{t("description")}</p>
+          </HelpTip>
         </div>
-        <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} noValidate className="space-y-5">
@@ -188,10 +192,13 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
               render={({ field }) => (
                 <Field orientation="horizontal">
                   <div className="flex flex-1 flex-col gap-0.5">
-                    <FieldLabel htmlFor="ai-limit-budget-on" className="font-medium">
+                    <AiFieldLabel
+                      htmlFor="ai-limit-budget-on"
+                      className="font-medium"
+                      help={<p>{t("fields.budget.description")}</p>}
+                    >
                       {t("fields.budget.label")}
-                    </FieldLabel>
-                    <FieldDescription>{t("fields.budget.description")}</FieldDescription>
+                    </AiFieldLabel>
                   </div>
                   <Switch
                     id="ai-limit-budget-on"
@@ -217,9 +224,9 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
                 rules={{ validate: intWithin(1, INT4_MAX) }}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid || undefined}>
-                    <FieldLabel htmlFor="ai-limit-budget">
+                    <AiFieldLabel htmlFor="ai-limit-budget">
                       {t("fields.dailyTokenLimitPerPrincipal.label")}
-                    </FieldLabel>
+                    </AiFieldLabel>
                     <div className="flex items-center gap-2">
                       <Input
                         id="ai-limit-budget"
@@ -262,9 +269,12 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
             rules={{ maxLength: AI_INSTRUCTIONS_MAX_LENGTH }}
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="ai-limit-instructions">
+                <AiFieldLabel
+                  htmlFor="ai-limit-instructions"
+                  help={<p>{t("fields.instructions.description")}</p>}
+                >
                   {t("fields.instructions.label")}
-                </FieldLabel>
+                </AiFieldLabel>
                 <Textarea
                   id="ai-limit-instructions"
                   {...field}
@@ -273,8 +283,8 @@ export function AiLimitsEditor({ settings }: { settings: AiSettings }) {
                   placeholder={t("fields.instructions.placeholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <FieldDescription>
-                  {t("fields.instructions.description", {
+                <FieldDescription className="tabular-nums">
+                  {t("fields.instructions.counter", {
                     count: field.value.length,
                     max: AI_INSTRUCTIONS_MAX_LENGTH,
                   })}

@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # AI assistant — Frontend surfaces
@@ -83,8 +83,13 @@ updated: 2026-09-24
   mismatch — the precedent for persisting "panel open" state.
 - **(R)** `apps/web/components/breadcrumb.tsx` humanizes unknown segments (`"ai"` → **"Ai"**); pages
   can pass explicit `items`.
-- **(R)** `apps/web/components/user-menu.tsx` links the per-user self-service pages `/profile` and
-  `/account/notifications` (no permission gate). `/account/**` is the per-user settings home.
+- **(R)** `apps/web/components/user-menu.tsx` links the per-user self-service pages `/account` (the
+  account hub, #1404), `/profile` and `/account/notifications` (no permission gate). `/account/**` is the
+  per-user settings home: `account/layout.tsx` renders a shared sub-navigation (Overview · My profile ·
+  Notification emails · AI & connected apps, the last gated like the menu entry) that `/profile` also
+  renders, and `/account` gathers identity, links to each per-user page, password & sessions (links to
+  and reuses the existing change-password panel and sign-out — no new auth behavior) and the
+  language/theme preferences.
 
 ### 2.2 Data layer, permissions, feature state
 
@@ -444,7 +449,18 @@ Rules:
   [[0041-soft-delete-reuse-and-restore]]).
 - A note of kind `external-side-effect` (e.g. a grant that triggers a provisioning workflow,
   [[0054-applications-workflow-engine]]) is always shown.
-- When a step proposes several mutations, v1 shows one card each and has no "Approve all".
+- When a step proposes several mutations, they render as **one paged card** (as built, #1409 —
+  `components/ai/ai-approval-pager.tsx`, pure logic in `lib/ai/approval-pages.ts`): "2 of 5", previous /
+  next and a page strip (arrow keys, `aria-live` position), every page the unchanged approval card, kept
+  mounted so a typed password survives paging. Deciding a page advances to the next undecided one. A single
+  card keeps its own look; auto-approved records (#1376) are never paged. "Approve all" / "Reject all" send
+  one decision per card through the same decision call (no bulk endpoint), show how many they cover, and
+  **never** cover a card that needs step-up (server flag or a step-up warning, `CRITICAL_APPLICATION`
+  included), an elevated card (G4), or one whose last decision was refused (`STALE`, preview changed, …).
+  A card with untrusted sources **is** covered (CEO decision, #1409); its page keeps the untrusted-source
+  banner. There is no extra confirmation step: the button shows the count. Refusals are reported per card and a run-wide one (`notAwaiting`,
+  `aiDisabled`, `forbidden`) stops the rest. Writes the server refused before proposing (the sixth and later
+  of a step) collapse into one "N changes couldn't be proposed" line with details.
 
 **Settings → AI — unconfigured (wizard)**
 
@@ -655,7 +671,11 @@ UI copy say so.
   #1366); in OAuth mode on an API without it, the `issuer` of the public
   `/.well-known/oauth-authorization-server`; on a host-agnostic `lan` instance (no pinned origin) the
   page's origin. The marketplace command uses `mcp.marketplaceUrl` when the status reports it
-  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). When the server origin differs from the
+  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). **Known gap (W4-3 F3, #1315):** the API reports
+  `marketplaceUrl: null` on a loopback origin, but in OAuth mode the panel still renders the marketplace
+  commands, rebuilt from the page origin (`claudePluginCommands` falls back to `marketplaceUrl(origin)`);
+  the download path below them is what works there, and the Manual says so. Hiding the marketplace step
+  when the status reports null is a frontend follow-up. When the server origin differs from the
   page's, or cannot be read in OAuth mode, the panel warns and renders the snippets without copy buttons
   (for review, not copy-ready).
 - The personal-token and consent-decision mutations use `gcTime: 0` and are `reset()` as soon as they
@@ -666,7 +686,8 @@ UI copy say so.
 - "Not you?" signs out and returns to `/login?callbackUrl=<the consent URL>` (`signOutAndRevoke(path)`).
 - Manual install re-verified against code.claude.com (2026-09-24): a folder under `~/.claude/skills/`
   holding `.claude-plugin/plugin.json` loads as `<name>@skills-dir` on the next session; `--plugin-dir`
-  accepts a `.zip`. The `userConfig` prompt for a `@skills-dir` plugin is still a W4-3 re-verify item.
+  accepts a `.zip`. W4-3 ([[ai-mcp-client-matrix]]) verified that the `@skills-dir` plugin connects once
+  `userConfig.token` is set; whether an interactive session prompts for it is an operator check there.
 
 ---
 
@@ -870,7 +891,7 @@ Edits to existing pages (en + es):
 - A full-page `/assistant` route; chat tabs.
 - The AI SDK's Redis-backed `resumable-stream` (the run event bus, `Last-Event-ID` and `run.snapshot`
   cover reconnection — R2).
-- "Approve all", per-user model choice, message edit, regenerate or branching.
+- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated and refused cards), per-user model choice, message edit, regenerate or branching.
 - File or image attachments; voice.
 - Sharing conversations; admins reading others' conversations.
 - Usage/cost dashboards and quotas UI.
@@ -1170,8 +1191,8 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 
 - **Generic.** A preview change whose `after` is a non-empty array of objects is a table, not a field row:
   `presentPreview` (`lib/ai/preview.ts`) keeps the raw `records`, and `buildPreviewTable`
-  (`lib/ai/preview-table.ts`, `bun test`ed) shapes it. Columns are the keys the rows carry — `name`,
-  `title`, `assetTag`, `serial`, `model`, `category`, `location`, `status` first, the rest in first-seen
+  (`lib/ai/preview-table.ts`, `bun test`ed) shapes it. Columns are the keys the rows carry — `asset` (the
+  existing asset an `asset_update_batch` row changes, #1412), `name`, `title`, `assetTag`, `serial`, `model`, `category`, `location`, `status` first, the rest in first-seen
   order — labelled like field rows (`ai.fields.*`, humanized fallback). Row-state keys are never columns:
   `row` (the number), `skipped: true` / `valid: false` (the row is **not applied**, marked "Skipped —
   won't be applied"), `errors` and `duplicates` (the **Problems** column), `<key>Defaulted: true` (the

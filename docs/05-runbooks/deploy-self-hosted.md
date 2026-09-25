@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -444,6 +444,7 @@ nothing to do: no required env key, no new container, no new port.
   | `/.well-known/oauth-protected-resource[/mcp]` | where to authorize (RFC 9728) | 404 while MCP is off, and always on `lan` |
   | `/.well-known/oauth-authorization-server` | the authorization server's metadata (RFC 8414) | 404 while MCP is off, and always on `lan` |
   | `/oauth/token`, `/oauth/register`, `/oauth/revoke` | OAuth protocol endpoints | 404 while MCP is off, and always on `lan` |
+  | `/.well-known/openid-configuration*`, `/authorize`, `/token`, `/register` | what MCP clients probe when the metadata above is missing | always a JSON 404 — lazyit is OAuth-only, so a client gets a clean "no authorization server" instead of the sign-in page's HTML |
 
   `/oauth/authorize` is the consent page and belongs to the web app. Everything the chat uses stays under
   `/api/*`.
@@ -527,9 +528,10 @@ trust Caddy's root, or the agent refuses the TLS connection before OAuth starts.
    Other Node-based agents honor `NODE_EXTRA_CA_CERTS` the same way; desktop editors (Cursor, VS Code)
    use the OS trust store.
 
-> [!note] Being verified end to end
-> The client × mode table and the CA steps follow each client's current documentation. The end-to-end
-> runs on every mode (issue #1315, wave 4) record the results here once the MCP server ships.
+> [!note] Verified end to end
+> [[ai-mcp-client-matrix]] records which cells of this table were run end to end (2026-09-25: personal
+> tokens on `lan`, OAuth over an internal CA, Claude Code honoring `NODE_EXTRA_CA_CERTS`) and holds the
+> operator checklists for the rest — claude.ai on a public instance, Cursor, the Claude Code sign-in.
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
 [[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·

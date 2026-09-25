@@ -1,4 +1,75 @@
 {
+  "nav": {
+    "label": "Account sections",
+    "overview": "Overview",
+    "profile": "My profile",
+    "notifications": "Notification emails",
+    "ai": "AI & connected apps"
+  },
+  "hub": {
+    "title": "Account",
+    "subtitle": "Everything about your own account in one place: who you are, your notifications, connected AI apps, password and sessions, and your preferences.",
+    "identity": {
+      "title": "You",
+      "name": "Name",
+      "email": "Email",
+      "role": "Role",
+      "joined": "Joined",
+      "viewProfile": "View my profile",
+      "errorTitle": "Couldn't load your account",
+      "errorDescription": "Your account details failed to load."
+    },
+    "sections": {
+      "title": "Your pages",
+      "profile": {
+        "title": "My profile",
+        "description": "The assets assigned to you, the applications you can access and your access requests."
+      },
+      "notifications": {
+        "title": "Notification emails",
+        "description": "Choose which notifications lazyit emails you. The in-app bell is unaffected."
+      },
+      "ai": {
+        "title": "AI & connected apps",
+        "description": "Connect Claude Code and other AI apps, and review or revoke the ones you connected."
+      },
+      "secrets": {
+        "title": "Secret Manager",
+        "description": "Your personal vault password and recovery key live with your vaults."
+      }
+    },
+    "security": {
+      "title": "Password & sessions",
+      "password": {
+        "title": "Password",
+        "local": "Your password is a lazyit password. Changing it keeps you signed in here and signs you out everywhere else.",
+        "identityProvider": "Your password is managed by your organization's sign-in provider. Change it there.",
+        "change": "Change password"
+      },
+      "sessions": {
+        "title": "Sessions",
+        "local": "Signing out ends every session you have — this browser, your other computers and your phone, including sessions kept with \"Keep me signed in\". Connected AI apps and personal tokens stay connected; revoke them in AI & connected apps.",
+        "identityProvider": "Signing out ends your session in this browser. Your sign-in provider manages your sessions elsewhere.",
+        "unknown": "Signing out ends your session in this browser.",
+        "signOutEverywhere": "Sign out on all devices",
+        "signOut": "Sign out"
+      }
+    },
+    "preferences": {
+      "title": "Preferences",
+      "language": {
+        "label": "Language",
+        "description": "Saved in this browser."
+      },
+      "theme": {
+        "label": "Theme",
+        "description": "Saved in this browser. System follows your device's setting.",
+        "system": "System",
+        "light": "Light",
+        "dark": "Dark"
+      }
+    }
+  },
   "notifications": {
     "title": "Notification emails",
     "subtitle": "Choose which notifications lazyit emails you. Your in-app bell is unaffected.",

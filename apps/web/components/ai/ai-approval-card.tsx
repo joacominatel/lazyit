@@ -133,6 +133,15 @@ interface ApprovalCardProps {
     decision: "approve" | "reject",
     password?: string,
   ) => Promise<DecisionResult>;
+  /**
+   * Inside the paged card (#1409): no own border (the pager draws it), `locked` disables both buttons
+   * while a bulk action runs, `busyOverride` stamps a decision the pager sent for this card, and
+   * `externalError` is a refusal of such a decision, shown and acted on as if the card had sent it.
+   */
+  embedded?: boolean;
+  locked?: boolean;
+  busyOverride?: "approve" | "reject" | null;
+  externalError?: DecisionErrorKind | null;
 }
 
 /**
@@ -141,9 +150,20 @@ interface ApprovalCardProps {
  * after, the warnings (every shared code localized, an unknown one generically), the untrusted-source
  * banner and, when the server asks for it, the password step-up. Elevated cards are visually distinct.
  * Approve is never autofocused and no global key approves anything; each click disables both buttons
- * until the server answers. There is no "approve all": one card, one decision.
+ * until the server answers. One card, one decision — several cards of one step are paged by
+ * `AiApprovalPager` (#1409), whose "Approve all" still sends one decision per card and never covers a
+ * card that needs the password, is sensitive, or whose last decision was refused.
  */
-export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: ApprovalCardProps) {
+export function AiApprovalCard({
+  part,
+  callStatus,
+  failureMessage,
+  onDecide,
+  embedded = false,
+  locked = false,
+  busyOverride = null,
+  externalError = null,
+}: ApprovalCardProps) {
   const t = useTranslations("ai.approval");
   const tWarn = useTranslations("ai.approval.warnings");
   const format = useFormatter();
@@ -174,13 +194,14 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
     return () => clearTimeout(timer);
   }, [secondsLeft]);
 
-  const stage = approvalStage(outcome, callStatus, busy);
+  const inFlight = busy ?? busyOverride;
+  const stage = approvalStage(outcome, callStatus, inFlight);
   const pending = outcome === null;
   const stepUp = pending && (request.stepUpRequired || preview.stepUpRequired || forceStepUp);
   const unavailable = error?.kind === "stepUpUnavailable";
   const blocked = secondsLeft > 0;
   const canApprove =
-    pending && busy === null && !unavailable && !blocked && (!stepUp || password.length > 0);
+    pending && inFlight === null && !locked && !unavailable && !blocked && (!stepUp || password.length > 0);
 
   const warnings = Array.from(new Set([...preview.warnings, ...addedWarnings]));
   const untrusted = linkableRefs([...request.untrustedSources, ...preview.untrustedSources]);
@@ -202,7 +223,10 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
       setBusy(null);
     }
     if (result.ok) return;
-    const kind = result.error;
+    applyError(result.error);
+  }
+
+  function applyError(kind: DecisionErrorKind) {
     setError(kind);
     if (kind.kind === "stepUpRequired") {
       setForceStepUp(true);
@@ -225,6 +249,11 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
     return t(`errors.${kind.kind}`);
   }
 
+  // A refusal of a decision the pager sent for this card lands here like the card's own (#1409).
+  useEffect(() => {
+    if (externalError) applyError(externalError);
+  }, [externalError]);
+
   const expiresAt = new Date(request.expiresAt);
 
   return (
@@ -232,8 +261,10 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
       role="group"
       aria-labelledby={titleId}
       className={cn(
-        "rounded-md border bg-card text-card-foreground",
-        elevated ? "border-destructive/60 border-l-4" : "border-border",
+        "bg-card text-card-foreground",
+        embedded
+          ? elevated && "border-l-4 border-destructive/60"
+          : ["rounded-md border", elevated ? "border-destructive/60 border-l-4" : "border-border"],
       )}
     >
       <header className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
@@ -389,7 +420,7 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
               type="password"
               autoComplete="current-password"
               value={password}
-              disabled={busy !== null || unavailable}
+              disabled={inFlight !== null || locked || unavailable}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => {
                 // Enter inside the password field is an explicit action on THIS card only.
@@ -432,7 +463,7 @@ export function AiApprovalCard({ part, callStatus, failureMessage, onDecide }: A
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={busy !== null}
+                disabled={inFlight !== null || locked}
                 onClick={() => void decide("reject")}
               >
                 {t("reject")}

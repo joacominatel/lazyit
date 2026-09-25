@@ -16,6 +16,7 @@ import type { Principal } from '../../auth/principal';
 import type { ResolvedAiProviderConfig } from '../core/ports/ai-settings.port';
 import {
   AiStatusService,
+  isLoopbackHost,
   resolveMcpAuthMode,
   resolveMcpUrls,
 } from './ai-status.service';
@@ -265,6 +266,55 @@ describe('AiStatusService', () => {
       endpoint: 'http://10.0.0.5:8080/mcp',
       marketplaceUrl: null,
     });
+  });
+
+  it.each([
+    'https://localhost',
+    'https://localhost:8443',
+    'https://LOCALHOST.',
+    'https://lazyit.localhost',
+    'https://127.0.0.1',
+    'https://127.8.9.10:8443',
+    'https://[::1]',
+    'https://[::1]:8443',
+  ])(
+    'offers no marketplace on a loopback origin (%s): Claude Code refuses it (W4-3 F3)',
+    (origin) => {
+      const urls = resolveMcpUrls(true, { WEB_ORIGIN: origin });
+      expect(urls.marketplaceUrl).toBeNull();
+      expect(urls.endpoint).toBe(`${new URL(origin).origin}/mcp`);
+    },
+  );
+
+  it('still offers the marketplace on a normal https host', () => {
+    expect(
+      resolveMcpUrls(true, { WEB_ORIGIN: 'https://it.example.com' })
+        .marketplaceUrl,
+    ).toBe('https://it.example.com/api/ai/claude-code/marketplace.json');
+    expect(
+      resolveMcpUrls(true, { WEB_ORIGIN: 'https://localhost.example.com' })
+        .marketplaceUrl,
+    ).toBe('https://localhost.example.com/api/ai/claude-code/marketplace.json');
+  });
+
+  it('isLoopbackHost recognises only loopback hostnames', () => {
+    for (const host of [
+      'localhost',
+      'app.localhost',
+      '127.0.0.1',
+      '127.255.0.9',
+      '[::1]',
+    ])
+      expect(isLoopbackHost(host)).toBe(true);
+    for (const host of [
+      'it.example.com',
+      'localhost.example.com',
+      'mylocalhost',
+      '10.0.0.5',
+      '128.0.0.1',
+      '[::2]',
+    ])
+      expect(isLoopbackHost(host)).toBe(false);
   });
 
   it('never derives the URLs from the request: no pinned origin, a bad one, or shim → null', () => {

@@ -71,7 +71,8 @@ Concrete setup (shadcn CLI `v4.8.0`, which is now **preset-driven** rather than 
 
 ### Icons — Heroicons only (with one boundary)
 
-> **Superseded by [[0045-icon-library-heroicons]] (2026-06-01).** The "Option A" boundary below
+> **Superseded by [[0045-icon-library-heroicons]] (2026-06-01)** — which, since 2026-09-25, also scopes
+> Hugeicons to the AI assistant's own chrome. The "Option A" boundary below
 > (keep `lucide-react` inside `components/ui/*`) was dropped: the primitives were re-mapped to
 > Heroicons, `lucide-react` was removed entirely, and a two-weight convention (`24/outline`
 > default, `16/solid` for dense/inline/badge) was adopted. The paragraphs below are retained as

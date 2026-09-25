@@ -91,7 +91,9 @@ Backups: `docs/05-runbooks/backups.md`.
   bakes `NEXT_PUBLIC_API_URL=/api`, so one image works on any domain — ADR-0026. A short allowlist of
   **unprefixed** paths for external AI agents — `/mcp`, `/.well-known/oauth-protected-resource*`,
   `/.well-known/oauth-authorization-server*`, `/oauth/{token,register,revoke}` — also reaches the API,
-  unstripped (ADR-0097); the API answers 404 there until MCP is enabled.
+  unstripped (ADR-0097); the API answers 404 there until MCP is enabled. So do the paths MCP clients
+  probe when that metadata is missing — `/.well-known/openid-configuration*`, `/authorize`, `/token`,
+  `/register` — which the API never serves: a JSON 404 rather than the web app's `/login` HTML (#1315).
 - **Streams skip compression.** `encode` wraps every response except streamed ones (the AI run event
   stream, `/mcp`, any `Accept: text/event-stream` request): the pinned Caddy withholds and compresses
   SSE otherwise. `test/caddy-routing.sh` asserts the routing and runs a live SSE probe (ADR-0097).

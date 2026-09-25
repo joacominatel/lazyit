@@ -1,23 +1,25 @@
 {
   "page": {
     "title": "Asistente de IA",
-    "subtitle": "Configura el asistente integrado y permite que agentes de IA externos (Claude Code y otros) trabajen con lazyit por MCP. Desactivado hasta que un administrador lo active.",
+    "subtitle": "El asistente integrado y los agentes de IA externos por MCP.",
     "breadcrumb": "IA",
     "statusOn": "Activo",
     "statusOff": "Inactivo",
     "loadError": "No se pudo cargar la configuración de IA",
     "enabled": {
       "title": "El asistente de IA está activo",
-      "body": "Las personas con el permiso “Usar el asistente de IA” ya ven el asistente en la barra superior. El resto lo verá en menos de un minuto, o al recargar."
+      "body": "Las personas con “Usar el asistente de IA” lo ven en la barra superior en menos de un minuto."
     },
     "secretKey": {
       "title": "El servidor no tiene AI_SECRET_KEY",
-      "body": "Las claves de API de los proveedores se guardan cifradas con la variable de entorno AI_SECRET_KEY de la API. Hasta que un operador la defina (una clave de 32 bytes, por ejemplo de openssl rand -hex 32) y reinicie la API, no se puede guardar ninguna clave y solo se puede usar un servidor compatible con OpenAI sin clave. MCP no la necesita."
+      "body": "Defínela en la API (openssl rand -hex 32) y reiníciala para guardar claves de proveedores.",
+      "help": "Las claves de API de los proveedores se guardan cifradas con la AI_SECRET_KEY de la API, una clave de 32 bytes. Hasta que se defina y se reinicie la API, no se puede guardar ninguna clave y solo se puede usar un servidor compatible con OpenAI sin clave. MCP no la necesita."
     },
     "serviceAccounts": {
-      "body": "Las cuentas de servicio usan el asistente sin que una persona apruebe cada cambio. Elige qué puede hacer cada una — nada, solo lectura o lectura y escritura, con un límite opcional de escrituras — desde el menú de su fila en",
+      "body": "El acceso a IA de las cuentas de servicio se define por cuenta en",
       "link": "Configuración → Cuentas de servicio."
-    }
+    },
+    "manualLink": "Guía de configuración"
   },
   "provider": {
     "label": "Proveedor de IA",
@@ -25,7 +27,7 @@
       "anthropic": "Modelos Claude, a través de la API de Anthropic.",
       "openai": "Modelos GPT, a través de la API de OpenAI.",
       "google": "Modelos Gemini, a través de la API de Google Gemini.",
-      "openai-compatible": "Cualquier servidor que hable la API de OpenAI — un modelo propio en tu red, un gateway u otra nube. Indicas su URL base."
+      "openai-compatible": "Cualquier servidor que hable la API de OpenAI — propio, un gateway u otra nube."
     }
   },
   "credentials": {
@@ -45,7 +47,8 @@
     },
     "privateNetwork": {
       "label": "Servidor en una red privada",
-      "description": "Permite este único host en una dirección privada (10.x, 172.16–31.x, 192.168.x, o un nombre interno que resuelva a una), incluso con http://. Las direcciones de loopback, link-local y de metadatos de la nube se rechazan siempre."
+      "description": "Permite este único host en una dirección privada (10.x, 172.16–31.x, 192.168.x, o un nombre interno que resuelva a una), incluso con http://. Las direcciones de loopback, link-local y de metadatos de la nube se rechazan siempre.",
+      "short": "Permite una dirección privada, incluso con http://."
     },
     "apiKey": {
       "label": "Clave de API de {provider}",
@@ -53,8 +56,8 @@
       "placeholderRequired": "Pega la clave de API",
       "placeholderOptional": "Opcional — deja en blanco si el servidor no necesita clave",
       "hintKeep": "Escribe una clave nueva solo para reemplazar la guardada.",
-      "hintReplaced": "Cambiar el proveedor o la URL base descarta la clave guardada, así que escribe la clave del nuevo destino.",
-      "hintRequired": "Este proveedor necesita una clave.",
+      "hintReplaced": "Un proveedor o una URL base nuevos descartan la clave guardada — escribe la nueva.",
+      "hintRequired": "Obligatoria para este proveedor.",
       "hintOptional": "Un servidor propio muchas veces no necesita clave.",
       "writeOnly": "Se guarda cifrada y no se vuelve a mostrar — ni siquiera a los administradores."
     },
@@ -91,10 +94,10 @@
       "enable": "Activar"
     },
     "provider": {
-      "intro": "El asistente envía lo que lee a este proveedor para responder. Elige uno en el que tu organización ya confíe."
+      "intro": "El asistente envía lo que lee a este proveedor."
     },
     "test": {
-      "intro": "Comprueba que {provider} acepta la clave, conoce el modelo {model} y puede llamar herramientas — el asistente no funciona sin llamadas a herramientas.",
+      "intro": "Comprueba la clave, el modelo {model} y las llamadas a herramientas en {provider}.",
       "run": "Ejecutar la prueba",
       "again": "Probar de nuevo",
       "continueHint": "La prueba debe pasar antes de continuar."
@@ -110,11 +113,12 @@
     "disclosure": {
       "title": "Qué sale de este servidor",
       "body": "Cuando alguien usa el asistente, lazyit envía a {provider}:",
-      "sent": "los mensajes que escribe, la página en la que está (su dirección y el registro que muestra) y los registros que el asistente lee para responder — activos, personas, aplicaciones, accesos, stock y artículos de la base de conocimiento, limitados a lo que esa persona puede ver;",
-      "notSent": "nunca secretos de las bóvedas, contraseñas ni la propia clave del proveedor, ni nada de páginas por las que la persona no preguntó;",
-      "retention": "las conversaciones también se guardan en este servidor durante la retención que elijas más abajo, y a lo que recibe el proveedor se le aplica su propia política de datos.",
+      "sent": "sus mensajes, la página en la que está y los registros que el asistente lee — solo lo que esa persona puede ver;",
+      "notSent": "nunca secretos de las bóvedas, contraseñas ni la clave del proveedor;",
+      "retention": "las conversaciones también se guardan aquí durante la retención que definas; a lo que recibe el proveedor se le aplica su política de datos.",
       "alreadyAcknowledged": "Aceptado el {when}.",
-      "checkbox": "Entiendo que estos datos se envían a {provider} y estoy autorizado a enviarlos allí."
+      "checkbox": "Entiendo que estos datos se envían a {provider} y estoy autorizado a enviarlos allí.",
+      "details": "Qué se envía exactamente"
     },
     "back": "Atrás",
     "next": "Continuar",
@@ -236,7 +240,8 @@
       "instructions": {
         "label": "Instrucciones para el asistente",
         "placeholder": "Por ejemplo: nuestras etiquetas de activo empiezan por ACME-. Responde en español salvo que se pida otra cosa.",
-        "description": "Se agregan a las instrucciones propias de lazyit en cada conversación. No pueden ampliar lo que el asistente puede hacer. {count} / {max} caracteres."
+        "description": "Se agregan a las instrucciones propias de lazyit en cada conversación. No pueden ampliar lo que el asistente puede hacer.",
+        "counter": "{count} / {max} caracteres"
       }
     }
   },
@@ -258,9 +263,9 @@
     },
     "disclosure": {
       "title": "Qué sale de lazyit",
-      "egress": "El proveedor hace la búsqueda en sus propios servidores: lazyit no hace ninguna solicitud propia. Las consultas y el contexto de la conversación van al proveedor, que puede pasar las consultas a su motor de búsqueda o a un socio de búsqueda, y puede facturar las búsquedas aparte.",
-      "untrusted": "Los resultados de búsqueda son contenido escrito por cualquiera en internet. El asistente los trata como datos, nunca como instrucciones, y cita las páginas que usó. Una vez que buscó en la web en una conversación, nada en esa conversación se aprueba automáticamente — cada cambio que proponga ahí muestra su tarjeta de aprobación.",
-      "openai": "Con OpenAI, la búsqueda usa la copia en caché e indexada de la web de OpenAI, no las páginas en vivo, así que pueden faltar páginas muy recientes. La búsqueda de OpenAI también puede abrir páginas; eso no se puede desactivar, pero nunca descarga una página en vivo desde su sitio.",
+      "egress": "La búsqueda la hace tu proveedor de IA: las consultas y el contexto de la conversación van a él (y quizá a un socio de búsqueda), y las búsquedas pueden facturarse aparte.",
+      "untrusted": "Los resultados son contenido web no confiable: una vez que una conversación buscó, ninguno de sus cambios se aprueba automáticamente.",
+      "openai": "OpenAI busca en su índice en caché de la web, no en páginas en vivo.",
       "conversations": "Solo el chat. Las ejecuciones headless nunca buscan en la web, porque sus cambios se aplican sin que nadie los apruebe."
     },
     "maxUses": {
@@ -275,42 +280,45 @@
     "title": "Agentes de IA externos (MCP)",
     "on": "Activo",
     "off": "Inactivo",
-    "description": "Permite que agentes de IA que corren fuera de lazyit — Claude Code, Codex, Cursor, OpenCode y otros — lean y modifiquen lazyit como la persona que los conecta, con sus permisos. Independiente del asistente de arriba: funciona sin ningún proveedor configurado.",
+    "description": "Permite que Claude Code, Codex, Cursor y otros agentes trabajen en lazyit como la persona que los conecta.",
     "switch": {
       "label": "Permitir agentes de IA externos",
       "description": "Las personas también necesitan el permiso “Conectar agentes de IA externos (MCP)”. Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a valer al reactivarlo."
     },
     "mode": {
       "oauth": {
-        "title": "La dirección pública de esta instancia es https://: los clientes inician sesión con OAuth",
+        "title": "Los clientes inician sesión con OAuth",
         "body": "Cuando una persona agrega lazyit a su cliente, el cliente abre una página de lazyit en el navegador donde revisa el acceso y lo aprueba. No hay nada que copiar a mano, y cada conexión se puede revocar en Cuenta → IA y aplicaciones conectadas. (OAuth está disponible porque la opción WEB_ORIGIN de la API es una dirección https://.)",
         "internalCa": "Si tu certificado lo emite una autoridad de certificación interna, Claude Code (y otros clientes Node.js) no confiarán en él hasta que se inicien con el certificado de esa autoridad:",
-        "cloud": "Los conectores en la nube — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde los servidores del proveedor, no desde la computadora de la persona. Solo funcionan si esta instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública."
+        "cloud": "Los conectores en la nube — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde los servidores del proveedor, no desde la computadora de la persona. Solo funcionan si esta instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública.",
+        "why": "La dirección pública de esta instancia (WEB_ORIGIN) es https://."
       },
       "personalToken": {
-        "title": "Esta instancia no tiene una dirección pública https://: los clientes usan tokens personales",
+        "title": "Los clientes usan tokens personales",
         "body": "Cada persona crea un token MCP personal en Cuenta → IA y aplicaciones conectadas y se lo da a su cliente (Claude Code lo pide al activar el plugin de lazyit). Los tokens vencen y se pueden revocar allí en cualquier momento.",
         "whyNoOauth": "El inicio de sesión con OAuth necesita HTTPS y una dirección pública fija, así que la API lo ofrece solo cuando su opción WEB_ORIGIN es una dirección https://. Un proxy TLS delante de lazyit no alcanza por sí solo: define WEB_ORIGIN con la dirección https:// que usan las personas y reinicia la API para pasar a OAuth.",
-        "cloud": "Los conectores en la nube (claude.ai, ChatGPT) no pueden conectarse a esta instancia: necesitan una dirección HTTPS alcanzable públicamente."
+        "cloud": "Los conectores en la nube (claude.ai, ChatGPT) no pueden conectarse a esta instancia: necesitan una dirección HTTPS alcanzable públicamente.",
+        "why": "Esta instancia no tiene una dirección pública https:// (WEB_ORIGIN)."
       },
-      "detectedFromBrowser": "La respuesta del servidor no estaba disponible, así que esto se dedujo de la dirección en tu navegador. El modo real depende de la opción WEB_ORIGIN de la API.",
-      "loading": "Comprobando cómo se conectan los clientes a esta instancia…"
+      "detectedFromBrowser": "Deducido de la dirección de tu navegador; lo decide la WEB_ORIGIN de la API.",
+      "loading": "Comprobando cómo se conectan los clientes a esta instancia…",
+      "help": "Cómo se conectan los clientes"
     },
     "endpoint": {
       "label": "Endpoint MCP",
       "copy": "Copiar el endpoint MCP",
       "description": "La dirección que se le da a un cliente MCP que se configura a mano.",
-      "pageFallback": "La API no tiene una dirección pública fijada (WEB_ORIGIN), así que esta es la dirección de la página en la que estás. Los clientes en otras máquinas pueden necesitar la dirección de la instancia en la red local."
+      "pageFallback": "La dirección de esta página — la API no tiene WEB_ORIGIN fijada."
     },
     "install": {
       "link": "IA y aplicaciones conectadas",
-      "description": "Tus aplicaciones conectadas y tokens personales están en Cuenta → IA y aplicaciones conectadas; los pasos de instalación están abajo."
+      "description": "Tus aplicaciones conectadas, tokens personales y pasos de instalación."
     },
     "allowlist": {
       "title": "Clientes permitidos",
       "description": "Solo estos clientes pueden conectarse. Un cliente se reconoce por su URL de metadatos de cliente o por la dirección exacta a la que devuelve a la persona después de iniciar sesión — nunca por el nombre que se da a sí mismo.",
       "anyHttps": {
-        "label": "Aceptar cualquier cliente con callback https:// (activado por defecto)",
+        "label": "Aceptar cualquier cliente con callback https://",
         "description": "Cualquier cliente MCP cuyo callback de inicio de sesión sea una dirección https:// puede pedirle acceso a una persona, aunque no esté en esta lista. Esto por sí solo no otorga nada: la persona igual ve la página de consentimiento, que muestra el host del callback del cliente y avisa que el cliente no estaba en la lista. Los clientes con callback de loopback o de esquema de aplicación (como cursor://) igual necesitan una entrada. Desactívalo para aceptar solo los clientes de la lista."
       },
       "added": {
@@ -368,11 +376,12 @@
         "verified": "Verificado",
         "vendor-docs": "Docs del proveedor"
       }
-    }
+    },
+    "help": "Agentes de IA que corren fuera de lazyit — Claude Code, Codex, Cursor, OpenCode y otros — leen y modifican lazyit como la persona que los conecta, con sus permisos. Independiente del asistente de arriba: funciona sin ningún proveedor configurado."
   },
   "danger": {
     "title": "Desactivar el asistente de IA",
-    "description": "Oculta el asistente para todos. La configuración y la clave se conservan, así que reactivarlo es un solo paso.",
+    "description": "Lo oculta para todos; la configuración y la clave se conservan.",
     "turnOff": "Desactivar el asistente",
     "confirm": {
       "title": "¿Desactivar el asistente de IA?",
@@ -384,5 +393,17 @@
       "cancel": "Cancelar",
       "action": "Desactivar"
     }
+  },
+  "links": {
+    "setup": "/help/ai-assistant-setup",
+    "secretKey": "/help/ai-assistant-setup#antes-de-empezar-ai_secret_key",
+    "wizard": "/help/ai-assistant-setup#el-asistente-de-configuración",
+    "connection": "/help/ai-assistant-setup#cambiar-el-proveedor-el-modelo-o-la-clave",
+    "privateNetwork": "/help/ai-assistant-setup#servidores-en-red-privada",
+    "limits": "/help/ai-assistant-setup#comportamiento-y-límites",
+    "webSearch": "/help/ai-assistant-setup#búsqueda-web",
+    "mcp": "/help/ai-assistant-setup#agentes-de-ia-externos-mcp",
+    "allowlist": "/help/ai-assistant-setup#clientes-permitidos",
+    "disclosure": "/help/ai-assistant-overview#qué-sale-de-tu-servidor"
   }
 }

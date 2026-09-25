@@ -166,11 +166,21 @@ import sites/*.caddy
 	# OAuth discovery address the bare origin — `{origin}/mcp` is the resource, the issuer is `{origin}`,
 	# and RFC 8414 / RFC 9728 put the metadata under `/.well-known/` — so these reach the API WITHOUT the
 	# /api strip. A short allowlist on purpose: `/oauth/authorize` is the web consent page and stays on
-	# the catch-all below, and nothing else under /oauth/* or /.well-known/* is the API's (ACME's
-	# /.well-known/acme-challenge/* is answered by Caddy itself, before any route). The API answers 404
-	# on all of these while MCP is off, on a `lan` instance (the OAuth rows), or before it ships them.
+	# the catch-all below, and nothing else under /oauth/* or /.well-known/* is the API's bar the probe
+	# paths below (ACME's /.well-known/acme-challenge/* is answered by Caddy itself, before any route).
+	# The API answers 404 on all of these while MCP is off, on a `lan` instance (the OAuth rows), or
+	# before it ships them.
+	#
+	# The second line is what MCP SDK clients PROBE when the RFC 8414 metadata is missing (always on
+	# `lan`): OIDC discovery (`/.well-known/openid-configuration`, and its path-suffixed forms), then the
+	# spec's root fallbacks `/authorize`, `/token`, `/register` (issue #1315, W4-3 finding F1). The API
+	# serves none of them — lazyit is OAuth-only, no OIDC — so they answer the API's JSON 404. Without
+	# these rows they reached the web app, whose auth proxy 302s to /login (200 text/html), and the client
+	# failed on `Unexpected token '<'` instead of its designed refusal (InsecureTokenEndpointError on
+	# plain HTTP). The web app owns none of these paths: its consent page is /oauth/authorize.
 	@agent_api {
 		path /mcp /.well-known/oauth-protected-resource* /.well-known/oauth-authorization-server* /oauth/token /oauth/register /oauth/revoke
+		path /.well-known/openid-configuration* /authorize /token /register
 	}
 	handle @agent_api {
 		reverse_proxy api:3001

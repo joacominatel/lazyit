@@ -3,7 +3,7 @@ title: Runbooks — MOC
 tags: [moc, runbook]
 status: draft
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # Runbooks — Map of Content
@@ -34,6 +34,11 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   MCP**: the unprefixed agent routes, SSE through Caddy, `AI_SECRET_KEY` / `AI_WORKER_CONCURRENCY`,
   which MCP clients work in which network mode, and trusting an internal CA (`NODE_EXTRA_CA_CERTS`)
   ([[0097-ai-assistant-mcp-and-headless-api]]).
+- **[[ai-mcp-client-matrix]]** — which AI agents connect over MCP in which network mode (`lan`
+  personal tokens, HTTPS OAuth): the client × deployment matrix with what was verified end to end and
+  with which versions, how to re-run the automatable checks (MCP Inspector, the conformance suite, an
+  SDK-v2 client, Claude Code), the operator checklists for claude.ai, Cursor and Claude Code sign-in,
+  and troubleshooting ([[0097-ai-assistant-mcp-and-headless-api]]).
 - **[[releasing]]** — cut a version: release = a `dev → master` promotion (auto-tagged by
   `release.yml`), the one-time signed `v1.0.0` seed, support/deprecation policy, and the guided
   host update. [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]].

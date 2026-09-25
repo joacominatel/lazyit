@@ -28,7 +28,7 @@ export class AiStatusController {
       '`{ chat: { available }, mcp: { available, auth, endpoint, marketplaceUrl }, configRevision, retentionDays }`. ' +
       '`chat.available` = enabled ∧ provider configured ∧ ai:use; `mcp.available` = the MCP switch ∧ ai:connect. ' +
       '`mcp.endpoint` is `<WEB_ORIGIN>/mcp` from the pinned origin (never the request Host), null without one; ' +
-      '`mcp.marketplaceUrl` is the public Claude Code marketplace, only while it is served (MCP on, pinned https). No secrets.',
+      '`mcp.marketplaceUrl` is the public Claude Code marketplace, only while it is served (MCP on, pinned https, non-loopback host). No secrets.',
   })
   @ApiOkResponse({ type: AiStatusDto })
   get(@CurrentPrincipal() principal?: Principal): Promise<AiStatus> {

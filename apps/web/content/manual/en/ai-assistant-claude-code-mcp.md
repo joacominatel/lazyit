@@ -69,6 +69,10 @@ work on an internal network too.
 3. **Updates are not automatic by default.** To receive new versions of the skill, open `/plugin` in
    Claude Code, go to **Marketplaces**, select your lazyit marketplace and enable auto-update.
 
+**On a `localhost` instance** (an address like `localhost`, `127.0.0.1` or `::1`), install the plugin
+from the [download](#install-from-a-download-any-instance) instead: Claude Code won't install a
+marketplace from a loopback address.
+
 **Internal certificate authority.** If your instance's HTTPS certificate is issued by a company CA,
 Claude Code (and other Node.js-based apps) must be told to trust it before starting:
 

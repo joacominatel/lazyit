@@ -25,6 +25,7 @@ import {
   type AiResolvedReference,
 } from '../core/reference-resolver';
 import { mapToolError } from '../core/error-mapper';
+import { requiresStepUp } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
   bind,
@@ -1130,15 +1131,29 @@ function batchRowView(plan: BatchRowPlan): Row {
  * (the approval-time preview refuses the batch). A batch whose rows reference nothing has no
  * precondition, like a single create.
  */
-function batchPrecondition(
+function createBatchPrecondition(
   plans: readonly BatchRowPlan[],
 ): AiActionPreview['precondition'] {
-  const refs = new Map<string, BatchReference>();
+  const refs: BatchReference[] = [];
   for (const plan of plans) {
     if (plan.skip) continue;
     for (const r of [plan.model, plan.category, plan.location]) {
-      if (r?.updatedAt) refs.set(`${r.ref.type}:${r.ref.id}`, r);
+      if (r?.updatedAt) refs.push(r);
     }
+  }
+  return batchPrecondition(refs);
+}
+
+/**
+ * The most recently changed of these versioned entities (ties broken by type and id) as a batch's ONE
+ * precondition, or none when nothing is versioned. Shared by the batch create and the batch update.
+ */
+function batchPrecondition(
+  versioned: readonly BatchReference[],
+): AiActionPreview['precondition'] {
+  const refs = new Map<string, BatchReference>();
+  for (const r of versioned) {
+    if (r.updatedAt) refs.set(`${r.ref.type}:${r.ref.id}`, r);
   }
   const newest = [...refs.values()].sort(
     (a, b) =>
@@ -1328,7 +1343,7 @@ const assetCreateBatch = defineTool({
       after: plans.map(batchRowView),
       valueKind: 'text',
     });
-    const precondition = batchPrecondition(plans);
+    const precondition = createBatchPrecondition(plans);
     return {
       changes,
       warnings: [],
@@ -1407,11 +1422,77 @@ async function updateBody(
   return body;
 }
 
+/** The fields an update input may carry (a batch row's merged values have the same shape). */
+type UpdateFields = Omit<AssetUpdateInput, 'asset'>;
+
+/**
+ * An update's card rows, before → after, against the asset as read now — the ONE diff `asset_update` and
+ * `asset_update_batch` share, so a batch row shows exactly what a single update would. A field already
+ * holding the value is left out. `warnings` are the preview warnings the change carries: none today for
+ * an asset field (no step-up warning applies to one); the batch refuses any row that would carry a
+ * step-up warning, so a future one cannot hide in a batch.
+ */
+function updateChanges(
+  input: UpdateFields,
+  current: Row,
+  resolved: { model?: AiResolvedReference; location?: AiResolvedReference },
+): { changes: Change[]; warnings: string[] } {
+  const changes: Change[] = [];
+  for (const field of SCALAR_FIELDS) {
+    const after = input[field];
+    if (after === undefined) continue;
+    const before = iso(current[field]) ?? null;
+    if (sameValue(before, after)) continue;
+    changes.push({
+      field,
+      before,
+      after,
+      valueKind: VALUE_KINDS[field] ?? 'text',
+    });
+  }
+  if (resolved.model) {
+    const after = resolved.model;
+    const before = current.model ? asRow(current.model) : null;
+    if (before?.id !== after.id) {
+      changes.push({
+        field: 'model',
+        before: before
+          ? { type: 'assetModel', id: before.id, label: modelLabel(before) }
+          : null,
+        after: entityValue(after),
+        valueKind: 'entity',
+      });
+    }
+  }
+  if (resolved.location) {
+    const after = resolved.location;
+    const before = current.location ? asRow(current.location) : null;
+    if (before?.id !== after.id) {
+      changes.push({
+        field: 'location',
+        before: before
+          ? { type: 'location', id: before.id, label: before.name }
+          : null,
+        after: entityValue(after),
+        valueKind: 'entity',
+      });
+    }
+  }
+  const specs = asRow(current.specs);
+  for (const [key, after] of Object.entries(input.specs ?? {})) {
+    const before = Object.hasOwn(specs, key) ? (specs[key] ?? null) : null;
+    if (before === after) continue;
+    changes.push({ field: `specs.${key}`, before, after, valueKind: 'text' });
+  }
+  return { changes, warnings: [] };
+}
+
 const assetUpdate = defineTool({
   name: 'asset_update',
   title: 'Update an asset',
   description:
-    'Change an asset (by id, asset tag or serial): any of its name, status, tag, serial, company, notes, ' +
+    'Change ONE asset (by id, asset tag or serial; for several, use asset_update_batch): any of its name, ' +
+    'status, tag, serial, company, notes, ' +
     'dates, cost, model, location or attributes. Only the fields you give change; specs are merged. ' +
     'Ownership is not a field: use asset_check_out / asset_check_in.',
   domain: 'assets',
@@ -1449,53 +1530,14 @@ const assetUpdate = defineTool({
         params: { id: resolved.id },
       }),
     );
-    const changes: Change[] = [];
-    for (const field of SCALAR_FIELDS) {
-      const after = input[field];
-      if (after === undefined) continue;
-      const before = iso(current[field]) ?? null;
-      if (sameValue(before, after)) continue;
-      changes.push({
-        field,
-        before,
-        after,
-        valueKind: VALUE_KINDS[field] ?? 'text',
-      });
-    }
-    if (input.model) {
-      const after = await resolveModel(rt, input.model, true);
-      const before = current.model ? asRow(current.model) : null;
-      if (before?.id !== after.id) {
-        changes.push({
-          field: 'model',
-          before: before
-            ? { type: 'assetModel', id: before.id, label: modelLabel(before) }
-            : null,
-          after: entityValue(after),
-          valueKind: 'entity',
-        });
-      }
-    }
-    if (input.location) {
-      const after = await resolveLocation(rt, input.location, true);
-      const before = current.location ? asRow(current.location) : null;
-      if (before?.id !== after.id) {
-        changes.push({
-          field: 'location',
-          before: before
-            ? { type: 'location', id: before.id, label: before.name }
-            : null,
-          after: entityValue(after),
-          valueKind: 'entity',
-        });
-      }
-    }
-    const specs = asRow(current.specs);
-    for (const [key, after] of Object.entries(input.specs ?? {})) {
-      const before = Object.hasOwn(specs, key) ? (specs[key] ?? null) : null;
-      if (before === after) continue;
-      changes.push({ field: `specs.${key}`, before, after, valueKind: 'text' });
-    }
+    const { changes, warnings } = updateChanges(input, current, {
+      model: input.model
+        ? await resolveModel(rt, input.model, true)
+        : undefined,
+      location: input.location
+        ? await resolveLocation(rt, input.location, true)
+        : undefined,
+    });
     if (changes.length === 0) {
       throw new BadRequestException(
         `Nothing to change: ${assetLabel(current)} already has these values`,
@@ -1505,7 +1547,7 @@ const assetUpdate = defineTool({
     return {
       target,
       changes,
-      warnings: [],
+      warnings,
       impacted: [],
       untrustedSources: [],
       elevated: false,
@@ -1517,6 +1559,474 @@ const assetUpdate = defineTool({
     };
   },
 });
+
+// ─── asset_update_batch ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The values a bulk update may set, once in `common` or per row. The unique physical identifiers (asset
+ * tag and serial) are left out: changing those is one asset at a time, through `asset_update`.
+ */
+const updateBatchFields = {
+  status: editableFields.status.optional(),
+  company: editableFields.company.optional(),
+  notes: editableFields.notes.optional().describe('Replaces the notes.'),
+  purchaseDate: editableFields.purchaseDate.optional(),
+  warrantyEnd: editableFields.warrantyEnd.optional(),
+  purchaseCost: money.nullable().optional().describe('null clears it.'),
+  usefulLifeMonths: months.nullable().optional().describe('null clears it.'),
+  salvageValue: money.nullable().optional().describe('null clears it.'),
+  model: editableFields.model.optional(),
+  location: editableFields.location.optional(),
+  specs: assetUpdateInput.shape.specs,
+};
+
+const updateBatchRowInput = z
+  .strictObject({
+    asset: assetReference,
+    name: editableFields.name.optional(),
+    ...updateBatchFields,
+    skip: z
+      .boolean()
+      .optional()
+      .describe(
+        'true = leave this asset out: the card lists it as skipped and it is never changed. Use it for a ' +
+          'row the check refused when the user wants the others changed without it.',
+      ),
+  })
+  .superRefine((row, ctx) => refuseReservedSpecKeys(row.specs, ctx));
+
+const assetUpdateBatchInput = z.strictObject({
+  rows: z
+    .array(updateBatchRowInput)
+    .min(1)
+    .max(ASSET_BATCH_MAX_ROWS)
+    .describe(
+      `One entry per asset to change (1–${ASSET_BATCH_MAX_ROWS}), each naming its asset by id, asset tag ` +
+        'or serial, with the values only that asset gets. Pass every asset the user meant: the card ' +
+        'counts them, so never summarize or drop rows.',
+    ),
+  common: z
+    .strictObject(updateBatchFields)
+    .superRefine((shared, ctx) => refuseReservedSpecKeys(shared.specs, ctx))
+    .optional()
+    .describe(
+      'Values set on every asset (status, location, model, company, dates, cost, specs…); a row’s own ' +
+        'value overrides it, and specs are merged.',
+    ),
+});
+
+type AssetUpdateBatchInput = z.output<typeof assetUpdateBatchInput>;
+type UpdateBatchRowInput = AssetUpdateBatchInput['rows'][number];
+
+/** One row of a bulk update, resolved and diffed: the route body, or why it cannot be applied. */
+interface UpdateRowPlan {
+  /** 1-based, in the order the user gave the rows. */
+  row: number;
+  skip: boolean;
+  /** The asset as the row names it (its reference until it resolves). */
+  asset: AiEntityRef | null;
+  reference: string;
+  /** The asset's version when read (the batch precondition). */
+  updatedAt: string | null;
+  model: BatchReference | null;
+  location: BatchReference | null;
+  changes: Change[];
+  warnings: string[];
+  errors: string[];
+  body: Row;
+}
+
+/**
+ * Resolve and diff every row of a bulk update (#1409), the same way for the preview and the execution —
+ * each row exactly as `asset_update` would see it:
+ *   - the asset: its reference resolved through the single update's resolver and read through
+ *     `GET /assets/:id`, as the principal (a reference that does not resolve is that row's error; a 403
+ *     propagates, as the route would answer it). The same asset named twice is an error on the later row;
+ *   - the model and location (the row's, else `common`'s): each distinct spelling resolved ONCE per plan;
+ *   - the diff: the single update's ({@link updateChanges}); a row that changes nothing is an error.
+ * Specs are merged over the asset's current ones, as a single update does.
+ */
+async function planUpdateBatch(
+  input: AssetUpdateBatchInput,
+  rt: AiToolRuntime,
+): Promise<UpdateRowPlan[]> {
+  const common = input.common ?? {};
+  const rows = input.rows.map((row) => ({
+    ...common,
+    ...row,
+    ...(common.specs || row.specs
+      ? { specs: { ...common.specs, ...row.specs } }
+      : {}),
+  })) as UpdateBatchRowInput[];
+
+  const assets = new Map<string, Lookup<Row>>();
+  const models = new Map<string, Lookup<BatchReference>>();
+  const locations = new Map<string, Lookup<BatchReference>>();
+  const reference = async (
+    kind: 'model' | 'location',
+    spelling: string,
+  ): Promise<Lookup<BatchReference>> =>
+    lookup(
+      async () => {
+        const resolved =
+          kind === 'model'
+            ? await resolveModel(rt, spelling, true)
+            : await resolveLocation(rt, spelling, true);
+        const row = asRow(
+          kind === 'model'
+            ? await rt.call(AssetModelsController, 'findOne', {
+                params: { id: resolved.id },
+              })
+            : await rt.call(LocationsController, 'findOne', {
+                params: { id: resolved.id },
+              }),
+        );
+        return { ref: entityValue(resolved), updatedAt: versionOf(row) };
+      },
+      kind === 'model'
+        ? ' — create the model first (asset_model_create) or use an existing one'
+        : ' — create the location first (location_create) or use an existing one',
+    );
+
+  const seen = new Map<string, number>();
+  const plans: UpdateRowPlan[] = [];
+  for (const [index, row] of rows.entries()) {
+    const number = index + 1;
+    const skip = row.skip === true;
+    const errors: string[] = [];
+    const key = referenceKey(row.asset);
+    if (!assets.has(key)) {
+      assets.set(
+        key,
+        await lookup(async () => {
+          const { id } = await resolveAsset(rt, row.asset, true);
+          return asRow(
+            await rt.call(AssetsController, 'findOne', { params: { id } }),
+          );
+        }, ' — find the asset with asset_search and use its id'),
+      );
+    }
+    let model: BatchReference | null = null;
+    if (row.model) {
+      const k = referenceKey(row.model);
+      if (!models.has(k)) models.set(k, await reference('model', row.model));
+      const found = models.get(k)!;
+      if (found.ok) model = found.value;
+      else errors.push(found.error);
+    }
+    let location: BatchReference | null = null;
+    if (row.location) {
+      const k = referenceKey(row.location);
+      if (!locations.has(k)) {
+        locations.set(k, await reference('location', row.location));
+      }
+      const found = locations.get(k)!;
+      if (found.ok) location = found.value;
+      else errors.push(found.error);
+    }
+
+    const found = assets.get(key)!;
+    if (!found.ok) {
+      errors.push(found.error);
+      plans.push({
+        row: number,
+        skip,
+        asset: null,
+        reference: row.asset,
+        updatedAt: null,
+        model,
+        location,
+        changes: [],
+        warnings: [],
+        errors,
+        body: {},
+      });
+      continue;
+    }
+    const current = found.value;
+    const id = String(current.id);
+    if (!skip) {
+      const earlier = seen.get(id);
+      if (earlier !== undefined) {
+        errors.push(`the same asset as row ${earlier}: give each asset once`);
+      } else {
+        seen.set(id, number);
+      }
+    }
+    const { changes, warnings } = updateChanges(row, current, {
+      ...(model ? { model: resolvedOf(model) } : {}),
+      ...(location ? { location: resolvedOf(location) } : {}),
+    });
+    if (changes.length === 0 && errors.length === 0) {
+      errors.push(
+        `nothing to change: ${assetLabel(current)} already has these values`,
+      );
+    }
+    const body = scalarBody(row);
+    if (model) body.modelId = model.ref.id;
+    if (location) body.locationId = location.ref.id;
+    if (row.specs) {
+      const edits = new Map(Object.entries(row.specs));
+      const kept = Object.entries(asRow(current.specs)).filter(
+        ([k]) => !edits.has(k),
+      );
+      const set = [...edits].filter(([, value]) => value !== null);
+      body.specs = Object.fromEntries([...kept, ...set]);
+    }
+    plans.push({
+      row: number,
+      skip,
+      asset: assetRef(current, 'updated'),
+      reference: row.asset,
+      updatedAt: versionOf(current),
+      model,
+      location,
+      changes,
+      warnings,
+      errors,
+      body,
+    });
+  }
+  return plans;
+}
+
+const resolvedOf = (r: BatchReference): AiResolvedReference => ({
+  type: r.ref.type,
+  id: r.ref.id,
+  ...(r.ref.label !== undefined ? { label: r.ref.label } : {}),
+});
+
+/** A before or after value as one short cell of the card's table. */
+function cellText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const label = (value as { label?: unknown }).label;
+    if (typeof label === 'string') return label;
+  }
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > 200 ? `${text.slice(0, 199)}…` : text;
+}
+
+/** One row as the card's table shows it: the asset, then one column per changed field (before → after). */
+function updateRowView(plan: UpdateRowPlan): Row {
+  const cells: Row = {};
+  for (const change of plan.changes) {
+    cells[change.field] =
+      `${cellText(change.before)} → ${cellText(change.after)}`;
+  }
+  return {
+    row: plan.row,
+    asset: plan.asset
+      ? { type: 'asset', id: plan.asset.id, label: plan.asset.label }
+      : plan.reference,
+    ...cells,
+    skipped: plan.skip,
+    valid: !plan.skip && plan.errors.length === 0,
+    errors: plan.errors,
+  };
+}
+
+/**
+ * The version a bulk update is approved against. Its rows' assets (and the models and locations they
+ * set) are versioned by `updatedAt`, and the precondition contract carries ONE `{ entity, updatedAt }`,
+ * so the batch pins the most recently changed of them, as `asset_create_batch` does: any of those assets
+ * edited after the card was built gets a newer `updatedAt` than anything the card saw, so the newest
+ * entity or its version changes and the approval is `STALE` — for every asset, not only the pinned one.
+ * An asset archived in between no longer resolves, so the approval-time preview refuses the batch.
+ */
+function updateBatchPrecondition(
+  plans: readonly UpdateRowPlan[],
+): AiActionPreview['precondition'] {
+  const refs: BatchReference[] = [];
+  for (const plan of plans) {
+    if (plan.skip) continue;
+    if (plan.asset && plan.updatedAt) {
+      refs.push({
+        ref: {
+          type: 'asset',
+          id: plan.asset.id,
+          ...(plan.asset.label !== undefined
+            ? { label: plan.asset.label }
+            : {}),
+        },
+        updatedAt: plan.updatedAt,
+      });
+    }
+    for (const r of [plan.model, plan.location]) if (r?.updatedAt) refs.push(r);
+  }
+  return batchPrecondition(refs);
+}
+
+const assetUpdateBatch = defineTool({
+  name: 'asset_update_batch',
+  title: 'Update several assets',
+  description:
+    `Change several existing assets at once (up to ${ASSET_BATCH_MAX_ROWS}) as ONE proposal with one ` +
+    'approval — e.g. move 25 laptops to storage, or set a status, model, location, company, dates or ' +
+    'attributes on many assets. Name each asset in `rows` (id, asset tag or serial) with its own values, ' +
+    'and put values every asset gets in `common`. Prefer it over separate asset_update calls when several ' +
+    'assets change. Every row is checked first, exactly as asset_update would: the asset and any model or ' +
+    'location must exist, and each row must change something. A proposal with a refused row is not ' +
+    'shown: fix the row, or mark it `skip: true` to change the others without it. Tags and serials are ' +
+    'changed one asset at a time with asset_update. The result lists what was changed and what was not.',
+  domain: 'assets',
+  class: 'write',
+  destructive: true,
+  idempotent: true,
+  input: assetUpdateBatchInput,
+  bindings: [
+    bind(AssetsController, 'update'),
+    bind(AssetsController, 'findOne'),
+    bind(AssetsController, 'findAll'),
+    bind(AssetModelsController, 'findAll'),
+    bind(AssetModelsController, 'findOne'),
+    bind(LocationsController, 'findAll'),
+    bind(LocationsController, 'findOne'),
+  ],
+  async run(input, rt) {
+    const plans = await planUpdateBatch(input, rt);
+    // Rows marked `skip` never run. A row that fails its check here (headless and MCP have no card; in
+    // the chat the approval-time preview already refused it) is reported, not applied.
+    const ready = plans.filter((p) => !p.skip && p.errors.length === 0);
+    if (ready.length === 0) {
+      const bad = plans.filter((p) => !p.skip);
+      throw new BadRequestException(
+        bad.length === 0
+          ? 'Every row is marked skip: nothing to change'
+          : `No row can be applied: ${updateRowErrors(bad, 5)}`,
+      );
+    }
+    const updated: Row[] = [];
+    const problems: Row[] = plans
+      .filter((p) => p.skip || p.errors.length > 0)
+      .map((p) => ({
+        row: p.row,
+        ...(p.skip ? { skipped: true } : {}),
+        errors: p.errors,
+      }));
+    const entityRefs: AiEntityRef[] = [];
+    let stoppedAt: number | null = null;
+    for (const plan of ready) {
+      try {
+        const asset = asRow(
+          await rt.call(AssetsController, 'update', {
+            params: { id: plan.asset!.id },
+            body: plan.body,
+          }),
+        );
+        updated.push({ row: plan.row, id: asset.id, label: assetLabel(asset) });
+        entityRefs.push(assetRef(asset, 'updated'));
+      } catch (err) {
+        const mapped = mapToolError(err);
+        if (updated.length === 0 && STOP_STATUSES.has(mapped.status ?? 0)) {
+          throw err;
+        }
+        problems.push({ row: plan.row, errors: [mapped.message] });
+        if (STOP_STATUSES.has(mapped.status ?? 0)) {
+          stoppedAt = plan.row;
+          break;
+        }
+      }
+    }
+    problems.sort((a, b) => Number(a.row) - Number(b.row));
+    const notAttempted =
+      stoppedAt === null ? 0 : ready.filter((p) => p.row > stoppedAt).length;
+    const notUpdated = plans.length - updated.length;
+    return {
+      data: {
+        requested: plans.length,
+        updated: updated.length,
+        notUpdated,
+        ...(notAttempted > 0 ? { stoppedAtRow: stoppedAt, notAttempted } : {}),
+        updatedAssets: updated,
+        problems,
+      },
+      summary:
+        `Updated ${updated.length} of ${plans.length} assets` +
+        (notUpdated > 0 ? `; ${notUpdated} not updated (see problems).` : '.'),
+      entityRefs,
+    };
+  },
+  async preview(input, rt) {
+    const plans = await planUpdateBatch(input, rt);
+    const toApply = plans.filter((p) => !p.skip);
+    if (toApply.length === 0) {
+      throw new BadRequestException(
+        'Every row is marked skip: nothing to change',
+      );
+    }
+    // A change that needs the password confirmation is decided one card at a time, never in a batch.
+    const stepUp = toApply.filter((p) =>
+      requiresStepUp({ stepUpRequired: false, warnings: p.warnings }),
+    );
+    if (stepUp.length > 0) {
+      throw new BadRequestException(
+        `${plural(stepUp.length, 'row needs', 'rows need')} a confirmation with the password ` +
+          `(rows ${stepUp.map((p) => p.row).join(', ')}): propose those with asset_update, one at a ` +
+          'time, and the rest in a batch.',
+      );
+    }
+    // A card never shows a row it would not apply as shown.
+    const refused = toApply.filter((p) => p.errors.length > 0);
+    if (refused.length > 0) {
+      throw new BadRequestException(
+        `${plural(refused.length, 'row', 'rows')} of ${plans.length} cannot be applied as given: ` +
+          `${updateRowErrors(refused, 20)}. Fix them, or mark them skip: true to change the others ` +
+          'without them, and propose again.',
+      );
+    }
+    const skipped = plans.length - toApply.length;
+    const targets = toApply.map((p) => p.asset!);
+    const precondition = updateBatchPrecondition(plans);
+    return {
+      changes: [
+        {
+          field: 'action',
+          after:
+            `Update ${toApply.length} of ${plans.length} assets` +
+            (skipped > 0
+              ? `; ${plural(skipped, 'row', 'rows')} skipped as requested.`
+              : '.'),
+          valueKind: 'text',
+        },
+        { field: 'rowCount', after: plans.length, valueKind: 'number' },
+        { field: 'validRows', after: toApply.length, valueKind: 'number' },
+        { field: 'invalidRows', after: skipped, valueKind: 'number' },
+        {
+          field: 'rows',
+          after: plans.map(updateRowView),
+          valueKind: 'text',
+        },
+      ],
+      warnings: [],
+      impacted: [
+        {
+          type: 'asset',
+          count: targets.length,
+          sample: targets.slice(0, 5),
+        },
+      ],
+      untrustedSources: [],
+      elevated: false,
+      stepUpRequired: false,
+      ...(precondition ? { precondition } : {}),
+    };
+  },
+});
+
+/** The rows' errors for a refusal message, each row with its reference. */
+function updateRowErrors(bad: readonly UpdateRowPlan[], max: number): string {
+  const shown = bad
+    .slice(0, max)
+    .map(
+      (p) =>
+        `row ${p.row} (${p.asset?.label ?? p.reference}): ${p.errors.join('; ')}`,
+    )
+    .join(' | ');
+  return bad.length > max
+    ? `${shown} | …and ${bad.length - max} more rows`
+    : shown;
+}
 
 // ─── asset_archive / asset_restore ───────────────────────────────────────────────────────────────────
 
@@ -1981,6 +2491,7 @@ export const assetsToolset: AiToolset = {
     assetCreate,
     assetCreateBatch,
     assetUpdate,
+    assetUpdateBatch,
     assetArchive,
     assetRestore,
     assetCheckOut,

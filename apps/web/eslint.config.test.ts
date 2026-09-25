@@ -79,3 +79,33 @@ for (const [name, code] of Object.entries(MUST_NOT_BE_FLAGGED)) {
     30_000,
   );
 }
+
+/**
+ * #1406 guard — Hugeicons is the AI assistant's icon set and nothing else's (ADR-0045 amendment,
+ * 2026-09-25). Only `components/ai/ai-icons.tsx` may import `@hugeicons/*`; anywhere else (even
+ * another file under `components/ai/`) must go through it.
+ */
+async function hugeiconsHits(code: string, file: string): Promise<number> {
+  const [result] = await eslint.lintText(code, { filePath: resolve(WEB_ROOT, file) });
+  return (result?.messages ?? []).filter((message) => message.ruleId === "no-restricted-imports")
+    .length;
+}
+
+const HUGEICONS_IMPORT = `import { HugeiconsIcon } from "@hugeicons/react";\nimport X from "@hugeicons/core-free-icons/Cancel01Icon";\nexport const a = [HugeiconsIcon, X];\n`;
+
+test(
+  "hugeicons guard flags an import outside the AI icon module",
+  async () => {
+    expect(await hugeiconsHits(HUGEICONS_IMPORT, "app/__eslint_guard_fixture__.tsx")).toBe(2);
+    expect(await hugeiconsHits(HUGEICONS_IMPORT, "components/ai/__eslint_guard_fixture__.tsx")).toBe(2);
+  },
+  30_000,
+);
+
+test(
+  "hugeicons guard allows the AI icon module",
+  async () => {
+    expect(await hugeiconsHits(HUGEICONS_IMPORT, "components/ai/ai-icons.tsx")).toBe(0);
+  },
+  30_000,
+);
