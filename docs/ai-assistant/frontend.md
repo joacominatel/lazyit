@@ -456,8 +456,9 @@ Rules:
   card keeps its own look; auto-approved records (#1376) are never paged. "Approve all" / "Reject all" send
   one decision per card through the same decision call (no bulk endpoint), show how many they cover, and
   **never** cover a card that needs step-up (server flag or a step-up warning, `CRITICAL_APPLICATION`
-  included), an elevated card (G4), a card with untrusted sources, or one whose last decision was refused
-  (`STALE`, preview changed, …); refusals are reported per card and a run-wide one (`notAwaiting`,
+  included), an elevated card (G4), or one whose last decision was refused (`STALE`, preview changed, …).
+  A card with untrusted sources **is** covered (CEO decision, #1409); its page keeps the untrusted-source
+  banner. There is no extra confirmation step: the button shows the count. Refusals are reported per card and a run-wide one (`notAwaiting`,
   `aiDisabled`, `forbidden`) stops the rest. Writes the server refused before proposing (the sixth and later
   of a step) collapse into one "N changes couldn't be proposed" line with details.
 
@@ -886,8 +887,7 @@ Edits to existing pages (en + es):
 - A full-page `/assistant` route; chat tabs.
 - The AI SDK's Redis-backed `resumable-stream` (the run event bus, `Last-Event-ID` and `run.snapshot`
   cover reconnection — R2).
-- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated, untrusted and refused
-  cards), per-user model choice, message edit, regenerate or branching.
+- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated and refused cards), per-user model choice, message edit, regenerate or branching.
 - File or image attachments; voice.
 - Sharing conversations; admins reading others' conversations.
 - Usage/cost dashboards and quotas UI.
@@ -1187,8 +1187,8 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 
 - **Generic.** A preview change whose `after` is a non-empty array of objects is a table, not a field row:
   `presentPreview` (`lib/ai/preview.ts`) keeps the raw `records`, and `buildPreviewTable`
-  (`lib/ai/preview-table.ts`, `bun test`ed) shapes it. Columns are the keys the rows carry — `name`,
-  `title`, `assetTag`, `serial`, `model`, `category`, `location`, `status` first, the rest in first-seen
+  (`lib/ai/preview-table.ts`, `bun test`ed) shapes it. Columns are the keys the rows carry — `asset` (the
+  existing asset an `asset_update_batch` row changes, #1412), `name`, `title`, `assetTag`, `serial`, `model`, `category`, `location`, `status` first, the rest in first-seen
   order — labelled like field rows (`ai.fields.*`, humanized fallback). Row-state keys are never columns:
   `row` (the number), `skipped: true` / `valid: false` (the row is **not applied**, marked "Skipped —
   won't be applied"), `errors` and `duplicates` (the **Problems** column), `<key>Defaulted: true` (the

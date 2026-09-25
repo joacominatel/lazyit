@@ -56,25 +56,41 @@ box.
 
 ## Several changes at once
 
-When the assistant proposes more than one change in the same step — for example, updating five assets — they
-appear as **one card with pages** instead of a stack of cards:
+**Up to 5 at a time.** At most **5** changes can wait for your approval at the same time. When you ask for
+more — "move these 25 laptops to storage" — the assistant works in batches: it proposes the first 5, tells
+you where it is (*"5 of 25"*) and waits. Once you have decided on those, it proposes the next 5 by itself,
+and so on until every change is done. If it stops before the end of a very long list, tell it to continue.
+
+**One card with pages.** The changes of one batch appear as **one card with pages** instead of a stack of
+cards:
 
 - The top of the card says **Proposed changes · 5 changes** and which page you are on (**2 of 5**). Use the
   arrows, or select a page number, to move between them; on the page numbers, the left and right arrow keys
   work too. A decided page shows a check (approved or done) or a crossed circle (rejected or expired).
-- Each page is the same card described above — what will happen, before → after, the warnings and, when it
-  needs it, your password — with its own **Approve** and **Reject**. After you decide a page, the card moves
-  to the next change still waiting.
-- **Approve all** and **Reject all** decide, one by one, only the changes that don't need a closer look; the
-  number on the button says how many. They **never** include a change that needs your password (roles,
-  identity, access, sign-in, an application marked critical), a *Sensitive change*, a change based on content
-  written by others, or one whose last decision was refused — for example because the item changed in the
-  meantime. The card lists how many were left out and why; decide those on their own page.
+- Each page is the same card described above — what will happen, before → after, the warnings, the
+  **Based on content written by others** note when it applies and, when it needs it, your password — with
+  its own **Approve** and **Reject**. After you decide a page, the card moves to the next change still
+  waiting.
+- **Approve all** and **Reject all** decide, one by one, every change still waiting except those that need
+  a closer look; the number on the button says how many. They **never** include a change that needs your
+  password (roles, identity, access, sign-in, an application marked critical), a *Sensitive change*, or one
+  whose last decision was refused — for example because the item changed in the meantime. The card lists
+  how many were left out and why; decide those on their own page. A change based on content written by
+  others **is** included, so check its page first if that note worries you.
 - If some changes of a bulk action can't be decided, the others still are, and the card lists the ones that
   failed with a link to their page.
 
 If the assistant tried to propose changes that were refused before they became a card, they appear as **one
 line** — for example *"20 changes couldn't be proposed"* — with **Show details** for the reasons.
+
+**One card for many edits.** For many similar edits to existing assets, the assistant can instead propose
+**one card for all of them** (up to 200 assets): the same kind of table as a [batch of new
+assets](#creating-many-assets-at-once), one row per asset — the **Asset** column first, then the before →
+after of each field that changes. You approve or reject the list as a whole; each asset is then updated on
+its own, exactly as if you had edited it by hand. If someone edits any of those assets before you approve,
+nothing is applied and the assistant can propose the list again. Asset tags and serial numbers are still
+changed one asset at a time. With [auto-approve](#auto-approve) on, such a list is applied without a card,
+like other basic changes.
 
 ## Changes that need your password
 
@@ -145,21 +161,6 @@ what you want, reject the card and tell the assistant the status to use.
 
 When the batch runs, each asset is created on its own, exactly as if you had created it by hand. If one row
 is refused at that point, the others still run and the assistant tells you which row failed and why.
-
-## Many changes at once
-
-At most **5** changes can wait for your approval at the same time. When you ask for more — "move these 25
-laptops to storage" — the assistant works in batches: it proposes the first 5, tells you where it is (*"5 of
-25"*) and waits. Once you have decided on those cards, it proposes the next 5 by itself, and so on until
-every change is done. If it stops before the end of a very long list, tell it to continue.
-
-For many similar edits to existing assets, the assistant can instead propose **one card for all of them**
-(up to 200 assets): the same kind of table as a [batch of new assets](#creating-many-assets-at-once), one
-row per asset with the before → after of each field that changes. You approve or reject the list as a
-whole; each asset is then updated on its own, exactly as if you had edited it by hand. If someone edits any
-of those assets before you approve, nothing is applied and the assistant can propose the list again. Asset
-tags and serial numbers are still changed one asset at a time. With [auto-approve](#auto-approve) on, such
-a list is applied without a card, like other basic changes.
 
 ## Categories, models and locations
 

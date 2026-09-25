@@ -60,11 +60,13 @@ describe("AiApprovalPager", () => {
       card("w3", null, { stepUpRequired: true }),
       card("w4", null, { untrustedSources: [{ type: "article", id: "k1", op: "navigate" }] }),
     ]);
-    expect(html).toContain("Approve all (2)");
-    expect(html).toContain("Reject all (2)");
-    expect(html).toContain("Approve all and Reject all cover 2 changes still waiting.");
+    // The untrusted-source change is covered; its page keeps the banner.
+    expect(html).toContain("Approve all (3)");
+    expect(html).toContain("Reject all (3)");
+    expect(html).toContain("Approve all and Reject all cover 3 changes still waiting.");
     expect(html).toContain("1 needs your password");
-    expect(html).toContain("1 is based on content written by others");
+    expect(html).not.toContain("1 is based on content written by others");
+    expect(html).toContain(en.approval.untrustedTitle);
   });
 
   test("nothing eligible disables the bulk actions; all decided hides them", () => {

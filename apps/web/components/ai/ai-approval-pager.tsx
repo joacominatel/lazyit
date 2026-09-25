@@ -65,8 +65,8 @@ interface AiApprovalPagerProps {
  * keys on the page strip), each page the unchanged approval card. Deciding a page moves on to the next
  * change still waiting; decided pages keep their outcome. "Approve all" / "Reject all" send one decision
  * per change — the same call a page's button makes — and only for the changes `bulkPlan` finds eligible
- * (never one needing the password, a sensitive one, or one based on other people's content). A refusal
- * stays on its own page. Every page stays mounted so a typed password or a shown error survives paging.
+ * (never one needing the password, a sensitive one, or one whose last decision was refused; one based
+ * on other people's content is covered, its banner still on its page). A refusal stays on its own page. Every page stays mounted so a typed password or a shown error survives paging.
  */
 export function AiApprovalPager({ parts, tools, navigated, onDecide }: AiApprovalPagerProps) {
   const t = useTranslations("ai.pager");
