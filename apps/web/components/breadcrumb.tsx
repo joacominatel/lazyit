@@ -25,6 +25,8 @@ const KNOWN_SEGMENTS = [
   "locations",
   "new",
   "edit",
+  // The account area (#1404): localized instead of the humanized English "Account".
+  "account",
   // `/account/ai` and `/settings/ai` (ADR-0097): the humanizer would print "Ai".
   "ai",
 ] as const;
