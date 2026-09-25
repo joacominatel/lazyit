@@ -54,7 +54,7 @@ import { AiRunPrincipals } from './principal-context';
 import { InProcessRunEventBus } from './run-event-bus';
 import { AiRunLifecycle } from './run-lifecycle';
 import type { AiRunQueue } from './run-queue';
-import { AiStepUpVerifier } from './step-up.verifier';
+import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/prefer-promise-reject-errors, @typescript-eslint/only-throw-error -- a structural in-memory Prisma and scripted fakes; intentional for this test harness only. */
 
@@ -1093,7 +1093,7 @@ export function buildRuntime() {
     queue as unknown as AiRunQueue,
     loop,
   );
-  const stepUp = new AiStepUpVerifier(credentials as any);
+  const stepUp = new PasswordStepUpVerifier(credentials as any);
   const approvals = new AiApprovalService(
     p,
     tools as unknown as AiToolService,

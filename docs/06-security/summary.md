@@ -122,9 +122,9 @@ consent page, `/account/ai`).
 | Critical | 0 |
 | High | 0 |
 | Medium | 1 |
-| Low | 14 |
+| Low | 12 |
 | Info | 0 |
-| **Total open** | **15** |
+| **Total open** | **13** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -146,8 +146,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
 | [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools\|SEC-080]] | 🟠 Medium | ai (runtime) | Untrusted-source tracking never fires for real read tools: no banner, and same-turn writes auto-approved |
 | [[SEC-081-sa-mutation-cap-counts-batch-as-one\|SEC-081]] | 🟡 Low | ai (headless / mcp) | Per-SA AI mutation cap counts a 200-row batch as one change |
-| [[SEC-082-oauth-consent-admin-step-up-no-backoff\|SEC-082]] | 🟡 Low | oauth | `lazyit.admin` consent step-up: no per-account backoff, failures not audited |
-| [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] | 🟡 Low | mcp | `/mcp` query-token scan: unbounded DB lookups before the MCP-off 404 and the IP limiter |
 
 ## Top findings
 
@@ -156,6 +154,11 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    all" both depend on the untrusted-source banner. Today the banner appears only for web search and
    the three `workflow_*_get` reads. Fix: derive the marker from the `<untrusted_content>` tag alone, and
    add a test that uses a real read tool.
+0. **SEC-082 / SEC-083 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315): the consent's
+   `lazyit.admin` password goes through the shared `PasswordStepUpVerifier`, so the chat approvals and
+   the consent share one per-account backoff, and each refused attempt is audited
+   `CONSENT_STEP_UP_FAILED`. The `/mcp` query-token scan is charged to the per-IP limiter first and reads
+   at most 4 well-formed values in one query. No data change.
 0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
    web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):

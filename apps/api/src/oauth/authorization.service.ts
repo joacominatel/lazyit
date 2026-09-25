@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import {
   OAuthAuthorizeDecisionSchema,
@@ -16,7 +17,7 @@ import {
   type OAuthScope,
 } from '@lazyit/shared';
 import type { OAuthClient, User } from '../../generated/prisma/client';
-import { LocalCredentialService } from '../auth/local/local-credential.service';
+import { PasswordStepUpVerifier } from '../auth/local/password-step-up.verifier';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { PrismaService } from '../prisma/prisma.service';
 import { CimdClientService } from './cimd/cimd-client.service';
@@ -85,11 +86,13 @@ export class OAuthAuthorizeRefusedException extends HttpException {
  */
 @Injectable()
 export class AuthorizationService {
+  private readonly logger = new Logger(AuthorizationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: OAuthPolicyService,
     private readonly subjects: OAuthSubjectService,
-    private readonly credentials: LocalCredentialService,
+    private readonly stepUp: PasswordStepUpVerifier,
     private readonly audit: OAuthAuditService,
     private readonly cimd: CimdClientService,
   ) {}
@@ -170,7 +173,10 @@ export class AuthorizationService {
       );
     }
     if (granted.includes('lazyit.admin')) {
-      await this.requireStepUp(user, body.password);
+      await this.requireStepUp(user, body.password, {
+        clientId: client.clientId,
+        ip: ctx.ip,
+      });
     }
 
     const code = mintAuthorizationCode();
@@ -199,10 +205,17 @@ export class AuthorizationService {
   /**
    * `lazyit.admin` unlocks the `elevated` tools, so approving it re-proves the password (security §6.3).
    * Only a local-mode account has one; elsewhere the admin scope cannot be granted.
+   *
+   * The password goes through the ONE step-up primitive (SEC-082), {@link PasswordStepUpVerifier}: one
+   * verification in flight per user, then the ADR-0086 §3 per-account exponential lock (5 free failures,
+   * 1 s doubling up to 15 min) — the same counter as the chat approvals, so a lock earned on either surface
+   * holds on both. A lock answers 429 `STEP_UP_RATE_LIMITED` (as in the chat). Every refused attempt is
+   * logged and audited (`CONSENT_STEP_UP_FAILED`); the password never is.
    */
   private async requireStepUp(
     user: User,
     password: string | undefined,
+    ctx: { clientId: string; ip?: string | null },
   ): Promise<void> {
     if (process.env.AUTH_MODE !== 'local' || !user.passwordHash) {
       throw new ForbiddenException({
@@ -218,14 +231,47 @@ export class AuthorizationService {
         code: 'STEP_UP_REQUIRED',
       });
     }
-    const result = await this.credentials.verify(user.passwordHash, password);
-    if (!result.valid) {
+    const result = await this.stepUp.verify(user, password);
+    if (result.ok) return;
+    if (result.reason === 'unavailable') {
       throw new ForbiddenException({
         statusCode: HttpStatus.FORBIDDEN,
-        message: 'The password is not correct.',
-        code: 'STEP_UP_FAILED',
+        message: 'Admin actions cannot be granted on this instance.',
+        code: 'STEP_UP_UNAVAILABLE',
       });
     }
+    const locked = result.reason === 'locked';
+    this.logger.warn(
+      locked
+        ? `oauth.consent.step_up_locked user=${user.id} retryAfterSec=${result.retryAfterSec}`
+        : `oauth.consent.step_up_failed user=${user.id}`,
+    );
+    await this.audit.record({
+      action: 'CONSENT_STEP_UP_FAILED',
+      userId: user.id,
+      actorId: user.id,
+      clientId: ctx.clientId,
+      ip: ctx.ip,
+      detail: locked
+        ? { reason: 'locked', retryAfterSec: result.retryAfterSec }
+        : { reason: 'invalid' },
+    });
+    if (locked) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          message: 'Too many wrong passwords; wait before trying again.',
+          code: 'STEP_UP_RATE_LIMITED',
+          retryAfterSec: result.retryAfterSec,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    throw new ForbiddenException({
+      statusCode: HttpStatus.FORBIDDEN,
+      message: 'The password is not correct.',
+      code: 'STEP_UP_FAILED',
+    });
   }
 
   /** Every check of an authorization request, in the order RFC 6749 §4.1.2.1 requires. */

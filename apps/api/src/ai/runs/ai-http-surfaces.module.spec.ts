@@ -21,6 +21,7 @@ import { Global, Module } from '@nestjs/common';
 import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
+import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import { PrincipalLoaderService } from '../../auth/principal-loader.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -42,12 +43,14 @@ import { AiRunEventStream } from './run-event-stream';
     { provide: PermissionResolverService, useValue: {} },
     { provide: PrincipalLoaderService, useValue: {} },
     { provide: LocalCredentialService, useValue: {} },
+    { provide: PasswordStepUpVerifier, useValue: {} },
   ],
   exports: [
     PrismaService,
     PermissionResolverService,
     PrincipalLoaderService,
     LocalCredentialService,
+    PasswordStepUpVerifier,
   ],
 })
 class GlobalStubsModule {}

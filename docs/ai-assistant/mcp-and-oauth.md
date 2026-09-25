@@ -659,7 +659,8 @@ model OAuthToken {
 model OAuthAuditLog {
   id         Int       @id @default(autoincrement())
   action     String    // CLIENT_REGISTERED | GRANT_CREATED | CONSENT_DENIED | GRANT_REVOKED |
-                       // REFRESH_REUSE_DETECTED | PERSONAL_TOKEN_CREATED | PERSONAL_TOKEN_REVOKED
+                       // REFRESH_REUSE_DETECTED | PERSONAL_TOKEN_CREATED | PERSONAL_TOKEN_REVOKED |
+                       // CLIENT_METADATA_FETCHED | CLIENT_METADATA_REFUSED | CONSENT_STEP_UP_FAILED
   userId     String?   @db.Uuid   // subject
   actorId    String?   @db.Uuid   // who acted (user/admin); null for protocol events
   grantId    String?
@@ -894,7 +895,7 @@ server must not depend on the provider configuration.
 | `POST /oauth/token` | form-encoded (JSON tolerated); `authorization_code` and `refresh_token` only; `Cache-Control: no-store` on every answer; errors are exactly `{ error, error_description? }`; a repeated parameter is `invalid_request`; 429 past 60/min per IP |
 | `POST /oauth/revoke` | 200, empty, whether or not the token was known; revoking either token revokes the grant |
 | `POST /oauth/authorize/validate` | 200 `OAuthAuthorizeValidation`; **400 `{ error, redirectTo }`** for a request error that belongs to the client (the page sends the browser to `redirectTo`, which carries `error`, `state`, `iss`) |
-| `POST /oauth/authorize/decision` | 200 `OAuthAuthorizeRedirect`; 403 `{ refusal }`; 403 `{ code: "STEP_UP_REQUIRED" \| "STEP_UP_FAILED" \| "STEP_UP_UNAVAILABLE" }` for `lazyit.admin`; 400 for scopes outside the request; the same 400 `{ error, redirectTo }`; 429 past 10/min per user |
+| `POST /oauth/authorize/decision` | 200 `OAuthAuthorizeRedirect`; 403 `{ refusal }`; 403 `{ code: "STEP_UP_REQUIRED" \| "STEP_UP_FAILED" \| "STEP_UP_UNAVAILABLE" }` and 429 `{ code: "STEP_UP_RATE_LIMITED", retryAfterSec }` for `lazyit.admin` (the password goes through `PasswordStepUpVerifier`, the chat approvals' per-account backoff — one counter for both; each refusal audited `CONSENT_STEP_UP_FAILED`, SEC-082); 400 for scopes outside the request; the same 400 `{ error, redirectTo }`; 429 past 10/min per user |
 | `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `ai:connect` / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
 
 `validate` refuses (never redirects) in this order: no human session or no `ai:connect` → `FORBIDDEN`; MCP
@@ -1149,7 +1150,12 @@ answers.
    checked (G3 review F1, `McpExposedTokenService`): an OAuth access or refresh token or a personal token
    has its whole grant revoked on sight (`revokeReason: "token_exposed"`, audited `GRANT_REVOKED` /
    `PERSONAL_TOKEN_REVOKED`), even while MCP is off; a Service Account token raises a warning event
-   `mcp.token_in_query` naming the account (never the secret) so an admin rotates it. The request log
+   `mcp.token_in_query` naming the account (never the secret) so an admin rotates it. The scan is bounded
+   (SEC-083), because it runs for anyone before the MCP switch is read: the request is first charged to the
+   per-IP refused-authentication limiter (in memory, no DB) and an address over it gets no scan; only
+   values with the exact credential grammar (prefix plus the fixed 43-character base64url body; a parsable
+   `lzit_sa_` token) are candidates, at most `MCP_QUERY_TOKEN_SCAN_MAX` (4) distinct ones, looked up in one
+   `findMany`. The answer (404 or 400) never depends on it. The request log
    never holds it: `logging.config.ts` redacts `req.query.access_token` / `token` and scrubs both from the
    logged URL.
 3. The bearer, by prefix only (`Authorization: Bearer`, scheme case-insensitive):

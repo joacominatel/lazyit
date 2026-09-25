@@ -21,6 +21,7 @@ import { Global, Module } from '@nestjs/common';
 import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
+import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
 import { PrincipalLoaderService } from '../../auth/principal-loader.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -32,6 +33,9 @@ import { AiRuntimeModule } from './ai-runtime.module';
 import { AiApprovalService } from './approval.service';
 import { InProcessRunEventBus } from './run-event-bus';
 
+/** The global Auth module's ONE step-up verifier (SEC-082): the runtime must use it, not its own. */
+const sharedStepUp = { verify: jest.fn() };
+
 /** What the global Prisma and Auth modules provide in the app, stubbed. */
 @Global()
 @Module({
@@ -40,12 +44,14 @@ import { InProcessRunEventBus } from './run-event-bus';
     { provide: PermissionResolverService, useValue: {} },
     { provide: PrincipalLoaderService, useValue: {} },
     { provide: LocalCredentialService, useValue: {} },
+    { provide: PasswordStepUpVerifier, useValue: sharedStepUp },
   ],
   exports: [
     PrismaService,
     PermissionResolverService,
     PrincipalLoaderService,
     LocalCredentialService,
+    PasswordStepUpVerifier,
   ],
 })
 class GlobalStubsModule {}
@@ -74,8 +80,11 @@ describe('AiRuntimeModule wiring', () => {
     expect(
       consumer.get(AgentRunOrchestrator, { strict: false }),
     ).toBeInstanceOf(AgentRunOrchestrator);
-    expect(consumer.get(AiApprovalService, { strict: false })).toBeInstanceOf(
-      AiApprovalService,
+    const approvals = consumer.get(AiApprovalService, { strict: false });
+    expect(approvals).toBeInstanceOf(AiApprovalService);
+    // One per-account step-up backoff for every surface (SEC-082): the global instance, not a local copy.
+    expect((approvals as unknown as { stepUp: unknown }).stepUp).toBe(
+      sharedStepUp,
     );
     expect(moduleRef.get(AgentRunWorker, { strict: false })).toBeInstanceOf(
       AgentRunWorker,

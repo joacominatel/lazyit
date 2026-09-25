@@ -52,13 +52,6 @@ export const AI_EXECUTING_STALE_AFTER_MS = 300_000;
 /** At most this many rows per reconciler per pass. */
 export const AI_SWEEP_BATCH = 100;
 
-/** Step-up backoff (the `LoginService` policy, ADR-0086 §3): no delay for the first N failures. */
-export const AI_STEP_UP_FAILURE_THRESHOLD = 5;
-export const AI_STEP_UP_BASE_DELAY_MS = 1_000;
-export const AI_STEP_UP_MAX_DELAY_MS = 15 * 60 * 1000;
-/** A cooled-down step-up record is forgotten after this long. */
-export const AI_STEP_UP_RESET_AFTER_MS = 60 * 60 * 1000;
-
 /**
  * A BullMQ-safe job id: BullMQ forbids `:` in a custom id, so parts are joined with `-` and any `:` a part
  * carries is replaced (the `workflowJobId` precedent, ADR-0053).
