@@ -1068,10 +1068,13 @@ requested meanwhile ends it CANCELLED. Calls are resolved in order. A name not i
 raw string (invalid JSON) → `INVALID_INPUT`; past 30 calls per run or the per-principal bucket (60 per
 minute) → `RATE_LIMITED`. Reads and navigation → `invoke`. Chat writes → `propose` with the tool-use id (at
 most `AI_MAX_PENDING_PER_STEP` = 5 pending per step — see *The pending-approval limit* below). Headless writes → `invoke` after the per-run mutation cap
-(attempted writes of the run in `ai_tool_invocations`; over the cap → `FORBIDDEN`). Each call's context
-carries the provenance `{ provider, model }` and the turn's untrusted sources: the entity refs of every read
-result whose data held `<untrusted_content>`, merged across the run. Every step record stores the merged
-set so far, so a resumed run rebuilds it exactly (T-03). Outputs are capped once, at write time
+(the changes the run's attempted writes in `ai_tool_invocations` account for — a batch counts its rows
+through the descriptor's `mutationWeight`, SEC-081; a call that would pass the cap is refused whole →
+`FORBIDDEN`). Each call's context carries the provenance `{ provider, model }` and the turn's untrusted
+sources: for every read result whose data held `<untrusted_content>`, its entity refs, or the synthetic
+`toolResult` ref of the tool when it named none (SEC-080), merged across the run. Every step record stores
+the merged set so far, and a resume adds the reads and forms answered while the run was paused (a form's
+picked labels are lazyit text, wrapped), so a resumed run rebuilds it exactly (T-03). Outputs are capped once, at write time
 (`AI_TOOL_OUTPUT_MAX_CHARS = 24 000` serialized, a `[truncated — N more characters; refine the query]`
 marker; core already truncates the data at 20 000). With no pending proposal the step's single tool message
 is appended and the loop continues. With one or more: the step record (known results + pending ids) is

@@ -947,7 +947,8 @@ Accounts holding the route's permission.
     asset in its `entityRefs`.
   - **Auto-approve.** The batch is an ordinary `write` (not elevated, no step-up warning), so in a
     conversation with auto-approve on (#1376) it runs without a card: **up to 200 creates** from one
-    call. The same is true of MCP and headless, within the principal's `asset:write`.
+    call. The same is true of MCP and headless, within the principal's `asset:write`; a Service
+    Account's mutation cap counts each non-skipped row as one change (`mutationWeight`, SEC-081).
   - **Cost.** Per plan (the proposal, the approval-time preview and the run each plan once): one
     resolve + one read per distinct model and location, one category list, two exact-value lookups —
     independent of the row count — then one create per row at execution.
@@ -998,7 +999,7 @@ Accounts holding the route's permission.
     lists them all.
   - **Auto-approve.** Like the batch create it is an ordinary `write`, so a chat with auto-approve on
     applies it without a card (up to 200 updates from one call), as MCP and headless do within the
-    principal's `asset:write`.
+    principal's `asset:write` — a Service Account's mutation cap counting each non-skipped row (SEC-081).
   - **Cost.** Per plan (proposal, approval-time preview, run): one resolve + one read per distinct asset
     reference, one resolve + one read per distinct model and location, then one update per row.
   - **Prompting.** `asset_update` says "for several, use asset_update_batch"; the chat rules
@@ -1409,6 +1410,10 @@ A tool declares (R4):
   applies **before** `input` validates it, for harmless noise only (a `null` or blank value meaning
   absent, a property that does not apply). It never widens what the tool accepts semantically and never
   changes the listed JSON Schema. `request_input` is the one tool that has it (below)
+- optionally `mutationWeight(input)` (SEC-081) — for a `write`/`elevated` tool, how many changes one call
+  counts for against the per-Service-Account mutation cap (headless per run, MCP per rolling hour), from
+  the validated input. Default 1; the batch tools weigh their non-skipped rows
+  (`core/mutation-weight.ts`)
 - `bindings` (controller + method; `[0]` is primary)
 - `run(input, rt)`
 - `preview(input, rt)` — mandatory for `write` and `elevated`; server-resolved, never model prose
