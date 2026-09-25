@@ -74,8 +74,12 @@ export function isRegistrableRedirectUri(uri: string): boolean {
   return true;
 }
 
-/** Whether the client is identified by an allowlisted CIMD `client_id` URL (never a DCR client). */
-function isCimdListed(
+/**
+ * Whether the client is identified by an allowlisted CIMD `client_id` URL (never a DCR client). Such a
+ * client is vouched for by the instance (a curated default or an admin's entry), which is what the consent
+ * screen's "verified" badge means.
+ */
+export function isCimdListed(
   client: PolicyClient,
   policy: ClientTrustPolicy,
 ): boolean {

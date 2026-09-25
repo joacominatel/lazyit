@@ -23,7 +23,9 @@ export interface OAuthSweepResult {
  *   - authorization codes that expired or were used;
  *   - tokens past their expiry (a rotated refresh token is KEPT until then — it is what reuse detection
  *     recognizes);
- *   - DCR clients never used (no code exchanged) and older than 24 h, with no grant row at all.
+ *   - DCR clients never used (no code exchanged) and older than 24 h, with no grant row at all — and, on
+ *     the same terms, CIMD / bundled client rows (`cimd`, `known`): they are a cache of a document the
+ *     client publishes, re-fetched on the next authorization request (W3-3).
  * Grants are never touched here: revoked grants stay soft-deleted for the record.
  *
  * The `NotificationsRetentionSweeper` shape: a plain unref'd `setInterval`, not started under
@@ -65,7 +67,7 @@ export class OAuthSweeper implements OnModuleInit, OnModuleDestroy {
       });
       const clients = await this.prisma.oAuthClient.deleteMany({
         where: {
-          kind: 'dcr',
+          kind: { in: ['dcr', 'cimd', 'known'] },
           lastUsedAt: null,
           createdAt: { lt: new Date(now.getTime() - DCR_UNUSED_CLIENT_TTL_MS) },
           grants: { none: {} },
