@@ -20,8 +20,13 @@ import { stripUntrusted } from "./untrusted-text";
 /** Keys that describe the row rather than being one of its columns. */
 const META_KEYS = new Set(["row", "valid", "skipped", "errors", "duplicates"]);
 
-/** The preferred column order; any other key follows in first-seen order. */
+/**
+ * The preferred column order; any other key follows in first-seen order. `asset` — the existing asset a
+ * row of `asset_update_batch` changes — leads, so each row starts with what it changes (#1412); a table
+ * without it (`asset_create_batch`) keeps `name` first.
+ */
 const PREFERRED_COLUMNS = [
+  "asset",
   "name",
   "title",
   "assetTag",

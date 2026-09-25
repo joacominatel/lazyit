@@ -162,6 +162,16 @@ describe("buildPreviewTable", () => {
     ]);
   });
 
+  test("an update batch leads with the asset each row changes (#1412)", () => {
+    const t = buildPreviewTable([
+      { row: 1, location: "HQ → Almacen", status: "IN_USE → IN_STORAGE", asset: { type: "asset", id: "a1", label: "AR-1" }, valid: true },
+      { row: 2, name: "Old → New", asset: "AR-2", skipped: true, valid: false, errors: [] },
+    ]);
+    expect(t.columns).toEqual(["asset", "name", "location", "status"]);
+    expect(t.rows[0]!.cells.asset!.href).toBe("/assets/a1");
+    expect(t.rows[1]!.applied).toBe(false);
+  });
+
   test("generic: any array of records, rows numbered by position when they carry no number", () => {
     const t = buildPreviewTable([{ title: "A", owner: { type: "user", id: "u1", label: "Ana" } }, { title: "B" }]);
     expect(t.columns).toEqual(["title", "owner"]);
