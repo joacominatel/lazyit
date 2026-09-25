@@ -687,5 +687,313 @@
     },
     "sentNote": "Sent. Waiting for the assistant to continue…",
     "expiredLocally": "The time to answer this form has passed. The assistant stops shortly; send a new message to continue."
+  },
+  "sentences": {
+    "application_create": {
+      "action": "Add the application \"{name}\" to the catalog.",
+      "actionCritical": "It is marked critical: every later AI change to it needs your password in the chat.",
+      "summary": "Added the application \"{name}\" to the catalog."
+    },
+    "application_update": {
+      "action": "Change {fields} of the application \"{name}\".",
+      "actionCritical": "It is a critical application: confirm with your password.",
+      "summary": "Updated the application \"{name}\" ({fields})."
+    },
+    "access_grant_create": {
+      "actionSelf": "You are granting access to yourself.",
+      "action": "Give {self, select, yes {yourself} other {{person}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}{hasUntil, select, yes { until {until}} other {}}.",
+      "summary": "Granted {self, select, yes {you} other {user {userId}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}."
+    },
+    "access_grant_revoke": {
+      "action": "Remove {self, select, yes {your} other {{person}'s}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}.",
+      "summary": "Revoked {self, select, yes {you} other {user {userId}}}'s {hasLevel, select, yes {\"{level}\" access} other {access}} to application {applicationId}."
+    },
+    "access_request_create": {
+      "action": "Ask for {hasLevel, select, yes {\"{level}\" access} other {access}} to {application} for yourself. The people who can grant access are notified and approve or deny it.",
+      "summary": "Requested {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}; it now waits for an approver."
+    },
+    "access_request_decide": {
+      "actionSelf": "You are deciding your own request.",
+      "actionApprove": "Approve the request: give {self, select, yes {you} other {{person}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}. An access grant is created and {self, select, yes {you are} other {{person} is}} notified.",
+      "actionDeny": "Deny {self, select, yes {your} other {{person}'s}} request for {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}. {self, select, yes {You are} other {{person} is}} notified with your reason.",
+      "summaryApprove": "Approved the request: {self, select, yes {you} other {user {userId}}} now has {hasLevel, select, yes {\"{level}\" access} other {access}} to application {applicationId} (grant {grantId}).",
+      "summaryDeny": "Denied the request of {self, select, yes {you} other {user {userId}}} for application {applicationId}; they are notified with the reason."
+    },
+    "access": {
+      "outlook": {
+        "mayRun": "This may trigger {revoke, select, yes {automatic deprovisioning (removing the account in {application})} other {automatic provisioning (creating the account in {application})}} if a workflow is configured for this application.",
+        "none": "No automatic {revoke, select, yes {deprovisioning} other {provisioning}} workflow is set up for {application}: nothing changes outside lazyit.",
+        "provisions": "This triggers automatic provisioning (creating the account in {application}) after approval, through the workflow set up for {application}.",
+        "keepsOtherAccess": "The user keeps other access to {application}, so its deprovisioning workflow does not run.",
+        "deprovisions": "This triggers automatic deprovisioning (removing the account in {application}), through the workflow set up for {application}.",
+        "deprovisionsIfLast": "This triggers automatic deprovisioning (removing the account in {application}) if it is the user's last access to {application}, through the workflow set up for it."
+      },
+      "criticalNote": "{application} is a critical application: confirm with your password."
+    },
+    "asset_create": {
+      "summary": "Created the asset {asset}."
+    },
+    "asset_create_batch": {
+      "action": "Create {count} of {total} assets{skipped, plural, =0 {.} one {; # row skipped as requested.} other {; # rows skipped as requested.}}",
+      "summary": "Created {count} of {total} assets{failed, plural, =0 {.} other {; # not created (see problems).}}"
+    },
+    "asset_update": {
+      "summary": "Updated the asset {asset}."
+    },
+    "asset_update_batch": {
+      "action": "Update {count} of {total} assets{skipped, plural, =0 {.} one {; # row skipped as requested.} other {; # rows skipped as requested.}}",
+      "summary": "Updated {count} of {total} assets{failed, plural, =0 {.} other {; # not updated (see problems).}}"
+    },
+    "asset_archive": {
+      "summary": "Archived the asset {asset}."
+    },
+    "asset_restore": {
+      "summary": "Restored the asset {asset}."
+    },
+    "asset_check_out": {
+      "summary": "Checked {asset} out to {user}."
+    },
+    "asset_check_in": {
+      "summary": "Checked {asset} in from {user}."
+    },
+    "consumable_create": {
+      "summary": "Created consumable {consumable} with 0 {hasUnit, select, yes {{unit}} other {units}} in stock."
+    },
+    "consumable_update": {
+      "summary": "Updated consumable {consumable}."
+    },
+    "consumable_record_movement": {
+      "summary": "Recorded {type} {quantity} on {consumable}{hasStock, select, yes {; stock is now {stock}.} other {.}}"
+    },
+    "asset_model_create": {
+      "summary": "Created the asset model {model}."
+    },
+    "location_create": {
+      "summary": "Created the location {location}."
+    },
+    "category_create": {
+      "summary": "Created the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "category_update": {
+      "summary": "Updated the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "category_archive": {
+      "summary": "Archived the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "asset_model_update": {
+      "summary": "Updated the asset model {model}."
+    },
+    "asset_model_archive": {
+      "summary": "Archived the asset model {model}."
+    },
+    "asset_model_restore": {
+      "summary": "Restored the asset model {model}."
+    },
+    "location_update": {
+      "summary": "Updated the location {location}."
+    },
+    "location_archive": {
+      "summary": "Archived the location {location}."
+    },
+    "location_restore": {
+      "summary": "Restored the location {location}."
+    },
+    "taxonomy": {
+      "categoryKind": "{kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}}",
+      "usedByUnknown": "Unknown to you: {kinds}"
+    },
+    "user_create": {
+      "summary": "Created {user} as {role}."
+    },
+    "user_update": {
+      "summary": "Updated {user}."
+    },
+    "user_offboard": {
+      "summary": "Offboarded {user}: released {released} asset(s), revoked {revoked} access grant(s).",
+      "summaryRotateVaults": "They could read {vaults} Secret Manager vault(s): an administrator should rotate those secrets in the lazyit UI.",
+      "criticalRevoked": "revoked",
+      "criticalUnknownGrants": "unknown: you cannot list this person’s grants, so they are treated as critical",
+      "criticalUnknownApplications": "unknown for {count} application(s) you cannot read — treated as critical",
+      "vaultMembershipsBefore": "any held",
+      "vaultMembershipsAfter": "dropped (not restored by user_restore)"
+    },
+    "user_restore": {
+      "summary": "Restored {user}. Access grants and asset assignments were not restored."
+    },
+    "kb_create_article": {
+      "summary": "Created as a draft."
+    },
+    "kb_update_article": {
+      "summary": "Article updated."
+    },
+    "kb_set_publication": {
+      "summaryPublish": "Published: every reader of its folder can now see it.",
+      "summaryUnpublish": "Unpublished: it is a draft again, visible only to its author."
+    },
+    "kb_folder_create": {
+      "summary": "Folder created.",
+      "topLevel": "None (top level)",
+      "noOwnRules": "None of its own: it inherits the audience above. Only an administrator can restrict a folder (folder access rules), and the assistant never sets them."
+    },
+    "kb_folder_rename": {
+      "summary": "Folder renamed."
+    },
+    "kb": {
+      "audience": {
+        "unknown": "Unknown to you: folder access rules are shown only to settings:manage holders",
+        "everyone": "Everyone who can read the knowledge base",
+        "restrictedByRules": "Restricted by folder access rules",
+        "restricted": "Restricted — only people matching every restricted folder on the path:",
+        "folder": "{folder}:",
+        "rule": "{rule, select, role {the {role} role} users {{count, plural, one {# named person} other {# named people}}} appGrant {people with access to application {applicationId}} assetAssignment {people assigned asset {assetId}} other {an unrecognized rule (matches nobody)}}{then, select, or { or} semicolon {;} other {}}",
+        "malformed": "{lead, select, yes {; } other {}}a folder with unreadable rules (matches nobody)"
+      }
+    },
+    "workflow_create": {
+      "whatItDoes": "Creates the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} automation of {application}, DISABLED and with no steps. Nothing is sent until steps are added and it is enabled.",
+      "summary": "Created the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application} (disabled)."
+    },
+    "workflow_update": {
+      "summary": "Updated the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow_archive": {
+      "whatItDoes": "Archives this workflow: from now on nothing runs every time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}. It cannot be restored from lazyit.",
+      "summary": "Archived the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow_author_version": {
+      "enabled": "The workflow is ENABLED: this version is live as soon as it is saved.",
+      "disabled": "The workflow is disabled: nothing runs until it is enabled.",
+      "summary": "Saved version {version} of the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}{live, select, yes { (live now)} other {}}."
+    },
+    "workflow_set_enabled": {
+      "whatItDoesOff": "Turns the workflow off: from now on nothing runs every time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}. Runs already started finish.",
+      "summary": "{enabled, select, yes {Enabled} other {Disabled}} the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow": {
+      "outbound": {
+        "manualOnly": "{fromNowOn, select, yes {From now on, every} other {Every}} time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}, lazyit will only create manual tasks; nothing is sent outside lazyit.",
+        "sends": "{fromNowOn, select, yes {From now on, every} other {Every}} time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}, lazyit will send",
+        "noData": "requests with no lazyit data",
+        "dataWord": "{token, select, event {the event name} grantee_id {the person's lazyit id} grantee_email {the person's email} grantee_firstName {the person's first name} grantee_lastName {the person's last name} grantee_legajo {the person's employee number} grantee_username {the person's username} grantee_manager_name {the person's manager's name} grantee_manager_email {the person's manager's email} grantee_manager_isOffboarded {whether the person's manager left} application_id {the application's lazyit id} application_name {the application's name} grant_id {the access grant's lazyit id} grant_accessLevel {the access level} grant_grantedAt {when access was granted} grant_expiresAt {when access expires} steps {the \"{field}\" a person typed in the manual step \"{step}\"} other {an unknown value (renders empty)}}{then, select, comma {,} other {}}",
+        "to": "to {hosts}."
+      },
+      "auth": {
+        "webhookSigned": "signed with the stored secret{hasHeader, select, yes { in {header}} other {}}",
+        "webhookUnsigned": "unsigned (no signing secret attached)",
+        "noCall": "no external call",
+        "none": "no authentication",
+        "rest": "{scheme}{isHeader, select, yes { in header {header}} other {}}, {credential, select, yes {with the stored credential} other {no credential attached yet}}"
+      }
+    },
+    "workflow_connection_create": {
+      "summary": "Created the {kind} connection of {application}{hasHost, select, yes { to {host}} other {}}."
+    },
+    "workflow_connection_update": {
+      "movesPath": "Changes where on {host} the connection sends.",
+      "repoints": "Re-points the connection from {from} to {to}: every workflow step using it will send there instead.",
+      "credentialToNewHost": "The stored credential will be sent to {host}.",
+      "attachesCredential": "Attaches the stored credential {secretId}: it will be sent to {hasHost, select, yes {{host}} other {the connection}} on every call.",
+      "detachesCredential": "Detaches the credential: calls will be sent without it.",
+      "inFlight": "From the next step that calls it — including in {count} run(s) already in flight, waiting for a person or failed and retryable — workflows will send their data to {host}.",
+      "settingsOnly": "Changes the settings of this connection to {hasHost, select, yes {{host}} other {no external host}}.",
+      "runsInFlightUnknown": "Could not be checked (needs the workflow:read permission): runs already started may send to the new host.",
+      "credentialNone": "none",
+      "credentialStored": "stored credential {secretId}",
+      "summary": "Updated the {kind} connection of {application}."
+    },
+    "workflow_connection_archive": {
+      "whatItDoes": "Archives the connection to {hasHost, select, yes {{host}} other {no external host}}. {users, plural, =0 {No workflow uses it.} other {# workflow(s) still call it and their steps will fail.}}",
+      "summary": "Archived the {kind} connection of {application}."
+    },
+    "workflow_connection_test": {
+      "whatItDoes": "Sends one read-only {method} request to {host} (path {path}){credential, select, yes {, with the stored credential} other {, without a credential}}. Nothing is changed there.",
+      "summary": "Tested the connection of {application} to {hasHost, select, yes {{host}} other {its host}}: {ok, select, yes {it answered} other {it failed}}."
+    },
+    "workflow_run_retry": {
+      "action": "Retry the failed run of workflow {workflow} for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}), resuming at {hasStep, select, yes {step {step}} other {the step that failed}}. Steps that already succeeded are not repeated; the same data is sent again.",
+      "resumesAtUnknown": "the step that failed (the run is on an older workflow version, not shown)",
+      "summary": "Retried run {run} from step {step} (attempt {attempt}); read it again with workflow_run_get to see the outcome."
+    },
+    "workflow_run_replay": {
+      "action": "Start a new run of workflow {workflow} (latest version {version}) for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}), from the first step. The failed run stays as it is.",
+      "summary": "Started run {newRun} on the latest version, replacing failed run {run}; read it with workflow_run_get to see the outcome."
+    },
+    "workflow_task_resolve": {
+      "action": "{action, select, submit {Submit the form of} skip {Skip} other {Fail}} the manual task of workflow {workflow} for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}); then {next, select, END_SUCCESS {the run finishes successfully} STOP_FAIL {the run stops as failed} ESCALATE_TO_MANUAL {a person is asked to finish it as a manual task} COMPENSATE {the steps already done are undone (compensation) and the run ends} step {it continues at step {index} ({key})} key {it continues at {key}} other {the run continues on its pinned version (not the latest one, so the next step is not shown)}}.",
+      "summary": "Task {task} {action, select, submit {submitted} skip {skipped} other {failed}}; run {run} resumes. Read it with workflow_run_get."
+    },
+    "workflows": {
+      "destinationsManualOnly": "no outbound call (manual steps only)",
+      "destinationsNone": "no outbound call",
+      "destinationsUnknown": "unknown (the run is on an older workflow version)",
+      "criticalUnknown": "unknown (the application cannot be read) — treated as critical"
+    },
+    "asset_tag_scheme_get": {
+      "summaryNotVisible": "The asset tag scheme is not visible to you.",
+      "summaryOn": "The asset tag scheme is on; the next tag would be {hasNext, select, yes {{tag}} other {none (the sequence is exhausted)}}.",
+      "summaryOff": "The asset tag scheme is off: assets get no automatic tag."
+    },
+    "asset_tag_scheme_update": {
+      "summary": "Updated the asset tag scheme (automatic tagging {enabled, select, yes {on} other {off}}). Existing asset tags are unchanged."
+    },
+    "request_input": {
+      "summary": "Asked for {count, plural, one {# field} other {# fields}}",
+      "summaryAnswered": "The user answered the form",
+      "summarySkipped": "The user skipped the form",
+      "summaryDeclined": "The user declined the form"
+    },
+    "refusal": {
+      "unknownTool": "Unknown tool: {tool}",
+      "notOnChannel": "{tool} is not available on this channel",
+      "mustPropose": "{tool} changes data: it must be proposed and approved, not invoked",
+      "notAWrite": "{tool} does not change data: invoke it",
+      "cannotProposeOnChannel": "{tool} cannot be proposed on this channel",
+      "invalidInput": "Invalid input: {detail}",
+      "invalidPreview": "This action cannot be proposed: its preview is invalid.",
+      "actionNotRecorded": "The action could not be recorded, so it was not executed.",
+      "approvalNotRecorded": "The approval could not be recorded, so the action was not executed.",
+      "userDeclined": "The user declined this action",
+      "userDeclinedWithReason": "The user declined this action: {reason}",
+      "approvalExpired": "The approval window for this action has passed",
+      "runCancelled": "The run was cancelled",
+      "runCancelledNothingExecuted": "The run was cancelled; nothing was executed",
+      "runEnded": "The run ended",
+      "runEndedBeforeCall": "The run ended before this call was executed",
+      "runInterrupted": "The run was interrupted; this call was not completed",
+      "aiTurnedOff": "The AI assistant was turned off; nothing was executed",
+      "outcomeUnknown": "The action was interrupted; whether it took effect is unknown. It will not be retried.",
+      "storedPreviewUnreadable": "The stored preview of this action is unreadable; it was not executed",
+      "storedInputMismatch": "The stored input of this action does not match what was approved; it was not executed",
+      "toolChanged": "The tool changed since this action was proposed; propose it again",
+      "toolGone": "The tool is no longer available",
+      "invalidStoredInput": "Invalid stored input",
+      "freshPreviewInvalid": "The preview of this action is invalid; it was not executed",
+      "stale": "The target changed after this action was proposed; read it again and propose a new action",
+      "headlessServiceAccountOnly": "Headless writes run only as a Service Account",
+      "noToolPermission": "You do not have permission to use {tool}",
+      "outsideSessionAccess": "{tool} is outside the access granted to this session",
+      "principalInvalid": "The acting principal is no longer valid",
+      "permissionRequired": "The {permission} permission is required",
+      "argumentsNotJson": "The arguments were not a valid JSON object",
+      "toolCallLimit": "The tool call limit of this run was reached",
+      "tooManyToolCalls": "Too many tool calls; wait a moment before calling more",
+      "mutationCap": "The mutation cap of this run ({cap}) was reached",
+      "pendingLimit": "Limit reached: {max} proposals are pending in this step; wait for the user's decisions and propose the rest in the next step.",
+      "repeatedFailure": "Not run: this exact {tool} call already failed {count} times in this turn",
+      "formChannel": "Nobody can answer a form on this channel",
+      "formStepWrites": "Ask for missing data in a step of its own, before proposing any change",
+      "formOneAtATime": "Ask with one form at a time; put every question in it",
+      "formNotBuilt": "The form could not be built",
+      "formNotStored": "The form could not be stored"
+    }
+  },
+  "sentenceValues": {
+    "taxonomyDependents": {
+      "assetModels": "asset models",
+      "assets": "assets",
+      "applications": "applications",
+      "consumables": "consumables",
+      "childLocations": "child locations"
+    }
   }
 }
