@@ -48,7 +48,7 @@
       },
       "sessions": {
         "title": "Sesiones",
-        "local": "Cerrar sesión termina todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste con \"Mantener la sesión iniciada\".",
+        "local": "Cerrar sesión termina todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste con \"Mantener la sesión iniciada\". Las apps de IA conectadas y los tokens personales siguen conectados; revocalos en IA y apps conectadas.",
         "identityProvider": "Cerrar sesión termina tu sesión en este navegador. Tu proveedor de inicio de sesión gestiona tus sesiones en otros lugares.",
         "unknown": "Cerrar sesión termina tu sesión en este navegador.",
         "signOutEverywhere": "Cerrar sesión en todos los dispositivos",

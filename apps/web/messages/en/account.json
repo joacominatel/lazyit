@@ -48,7 +48,7 @@
       },
       "sessions": {
         "title": "Sessions",
-        "local": "Signing out ends every session you have — this browser, your other computers and your phone, including sessions kept with \"Keep me signed in\".",
+        "local": "Signing out ends every session you have — this browser, your other computers and your phone, including sessions kept with \"Keep me signed in\". Connected AI apps and personal tokens stay connected; revoke them in AI & connected apps.",
         "identityProvider": "Signing out ends your session in this browser. Your sign-in provider manages your sessions elsewhere.",
         "unknown": "Signing out ends your session in this browser.",
         "signOutEverywhere": "Sign out on all devices",
