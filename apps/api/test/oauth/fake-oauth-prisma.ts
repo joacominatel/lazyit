@@ -221,6 +221,24 @@ export class FakeOAuthPrisma {
             this.matches(table, candidate, scoped(args)),
           ).length,
       ),
+      upsert: jest.fn(
+        async ({
+          where,
+          create: createData,
+          update: updateData,
+        }: {
+          where: Row;
+          create: Row;
+          update: Row;
+        }) => {
+          const row = rows().find((candidate) =>
+            this.matches(table, candidate, where),
+          );
+          if (!row) return { ...create(createData) };
+          Object.assign(row, updateData, { updatedAt: new Date() });
+          return { ...row };
+        },
+      ),
       update: jest.fn(async ({ where, data }: { where: Row; data: Row }) => {
         const row = rows().find((candidate) =>
           this.matches(table, candidate, where),

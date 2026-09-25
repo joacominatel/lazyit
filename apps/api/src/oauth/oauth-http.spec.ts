@@ -112,6 +112,9 @@ describe('OAuth authorization server — HTTP surface', () => {
       token_endpoint_auth_methods_supported: ['none'],
       authorization_response_iss_parameter_supported: true,
       scopes_supported: ['lazyit.read', 'lazyit.write', 'lazyit.admin'],
+      // CIMD (W3-3): Claude picks CIMD when this is true and "none" is an accepted auth method.
+      client_id_metadata_document_supported: true,
+      registration_endpoint: `${ISSUER}/oauth/register`,
     });
   });
 

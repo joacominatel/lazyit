@@ -267,7 +267,13 @@ describe('consent: validate', () => {
       await h.authorization.validate(human(user), validParams(clientId)),
     ).toEqual({
       ok: true,
-      client: { id: clientId, name: 'Claude Code', uri: null, verified: false },
+      client: {
+        id: clientId,
+        name: 'Claude Code',
+        uri: null,
+        verified: false,
+        verifiedDomain: null,
+      },
       redirectUri: CLAUDE_CODE_REDIRECT,
       redirectHost: 'localhost:53682',
       loopbackOnly: true,
