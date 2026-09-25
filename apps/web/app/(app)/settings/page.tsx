@@ -8,17 +8,19 @@ import {
   MapPinIcon,
   ServerStackIcon,
   SignalIcon,
-  SparklesIcon,
   TagIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { Permission } from "@lazyit/shared";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
+import { AiAssistantIcon } from "@/components/ai/ai-icons";
+import { usePointerGlow } from "@/components/ai/use-pointer-glow";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
+import { cn } from "@/lib/utils";
 import { AdminGate } from "./_components/admin-gate";
 
 interface SettingsSection {
@@ -41,6 +43,8 @@ interface SettingsSection {
    * `import:run` (the same gate the wizard + API enforce). Omitted → visible to anyone past AdminGate.
    */
   permission?: Permission;
+  /** The pointer-following glow that presents the AI assistant as new (#1405). */
+  glow?: boolean;
 }
 
 /**
@@ -72,8 +76,21 @@ const SECTIONS: SettingsSection[] = [
   },
   { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
   // The opt-in AI assistant and external agents over MCP (ADR-0097) — off until an admin sets it up.
-  { href: "/settings/ai", key: "ai", icon: SparklesIcon },
+  { href: "/settings/ai", key: "ai", icon: AiAssistantIcon, glow: true },
 ];
+
+/** One hub card; `glow` adds the AI assistant's pointer-following gradient (`ai-glow`, #1405). */
+function HubCard({ glow, children }: { glow?: boolean; children: ReactNode }) {
+  const handlers = usePointerGlow<HTMLDivElement>();
+  return (
+    <Card
+      className={cn("h-full transition-colors group-hover:bg-muted/40", glow && "ai-glow")}
+      {...(glow ? handlers : {})}
+    >
+      {children}
+    </Card>
+  );
+}
 
 // ponytail: skipped from the ADR-0067 server-prefetch rollout — a pure link hub with no list/record
 // read to prefetch (the only read is the client `useMyPermissions` per-card gate).
@@ -92,13 +109,13 @@ export default function SettingsPage() {
         />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {sections.map(({ href, key, icon: Icon }) => (
+          {sections.map(({ href, key, icon: Icon, glow }) => (
             <Link
               key={href}
               href={href}
               className="group rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Card className="h-full transition-colors group-hover:bg-muted/40">
+              <HubCard glow={glow}>
                 <CardContent className="flex h-full flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-foreground">
@@ -113,7 +130,7 @@ export default function SettingsPage() {
                     </p>
                   </div>
                 </CardContent>
-              </Card>
+              </HubCard>
             </Link>
           ))}
         </div>

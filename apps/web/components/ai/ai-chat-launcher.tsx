@@ -1,10 +1,11 @@
 "use client";
 
-import { ChatBubbleLeftRightIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useAiAssistant } from "./ai-assistant-root";
+import { AiChatIcon } from "./ai-icons";
+import { usePointerGlow } from "./use-pointer-glow";
 
 /** The keyboard shape of the toggle shortcut. */
 export interface ShortcutKeyEvent {
@@ -39,6 +40,7 @@ export function isAiChatShortcut(event: ShortcutKeyEvent): boolean {
 export function AiChatLauncher() {
   const t = useTranslations("ai");
   const { available, open, toggle, launcherRef, panelId } = useAiAssistant();
+  const glow = usePointerGlow<HTMLButtonElement>();
 
   useEffect(() => {
     if (!available) return;
@@ -63,8 +65,11 @@ export function AiChatLauncher() {
       aria-controls={open ? panelId : undefined}
       aria-keyshortcuts="Meta+J Control+J"
       onClick={toggle}
+      // The pointer-following glow that presents the assistant as new (#1405), sized for an icon button.
+      className="ai-glow [--ai-glow-size:2.25rem]"
+      {...glow}
     >
-      <ChatBubbleLeftRightIcon className="size-5" />
+      <AiChatIcon className="size-5" />
     </Button>
   );
 }

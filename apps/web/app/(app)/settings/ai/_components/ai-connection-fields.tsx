@@ -12,12 +12,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useEffect, useId } from "react";
 import { Callout } from "@/components/callout";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldDescription, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -36,6 +31,7 @@ import {
   keyFieldState,
   parseTemperature,
 } from "../_lib/ai-settings-form";
+import { AiFieldLabel } from "./ai-field-label";
 
 /** The select's value for "the provider's default effort" (Radix Select has no empty value). */
 const EFFORT_DEFAULT = "default";
@@ -104,6 +100,7 @@ export function AiCredentialsFields({
   onChange: (patch: Partial<ConnectionDraft>) => void;
 }) {
   const t = useTranslations("aiSettings.credentials");
+  const tLinks = useTranslations("aiSettings.links");
   const id = useId();
   const descriptor = AI_PROVIDER_DESCRIPTORS[draft.provider];
   const compatible = draft.provider === "openai-compatible";
@@ -121,7 +118,13 @@ export function AiCredentialsFields({
       {compatible ? (
         <>
           <Field data-invalid={urlProblem && draft.baseUrl ? true : undefined}>
-            <FieldLabel htmlFor={`${id}-base-url`}>{t("baseUrl.label")}</FieldLabel>
+            <AiFieldLabel
+              htmlFor={`${id}-base-url`}
+              help={<p>{t("baseUrl.description")}</p>}
+              href={tLinks("privateNetwork")}
+            >
+              {t("baseUrl.label")}
+            </AiFieldLabel>
             <Input
               id={`${id}-base-url`}
               value={draft.baseUrl}
@@ -132,17 +135,21 @@ export function AiCredentialsFields({
               className="font-mono"
               aria-invalid={urlProblem && draft.baseUrl ? true : undefined}
             />
-            <FieldDescription>{t("baseUrl.description")}</FieldDescription>
             {urlProblem && draft.baseUrl ? (
               <FieldError>{t(`baseUrl.problems.${urlProblem}`)}</FieldError>
             ) : null}
           </Field>
           <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
             <div className="flex flex-1 flex-col gap-0.5">
-              <FieldLabel htmlFor={`${id}-private`} className="font-medium">
+              <AiFieldLabel
+                htmlFor={`${id}-private`}
+                className="font-medium"
+                help={<p>{t("privateNetwork.description")}</p>}
+                href={tLinks("privateNetwork")}
+              >
                 {t("privateNetwork.label")}
-              </FieldLabel>
-              <FieldDescription>{t("privateNetwork.description")}</FieldDescription>
+              </AiFieldLabel>
+              <FieldDescription>{t("privateNetwork.short")}</FieldDescription>
             </div>
             <Switch
               id={`${id}-private`}
@@ -154,9 +161,9 @@ export function AiCredentialsFields({
       ) : null}
 
       <Field>
-        <FieldLabel htmlFor={`${id}-key`}>
+        <AiFieldLabel htmlFor={`${id}-key`} help={<p>{t("apiKey.writeOnly")}</p>}>
           {t("apiKey.label", { provider: descriptor.label })}
-        </FieldLabel>
+        </AiFieldLabel>
         <Input
           id={`${id}-key`}
           type="password"
@@ -179,8 +186,7 @@ export function AiCredentialsFields({
               ? t("apiKey.hintReplaced")
               : keyState === "required"
                 ? t("apiKey.hintRequired")
-                : t("apiKey.hintOptional")}{" "}
-          {t("apiKey.writeOnly")}
+                : t("apiKey.hintOptional")}
         </FieldDescription>
       </Field>
 
@@ -222,7 +228,9 @@ export function AiModelFields({
   return (
     <div className="space-y-4">
       <Field>
-        <FieldLabel htmlFor={`${id}-model`}>{t("label")}</FieldLabel>
+        <AiFieldLabel htmlFor={`${id}-model`} help={<p>{t("description")}</p>}>
+          {t("label")}
+        </AiFieldLabel>
         <Input
           id={`${id}-model`}
           value={draft.model}
@@ -240,12 +248,13 @@ export function AiModelFields({
             </option>
           ))}
         </datalist>
-        <FieldDescription>{t("description")}</FieldDescription>
       </Field>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field>
-          <FieldLabel htmlFor={`${id}-effort`}>{t("effort.label")}</FieldLabel>
+          <AiFieldLabel htmlFor={`${id}-effort`} help={<p>{t("effort.description")}</p>}>
+            {t("effort.label")}
+          </AiFieldLabel>
           <Select
             value={draft.effort ?? EFFORT_DEFAULT}
             onValueChange={(value) =>
@@ -266,14 +275,16 @@ export function AiModelFields({
               ))}
             </SelectContent>
           </Select>
-          <FieldDescription>{t("effort.description")}</FieldDescription>
         </Field>
 
         {provider === "openai-compatible" ? (
           <Field data-invalid={temperatureInvalid || undefined}>
-            <FieldLabel htmlFor={`${id}-temperature`}>
+            <AiFieldLabel
+              htmlFor={`${id}-temperature`}
+              help={<p>{t("temperature.description")}</p>}
+            >
               {t("temperature.label")}
-            </FieldLabel>
+            </AiFieldLabel>
             <Input
               id={`${id}-temperature`}
               inputMode="decimal"
@@ -283,11 +294,7 @@ export function AiModelFields({
               aria-invalid={temperatureInvalid || undefined}
               className="font-mono tabular-nums"
             />
-            {temperatureInvalid ? (
-              <FieldError>{t("temperature.invalid")}</FieldError>
-            ) : (
-              <FieldDescription>{t("temperature.description")}</FieldDescription>
-            )}
+            {temperatureInvalid ? <FieldError>{t("temperature.invalid")}</FieldError> : null}
           </Field>
         ) : null}
       </div>

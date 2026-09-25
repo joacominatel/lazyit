@@ -2,10 +2,7 @@
 
 import type { AiMessagePart } from "@lazyit/shared";
 import {
-  ArrowLeftIcon,
   ChatBubbleLeftEllipsisIcon,
-  ClockIcon,
-  PlusIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
@@ -45,6 +42,7 @@ import { AiChatHelp } from "./ai-chat-help";
 import { AiChatSettings } from "./ai-chat-settings";
 import { AiComposer } from "./ai-composer";
 import { AiConversationHistory } from "./ai-conversation-history";
+import { AiBackIcon, AiHistoryIcon, AiNewChatIcon } from "./ai-icons";
 import { PENDING_INPUT_ATTR } from "./ai-input-card";
 import { useToolDisplayName } from "./ai-labels";
 import { AiMessage } from "./ai-message";
@@ -254,12 +252,12 @@ export function AiChatPanel() {
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
         {view === "history" ? (
           <Button type="button" variant="ghost" size="sm" onClick={() => setView("chat")}>
-            <ArrowLeftIcon />
+            <AiBackIcon />
             {t("panel.backToChat")}
           </Button>
         ) : (
           <Button type="button" variant="ghost" size="sm" onClick={() => setView("history")}>
-            <ClockIcon />
+            <AiHistoryIcon />
             {t("panel.history")}
           </Button>
         )}
@@ -276,7 +274,7 @@ export function AiChatPanel() {
           className={settingsView.autoApprove ? undefined : "ml-auto"}
           onClick={startNewChat}
         >
-          <PlusIcon />
+          <AiNewChatIcon />
           {t("panel.newChat")}
         </Button>
       </div>

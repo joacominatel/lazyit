@@ -8,9 +8,14 @@ subcategory: setup
 # AI assistant — setup
 
 Everything about AI is configured in **Settings → AI**, which needs the **Configure the instance**
-permission. The page has four parts: the assistant's provider (a setup wizard while the assistant is
-off, an editor once it is on), **Behaviour & limits**, **External AI agents (MCP)**, and — once it is
-on — **Turn off the AI assistant**.
+permission. The page has five parts: the assistant's provider (a setup wizard while the assistant is
+off, an editor once it is on), **Behaviour & limits**, **Web search**, **External AI agents (MCP)**,
+and — once it is on — **Turn off the AI assistant**.
+
+The page is kept to labels and controls. Next to a setting, the **?** opens its explanation: hover it
+with a mouse, or click, tap or press Enter on it to keep it open (Escape closes it). Most tips end with
+**Learn more in the Manual**, which opens the matching section of this page in a new tab; **Setup
+guide** at the top of the page opens this page too.
 
 ## Before you start: `AI_SECRET_KEY`
 
@@ -29,14 +34,16 @@ entered (still turned off), so you can stop and come back — the wizard reopens
 2. **Credentials** — the provider's API key. It is stored encrypted and **never shown again**, not even
    to administrators; to change it you type a new one. For an OpenAI-compatible server you also give
    its **base URL** (usually ending in `/v1`); see [Private-network servers](#private-network-servers).
-3. **Model** — pick a suggestion or type any model id your provider accepts, and optionally the
-   **reasoning effort** (and a temperature for an OpenAI-compatible server).
+3. **Model** — pick a suggestion or type any model id your provider accepts (the test in the next step
+   checks it), and optionally the **reasoning effort** — higher effort answers harder requests better,
+   but is slower and uses more tokens. For an OpenAI-compatible server you can also set a
+   **temperature** between 0 and 2; leave it blank for the server's default.
 4. **Test** — lazyit checks that the provider accepts the key, knows the model, and that the model can
    **call tools**. The assistant cannot work without tool calling, so you cannot continue until the
    test passes. If it fails, the page says why (a rejected key, an unknown model, an unreachable host…).
-5. **Enable** — review what leaves your server (see
-   [AI assistant — overview](/help/ai-assistant-overview#what-leaves-your-server)), confirm you may send
-   it to the provider, and **Turn on the AI assistant**. The page reloads, and people with the
+5. **Enable** — review what leaves your server (the step lists it in short; **Exactly what is sent**
+   opens [AI assistant — overview](/help/ai-assistant-overview#what-leaves-your-server)), confirm you
+   may send it to the provider, and **Turn on the AI assistant**. The page reloads, and people with the
    **Use the AI assistant** permission see the assistant in the top bar — others within a minute or on
    their next reload.
 
@@ -64,15 +71,16 @@ or fragment — the key goes in the API key field.
 
 ## Behaviour & limits
 
-These apply to every conversation and can be changed at any time, whether the assistant is on or off:
+These apply to every conversation and can be changed at any time, whether the assistant is on or off.
+A change applies to new requests:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Keep conversations for | 90 days | Older conversations are deleted automatically (7–3650 days). The record of executed actions is kept. |
 | Approval cards expire after | 30 minutes | A proposed change nobody approves in time can no longer be approved. |
 | Daily token budget per person | 2,000,000 | The most tokens one person or service account may use in any 24 hours. Turn it off for no budget. |
-| Max reply length, max steps, conversation size | — | Bounds on a single answer, on how many tools one request may chain, and on how long a conversation may grow. |
-| Instructions for the assistant | — | Your own guidance, added to lazyit's for every conversation (house conventions, preferred language). It cannot widen what the assistant may do. |
+| Max reply length, max steps, conversation size | — | Bounds on a single answer, on how many tools one request may chain, and on how long a conversation may grow — past the size limit, the person starts a new chat. |
+| Instructions for the assistant | — | Your own guidance, added to lazyit's for every conversation (house conventions, preferred language). It cannot widen what the assistant may do. The counter under the box shows how many characters are left. |
 
 ## Web search
 
@@ -110,14 +118,16 @@ agents (MCP)** permission). This switch is independent of the assistant: it work
 configured. Turning it off disconnects every client at once; their authorizations work again when you
 turn it back on.
 
-The card shows the **MCP endpoint** — the public address in the API's `WEB_ORIGIN` followed by `/mcp`
-(when no address is pinned, the card shows the address of the page you are on and says so) — and
-explains how
+The card shows the **MCP endpoint** — the address to give an MCP client that is set up by hand: the
+public address in the API's `WEB_ORIGIN` followed by `/mcp`. When no address is pinned, the card shows
+the address of the page you are on and says so; clients on other machines may then need the instance's
+address on your network instead. The card also says, in one line, how
 clients sign in on **this** instance. That depends on the API's `WEB_ORIGIN` setting — the public
 address lazyit is pinned to — not merely on whether the page is shown over HTTPS:
 
 - **`WEB_ORIGIN` is an `https://` address: OAuth.** The client opens a lazyit page in the browser where the person reviews the
-  access and approves it. If your certificate comes from an **internal certificate authority**, Claude
+  access and approves it — nothing to copy by hand, and each connection can be revoked from **Account →
+  AI & connected apps**. If your certificate comes from an **internal certificate authority**, Claude
   Code and other Node.js clients must be started with it, for example
   `export NODE_EXTRA_CA_CERTS=/path/to/internal-ca.pem`.
 - **No `https://` `WEB_ORIGIN` (for example the plain-HTTP `lan` mode): personal tokens.** OAuth
@@ -148,7 +158,9 @@ Which clients may connect is decided by two things, both in the MCP card:
   **Vendor docs**). **Remove** a built-in client to stop it connecting (while "any https:// client" is on,
   a removed client with an `https://` callback can still ask for consent), and **Restore** it at any
   time. Pi, Windsurf and Zed are not built in, because their identifiers could not be verified — add them
-  yourself if your team uses them.
+  yourself if your team uses them. If you removed a built-in client that a later version of lazyit no
+  longer ships, it is listed under **Removed clients no longer in the built-in list**; restoring it only
+  clears your removal.
 
 To allow another client, **Add a client** by one of:
 

@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowsPointingInIcon, ArrowsPointingOutIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import {
@@ -26,6 +25,7 @@ import {
 } from "@/lib/ai/panel-width";
 import { cn } from "@/lib/utils";
 import { useAiAssistant } from "./ai-assistant-root";
+import { AiChatIcon, AiCloseIcon, AiExpandIcon, AiRestoreIcon } from "./ai-icons";
 
 /** The chat itself (W3-7), loaded on the panel's first open only. */
 const AiChatPanel = dynamic(() => import("./ai-chat-panel").then((m) => m.AiChatPanel), {
@@ -213,7 +213,10 @@ export function AiChatPanelSlot() {
           />
         </div>
         <div className="flex h-14 shrink-0 items-center justify-between gap-1 border-b border-border px-4">
-          <h2 className="text-sm font-medium">{t("panel.title")}</h2>
+          <h2 className="flex items-center gap-2 text-sm font-medium">
+            <AiChatIcon className="size-4 text-primary" />
+            {t("panel.title")}
+          </h2>
           <div className="flex items-center gap-1">
             <Button
               variant="ghost"
@@ -222,10 +225,10 @@ export function AiChatPanelSlot() {
               title={overlay ? t("panel.restore") : t("panel.expand")}
               onClick={() => commit(toggledPanelWidth(width, window.innerWidth))}
             >
-              {overlay ? <ArrowsPointingInIcon /> : <ArrowsPointingOutIcon />}
+              {overlay ? <AiRestoreIcon /> : <AiExpandIcon />}
             </Button>
             <Button variant="ghost" size="icon-sm" aria-label={t("panel.close")} onClick={close}>
-              <XMarkIcon />
+              <AiCloseIcon />
             </Button>
           </div>
         </div>
