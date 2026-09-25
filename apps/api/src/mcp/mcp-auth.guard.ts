@@ -66,7 +66,9 @@ const TOKEN_REFUSED = 'The access token is invalid, expired or revoked.';
  *  2. **Transport.** A present `Origin` whose host is not this instance's is refused (403, the spec's
  *     DNS-rebinding MUST); with a pinned origin (`WEB_ORIGIN`) the `Host` must name it too. A token in
  *     the query string is refused (400) — tokens travel only in the `Authorization` header — and, being
- *     compromised, is revoked on sight before anything else ({@link McpExposedTokenService}; G3 F1).
+ *     compromised, is revoked on sight before anything else ({@link McpExposedTokenService}; G3 F1),
+ *     within a bound: charged to the per-IP refused-authentication limiter, at most a few well-formed
+ *     values, one query (SEC-083).
  *  3. **The bearer**, by prefix — and nothing else. A local session JWT, an IdP token or any other value
  *     is refused (no token passthrough):
  *     - `lzit_oat_` — only on an HTTPS instance (the pinned issuer); {@link OAuthTokenService.verifyAccessToken}.
@@ -106,10 +108,16 @@ export class McpAuthGuard implements CanActivate {
     const req = http.getRequest<McpRequest>();
     const res = http.getResponse<Response>();
 
-    // 0 — a credential in the URL is compromised whatever happens next: revoke it on sight (G3 F1).
+    // 0 — a credential in the URL is compromised whatever happens next: revoke it on sight (G3 F1). This
+    //     runs for anyone, even while MCP is off, so it is bounded (SEC-083): the request is charged to the
+    //     per-IP refused-authentication limiter first (no DB, so the off-by-default surface stays inert), an
+    //     address over it gets no scan at all, and the scan itself reads at most a few well-formed values in
+    //     one query. The answer (404 / 400) never changes.
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const queryTokens = queryTokensOf(req);
-    if (queryTokens.length > 0) await this.exposed.handle(queryTokens, ip);
+    if (queryTokens.length > 0 && this.rateLimiter.authFailure(ip)) {
+      await this.exposed.handle(queryTokens, ip);
+    }
 
     // 1 — the capability exists at all.
     if (process.env.AUTH_MODE === 'shim') throw new NotFoundException();
