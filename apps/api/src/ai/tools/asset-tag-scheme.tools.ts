@@ -10,6 +10,7 @@ import {
 } from '@lazyit/shared';
 import { AssetTagSchemeController } from '../../asset-tag-scheme/asset-tag-scheme.controller';
 import { untrusted } from '../core/result-shaper';
+import { phrase, summaryPhrase } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -158,7 +159,7 @@ const assetTagSchemeGet = defineTool({
       if (err instanceof HttpException && err.getStatus() === 403) {
         return {
           data: { visible: false, guidance: NOT_VISIBLE },
-          summary: 'The asset tag scheme is not visible to you.',
+          ...summaryPhrase(phrase('asset_tag_scheme_get.summaryNotVisible')),
         };
       }
       throw err;
@@ -193,9 +194,14 @@ const assetTagSchemeGet = defineTool({
         updatedAt: isUnsetDefault(scheme) ? null : scheme.updatedAt,
         guidance,
       },
-      summary: scheme.enabled
-        ? `The asset tag scheme is on; the next tag would be ${untrusted(next.tag) ?? 'none (the sequence is exhausted)'}.`
-        : 'The asset tag scheme is off: assets get no automatic tag.',
+      ...summaryPhrase(
+        scheme.enabled
+          ? phrase('asset_tag_scheme_get.summaryOn', {
+              hasNext: untrusted(next.tag) !== null ? 'yes' : 'no',
+              tag: String(untrusted(next.tag)),
+            })
+          : phrase('asset_tag_scheme_get.summaryOff'),
+      ),
     };
   },
 });
@@ -326,9 +332,11 @@ const assetTagSchemeUpdate = defineTool({
         nextNumber: updated.nextNumber,
         updatedAt: updated.updatedAt,
       },
-      summary: `Updated the asset tag scheme (automatic tagging ${
-        updated.enabled ? 'on' : 'off'
-      }). Existing asset tags are unchanged.`,
+      ...summaryPhrase(
+        phrase('asset_tag_scheme_update.summary', {
+          enabled: updated.enabled ? 'yes' : 'no',
+        }),
+      ),
       entityRefs: [schemeRef('updated')],
     };
   },

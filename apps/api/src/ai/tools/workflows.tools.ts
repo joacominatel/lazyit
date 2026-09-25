@@ -37,6 +37,13 @@ import {
 import { assertChannelAllows } from '../core/pending-action';
 import { untrusted } from '../core/result-shaper';
 import {
+  afterPhrase,
+  phrase,
+  summaryPhrase,
+  yesNo,
+  type Phrase,
+} from '../core/sentences';
+import {
   bind,
   defineTool,
   type AiToolPreview,
@@ -878,6 +885,12 @@ function workflowLabel(ctx: RunContext): string {
     : `workflow ${String(ctx.run.workflowId)}`;
 }
 
+/** The workflow a run belongs to, by name (untrusted) or id — the templates say "workflow {workflow}". */
+function workflowParam(ctx: RunContext): string {
+  const name = str(ctx.workflow?.name);
+  return name ? String(untrusted(name)) : String(ctx.run.workflowId);
+}
+
 function provisioningWarnings(trigger: unknown, app: AppView): string[] {
   const warnings = [
     trigger === 'ACCESS_REVOKED'
@@ -893,8 +906,24 @@ function criticalChange(app: AppView): AiToolPreview['changes'][number] {
     ? { field: 'isCritical', after: app.critical, valueKind: 'boolean' }
     : {
         field: 'isCritical',
-        after: 'unknown (the application cannot be read) — treated as critical',
+        ...afterPhrase(phrase('workflows.criticalUnknown')),
       };
+}
+
+/** The `destinations` row of a run or task card: the hosts, or why there are none. */
+function destinationsChange(
+  destinations: readonly string[] | null,
+  none: Phrase,
+): AiToolPreview['changes'][number] {
+  if (destinations === null) {
+    return {
+      field: 'destinations',
+      ...afterPhrase(phrase('workflows.destinationsUnknown')),
+    };
+  }
+  return destinations.length > 0
+    ? { field: 'destinations', after: destinations.join(', ') }
+    : { field: 'destinations', ...afterPhrase(none) };
 }
 
 /**
@@ -1472,6 +1501,21 @@ function continuationText(tc: TaskContext, cursor: string | null): string {
   return edgeText(cursor, tc.ctx.pinnedSteps);
 }
 
+/** Where the run goes after a task, as the `next` / `index` / `key` params of its card's sentence. */
+function continuationParams(
+  tc: TaskContext,
+  cursor: string | null,
+): { next: string; index: number; key: string } {
+  if (cursor === null || !tc.ctx.pinnedSteps) {
+    return { next: 'pinned', index: 0, key: '' };
+  }
+  if (TERMINAL_WORDS[cursor]) return { next: cursor, index: 0, key: '' };
+  const index = tc.ctx.pinnedSteps.findIndex((s) => s.key === cursor);
+  return index >= 0
+    ? { next: 'step', index: index + 1, key: keyText(cursor) }
+    : { next: 'key', index: 0, key: keyText(cursor) };
+}
+
 const workflowTaskGet = defineTool({
   name: 'workflow_task_get',
   title: 'Get a manual task',
@@ -1597,7 +1641,13 @@ const workflowRunRetry = defineTool({
         resumedAtStep: resume ? keyText(resume) : null,
         attempt: num(result.attempt),
       },
-      summary: `Retried run ${input.run} from step ${resume ? keyText(resume) : '?'} (attempt ${num(result.attempt) ?? '?'}); read it again with workflow_run_get to see the outcome.`,
+      ...summaryPhrase(
+        phrase('workflow_run_retry.summary', {
+          run: input.run,
+          step: resume ? keyText(resume) : '?',
+          attempt: String(num(result.attempt) ?? '?'),
+        }),
+      ),
       entityRefs: [
         {
           type: 'workflowRun',
@@ -1646,10 +1696,16 @@ const workflowRunRetry = defineTool({
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after:
-          `Retry the failed run of ${workflowLabel(ctx)} for ${personText(ctx.person)} on ${appLabel(ctx.app)}` +
-          ` (${TRIGGER_WORDS[trigger] ?? trigger}), resuming at ${failedKey ? `step ${keyText(failedKey)}` : 'the step that failed'}.` +
-          ' Steps that already succeeded are not repeated; the same data is sent again.',
+        ...afterPhrase(
+          phrase('workflow_run_retry.action', {
+            workflow: workflowParam(ctx),
+            person: personText(ctx.person),
+            application: appLabel(ctx.app),
+            trigger,
+            hasStep: yesNo(!!failedKey),
+            step: failedKey ? keyText(failedKey) : '',
+          }),
+        ),
       },
       { field: 'run', after: String(run.id) },
       {
@@ -1659,19 +1715,16 @@ const workflowRunRetry = defineTool({
       { field: 'application', after: appLabel(ctx.app), valueKind: 'entity' },
       { field: 'person', after: personText(ctx.person) },
       { field: 'trigger', after: trigger },
-      {
-        field: 'resumesAtStep',
-        after: failedKey
-          ? keyText(failedKey)
-          : 'the step that failed (the run is on an older workflow version, not shown)',
-      },
-      {
-        field: 'destinations',
-        after:
-          destinations.length > 0
-            ? destinations.join(', ')
-            : 'no outbound call (manual steps only)',
-      },
+      failedKey
+        ? { field: 'resumesAtStep', after: keyText(failedKey) }
+        : {
+            field: 'resumesAtStep',
+            ...afterPhrase(phrase('workflow_run_retry.resumesAtUnknown')),
+          },
+      destinationsChange(
+        destinations,
+        phrase('workflows.destinationsManualOnly'),
+      ),
       criticalChange(ctx.app),
     ];
     return {
@@ -1734,7 +1787,9 @@ const workflowRunReplay = defineTool({
         workflowVersionId: num(result.workflowVersionId),
         replaySeq: num(result.replaySeq),
       },
-      summary: `Started run ${newRun} on the latest version, replacing failed run ${input.run}; read it with workflow_run_get to see the outcome.`,
+      ...summaryPhrase(
+        phrase('workflow_run_replay.summary', { newRun, run: input.run }),
+      ),
       entityRefs: [
         { type: 'workflowRun', id: newRun, op: 'created', ...parent },
         { type: 'workflowRun', id: input.run, op: 'updated', ...parent },
@@ -1811,10 +1866,15 @@ const workflowRunReplay = defineTool({
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after:
-          `Start a new run of ${workflowLabel(ctx)} (latest version ${ctx.latestVersion ?? '?'}) for ` +
-          `${personText(ctx.person)} on ${appLabel(ctx.app)} (${TRIGGER_WORDS[trigger] ?? trigger}), from the first ` +
-          'step. The failed run stays as it is.',
+        ...afterPhrase(
+          phrase('workflow_run_replay.action', {
+            workflow: workflowParam(ctx),
+            version: String(ctx.latestVersion ?? '?'),
+            person: personText(ctx.person),
+            application: appLabel(ctx.app),
+            trigger,
+          }),
+        ),
       },
       { field: 'run', after: String(run.id) },
       {
@@ -1825,13 +1885,10 @@ const workflowRunReplay = defineTool({
       { field: 'application', after: appLabel(ctx.app), valueKind: 'entity' },
       { field: 'person', after: personText(ctx.person) },
       { field: 'trigger', after: trigger },
-      {
-        field: 'destinations',
-        after:
-          destinations.length > 0
-            ? destinations.join(', ')
-            : 'no outbound call (manual steps only)',
-      },
+      destinationsChange(
+        destinations,
+        phrase('workflows.destinationsManualOnly'),
+      ),
       criticalChange(ctx.app),
     ];
     return {
@@ -1918,7 +1975,13 @@ const workflowTaskResolve = defineTool({
           ? keyText(String(result.resumeCursor))
           : null,
       },
-      summary: `Task ${input.task} ${input.action === 'submit' ? 'submitted' : input.action === 'skip' ? 'skipped' : 'failed'}; run ${runId} resumes. Read it with workflow_run_get.`,
+      ...summaryPhrase(
+        phrase('workflow_task_resolve.summary', {
+          task: input.task,
+          action: input.action,
+          run: runId,
+        }),
+      ),
       entityRefs: [
         { type: 'manualTask', id: input.task, op: 'updated' },
         { type: 'workflowRun', id: runId, op: 'updated', ...parent },
@@ -1950,12 +2013,6 @@ const workflowTaskResolve = defineTool({
       cursor !== null && tc.ctx.pinnedSteps
         ? destinationsFrom(tc.ctx.pinnedSteps, cursor, tc.ctx.connections)
         : null;
-    const verb =
-      input.action === 'submit'
-        ? 'Submit the form of'
-        : input.action === 'skip'
-          ? 'Skip'
-          : 'Fail';
     const trigger = String(tc.ctx.run.trigger);
     const target: AiEntityRef = {
       type: 'manualTask',
@@ -1968,9 +2025,16 @@ const workflowTaskResolve = defineTool({
     const changes: AiToolPreview['changes'] = [
       {
         field: 'action',
-        after:
-          `${verb} the manual task of ${workflowLabel(tc.ctx)} for ${personText(tc.ctx.person)} on ` +
-          `${appLabel(tc.ctx.app)} (${TRIGGER_WORDS[trigger] ?? trigger}); then ${continuationText(tc, cursor)}.`,
+        ...afterPhrase(
+          phrase('workflow_task_resolve.action', {
+            action: input.action,
+            workflow: workflowParam(tc.ctx),
+            person: personText(tc.ctx.person),
+            application: appLabel(tc.ctx.app),
+            trigger,
+            ...continuationParams(tc, cursor),
+          }),
+        ),
       },
       { field: 'task', after: String(task.id) },
       { field: 'prompt', after: untrusted(str(task.prompt)) },
@@ -1989,15 +2053,7 @@ const workflowTaskResolve = defineTool({
         field: `input.${name}`,
         after: value,
       })),
-      {
-        field: 'destinations',
-        after:
-          destinations === null
-            ? 'unknown (the run is on an older workflow version)'
-            : destinations.length > 0
-              ? destinations.join(', ')
-              : 'no outbound call',
-      },
+      destinationsChange(destinations, phrase('workflows.destinationsNone')),
       criticalChange(tc.ctx.app),
     ];
     return {

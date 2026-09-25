@@ -21,6 +21,7 @@ import { ConsumablesController } from '../../consumables/consumables.controller'
 import { LocationsController } from '../../locations/locations.controller';
 import { AiReferenceError } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
+import { afterPhrase, phrase, summaryPhrase } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -454,7 +455,11 @@ function archiveChanges(impact: Impact): Change[] {
       ? [
           {
             field: 'usedBy',
-            after: `Unknown to you: ${impact.unknown.join(', ')}`,
+            ...afterPhrase(
+              phrase('taxonomy.usedByUnknown', {
+                kinds: impact.unknown.join(', '),
+              }),
+            ),
             valueKind: 'text' as const,
           },
         ]
@@ -536,7 +541,12 @@ const categoryCreate = defineTool({
     const created = await createCategory(rt, kind, body);
     return {
       data: categoryResult(kind, created),
-      summary: `Created the ${KIND_LABEL[kind]} ${untrusted(str(created.name))}.`,
+      ...summaryPhrase(
+        phrase('category_create.summary', {
+          kind: kind,
+          name: String(untrusted(str(created.name))),
+        }),
+      ),
       entityRefs: [categoryRef(created, 'created')],
     };
   },
@@ -553,7 +563,11 @@ const categoryCreate = defineTool({
       );
     }
     const changes: Change[] = [
-      { field: 'kind', after: KIND_LABEL[kind], valueKind: 'text' },
+      {
+        field: 'kind',
+        ...afterPhrase(phrase('taxonomy.categoryKind', { kind })),
+        valueKind: 'text',
+      },
       { field: 'name', after: input.name, valueKind: 'text' },
     ];
     if (input.description !== undefined) {
@@ -622,7 +636,12 @@ const categoryUpdate = defineTool({
     const updated = await updateCategory(rt, kind, id, body);
     return {
       data: categoryResult(kind, updated),
-      summary: `Updated the ${KIND_LABEL[kind]} ${untrusted(str(updated.name))}.`,
+      ...summaryPhrase(
+        phrase('category_update.summary', {
+          kind: kind,
+          name: String(untrusted(str(updated.name))),
+        }),
+      ),
       entityRefs: [categoryRef(updated, 'updated')],
     };
   },
@@ -699,7 +718,12 @@ const categoryArchive = defineTool({
     const archived = await removeCategory(rt, input.kind, id);
     return {
       data: categoryResult(input.kind, archived),
-      summary: `Archived the ${KIND_LABEL[input.kind]} ${untrusted(str(archived.name))}.`,
+      ...summaryPhrase(
+        phrase('category_archive.summary', {
+          kind: input.kind,
+          name: String(untrusted(str(archived.name))),
+        }),
+      ),
       entityRefs: [categoryRef(archived, 'archived')],
     };
   },
@@ -825,7 +849,11 @@ const assetModelUpdate = defineTool({
     );
     return {
       data: modelResult(updated),
-      summary: `Updated the asset model ${untrusted(modelLabel(updated))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_update.summary', {
+          model: String(untrusted(modelLabel(updated))),
+        }),
+      ),
       entityRefs: [modelRef(updated, 'updated')],
     };
   },
@@ -905,7 +933,11 @@ const assetModelArchive = defineTool({
     );
     return {
       data: modelResult(archived),
-      summary: `Archived the asset model ${untrusted(modelLabel(archived))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_archive.summary', {
+          model: String(untrusted(modelLabel(archived))),
+        }),
+      ),
       entityRefs: [modelRef(archived, 'archived')],
     };
   },
@@ -1033,7 +1065,11 @@ const assetModelRestore = defineTool({
     );
     return {
       data: modelResult(restored),
-      summary: `Restored the asset model ${untrusted(modelLabel(restored))}.`,
+      ...summaryPhrase(
+        phrase('asset_model_restore.summary', {
+          model: String(untrusted(modelLabel(restored))),
+        }),
+      ),
       entityRefs: [modelRef(restored, 'restored')],
     };
   },
@@ -1157,7 +1193,11 @@ const locationUpdate = defineTool({
     );
     return {
       data: locationResult(updated),
-      summary: `Updated the location ${untrusted(str(updated.name))}.`,
+      ...summaryPhrase(
+        phrase('location_update.summary', {
+          location: String(untrusted(str(updated.name))),
+        }),
+      ),
       entityRefs: [locationRef(updated, 'updated')],
     };
   },
@@ -1243,7 +1283,11 @@ const locationArchive = defineTool({
     );
     return {
       data: locationResult(archived),
-      summary: `Archived the location ${untrusted(str(archived.name))}.`,
+      ...summaryPhrase(
+        phrase('location_archive.summary', {
+          location: String(untrusted(str(archived.name))),
+        }),
+      ),
       entityRefs: [locationRef(archived, 'archived')],
     };
   },
@@ -1327,7 +1371,11 @@ const locationRestore = defineTool({
     );
     return {
       data: locationResult(restored),
-      summary: `Restored the location ${untrusted(str(restored.name))}.`,
+      ...summaryPhrase(
+        phrase('location_restore.summary', {
+          location: String(untrusted(str(restored.name))),
+        }),
+      ),
       entityRefs: [locationRef(restored, 'restored')],
     };
   },

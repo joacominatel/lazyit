@@ -21,6 +21,15 @@ import {
 import type { AiResolvedReference } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
 import {
+  afterPhrase,
+  beforePhrase,
+  englishOnly,
+  joinPhrases,
+  phrase,
+  summaryPhrase,
+  type Phrase,
+} from '../core/sentences';
+import {
   bind,
   defineTool,
   unexposed,
@@ -298,28 +307,69 @@ interface FolderView {
   /** The caller passes the folder ACL for this folder (ADR-0060 §4). */
   readable: boolean;
   visibility: 'public' | 'restricted' | 'unknown';
-  audience: string;
+  /** Who can read it, in words (#1384: with its sentence codes). */
+  audience: Phrase;
   /** The folder's own name (the last segment of `name`, which is the whole path). */
   ownName: string;
   /** The folder row's version, for a write's precondition. */
   updatedAt: string | null;
 }
 
-function ruleSummary(rule: Row): string {
-  switch (rule.kind) {
-    case 'role':
-      return `the ${String(rule.role)} role`;
-    case 'users': {
-      const n = Array.isArray(rule.userIds) ? rule.userIds.length : 0;
-      return n === 1 ? '1 named person' : `${n} named people`;
+/**
+ * One access rule in words, followed by what comes after it in the audience sentence: another rule of
+ * the same folder (` or`), the next folder (`;`) or nothing.
+ */
+function ruleSummary(rule: Row, then: 'or' | 'semicolon' | 'end'): Phrase {
+  const kind =
+    rule.kind === 'role' ||
+    rule.kind === 'users' ||
+    rule.kind === 'appGrant' ||
+    rule.kind === 'assetAssignment'
+      ? rule.kind
+      : 'unknown';
+  return phrase('kb.audience.rule', {
+    rule: kind,
+    role: String(rule.role),
+    count: Array.isArray(rule.userIds) ? rule.userIds.length : 0,
+    applicationId: String(rule.applicationId),
+    assetId: String(rule.assetId),
+    then,
+  });
+}
+
+/** The audience of a path with restricted folders (and possibly unreadable rules). Exported for its spec. */
+export function restrictedAudience(
+  restricted: Row[],
+  malformed: boolean,
+): Phrase {
+  const parts: Phrase[] = [phrase('kb.audience.restricted')];
+  restricted.forEach((f, index) => {
+    const rules = asRows(f.accessRules);
+    const lastFolder = index === restricted.length - 1 && !malformed;
+    parts.push(
+      phrase('kb.audience.folder', { folder: str(f.name) ?? String(f.id) }),
+    );
+    if (rules.length === 0) {
+      // Not modelled by the closed list (a separator with nothing before it): English only.
+      parts.push(englishOnly(lastFolder ? '' : ';'));
     }
-    case 'appGrant':
-      return `people with access to application ${String(rule.applicationId)}`;
-    case 'assetAssignment':
-      return `people assigned asset ${String(rule.assetId)}`;
-    default:
-      return 'an unrecognized rule (matches nobody)';
+    rules.forEach((rule, i) =>
+      parts.push(
+        ruleSummary(
+          rule,
+          i < rules.length - 1 ? 'or' : lastFolder ? 'end' : 'semicolon',
+        ),
+      ),
+    );
+  });
+  if (malformed) {
+    parts.push(
+      phrase('kb.audience.malformed', {
+        lead: restricted.length === 0 ? 'yes' : 'no',
+      }),
+    );
   }
+  return joinPhrases(...parts);
 }
 
 /**
@@ -357,8 +407,7 @@ async function folderView(
   const readable = typeof row.articleCount === 'number';
 
   let visibility: FolderView['visibility'] = 'unknown';
-  let audience =
-    'Unknown to you: folder access rules are shown only to settings:manage holders';
+  let audience = phrase('kb.audience.unknown');
   if (path.every((f) => 'accessRules' in f)) {
     const restricted = path.filter(
       (f) => Array.isArray(f.accessRules) && f.accessRules.length > 0,
@@ -371,27 +420,17 @@ async function folderView(
     );
     if (restricted.length === 0 && !malformed) {
       visibility = 'public';
-      audience = 'Everyone who can read the knowledge base';
+      audience = phrase('kb.audience.everyone');
     } else {
       visibility = 'restricted';
-      audience =
-        'Restricted — only people matching every restricted folder on the path: ' +
-        restricted
-          .map(
-            (f) =>
-              `${str(f.name) ?? String(f.id)}: ${asRows(f.accessRules)
-                .map(ruleSummary)
-                .join(' or ')}`,
-          )
-          .join('; ') +
-        (malformed ? '; a folder with unreadable rules (matches nobody)' : '');
+      audience = restrictedAudience(restricted, malformed);
     }
   } else if (path.every((f) => typeof f.hasAccessRules === 'boolean')) {
     const restricted = path.some((f) => f.hasAccessRules === true);
     visibility = restricted ? 'restricted' : 'public';
     audience = restricted
-      ? 'Restricted by folder access rules'
-      : 'Everyone who can read the knowledge base';
+      ? phrase('kb.audience.restrictedByRules')
+      : phrase('kb.audience.everyone');
   }
   return {
     id,
@@ -705,7 +744,7 @@ const kbCreateArticle = defineTool({
     );
     return {
       data: articleSummary(created, false),
-      summary: 'Created as a draft.',
+      ...summaryPhrase(phrase('kb_create_article.summary')),
       entityRefs: [articleRef(created, 'created')],
     };
   },
@@ -722,7 +761,7 @@ const kbCreateArticle = defineTool({
         // Who will read it once it is published (it is created as a private draft).
         {
           field: 'audience',
-          after: folder.audience,
+          ...afterPhrase(folder.audience),
           valueKind: 'text' as const,
         },
         { field: 'status', after: 'DRAFT', valueKind: 'text' as const },
@@ -815,6 +854,7 @@ const kbUpdateArticle = defineTool({
     );
     return {
       data: articleSummary(updated, false),
+      ...summaryPhrase(phrase('kb_update_article.summary')),
       entityRefs: [articleRef(updated, 'updated')],
     };
   },
@@ -871,8 +911,8 @@ const kbUpdateArticle = defineTool({
         },
         {
           field: 'audience',
-          before: home?.audience ?? null,
-          after: destination.audience,
+          ...(home ? beforePhrase(home.audience) : { before: null }),
+          ...afterPhrase(destination.audience),
           valueKind: 'text',
         },
       );
@@ -897,7 +937,12 @@ const kbUpdateArticle = defineTool({
       // The edit goes live to the readers of the folder it is in: name them.
       changes.push({
         field: 'audience',
-        after: `${home.name}: ${home.audience}`,
+        ...afterPhrase(
+          joinPhrases(
+            phrase('kb.audience.folder', { folder: home.name }),
+            home.audience,
+          ),
+        ),
         valueKind: 'text',
       });
     }
@@ -957,6 +1002,13 @@ const kbSetPublication = defineTool({
     );
     return {
       data: articleSummary(row, false),
+      ...summaryPhrase(
+        phrase(
+          input.action === 'publish'
+            ? 'kb_set_publication.summaryPublish'
+            : 'kb_set_publication.summaryUnpublish',
+        ),
+      ),
       entityRefs: [articleRef(row, 'updated')],
     };
   },
@@ -987,9 +1039,7 @@ const kbSetPublication = defineTool({
         },
         {
           field: 'audience',
-          after:
-            folder?.audience ??
-            'Unknown to you: folder access rules are shown only to settings:manage holders',
+          ...afterPhrase(folder?.audience ?? phrase('kb.audience.unknown')),
           valueKind: 'text',
         },
         { field: 'title', after: row.title, valueKind: 'text' },
@@ -1016,12 +1066,10 @@ const kbSetPublication = defineTool({
 // ─── kb_folder_create / kb_folder_rename (#1378) ─────────────────────────────────────────────────────
 
 /** The audience of a top-level folder: a new folder carries no access rules of its own. */
-const PUBLIC_AUDIENCE = 'Everyone who can read the knowledge base';
+const PUBLIC_AUDIENCE = phrase('kb.audience.everyone');
 
 /** What the card says about the folder's own access rules: none, and the assistant never sets them. */
-const NO_OWN_RULES =
-  'None of its own: it inherits the audience above. Only an administrator can restrict a folder ' +
-  '(folder access rules), and the assistant never sets them.';
+const NO_OWN_RULES = phrase('kb_folder_create.noOwnRules');
 
 const folderName = z
   .string()
@@ -1147,7 +1195,7 @@ const kbFolderCreate = defineTool({
     );
     return {
       data: folderSummary(created),
-      summary: 'Folder created.',
+      ...summaryPhrase(phrase('kb_folder_create.summary')),
       entityRefs: [folderRef(created, 'created')],
     };
   },
@@ -1167,7 +1215,7 @@ const kbFolderCreate = defineTool({
             }
           : {
               field: 'parent folder',
-              after: 'None (top level)',
+              ...afterPhrase(phrase('kb_folder_create.topLevel')),
               valueKind: 'text' as const,
             },
         {
@@ -1179,12 +1227,12 @@ const kbFolderCreate = defineTool({
         // folder has no rules of its own (a restricted ancestor narrows the whole subtree, ADR-0060 §1).
         {
           field: 'audience',
-          after: parent ? parent.audience : PUBLIC_AUDIENCE,
+          ...afterPhrase(parent ? parent.audience : PUBLIC_AUDIENCE),
           valueKind: 'text' as const,
         },
         {
           field: 'access rules',
-          after: NO_OWN_RULES,
+          ...afterPhrase(NO_OWN_RULES),
           valueKind: 'text' as const,
         },
         ...(input.description !== undefined
@@ -1241,6 +1289,7 @@ const kbFolderRename = defineTool({
     );
     return {
       data: folderSummary(updated),
+      ...summaryPhrase(phrase('kb_folder_rename.summary')),
       entityRefs: [folderRef(updated, 'updated')],
     };
   },
@@ -1270,7 +1319,11 @@ const kbFolderRename = defineTool({
           valueKind: 'text',
         },
         // Unchanged by a rename; named so the reader knows who sees the new name.
-        { field: 'audience', after: folder.audience, valueKind: 'text' },
+        {
+          field: 'audience',
+          ...afterPhrase(folder.audience),
+          valueKind: 'text',
+        },
       ],
       warnings: [],
       impacted: [],

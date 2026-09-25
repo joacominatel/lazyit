@@ -1261,6 +1261,9 @@ describe('taxonomy toolset (#1390)', () => {
       expect(action.preview!.changes).toContainEqual({
         field: 'usedBy',
         after: 'Unknown to you: assets',
+        afterSentences: [
+          { code: 'taxonomy.usedByUnknown', params: { kinds: 'assets' } },
+        ],
         valueKind: 'text',
       });
     });
@@ -1484,6 +1487,12 @@ describe('taxonomy toolset (#1390)', () => {
       expect(action.preview!.changes).toContainEqual({
         field: 'usedBy',
         after: 'Unknown to you: child locations',
+        afterSentences: [
+          {
+            code: 'taxonomy.usedByUnknown',
+            params: { kinds: 'child locations' },
+          },
+        ],
         valueKind: 'text',
       });
     });

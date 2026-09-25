@@ -19,6 +19,7 @@ import {
   type AiResolvedReference,
 } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
+import { phrase, summaryPhrase, yesNo } from '../core/sentences';
 import {
   bind,
   defineTool,
@@ -389,7 +390,13 @@ const consumableCreate = defineTool({
     const id = String(created.id);
     return {
       data: consumableDetail(created),
-      summary: `Created consumable ${labelOf(created)} with 0 ${str(created.unit) ?? 'units'} in stock.`,
+      ...summaryPhrase(
+        phrase('consumable_create.summary', {
+          consumable: labelOf(created),
+          hasUnit: yesNo(str(created.unit) !== null),
+          unit: str(created.unit) ?? '',
+        }),
+      ),
       entityRefs: [consumableRef(id, 'created', labelOf(created))],
     };
   },
@@ -480,7 +487,9 @@ const consumableUpdate = defineTool({
     );
     return {
       data: consumableDetail(updated),
-      summary: `Updated consumable ${labelOf(updated)}.`,
+      ...summaryPhrase(
+        phrase('consumable_update.summary', { consumable: labelOf(updated) }),
+      ),
       entityRefs: [consumableRef(id, 'updated', labelOf(updated))],
     };
   },
@@ -571,9 +580,15 @@ const consumableRecordMovement = defineTool({
     if (after) data.consumable = consumableSummary(after);
     return {
       data,
-      summary:
-        `Recorded ${input.type} ${input.quantity} on ${label ?? id}` +
-        (after ? `; stock is now ${String(after.currentStock)}.` : '.'),
+      ...summaryPhrase(
+        phrase('consumable_record_movement.summary', {
+          type: input.type,
+          quantity: input.quantity,
+          consumable: label ?? id,
+          hasStock: yesNo(after !== null),
+          stock: after ? String(after.currentStock) : '',
+        }),
+      ),
       entityRefs: [
         consumableRef(id, 'updated', label),
         {
