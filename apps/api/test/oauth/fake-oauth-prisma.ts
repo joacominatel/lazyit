@@ -109,6 +109,14 @@ export class FakeOAuthPrisma {
           ? grants.length === 0
           : true;
       }
+      if (table === 'oAuthClient' && key === 'codes') {
+        const codes = this.tables.oAuthAuthorizationCode.filter(
+          (code) => code.clientRefId === row.id,
+        );
+        return (condition as Row).none !== undefined
+          ? codes.length === 0
+          : true;
+      }
       if (table === 'oAuthGrant' && key === 'user') {
         const owner = this.tables.user.find((user) => user.id === row.userId);
         return (
