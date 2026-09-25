@@ -87,6 +87,9 @@ Recorded events include:
 - **Status** changes — for example Operational → In maintenance.
 - **Location** and **Model** changes.
 - **Specs** changes — edits to custom fields.
+- **Updated** — edits to the asset's other details (name, serial, tag, notes, company, dates, cost); the
+  log records which fields were edited, never their old or new values, and the edit also shows in
+  [Reports](/help/notifications-activity-activity-reports).
 - **Assigned** and **Released** — ownership changes, naming the owner involved.
 - **Acknowledged** — an owner confirmed receipt of the asset checked out to them.
 - **Consumable delivered** and **Consumable returned** — supplies fitted to or left in the asset (a

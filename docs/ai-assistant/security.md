@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # AI Assistant — Security & Threat Model
@@ -349,7 +349,7 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 | T-39 | CH | I | Secret Manager plaintext decrypted in the browser leaks into chat context (e.g. "current page" context). | INV-AI-5: the client never sends decrypted vault content or DOM snapshots | v1 |
 | T-40 | CH | I | Injection steers the AI to author a persistent exfiltration integration: a `WEBHOOK_OUT`/`REST` connection to an attacker host plus an enabled workflow mapping grantee identity, which leaks on every future grant and outlives the conversation (§6.9). | Authoring is chat-only and `elevated`; `OUTBOUND_INTEGRATION` preview listing every host and mapped field; created disabled, enabling is its own approval with an embedded dry-run; `CRITICAL_APPLICATION` step-up; no SA authoring (ADR-0097 decision 3, amended) | v1 |
 | T-41 | CH | I | Credential exfiltration by re-pointing a secret-bearing connection to another host. | CSEC-1 (`workflow:secrets` to re-point or attach) runs through the route; the preview shows old → new host; secrets are reference-only, never read (§6.9) | v1 |
-| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | Authoring tools declare `channels: ['CHAT']`; MCP/headless authoring deferred (#1344); MCP and headless refuse writes on critical applications (`AI_CHANNEL_REFUSED_WARNINGS`) | v1 |
+| T-42 | HL, MCP | T, E | No-human authoring or enabling of an outbound integration by an SA or an MCP client, or any unconfirmed write on a critical application. | Authoring tools declare `channels: ['CHAT']`; MCP authoring deferred (#1344), headless authoring excluded for good (INV-AI-17); MCP and headless refuse writes on critical applications (`AI_CHANNEL_REFUSED_WARNINGS`) | v1 |
 
 ---
 
@@ -722,7 +722,7 @@ secret-bearing connection or attaching a secret needs `workflow:secrets` on top 
 **AI-level mitigations (the amendment):**
 - Authoring tools are `elevated` and `channels: ['CHAT']`: one action per approval, the untrusted-source
   banner, no default focus. No Service Account and no MCP client authors, connects or enables (T-42;
-  MCP/headless authoring deferred, #1344).
+  MCP authoring deferred, #1344; headless authoring excluded for good, INV-AI-17).
 - **`OUTBOUND_INTEGRATION`** on any proposal that creates a connection, changes its host, URL or
   credential reference, authors a version on an enabled workflow, or enables a workflow. The preview
   lists every outbound host and every mapped field → token ("what leaves lazyit"), and old → new host
@@ -795,6 +795,16 @@ Open items recorded by the G2 review of #1354 (W2-14):
   Service Account and no MCP client does it.
 - **INV-AI-16 — Workflow secrets are reference-only.** The AI never reads, sets or rotates a workflow
   secret value; it may state whether a connection has a credential configured.
+- **INV-AI-17 — A Service Account operates workflows, it never builds them.** Over headless, a Service
+  Account gets the workflow reads, run retry and replay, and the resolution of **unassigned** manual
+  tasks. It never authors a workflow or a version, never creates, changes, tests or archives a
+  connection, and never enables or disables a workflow. This is a CEO decision recorded in #1344, not a
+  deferral: headless authoring is excluded for good, whatever MCP authoring later becomes. As built:
+  every authoring tool declares `channels: ['CHAT']` (`ai/tools/workflow-authoring.tools.ts`), so core
+  hides it from the headless catalog and refuses to invoke or propose it there
+  (`ai/core/ai-tool.service.ts`, the channel checks and the human-only proposal rule); each tool also
+  re-checks chat + human in `preview` and `run` (`assertChatHuman`). A Service Account has no user id,
+  so `workflow_task_resolve` refuses any task with an assignee (`ai/tools/workflows.tools.ts`).
 
 ### 6.11 Provider-native web search (ADR-0097 decision 3, amended 2026-09-24 for #1389)
 

@@ -11,7 +11,13 @@ import type {
 } from '../../generated/prisma/client';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { redirectHost } from './client-policy';
+import { clientIdDomain } from './cimd/client-id-url';
+import {
+  isCimdListed,
+  redirectHost,
+  type ClientTrustPolicy,
+} from './client-policy';
+import { OAuthPolicyService } from './oauth-policy.service';
 import { OAuthTokenService } from './oauth-token.service';
 
 type GrantWithClient = OAuthGrantRow & { client: OAuthClient | null };
@@ -21,15 +27,29 @@ export type AdminOAuthGrant = OAuthGrant & { userId: string };
 
 const CUID_REGEX = /^c[a-z0-9]{20,32}$/;
 
-/** Map a row to the connected-apps wire shape (`OAuthGrantSchema`). Never carries a token or hash. */
-export function toOAuthGrantWire(grant: GrantWithClient): OAuthGrant {
+/**
+ * Map a row to the connected-apps wire shape (`OAuthGrantSchema`). Never carries a token or hash.
+ * `verified` follows the consent screen: only a CIMD client listed by URL on the allowlist (`policy`);
+ * without a policy nothing is verified.
+ */
+export function toOAuthGrantWire(
+  grant: GrantWithClient,
+  policy?: ClientTrustPolicy,
+): OAuthGrant {
+  const client = grant.client;
+  const isCimd = client !== null && client.kind !== 'dcr';
   const kind = OAuthGrantKindSchema.safeParse(grant.kind);
   const firstRedirect = grant.client?.redirectUris[0];
   return {
     id: grant.id,
     kind: kind.success ? kind.data : 'oauth',
-    client: grant.client
-      ? { name: grant.client.name, verified: grant.client.kind !== 'dcr' }
+    client: client
+      ? {
+          name: client.name,
+          verified:
+            isCimd && policy !== undefined && isCimdListed(client, policy),
+          verifiedDomain: isCimd ? clientIdDomain(client.clientId) : null,
+        }
       : null,
     label: grant.label,
     redirectHost: firstRedirect ? redirectHost(firstRedirect) : null,
@@ -58,6 +78,7 @@ export class GrantsService {
     private readonly prisma: PrismaService,
     private readonly permissions: PermissionResolverService,
     private readonly tokens: OAuthTokenService,
+    private readonly policy: OAuthPolicyService,
   ) {}
 
   async listMine(user: User): Promise<OAuthGrant[]> {
@@ -71,7 +92,8 @@ export class GrantsService {
       include: { client: true },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map(toOAuthGrantWire);
+    const policy = await this.policy.mcpSettings();
+    return rows.map((row) => toOAuthGrantWire(row, policy));
   }
 
   async listForAdmin(userId: string | undefined): Promise<AdminOAuthGrant[]> {
@@ -85,9 +107,10 @@ export class GrantsService {
       include: { client: true, user: { select: { mcpCredentialEpoch: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    const policy = await this.policy.mcpSettings();
     return rows
       .filter((row) => row.mcpCredentialEpoch === row.user.mcpCredentialEpoch)
-      .map((row) => ({ ...toOAuthGrantWire(row), userId: row.userId }));
+      .map((row) => ({ ...toOAuthGrantWire(row, policy), userId: row.userId }));
   }
 
   /**

@@ -22,6 +22,9 @@ export function buildAuthorizationServerMetadata(config: OAuthServerConfig) {
     revocation_endpoint_auth_methods_supported: ['none'],
     scopes_supported: [...OAUTH_SCOPES],
     authorization_response_iss_parameter_supported: true,
+    // CIMD (W3-3): an https `client_id` is fetched as a Client ID Metadata Document. Claude picks CIMD only
+    // when this is true AND "none" is an accepted token endpoint auth method (above).
+    client_id_metadata_document_supported: true,
   };
 }
 

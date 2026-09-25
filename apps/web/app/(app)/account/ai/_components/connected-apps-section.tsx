@@ -34,6 +34,7 @@ import {
   useRevokeOAuthGrant,
 } from "@/lib/api/hooks/use-oauth-grants";
 import { notifyError } from "@/lib/api/notify-error";
+import { clientDomain } from "@/lib/ai/client-domain";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { scopeMessageKey } from "../_lib/scope-labels";
 import { PersonalTokenDialog } from "./personal-token-dialog";
@@ -146,6 +147,8 @@ function GrantRow({ grant }: { grant: OAuthGrant }) {
     ? (grant.label ?? t("unnamedToken"))
     : (grant.client?.name ?? t("unknownApp"));
   const Icon = isPersonal ? KeyIcon : CommandLineIcon;
+  // The name is self-declared; the domain (CIMD clients, newer API) is what lazyit proved — shown apart.
+  const domain = isPersonal ? null : clientDomain(grant.client?.verifiedDomain);
 
   function onRevoke() {
     revoke.mutate(grant.id, {
@@ -173,6 +176,12 @@ function GrantRow({ grant }: { grant: OAuthGrant }) {
               <StatusBadge tone="warning">{t("unverified")}</StatusBadge>
             ) : null}
           </p>
+          {domain ? (
+            <p className="text-xs text-muted-foreground">
+              {t("domain")}{" "}
+              <span className="font-mono font-medium break-all text-foreground">{domain}</span>
+            </p>
+          ) : null}
           {grant.redirectHost ? (
             <p className="text-xs text-muted-foreground">
               {t("redirectHost")}{" "}

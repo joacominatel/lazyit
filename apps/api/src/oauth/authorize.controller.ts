@@ -43,10 +43,13 @@ export class AuthorizeController {
   async validate(
     @Body() body: unknown,
     @CurrentPrincipal() principal: Principal | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<OAuthAuthorizeValidation> {
     res.setHeader('Cache-Control', 'no-store');
-    return this.authorization.validate(principal, body);
+    return this.authorization.validate(principal, body, {
+      ip: req.ip ?? null,
+    });
   }
 
   @Post('decision')
