@@ -369,7 +369,10 @@ const writeToolset: AiToolset = {
             ...(appState.critical ? ['CRITICAL_APPLICATION'] : []),
             ...(appState.notifies ? ['NOTIFIES_USERS'] : []),
           ],
-          impacted: [],
+          impacted:
+            appState.impact > 0
+              ? [{ type: 'asset' as const, count: appState.impact, sample: [] }]
+              : [],
           untrustedSources: [],
           elevated: false,
           stepUpRequired: false,
@@ -380,7 +383,7 @@ const writeToolset: AiToolset = {
 };
 
 /** Mutable fixture state read by `thing_app_write`'s preview. */
-const appState = { critical: false, notifies: false };
+const appState = { critical: false, notifies: false, impact: 0 };
 
 /** A fixture write whose run renames `t1` and whose preview is exactly `preview` (defaults: no warning). */
 function previewFixture(
@@ -671,6 +674,7 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
   beforeEach(() => {
     appState.critical = false;
     appState.notifies = false;
+    appState.impact = 0;
     users = {
       [ID.member]: user(ID.member, 'MEMBER'),
       [ID.other]: user(ID.other, 'MEMBER'),
@@ -1561,6 +1565,57 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
           },
         });
         expect(updates).toBe(0);
+        const approved = await tools.approve(action.id, chat(human(ID.member)));
+        expect(approved.status).toBe('SUCCEEDED');
+      });
+
+      it('an impact count that moved since propose refreshes the card and asks for a new review (#1315)', async () => {
+        appState.impact = 2;
+        const action = await proposeOk('thing_app_write');
+        expect(action.preview?.impacted).toEqual([
+          { type: 'asset', count: 2, sample: [] },
+        ]);
+        appState.impact = 5;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'PREVIEW_CHANGED', addedWarnings: [] },
+        });
+        expect(updates).toBe(0);
+        const row = invocations.get(action.id)!;
+        expect(row.status).toBe('AWAITING_APPROVAL');
+        // The card re-renders with the count that is true now.
+        expect(row.preview).toMatchObject({
+          impacted: [{ type: 'asset', count: 5, sample: [] }],
+          warnings: [],
+          stepUpRequired: false,
+        });
+        expect(events(action.id)).toEqual(['PROPOSED']);
+        // Decided again on the refreshed card, it executes.
+        const approved = await tools.approve(action.id, chat(human(ID.member)));
+        expect(approved.status).toBe('SUCCEEDED');
+        expect(updates).toBe(1);
+      });
+
+      it('an impact that disappeared since propose is a changed card too', async () => {
+        appState.impact = 3;
+        const action = await proposeOk('thing_app_write');
+        appState.impact = 0;
+        await expect(
+          tools.approve(action.id, chat(human(ID.member))),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'PREVIEW_CHANGED' },
+        });
+        expect(invocations.get(action.id)!.preview).toMatchObject({
+          impacted: [],
+        });
+      });
+
+      it('an unchanged impact count approves at once', async () => {
+        appState.impact = 4;
+        const action = await proposeOk('thing_app_write');
         const approved = await tools.approve(action.id, chat(human(ID.member)));
         expect(approved.status).toBe('SUCCEEDED');
       });

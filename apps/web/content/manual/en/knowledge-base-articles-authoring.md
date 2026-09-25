@@ -34,6 +34,10 @@ actions ride in a bar that **stays in reach** as you scroll a long article. Fenc
 syntax-highlighted on the published page, each with a copy button, and a ` ```mermaid ` block renders
 as a diagram. You write raw Markdown; the formatting appears when the article is viewed.
 
+Diagrams use Mermaid's current look: automatic layout and a coloured theme that follows light and
+dark mode. Diagrams written before an update render with the new layout, so they can look different
+even though their source is unchanged.
+
 If a code block's fence has **no language** marker, lazyit makes a best-effort guess at display time
 and labels it **auto** (for example, ` ```def sum(a, b): return a + b``` ` is highlighted as Python).
 An explicit language on the fence always wins, and an ambiguous block is left as plain text rather

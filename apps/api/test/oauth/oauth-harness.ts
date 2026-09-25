@@ -10,6 +10,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Permission } from '@lazyit/shared';
 import { PrincipalLoaderService } from '../../src/auth/principal-loader.service';
 import type { HumanPrincipal } from '../../src/auth/principal';
+import { PasswordStepUpVerifier } from '../../src/auth/local/password-step-up.verifier';
 import { AuthorizationService } from '../../src/oauth/authorization.service';
 import { CimdClientService } from '../../src/oauth/cimd/cimd-client.service';
 import { ClientRegistrationService } from '../../src/oauth/client-registration.service';
@@ -37,6 +38,8 @@ export interface Harness {
   /** Permissions per role; MEMBER holds ai:connect unless a test removes it. */
   rolePermissions: Map<string, Set<Permission>>;
   credentials: { verify: jest.Mock };
+  /** The shared password step-up primitive (SEC-082) over {@link credentials}. */
+  stepUp: PasswordStepUpVerifier;
 }
 
 export function buildHarness(): Harness {
@@ -75,11 +78,12 @@ export function buildHarness(): Harness {
       throw new Error('network disabled in tests');
     },
   };
+  const stepUp = new PasswordStepUpVerifier(credentials as any);
   const authorization = new AuthorizationService(
     db,
     policy,
     subjects,
-    credentials as any,
+    stepUp,
     audit,
     cimd,
   );
@@ -96,6 +100,7 @@ export function buildHarness(): Harness {
     cimd,
     rolePermissions,
     credentials,
+    stepUp,
   };
 }
 

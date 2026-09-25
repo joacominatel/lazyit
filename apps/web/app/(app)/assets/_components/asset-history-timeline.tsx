@@ -13,6 +13,10 @@ import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
+import {
+  formatChangedFields,
+  parseUpdatedPayload,
+} from "./asset-history-updated";
 
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
@@ -146,6 +150,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   } = useAssetHistory(assetId);
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
+  const tForm = useTranslations("assets.form");
   const { dateTime, relative } = useFormatters();
 
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
@@ -202,6 +207,31 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     });
   }
 
+  /**
+   * The UPDATED line (#1382): "Changed: Name, Notes" from the `{ fields }` payload (names only, never
+   * values), labelled with the asset form's own field labels, an unknown name shown raw. A re-import row
+   * (`source: 'import'`, #1061) adds "via re-import"; a legacy row with no `fields` keeps the neutral line.
+   */
+  function updatedDetail(payload: unknown): ReactNode {
+    const { fields, viaImport } = parseUpdatedPayload(payload);
+    const list = formatChangedFields(fields, (field) => tForm(field));
+    const main = list
+      ? t("details.updatedFields", { count: fields.length, fields: list })
+      : viaImport
+        ? t("details.updatedViaImport")
+        : t("details.updated");
+    if (!list || !viaImport) return main;
+    return (
+      <>
+        {main}
+        <span className="text-muted-foreground">
+          {" · "}
+          {t("details.viaImport")}
+        </span>
+      </>
+    );
+  }
+
   /** Contextual detail for an event (the type itself is shown as a badge). */
   function detail(event: AssetHistory): ReactNode {
     const payload = event.payload ?? {};
@@ -218,7 +248,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
       case "CREATED":
         return t("details.created");
       case "UPDATED":
-        return t("details.updated");
+        return updatedDetail(event.payload);
       case "LOCATION_CHANGED":
         return t("details.locationChanged");
       case "MODEL_CHANGED":

@@ -120,9 +120,10 @@ cualquier caso.
 ## Cuando la tarjeta cambia
 
 lazyit revisa el cambio de nuevo en el momento en que aprobás. Si algo cambió desde que se mostró la tarjeta
-— por ejemplo, la aplicación se marcó como crítica mientras tanto — no se aplica nada. La tarjeta se
-actualiza, las advertencias nuevas se resaltan con la etiqueta **Nuevo**, y te pide la contraseña si ahora la
-necesita. Revisala y decidí de nuevo.
+— por ejemplo, la aplicación se marcó como crítica mientras tanto, o ahora hay más activos que usan la
+categoría que archiva — no se aplica nada. La tarjeta se actualiza (con las cantidades de ahora), las
+advertencias nuevas se resaltan con la etiqueta **Nuevo**, y te pide la contraseña si ahora la necesita.
+Revisala y decidí de nuevo.
 
 Otras cosas que podés ver:
 
@@ -207,8 +208,9 @@ instancia:
   [aprobación automática](#aprobación-automática) nunca la saltea. Las etiquetas existentes nunca se
   reescriben.
 
-Solo los administradores pueden ver o cambiar el esquema; para el resto, el asistente simplemente deja que
-lazyit asigne la etiqueta.
+Cualquiera que pueda crear activos puede hacer que el asistente lea el esquema (el patrón y la próxima
+etiqueta), así también lo sigue para esa persona; solo los administradores pueden cambiarlo. Para quien no
+puede crear activos, el asistente simplemente deja que lazyit asigne la etiqueta.
 
 ## Aprobación automática
 

@@ -25,7 +25,7 @@ import {
 import type { AiExecutionContext } from '../core/tool-descriptor';
 import { toolResultEvent } from './agent-loop';
 import { AiRunLifecycle } from './run-lifecycle';
-import { AiStepUpVerifier } from './step-up.verifier';
+import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
 import { describeError } from './runtime.constants';
 
 export interface AiDecisionInput {
@@ -80,7 +80,7 @@ export class AiApprovalService {
     private readonly prisma: PrismaService,
     private readonly tools: AiToolService,
     private readonly loader: PrincipalLoaderService,
-    private readonly stepUp: AiStepUpVerifier,
+    private readonly stepUp: PasswordStepUpVerifier,
     private readonly lifecycle: AiRunLifecycle,
     @Inject(AI_SETTINGS_READER) private readonly settings: AiSettingsReader,
   ) {}

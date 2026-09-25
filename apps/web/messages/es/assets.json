@@ -322,6 +322,9 @@
       "details": {
         "created": "Activo creado",
         "updated": "Datos actualizados",
+        "updatedFields": "{count, plural, one {Cambió} other {Cambiaron}}: {fields}",
+        "updatedViaImport": "Actualizado por reimportación",
+        "viaImport": "por reimportación",
         "locationChanged": "Ubicación actualizada",
         "modelChanged": "Modelo actualizado",
         "specsChanged": "Especificaciones actualizadas",

@@ -91,8 +91,10 @@ Los eventos registrados incluyen:
 - Cambios de **Ubicación** y **Modelo**.
 - Cambios de **Specs** — ediciones de los campos personalizados.
 - **Actualizado** — ediciones de los demás datos del activo (nombre, serie, etiqueta, notas, empresa,
-  fechas, costo); el registro guarda qué campos se editaron, nunca sus valores anteriores ni nuevos, y la
-  edición también aparece en [Informes](/help/notifications-activity-activity-reports).
+  fechas, costo); la entrada enumera qué campos se editaron — por ejemplo *Cambiaron: Nombre, Notas* —,
+  nunca sus valores anteriores ni nuevos, y marca *por reimportación* una edición que vino de una
+  reimportación. Las entradas registradas antes de esta lista dicen *Datos actualizados*. La edición
+  también aparece en [Informes](/help/notifications-activity-activity-reports).
 - **Asignado** y **Liberado** — cambios de pertenencia, nombrando al responsable involucrado.
 - **Confirmado** — un responsable confirmó la recepción del activo entregado a él.
 - **Consumible entregado** y **Consumible devuelto** — insumos colocados o dejados en el activo (un

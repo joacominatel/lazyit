@@ -475,6 +475,62 @@ describe('/mcp authentication matrix', () => {
       warn.mockRestore();
     });
 
+    // SEC-083: the pre-auth scan is bounded — a few well-formed candidates, one query, behind the IP limiter.
+    const tokenLookups = () =>
+      h.prisma.oAuthToken.findUnique.mock.calls.length +
+      h.prisma.oAuthToken.findMany.mock.calls.length;
+    const fakePat = (i: number) =>
+      `lzit_pat_${String(i).padStart(43, 'A')}`.slice(0, 9 + 43);
+
+    it('bounds the query-token scan: 200 values cost at most one lookup, even while MCP is off (SEC-083)', async () => {
+      enableMcp(h, { mcpEnabled: false });
+      const query = Array.from(
+        { length: 200 },
+        (_, i) => `token=${fakePat(i)}`,
+      ).join('&');
+      h.prisma.oAuthToken.findUnique.mockClear();
+      h.prisma.oAuthToken.findMany.mockClear();
+      await withQuery(query).expect(404);
+      expect(tokenLookups()).toBeLessThanOrEqual(1);
+      const looked = h.prisma.oAuthToken.findMany.mock.calls.at(0)?.[0] as any;
+      expect(looked?.where.tokenHash.in.length ?? 0).toBeLessThanOrEqual(4);
+    });
+
+    it('never looks up a value that is not token-shaped (SEC-083)', async () => {
+      h.prisma.oAuthToken.findUnique.mockClear();
+      h.prisma.oAuthToken.findMany.mockClear();
+      await withQuery(
+        'token=lzit_pat_1&token=lzit_oat_short&access_token=lzit_ort_' +
+          '!'.repeat(43),
+      ).expect(400);
+      expect(tokenLookups()).toBe(0);
+    });
+
+    it('still revokes a real exposed token sent alongside malformed junk (SEC-083)', async () => {
+      const user = seedUser(h);
+      const token = await oauthAccessToken(user);
+      const junk = Array.from(
+        { length: 50 },
+        (_, i) => `token=lzit_pat_${i}`,
+      ).join('&');
+      await withQuery(`${junk}&access_token=${token}`).expect(400);
+      expect(h.prisma.tables.oAuthGrant[0]).toMatchObject({
+        revokeReason: 'token_exposed',
+      });
+    });
+
+    it('charges the per-IP limiter and skips the scan once the address is over it (SEC-083)', async () => {
+      for (let i = 0; i < 30; i += 1) {
+        await withQuery(`token=${fakePat(i)}`).expect(400);
+      }
+      h.prisma.oAuthToken.findUnique.mockClear();
+      h.prisma.oAuthToken.findMany.mockClear();
+      await withQuery(`token=${fakePat(99)}`).expect(400);
+      expect(tokenLookups()).toBe(0);
+      // A query credential is a refused authentication: the bearer path is blocked too.
+      await list('lzit_oat_wrong').expect(429);
+    });
+
     it('accepts the Bearer scheme case-insensitively', async () => {
       const user = seedUser(h);
       const token = await oauthAccessToken(user);

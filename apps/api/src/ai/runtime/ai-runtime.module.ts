@@ -18,7 +18,6 @@ import { AiRunPrincipals } from './principal-context';
 import { InProcessRunEventBus } from './run-event-bus';
 import { AiRunLifecycle } from './run-lifecycle';
 import { AiRunQueue } from './run-queue';
-import { AiStepUpVerifier } from './step-up.verifier';
 
 /**
  * The agent runtime (ADR-0097 decisions 4–6; provider-and-runtime.md §6–§8; synthesis §4.4, §4.6): the
@@ -27,7 +26,7 @@ import { AiStepUpVerifier } from './step-up.verifier';
  *
  * Imports the tool core (`AiToolService`, the registry), the provider layer (`CHAT_MODEL_PORT`), the
  * settings reader (`AI_SETTINGS_READER`) and the prompt builder. `PrismaService`, the principal loader,
- * the permission resolver and the local credential verifier come from the global Prisma and Auth
+ * the permission resolver and the password step-up verifier come from the global Prisma and Auth
  * modules; the BullMQ connection from the global `QueueModule`.
  *
  * Exports what the HTTP surfaces (W3-1) call — the orchestrator, the approval service — and the event
@@ -53,7 +52,6 @@ import { AiStepUpVerifier } from './step-up.verifier';
     AiRunLifecycle,
     AgentLoop,
     AgentRunOrchestrator,
-    AiStepUpVerifier,
     AiApprovalService,
     AiInputRequests,
     AiInputService,

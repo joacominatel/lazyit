@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import type { User } from '../../../generated/prisma/client';
-import { LocalCredentialService } from '../../auth/local/local-credential.service';
-import {
-  AI_STEP_UP_BASE_DELAY_MS,
-  AI_STEP_UP_FAILURE_THRESHOLD,
-  AI_STEP_UP_MAX_DELAY_MS,
-  AI_STEP_UP_RESET_AFTER_MS,
-} from './runtime.constants';
+import { LocalCredentialService } from './local-credential.service';
+
+/** Step-up backoff (the `LoginService` policy, ADR-0086 §3): no delay for the first N failures. */
+export const STEP_UP_FAILURE_THRESHOLD = 5;
+export const STEP_UP_BASE_DELAY_MS = 1_000;
+export const STEP_UP_MAX_DELAY_MS = 15 * 60 * 1000;
+/** A cooled-down step-up record is forgotten after this long. */
+export const STEP_UP_RESET_AFTER_MS = 60 * 60 * 1000;
 
 export type StepUpResult =
   | { ok: true }
@@ -22,8 +23,11 @@ interface AttemptRecord {
 const MAX_TRACKED = 10_000;
 
 /**
- * The password STEP-UP for elevated approvals (ADR-0097 decision 4; security.md §6.2; tools §9 "Boundary":
- * the runtime verifies it before calling core's `approve(…, { stepUpVerified: true })`).
+ * The ONE password STEP-UP primitive (SEC-082): the chat's elevated approvals (ADR-0097 decision 4;
+ * security.md §6.2; tools §9 "Boundary": the runtime verifies it before calling core's
+ * `approve(…, { stepUpVerified: true })`) and the OAuth consent's `lazyit.admin` grant (security.md §6.3)
+ * both call it. Provided once by the global `AuthModule`, so a single per-account backoff covers every
+ * step-up surface: failures at the consent lock the chat approvals too, and the other way round.
  *
  * The password is checked by the local-auth verifier itself — `LocalCredentialService.verify` (argon2id,
  * constant-time, fail-closed on a missing hash, oversized input refused before the KDF) — against the
@@ -32,16 +36,16 @@ const MAX_TRACKED = 10_000;
  * Brute force: at most ONE verification in flight per user (a concurrent attempt is answered `locked`
  * without reaching the KDF), and every attempt is counted as a failure before the KDF runs (cleared by a
  * success) — then the `LoginService` per-account policy (ADR-0086 §3), mirrored here because that service's
- * backoff map is private to the login flow: no delay for the first {@link AI_STEP_UP_FAILURE_THRESHOLD}
+ * backoff map is private to the login flow: no delay for the first {@link STEP_UP_FAILURE_THRESHOLD}
  * failures, then an exponential lock from 1 s up to 15 min, keyed by the user id, cleared by a success.
  * In-memory and per-process, like the login backoff. The caller is already authenticated, so a lock
  * answers `locked` openly (no enumeration concern).
  *
  * Outside `AUTH_MODE=local` there is no lazyit password to confirm: step-up is `unavailable` and the
- * action cannot be approved (fail closed).
+ * action cannot be approved or granted (fail closed).
  */
 @Injectable()
-export class AiStepUpVerifier {
+export class PasswordStepUpVerifier {
   private readonly attempts = new Map<string, AttemptRecord>();
   /** Users with a verification running now (at most one per user). */
   private readonly inFlight = new Set<string>();
@@ -92,20 +96,17 @@ export class AiStepUpVerifier {
     if (
       record &&
       record.lockedUntil !== 0 &&
-      now - record.lockedUntil > AI_STEP_UP_RESET_AFTER_MS
+      now - record.lockedUntil > STEP_UP_RESET_AFTER_MS
     ) {
       record = undefined;
     }
     record ??= { count: 0, lockedUntil: 0 };
     record.count += 1;
-    if (record.count > AI_STEP_UP_FAILURE_THRESHOLD) {
-      const over = record.count - AI_STEP_UP_FAILURE_THRESHOLD;
+    if (record.count > STEP_UP_FAILURE_THRESHOLD) {
+      const over = record.count - STEP_UP_FAILURE_THRESHOLD;
       record.lockedUntil =
         now +
-        Math.min(
-          AI_STEP_UP_BASE_DELAY_MS * 2 ** (over - 1),
-          AI_STEP_UP_MAX_DELAY_MS,
-        );
+        Math.min(STEP_UP_BASE_DELAY_MS * 2 ** (over - 1), STEP_UP_MAX_DELAY_MS);
     }
     this.attempts.set(userId, record);
     if (this.attempts.size > MAX_TRACKED) {

@@ -465,8 +465,9 @@ apps/api/src/common/crypto/envelope-cipher.ts   # generic AES-256-GCM envelope k
 ```
 
 As built, the runtime's files differ from the sketch above: `system-prompt.ts` lives in `ai/prompt/`, and
-the runtime adds `run-lifecycle.ts`, `run-records.ts`, `run-queue.ts`, `step-up.verifier.ts` and
-`runtime.constants.ts` — the table is in §8.1.
+the runtime adds `run-lifecycle.ts`, `run-records.ts`, `run-queue.ts` and `runtime.constants.ts` — the
+table is in §8.1. The password step-up it calls is `auth/local/password-step-up.verifier.ts`
+(`PasswordStepUpVerifier`, provided by the global `AuthModule` and shared with the OAuth consent — SEC-082).
 
 `packages/shared/src/schemas/` holds **contracts only**: `ai-provider.ts` (provider kinds and
 descriptors), `ai-settings.ts`, `ai-run.ts` (run, conversation and approval wire shapes plus the SSE
@@ -494,7 +495,7 @@ webSearchTool?(maxUses), toolStrict? }` in
 only the wording a status code cannot tell apart. Failures are thrown as `AiProviderError` (`code` is an
 `AI_RUN_ERROR_CODES` value: `AI_DISABLED`, `PROVIDER_AUTH`, `PROVIDER_RATE_LIMIT` with `retryAfterSec`,
 `PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `CONTEXT_LIMIT`, `EGRESS_DENIED`, `CANCELLED`,
-`CONVERSATION_READ_ONLY`), with a fixed message and no `cause`; it lives in `ai-provider.error.ts`, which
+`CONVERSATION_READ_ONLY`, `WEB_SEARCH_DISABLED`), with a fixed message and no `cause`; it lives in `ai-provider.error.ts`, which
 imports nothing from the SDK, so the runtime can catch it without pulling `ai` into its graph. A refusal
 is not an error: it comes back as the step's `finishReason` (`content-filter`) and the runtime decides.
 
@@ -586,6 +587,18 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
     provider tool with function declarations and would drop lazyit's tools (it only warns). The
     Gemini-3 rule mirrors the SDK's own model detection.
   - OpenAI-compatible — none.
+  - **Web search disabled at the provider (#1315, follow-up of #1389).** An account can turn the
+    provider's search off: Anthropic per organization in the Claude Console (the request then fails with a
+    400 `invalid_request_error` saying web search is not enabled, not with an error inside a search
+    result), OpenAI per organization / project through its hosted-tool permissions (an
+    `invalid_request_error` such as "Web Search tool is not enabled for this organization"). A step that
+    **carried** the search tool and fails with a 4xx (not 429) whose upstream text says web search is not
+    enabled / disabled / not allowed is classified `WEB_SEARCH_DISABLED` (`classifyProviderError(…,
+    { webSearch: true })`, checked before the 401/403 → `PROVIDER_AUTH` mapping) instead of the generic
+    `PROVIDER_BAD_REQUEST`; the run fails with it and the web tells the user an administrator must enable
+    web search at the provider or turn it off in Settings → AI. The same text on a step without the tool,
+    or a model that does not *support* the tool ("… is not supported with …"), stays a bad request. The
+    upstream text is read only to classify, as for every other code; the error keeps its fixed message.
 
   The step result drops provider-executed calls from `toolCalls` (lazyit never answers them) and reports
   `webSearch = { searches, queries, sources }` (`webSearchOf`: provider-executed calls of the search tool,
@@ -987,7 +1000,7 @@ Invariants [C]:
 | `agent-loop.ts` | the loop (`advance(runId)`): claim QUEUED → RUNNING, guardrails, one `ChatModelPort.step` per iteration, resolve every call, pause or continue |
 | `agent-run.worker.ts` | `@Processor('ai-run')`, concurrency `AI_WORKER_CONCURRENCY` (default 4, max 16); `start` and `resume` both call `advance`; never rethrows |
 | `agent-run.sweeper.ts` | the reconciler (every 30 s, off under `NODE_ENV=test`) |
-| `approval.service.ts` + `step-up.verifier.ts` | the runtime side of a decision, with the password step-up |
+| `approval.service.ts` | the runtime side of a decision, with the password step-up (`auth/local/password-step-up.verifier.ts`, shared with the OAuth consent — SEC-082) |
 | `run-lifecycle.ts` | events, append-only rows, answering a step, terminal transitions, the resume hand-off |
 | `principal-context.ts` | re-load and re-authorize the principal (`ai:use`, the per-SA setting, `infra:report`) |
 | `limits.ts` | budget and context queries, token buckets, tool-output cap, turn-context neutralization, toolset hash |
@@ -1131,7 +1144,8 @@ approval whose stored preview requires step-up (core's `requiresStepUp`) needs t
 against the current hash — at most one verification in flight per user (a concurrent attempt is answered
 429 without reaching the KDF) and each attempt counted as a failure before the KDF runs (cleared by a
 success), so a burst of concurrent guesses is one guess; wrong → 403 `STEP_UP_FAILED`; after 5 failures an exponential lock from 1 s to
-15 min (the `LoginService` policy, per user, in memory) → 429 `STEP_UP_RATE_LIMITED` with
+15 min (the `LoginService` policy, per user, in memory; ONE counter shared with the OAuth consent's
+`lazyit.admin` step-up, SEC-082) → 429 `STEP_UP_RATE_LIMITED` with
 `retryAfterSec`; outside `AUTH_MODE=local` → 403 `STEP_UP_UNAVAILABLE` (no lazyit password exists: such
 actions cannot be approved from the chat — fail closed). Only a verified password calls core's
 `approve(…, { stepUpVerified: true })`; a missing or wrong one never consumes the action. A password sent

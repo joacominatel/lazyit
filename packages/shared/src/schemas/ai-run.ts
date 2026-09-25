@@ -158,6 +158,9 @@ export const AI_RUN_ERROR_CODES = [
   "RUN_IN_PROGRESS",
   "CONVERSATION_READ_ONLY",
   "STEP_UP_REQUIRED",
+  // The provider refused its server-side web search tool: disabled for the organization / project
+  // (#1315, follow-up of #1389). Added after the original set: a web without it renders it generically.
+  "WEB_SEARCH_DISABLED",
 ] as const;
 export const AiRunErrorCodeSchema = z.enum(AI_RUN_ERROR_CODES);
 export type AiRunErrorCode = z.infer<typeof AiRunErrorCodeSchema>;

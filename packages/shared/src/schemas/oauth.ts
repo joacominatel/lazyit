@@ -87,6 +87,12 @@ export const OAUTH_AUDIT_ACTIONS = [
   "CLIENT_METADATA_FETCHED",
   /** A CIMD client's metadata document could not be fetched or was invalid (`detail.reason`). */
   "CLIENT_METADATA_REFUSED",
+  /**
+   * The `lazyit.admin` password step-up at consent was refused (SEC-082): `detail.reason` is `invalid`
+   * (wrong password) or `locked` (the shared per-account step-up backoff, with `retryAfterSec`). Never
+   * the password.
+   */
+  "CONSENT_STEP_UP_FAILED",
 ] as const;
 export const OAuthAuditActionSchema = z.enum(OAUTH_AUDIT_ACTIONS);
 export type OAuthAuditAction = z.infer<typeof OAuthAuditActionSchema>;
