@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # Security summary
@@ -96,8 +96,24 @@ Snapshot of the security review. Updated each sweep. Method:
    authorizes on its own Bearer. **✅ Closed the same day**: upgraded to beta.32, and every server-side
    guard now requires `session.user` through `hasSession()`.
 
-Frontend (`apps/web`) and dependency auditing remain **out of scope** for the sweeps. SEC-079 is a
-one-off dependency triage.
+11. **2026-09-25 — AI assistant, MCP and OAuth integrated review (epic #1315, W4-2).** Gates G1–G4
+   re-run over the integrated feature on `origin/dev` 8012f468, plus a sweep of `apps/api/src/{ai,oauth,mcp}`
+   and the web surfaces that render model or untrusted content → [[sweep-2026-09-25-ai-assistant]]. G1 and
+   G4 pass; G2 and G3 pass with findings. Four new findings:
+   [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools\|SEC-080]] (**Medium**): the chat's
+   untrusted-source marker is keyed on `entityRefs`, which real read tools never return. A write
+   proposed in the same turn after reading a KB article, a search hit or an asset note therefore shows
+   no banner and is auto-approved. The documents say this case is closed.
+   [[SEC-081-sa-mutation-cap-counts-batch-as-one\|SEC-081]] (**Low**): the per-SA AI mutation cap
+   counts calls, so a 200-row batch counts as one change.
+   [[SEC-082-oauth-consent-admin-step-up-no-backoff\|SEC-082]] (**Low**): the `lazyit.admin` consent
+   step-up has only a 10-per-minute window, no per-account backoff, and no audit of failures.
+   [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] (**Low**): the `/mcp` query-token
+   revocation runs one DB lookup per value, unbounded, before the MCP-off 404 and the IP limiter.
+
+Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
+one-off dependency triage, and sweep 11 covered only the AI web surfaces (chat renderer, approval cards,
+consent page, `/account/ai`).
 
 ## Counts by severity (open)
 
@@ -105,10 +121,10 @@ one-off dependency triage.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 0 |
-| Low | 11 |
+| Medium | 1 |
+| Low | 14 |
 | Info | 0 |
-| **Total open** | **11** |
+| **Total open** | **15** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -128,9 +144,18 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
+| [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools\|SEC-080]] | 🟠 Medium | ai (runtime) | Untrusted-source tracking never fires for real read tools: no banner, and same-turn writes auto-approved |
+| [[SEC-081-sa-mutation-cap-counts-batch-as-one\|SEC-081]] | 🟡 Low | ai (headless / mcp) | Per-SA AI mutation cap counts a 200-row batch as one change |
+| [[SEC-082-oauth-consent-admin-step-up-no-backoff\|SEC-082]] | 🟡 Low | oauth | `lazyit.admin` consent step-up: no per-account backoff, failures not audited |
+| [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] | 🟡 Low | mcp | `/mcp` query-token scan: unbounded DB lookups before the MCP-off 404 and the IP limiter |
 
 ## Top findings
 
+0. **SEC-080 🟠 Open (Medium): fix before ADR-0097 is accepted.** The auto-approve eligibility rule
+   (INV-AI-3 as amended) and the CEO's #1409 decision to include untrusted-source proposals in "Approve
+   all" both depend on the untrusted-source banner. Today the banner appears only for web search and
+   the three `workflow_*_get` reads. Fix: derive the marker from the `<untrusted_content>` tag alone, and
+   add a test that uses a real read tool.
 0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
    web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):
