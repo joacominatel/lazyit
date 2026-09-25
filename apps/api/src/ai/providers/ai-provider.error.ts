@@ -16,6 +16,7 @@ export type AiProviderErrorCode = Extract<
   | 'CONTEXT_LIMIT'
   | 'CANCELLED'
   | 'CONVERSATION_READ_ONLY'
+  | 'WEB_SEARCH_DISABLED'
 >;
 
 /** The fixed, user-safe message per code. Never the upstream body, a header or the key (security §6.5). */
@@ -31,6 +32,8 @@ const MESSAGES: Record<AiProviderErrorCode, string> = {
   CANCELLED: 'The model call was cancelled.',
   CONVERSATION_READ_ONLY:
     'The conversation belongs to a different provider configuration.',
+  WEB_SEARCH_DISABLED:
+    'The AI provider refused web search: it is disabled for this account. Enable web search at the provider, or turn it off in Settings → AI.',
 };
 
 /**

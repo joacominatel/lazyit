@@ -724,6 +724,7 @@ describe('refusal and provider errors', () => {
     ['PROVIDER_UNAVAILABLE', undefined],
     ['PROVIDER_BAD_REQUEST', undefined],
     ['EGRESS_DENIED', undefined],
+    ['WEB_SEARCH_DISABLED', undefined],
   ] as const)(
     '%s is surfaced as the run error',
     async (code, retryAfterSec) => {

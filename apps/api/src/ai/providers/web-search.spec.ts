@@ -15,9 +15,12 @@ import { googleProvider } from './google/google.provider';
 import { webSearchOf, webSearchToolFor } from './model-step';
 import { openaiCompatibleProvider } from './openai-compatible/openai-compatible.provider';
 import { openaiProvider } from './openai/openai.provider';
+import { AiProviderError } from './ai-provider.error';
+import { isWebSearchDisabled } from './provider-errors';
 import {
   SEARCH_TOOL,
   chatModelFor,
+  jsonResponse,
   providerConfig,
   scriptedFetch,
   stepRequest,
@@ -284,5 +287,99 @@ describe('runModelStep with web search (Anthropic, SDK mock model)', () => {
       stepRequest(config, { webSearch: { maxUses: 4 } }),
     );
     expect(result.paused).toBe(true);
+  });
+});
+
+/**
+ * Web search disabled at the provider (#1315, follow-up of #1389): the provider refuses a request that
+ * carries its search tool because the account turned it off. The run ends with a specific code telling
+ * the admin what to do, not a generic bad request. Bodies recorded from the providers' documented shapes;
+ * no live call.
+ */
+describe('web search disabled at the provider', () => {
+  // Anthropic: a 400 invalid_request_error "that says web search is not enabled" (web-search-tool docs).
+  const anthropicDisabled = () =>
+    jsonResponse(400, {
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message: 'Web search is not enabled for this organization.',
+      },
+      request_id: 'req_011CWebSearchOff',
+    });
+  // OpenAI: a hosted tool denied by the organization / project hosted-tool permissions.
+  const openaiDisabled =
+    (status = 400) =>
+    () =>
+      jsonResponse(status, {
+        error: {
+          message: 'Web Search tool is not enabled for this organization.',
+          type: 'invalid_request_error',
+          param: 'tools',
+          code: null,
+        },
+      });
+
+  async function stepError(
+    config: ReturnType<typeof providerConfig>,
+    responder: () => Response,
+    webSearch: boolean,
+  ): Promise<AiProviderError> {
+    const { fetch } = scriptedFetch([responder]);
+    try {
+      await chatModelFor(config, fetch).step(
+        stepRequest(config, webSearch ? { webSearch: { maxUses: 3 } } : {}),
+      );
+    } catch (err) {
+      if (err instanceof AiProviderError) return err;
+      throw err;
+    }
+    throw new Error('the step did not fail');
+  }
+
+  it('Anthropic: the 400 for a disabled web search is WEB_SEARCH_DISABLED', async () => {
+    const err = await stepError(providerConfig(), anthropicDisabled, true);
+    expect(err.code).toBe('WEB_SEARCH_DISABLED');
+    expect(err.status).toBe(400);
+    expect(err.message).toMatch(/Settings → AI/);
+  });
+
+  it.each([400, 403])(
+    'OpenAI: a %i refusing the hosted web search tool is WEB_SEARCH_DISABLED',
+    async (status) => {
+      const config = providerConfig({ provider: 'openai', model: 'gpt-5' });
+      const err = await stepError(config, openaiDisabled(status), true);
+      expect(err.code).toBe('WEB_SEARCH_DISABLED');
+    },
+  );
+
+  it('the same text on a step WITHOUT the search tool stays a generic bad request', async () => {
+    const err = await stepError(providerConfig(), anthropicDisabled, false);
+    expect(err.code).toBe('PROVIDER_BAD_REQUEST');
+  });
+
+  it('any other 400 on a step with the search stays PROVIDER_BAD_REQUEST', async () => {
+    const other = () =>
+      jsonResponse(400, {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'tools.0: bad schema',
+        },
+      });
+    const err = await stepError(providerConfig(), other, true);
+    expect(err.code).toBe('PROVIDER_BAD_REQUEST');
+  });
+
+  it.each([
+    ['Web search is not enabled for this organization.', true],
+    ['Web Search tool is not enabled for this organization', true],
+    ['The web_search tool is disabled for this project.', true],
+    ["Hosted tool 'web_search' is not allowed for this project", true],
+    ["Hosted tool 'web_search_preview' is not supported with gpt-5.", false],
+    ['This organization has been disabled.', false],
+    ['tools.1.max_uses: must be at most 20', false],
+  ])('recognizes %j as disabled: %s', (text, expected) => {
+    expect(isWebSearchDisabled(text)).toBe(expected);
   });
 });
