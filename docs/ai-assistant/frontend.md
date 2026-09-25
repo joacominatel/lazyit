@@ -670,7 +670,11 @@ UI copy say so.
   #1366); in OAuth mode on an API without it, the `issuer` of the public
   `/.well-known/oauth-authorization-server`; on a host-agnostic `lan` instance (no pinned origin) the
   page's origin. The marketplace command uses `mcp.marketplaceUrl` when the status reports it
-  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). When the server origin differs from the
+  (`resolveSnippetOrigin`, `claudePluginCommands`, bun-tested). **Known gap (W4-3 F3, #1315):** the API reports
+  `marketplaceUrl: null` on a loopback origin, but in OAuth mode the panel still renders the marketplace
+  commands, rebuilt from the page origin (`claudePluginCommands` falls back to `marketplaceUrl(origin)`);
+  the download path below them is what works there, and the Manual says so. Hiding the marketplace step
+  when the status reports null is a frontend follow-up. When the server origin differs from the
   page's, or cannot be read in OAuth mode, the panel warns and renders the snippets without copy buttons
   (for review, not copy-ready).
 - The personal-token and consent-decision mutations use `gcTime: 0` and are `reset()` as soon as they

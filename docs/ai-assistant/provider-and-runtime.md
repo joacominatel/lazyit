@@ -1372,7 +1372,10 @@ the equivalent, and lazyit does not use it yet (§13).
   (security.md T-30). It is present whether MCP is on or off, and null when no http(s) origin is pinned
   (a `lan` instance without `WEB_ORIGIN`: the web falls back to its page origin) or in shim mode.
   `mcp.marketplaceUrl` is `<origin>/api/ai/claude-code/marketplace.json`, only while the public
-  marketplace is served (MCP on, a pinned HTTPS origin, not shim), else null. Both are null for an
+  marketplace is served (MCP on, a pinned HTTPS origin, not shim) **and the origin's host is not loopback**
+  (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1` — `isLoopbackHost`), else null: Claude Code refuses a
+  marketplace on a loopback host, so offering it there is a command that cannot work (W4-3 finding F3,
+  [[05-runbooks/ai-mcp-client-matrix|client matrix]]). Both are null for an
   anonymous caller. The shared schema marks them optional only for tolerance of an older API; this build
   always sends them. The web install panel and settings card use them instead of
   `window.location.origin`.
