@@ -207,6 +207,39 @@
       "note": "La aprobación automática está activada en este chat. El cambio queda registrado como cualquier otro, a tu nombre."
     }
   },
+  "pager": {
+    "title": "Cambios propuestos",
+    "count": "{count, plural, one {# cambio} other {# cambios}}",
+    "position": "{page} de {total}",
+    "live": "Cambio {page} de {total}",
+    "previous": "Cambio anterior",
+    "next": "Cambio siguiente",
+    "pages": "Cambios de este paso",
+    "pageLabel": "Cambio {page}: {state}",
+    "progress": "{decided} de {total} decididos",
+    "approveAll": "Aprobar todos ({count})",
+    "rejectAll": "Rechazar todos ({count})",
+    "bulkCovers": "{count, plural, =0 {Ninguno de los cambios pendientes se puede decidir todos juntos.} one {Aprobar todos y Rechazar todos cubren # cambio pendiente.} other {Aprobar todos y Rechazar todos cubren # cambios pendientes.}}",
+    "excludedTitle": "Decidí estos en su propia página:",
+    "excluded": {
+      "stepUp": "{count, plural, one {# necesita tu contraseña} other {# necesitan tu contraseña}}",
+      "elevated": "{count, plural, one {# es un cambio sensible} other {# son cambios sensibles}}",
+      "untrusted": "{count, plural, one {# se basa en contenido escrito por otras personas} other {# se basan en contenido escrito por otras personas}}",
+      "needsReview": "{count, plural, one {# necesita otra revisión} other {# necesitan otra revisión}}"
+    },
+    "bulkRunning": "{decision, select, approve {Aprobando} other {Rechazando}} {done} de {total}…",
+    "bulkDone": "{decision, select, approve {Se aprobaron} other {Se rechazaron}} {count, plural, one {# cambio} other {# cambios}}.",
+    "bulkFailed": "{count, plural, one {# cambio no se pudo decidir:} other {# cambios no se pudieron decidir:}}",
+    "bulkSkipped": "{count, plural, one {# más no se envió.} other {# más no se enviaron.}}",
+    "goTo": "Cambio {page}",
+    "allDecided": "Todos los cambios de este paso están decididos."
+  },
+  "refused": {
+    "summary": "{count, plural, one {# cambio no se pudo proponer} other {# cambios no se pudieron proponer}}",
+    "item": "{tool}: {message}",
+    "itemRepeated": "{tool} ×{count}: {message}",
+    "noReason": "sin motivo informado"
+  },
   "effects": {
     "open": "Abrir {label}",
     "opened": "Se abrió {label}"
