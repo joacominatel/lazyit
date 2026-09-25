@@ -93,13 +93,21 @@ export type OAuthAuditAction = z.infer<typeof OAuthAuditActionSchema>;
 
 /**
  * One connected app, as `GET /oauth/grants/mine` (and the admin `GET /oauth/grants?userId=`) list it.
- * `client.verified` is true for a CIMD client whose metadata document was fetched from its own https
- * `client_id` URL; a DCR client's name is self-declared.
+ * `client.verified` follows the consent screen's rule: true only for a CIMD client listed by its
+ * `client_id` URL on the instance's allowlist (a curated default or an admin's entry). `client.verifiedDomain`
+ * is the host of a CIMD client's `client_id` URL (null for DCR); a DCR client's name is self-declared.
  */
 export const OAuthGrantSchema = z.object({
   id: z.cuid(),
   kind: OAuthGrantKindSchema,
-  client: z.object({ name: z.string(), verified: z.boolean() }).nullable(),
+  client: z
+    .object({
+      name: z.string(),
+      verified: z.boolean(),
+      /** CIMD clients only: the domain whose metadata document lazyit fetched. Added in W3-3; optional. */
+      verifiedDomain: z.string().min(1).nullable().optional(),
+    })
+    .nullable(),
   /** The personal token's name; null for an OAuth grant. */
   label: z.string().nullable(),
   /** The host the client redirects to; null for a personal token. */

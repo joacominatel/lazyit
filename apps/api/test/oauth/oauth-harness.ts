@@ -84,7 +84,7 @@ export function buildHarness(): Harness {
     cimd,
   );
   const registrations = new ClientRegistrationService(db, policy, audit);
-  const grants = new GrantsService(db, permissions as any, tokens);
+  const grants = new GrantsService(db, permissions as any, tokens, policy);
   return {
     prisma,
     policy,

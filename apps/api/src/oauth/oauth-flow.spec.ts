@@ -944,7 +944,7 @@ describe('connected apps', () => {
     expect(mine).toEqual([
       expect.objectContaining({
         kind: 'oauth',
-        client: { name: 'Claude Code', verified: false },
+        client: { name: 'Claude Code', verified: false, verifiedDomain: null },
         redirectHost: 'localhost:53682',
         scopes: ['lazyit.read', 'lazyit.write'],
       }),
