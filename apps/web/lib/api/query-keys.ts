@@ -61,6 +61,12 @@ export const assetTagSchemeKeys = {
   all: ["asset-tag-scheme"] as const,
   single: () => [...["asset-tag-scheme"], "single"] as const,
   /**
+   * The member-safe summary (#1315) the asset create form reads. Its own key — the admin `single()`
+   * read 403s for a member and must never be served in its place — under the `all` prefix, so a scheme
+   * save or a backfill apply refreshes it too.
+   */
+  summary: () => [...["asset-tag-scheme"], "summary"] as const,
+  /**
    * The seed suggestion for a pattern (ADR-0068 §2). Keyed by the (prefix, suffix, width) so the
    * editor refetches only when the operator changes the template, not on every keystroke elsewhere.
    */

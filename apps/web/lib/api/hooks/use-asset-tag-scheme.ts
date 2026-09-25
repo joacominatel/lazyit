@@ -15,6 +15,7 @@ import {
   getAssetTagBackfillPreview,
   getAssetTagNextPreview,
   getAssetTagScheme,
+  getAssetTagSchemeSummary,
   getAssetTagSeedSuggestion,
   updateAssetTagScheme,
 } from "../endpoints/asset-tag-scheme";
@@ -22,9 +23,8 @@ import { assetTagSchemeKeys } from "../query-keys";
 
 /**
  * Read the org-wide asset-tag scheme (`GET /config/asset-tag-scheme`, ADR-0063 — ADR-0020 data layer).
- * Used by:
- *   - the settings editor (Settings → Instance), to seed the form fields;
- *   - the asset CREATE form, to learn WHETHER the scheme is on and with which affixes.
+ * Used by the settings editor (Settings → Instance), to seed the form fields. The asset CREATE form
+ * reads {@link useAssetTagSchemeSummary} instead (member-safe, #1315).
  *
  * It is NOT the source of the next tag — `nextNumber` is the raw counter, which the allocator may skip
  * past when that number's tag is already taken (ADR-0068 §1). Rendering it as "the next tag" is the
@@ -32,7 +32,7 @@ import { assetTagSchemeKeys } from "../query-keys";
  *
  * The API never 404s for "unset" — it returns an explicit `enabled: false` default — so `data` is a
  * concrete scheme shape whenever the query resolves. It is gated `settings:manage`, so for a non-admin
- * the query 403s and `data` stays undefined; every consumer must degrade gracefully rather than block.
+ * the query 403s and `data` stays undefined.
  * `staleTime` is short so a freshly-saved scheme is reflected without a hard reload; the API is the real
  * gate, so a stale read never authorizes anything.
  */
@@ -41,6 +41,23 @@ export function useAssetTagScheme() {
     queryKey: assetTagSchemeKeys.single(),
     queryFn: ({ signal }) => getAssetTagScheme(signal),
     staleTime: 30 * 1000,
+  });
+}
+
+/**
+ * Read the member-safe scheme summary (`GET /config/asset-tag-scheme/summary`, `asset:write`, #1315):
+ * whether auto-tagging is on and `nextTag`, the tag an asset created without one would get now. The
+ * asset CREATE form's hint reads this so members see it too (the admin read above 403s for them).
+ * `enabled` keeps it off the network where it is meaningless (the edit form). A preview, not a
+ * reservation — the tag the create finally gets can differ if someone else creates first. Consumers
+ * still treat it as optional context: a failed read hides the hint and never blocks a create.
+ */
+export function useAssetTagSchemeSummary({ enabled }: { enabled: boolean }) {
+  return useQuery({
+    queryKey: assetTagSchemeKeys.summary(),
+    queryFn: ({ signal }) => getAssetTagSchemeSummary(signal),
+    enabled,
+    staleTime: 10 * 1000,
   });
 }
 
