@@ -27,6 +27,9 @@ description, an optional **category**, and optional **default specs**.
   custom fields of assets already created from it, and an asset's own values always win over the
   model's defaults.
 - **SKU** is unique among live models when set, the same way a serial is for assets.
+- The **category** is optional and can be removed later: when editing a model, pick **No category** at
+  the top of the category list and save. The model (and every asset of it) is then uncategorized, so
+  it no longer matches a category filter on the Assets list.
 
 Manage models under **Settings → Taxonomies → Asset models**. The model picker in the asset form is
 searchable, so a long catalog stays easy to use.
