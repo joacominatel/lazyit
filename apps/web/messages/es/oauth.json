@@ -58,7 +58,8 @@
         "stepInstall": "Agrega el marketplace de plugins de esta instancia e instala el plugin:",
         "copyInstall": "Copiar los comandos de instalación",
         "stepSignIn": "Inicia Claude Code, ejecuta <code>/mcp</code>, elige lazyit e inicia sesión. Tu navegador abre la pantalla de consentimiento de lazyit.",
-        "stepUpdates": "Las actualizaciones no son automáticas por defecto. Para recibir nuevas versiones del skill, abre <code>/plugin</code> en Claude Code, ve a Marketplaces, selecciona <code>{marketplace}</code> y activa la actualización automática."
+        "stepUpdates": "Las actualizaciones no son automáticas por defecto. Para recibir nuevas versiones del skill, abre <code>/plugin</code> en Claude Code, ve a Marketplaces, selecciona <code>{marketplace}</code> y activa la actualización automática.",
+        "noMarketplaceLoopback": "Claude Code no agrega un marketplace de plugins desde una dirección de loopback (localhost), y esta instancia se sirve desde una; así que instala el plugin desde una descarga:"
       },
       "personalToken": {
         "noMarketplace": "La instalación con un solo comando necesita HTTPS, así que en esta instancia instala el plugin desde una descarga:"
