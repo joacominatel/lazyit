@@ -1348,8 +1348,7 @@ function isStale(stored: AiActionPreview, fresh: AiActionPreview): boolean {
 
 /** A fresh preview built at approve, or the tool error that building it produced. */
 type FreshPreview =
-  | { ok: true; preview: AiActionPreview }
-  | { ok: false; error: ToolError };
+  { ok: true; preview: AiActionPreview } | { ok: false; error: ToolError };
 
 const PRINCIPAL_INVALID: ToolError = {
   code: 'FORBIDDEN',

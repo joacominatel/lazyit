@@ -23,8 +23,7 @@ export class AiToolBindingError extends Error {
 }
 
 export type AiToolInputCheck =
-  | { ok: true; input: unknown }
-  | { ok: false; result: AiToolResult };
+  { ok: true; input: unknown } | { ok: false; result: AiToolResult };
 
 /**
  * Executes one registered tool (tools-and-execution.md §8.2). No policy lives here — who may call what,

@@ -393,7 +393,7 @@ async function folderView(
   if (!row) return undefined;
   const path: Row[] = [];
   const seen = new Set<string>();
-  for (let cur: Row | undefined = row; cur; ) {
+  for (let cur: Row | undefined = row; cur;) {
     const curId = String(cur.id);
     if (seen.has(curId)) break;
     seen.add(curId);
