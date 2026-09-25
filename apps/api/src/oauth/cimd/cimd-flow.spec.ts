@@ -451,6 +451,66 @@ describe('the bundled offline copy', () => {
     });
   });
 
+  it.each([
+    ['a 503', 503],
+    ['a gateway timeout', 504],
+  ])('is used on %s from the host (transient)', async (_label, status) => {
+    served.set(CLAUDE_CODE_CLIENT_ID, {
+      status,
+      body: '{}',
+      headers: { 'content-type': 'application/json' },
+    });
+    const user = seedUser(h);
+    await expect(
+      h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID)),
+    ).resolves.toMatchObject({ ok: true });
+    expect(h.prisma.tables.oAuthClient[0].kind).toBe('known');
+  });
+
+  it.each([
+    ['a 404', 404, CLAUDE_CODE_CLIENT_METADATA, 'http_status'],
+    ['a 410', 410, CLAUDE_CODE_CLIENT_METADATA, 'http_status'],
+    [
+      'a document for another client_id',
+      200,
+      {
+        ...CLAUDE_CODE_CLIENT_METADATA,
+        client_id: 'https://claude.ai/oauth/other',
+      },
+      'client_id_mismatch',
+    ],
+    [
+      'a document with a bad redirect',
+      200,
+      { ...CLAUDE_CODE_CLIENT_METADATA, redirect_uris: ['javascript:x'] },
+      'redirect_uris',
+    ],
+    [
+      'a document declaring client secrets',
+      200,
+      {
+        ...CLAUDE_CODE_CLIENT_METADATA,
+        token_endpoint_auth_method: 'client_secret_basic',
+      },
+      'auth_method',
+    ],
+  ])(
+    'is NOT used when the host answers with %s: refused and audited',
+    async (_label, status, body, reason) => {
+      serve(CLAUDE_CODE_CLIENT_ID, body, {}, status);
+      const user = seedUser(h);
+      await expect(
+        h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID)),
+      ).resolves.toEqual({ ok: false, refusal: 'INVALID_CLIENT' });
+      expect(h.prisma.tables.oAuthClient).toHaveLength(0);
+      expect(audits('CLIENT_METADATA_FETCHED')).toHaveLength(0);
+      expect(audits('CLIENT_METADATA_REFUSED')[0].detail).toEqual({
+        host: 'claude.ai',
+        reason,
+      });
+    },
+  );
+
   it('is used when the network serves something invalid (e.g. a captive portal)', async () => {
     served.set(CLAUDE_CODE_CLIENT_ID, {
       status: 200,
@@ -651,7 +711,102 @@ describe('end to end: authorize → token → /mcp with a CIMD client', () => {
   });
 });
 
+describe('connected apps follow the consent rule', () => {
+  it('marks only allowlist-listed CIMD clients verified, and carries the verified domain', async () => {
+    serve(CLAUDE_CODE_CLIENT_ID, CLAUDE_CODE_CLIENT_METADATA);
+    serve(EXAMPLE_ID, exampleDocument({ client_name: 'Claude Code' }));
+    enableMcp(h, { mcpAllowAnyHttpsClient: true });
+    const user = seedUser(h);
+    await connect(h, user, { clientId: CLAUDE_CODE_CLIENT_ID });
+    await connect(h, user, {
+      clientId: EXAMPLE_ID,
+      redirectUri: EXAMPLE_REDIRECT,
+    });
+    const apps = await h.grants.listMine(user);
+    const byDomain = new Map(
+      apps.map((app) => [app.client?.verifiedDomain, app.client]),
+    );
+    expect(byDomain.get('claude.ai')).toEqual({
+      name: 'Claude Code',
+      verified: true,
+      verifiedDomain: 'claude.ai',
+    });
+    expect(byDomain.get('tools.example.org')).toEqual({
+      name: 'Claude Code',
+      verified: false,
+      verifiedDomain: 'tools.example.org',
+    });
+    const admin = await h.grants.listForAdmin(user.id);
+    expect(admin.map((app) => app.client?.verified).sort()).toEqual([
+      false,
+      true,
+    ]);
+  });
+});
+
+describe('storing a resolved client', () => {
+  it('recovers from a unique-constraint race and propagates any other error', async () => {
+    serve(CLAUDE_CODE_CLIENT_ID, CLAUDE_CODE_CLIENT_METADATA);
+    const user = seedUser(h);
+    const upsert = h.prisma.oAuthClient.upsert;
+    upsert.mockImplementationOnce(async ({ create }: any) => {
+      // Another request created the row first.
+      h.prisma.tables.oAuthClient.push({ id: 'crace', ...create });
+      throw Object.assign(new Error('Unique constraint failed'), {
+        code: 'P2002',
+      });
+    });
+    await expect(
+      h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID)),
+    ).resolves.toMatchObject({ ok: true });
+
+    jest.setSystemTime(T0 + CIMD_CACHE_MAX_TTL_MS + 1000);
+    upsert.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('connection lost'), { code: 'P1001' });
+    });
+    await expect(
+      h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID)),
+    ).rejects.toThrow('connection lost');
+  });
+});
+
 describe('the sweeper', () => {
+  it('ages a cache row by its last refresh and never collects one with a pending code', async () => {
+    serve(CLAUDE_CODE_CLIENT_ID, CLAUDE_CODE_CLIENT_METADATA, {
+      'cache-control': 'max-age=300',
+    });
+    const user = seedUser(h);
+    await h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID));
+    const row = h.prisma.tables.oAuthClient[0];
+    expect(row.createdAt).toEqual(new Date(T0));
+
+    // Refreshed 23 h later: created > 24 h ago at sweep time, but refreshed recently → kept.
+    jest.setSystemTime(T0 + 23 * 60 * 60 * 1000);
+    await h.authorization.validate(human(user), params(CLAUDE_CODE_CLIENT_ID));
+    const sweeper = new OAuthSweeper(h.prisma as any);
+    expect(
+      (await sweeper.sweep(new Date(T0 + 25 * 60 * 60 * 1000))).clients,
+    ).toBe(0);
+
+    // A sign-in in progress: consent issued a code; the row is old enough, but the code protects it.
+    jest.setSystemTime(T0 + 48 * 60 * 60 * 1000);
+    await h.authorization.decision(human(user), {
+      params: params(CLAUDE_CODE_CLIENT_ID),
+      decision: 'approve',
+      scopes: ['lazyit.read'],
+    });
+    row.updatedAt = new Date(T0);
+    const now = new Date(T0 + 48 * 60 * 60 * 1000 + 30 * 1000);
+    const result = await sweeper.sweep(now);
+    expect(result.clients).toBe(0);
+    expect(h.prisma.tables.oAuthClient).toHaveLength(1);
+    expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(1);
+
+    // Once the code has expired, the same pass removes it and then the stale unused row.
+    const later = new Date(now.getTime() + 2 * 60 * 1000);
+    expect(await sweeper.sweep(later)).toMatchObject({ codes: 1, clients: 1 });
+  });
+
   it('collects unused CIMD cache rows after 24 h and keeps the ones with a grant', async () => {
     serve(CLAUDE_CODE_CLIENT_ID, CLAUDE_CODE_CLIENT_METADATA);
     serve(EXAMPLE_ID, exampleDocument());

@@ -538,6 +538,64 @@ describe('the guarded fetch', () => {
     ).resolves.toBe('malformed');
   });
 
+  it('time-boxes the whole fetch, DNS resolution included', async () => {
+    const { transport, calls } = respond(200, JSON.stringify(doc()));
+    const started = Date.now();
+    let refusal: unknown;
+    try {
+      await fetchClientMetadataDocument(new URL(CLIENT_ID), {
+        transport,
+        // A resolver stuck on the libuv threadpool: never answers.
+        lookup: () => new Promise(() => undefined),
+        deadlineMs: 50,
+      });
+    } catch (err) {
+      refusal = err;
+    }
+    expect(refusal).toBeInstanceOf(CimdRefusal);
+    expect(refusal).toMatchObject({
+      reason: 'fetch_failed',
+      networkFailure: true,
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('classifies which failures are network failures (the only ones a bundled copy may cover)', async () => {
+    const classify = async (
+      status: number,
+      body: string | null,
+      headers: Record<string, string> = { 'content-type': 'application/json' },
+    ) => {
+      const { transport } = respond(status, body, headers);
+      try {
+        await fetchClientMetadataDocument(new URL(CLIENT_ID), {
+          transport,
+          lookup: PUBLIC,
+        });
+      } catch (err) {
+        const refusal = err as CimdRefusal;
+        return [refusal.reason, refusal.networkFailure];
+      }
+      return null;
+    };
+    expect(await classify(404, '{}')).toEqual(['http_status', false]);
+    expect(await classify(410, '{}')).toEqual(['http_status', false]);
+    expect(await classify(403, '{}')).toEqual(['http_status', false]);
+    expect(await classify(503, '{}')).toEqual(['http_status', true]);
+    expect(await classify(429, '{}')).toEqual(['http_status', true]);
+    expect(
+      await classify(302, null, { location: 'https://portal.example/login' }),
+    ).toEqual(['http_status', true]);
+    expect(
+      await classify(200, '<html></html>', { 'content-type': 'text/html' }),
+    ).toEqual(['content_type', true]);
+    expect(await classify(200, '{"client_id":')).toEqual(['malformed', false]);
+    expect(
+      await classify(200, JSON.stringify(doc({ x: 'y'.repeat(6000) }))),
+    ).toEqual(['too_large', false]);
+  });
+
   it('turns a timeout or a network error into fetch_failed', async () => {
     for (const error of [
       new EgressError('deadline-exceeded', 'too slow'),

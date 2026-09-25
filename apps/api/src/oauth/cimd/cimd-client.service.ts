@@ -61,10 +61,11 @@ function cacheExpiresAt(client: OAuthClient): number | null {
  *      INV-MCP-6 / INV-AI-7), validated ({@link parseClientMetadataDocument}) and cached on the row
  *      (`kind: 'cimd'`, `fetchedAt`) for the response's cache lifetime, clamped to lazyit's bounds.
  *      Errors and invalid documents are never cached.
- *   4. When the fetch or the validation fails and the URL has a BUNDLED copy (Claude Code's), that copy is
- *      validated the same way and cached as `kind: 'known'` for a short retry interval, so an HTTPS
- *      instance without internet access can still connect it. Without a bundled copy the request is
- *      refused (the draft's "SHOULD abort"); a stale cached row is NOT used.
+ *   4. When the fetch fails for a NETWORK reason (see {@link CimdRefusal.networkFailure}) and the URL has a
+ *      BUNDLED copy (Claude Code's), that copy is validated the same way and cached as `kind: 'known'` for
+ *      a short retry interval, so an HTTPS instance without internet access can still connect it. An
+ *      invalid or definitive answer from the host, or a URL without a bundled copy, is refused (the draft's
+ *      "SHOULD abort"); a stale cached row is NOT used.
  *
  * Whether the resulting client may connect is NOT decided here: the caller applies the client allowlist
  * (`isClientAllowed`, ADR-0097 decision 13) to the row exactly as it does for a DCR client.
@@ -122,6 +123,7 @@ export class CimdClientService {
         throw new CimdRefusal(
           'rate_limited',
           'Too many client metadata fetches; try again later',
+          true,
         );
       }
       const fetched = await fetchClientMetadataDocument(url, this.fetchOptions);
@@ -158,7 +160,12 @@ export class CimdClientService {
     return row;
   }
 
-  /** The fetch failed: serve the bundled copy when there is one, otherwise refuse (and audit why). */
+  /**
+   * The fetch failed. A NETWORK failure (unreachable, timeout, transient status, redirect, a non-JSON page,
+   * the per-user limit) is served from the bundled copy when there is one; an answer from the client's
+   * host that is definitive or invalid (404/410, a JSON document failing validation) is refused and
+   * audited even for a bundled client — the host's word wins over the image's copy.
+   */
   private async fallBack(
     clientId: string,
     url: URL,
@@ -167,7 +174,9 @@ export class CimdClientService {
     ctx: CimdResolveContext,
     now: number,
   ): Promise<OAuthClient | null> {
-    const bundled = KNOWN_CLIENT_DOCUMENTS.get(clientId);
+    const bundled = refusal.networkFailure
+      ? KNOWN_CLIENT_DOCUMENTS.get(clientId)
+      : undefined;
     if (bundled !== undefined) {
       const document = parseClientMetadataDocument(bundled, clientId);
       const row = await this.store(
@@ -244,7 +253,9 @@ export class CimdClientService {
         update: data,
       });
     } catch (err) {
-      // A concurrent first resolution of the same URL created the row between our read and write.
+      // Only a unique-constraint race is recoverable: a concurrent first resolution of the same URL
+      // created the row between our read and write. Anything else propagates.
+      if ((err as { code?: unknown }).code !== 'P2002') throw err;
       const row = await this.prisma.oAuthClient.findUnique({
         where: { clientId },
       });

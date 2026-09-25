@@ -7,8 +7,6 @@ import { DCR_MAX_REDIRECT_URIS, DCR_UNNAMED_CLIENT } from '../oauth.constants';
  * (`CLIENT_METADATA_REFUSED`), never shown to the end user verbatim.
  */
 export type CimdRefusalReason =
-  /** The `client_id` is not an acceptable Client Identifier URL. */
-  | 'invalid_client_id_url'
   /** The egress guard refused the target, DNS failed, the connection failed or timed out. */
   | 'fetch_failed'
   /** A redirect (never followed) or any status other than 200. */
@@ -33,9 +31,17 @@ export type CimdRefusalReason =
   | 'rate_limited';
 
 export class CimdRefusal extends Error {
+  /**
+   * @param networkFailure true when the refusal says nothing about what the client's host publishes — the
+   *   host could not be reached, answered with a transient error, redirected, or served a non-JSON page (a
+   *   captive portal or an intercepting proxy). Only such a failure may fall back to a bundled copy; a JSON
+   *   document the host really served that fails validation, and a definitive status (404, 410, 403…),
+   *   are refused.
+   */
   constructor(
     readonly reason: CimdRefusalReason,
     message: string,
+    readonly networkFailure = false,
   ) {
     super(message);
     this.name = 'CimdRefusal';
