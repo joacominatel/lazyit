@@ -342,10 +342,11 @@ Reported on the W4-3 PR for the owning lanes; none was fixed in that run (F1 has
   `responseMode: 'json'` means no streams; it applies to the 2026-07-28 leg only. The 2025-era leg answers
   `text/event-stream` (a single `event: message`, then closes) and 406 when the client does not accept
   `text/event-stream`. Harmless (short-lived, uncompressed through Caddy). §14 is corrected in this change.
-- **F3 — the marketplace path cannot work on `localhost`.** Claude Code 2.1.282 refuses a plugin archive
-  on a loopback, link-local or cloud-metadata host. On a `local` instance `/api/ai/status` still reports
-  `mcp.marketplaceUrl`, so the install panel offers a command that cannot succeed. Candidates: omit
-  `marketplaceUrl` for a loopback origin, or say so in the Manual. Untested: private LAN addresses.
+- **F3 — the marketplace path cannot work on `localhost`. Fixed (#1315).** Claude Code 2.1.282 refuses a
+  plugin archive on a loopback, link-local or cloud-metadata host. `/api/ai/status` now reports
+  `mcp.marketplaceUrl: null` when the pinned origin's host is loopback (`localhost`, `*.localhost`,
+  `127.0.0.0/8`, `::1`), and the Manual says to install from the downloaded plugin there. Untested: private
+  LAN addresses; link-local and metadata hosts are not special-cased (not a plausible `WEB_ORIGIN`).
 - **F4 — CIMD not advertised yet.** Expected until W3-3 ships (§12 of the MCP note); Claude Code and
   claude.ai register through DCR meanwhile. Re-run §4.3 step 4 after W3-3.
 - **F5 — the MCP Inspector is not a curated client.** Its fixed callback needs an admin entry (§3.3). By
