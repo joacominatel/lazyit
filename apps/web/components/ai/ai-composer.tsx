@@ -1,7 +1,6 @@
 "use client";
 
 import type { AiPageContext } from "@lazyit/shared";
-import { ArrowUpIcon, StopIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -17,6 +16,7 @@ import {
 } from "@/lib/ai/slash-commands";
 import { AI_PROMPT_MAX_LENGTH } from "@lazyit/shared";
 import { AiCommandPalette, commandOptionId } from "./ai-command-palette";
+import { AiCloseIcon, AiSendIcon, AiStopIcon } from "./ai-icons";
 import { useEntityTypeLabel } from "./ai-labels";
 
 /**
@@ -170,7 +170,7 @@ export function AiComposer<C>({
                 aria-label={tContext("remove")}
                 onClick={() => setWithContext(false)}
               >
-                <XMarkIcon />
+                <AiCloseIcon />
               </Button>
             </span>
           ) : (
@@ -222,7 +222,7 @@ export function AiComposer<C>({
             disabled={stopping}
             onClick={onStop}
           >
-            <StopIcon />
+            <AiStopIcon />
           </Button>
         ) : (
           <Button
@@ -231,7 +231,7 @@ export function AiComposer<C>({
             aria-label={t("send")}
             disabled={disabled || trimmed.length === 0}
           >
-            <ArrowUpIcon />
+            <AiSendIcon />
           </Button>
         )}
       </div>

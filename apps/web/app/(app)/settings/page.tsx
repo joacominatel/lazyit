@@ -8,7 +8,6 @@ import {
   MapPinIcon,
   ServerStackIcon,
   SignalIcon,
-  SparklesIcon,
   TagIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -16,6 +15,7 @@ import type { Permission } from "@lazyit/shared";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ComponentType } from "react";
+import { AiAssistantIcon } from "@/components/ai/ai-icons";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
@@ -72,7 +72,7 @@ const SECTIONS: SettingsSection[] = [
   },
   { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
   // The opt-in AI assistant and external agents over MCP (ADR-0097) — off until an admin sets it up.
-  { href: "/settings/ai", key: "ai", icon: SparklesIcon },
+  { href: "/settings/ai", key: "ai", icon: AiAssistantIcon },
 ];
 
 // ponytail: skipped from the ADR-0067 server-prefetch rollout — a pure link hub with no list/record

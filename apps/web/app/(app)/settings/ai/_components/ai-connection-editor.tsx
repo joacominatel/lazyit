@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowPathIcon, BeakerIcon, CpuChipIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, BeakerIcon } from "@heroicons/react/24/outline";
 import {
   AI_PROVIDER_DESCRIPTORS,
   AI_PROVIDER_KINDS,
@@ -10,6 +10,7 @@ import {
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { toast } from "sonner";
+import { AiAssistantIcon } from "@/components/ai/ai-icons";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -90,7 +91,7 @@ export function AiConnectionEditor({ settings }: { settings: AiSettings }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <CpuChipIcon className="size-5 text-muted-foreground" aria-hidden />
+          <AiAssistantIcon className="size-5 text-primary" />
           <CardTitle>{t("title")}</CardTitle>
         </div>
         <CardDescription>{t("description")}</CardDescription>

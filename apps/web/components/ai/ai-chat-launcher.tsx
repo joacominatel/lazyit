@@ -1,10 +1,10 @@
 "use client";
 
-import { ChatBubbleLeftRightIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useAiAssistant } from "./ai-assistant-root";
+import { AiChatIcon } from "./ai-icons";
 
 /** The keyboard shape of the toggle shortcut. */
 export interface ShortcutKeyEvent {
@@ -64,7 +64,7 @@ export function AiChatLauncher() {
       aria-keyshortcuts="Meta+J Control+J"
       onClick={toggle}
     >
-      <ChatBubbleLeftRightIcon className="size-5" />
+      <AiChatIcon className="size-5" />
     </Button>
   );
 }

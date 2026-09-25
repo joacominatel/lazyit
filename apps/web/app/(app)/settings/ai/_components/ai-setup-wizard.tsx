@@ -4,11 +4,11 @@ import {
   ArrowPathIcon,
   BeakerIcon,
   ShieldCheckIcon,
-  SparklesIcon,
 } from "@heroicons/react/24/outline";
 import { AI_PROVIDER_DESCRIPTORS, type AiSettings } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { AiAssistantIcon } from "@/components/ai/ai-icons";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -104,7 +104,7 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <SparklesIcon className="size-5 text-muted-foreground" aria-hidden />
+            <AiAssistantIcon className="size-5 text-primary" />
             <CardTitle>{t("title")}</CardTitle>
           </div>
           <span className="text-sm text-muted-foreground tabular-nums">
@@ -282,7 +282,7 @@ export function AiSetupWizard({ settings }: { settings: AiSettings }) {
             onClick={enable}
             disabled={save.isPending || (!disclosureDone && !acknowledged)}
           >
-            {save.isPending ? <ArrowPathIcon className="animate-spin" /> : <SparklesIcon />}
+            {save.isPending ? <ArrowPathIcon className="animate-spin" /> : <AiAssistantIcon />}
             {t("enable")}
           </Button>
         ) : null}

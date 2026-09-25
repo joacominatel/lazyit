@@ -101,6 +101,30 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // ADR-0045 amendment (2026-09-25, #1406): Hugeicons draws the AI assistant and nothing else.
+    // Every glyph goes through `components/ai/ai-icons.tsx`, so the exception's scope is that one
+    // file's export list and a stray `@hugeicons/*` import elsewhere fails lint. Pinned by
+    // `eslint.config.test.ts`.
+    name: "lazyit/hugeicons-only-for-the-ai-assistant",
+    files: ["app/**/*.{ts,tsx}", "components/**/*.{ts,tsx}", "lib/**/*.{ts,tsx}"],
+    ignores: ["components/ai/ai-icons.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@hugeicons/*"],
+              message:
+                "Hugeicons is reserved for the AI assistant (ADR-0045 amendment). Import the glyph " +
+                "from @/components/ai/ai-icons — or use @heroicons/react everywhere else.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
