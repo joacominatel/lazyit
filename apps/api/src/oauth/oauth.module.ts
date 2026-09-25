@@ -35,7 +35,7 @@ import { TokenController } from './token.controller';
  * tokens of `personal-tokens/`, W3-4). CIMD (`cimd/`, W3-3) resolves https `client_id`s for the
  * authorization endpoint ({@link CimdClientService}).
  *
- * `PrismaService`, `PermissionResolverService`, `LocalCredentialService` and `PrincipalLoaderService`
+ * `PrismaService`, `PermissionResolverService`, `PasswordStepUpVerifier` and `PrincipalLoaderService`
  * come from the global Prisma and Auth modules.
  */
 @Module({

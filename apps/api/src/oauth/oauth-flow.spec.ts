@@ -474,6 +474,75 @@ describe('consent: decision', () => {
       expect(tokens.scope).toBe('lazyit.read lazyit.write lazyit.admin');
     });
 
+    // SEC-082: the consent step-up is the SAME primitive as the chat's, with its per-account backoff.
+    const approveAdmin = async (user: any, password: string) => {
+      const clientId = await registerClient(h);
+      return h.authorization.decision(
+        human(user),
+        {
+          params: adminParams(clientId),
+          decision: 'approve',
+          scopes: ['lazyit.admin'],
+          password,
+        },
+        { ip: '203.0.113.9' },
+      );
+    };
+
+    it('locks the account after repeated wrong passwords — even the right one is refused (SEC-082)', async () => {
+      const user = seedUser(h);
+      for (let i = 0; i < 6; i += 1) {
+        await expect(approveAdmin(user, 'guess')).rejects.toMatchObject({
+          response: expect.objectContaining({ code: 'STEP_UP_FAILED' }),
+        });
+      }
+      await expect(approveAdmin(user, PASSWORD)).rejects.toMatchObject({
+        status: 429,
+        response: expect.objectContaining({
+          code: 'STEP_UP_RATE_LIMITED',
+          retryAfterSec: expect.any(Number),
+        }),
+      });
+      expect(h.prisma.tables.oAuthAuthorizationCode).toHaveLength(0);
+      // Another account is not affected.
+      await expect(approveAdmin(seedUser(h), PASSWORD)).resolves.toMatchObject({
+        redirectTo: expect.any(String),
+      });
+    });
+
+    it('shares one backoff with the chat approvals: a lock earned there refuses the consent (SEC-082)', async () => {
+      const user = seedUser(h);
+      for (let i = 0; i < 6; i += 1) {
+        await h.stepUp.verify(user, 'guess');
+      }
+      await expect(approveAdmin(user, PASSWORD)).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STEP_UP_RATE_LIMITED' }),
+      });
+    });
+
+    it('audits every failed or locked step-up, never the password (SEC-082)', async () => {
+      const user = seedUser(h);
+      await expect(approveAdmin(user, 'hunter2-guess')).rejects.toBeDefined();
+      expect(h.prisma.tables.oAuthAuditLog.at(-1)).toMatchObject({
+        action: 'CONSENT_STEP_UP_FAILED',
+        userId: user.id,
+        actorId: user.id,
+        clientId: expect.any(String),
+        ip: '203.0.113.9',
+        detail: { reason: 'invalid' },
+      });
+      for (let i = 0; i < 6; i += 1) {
+        await approveAdmin(user, 'hunter2-guess').catch(() => undefined);
+      }
+      expect(h.prisma.tables.oAuthAuditLog.at(-1)).toMatchObject({
+        action: 'CONSENT_STEP_UP_FAILED',
+        detail: { reason: 'locked', retryAfterSec: expect.any(Number) },
+      });
+      expect(JSON.stringify(h.prisma.tables.oAuthAuditLog)).not.toContain(
+        'hunter2',
+      );
+    });
+
     it('cannot be granted outside local mode (no password to step up with)', async () => {
       const user = seedUser(h);
       const clientId = await registerClient(h);
