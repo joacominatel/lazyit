@@ -99,6 +99,8 @@ describe('AiRunQueue (producer)', () => {
       .mockRejectedValueOnce(new Error('down'));
     const queue = new AiRunQueue({ getJobs } as never);
     await expect(queue.inFlightRunIds()).resolves.toEqual(new Set(['a']));
+    // BullMQ 6 has no `paused` job state: a paused queue's jobs are `waiting` (#1402).
+    expect(getJobs).toHaveBeenCalledWith(['active', 'waiting', 'delayed']);
     await expect(queue.inFlightRunIds()).resolves.toBeNull();
   });
 

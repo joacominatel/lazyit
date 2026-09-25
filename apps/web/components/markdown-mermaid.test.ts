@@ -19,7 +19,6 @@ describe("loadMermaid", () => {
     expect(config).not.toHaveProperty("layout");
     expect(config.securityLevel).toBe("strict");
     expect(config.startOnLoad).toBe(false);
-    expect(config.flowchart).toEqual({ htmlLabels: false });
   });
 
   test("the same mode does not re-initialize", async () => {
@@ -40,4 +39,31 @@ describe("loadMermaid", () => {
     expect(initialize).toHaveBeenCalledTimes(3);
     expect(initialize.mock.calls[2][0]).not.toHaveProperty("theme");
   });
+
+  // SEC-084: `flowchart.htmlLabels` is deprecated since mermaid 11.12.3 and does not stop node
+  // labels rendering as HTML (a `<foreignObject>` that loads a remote `<img>`). The root
+  // `htmlLabels: false` does, and listing it in `secure` stops a diagram's `%%{init}%%` directive
+  // or front-matter `config:` from turning HTML labels back on.
+  test.each([false, true])(
+    "labels render as SVG text and a diagram cannot re-enable HTML (dark=%p)",
+    async (dark) => {
+      const config = initialize.mock.calls.findLast(
+        (call) => (call[0].theme === "redux-dark-color") === dark,
+      )![0];
+      expect(config.htmlLabels).toBe(false);
+      expect(config).not.toHaveProperty("flowchart");
+      expect(config.secure).toEqual(
+        expect.arrayContaining([
+          "htmlLabels",
+          // mermaid's own defaults: a `secure` list replaces them, so they must be kept.
+          "secure",
+          "securityLevel",
+          "startOnLoad",
+          "maxTextSize",
+          "suppressErrorRendering",
+          "maxEdges",
+        ]),
+      );
+    },
+  );
 });

@@ -38,6 +38,10 @@ Diagrams use Mermaid's current look: automatic layout and a coloured theme that 
 dark mode. Diagrams written before an update render with the new layout, so they can look different
 even though their source is unchanged.
 
+Diagram labels are plain text. HTML tags in a label (`<b>`, `<img>`, links) show exactly as written
+rather than being applied, and diagram settings in the source cannot change that. For a line break in
+a label, use `<br>`; for bold or italic, use a Markdown string such as ``A["`**Return** asset`"]``.
+
 If a code block's fence has **no language** marker, lazyit makes a best-effort guess at display time
 and labels it **auto** (for example, ` ```def sum(a, b): return a + b``` ` is highlighted as Python).
 An explicit language on the fence always wins, and an ambiguous block is left as plain text rather

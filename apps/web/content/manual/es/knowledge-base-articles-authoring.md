@@ -39,6 +39,11 @@ Los diagramas usan el aspecto actual de Mermaid: distribución automática y un 
 el modo claro u oscuro. Los diagramas escritos antes de una actualización se renderizan con la nueva
 distribución, así que pueden verse distintos aunque su código no haya cambiado.
 
+Las etiquetas de los diagramas son texto plano. Las etiquetas HTML dentro de una etiqueta (`<b>`,
+`<img>`, enlaces) se muestran tal cual están escritas en lugar de aplicarse, y la configuración del
+diagrama en el código no puede cambiarlo. Para un salto de línea en una etiqueta usa `<br>`; para
+negrita o cursiva, usa una cadena Markdown como ``A["`**Devolver** activo`"]``.
+
 Si el cerco de un bloque de código **no tiene** marcador de lenguaje, lazyit hace una mejor conjetura
 al momento de mostrarlo y lo etiqueta como **auto** (por ejemplo, ` ```def sum(a, b): return a + b``` `
 se resalta como Python). Un lenguaje explícito en el cerco siempre tiene prioridad, y un bloque ambiguo
