@@ -1,4 +1,75 @@
 {
+  "nav": {
+    "label": "Secciones de la cuenta",
+    "overview": "Resumen",
+    "profile": "Mi perfil",
+    "notifications": "Correos de notificación",
+    "ai": "IA y apps conectadas"
+  },
+  "hub": {
+    "title": "Cuenta",
+    "subtitle": "Todo sobre tu propia cuenta en un solo lugar: quién sos, tus notificaciones, las apps de IA conectadas, contraseña y sesiones, y tus preferencias.",
+    "identity": {
+      "title": "Vos",
+      "name": "Nombre",
+      "email": "Email",
+      "role": "Rol",
+      "joined": "Alta",
+      "viewProfile": "Ver mi perfil",
+      "errorTitle": "No se pudo cargar tu cuenta",
+      "errorDescription": "No se pudieron cargar los datos de tu cuenta."
+    },
+    "sections": {
+      "title": "Tus páginas",
+      "profile": {
+        "title": "Mi perfil",
+        "description": "Los activos asignados a vos, las aplicaciones a las que tenés acceso y tus solicitudes de acceso."
+      },
+      "notifications": {
+        "title": "Correos de notificación",
+        "description": "Elegí qué notificaciones te envía lazyit por email. La campana de la app no cambia."
+      },
+      "ai": {
+        "title": "IA y apps conectadas",
+        "description": "Conectá Claude Code y otras apps de IA, y revisá o revocá las que conectaste."
+      },
+      "secrets": {
+        "title": "Secret Manager",
+        "description": "Tu contraseña personal de bóveda y tu clave de recuperación están junto a tus bóvedas."
+      }
+    },
+    "security": {
+      "title": "Contraseña y sesiones",
+      "password": {
+        "title": "Contraseña",
+        "local": "Tu contraseña es una contraseña de lazyit. Cambiarla te mantiene con la sesión iniciada acá y cierra tu sesión en todos los demás lugares.",
+        "identityProvider": "Tu contraseña la gestiona el proveedor de inicio de sesión de tu organización. Cambiala ahí.",
+        "change": "Cambiar contraseña"
+      },
+      "sessions": {
+        "title": "Sesiones",
+        "local": "Cerrar sesión termina todas tus sesiones: este navegador, tus otras computadoras y tu teléfono, incluidas las que mantuviste con \"Mantener la sesión iniciada\".",
+        "identityProvider": "Cerrar sesión termina tu sesión en este navegador. Tu proveedor de inicio de sesión gestiona tus sesiones en otros lugares.",
+        "unknown": "Cerrar sesión termina tu sesión en este navegador.",
+        "signOutEverywhere": "Cerrar sesión en todos los dispositivos",
+        "signOut": "Cerrar sesión"
+      }
+    },
+    "preferences": {
+      "title": "Preferencias",
+      "language": {
+        "label": "Idioma",
+        "description": "Se guarda en este navegador."
+      },
+      "theme": {
+        "label": "Tema",
+        "description": "Se guarda en este navegador. Sistema sigue la configuración de tu dispositivo.",
+        "system": "Sistema",
+        "light": "Claro",
+        "dark": "Oscuro"
+      }
+    }
+  },
   "notifications": {
     "title": "Correos de notificación",
     "subtitle": "Elige de qué notificaciones lazyit te envía correo. Tu campana en la app no se ve afectada.",
