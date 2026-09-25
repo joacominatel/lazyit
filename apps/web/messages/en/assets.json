@@ -322,6 +322,9 @@
       "details": {
         "created": "Asset created",
         "updated": "Details updated",
+        "updatedFields": "Changed: {fields}",
+        "updatedViaImport": "Updated via re-import",
+        "viaImport": "via re-import",
         "locationChanged": "Location updated",
         "modelChanged": "Model updated",
         "specsChanged": "Specs updated",

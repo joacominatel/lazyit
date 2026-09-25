@@ -88,7 +88,9 @@ Recorded events include:
 - **Location** and **Model** changes.
 - **Specs** changes — edits to custom fields.
 - **Updated** — edits to the asset's other details (name, serial, tag, notes, company, dates, cost); the
-  log records which fields were edited, never their old or new values, and the edit also shows in
+  entry lists which fields were edited — for example *Changed: Name, Notes* — never their old or new
+  values, and marks an edit that came from a re-import *via re-import*. Entries recorded before this
+  list existed read *Details updated*. The edit also shows in
   [Reports](/help/notifications-activity-activity-reports).
 - **Assigned** and **Released** — ownership changes, naming the owner involved.
 - **Acknowledged** — an owner confirmed receipt of the asset checked out to them.
