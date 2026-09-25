@@ -444,7 +444,17 @@ Rules:
   [[0041-soft-delete-reuse-and-restore]]).
 - A note of kind `external-side-effect` (e.g. a grant that triggers a provisioning workflow,
   [[0054-applications-workflow-engine]]) is always shown.
-- When a step proposes several mutations, v1 shows one card each and has no "Approve all".
+- When a step proposes several mutations, they render as **one paged card** (as built, #1409 —
+  `components/ai/ai-approval-pager.tsx`, pure logic in `lib/ai/approval-pages.ts`): "2 of 5", previous /
+  next and a page strip (arrow keys, `aria-live` position), every page the unchanged approval card, kept
+  mounted so a typed password survives paging. Deciding a page advances to the next undecided one. A single
+  card keeps its own look; auto-approved records (#1376) are never paged. "Approve all" / "Reject all" send
+  one decision per card through the same decision call (no bulk endpoint), show how many they cover, and
+  **never** cover a card that needs step-up (server flag or a step-up warning, `CRITICAL_APPLICATION`
+  included), an elevated card (G4), a card with untrusted sources, or one whose last decision was refused
+  (`STALE`, preview changed, …); refusals are reported per card and a run-wide one (`notAwaiting`,
+  `aiDisabled`, `forbidden`) stops the rest. Writes the server refused before proposing (the sixth and later
+  of a step) collapse into one "N changes couldn't be proposed" line with details.
 
 **Settings → AI — unconfigured (wizard)**
 
@@ -870,7 +880,8 @@ Edits to existing pages (en + es):
 - A full-page `/assistant` route; chat tabs.
 - The AI SDK's Redis-backed `resumable-stream` (the run event bus, `Last-Event-ID` and `run.snapshot`
   cover reconnection — R2).
-- "Approve all", per-user model choice, message edit, regenerate or branching.
+- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated, untrusted and refused
+  cards), per-user model choice, message edit, regenerate or branching.
 - File or image attachments; voice.
 - Sharing conversations; admins reading others' conversations.
 - Usage/cost dashboards and quotas UI.
