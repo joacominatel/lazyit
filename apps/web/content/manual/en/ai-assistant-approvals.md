@@ -124,6 +124,21 @@ what you want, reject the card and tell the assistant the status to use.
 When the batch runs, each asset is created on its own, exactly as if you had created it by hand. If one row
 is refused at that point, the others still run and the assistant tells you which row failed and why.
 
+## Many changes at once
+
+At most **5** changes can wait for your approval at the same time. When you ask for more — "move these 25
+laptops to storage" — the assistant works in batches: it proposes the first 5, tells you where it is (*"5 of
+25"*) and waits. Once you have decided on those cards, it proposes the next 5 by itself, and so on until
+every change is done. If it stops before the end of a very long list, tell it to continue.
+
+For many similar edits to existing assets, the assistant can instead propose **one card for all of them**
+(up to 200 assets): the same kind of table as a [batch of new assets](#creating-many-assets-at-once), one
+row per asset with the before → after of each field that changes. You approve or reject the list as a
+whole; each asset is then updated on its own, exactly as if you had edited it by hand. If someone edits any
+of those assets before you approve, nothing is applied and the assistant can propose the list again. Asset
+tags and serial numbers are still changed one asset at a time. With [auto-approve](#auto-approve) on, such
+a list is applied without a card, like other basic changes.
+
 ## Categories, models and locations
 
 The assistant can also keep your classification tidy, always through a card:

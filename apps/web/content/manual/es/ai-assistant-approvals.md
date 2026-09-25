@@ -130,6 +130,22 @@ Cuando el lote se ejecuta, cada activo se crea por separado, igual que si lo hub
 ese momento se rechaza una fila, las demás se ejecutan igual y el asistente te dice qué fila falló y por
 qué.
 
+## Muchos cambios a la vez
+
+Como máximo **5** cambios pueden esperar tu aprobación al mismo tiempo. Cuando pedís más — "pasá estas 25
+notebooks a depósito" — el asistente trabaja por tandas: propone los primeros 5, te dice por dónde va
+(*"5 de 25"*) y espera. Cuando decidiste sobre esas tarjetas, propone los 5 siguientes por su cuenta, y así
+hasta terminar todos los cambios. Si se detiene antes del final de una lista muy larga, decile que siga.
+
+Para muchas ediciones parecidas sobre activos existentes, el asistente puede proponer en cambio **una sola
+tarjeta para todos** (hasta 200 activos): el mismo tipo de tabla que un [lote de activos
+nuevos](#crear-muchos-activos-a-la-vez), una fila por activo con el antes → después de cada campo que
+cambia. Aprobás o rechazás la lista completa; después cada activo se actualiza por separado, igual que si
+lo hubieras editado a mano. Si alguien edita alguno de esos activos antes de que apruebes, no se aplica
+nada y el asistente puede volver a proponer la lista. Las etiquetas y los números de serie se siguen
+cambiando de a un activo. Con la [aprobación automática](#aprobación-automática) activada, una lista así se
+aplica sin tarjeta, como los demás cambios básicos.
+
 ## Categorías, modelos y ubicaciones
 
 El asistente también puede mantener ordenada tu clasificación, siempre con una tarjeta:
