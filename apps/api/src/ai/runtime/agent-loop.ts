@@ -1,6 +1,7 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   AI_WEB_SEARCH_SOURCE_REF,
+  aiToolResultSourceRef,
   AiInputFormSchema,
   type AiConversationChannel,
   type AiInputRequest,
@@ -177,11 +178,21 @@ const UNTRUSTED_TAG = '<untrusted_content>';
 /** A tool name as the registry allows it; anything else the model sent is logged as `(invalid)`. */
 const TOOL_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 
-/** The refs of a read result that carried other-authored text (the untrusted-source banner). */
-function untrustedRefsOf(result: AiToolResult): AiEntityRef[] {
+/**
+ * The untrusted sources a result adds to the turn (the untrusted-source banner; never auto-approved). A
+ * result whose data carries `<untrusted_content>` — other-authored text wrapped by `untrusted()`, which
+ * never wraps an empty string — is a source whatever the tool returned: its entity refs when it named
+ * any, otherwise the synthetic `toolResult` marker of the tool (SEC-080 — most reads name no entity).
+ */
+export function untrustedRefsOf(
+  result: AiToolResult,
+  toolName: string,
+): AiEntityRef[] {
   if (!result.ok) return [];
   const serialized = JSON.stringify(result.data ?? null);
-  return serialized.includes(UNTRUSTED_TAG) ? result.entityRefs : [];
+  if (!serialized.includes(UNTRUSTED_TAG)) return [];
+  const refs = Array.isArray(result.entityRefs) ? result.entityRefs : [];
+  return refs.length > 0 ? refs : [aiToolResultSourceRef(toolName)];
 }
 
 /**
@@ -959,7 +970,7 @@ export class AgentLoop {
       if (await this.autoApproveOn(state.ctx)) {
         const auto = await this.autoApprove(call, tool, pending, state.ctx);
         if (auto.kind === 'executed') {
-          return answer(auto.result, untrustedRefsOf(auto.result));
+          return answer(auto.result, untrustedRefsOf(auto.result, name));
         }
         pending = auto.action;
       }
@@ -984,7 +995,7 @@ export class AgentLoop {
     this.emitCall(runId, call, tool, 'EXECUTING');
     const result = await this.tools.invoke(name, call.input, state.ctx);
     this.emitResult(runId, call.toolCallId, result);
-    return answer(result, untrustedRefsOf(result));
+    return answer(result, untrustedRefsOf(result, name));
   }
 
   /**
@@ -1351,7 +1362,11 @@ export class AgentLoop {
     let toolCalls = 0;
     const callIds = new Set<string>();
     let untrusted: AiEntityRef[] = [];
+    const answered: string[] = [];
     for (const record of latest.values()) {
+      for (const outcome of record.outcomes) {
+        if ('invocationId' in outcome) answered.push(outcome.invocationId);
+      }
       // A proposal deferred past the per-step limit ran nothing and is not counted (#1409).
       const deferred = record.outcomes.filter(
         (outcome) => 'deferred' in outcome && outcome.deferred === true,
@@ -1360,6 +1375,9 @@ export class AgentLoop {
       for (const call of record.calls) callIds.add(call.toolCallId);
       untrusted = mergeRefs(untrusted, record.untrustedSources);
     }
+    // A call answered while the run was paused — a form the user filled (#1388), whose labels picked from
+    // lazyit lists are other-authored text — is a source like any read the step made (SEC-080).
+    untrusted = mergeRefs(untrusted, await this.pausedSources(answered));
     // Web search results stay in the history and are replayed to the model on every later turn, so once
     // the conversation has searched ANYWHERE — this run or an earlier one — every turn from then on counts
     // as having read untrusted sources: the banner, and never an auto-approval (#1389, G2 review).
@@ -1367,6 +1385,28 @@ export class AgentLoop {
       untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
     }
     return { toolCalls, untrusted, callIds };
+  }
+
+  /**
+   * The untrusted sources of the reads and forms (`read`/`navigate`) answered while the run was paused:
+   * their results are stored on the invocation row, not in the step record.
+   */
+  private async pausedSources(invocationIds: string[]): Promise<AiEntityRef[]> {
+    if (invocationIds.length === 0) return [];
+    const rows = await this.prisma.aiToolInvocation.findMany({
+      where: {
+        id: { in: invocationIds },
+        toolClass: { in: ['read', 'navigate'] },
+      },
+      select: { toolName: true, result: true },
+    });
+    let sources: AiEntityRef[] = [];
+    for (const row of rows) {
+      const result = row.result as AiToolResult | null;
+      if (!result || typeof result !== 'object' || result.ok !== true) continue;
+      sources = mergeRefs(sources, untrustedRefsOf(result, row.toolName));
+    }
+    return sources;
   }
 
   /** Whether any step of this conversation searched the web (a `lazyit-web-search-v1` record exists). */

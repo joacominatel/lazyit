@@ -637,7 +637,8 @@ const assetGet = defineTool({
               ),
             };
     }
-    return { data };
+    // The asset it read: the source the untrusted-source banner names (SEC-080).
+    return { data, entityRefs: [assetRef(row, 'navigate')] };
   },
 });
 
