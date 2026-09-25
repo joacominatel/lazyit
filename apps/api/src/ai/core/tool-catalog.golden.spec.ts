@@ -267,9 +267,9 @@ const GOLDEN = {
   },
   // ── asset tag scheme (#1394): instance configuration, human-only routes — no Service Account ──
   asset_tag_scheme_get: {
-    route: 'GET /config/asset-tag-scheme',
-    permissions: ['settings:manage'],
-    roles: ['ADMIN'],
+    route: 'GET /config/asset-tag-scheme/summary',
+    permissions: ['asset:write'],
+    roles: ['ADMIN', 'MEMBER'],
     humans: true,
     serviceAccounts: false,
     class: 'read',
