@@ -36,13 +36,28 @@ export function resolveMcpAuthMode(
 }
 
 /**
+ * Whether a URL hostname is a loopback address: `localhost`, any `*.localhost` (RFC 6761), `127.0.0.0/8`
+ * or `::1`. Claude Code refuses to install a plugin marketplace or archive hosted on a loopback host, so
+ * the status never offers the marketplace for one (W4-3 finding F3, docs/05-runbooks/ai-mcp-client-matrix.md).
+ * Takes `URL.hostname` (IPv6 in brackets, IPv4 already canonical).
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '[::1]' || host === '::1') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/**
  * The server-known MCP URLs for `GET /ai/status` `mcp` — derived ONLY from the pinned `WEB_ORIGIN` (the
  * origin the plugin renderer and the OAuth issuer use), never from the request's `Host` (security.md T-30):
  *   - `endpoint`       — `<WEB_ORIGIN>/mcp` whenever an http(s) origin is pinned, MCP on or off, so the
  *                        settings card can show it before the switch is flipped; null on a `lan` instance
  *                        without `WEB_ORIGIN` (the web then falls back to its own origin) and in shim mode;
  *   - `marketplaceUrl` — the public Claude Code URL marketplace, only while it is actually served: MCP on,
- *                        a pinned HTTPS origin, not shim (`PluginDistributionService.requirePublicOrigin`).
+ *                        a pinned HTTPS origin, not shim (`PluginDistributionService.requirePublicOrigin`),
+ *                        and not on a loopback host — Claude Code refuses a marketplace there, so the web
+ *                        falls back to the downloaded plugin (W4-3 finding F3).
  */
 export function resolveMcpUrls(
   mcpEnabled: boolean,
@@ -59,9 +74,11 @@ export function resolveMcpUrls(
     return none;
   }
   const oauth = resolveOAuthServerConfig(env);
+  const offerMarketplace =
+    mcpEnabled && oauth && !isLoopbackHost(new URL(oauth.issuer).hostname);
   return {
     endpoint: mcpUrl(origin),
-    marketplaceUrl: mcpEnabled && oauth ? marketplaceUrl(oauth.issuer) : null,
+    marketplaceUrl: offerMarketplace ? marketplaceUrl(oauth.issuer) : null,
   };
 }
 
