@@ -1041,9 +1041,9 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   audience; its delete cascades).
 - **Models and locations:** `asset_model_update`·D (name, manufacturer, SKU, description, category by id
   or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
-  route replaces `specs` whole; the category can be changed but **not cleared**: the domain allows a
-  model without a category, but `PATCH /asset-models/:id` takes `categoryId` as a cuid only, not `null` —
-  a route change, not a tool one, recorded as a follow-up in #1315), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
+  route replaces `specs` whole; `category: null` removes the model's category — the card shows the
+  category before → "None (no category)", and clearing one the model does not have is no change; the
+  route takes `categoryId: null` since #1315, CEO 2026-09-25), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
   top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
   `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to

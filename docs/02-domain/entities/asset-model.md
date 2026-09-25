@@ -74,6 +74,8 @@ default `createdAt desc`) and the `deleted` slice — migrated off the raw array
 picker can search/page authoritatively (issue #199, [[0030-list-pagination-contract]] §8). Then
 `GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete), `POST /:id/restore`
 (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on
-write returns `400` (FK → [[0018-api-documentation-swagger]]).
+write returns `400` (FK → [[0018-api-documentation-swagger]]). `PATCH /:id` with `categoryId: null`
+**clears** the category (the model becomes uncategorized; its assets keep pointing at it) — the same
+state `onDelete: SetNull` produces when a category is deleted (CEO 2026-09-25, #1315).
 
 Related: [[asset]] · [[asset-category]] · [[conventions]] · [[0018-api-documentation-swagger]]
