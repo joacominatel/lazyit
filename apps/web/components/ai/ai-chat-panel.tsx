@@ -23,6 +23,7 @@ import {
   type ChatSettingsDraft,
 } from "@/lib/ai/chat-settings";
 import { presentPreview } from "@/lib/ai/preview";
+import type { SentenceRenderer } from "@/lib/ai/sentences";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommand, type SlashCommandContext } from "@/lib/ai/slash-commands";
 import {
   isAwaitingApproval,
@@ -47,6 +48,7 @@ import { PENDING_INPUT_ATTR } from "./ai-input-card";
 import { useToolDisplayName } from "./ai-labels";
 import { AiMessage } from "./ai-message";
 import { AiRunNotice } from "./ai-run-notice";
+import { useAiSentences } from "./use-ai-sentences";
 import { useTranscriptLabels } from "./use-transcript-labels";
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
@@ -65,11 +67,12 @@ function lastUserText(messages: readonly ChatMessage[]): string | null {
 function pendingAction(
   messages: readonly ChatMessage[],
   toolName: (name: string) => string,
+  sentences: SentenceRenderer,
 ): string | null {
   for (const m of messages) {
     for (const p of m.parts) {
       if (p.type === "approval" && p.outcome === null) {
-        return presentPreview(p.request.preview).action?.text ?? toolName(p.request.preview.toolName);
+        return presentPreview(p.request.preview, sentences).action?.text ?? toolName(p.request.preview.toolName);
       }
     }
   }
@@ -115,6 +118,7 @@ export function AiChatPanel() {
   const turn = useAiTurn();
   const { state } = turn;
   const toolName = useToolDisplayName();
+  const sentences = useAiSentences();
   const transcriptLabels = useTranscriptLabels();
   const [view, setView] = useState<"chat" | "history">("chat");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -233,7 +237,7 @@ export function AiChatPanel() {
   // Completion-only announcements (deltas are never announced): the live region's text changes only
   // when the run finishes or starts waiting for a decision.
   const runStatus = state.run?.status;
-  const action = runStatus === "AWAITING_APPROVAL" ? pendingAction(state.messages, toolName) : null;
+  const action = runStatus === "AWAITING_APPROVAL" ? pendingAction(state.messages, toolName, sentences) : null;
   const inputTitle = inputRequest ? plainText(inputRequest.request.form.title) : null;
   const announcement =
     runStatus === "SUCCEEDED"

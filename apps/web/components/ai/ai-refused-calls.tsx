@@ -5,20 +5,23 @@ import { ChevronRightIcon, ExclamationCircleIcon } from "@heroicons/react/24/out
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { refusedDetails } from "@/lib/ai/approval-pages";
-import { plainText } from "@/lib/ai/untrusted-text";
+import { localizedText } from "@/lib/ai/sentences";
 import { cn } from "@/lib/utils";
 import { useToolDisplayName } from "./ai-labels";
+import { useAiSentences } from "./use-ai-sentences";
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
 
 /**
  * The changes the server refused before they became a proposal, as ONE line (#1409): "20 changes
  * couldn't be proposed — Show details" instead of one "Failed" line each. The details group the calls
- * by tool and reason ("Update asset ×20: Propose at most 5 changes at a time"), as plain text.
+ * by tool and reason ("Update asset ×20: Propose at most 5 changes at a time"), as plain text — the reason
+ * in the user's language when the server sent it as sentences (#1384).
  */
 export function AiRefusedCalls({ parts }: { parts: readonly ToolPart[] }) {
   const t = useTranslations("ai");
   const toolName = useToolDisplayName();
+  const sentences = useAiSentences();
   const [open, setOpen] = useState(false);
   const listId = useId();
   const details = refusedDetails(parts);
@@ -40,9 +43,9 @@ export function AiRefusedCalls({ parts }: { parts: readonly ToolPart[] }) {
         </button>
       </div>
       <ul id={listId} hidden={!open} className="mt-1 ml-5 space-y-1 text-muted-foreground">
-        {details.map(({ name, message, count }) => {
+        {details.map(({ name, message, messageSentences, count }) => {
           const tool = toolName(name);
-          const reason = plainText(message) || t("refused.noReason");
+          const reason = localizedText(message, messageSentences, sentences)?.text || t("refused.noReason");
           return (
             <li key={`${name}-${message}`} className="break-words whitespace-pre-wrap">
               {count > 1

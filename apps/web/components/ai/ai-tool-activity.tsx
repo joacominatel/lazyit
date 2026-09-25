@@ -13,9 +13,11 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { linkableRefs } from "@/lib/ai/entity-href";
+import { localizedText, type SentenceRenderer } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import { cn } from "@/lib/utils";
 import { useEntityTypeLabel, useToolDisplayName } from "./ai-labels";
+import { useAiSentences } from "./use-ai-sentences";
 
 type ToolPart = Extract<AiMessagePart, { type: "tool" }>;
 
@@ -81,9 +83,18 @@ export function toolLineText(t: Translate, status: string, tool: string, count =
   return t(`tools.generic.${known}`, { tool: name });
 }
 
-function detailOf(part: ToolPart): string {
-  const summary = part.result?.summary ? plainText(part.result.summary) : "";
-  const errorMessage = part.result?.error ? plainText(part.result.error.message) : "";
+/**
+ * A call's detail line: its summary, else its error message — each in the user's language when the server
+ * also sent it as sentences and they render whole (#1384), else the English.
+ */
+export function detailOf(part: ToolPart, sentences?: SentenceRenderer): string {
+  const result = part.result;
+  const summary = result?.summary
+    ? (localizedText(result.summary, result.summarySentences, sentences)?.text ?? "")
+    : "";
+  const errorMessage = result?.error
+    ? (localizedText(result.error.message, result.error.messageSentences, sentences)?.text ?? "")
+    : "";
   return summary || errorMessage;
 }
 
@@ -96,9 +107,10 @@ function detailOf(part: ToolPart): string {
 export function AiToolActivity({ parts, navigated }: { parts: readonly ToolPart[]; navigated: boolean }) {
   const t = useTranslations("ai");
   const toolName = useToolDisplayName();
+  const sentences = useAiSentences();
   const [open, setOpen] = useState(false);
   const part = parts[0]!;
-  const details = parts.map(detailOf).filter((d) => d !== "");
+  const details = parts.map((p) => detailOf(p, sentences)).filter((d) => d !== "");
   const detail = details.length > 0;
 
   return (

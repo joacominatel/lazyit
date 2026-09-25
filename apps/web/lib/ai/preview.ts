@@ -1,4 +1,5 @@
 import type { AiActionPreview, AiPreviewValueKind } from "@lazyit/shared";
+import { localizedText, type SentenceRenderer } from "./sentences";
 import { stripUntrusted } from "./untrusted-text";
 
 /**
@@ -107,8 +108,25 @@ export function isRecordArray(value: unknown): value is PreviewRecord[] {
   );
 }
 
-/** Splits the preview into its `action` sentence (the first row by convention) and the field rows. */
-export function presentPreview(preview: Pick<AiActionPreview, "changes">): PreviewModel {
+/** A value the server also sent as sentences (#1384): the localized text when it renders whole, else null. */
+function sentenceValue(sentences: unknown, render: SentenceRenderer | undefined): PreviewValue | null {
+  if (sentences === undefined || !render) return null;
+  const localized = render(sentences);
+  if (localized === null) return null;
+  const value = textValue(localized.text);
+  return value.kind === "text" ? { ...value, untrusted: localized.untrusted } : value;
+}
+
+/**
+ * Splits the preview into its `action` sentence (the first row by convention) and the field rows. With a
+ * `render` (the `useAiSentences` renderer), a row the server also sent as sentences
+ * (`afterSentences` / `beforeSentences`, #1384) shows them in the user's language; without one, or when
+ * they cannot be rendered whole, the English value shows.
+ */
+export function presentPreview(
+  preview: Pick<AiActionPreview, "changes">,
+  render?: SentenceRenderer,
+): PreviewModel {
   let action: PreviewModel["action"] = null;
   const rows: PreviewRow[] = [];
   const notices: PreviewNotice[] = [];
@@ -118,15 +136,21 @@ export function presentPreview(preview: Pick<AiActionPreview, "changes">): Previ
       continue;
     }
     if (change.field === "action" && action === null && typeof change.after === "string") {
-      const clean = stripUntrusted(change.after);
-      action = { text: clean.text, untrusted: clean.untrusted };
+      action = localizedText(change.after, change.afterSentences, render);
       continue;
     }
+    // A redacted value is never replaced by sentences.
+    const redacted = change.valueKind === "redacted";
     rows.push({
       field: change.field,
       before:
-        change.before === undefined ? null : formatPreviewValue(change.before, change.valueKind),
-      after: formatPreviewValue(change.after, change.valueKind),
+        change.before === undefined
+          ? null
+          : ((!redacted && sentenceValue(change.beforeSentences, render)) ||
+            formatPreviewValue(change.before, change.valueKind)),
+      after:
+        (!redacted && sentenceValue(change.afterSentences, render)) ||
+        formatPreviewValue(change.after, change.valueKind),
       // A redacted value never reaches the table: its records are dropped with it.
       ...(change.valueKind !== "redacted" && isRecordArray(change.after) ? { records: change.after } : {}),
     });
