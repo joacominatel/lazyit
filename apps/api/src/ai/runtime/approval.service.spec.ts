@@ -20,7 +20,7 @@ jest.mock('jose', () => ({
 import { HttpException, Logger } from '@nestjs/common';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import type { LocalCredentialService } from '../../auth/local/local-credential.service';
-import { AiStepUpVerifier } from './step-up.verifier';
+import { PasswordStepUpVerifier } from '../../auth/local/password-step-up.verifier';
 import {
   buildRuntime,
   HUMAN,
@@ -259,7 +259,7 @@ describe('who decides', () => {
   });
 });
 
-describe('AiStepUpVerifier under a burst', () => {
+describe('PasswordStepUpVerifier under a burst', () => {
   it('lets one verification per user reach the KDF; concurrent attempts are refused', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
@@ -269,7 +269,7 @@ describe('AiStepUpVerifier under a burst', () => {
       await gate;
       return { valid: false, needsRehash: false };
     });
-    const verifier = new AiStepUpVerifier({
+    const verifier = new PasswordStepUpVerifier({
       verify,
     } as unknown as LocalCredentialService);
     const user = { id: 'u1', passwordHash: 'hash:x' } as never;
@@ -290,7 +290,7 @@ describe('AiStepUpVerifier under a burst', () => {
 
   it('counts an attempt before the KDF answers', async () => {
     const verify = jest.fn(() => new Promise<never>(() => undefined)); // the KDF never returns
-    const verifier = new AiStepUpVerifier({
+    const verifier = new PasswordStepUpVerifier({
       verify,
     } as unknown as LocalCredentialService);
     const user = { id: 'u1', passwordHash: 'hash:x' } as never;
