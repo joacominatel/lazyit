@@ -51,8 +51,30 @@ meant to trick an AI. Check that the change is really what **you** asked for bef
 - **Reject** makes nothing change. The assistant is told you declined and can suggest something else — tell
   it what to change.
 
-Each card is decided on its own; there is no "approve all". Nothing is ever approved by pressing Enter in the
-message box.
+Each change is decided on its own card or page. Nothing is ever approved by pressing Enter in the message
+box.
+
+## Several changes at once
+
+When the assistant proposes more than one change in the same step — for example, updating five assets — they
+appear as **one card with pages** instead of a stack of cards:
+
+- The top of the card says **Proposed changes · 5 changes** and which page you are on (**2 of 5**). Use the
+  arrows, or select a page number, to move between them; on the page numbers, the left and right arrow keys
+  work too. A decided page shows a check (approved or done) or a crossed circle (rejected or expired).
+- Each page is the same card described above — what will happen, before → after, the warnings and, when it
+  needs it, your password — with its own **Approve** and **Reject**. After you decide a page, the card moves
+  to the next change still waiting.
+- **Approve all** and **Reject all** decide, one by one, only the changes that don't need a closer look; the
+  number on the button says how many. They **never** include a change that needs your password (roles,
+  identity, access, sign-in, an application marked critical), a *Sensitive change*, a change based on content
+  written by others, or one whose last decision was refused — for example because the item changed in the
+  meantime. The card lists how many were left out and why; decide those on their own page.
+- If some changes of a bulk action can't be decided, the others still are, and the card lists the ones that
+  failed with a link to their page.
+
+If the assistant tried to propose changes that were refused before they became a card, they appear as **one
+line** — for example *"20 changes couldn't be proposed"* — with **Show details** for the reasons.
 
 ## Changes that need your password
 

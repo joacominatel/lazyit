@@ -4,12 +4,14 @@ import type { AiMessagePart } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import type { ChatMessage } from "@/lib/ai/stream-reducer";
-import { groupMessageParts } from "@/lib/ai/tool-groups";
+import { planMessageParts } from "@/lib/ai/approval-pages";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { AiApprovalCard } from "./ai-approval-card";
+import { AiApprovalPager } from "./ai-approval-pager";
 import { AiAutoAppliedCard } from "./ai-auto-applied-card";
 import { AiInputCard, type AnswerInput } from "./ai-input-card";
 import { AiMarkdown } from "./ai-markdown";
+import { AiRefusedCalls } from "./ai-refused-calls";
 import { AiRunNotice } from "./ai-run-notice";
 import { AiToolActivity } from "./ai-tool-activity";
 import { AiWebSources } from "./ai-web-sources";
@@ -76,7 +78,23 @@ export function AiMessage({
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {t("assistant")}
       </p>
-      {groupMessageParts(message.parts).map((item) => {
+      {planMessageParts(message.parts).map((item) => {
+        if (item.kind === "approvals") {
+          // Several changes of one step: one paged card (#1409).
+          return (
+            <AiApprovalPager
+              key={`pager-${item.parts[0]!.request.toolCallId}`}
+              parts={item.parts}
+              tools={tools}
+              navigated={navigated}
+              onDecide={onDecide}
+            />
+          );
+        }
+        if (item.kind === "refused") {
+          // Changes the server refused before proposing them: one line, not one per call (#1409).
+          return <AiRefusedCalls key={`refused-${item.parts[0]!.toolCallId}`} parts={item.parts} />;
+        }
         if (item.kind === "tools") {
           // Consecutive identical read calls share one line (#1377).
           return (
