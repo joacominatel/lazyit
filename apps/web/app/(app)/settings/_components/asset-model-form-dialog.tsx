@@ -29,6 +29,7 @@ import {
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
 import { notifyError } from "@/lib/api/notify-error";
+import { categoryIdForPayload } from "./asset-model-category-payload";
 import {
   type SpecsFieldError,
   type SpecsFieldRow,
@@ -230,7 +231,8 @@ function AssetModelForm({
     const payload: Record<string, unknown> = { name, manufacturer };
     if (sku.length > 0) payload.sku = sku;
     if (description.length > 0) payload.description = description;
-    if (values.categoryId.length > 0) payload.categoryId = values.categoryId;
+    const categoryId = categoryIdForPayload(values.categoryId, model?.categoryId);
+    if (categoryId !== undefined) payload.categoryId = categoryId;
     if (specs !== undefined) payload.specs = specs;
     return { ok: true, payload };
   }
@@ -347,6 +349,7 @@ function AssetModelForm({
               placeholder={t("taxonomies.models.form.categoryPlaceholder")}
               searchPlaceholder={t("taxonomies.models.form.searchCategory")}
               emptyText={t("taxonomies.models.form.noCategories")}
+              noneLabel={t("taxonomies.models.form.noCategory")}
             />
           </Field>
 
