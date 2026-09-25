@@ -123,6 +123,16 @@ read-authz gap (the old DEF-001 residual / "reads open to any authenticated user
   `{ role, permissions }` via the same resolver, so the web derives `can('domain:action')` without
   polluting the `User` wire shape.
 
+**Instance configuration a non-admin may READ (read widened on purpose).** One narrow exception to "config
+is `settings:manage`": `GET /config/asset-tag-scheme/summary` (#1315, follow-up of #1394) is gated
+`asset:write` — the permission of `POST /assets` — so whoever may create assets can follow the instance's
+tag pattern (in the asset form and through the AI tool `asset_tag_scheme_get`). It is read-only, answers
+for the STORED pattern only (no query to probe others), returns the minimal non-sensitive fields
+(`enabled`, `prefix`, `suffix`, `width`, and the next tag with its number — no `nextNumber` counter, no
+skip count, no timestamps) and stays human-only (`ServicePrincipalForbiddenGuard`, like the rest of that
+controller). Every other `/config/asset-tag-scheme` route — read, configure, seed suggestion, next-tag
+preview, backfill — stays `settings:manage`. See [[asset-tag-scheme]].
+
 **Fully configurable, admin-delegated.** Coarse verbs and `:delete` ARE grantable to MEMBER/VIEWER — the
 UI marks them ⚠ "Admin-level" and confirms, but the server does not block (an admin-initiated delegation
 is accepted by design). The only guardrails are *ADMIN-immutable* + *catalog-membership*.

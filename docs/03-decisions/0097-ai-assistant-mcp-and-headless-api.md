@@ -501,6 +501,17 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > `AI_PROMPT_VERSION` goes to 5: conversations begun on 4 become read-only on the next message (default 7).
 > Downgrading leaves inert columns and `lazyit-web-search-v1` rows an older projection ignores.
 
+> Amended 2026-09-25 (#1315 follow-ups of #1390, #1389 and #1394): no migration, no prompt change.
+> (1) An approval re-reads the card's **impact counts**: when they moved since propose, the stored
+> preview takes the fresh counts and the action stays pending (`PREVIEW_CHANGED`) — pending rows need
+> nothing. (2) A provider refusing its web search tool because the account disabled it ends the run with
+> the new run error code **`WEB_SEARCH_DISABLED`** (additive; the run's `error` is JSON, and an older web
+> renders an unknown code generically). (3) **Authorization, read widened:** the new
+> `GET /config/asset-tag-scheme/summary` (`asset:write`, human-only, read-only; the pattern and the next
+> tag, no counter internals or timestamps) lets whoever may create assets read the instance's tag
+> pattern; `asset_tag_scheme_get` now binds it, so it is listed to MEMBER as well as ADMIN
+> ([[authorization]]). Every other asset-tag-scheme route stays `settings:manage`.
+
 ## Prerequisites
 
 - **#1314** — the seed must stop re-granting revoked default permissions before `ai:use` / `ai:connect`

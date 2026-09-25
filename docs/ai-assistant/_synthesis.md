@@ -251,7 +251,8 @@ after `AWAITING_APPROVAL` / `AWAITING_INPUT`; the client re-subscribes after dec
 Run error codes: `AI_DISABLED`, `FORBIDDEN`, `PROVIDER_AUTH`, `PROVIDER_RATE_LIMIT`,
 `PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `PROVIDER_REFUSED`, `EGRESS_DENIED`, `BUDGET_EXCEEDED`,
 `CONTEXT_LIMIT`, `MAX_STEPS`, `CANCELLED`, `ENGINE_RESTART`, `RUN_IN_PROGRESS`,
-`CONVERSATION_READ_ONLY`, `STEP_UP_REQUIRED`. Tool-level codes are the tools note's `AI_ERROR_CODES`.
+`CONVERSATION_READ_ONLY`, `STEP_UP_REQUIRED`, `WEB_SEARCH_DISABLED` (#1315: the provider refused its web search tool
+because the account disabled it). Tool-level codes are the tools note's `AI_ERROR_CODES`.
 
 ### 4.7 HTTP surface
 
