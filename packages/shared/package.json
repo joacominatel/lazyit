@@ -27,13 +27,13 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@noble/ciphers": "2.3.0",
-    "@noble/curves": "2.3.0",
+    "@noble/ciphers": "2.4.0",
+    "@noble/curves": "2.4.0",
     "@noble/hashes": "2.4.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.1"
+    "@types/bun": "^1.4.2"
   },
   "peerDependencies": {
     "typescript": "^6"
