@@ -979,6 +979,7 @@
       "toolCallLimit": "The tool call limit of this run was reached",
       "tooManyToolCalls": "Too many tool calls; wait a moment before calling more",
       "mutationCap": "The mutation cap of this run ({cap}) was reached",
+      "mutationCapBatch": "This call would make {weight} changes, but the mutation cap of this run ({cap}) allows {left} more",
       "pendingLimit": "Limit reached: {max} proposals are pending in this step; wait for the user's decisions and propose the rest in the next step.",
       "repeatedFailure": "Not run: this exact {tool} call already failed {count} times in this turn",
       "formChannel": "Nobody can answer a form on this channel",

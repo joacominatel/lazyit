@@ -979,6 +979,7 @@
       "toolCallLimit": "Se alcanzó el límite de llamadas a herramientas de esta respuesta",
       "tooManyToolCalls": "Demasiadas llamadas a herramientas; esperá un momento antes de hacer más",
       "mutationCap": "Se alcanzó el límite de cambios de esta respuesta ({cap})",
+      "mutationCapBatch": "Esta llamada haría {weight, plural, one {# cambio} other {# cambios}}, pero el límite de cambios de esta respuesta ({cap}) permite {left} más",
       "pendingLimit": "Se alcanzó el límite: hay {max} propuestas pendientes en este paso; hay que esperar tus decisiones y proponer el resto en el paso siguiente.",
       "repeatedFailure": "No se ejecutó: esta misma llamada a {tool} ya falló {count, plural, one {# vez} other {# veces}} en este turno",
       "formChannel": "Nadie puede responder un formulario en este canal",
