@@ -42,7 +42,7 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "ai": "^7.0.114",
-    "bullmq": "^5.81.5",
+    "bullmq": "^6.3.8",
     "csv-parse": "^7.0.3",
     "ioredis": "^6.0.0",
     "jose": "^6.2.12",

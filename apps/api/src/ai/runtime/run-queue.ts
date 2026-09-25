@@ -60,17 +60,13 @@ export class AiRunQueue {
   }
 
   /**
-   * The run ids with a job not yet finished (active, waiting, delayed, paused), or `null` when the broker
-   * cannot be read — the sweeper then finalizes nothing on incomplete information.
+   * The run ids with a job not yet finished (active, waiting, delayed), or `null` when the broker
+   * cannot be read — the sweeper then finalizes nothing on incomplete information. BullMQ 6 reports
+   * the jobs of a paused queue as `waiting`; there is no separate `paused` state to scan.
    */
   async inFlightRunIds(): Promise<Set<string> | null> {
     try {
-      const jobs = await this.queue.getJobs([
-        'active',
-        'waiting',
-        'delayed',
-        'paused',
-      ]);
+      const jobs = await this.queue.getJobs(['active', 'waiting', 'delayed']);
       const ids = new Set<string>();
       for (const job of jobs) {
         const runId = (job?.data as AiRunJobData | undefined)?.runId;

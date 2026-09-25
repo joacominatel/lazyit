@@ -275,19 +275,14 @@ export class WorkflowTriggerService {
 
   /**
    * The set of run ids that currently have a job NOT-yet-finished on the queue (active / waiting /
-   * delayed / paused). Used by the sweeper's RUNNING-staleness reconciler (CCOR-4) to AVOID failing a
+   * delayed; BullMQ 6 reports a paused queue's jobs as waiting). Used by the sweeper's RUNNING-staleness reconciler (CCOR-4) to AVOID failing a
    * run that is legitimately in-flight or backing off (its delayed retry job counts as in-flight).
    * Returns `null` when the broker state cannot be read (e.g. Valkey down) so the reconciler can SKIP —
    * never finalize a possibly-live run as failed on incomplete information.
    */
   async inFlightRunIds(): Promise<Set<string> | null> {
     try {
-      const jobs = await this.queue.getJobs([
-        'active',
-        'waiting',
-        'delayed',
-        'paused',
-      ]);
+      const jobs = await this.queue.getJobs(['active', 'waiting', 'delayed']);
       const ids = new Set<string>();
       for (const job of jobs) {
         const runId = (job?.data as WorkflowRunJobData | undefined)?.runId;
