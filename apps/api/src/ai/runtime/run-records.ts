@@ -62,7 +62,16 @@ export interface StepCall {
 
 /** A call's answer as recorded: the output itself, or the pending invocation that will hold it. */
 export type StepOutcome =
-  | { toolCallId: string; output: unknown; isError: boolean }
+  | {
+      toolCallId: string;
+      output: unknown;
+      isError: boolean;
+      /**
+       * A chat write answered "limit reached" past the per-step pending limit (#1409): nothing ran, and a
+       * resume does not count it against the run's tool calls. Absent on older records (counted).
+       */
+      deferred?: true;
+    }
   | { toolCallId: string; invocationId: string };
 
 export interface StepRecord {

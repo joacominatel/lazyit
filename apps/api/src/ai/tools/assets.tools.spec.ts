@@ -1225,6 +1225,281 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
     });
   });
 
+  describe('asset_update_batch (#1409)', () => {
+    const change = (action: AiPendingAction, field: string) =>
+      action.preview!.changes.find((c) => c.field === field)?.after;
+    const rowsOf = (action: AiPendingAction) =>
+      change(action, 'rows') as Array<Row & { errors: string[] }>;
+    const refusal = (proposal: unknown) =>
+      (proposal as { result: { error: { code: string; message: string } } })
+        .result.error;
+    const THREE = [
+      { asset: 'LT-0001', specs: { dock: 'yes' } },
+      { asset: 'SRV-0001' },
+      { asset: A.shared, name: 'Shared iPad (spare)' },
+    ];
+
+    it('many assets, ONE card: each row diffed like asset_update; one approval updates each, audited with the shared id', async () => {
+      const action = await propose('asset_update_batch', {
+        rows: THREE,
+        common: { status: 'IN_STORAGE', location: 'Storage Room' },
+      });
+      expect(ai.invocations.size).toBe(1);
+      expect(change(action, 'action')).toBe('Update 3 of 3 assets.');
+      expect(change(action, 'rowCount')).toBe(3);
+      expect(change(action, 'validRows')).toBe(3);
+      expect(change(action, 'invalidRows')).toBe(0);
+      expect(rowsOf(action)).toEqual([
+        {
+          row: 1,
+          asset: { type: 'asset', id: A.laptop, label: 'LT-0001' },
+          status: 'OPERATIONAL → IN_STORAGE',
+          location: 'HQ → Storage Room',
+          'specs.dock': '— → yes',
+          skipped: false,
+          valid: true,
+          errors: [],
+        },
+        {
+          row: 2,
+          asset: { type: 'asset', id: A.server, label: 'Server (SRV-0001)' },
+          status: 'OPERATIONAL → IN_STORAGE',
+          location: '— → Storage Room',
+          skipped: false,
+          valid: true,
+          errors: [],
+        },
+        {
+          row: 3,
+          asset: {
+            type: 'asset',
+            id: A.shared,
+            label: 'Shared iPad (TAB-0001)',
+          },
+          name: 'Shared iPad → Shared iPad (spare)',
+          status: 'OPERATIONAL → IN_STORAGE',
+          location: '— → Storage Room',
+          skipped: false,
+          valid: true,
+          errors: [],
+        },
+      ]);
+      // A bulk change lists what it touches (T2), never needs the password, and is pinned to a version.
+      expect(action.preview).toMatchObject({
+        warnings: [],
+        elevated: false,
+        stepUpRequired: false,
+        impacted: [{ type: 'asset', count: 3 }],
+        precondition: { updatedAt: T0.toISOString() },
+      });
+      expect(action.preview!.impacted[0].sample).toHaveLength(3);
+      expect(state.mutations).toBe(0);
+
+      const approved = await approve(action);
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { ok: true, mutated: true, summary: 'Updated 3 of 3 assets.' },
+      });
+      expect(assetsService.update).toHaveBeenCalledTimes(3);
+      const [id, body] = assetsService.update.mock.calls[0] as [string, Row];
+      expect(id).toBe(A.laptop);
+      // specs are MERGED, as a single update does: the agent-reported host facts survive.
+      expect(body).toEqual({
+        status: 'IN_STORAGE',
+        locationId: L.storage,
+        specs: {
+          ram: '16 GB',
+          host: { hostname: 'ana-lt', os: INJECTION },
+          dock: 'yes',
+        },
+      });
+      const history = historyRows();
+      expect(history).toHaveLength(3);
+      for (const row of history) {
+        expect(row).toMatchObject({
+          eventType: 'UPDATED',
+          aiInvocationId: action.id,
+        });
+      }
+      expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
+      expect(approved.result?.entityRefs).toHaveLength(3);
+      expect(data(approved.result!)).toMatchObject({
+        requested: 3,
+        updated: 3,
+        notUpdated: 0,
+        problems: [],
+      });
+    });
+
+    it.each([
+      ['the first row', () => A.laptop],
+      ['the last row', () => A.shared],
+    ])(
+      'STALE when %s asset changed before the approval; nothing runs',
+      async (_label, target) => {
+        const action = await propose('asset_update_batch', {
+          rows: THREE,
+          common: { status: 'IN_STORAGE' },
+        });
+        touch(state.assets.get(target())!);
+        expect(await approve(action)).toMatchObject({
+          status: 'FAILED',
+          result: { ok: false, error: { code: 'STALE', status: 409 } },
+        });
+        expect(assetsService.update).not.toHaveBeenCalled();
+      },
+    );
+
+    const MIXED = [
+      { asset: 'LT-0001', status: 'IN_STORAGE' as const },
+      { asset: 'NOPE-9' },
+      { asset: 'SRV-0001', status: 'OPERATIONAL' as const },
+      { asset: 'LT-0001', status: 'LOST' as const },
+      { asset: 'TAB-0001', location: 'Basement' },
+      { asset: A.dupUpper, company: 'Acme' },
+    ];
+
+    it('a row that cannot be applied refuses the proposal with EVERY reason; no card, nothing stored', async () => {
+      const proposal = await h.tools.propose(
+        'asset_update_batch',
+        { rows: MIXED, common: { company: 'Acme' } },
+        ctx(actor('MEMBER')),
+      );
+      expect(proposal.ok).toBe(false);
+      const error = refusal(proposal);
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toContain('3 rows of 6 cannot be applied as given');
+      expect(error.message).toContain('row 2 (NOPE-9): No asset matches');
+      expect(error.message).toContain(
+        'row 4 (LT-0001): the same asset as row 1',
+      );
+      expect(error.message).toContain(
+        'row 5 (Shared iPad (TAB-0001)): No location matches',
+      );
+      expect(error.message).toContain('skip: true');
+      expect(ai.invocations.size).toBe(0);
+    });
+
+    it('nothing to change on a row is refused like a single update', async () => {
+      const proposal = await h.tools.propose(
+        'asset_update_batch',
+        { rows: [{ asset: 'SRV-0001', status: 'OPERATIONAL' }] },
+        ctx(actor('MEMBER')),
+      );
+      expect(refusal(proposal).message).toContain(
+        'row 1 (Server (SRV-0001)): nothing to change: Server (SRV-0001) already has these values',
+      );
+    });
+
+    it('rows marked skip are shown and never run; only the rest are updated', async () => {
+      const action = await propose('asset_update_batch', {
+        rows: MIXED.map((r, i) =>
+          i === 1 || i === 3 || i === 4 ? { ...r, skip: true } : r,
+        ),
+        common: { company: 'Acme' },
+      });
+      expect(change(action, 'action')).toBe(
+        'Update 3 of 6 assets; 3 rows skipped as requested.',
+      );
+      expect(change(action, 'invalidRows')).toBe(3);
+      const rows = rowsOf(action);
+      expect(rows.map((r) => [r.skipped, r.valid])).toEqual([
+        [false, true],
+        [true, false],
+        [false, true],
+        [true, false],
+        [true, false],
+        [false, true],
+      ]);
+      expect(rows[1].asset).toBe('NOPE-9');
+      expect(action.preview!.impacted[0].count).toBe(3);
+      const approved = await approve(action);
+      expect(approved.status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls.map((c) => c[0])).toEqual([
+        A.laptop,
+        A.server,
+        A.dupUpper,
+      ]);
+      expect(data(approved.result!)).toMatchObject({
+        requested: 6,
+        updated: 3,
+        notUpdated: 3,
+        problems: [
+          expect.objectContaining({ row: 2, skipped: true }),
+          expect.objectContaining({ row: 4, skipped: true }),
+          expect.objectContaining({ row: 5, skipped: true }),
+        ],
+      });
+    });
+
+    it('headless (no card): a row that fails its check is reported and not applied, the others run', async () => {
+      const result = await h.tools.invoke(
+        'asset_update_batch',
+        {
+          rows: [{ asset: 'SRV-0001' }, { asset: 'NOPE-9' }],
+          common: { status: 'IN_MAINTENANCE' },
+        },
+        ctx(actor('SA writer')),
+      );
+      expect(result).toMatchObject({ ok: true, mutated: true });
+      expect(data(result)).toMatchObject({
+        requested: 2,
+        updated: 1,
+        problems: [{ row: 2, errors: [expect.stringContaining('NOPE-9')] }],
+      });
+      expect(state.assets.get(A.server)!.status).toBe('IN_MAINTENANCE');
+    });
+
+    it('bounded and strict: more than 200 rows, a tag or serial, or a reserved spec key is refused before any dispatch', async () => {
+      for (const input of [
+        {
+          rows: Array.from({ length: 201 }, (_, i) => ({
+            asset: `A${i}`,
+            status: 'IN_MAINTENANCE',
+          })),
+        },
+        { rows: [{ asset: 'SRV-0001', assetTag: 'X-1' }] },
+        { rows: [{ asset: 'SRV-0001', serial: 'S-1' }] },
+        { rows: [{ asset: 'SRV-0001' }], common: { specs: { host: 'x' } } },
+        { rows: [{ asset: 'SRV-0001', specs: { _infraAutoCreated: true } }] },
+      ]) {
+        const proposal = await h.tools.propose(
+          'asset_update_batch',
+          input,
+          ctx(actor('MEMBER')),
+        );
+        expect(proposal).toMatchObject({
+          ok: false,
+          result: { error: { code: 'INVALID_INPUT' } },
+        });
+      }
+      expect(assetsService.findPage).not.toHaveBeenCalled();
+      expect(ai.invocations.size).toBe(0);
+    });
+
+    it('same permission as a single update, per row through the route: a VIEWER is DENIED, an SA without asset:write gets the route 403', async () => {
+      const viewer = await h.tools.propose(
+        'asset_update_batch',
+        { rows: [{ asset: 'SRV-0001', status: 'IN_MAINTENANCE' }] },
+        ctx(actor('VIEWER')),
+      );
+      expect(viewer).toMatchObject({
+        ok: false,
+        result: { error: { code: 'FORBIDDEN' } },
+      });
+      const sa = await h.tools.invoke(
+        'asset_update_batch',
+        {
+          rows: [{ asset: 'SRV-0001' }, { asset: 'TAB-0001' }],
+          common: { status: 'IN_MAINTENANCE' },
+        },
+        ctx(actor('SA reader')),
+      );
+      expect(sa).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+      expect(state.mutations).toBe(0);
+    });
+  });
+
   describe('asset_archive', () => {
     it('ADMIN: a soft delete with its warning; the card says who still holds the asset', async () => {
       const action = await propose(
@@ -1654,6 +1929,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         'asset_restore',
         'asset_search',
         'asset_update',
+        'asset_update_batch',
       ]);
       expect(await names('MEMBER')).toEqual([
         'asset_check_in',
@@ -1664,6 +1940,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         'asset_model_create',
         'asset_search',
         'asset_update',
+        'asset_update_batch',
       ]);
       expect(await names('VIEWER')).toEqual(['asset_get', 'asset_search']);
     });

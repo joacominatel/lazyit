@@ -156,6 +156,15 @@ const GOLDEN = {
     class: 'write',
     channels: ['CHAT', 'MCP', 'HEADLESS'],
   },
+  asset_update_batch: {
+    route: 'PATCH /assets/:id',
+    permissions: ['asset:write'],
+    roles: ['ADMIN', 'MEMBER'],
+    humans: true,
+    serviceAccounts: true,
+    class: 'write',
+    channels: ['CHAT', 'MCP', 'HEADLESS'],
+  },
   location_create: {
     route: 'POST /locations',
     permissions: ['location:write'],

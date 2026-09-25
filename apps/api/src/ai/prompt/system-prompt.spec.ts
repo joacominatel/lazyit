@@ -27,6 +27,7 @@ import {
   PERMISSIONS,
 } from '@lazyit/shared';
 import { AI_PROMPT_VERSION } from '../ai.constants';
+import { AI_MAX_PENDING_PER_STEP } from '../runtime/runtime.constants';
 import { ALL_TOOLSETS } from '../tools';
 import { AiPromptService } from './ai-prompt.module';
 import { LAZYIT_DOMAIN_PRIMER } from './primer';
@@ -48,8 +49,8 @@ import {
  * `ai.constants.ts`, then record the new version and hash here.
  */
 const PINNED = {
-  version: 5,
-  sha256: '2cba36f643acc29b5803dbd7f1258acc251d264eaf456baae8b77e7764c59e0f',
+  version: 6,
+  sha256: '53b0500e1b6d2aa0839bde554d254e2ee654fd2fad9909fd04e061009e10f121',
 };
 
 const tools = (...classes: AiPromptTool['class'][]): AiPromptTool[] =>
@@ -275,6 +276,28 @@ describe('buildSystemPrompt', () => {
     );
     expect(buildSystemPrompt(HEADLESS).text).not.toContain('quick form');
     expect(buildMcpInstructions()).not.toContain('quick form');
+  });
+
+  it('chat: knows the pending-approval limit and works in batches until done (#1409, AI_PROMPT_VERSION 6)', () => {
+    const { text } = buildSystemPrompt(CHAT);
+    const n = AI_MAX_PENDING_PER_STEP;
+    expect(text).toContain(
+      `At most ${n} proposals can wait for approval at once`,
+    );
+    expect(text).toContain(`propose the first ${n}, tell the person how many`);
+    expect(text).toContain(`(for example "${n} of 25")`);
+    expect(text).toContain(
+      `Once they have decided, propose the next ${n}, and so on until every change is done`,
+    );
+    expect(text).toContain('never propose the same change twice');
+    // The batch guidance names no tool (tool names never enter the prompt).
+    expect(text).toContain('prefer it over separate proposals');
+    for (const other of [
+      buildSystemPrompt(HEADLESS).text,
+      buildMcpInstructions(),
+    ]) {
+      expect(other).not.toContain('can wait for approval at once');
+    }
   });
 
   it('carries the headless rules: unattended autonomy within the SA setting, no guessing, a report', () => {

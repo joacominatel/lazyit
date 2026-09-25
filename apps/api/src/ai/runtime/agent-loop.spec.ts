@@ -502,6 +502,143 @@ describe('chat writes: propose → approve → resume', () => {
   });
 });
 
+describe('more changes than the pending-approval limit (#1409)', () => {
+  const writes = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      toolCallId: `call_${from + i}`,
+      toolName: WRITE,
+      input: { id: `a${from + i}` },
+    }));
+
+  async function approveAll(runId: string) {
+    const pending = rt.prisma.tables.aiToolInvocation.rows.filter(
+      (row: any) => row.runId === runId && row.status === 'AWAITING_APPROVAL',
+    );
+    for (const row of pending) {
+      await rt.approvals.decide({
+        runId,
+        toolCallId: row.toolUseId,
+        decision: 'approve',
+        identity: HUMAN,
+      });
+    }
+    await rt.drain();
+    return pending.length;
+  }
+
+  it('answers the proposals past the limit "limit reached" — not an error, not counted — and continues after the decisions', async () => {
+    rt.model.push(
+      { toolCalls: writes(1, 7) },
+      { toolCalls: writes(6, 7) },
+      { text: 'All 7 done.' },
+    );
+    const { runId, conversationId } = await chat('Retire these 7 assets');
+    await rt.drain();
+
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    const proposed = rt.prisma.tables.aiToolInvocation.rows.map(
+      (row: any) => row.toolUseId,
+    );
+    expect(proposed).toEqual([
+      'call_1',
+      'call_2',
+      'call_3',
+      'call_4',
+      'call_5',
+    ]);
+    const cards = rt
+      .events(runId)
+      .filter((e) => e.type === 'tool.approval_required');
+    expect(cards).toHaveLength(5);
+
+    expect(await approveAll(runId)).toBe(5);
+    // The resumed step answered every call: five executed, two deferred with an instruction.
+    const [first] = toolMessages(conversationId);
+    expect(first.map((r) => r.toolCallId)).toEqual(
+      writes(1, 7).map((c) => c.toolCallId),
+    );
+    for (const deferred of first.slice(5)) {
+      expect(deferred.isError).toBe(false);
+      expect(deferred.output).toMatchObject({
+        ok: false,
+        mutated: false,
+        error: { code: 'RATE_LIMITED' },
+      });
+      expect(deferred.output.error.message).toBe(
+        "Limit reached: 5 proposals are pending in this step; wait for the user's decisions and propose the rest in the next step.",
+      );
+      expect(deferred.output.error.hint).toContain('Nothing failed');
+      expect(deferred.output.error.hint).not.toContain('failed the same way');
+    }
+    // The model read those answers and proposed the remaining two: new cards, a second pause.
+    const second = rt.model.requests[1].messages as any[];
+    expect(second.at(-1)).toMatchObject({ role: 'tool' });
+    expect(status(runId)).toBe('AWAITING_APPROVAL');
+    expect(await approveAll(runId)).toBe(2);
+    expect(status(runId)).toBe('SUCCEEDED');
+    expect(
+      rt.prisma.tables.aiToolInvocation.rows.map((row: any) => row.status),
+    ).toEqual(Array(7).fill('SUCCEEDED'));
+  });
+
+  it('works through 25 edits five at a time to completion, within the run tool-call budget', async () => {
+    rt.model.push(
+      // The model over-proposes all 25 at once, then follows the limit.
+      { toolCalls: writes(1, 25) },
+      { toolCalls: writes(6, 10) },
+      { toolCalls: writes(11, 15) },
+      { toolCalls: writes(16, 20) },
+      { toolCalls: writes(21, 25) },
+      { text: '25 of 25 done.' },
+    );
+    const { runId } = await chat('Move these 25 laptops to storage');
+    await rt.drain();
+    const batches: number[] = [];
+    while (status(runId) === 'AWAITING_APPROVAL') {
+      batches.push(await approveAll(runId));
+    }
+    expect(batches).toEqual([5, 5, 5, 5, 5]);
+    expect(status(runId)).toBe('SUCCEEDED');
+    expect(rt.run(runId).finishReason).toBe('stop');
+    // Every edit ran exactly once; the 20 deferred calls spent none of the run's 30 tool calls.
+    const done = rt.prisma.tables.aiToolInvocation.rows.filter(
+      (row: any) => row.status === 'SUCCEEDED',
+    );
+    expect(done.map((row: any) => row.input.id).sort()).toEqual(
+      writes(1, 25)
+        .map((c) => c.input.id)
+        .sort(),
+    );
+    // The last model step was offered tools (not forced into a summary by the tool-call cap).
+    expect(rt.model.requests.at(-1)!.toolChoice).toBe('auto');
+  });
+
+  it('never counts a deferred proposal toward the repeated-failure guard', async () => {
+    // The same over-limit call three times: the guard would stop the third if it counted.
+    const same = { toolName: WRITE, input: { id: 'a9' } };
+    rt.model.push(
+      {
+        toolCalls: [
+          ...writes(1, 5),
+          { toolCallId: 'x1', ...same },
+          { toolCallId: 'x2', ...same },
+          { toolCallId: 'x3', ...same },
+        ],
+      },
+      { text: 'Five proposed; I will propose the rest next.' },
+    );
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+    await approveAll(runId);
+    expect(status(runId)).toBe('SUCCEEDED');
+    const [results] = toolMessages(conversationId);
+    for (const deferred of results.slice(5)) {
+      expect(deferred.output.error.message).toMatch(/^Limit reached/);
+      expect(deferred.output.error.hint).not.toContain('failed the same way');
+    }
+  });
+});
+
 describe('every tool call is answered', () => {
   it('answers an unknown tool and unparseable arguments without executing anything', async () => {
     rt.model.push(
