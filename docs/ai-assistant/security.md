@@ -548,7 +548,9 @@ the **exfiltration leg** and the **consequential-action leg**.
   - Refuse consent while `mustChangePassword` is set.
 - **Scopes** (least agency) [E: scope minimization]. `lazyit.read` covers T0. `lazyit.write` adds
   T1/T2. `lazyit.admin` adds T3/T4 (the `elevated` class), is **never preselected**, and requires
-  step-up at consent (R7). At
+  step-up at consent (R7) — through the same `PasswordStepUpVerifier` as the chat approvals, so one
+  per-account backoff covers both, and each refused attempt is audited `CONSENT_STEP_UP_FAILED`
+  (SEC-082). At
   runtime, **effective authority = the user's live DB permissions ∩ the granted scopes.** Tools the
   user or scope cannot use are not listed.
 - **Tokens** [C, modelled on INV-SA-1]:
@@ -575,7 +577,9 @@ the **exfiltration leg** and the **consequential-action leg**.
     so there is no passthrough to the REST API. `/mcp` rejects local session JWTs [E: token
     passthrough].
 - **Transport.** Validate `Origin` on `/mcp` and return 403 when it is invalid [E]. Tokens are never
-  accepted in a query string [E]. Do not mint `Mcp-Session-Id` [E, 2026-07-28]. Any server-side
+  accepted in a query string [E]; one seen there is revoked on sight (G3 F1), within a bound that holds
+  for anonymous callers even while MCP is off: per-IP limiter first, a few well-formed values, one
+  query (SEC-083). Do not mint `Mcp-Session-Id` [E, 2026-07-28]. Any server-side
   handle (pending action, run id) is bound to the verified principal [E].
 - **User notice.** A newly connected client triggers a bell notification (and an email when SMTP is
   configured). This matters more because local mode has no MFA [R].

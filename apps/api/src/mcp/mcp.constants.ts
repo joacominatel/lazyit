@@ -30,6 +30,12 @@ export const MCP_SA_WRITE_CAP_WINDOW_MS = 60 * 60_000;
 export const MCP_AUTH_FAILURE_RATE_LIMIT = { max: 30, windowMs: 60_000 };
 
 /**
+ * At most this many distinct, well-formed credentials in a `/mcp` query string are acted on per request
+ * (SEC-083): a real leak carries one or two; the rest of an oversized list is ignored, unread.
+ */
+export const MCP_QUERY_TOKEN_SCAN_MAX = 4;
+
+/**
  * An MCP invocation still `EXECUTING` this long after its last update was interrupted (the process died
  * mid-call): it becomes `OUTCOME_UNKNOWN` and is never retried. Far longer than any HTTP request lives.
  */

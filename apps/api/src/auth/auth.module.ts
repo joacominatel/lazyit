@@ -9,6 +9,7 @@ import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
 import { createIdentityProvider } from './identity/identity-provider.factory';
 import { LocalCredentialService } from './local/local-credential.service';
 import { LocalProvisioningService } from './local/local-provisioning.service';
+import { PasswordStepUpVerifier } from './local/password-step-up.verifier';
 import { PrincipalLoaderService } from './principal-loader.service';
 import { ServiceAccountAuthenticator } from './service-account-authenticator';
 
@@ -63,6 +64,10 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     // ConfigService.setup + UsersService.create/requestPasswordReset in their local branches. Global so
     // both feature modules inject it without importing the local module.
     LocalProvisioningService,
+    // The ONE password step-up primitive (SEC-082): the chat's elevated approvals (AiRuntimeModule) and the
+    // OAuth consent's `lazyit.admin` grant (OAuthModule) inject this SAME instance, so one per-account
+    // backoff covers both surfaces.
+    PasswordStepUpVerifier,
     // DB-first principal re-load + SA bearer verification (ADR-0097, R1/R10), shared by the guard's
     // branches, the AI tool layer and `/mcp`.
     PrincipalLoaderService,
@@ -100,6 +105,7 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     IDENTITY_PROVIDER,
     LocalCredentialService,
     LocalProvisioningService,
+    PasswordStepUpVerifier,
     PrincipalLoaderService,
     ServiceAccountAuthenticator,
   ],

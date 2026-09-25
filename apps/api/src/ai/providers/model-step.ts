@@ -364,7 +364,9 @@ export async function runModelStep(
     throw new AiProviderError('CANCELLED');
   }
   if (failure !== undefined) {
-    throw classifyProviderError(failure, definition.errorPatterns, signal);
+    throw classifyProviderError(failure, definition.errorPatterns, signal, {
+      webSearch: search !== null,
+    });
   }
 
   try {
@@ -422,6 +424,8 @@ export async function runModelStep(
       ...(rawFinishReason === 'pause_turn' ? { paused: true } : {}),
     };
   } catch (err) {
-    throw classifyProviderError(err, definition.errorPatterns, signal);
+    throw classifyProviderError(err, definition.errorPatterns, signal, {
+      webSearch: search !== null,
+    });
   }
 }

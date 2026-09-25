@@ -21,6 +21,23 @@ export interface MintedSecret {
   hash: string;
 }
 
+/** The exact body of every opaque token {@link mintOpaqueToken} has minted: unpadded base64url of the secret. */
+const OPAQUE_TOKEN_BODY = new RegExp(
+  `^[A-Za-z0-9_-]{${Math.ceil((SECRET_BYTES * 4) / 3)}}$`,
+);
+
+/**
+ * Whether `value` has the exact shape of an opaque token minted with `prefix` (the prefix, then the
+ * fixed-length base64url body). A cheap pre-filter before any lookup (SEC-083): a value that fails it can
+ * never be a stored token.
+ */
+export function hasOpaqueTokenShape(value: string, prefix: string): boolean {
+  return (
+    value.startsWith(prefix) &&
+    OPAQUE_TOKEN_BODY.test(value.slice(prefix.length))
+  );
+}
+
 /** Mint an opaque, prefixed token (`lzit_oat_…`, `lzit_ort_…`). */
 export function mintOpaqueToken(prefix: string): MintedSecret {
   const value = `${prefix}${randomBytes(SECRET_BYTES).toString('base64url')}`;

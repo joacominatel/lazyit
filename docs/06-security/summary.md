@@ -110,7 +110,7 @@ Snapshot of the security review. Updated each sweep. Method:
    step-up has only a 10-per-minute window, no per-account backoff, and no audit of failures.
    [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] (**Low**): the `/mcp` query-token
    revocation runs one DB lookup per value, unbounded, before the MCP-off 404 and the IP limiter.
-   SEC-080 and SEC-081 ✅ closed the same day (#1315).
+   All four ✅ closed the same day (#1315): SEC-080 and SEC-081 in #1433, SEC-082 and SEC-083 in #1431.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, and sweep 11 covered only the AI web surfaces (chat renderer, approval cards,
@@ -123,9 +123,9 @@ consent page, `/account/ai`).
 | Critical | 0 |
 | High | 0 |
 | Medium | 0 |
-| Low | 13 |
+| Low | 11 |
 | Info | 0 |
-| **Total open** | **13** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -145,8 +145,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
-| [[SEC-082-oauth-consent-admin-step-up-no-backoff\|SEC-082]] | 🟡 Low | oauth | `lazyit.admin` consent step-up: no per-account backoff, failures not audited |
-| [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] | 🟡 Low | mcp | `/mcp` query-token scan: unbounded DB lookups before the MCP-off 404 and the IP limiter |
 
 ## Top findings
 
@@ -156,6 +154,11 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    in the same turn therefore shows the banner and is never auto-approved. The per-SA mutation cap now
    counts a batch's rows through the descriptor's `mutationWeight`, and a call that would pass the cap is
    refused whole. No data change.
+0. **SEC-082 / SEC-083 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315): the consent's
+   `lazyit.admin` password goes through the shared `PasswordStepUpVerifier`, so the chat approvals and
+   the consent share one per-account backoff, and each refused attempt is audited
+   `CONSENT_STEP_UP_FAILED`. The `/mcp` query-token scan is charged to the per-IP limiter first and reads
+   at most 4 well-formed values in one query. No data change.
 0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
    web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
 0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):

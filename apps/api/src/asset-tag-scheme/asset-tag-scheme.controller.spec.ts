@@ -7,6 +7,10 @@ jest.mock('../../generated/prisma/client', () => ({
   Prisma: { PrismaClientKnownRequestError: class extends Error {} },
 }));
 
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { Reflector } from '@nestjs/core';
+import { PERMISSION_KEY } from '../auth/require-permission.decorator';
+import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import { AssetTagSchemeController } from './asset-tag-scheme.controller';
 import { AssetTagSchemeService } from './asset-tag-scheme.service';
 import type { AssetTagScheme } from '@lazyit/shared';
@@ -15,6 +19,7 @@ describe('AssetTagSchemeController', () => {
   let controller: AssetTagSchemeController;
   let service: {
     getScheme: jest.Mock;
+    getSummary: jest.Mock;
     updateScheme: jest.Mock;
     seedSuggestion: jest.Mock;
     previewNextTag: jest.Mock;
@@ -32,9 +37,20 @@ describe('AssetTagSchemeController', () => {
     updatedAt: '2026-06-16T00:00:00.000Z',
   };
 
+  const SUMMARY = {
+    enabled: true,
+    prefix: 'LAZY-',
+    suffix: null,
+    width: 5,
+    nextTag: 'LAZY-00042',
+    nextTagNumber: 42,
+    exhausted: false,
+  };
+
   beforeEach(async () => {
     service = {
       getScheme: jest.fn().mockResolvedValue(SCHEME),
+      getSummary: jest.fn().mockResolvedValue(SUMMARY),
       updateScheme: jest.fn().mockResolvedValue(SCHEME),
       seedSuggestion: jest.fn().mockResolvedValue({
         suggestedStartNumber: 1006,
@@ -67,6 +83,36 @@ describe('AssetTagSchemeController', () => {
   it('GET delegates to getScheme', async () => {
     await expect(controller.get()).resolves.toEqual(SCHEME);
     expect(service.getScheme).toHaveBeenCalledTimes(1);
+  });
+
+  it('GET summary delegates to getSummary', async () => {
+    await expect(controller.summary()).resolves.toEqual(SUMMARY);
+    expect(service.getSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it('GET summary is gated by asset:write (read widened, #1315) and stays human-only; the rest stays settings:manage', () => {
+    const reflector = new Reflector();
+    const proto = AssetTagSchemeController.prototype;
+    const handlerOf = (name: keyof AssetTagSchemeController) =>
+      Object.getOwnPropertyDescriptor(proto, name)!.value as () => unknown;
+    const perms = (handler: keyof AssetTagSchemeController) =>
+      reflector.get<string[] | undefined>(PERMISSION_KEY, handlerOf(handler));
+    expect(perms('summary')).toEqual(['asset:write']);
+    for (const handler of [
+      'get',
+      'update',
+      'seedSuggestion',
+      'previewNextTag',
+      'backfillPreview',
+      'backfillApply',
+    ] as const) {
+      expect(perms(handler)).toEqual(['settings:manage']);
+    }
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      handlerOf('summary'),
+    ) as unknown[];
+    expect(guards).toContain(ServicePrincipalForbiddenGuard);
   });
 
   it('PUT delegates the validated body to updateScheme', async () => {

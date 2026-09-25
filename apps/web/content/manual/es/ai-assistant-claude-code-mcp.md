@@ -139,7 +139,9 @@ nada. Muestra:
 - **La cuenta en cuyo nombre actúa** y **qué puede hacer**: **Solo lectura** o **Lectura y escritura**
   (preseleccionada cuando la app la pide).
 - **Acciones de administración**, solo si la app las pidió. Nunca vienen marcadas, y al marcarlas se
-  pide tu contraseña.
+  pide tu contraseña. Tras varias contraseñas incorrectas, lazyit te hace esperar antes de volver a
+  intentarlo: es la misma espera que se aplica a las confirmaciones con contraseña del chat de IA, así
+  que los errores en uno y otro lugar cuentan juntos.
 
 Elige **Permitir acceso** o **Denegar**. Para una app **sin verificar**, lazyit te pide confirmar una
 segunda vez: continúa solo si iniciaste la conexión tú mismo, hace un momento, y reconoces a dónde te

@@ -109,6 +109,12 @@ product someone asks it to set up a workflow for. It is **off** by default.
   the chats that had it read-only; people start a new chat to go on.
 - **Searches per step** (default 5, 1–20) is the most searches the assistant may run in one step, where the
   provider supports a limit (Anthropic).
+- **Disabled at the provider.** Your provider account can turn web search off on its side (Anthropic: the
+  organization's privacy settings in the Claude Console; OpenAI: the organization's or project's tool
+  permissions). If it is off there while the switch here is on, the provider refuses the request and the
+  chat says *"The AI provider refused web search because it is disabled for this account."* Either enable
+  web search at the provider, or turn **Allow the assistant to search the web** off here and start a new
+  chat.
 
 ## External AI agents (MCP)
 

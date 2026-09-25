@@ -26,9 +26,9 @@ import { asRow, iso, str, type Row } from './reference.tools';
  * the person explicitly asks to change the general asset tag scheme.
  *
  * - `asset_tag_scheme_get` (read) — the scheme and the tag the next asset created without `assetTag`
- *   would get (the settings route's own skip-existing preview). The routes need `settings:manage` and are
- *   human-only, so a caller without it gets a plain "not visible" answer instead of an error: the tag is
- *   then left to the server (omit `assetTag`).
+ *   would get, through the member-safe summary route (`asset:write`, #1315 — anyone who can create an
+ *   asset can follow the pattern; human-only like the rest of the controller). A caller the route refuses
+ *   gets a plain "not visible" answer instead of an error: the tag is then left to the server.
  * - `asset_tag_scheme_update` (elevated) — changes the scheme. Never automatic: `elevated`, so the chat
  *   always waits for the user (auto-approve excludes it). The card shows only the fields that change,
  *   before → after, plus the next tag before → after; it names the scheme as its target with its
@@ -128,10 +128,17 @@ async function nextTagOf(
 // ─── asset_tag_scheme_get ────────────────────────────────────────────────────────────────────────────
 
 const NOT_VISIBLE =
-  'The asset tag scheme is not visible to you (it is instance configuration, readable with the ' +
-  'settings permission). Do not invent a tag: when creating an asset, use the tag the person gives, or ' +
-  'omit assetTag and lazyit assigns the next tag itself if the instance has a scheme turned on.';
+  'The asset tag scheme is not visible to you (it is readable by whoever may create assets). Do not ' +
+  'invent a tag: when creating an asset, use the tag the person gives, or omit assetTag and lazyit ' +
+  'assigns the next tag itself if the instance has a scheme turned on.';
 
+/**
+ * `asset_tag_scheme_get` reads the member-safe summary route (`GET /config/asset-tag-scheme/summary`,
+ * `asset:write` — the permission that creates assets; #1315, follow-up of #1394), not the settings route:
+ * everyone who can create an asset can follow the instance's tag pattern. The summary carries the stored
+ * pattern and the next tag only — no counter internals, no timestamps (the update tool reads the full
+ * scheme through the settings route itself).
+ */
 const assetTagSchemeGet = defineTool({
   name: 'asset_tag_scheme_get',
   title: 'Read the asset tag scheme',
@@ -145,14 +152,11 @@ const assetTagSchemeGet = defineTool({
   domain: 'platform',
   class: 'read',
   input: z.strictObject({}),
-  bindings: [
-    bind(AssetTagSchemeController, 'get'),
-    bind(AssetTagSchemeController, 'previewNextTag'),
-  ],
+  bindings: [bind(AssetTagSchemeController, 'summary')],
   async run(_input, rt): Promise<AiToolRunOutput<Row>> {
-    let scheme: Scheme;
+    let row: Row;
     try {
-      scheme = await readScheme(rt);
+      row = asRow(await rt.call(AssetTagSchemeController, 'summary'));
     } catch (err) {
       // Authorized like the route: a caller it refuses gets the guidance, not an error to retry.
       if (err instanceof HttpException && err.getStatus() === 403) {
@@ -163,11 +167,19 @@ const assetTagSchemeGet = defineTool({
       }
       throw err;
     }
-    const next = await nextTagOf(rt, scheme);
-    const pattern = `${scheme.prefix ?? ''}{number${
-      scheme.width ? `, ${scheme.width} digits` : ''
-    }}${scheme.suffix ?? ''}`;
-    const guidance = scheme.enabled
+    const enabled = row.enabled === true;
+    const prefix = str(row.prefix);
+    const suffix = str(row.suffix);
+    const width =
+      typeof row.width === 'number' && Number.isFinite(row.width)
+        ? row.width
+        : null;
+    const exhausted = row.exhausted === true;
+    const nextTag = exhausted ? null : str(row.nextTag);
+    const pattern = `${prefix ?? ''}{number${
+      width ? `, ${width} digits` : ''
+    }}${suffix ?? ''}`;
+    const guidance = enabled
       ? 'The scheme is ON. When creating an asset, omit assetTag unless the person gives a specific tag: ' +
         'lazyit assigns the next free tag of the scheme itself. Never compose a tag from the pattern — ' +
         'a composed tag skips the counter. Existing tags are never rewritten by the scheme.'
@@ -176,25 +188,26 @@ const assetTagSchemeGet = defineTool({
     return {
       data: {
         visible: true,
-        enabled: scheme.enabled,
+        enabled,
         pattern: untrusted(pattern),
-        prefix: untrusted(scheme.prefix),
-        suffix: untrusted(scheme.suffix),
-        width: scheme.width,
-        nextNumber: scheme.nextNumber,
-        nextTag: next.exhausted
-          ? null
-          : {
-              tag: untrusted(next.tag),
-              number: next.number,
-              skippedCount: next.skippedCount,
-            },
-        exhausted: next.exhausted,
-        updatedAt: isUnsetDefault(scheme) ? null : scheme.updatedAt,
+        prefix: untrusted(prefix),
+        suffix: untrusted(suffix),
+        width,
+        nextTag:
+          nextTag === null
+            ? null
+            : {
+                tag: untrusted(nextTag),
+                number:
+                  typeof row.nextTagNumber === 'number'
+                    ? row.nextTagNumber
+                    : null,
+              },
+        exhausted,
         guidance,
       },
-      summary: scheme.enabled
-        ? `The asset tag scheme is on; the next tag would be ${untrusted(next.tag) ?? 'none (the sequence is exhausted)'}.`
+      summary: enabled
+        ? `The asset tag scheme is on; the next tag would be ${untrusted(nextTag) ?? 'none (the sequence is exhausted)'}.`
         : 'The asset tag scheme is off: assets get no automatic tag.',
     };
   },

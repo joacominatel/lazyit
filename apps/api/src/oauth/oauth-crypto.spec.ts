@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  hasOpaqueTokenShape,
   hashOpaqueToken,
   isS256Challenge,
   mintAuthorizationCode,
@@ -74,6 +75,29 @@ describe('oauth-crypto', () => {
       expect(safeEqual('abc', 'abc')).toBe(true);
       expect(safeEqual('abc', 'abd')).toBe(false);
       expect(safeEqual('abc', 'abcd')).toBe(false);
+    });
+  });
+
+  describe('hasOpaqueTokenShape — the exact grammar of a minted token (SEC-083)', () => {
+    it('accepts every token the minter produces, for its own prefix only', () => {
+      for (let i = 0; i < 20; i += 1) {
+        const { value } = mintOpaqueToken('lzit_pat_');
+        expect(hasOpaqueTokenShape(value, 'lzit_pat_')).toBe(true);
+        expect(hasOpaqueTokenShape(value, 'lzit_oat_')).toBe(false);
+      }
+    });
+
+    it('refuses a wrong length or a character outside base64url', () => {
+      const body = 'A'.repeat(43);
+      expect(hasOpaqueTokenShape(`lzit_pat_${body}`, 'lzit_pat_')).toBe(true);
+      expect(hasOpaqueTokenShape(`lzit_pat_${body}A`, 'lzit_pat_')).toBe(false);
+      expect(
+        hasOpaqueTokenShape(`lzit_pat_${body.slice(1)}`, 'lzit_pat_'),
+      ).toBe(false);
+      expect(
+        hasOpaqueTokenShape(`lzit_pat_${body.slice(1)}=`, 'lzit_pat_'),
+      ).toBe(false);
+      expect(hasOpaqueTokenShape('lzit_pat_', 'lzit_pat_')).toBe(false);
     });
   });
 });

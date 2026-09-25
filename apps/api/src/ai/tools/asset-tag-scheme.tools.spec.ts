@@ -202,6 +202,24 @@ const schemeService = {
   seedSuggestion: jest.fn(),
   backfillPreview: jest.fn(),
   backfillApply: jest.fn(),
+  // The member-safe summary (#1315): the stored pattern and its skip-existing next tag, nothing else.
+  getSummary: jest.fn(() => {
+    const pattern = {
+      prefix: (scheme?.prefix as string | null) ?? null,
+      suffix: (scheme?.suffix as string | null) ?? null,
+      width: (scheme?.width as number | null) ?? null,
+    };
+    const from = (scheme?.nextNumber as number | undefined) ?? 1;
+    let n = from;
+    while (liveTags.includes(renderAssetTag(pattern, n))) n += 1;
+    return Promise.resolve({
+      enabled: scheme?.enabled === true,
+      ...pattern,
+      nextTag: renderAssetTag(pattern, n),
+      nextTagNumber: n,
+      exhausted: false,
+    });
+  }),
 };
 
 // ─── An in-memory Prisma for the auth lookups and the AI tables ──────────────────────────────────
@@ -474,14 +492,15 @@ describe('asset tag scheme toolset (#1394)', () => {
 
   // ─── Listing ───────────────────────────────────────────────────────────────────────────────────
 
-  it('lists both tools to an ADMIN only — never to a MEMBER or a Service Account', async () => {
+  it('lists the read to whoever may create assets (ADMIN, MEMBER) and the update to an ADMIN only — never to a Service Account', async () => {
     const names = async (ctx: AiExecutionContext) =>
       (await tools.list(ctx)).map((t) => t.name);
     expect(await names(chat(ADMIN))).toEqual([
       'asset_tag_scheme_get',
       'asset_tag_scheme_update',
     ]);
-    expect(await names(chat(MEMBER))).toEqual([]);
+    // #1315: read widened to asset:write, so a member follows the instance's tag scheme.
+    expect(await names(chat(MEMBER))).toEqual(['asset_tag_scheme_get']);
     expect(await names(headless(SA))).toEqual([]);
     const update = (await tools.list(chat(ADMIN))).find(
       (t) => t.name === 'asset_tag_scheme_update',
@@ -492,7 +511,7 @@ describe('asset tag scheme toolset (#1394)', () => {
   });
 
   it.each(['asset_create', 'asset_create_batch'])(
-    '%s tells every caller to leave the tag to the scheme (the read tool is admin-only)',
+    '%s tells every caller to leave the tag to the scheme (whether or not it can read the scheme)',
     (name) => {
       const tool = assetsToolset.tools.find((t) => t.name === name)!;
       expect(tool.description).toMatch(
@@ -506,52 +525,58 @@ describe('asset tag scheme toolset (#1394)', () => {
   // ─── asset_tag_scheme_get ──────────────────────────────────────────────────────────────────────
 
   describe('asset_tag_scheme_get', () => {
-    it('ADMIN: the scheme, and the next tag the server would assign (taken numbers skipped)', async () => {
-      const result = await tools.invoke(
-        'asset_tag_scheme_get',
-        {},
-        chat(ADMIN),
-      );
-      expect(AiToolResultSchema.safeParse(result).success).toBe(true);
-      expect(result).toMatchObject({
-        ok: true,
-        kind: 'read',
-        mutated: false,
-        data: {
-          visible: true,
-          enabled: true,
-          prefix: '<untrusted_content>LAP-</untrusted_content>',
-          suffix: null,
-          width: 5,
-          nextNumber: 42,
-          nextTag: {
-            tag: '<untrusted_content>LAP-00043</untrusted_content>',
-            number: 43,
-            skippedCount: 1,
+    it.each([
+      ['ADMIN', ADMIN],
+      ['MEMBER (asset:write, no settings:manage — #1315)', MEMBER],
+    ])(
+      '%s: the pattern, and the next tag the server would assign (taken numbers skipped) — no counter internals',
+      async (_label, actor) => {
+        const result = await tools.invoke(
+          'asset_tag_scheme_get',
+          {},
+          chat(actor),
+        );
+        expect(AiToolResultSchema.safeParse(result).success).toBe(true);
+        expect(result).toMatchObject({
+          ok: true,
+          kind: 'read',
+          mutated: false,
+          data: {
+            visible: true,
+            enabled: true,
+            prefix: '<untrusted_content>LAP-</untrusted_content>',
+            suffix: null,
+            width: 5,
+            nextTag: {
+              tag: '<untrusted_content>LAP-00043</untrusted_content>',
+              number: 43,
+            },
+            exhausted: false,
           },
-          exhausted: false,
-          updatedAt: T0.toISOString(),
-        },
-      });
-      const data = (result as { data: { guidance: string } }).data;
-      expect(data.guidance).toMatch(/omit assetTag/);
-      expect(data.guidance).toMatch(/Never compose a tag/);
-      expect(schemeService.previewNextTag).toHaveBeenCalledWith({
-        prefix: 'LAP-',
-        width: 5,
-      });
-    });
+          summary: expect.stringContaining('LAP-00043') as unknown,
+        });
+        const data = (result as { data: Row & { guidance: string } }).data;
+        expect(data.guidance).toMatch(/omit assetTag/);
+        expect(data.guidance).toMatch(/Never compose a tag/);
+        // The member-safe route only: the settings routes are not read, and nothing internal leaks.
+        expect(schemeService.getSummary).toHaveBeenCalledTimes(1);
+        expect(schemeService.getScheme).not.toHaveBeenCalled();
+        expect(schemeService.previewNextTag).not.toHaveBeenCalled();
+        expect(data).not.toHaveProperty('nextNumber');
+        expect(data).not.toHaveProperty('updatedAt');
+      },
+    );
 
-    it('ADMIN, never configured: the scheme is off and carries no version', async () => {
+    it('never configured: the scheme is off', async () => {
       resetStore(false);
       const result = await tools.invoke(
         'asset_tag_scheme_get',
         {},
-        chat(ADMIN),
+        chat(MEMBER),
       );
       expect(result).toMatchObject({
         ok: true,
-        data: { visible: true, enabled: false, updatedAt: null },
+        data: { visible: true, enabled: false },
         summary: 'The asset tag scheme is off: assets get no automatic tag.',
       });
       expect((result as { data: { guidance: string } }).data.guidance).toMatch(
@@ -559,24 +584,22 @@ describe('asset tag scheme toolset (#1394)', () => {
       );
     });
 
-    it.each([
-      ['MEMBER (no settings:manage)', MEMBER, chat(MEMBER)],
-      ['a Service Account (the route is human-only)', SA, headless(SA)],
-    ])(
-      '%s: the route refuses it, and the tool says so with the guidance instead of an error',
-      async (_label, _actor, ctx) => {
-        const result = await tools.invoke('asset_tag_scheme_get', {}, ctx);
-        expect(result).toMatchObject({
-          ok: true,
-          data: { visible: false },
-          summary: 'The asset tag scheme is not visible to you.',
-        });
-        const data = (result as { data: Row }).data;
-        expect(data.guidance).toMatch(/omit assetTag/);
-        expect(data).not.toHaveProperty('prefix');
-        expect(schemeService.getScheme).not.toHaveBeenCalled();
-      },
-    );
+    it('a Service Account: the route is human-only, and the tool says so with the guidance instead of an error', async () => {
+      const result = await tools.invoke(
+        'asset_tag_scheme_get',
+        {},
+        headless(SA),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: { visible: false },
+        summary: 'The asset tag scheme is not visible to you.',
+      });
+      const data = (result as { data: Row }).data;
+      expect(data.guidance).toMatch(/omit assetTag/);
+      expect(data).not.toHaveProperty('prefix');
+      expect(schemeService.getSummary).not.toHaveBeenCalled();
+    });
   });
 
   // ─── asset_tag_scheme_update ───────────────────────────────────────────────────────────────────

@@ -283,6 +283,7 @@
       "RUN_IN_PROGRESS": "Otra ventana ya está respondiendo en este chat. Se muestra esa respuesta.",
       "CONVERSATION_READ_ONLY": "Este chat usó una configuración de IA anterior y es de solo lectura.",
       "STEP_UP_REQUIRED": "Un cambio necesita tu contraseña.",
+      "WEB_SEARCH_DISABLED": "El proveedor de IA rechazó la búsqueda web porque está deshabilitada para esta cuenta. Un administrador tiene que habilitarla en el proveedor o desactivarla en Configuración → IA.",
       "NETWORK": "Se perdió la conexión.",
       "RATE_LIMITED": "Demasiados pedidos.",
       "EXPIRED": "Un cambio propuesto venció antes de que se decidiera.",

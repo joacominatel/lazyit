@@ -93,8 +93,14 @@ No `deletedAt` — not soft-deletable.
 
 ## Endpoints
 
-`apps/api/src/asset-tag-scheme/` (`AssetTagSchemeModule`). All routes require `settings:manage` and
-are forbidden to service principals.
+`apps/api/src/asset-tag-scheme/` (`AssetTagSchemeModule`). All routes are forbidden to service
+principals, and all require `settings:manage` except `GET …/summary`, which requires `asset:write`
+([[authorization]] §5, #1315).
+
+- `GET /config/asset-tag-scheme/summary` — the member-safe view for whoever may create assets:
+  `{ enabled, prefix, suffix, width, nextTag, nextTagNumber, exhausted }` — the stored pattern and the
+  tag the next untagged create would get (the `next-tag` skip-existing preview on the stored pattern).
+  Read-only; no counter internals, no timestamps.
 
 - `GET /config/asset-tag-scheme` — read the scheme (or its unset/disabled default when no row exists).
 - `PUT /config/asset-tag-scheme` — upsert the scheme; body `{ enabled, prefix?, suffix?, width?, startNumber? }`.
@@ -111,8 +117,8 @@ are forbidden to service principals.
 - `POST /config/asset-tag-scheme/backfill/apply` — deliberate bulk retag; body
   `{ mode, excludeIds?, modelId? }`; returns `{ tagged, skipped }`.
 
-**AI assistant (#1394).** The assistant reads the scheme (`asset_tag_scheme_get`: the scheme and the next
-tag) so it follows it — it omits `assetTag` on create and lets the allocator assign the tag — and changes
+**AI assistant (#1394).** The assistant reads the scheme (`asset_tag_scheme_get`: the pattern and the
+next tag, through `GET …/summary`, so a member's assistant can read it too — #1315) so it follows it — it omits `assetTag` on create and lets the allocator assign the tag — and changes
 it only when explicitly asked to change the general scheme (`asset_tag_scheme_update`, an `elevated`
 approval card). The seed suggestion and the backfill are not AI tools. →
 [[ai-assistant/tools-and-execution|tools-and-execution]] *Asset tag scheme tools as built*.

@@ -178,3 +178,36 @@ export const AssetTagNextPreviewSchema = z
     path: ["tag"],
   });
 export type AssetTagNextPreview = z.infer<typeof AssetTagNextPreviewSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Member-safe summary (#1315, follow-up of #1394)                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `GET /config/asset-tag-scheme/summary` response — the scheme as someone who CREATES assets needs it
+ * (`asset:write`), so a member can follow the instance's tag pattern instead of inventing one. Read-only
+ * and deliberately minimal: whether the scheme is on, the pattern (prefix, suffix, digits) and the tag
+ * the next asset created without a tag would get (the same skip-existing preview as `next-tag`, for the
+ * STORED pattern only — no arbitrary pattern probing). It carries no counter internals (`nextNumber`, the
+ * skip count) and no timestamps; configuring the scheme stays `settings:manage`.
+ */
+export const AssetTagSchemeSummarySchema = z
+  .object({
+    /** false = no automatic tag: an asset created without `assetTag` gets none. */
+    enabled: z.boolean(),
+    prefix: z.string().nullable(),
+    suffix: z.string().nullable(),
+    /** Zero-pad width (`null`/`0` = no padding). */
+    width: z.number().int().nullable(),
+    /** The tag the next untagged create would get now (not a reservation); null when exhausted. */
+    nextTag: z.string().nullable(),
+    /** The number behind `nextTag`; null exactly when `nextTag` is. */
+    nextTagNumber: z.number().int().nullable(),
+    /** True when the sequence is past the int4 ceiling (nothing allocatable). */
+    exhausted: z.boolean(),
+  })
+  .refine((value) => (value.nextTag === null) === (value.nextTagNumber === null), {
+    message: "`nextTag` and `nextTagNumber` must both be present or both be null",
+    path: ["nextTag"],
+  });
+export type AssetTagSchemeSummary = z.infer<typeof AssetTagSchemeSummarySchema>;

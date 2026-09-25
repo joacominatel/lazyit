@@ -113,6 +113,12 @@ terceros para el que alguien le pide configurar un workflow. Viene **desactivada
   desactivarla, los chats que la tenían pasan a ser de solo lectura; para seguir, se empieza un chat nuevo.
 - **Búsquedas por paso** (5 por defecto, de 1 a 20) es la cantidad máxima de búsquedas que el asistente puede
   hacer en un paso, donde el proveedor admite un límite (Anthropic).
+- **Deshabilitada en el proveedor.** Tu cuenta del proveedor puede desactivar la búsqueda web de su lado
+  (Anthropic: la configuración de privacidad de la organización en la Claude Console; OpenAI: los permisos
+  de herramientas de la organización o del proyecto). Si está desactivada allá mientras el interruptor de
+  acá está activado, el proveedor rechaza el pedido y el chat dice *"El proveedor de IA rechazó la búsqueda
+  web porque está deshabilitada para esta cuenta."* Habilitá la búsqueda web en el proveedor, o desactivá
+  acá **Permitir que el asistente busque en la web** y empezá un chat nuevo.
 
 ## Agentes de IA externos (MCP)
 
