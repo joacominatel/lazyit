@@ -1297,7 +1297,12 @@ a non-default port are allowed. An unacceptable URL is refused without any fetch
 `guardedFetch`: `https:` only, userinfo refused, every resolved address public (loopback, RFC 1918, ULA,
 link-local, IMDS, CGNAT and every other special-use range denied; a host is refused if **any** address is),
 the dialed IP pinned, **no** internal-target allowlist, **no redirects** (`maxRedirects: 0` — a 3xx is a
-failure, as the draft requires), a 3 s idle timeout and a 5 s total deadline, a bare `GET` with
+failure, as the draft requires), a 3 s idle timeout, and a **5 s total deadline over the whole attempt,
+DNS resolution included**. The guard's own deadline starts at connect, and `getaddrinfo` runs before it
+on the libuv threadpool and cannot be cancelled. So the CIMD fetch races the whole attempt against its
+own timer; when that fires, the request is aborted and the authorization request gets `fetch_failed` at
+once, even if a stuck resolver thread finishes later. The guard's behaviour for other callers is
+unchanged. The fetch is a bare `GET` with
 `Accept: application/json` and no credentials. Only a **200** with a JSON media type (`application/json`
 or `application/*+json`) succeeds; the body is read up to **5 KB** (the draft's recommended limit —
 checked on `Content-Length` and again while streaming) and must parse as a JSON object. Nothing the
@@ -1325,9 +1330,17 @@ still re-checked on every refresh (§12).
 
 **Bundled offline copy** (`known-clients/`). Claude Code's document
 (`https://claude.ai/oauth/claude-code-client-metadata`, fetched verbatim on 2026-09-25) ships in the image
-as a TypeScript module (compiled into `dist/`; the API does not enable `resolveJsonModule`). It is used
-**only when the network fetch or its validation fails** — an instance without internet access, a DNS
-failure, a timeout, a captive portal, the per-user fetch limit — and it passes the same validation. The
+as a TypeScript module (compiled into `dist/`; the API does not enable `resolveJsonModule`). It passes the
+same validation as a fetched copy, and it is used **only on a network failure**, i.e. a failure that says
+nothing about what the host publishes:
+- the host is unreachable (DNS, connect, TLS), or the deadline is exceeded;
+- a transient status: 5xx, 408, 425 or 429;
+- a redirect, or a non-JSON page. Both are what a captive portal or an intercepting proxy answers with;
+- the per-user fetch limit.
+
+A **definitive answer from the host** is refused and audited, even for Claude Code: another 4xx (404,
+410, 403…), or a JSON document that fails validation (mismatched `client_id`, bad redirects, secrets or a
+non-`none` auth method, oversize, malformed JSON). The host's word wins over the image's copy. The
 row is then `kind: "known"`, `fetchedAt: null`, cached for 5 minutes, after which the network is tried
 again and wins once reachable. Any other client without a reachable document is refused.
 
@@ -1340,23 +1353,28 @@ client's own registrable redirects; otherwise each redirect needs a `redirect_ur
 **Consent** (`POST /oauth/authorize/validate`). `client.verifiedDomain` (additive, optional in the shared
 contract) is the host of the `client_id` URL for a CIMD client — the domain whose document lazyit fetched —
 and `null` for DCR. `client.verified` is **true only for a CIMD client matched by a `cimd_url` allowlist
-entry**: the instance vouches for it. A CIMD client admitted only through its redirect URIs proves its
-domain, not its self-declared name, so it is **not** "verified" and the consent page treats it like a DCR
-client (the unverified badge and the extra confirmation). A DCR client is never verified. The
-connected-apps list keeps `verified = kind !== "dcr"` (domain-verified).
+entry**: the instance vouches for it (CEO, 2026-09-25: "Solo las de la lista"). A CIMD client admitted
+only through its redirect URIs is **domain-verified**, not verified: it proved its domain, not its
+self-declared name. So it is shown as unverified with its real domain, and the consent page asks for the
+extra confirmation. A DCR client is never verified. **Connected apps** (`GET /oauth/grants/mine` and the
+admin listing) apply the same rule and carry the same optional `client.verifiedDomain` (`OAuthGrantSchema`).
 
 **Abuse bounds.** Only a signed-in user holding `ai:connect` on an instance with MCP on reaches the fetch
 (the checks run first). Network fetches — cache misses — are limited to **20 per user per 10 minutes**
-(in memory, per replica); past it the client is refused (or served from its bundled copy). Unused CIMD and
-bundled rows (never exchanged a code, no grant) are hard-deleted by the sweeper after 24 h, like unused
-DCR rows — they are a cache and are re-fetched on demand.
+(in memory, per replica); past it the client is refused (or served from its bundled copy). The sweeper
+hard-deletes unused CIMD and bundled rows (never used, no grant) whose **last refresh** (`updatedAt`) is
+more than 24 h old; they are a cache and are re-fetched on demand. No client row with a pending
+authorization code is collected (DCR included), because the code would cascade and break a sign-in in
+progress.
 
 **Audit** (`oauth_audit_log`, two new actions). `CLIENT_METADATA_FETCHED` on every fetch that yields a
 registration — `detail: { host, source: "network" | "bundled", ttlSeconds | fetchFailure, redirectHosts,
 redirectsChanged }` — and `CLIENT_METADATA_REFUSED` on a failed fetch or an invalid document without a
-bundled copy — `detail: { host, reason }` (`invalid_client_id_url`, `fetch_failed`, `http_status`,
-`content_type`, `too_large`, `malformed`, `client_id_mismatch`, `client_secret`, `auth_method`,
-`redirect_uris`, `grant_types`). A refusal by the per-user fetch limit is logged, not audited. The user
+bundled copy — `detail: { host, reason }` (`fetch_failed`, `http_status`, `content_type`, `too_large`,
+`malformed`, `client_id_mismatch`, `client_secret`, `auth_method`, `redirect_uris`, `grant_types`). A
+refusal by the per-user fetch limit is logged, not audited. Neither is an unacceptable `client_id` URL:
+it is refused before any work, so auditing it would let anyone with `ai:connect` write rows without
+bound. The user
 whose request triggered the fetch is the row's `userId`/`actorId`.
 
 **Data.** No migration: `OAuthClient.kind` (`dcr | cimd | known`), `fetchedAt` and `metadata` already
@@ -1364,17 +1382,20 @@ exist (W2-4). Existing rows are all `dcr` and are untouched.
 
 **Tests.** `cimd/cimd.spec.ts` (URL rules, document validation, cache lifetime, the guarded fetch: SSRF
 refusals for loopback, RFC 1918, IMDS, ULA, CGNAT and mixed DNS answers without connecting, no redirect
-following, non-200, content type, oversize declared and streamed, malformed JSON, timeouts) and
+following, non-200, content type, oversize declared and streamed, malformed JSON, timeouts, a resolver
+that never answers, network-failure classification) and
 `cimd/cimd-flow.spec.ts` (resolution and caching over the in-memory database, cache expiry and bounds,
-`client_id` mismatch, redirect mismatch, the bundled fallback and its retry, allowlist refusal and the
-verified badge, the per-user fetch limit, the sweeper, and authorize → token → refresh → allowlist cut-off
+`client_id` mismatch, redirect mismatch, the bundled fallback and its retry, no fallback on a
+definitive or invalid answer, allowlist refusal and the verified badge on consent and in connected apps,
+the per-user fetch limit, the unique-race recovery, the sweeper (refresh-aged, pending-code-safe), and authorize → token → refresh → allowlist cut-off
 end to end with Claude Code's URL, online and offline).
 
 **Follow-ups.**
 
-1. **Consent page (web):** render `client.verifiedDomain` — "verified domain: claude.ai" — next to the
-   client name for every CIMD client (security §6.3; draft §"OAuth Phishing Attacks": "SHOULD display the
-   hostname of the `client_id`"). Until then the page shows the badge and the redirect host only.
+1. **Web:** the consent page and the connected-apps list render `client.verifiedDomain` next to the
+   client name for every CIMD client, e.g. "domain: claude.ai" (security §6.3; draft §"OAuth Phishing
+   Attacks": "SHOULD display the hostname of the `client_id`"). Until then they show the badge and the
+   redirect host only.
 2. A distinct refusal for "the client's metadata document could not be fetched" (today `INVALID_CLIENT`)
    would let the consent page explain an offline instance; it needs a new refusal value and its labels.
 3. W4-3 re-verifies Claude Code's document against the bundled copy and exercises the offline path.
