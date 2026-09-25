@@ -35,6 +35,10 @@ por un artículo largo. Los bloques de código se resaltan con sintaxis en la p�
 con un botón de copia, y un bloque ` ```mermaid ` se renderiza como un diagrama. Tú escribes Markdown
 en bruto; el formato aparece cuando se ve el artículo.
 
+Los diagramas usan el aspecto actual de Mermaid: distribución automática y un tema en color que sigue
+el modo claro u oscuro. Los diagramas escritos antes de una actualización se renderizan con la nueva
+distribución, así que pueden verse distintos aunque su código no haya cambiado.
+
 Si el cerco de un bloque de código **no tiene** marcador de lenguaje, lazyit hace una mejor conjetura
 al momento de mostrarlo y lo etiqueta como **auto** (por ejemplo, ` ```def sum(a, b): return a + b``` `
 se resalta como Python). Un lenguaje explícito en el cerco siempre tiene prioridad, y un bloque ambiguo

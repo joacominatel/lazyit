@@ -43,29 +43,38 @@ type RenderState =
   | { status: "error" };
 
 /**
- * Singleton mermaid loader. `mermaid.initialize` is idempotent and global, so we configure it
- * exactly once and share the module across every diagram on the page. Importing inside this
- * promise (not at module scope) keeps mermaid off the server and out of unrelated bundles.
+ * Singleton mermaid loader. The module is imported once and shared across every diagram on the
+ * page; importing inside this promise (not at module scope) keeps mermaid off the server and out of
+ * unrelated bundles. `mermaid.initialize` is global and rebuilds the site config from mermaid's
+ * defaults on every call, so it is re-run whenever the app theme flips — otherwise a diagram keeps
+ * the theme of whichever mode it was first loaded in.
  */
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
+let initializedDark: boolean | null = null;
 
-function loadMermaid(dark: boolean) {
+export function loadMermaid(dark: boolean) {
   if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then(({ default: mermaid }) => {
+    mermaidPromise = import("mermaid").then(({ default: mermaid }) => mermaid);
+  }
+  return mermaidPromise.then((mermaid) => {
+    if (initializedDark !== dark) {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
-        // `theme: 'base'` lets the diagram inherit a neutral palette that reads on the warm-bone
-        // surface in both themes; the dark flag only flips it to mermaid's dark base. Colour is
+        // Mermaid 12 look (#1402): light mode sets no `theme`, so each diagram type gets
+        // mermaid's own default — `redux-color` + the `neo` look for flowchart, class, state, ER,
+        // sequence and the rest; `default` for the others. Dark mode needs an explicit theme
+        // (mermaid does not follow the page's colour scheme), so it takes the matching dark
+        // variant, `redux-dark-color`. Layout is left at mermaid's default (ELK). Colour is
         // mermaid's own (decorative, glyph-like), so it does not violate ADR-0049 §4 text-AA.
-        theme: dark ? "dark" : "base",
+        ...(dark ? { theme: "redux-dark-color" as const } : {}),
         fontFamily: "inherit",
         flowchart: { htmlLabels: false },
       });
-      return mermaid;
-    });
-  }
-  return mermaidPromise;
+      initializedDark = dark;
+    }
+    return mermaid;
+  });
 }
 
 /**
