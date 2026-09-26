@@ -148,7 +148,7 @@ $DC down -v              # stop AND delete ALL volumes (incl. zitadel_db_data; s
 ## Teardown
 
 `down` keeps every named volume (your data survives). `down -v` removes **all five** volumes —
-`db_data`, `zitadel_db_data` (the whole IdP: users + OIDC client), `meili_data`, `caddy_data`,
+`db_data`, `zitadel_db_data` (the whole IdP: users + OIDC client), `meili_data_v1_53_2`, `caddy_data`,
 `caddy_config` — a full clean slate. Use it for a local reset only. To restore a real deployment do
 **not** use `down -v`: remove just the targeted volume (`docker volume rm lazyit-prod_db_data`) —
 see [[backups]].

@@ -216,10 +216,18 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
 
-## 2a. Populate search indices (first deploy only)
+## 2a. Search indices populate themselves
 
-After the stack is healthy (all services up, `migrate` exited 0), run the full re-index once to
-populate Meilisearch with existing data ([[0035-search-architecture]]):
+There is **no manual step**. On every boot the API checks Meilisearch and rebuilds any **missing or
+empty** index from the database in the background ([[0035-search-architecture]] amendments 2026-06-11
+and 2026-09-26): it waits for Meilisearch to answer `/health` (up to ~5 minutes), then rebuilds, without
+ever blocking readiness. On a first deploy — or right after a Meilisearch server upgrade, which starts on
+a new, empty data volume — search results are **incomplete for a few minutes** while that runs; the API
+log shows `Search self-heal: rebuilt '<index>' with N document(s).` per index. When every index already
+has documents, the check is a no-op.
+
+To force a deterministic full rebuild at any time (after a restore, a long outage, or to be sure), run
+the standalone reindex:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
@@ -233,10 +241,9 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
 > `run --rm migrate bun run reindex:all` runs the standalone reindex (it gets `DATABASE_URL` and
 > `MEILI_*` from `.env.prod` and exits when done).
 
-This is a one-time step on first deploy, or after adding Meilisearch to an existing instance.
-Subsequent deploys do not need it — the API keeps Meili in sync incrementally. The API's
-`SearchService` is fail-soft: if Meilisearch is unreachable, search calls no-op and the app
-continues to function ([[0035-search-architecture]]).
+The API keeps Meili in sync incrementally between boots. The API's `SearchService` is fail-soft: if
+Meilisearch is unreachable, search calls no-op and the app continues to function
+([[0035-search-architecture]]).
 
 > [!tip] Drift now self-heals on a timer (no manual reindex between deploys)
 > A fire-and-forget sync dropped while Meili is momentarily down leaves that index drifted from the
@@ -244,7 +251,7 @@ continues to function ([[0035-search-architecture]]).
 > set (the same zero-downtime swap as `reindex:all`), so such drift repairs itself automatically —
 > default **hourly**, tunable via `SEARCH_RECONCILE_INTERVAL_MS` (milliseconds) in `.env.prod`
 > ([[0035-search-architecture]] amendment 2026-06-14, issue #383). `reindex:all` above stays the
-> first-deploy backfill and the deterministic big-hammer recovery after a long outage; the sweeper
+> deterministic big-hammer recovery after a long outage; the sweeper
 > handles ongoing drift in between. The sweep is `unref`'d (never holds the process open) and
 > fail-soft (a reconcile error never crashes the API).
 
@@ -386,6 +393,31 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > ```sh
 > docker run --rm -v lazyit-prod_attachments_data:/v alpine chown -R 1000:1000 /v
 > ```
+
+> **Upgrade note — Meilisearch server v1.12.3 → v1.53.2: search rebuilds itself on a new volume (#1216).**
+> Nothing to do. A Meilisearch database only opens on the exact engine version that wrote it, so the
+> upgraded server runs on a **new** data volume, `lazyit-prod_meili_data_v1_53_2`, which Compose creates
+> on the normal `up`. On boot the API rebuilds every search index from the database in the background:
+> **search results are incomplete for a few minutes** after the upgrade, then complete — nothing else
+> is affected (`/health/ready` does not wait for search, so neither `start.sh` nor the `update.sh`
+> health gate does). `MEILI_MASTER_KEY` and `.env.prod` are unchanged. Both paths work unattended:
+>
+> - `git pull` + `./infra/start.sh` — detected as an existing install (your `.env.prod`), secrets
+>   preserved, `up -d --build`; at the end it prints a note that the previous volume can be removed.
+> - `./infra/update.sh vX.Y.Z` — backup, build, `up -d`, health gate as usual. The *update.sh* that runs
+>   is the one you already had, so the old-volume note appears from the next update on.
+>
+> The previous volume, **`lazyit-prod_meili_data`**, is left untouched — it is what a rollback to an
+> earlier tag mounts again (with its old index intact; the hourly reconcile sweeper then catches up any
+> writes made on the new version). Once you no longer need to roll back, reclaim its space (a few MB to a
+> few hundred MB) with:
+>
+> ```sh
+> docker volume rm lazyit-prod_meili_data
+> ```
+>
+> Dev machines: the same applies to `lazyit_meili_data` (`docker volume rm lazyit_meili_data`, or
+> `bun run dev:fresh`, which removes both — and everything else in the dev stack).
 
 ## 5. Backups & disaster recovery
 

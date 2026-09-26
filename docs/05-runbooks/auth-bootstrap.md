@@ -129,7 +129,7 @@ bun run dev:up       # (every day after) up + a fresh Prisma client → start; a
 
 `dev:fresh` is **idempotent and fail-loud** (the script mirrors the prod sidecar's discipline). It:
 
-1. **removes the dev volumes** `lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data,valkey_data}`
+1. **removes the dev volumes** `lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data_v1_53_2,meili_data,valkey_data}`
    (the destructive step — it prompts for a typed `yes` unless `--yes` is passed);
 2. `docker compose up -d` — the dev **`zitadel-secrets-init-dev`** (in `compose.override.yaml`) chmods
    the `zitadel_secrets` volume `0777` **before** Zitadel starts, so Zitadel's non-root uid can write
