@@ -59,11 +59,11 @@
       "title": "Preferencias",
       "language": {
         "label": "Idioma",
-        "description": "Se guarda en este navegador."
+        "description": "Se guarda en este navegador y en tu cuenta, así un navegador nuevo arranca con él."
       },
       "theme": {
         "label": "Tema",
-        "description": "Se guarda en este navegador. Sistema sigue la configuración de tu dispositivo.",
+        "description": "Se guarda en este navegador y en tu cuenta. Sistema sigue la configuración de tu dispositivo.",
         "system": "Sistema",
         "light": "Claro",
         "dark": "Oscuro"

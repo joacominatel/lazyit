@@ -16,6 +16,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { setLocale } from "@/i18n/actions";
 import { isLocale, localeLabels, locales } from "@/i18n/config";
+import { useSavePreference } from "@/lib/api/hooks/use-account-preferences";
+import {
+  localePreferencePatch,
+  themePreferencePatch,
+} from "@/lib/preferences/preference-sync";
 import { THEME_CHOICES, toThemeChoice } from "../_lib/account-sections";
 
 function subscribe(): () => void {
@@ -32,13 +37,16 @@ function useHydrated(): boolean {
 }
 
 /**
- * The hub's "Preferences" panel (issue #1404): the two per-user display preferences lazyit already
- * has, surfaced in one place. Both are client-side and change no server state:
+ * The hub's "Preferences" panel (issue #1404): the two per-user display preferences, in one place.
  *
  * - **Language** — the `NEXT_LOCALE` cookie via the existing `setLocale` action + `router.refresh()`,
  *   the same path as the user-menu switcher (ADR-0051).
  * - **Theme** — next-themes' stored choice (light / dark / follow the system), the same store the topbar
  *   toggle writes. Rendered only after hydration, as next-themes documents, to avoid a mismatch.
+ *
+ * Each change is written to this browser first and also saved to the account (issue #1422,
+ * fire-and-forget), so it follows the user to a browser with no choice of its own. This browser's value
+ * always wins over the saved one.
  */
 export function AccountPreferencesPanel() {
   const t = useTranslations("account.hub.preferences");
@@ -47,13 +55,20 @@ export function AccountPreferencesPanel() {
   const [isPending, startTransition] = useTransition();
   const { theme, setTheme } = useTheme();
   const hydrated = useHydrated();
+  const savePreference = useSavePreference();
 
   function onLocaleChange(value: string) {
     if (!isLocale(value) || value === locale) return;
+    savePreference(localePreferencePatch(value));
     startTransition(async () => {
       await setLocale(value);
       router.refresh();
     });
+  }
+
+  function onThemeChange(value: string) {
+    setTheme(value);
+    savePreference(themePreferencePatch(value));
   }
 
   return (
@@ -84,7 +99,7 @@ export function AccountPreferencesPanel() {
         <div className="space-y-2">
           <Label htmlFor="account-theme">{t("theme.label")}</Label>
           {hydrated ? (
-            <Select value={toThemeChoice(theme)} onValueChange={setTheme}>
+            <Select value={toThemeChoice(theme)} onValueChange={onThemeChange}>
               <SelectTrigger id="account-theme" className="w-full">
                 <SelectValue />
               </SelectTrigger>

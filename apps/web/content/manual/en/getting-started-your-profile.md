@@ -30,22 +30,57 @@ account. Everyone can open it; it shows only what applies to you:
   a **Change password** shortcut on local-account instances, and a sign-out button. On local accounts it
   reads **Sign out on all devices**, because signing out already ends every session you have (see
   [Signing in and out](#signing-in-and-out)). lazyit does not list your individual sessions or devices.
-- **Preferences** — your **language** and **theme** (light, dark or follow your device). Both are saved in
-  the browser you set them in.
+- **Preferences** — your **language** and **theme** (light, dark or follow your device). See
+  [Your language and theme on every device](#your-language-and-theme-on-every-device).
 
 A row of tabs at the top of **Account**, **My profile**, **Notification emails** and **AI & connected
 apps** lets you move between them without going back to the menu.
 
 ## What you'll see
 
-- **Identity** — your name, email, role and the date you joined. This is exactly how you appear to the
-  rest of the team.
+- **Name** — your first and last name, which you can edit yourself (see
+  [Editing your name](#editing-your-name)).
+- **Identity** — your email, role and the date you joined. Together with your name, this is exactly how
+  you appear to the rest of the team.
 - **My assets** — every asset **currently assigned to you** (a live assignment). Each row shows the
   asset's name, its model and location, and its status. Select **View** to open the full asset page.
 - **My application access** — the applications you can currently access, each with its access level and,
   where set, an expiry date. If a grant has passed its expiry it's flagged as **Expired**.
 - **Past access** — a history of applications you *used* to have access to, showing when each grant
   started and when it was revoked. This section appears only if you have any past access.
+
+## Editing your name
+
+You can fix your own **first and last name** — a typo, a changed surname, the name you actually go by.
+
+1. Open **My profile** and select **Edit name** on the **Name** panel.
+2. Change the first name, the last name or both (1 to 100 characters each), then select **Save**.
+
+The new name shows up everywhere at once: in the top-right menu, on asset owners and grants, and in the
+**Users** list. If your organization signs in through lazyit's bundled sign-in service, your name there
+is updated too. The change is recorded in your user history, like any other name change.
+
+Only the name is editable. Your email, role, employee number, username and manager stay with
+administrators.
+
+**When your name comes from the company directory.** If your instance syncs people from Active Directory
+or LDAP and you are one of them, the directory owns your name. The **Name** panel shows it read-only,
+with a note saying so — an edit here would only be overwritten by the next sync. Ask an administrator to
+change it in the directory.
+
+**If saving fails.** If the sign-in service can't be updated at that moment, lazyit changes nothing and
+says so — try again in a moment. Service accounts have no profile, so they can't edit a name.
+
+## Your language and theme on every device
+
+Your **language** and **theme** are saved in the browser you set them in **and** on your account.
+Change them anywhere — the **Preferences** panel in **Account**, the language row in the avatar menu or
+the theme button in the top bar — and both happen at once.
+
+**The browser you are using always wins.** Your saved choice is used only in a browser that has none of
+its own: typically the first time you sign in on a new computer or phone, lazyit picks up the language and
+theme you chose elsewhere. A browser where you already picked something keeps its own choice, so you can
+have a dark theme at home and a light one at work. See [Languages](/help/getting-started-languages).
 
 ## Signing in and out
 
@@ -102,7 +137,7 @@ administrator to reset your password for you.
 
 ## Read-only by design
 
-Aside from your own password (above), your profile is a **view**, not an editor. You can't reassign an
+Aside from your own name and password (above), your profile is a **view**, not an editor. You can't reassign an
 asset or grant yourself access from here — those actions stay with administrators, so the page is always
 a safe, honest picture of your current standing. If something looks wrong (an asset you no longer have,
 access you still need), contact an administrator — every assignment and grant is timestamped, so the

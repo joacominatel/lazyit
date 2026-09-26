@@ -1,6 +1,24 @@
 {
   "title": "Mi perfil",
   "subtitle": "Tu identidad, los activos asignados a vos y las aplicaciones a las que podés acceder.",
+  "name": {
+    "title": "Nombre",
+    "edit": "Editar nombre",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "saved": "Se actualizó tu nombre.",
+    "fieldInvalid": "Ingresá entre 1 y 100 caracteres.",
+    "managedByDirectory": "Tu nombre viene del directorio de la empresa. Pedile a un administrador que lo cambie ahí.",
+    "errors": {
+      "managedByDirectory": "Tu nombre viene del directorio de la empresa, así que no se puede cambiar acá. Pedile a un administrador que lo cambie ahí.",
+      "serviceAccount": "Las cuentas de servicio no tienen un perfil para editar.",
+      "identityProviderUnavailable": "No se pudo actualizar el servicio de inicio de sesión, así que no se cambió nada. Probá de nuevo en un momento.",
+      "invalid": "Revisá los dos nombres y probá de nuevo.",
+      "generic": "No se pudo actualizar tu nombre."
+    }
+  },
   "identity": {
     "title": "Identidad",
     "email": "Correo",

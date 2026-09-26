@@ -8,8 +8,8 @@ subcategory: languages
 # Idiomas
 
 lazyit viene en dos idiomas: **English** y **Español**. El inglés es el predeterminado. La elección es
-una preferencia personal guardada en tu navegador, no un ajuste de toda la instancia — cada persona
-elige el suyo y no cambia el de nadie más.
+una preferencia personal, no un ajuste de toda la instancia — cada persona elige el suyo y no cambia el
+de nadie más.
 
 ## Cambiar de idioma
 
@@ -18,7 +18,8 @@ Hay dos lugares para cambiar, según dónde estés:
 - **En las páginas públicas** (este Manual, la página de inicio de sesión) — usa el botón del **globo**
   en la barra superior y elige **English** o **Español** en el menú. No hace falta iniciar sesión.
 - **Con la sesión iniciada** — abre tu **menú de usuario** arriba a la derecha y usa el submenú de
-  idioma (la fila del globo) para elegir tu idioma.
+  idioma (la fila del globo) para elegir tu idioma, o usa **Idioma** en el panel **Preferencias** de
+  **Cuenta**.
 
 El cambio se aplica de inmediato — la página se vuelve a renderizar en el idioma elegido. No hay un
 paso de "guardar" aparte.
@@ -28,12 +29,16 @@ paso de "guardar" aparte.
 Tu elección se guarda en una cookie de navegador de larga duración (`NEXT_LOCALE`), así que lazyit te
 sigue mostrando el mismo idioma en tu próxima visita. De ahí se desprenden algunas cosas:
 
-- **Es por navegador y por dispositivo.** Cambiarlo en tu portátil no cambia el idioma en tu teléfono,
-  y otra persona en la misma instancia conserva su propia elección.
+- **Gana la elección de tu navegador.** Cambiarlo en tu portátil no cambia el idioma en un teléfono
+  donde ya elegiste uno, y otra persona en la misma instancia conserva su propia elección.
+- **Te sigue a un navegador nuevo.** Cuando lo cambias con la sesión iniciada, lazyit también guarda la
+  elección en tu cuenta. Un navegador que no tiene una elección propia —por ejemplo, el primer inicio de
+  sesión en un teléfono nuevo— arranca en ese idioma. Consulta
+  [Tu perfil](/help/getting-started-your-profile#tu-idioma-y-tu-tema-en-todos-tus-dispositivos).
 - **La dirección web nunca cambia.** lazyit no agrega un prefijo de idioma (como `/es/`) a las URL — el
   mismo enlace funciona sin importar el idioma que hayas elegido.
 - **Borrar las cookies lo reinicia.** Si borras las cookies de tu navegador, lazyit vuelve al
-  predeterminado, el inglés, hasta que vuelvas a elegir.
+  predeterminado, el inglés, o, cuando inicias sesión, al idioma guardado en tu cuenta.
 
 ## Qué se traduce
 

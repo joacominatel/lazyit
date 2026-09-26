@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { setLocale } from "@/i18n/actions";
 import { type Locale, localeLabels, locales } from "@/i18n/config";
+import { useSavePreference } from "@/lib/api/hooks/use-account-preferences";
+import { localePreferencePatch } from "@/lib/preferences/preference-sync";
 import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -30,10 +32,13 @@ export function LocaleSwitcher() {
   const activeLocale = useLocale();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const savePreference = useSavePreference();
 
   function onSelect(value: string) {
     const locale = value as Locale;
     if (locale === activeLocale) return;
+    // The cookie is this browser's value; also save it to the account (#1422), without waiting.
+    savePreference(localePreferencePatch(locale));
     startTransition(async () => {
       await setLocale(locale);
       router.refresh();
