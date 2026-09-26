@@ -61,10 +61,36 @@ consultando `GET /infra/graph/nodes`; no reemplaces el mapa por la lista paginad
 
 ## Nuevos ajustes obligatorios tras una descarga
 
-Una versión que añade una función puede introducir un **nuevo valor de entorno obligatorio**. El arranque
-guiado solo escribe valores nuevos en una generación desde cero — nunca edita un archivo de entorno
-existente — así que tras descargar una versión que lo necesite, añádelo a mano y recrea el servicio
-afectado. Dos ejemplos que ya han llegado:
+Una versión que añade una función puede introducir un **nuevo valor de entorno**. Algunos los puede
+añadir el script de arranque por ti (abajo); cualquier otro lo añades a mano y luego recreas el servicio
+afectado.
+
+### Claves que el script de arranque añade por ti
+
+Si actualizas con `git pull` seguido de `./infra/start.sh`, el script detecta tu instalación existente
+y, antes de levantar el stack, **añade cualquier clave que falte y sea segura de generar** — hoy la
+clave de la contraseña del correo (`SMTP_SECRET_KEY`) y la clave de almacenamiento de la clave del
+proveedor de IA (`AI_SECRET_KEY`). Cada una solo protege un secreto que lazyit se niega a guardar
+mientras la clave falta, así que una nueva no puede dejarte sin acceso a nada. Funciona tanto si inicias
+sesión con cuentas integradas como con un proveedor de identidad.
+
+- Primero **hace una copia** de tu archivo de entorno, en `infra/env/.env.prod.bak-<fecha y hora>`. Esa
+  copia contiene tus secretos: mantenla privada y bórrala cuando estés conforme.
+- **Solo añade al final**, bajo un comentario con fecha. Tus líneas existentes nunca cambian y una clave
+  que ya tienes nunca se reemplaza.
+- Muestra los **nombres** de las claves que añadió, nunca sus valores. Volver a ejecutarlo no añade nada.
+- `./infra/start.sh --dry-run` muestra lo que añadiría sin escribir nada.
+
+Después de que añada una clave, respalda fuera del servidor el archivo de entorno actualizado. Las claves
+que protegen datos que ya tienes — la clave de secretos de flujos de trabajo, la clave maestra del
+proveedor de identidad, los secretos de inicio de sesión, las contraseñas de las bases de datos —
+**nunca** se generan por ti: si falta una, el script la nombra y la añades a mano. El script de
+actualización (`./infra/update.sh`) tampoco edita el archivo; se detiene ante una clave que falta y te
+dice cuál.
+
+### Claves que añades a mano
+
+Dos ejemplos que ya han llegado:
 
 - La **URL del intermediario de trabajos en segundo plano** (`REDIS_URL`), obligatoria desde que llegaron
   los trabajadores en segundo plano. Si falta, la importación de documentos en segundo plano falla.

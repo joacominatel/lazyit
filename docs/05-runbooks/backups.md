@@ -59,7 +59,8 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > day one and an admin can save an authenticated SMTP password without hand-editing anything.
 > `--reconfigure` **preserves an already-present key verbatim** and only mints one when the file carries
 > none (nothing can be encrypted under a key that was never there). A `.env.prod` predating that change
-> has no key: `./infra/start.sh --reconfigure` adds it, or append one by hand and recreate the api
+> has no key: re-running `./infra/start.sh` on the existing install appends one (any auth mode, backup
+> first — ADR-0047 amendment 2026-09-26), as does `./infra/start.sh --reconfigure`; or append one by hand and recreate the api
 > container — see **[[deploy-self-hosted]]**. Never regenerate a key that is already in the file: the
 > stored SMTP password becomes undecryptable and must be re-typed.
 
@@ -71,8 +72,15 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > the assistant stops reaching its provider until an admin re-enters the API key — nothing else is lost
 > (conversations, the AI action ledger and MCP connections live in the app DB, item #2). The key is
 > **optional** (unset ⇒ the app boots unchanged and only saving a provider API key 409s), so it is not a
-> DR linchpin. A guided install and `./infra/start.sh --reconfigure` write it; `--reconfigure` preserves a
-> present key verbatim. Never regenerate a key that is already in the file.
+> DR linchpin. A guided install, `./infra/start.sh --reconfigure`, and a re-run of `./infra/start.sh` on
+> an existing install that lacks it write it; all of them preserve a present key verbatim. Never
+> regenerate a key that is already in the file.
+>
+> Restoring a `.env.prod` backup **older than the key** onto a database whose stored secret was encrypted
+> under it: a re-run of `start.sh` sees the key missing and mints a fresh one, so that stored SMTP password
+> or provider key stays undecryptable — exactly as it would with no key at all — and an admin re-enters
+> it. This is why the off-host copy of `.env.prod` should be refreshed whenever `start.sh` reports it
+> added a key.
 >
 > **AI conversations outlive their retention in your dumps.** The app deletes a conversation for good
 > after the retention an admin sets (default 90 days) or when its owner deletes it — but a dump taken
