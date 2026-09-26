@@ -138,6 +138,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
+| `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
+| `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
 | `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
@@ -238,6 +240,7 @@ literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
 `PATCH /users/me` (the caller edits **their own first and last name** — see the self-service note below),
+`GET` / `PUT /account/preferences` (the caller's language and theme — see the preferences note below),
 `GET /users/:id`, `POST /users`, `POST /users/:id/clone` (clone-with-chosen-actions —
 [[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
 `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
@@ -290,6 +293,17 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 >   Resending the stored name is not a change and writes nothing. Under BYOI the name is local only
 >   (lazyit never writes to a foreign IdP), and a later sign-in does **not** overwrite it — the JIT
 >   path only refreshes a name that still looks like a seed placeholder ([[0038-jit-user-provisioning]]).
+
+> [!note] Per-user language and theme — `/account/preferences` (issue #1422)
+> The CEO chose **"the browser's value wins"**. `GET /account/preferences` returns `{ locale, theme }`
+> (`UserPreferencesSchema`); `PUT /account/preferences` takes either key (`UpdateUserPreferencesSchema`:
+> strict, at least one key; omitted = unchanged, `null` = back to never chosen). `GET /users/me` also
+> carries `locale` and `theme`. Self-only (the id is the principal's), any signed-in human, no
+> permission; service accounts get 403. **Precedence on the web:** the browser's own value (the
+> `NEXT_LOCALE` cookie, next-themes' `localStorage`) wins; the stored value is applied **only** in a
+> browser with no preference of its own; changing either in the UI also saves it here, so it follows the
+> user to other devices ([[0051-i18n-next-intl]] amendment). **No [[user-history]] row** — a display
+> preference is not a change to the person record (the same call as the email opt-outs, #879).
 
 > [!note] RBAC safety guards (ADR-0040, Round 3)
 > Changing a `role` is governed by two service-level guards. The API **refuses to remove the last

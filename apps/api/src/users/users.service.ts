@@ -20,6 +20,8 @@ import type {
   ManagerInput,
   PageQuery,
   PasswordResetCapabilities,
+  ThemePreference,
+  UiLocale,
   UpdateOwnProfile,
   UpdateUser,
 } from '@lazyit/shared';
@@ -36,6 +38,7 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { UserHistoryService } from '../user-history/user-history.service';
+import { toThemePreference, toUiLocale } from './user-preferences.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import {
@@ -67,8 +70,13 @@ type ManagerColumns = { managerId: string | null; managerName: string | null };
  * the API serializes them to the ISO-string wire shape (UserSchema) at the HTTP boundary, exactly like
  * every other endpoint. The controller's `UserDto` / `CloneUserResultDto` document that wire shape.
  */
-export type SerializedUser = Omit<User, 'managerId' | 'managerName'> & {
+export type SerializedUser = Omit<
+  User,
+  'managerId' | 'managerName' | 'locale' | 'theme'
+> & {
   manager: ManagerDescriptor | null;
+  locale: UiLocale | null;
+  theme: ThemePreference | null;
 };
 
 /**
@@ -379,6 +387,9 @@ export class UsersService {
     return rows.map((row) => ({
       ...this.stripManagerColumns(row),
       manager: this.toManagerDescriptor(row, byId),
+      // Per-user UI preferences (issue #1422), read-tolerant: an unknown stored value reads as null.
+      locale: toUiLocale(row.locale),
+      theme: toThemePreference(row.theme),
     }));
   }
 

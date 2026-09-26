@@ -128,6 +128,16 @@ model User {
   // then (YAGNI — not built now). No DB enum — mirrors the catalog-as-code String NotificationType.
   notificationEmailOptOutTypes String[] @default([])
 
+  // Per-user UI preferences (issue #1422) — the language and colour theme the user last chose, so they
+  // follow the user to another browser. Both NULLABLE (additive, no backfill): null = never chosen, which
+  // is every existing row and exactly today's per-browser behaviour. The BROWSER's own value always wins;
+  // the stored one only seeds a browser with no preference of its own. Plain strings validated on WRITE
+  // (`UiLocaleSchema` en|es, `ThemePreferenceSchema` light|dark|system in @lazyit/shared); the read path
+  // maps an unknown stored value to null, so retiring a language never breaks a read. No DB enum — a new
+  // language is then a shared-schema change, not a migration.
+  locale String?
+  theme  String?
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?

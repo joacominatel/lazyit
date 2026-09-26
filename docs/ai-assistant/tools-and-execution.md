@@ -223,6 +223,7 @@ Legend:
 | audit | export | logs:read | R | EXCL |
 | search | `GET /search` | search:read | R | v1 `lazyit_search` |
 | notifications | list, unread-count, mark read | self (service-scoped) | R / W | v1.1 |
+| account | preferences — language and theme (#1422) | self (human-only) | R / W | not in the v1 cut (set from the UI, where the browser value wins) |
 | infra | nodes (paged), node, edges, impact | infra:read | R | v1 `infra_node_search` / `infra_node_get` (built, W2-10) |
 | infra | changes, identity-matches, auto-confirm rules | infra:read | R | v1.1 (with the curation surface they serve) |
 | infra | graph nodes / edges (canvas bulk reads) | infra:read | R | EXCL (unpaged, up to 10,000 rows; the two v1 tools are the paged equivalents) |

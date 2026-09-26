@@ -3,7 +3,7 @@ title: "ADR-0051: i18n with next-intl (cookie-mode, en + es)"
 tags: [adr, web, frontend, i18n, next-intl]
 status: accepted
 created: 2026-06-04
-updated: 2026-06-04
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -12,7 +12,8 @@ deciders: [Joaquín Minatel]
 ## Status
 
 accepted — 2026-06-04. CEO-approved (i18n was deferred in [[0049-activated-restraint-ux-direction]]
-as "its own future ADR" — this is it). Web-only; no API or contract change. Phase 0 (this ADR's
+as "its own future ADR" — this is it). Web-only; no API or contract change (amended 2026-09-26: the
+language is now also saved per user — see *Amendment 2026-09-26* below). Phase 0 (this ADR's
 foundation) shipped under epic #157 / issue #192 — the **plumbing + conventions** only. The
 per-section string extraction is a follow-up fan-out, not part of this ADR.
 
@@ -105,6 +106,24 @@ The full, mechanical convention for the per-section agents lives in
   `{name}`), not string concatenation.
 - **Do not translate** identifiers, enum values, route paths, API field names, user-entered
   data, emails, or any value that is data rather than UI copy.
+
+### Amendment 2026-09-26 — per-user preference on the server (#1422)
+
+The CEO chose **"the browser's value wins"**. Language (and, by the same rule, the colour theme —
+[[0011-tailwind-styling]]) is now **also** stored per user, so it follows the user to another device,
+without replacing the cookie:
+
+- **Storage** — two nullable columns on `User`: `locale` (`en | es`, `UiLocaleSchema`) and `theme`
+  (`light | dark | system`, `ThemePreferenceSchema`), both in `@lazyit/shared`. `null` = never chosen.
+  Validated on write; a stored value outside the catalog reads as `null`.
+- **API** — `GET /account/preferences` → `{ locale, theme }`; `PUT /account/preferences` with any of
+  the two keys (omitted = unchanged, `null` = clear). `GET /users/me` carries the same two fields, so
+  the app-load read already has them. Self-only, any signed-in human; service accounts 403.
+- **Precedence (web)** — the browser's own value (`NEXT_LOCALE` cookie / next-themes `localStorage`)
+  **wins**. The stored value is applied **only** in a browser with no preference of its own. Changing
+  the language or theme in the UI keeps writing the browser value **and** saves it to the user.
+- **No history row** — a display preference is not a change to the person record.
+- **Upgrade** — every existing user reads `null`, so behaviour is exactly today's until they choose.
 
 ## Consequences
 

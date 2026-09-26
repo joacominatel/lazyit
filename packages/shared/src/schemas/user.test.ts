@@ -6,8 +6,12 @@ import {
   RoleSchema,
   RoleSourceSchema,
   TempPasswordSchema,
+  ThemePreferenceSchema,
+  UiLocaleSchema,
   UpdateOwnProfileSchema,
+  UpdateUserPreferencesSchema,
   UpdateUserSchema,
+  UserPreferencesSchema,
   UserSchema,
 } from "./user";
 
@@ -437,5 +441,34 @@ describe("UserSchema.directorySource (#1421)", () => {
     expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
     expect(UserSchema.safeParse({ ...READ_BASE, directorySource: "ad" }).success).toBe(true);
     expect(UserSchema.safeParse({ ...READ_BASE, directorySource: null }).success).toBe(true);
+  });
+});
+
+// Issue #1422 — per-user UI preferences. null = never chosen; validated on write.
+describe("UI preferences (#1422)", () => {
+  test("catalogs", () => {
+    expect(UiLocaleSchema.options).toEqual(["en", "es"]);
+    expect(ThemePreferenceSchema.options).toEqual(["light", "dark", "system"]);
+  });
+
+  test("read shape: both nullable, both required", () => {
+    expect(UserPreferencesSchema.safeParse({ locale: null, theme: null }).success).toBe(true);
+    expect(UserPreferencesSchema.safeParse({ locale: "es", theme: "system" }).success).toBe(true);
+    expect(UserPreferencesSchema.safeParse({ locale: "es" }).success).toBe(false);
+  });
+
+  test("write: partial, null clears, strict, non-empty", () => {
+    expect(UpdateUserPreferencesSchema.safeParse({ locale: "en" }).success).toBe(true);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: null }).success).toBe(true);
+    expect(UpdateUserPreferencesSchema.safeParse({}).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ locale: "fr" }).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: "sepia" }).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: "dark", userId: "x" }).success).toBe(false);
+  });
+
+  test("UserSchema carries them optionally (additive)", () => {
+    expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, locale: null, theme: null }).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, locale: "es", theme: "dark" }).success).toBe(true);
   });
 });
