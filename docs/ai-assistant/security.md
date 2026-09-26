@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # AI Assistant — Security & Threat Model
@@ -175,8 +175,9 @@ A new permission, `ai:use`, defaults to ADMIN + MEMBER; MCP has its own, `ai:con
   UNENCRYPTED on the LAN".
 - [R] Caddy proxies `/api/*` to the API and everything else to the web app. It adds nosniff,
   referrer-policy and `X-Frame-Options: DENY`, and has **no content CSP** (`infra/caddy/Caddyfile`).
-  The web sets only `Content-Security-Policy: frame-ancestors 'none'`. A full
-  `script-src`/`img-src` CSP is deliberately deferred (`apps/web/next.config.ts:28-46`).
+  The web enforces `Content-Security-Policy: frame-ancestors 'none'`. *(Update #1440: the web now
+  also sends a full nonce-based `script-src`/`img-src` policy, report-only first —
+  [[content-security-policy]].)*
 - [R] Request logs record method, URL (**including the query string**), status, request id and
   actor. They never record bodies. `authorization`, `cookie` and `x-user-id` headers are redacted
   (`apps/api/src/logging/logging.config.ts:58-91`; [[0031-logging-strategy]]).
@@ -923,7 +924,7 @@ LLM provider's own server-side search tool. As built:
 
 | v1 (mandatory) | Deferrable (with trigger) |
 | --- | --- |
-| INV-AI-1…12 | Full content CSP (`script-src`/`img-src`). Trigger: before GA if time allows, otherwise the next hardening pass (T-12) |
+| INV-AI-1…12 | Full content CSP (`script-src`/`img-src`). Trigger: before GA if time allows, otherwise the next hardening pass (T-12). *(Landed report-only in #1440; enforcing is the remaining step — [[content-security-policy]].)* |
 | Route-equivalent tool execution plus parity golden test | A hash-chained audit, and a DB-level block on the *existing* audit tables |
 | Pending-action store, atomic single-use approval, version check | Per-field PII minimization before provider egress |
 | T3/T4 elevated cards with step-up; AI configuration excluded | MCP elicitation-based server-side confirmation for T3/T4 (§11 E3 option) |
