@@ -242,7 +242,7 @@ Legend:
 | config | status / csrf / setup | @Public | — | N/A |
 | service-accounts | create / rotate | settings:manage, human-only | W | EXCL (returns the token in cleartext; CEO round 2) |
 | service-accounts | read / update / grants / revoke | settings:manage, human-only | R / W | v1.1 (reads `read`; writes `elevated` with step-up) |
-| asset-tag-scheme | read / next-tag preview | settings:manage, human-only | R | v1 `asset_tag_scheme_get` (built, #1394) |
+| asset-tag-scheme | read / next-tag preview | settings:manage, human-only; the summary read `asset:write` (#1428) | R | v1 `asset_tag_scheme_get` (built, #1394; bound to the member-safe summary since #1428) |
 | asset-tag-scheme | update | settings:manage, human-only | W | v1 `asset_tag_scheme_update`, `elevated` (built, #1394; only on an explicit request to change the general scheme) |
 | asset-tag-scheme | seed suggestion / backfill preview / backfill apply | settings:manage, human-only | R / W | not exposed: the backfill rewrites existing tags in bulk, the seed suggestion only serves the settings editor (CEO, #1394) |
 | smtp, directory, instance update | config | settings:manage (+human-only) | W | later, `elevated`; secret-bearing fields (SMTP password, directory bind password) are never tool inputs (INV-AI-5) |
@@ -481,7 +481,7 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
 | 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
-| 16j | `asset_tag_scheme_get` ✅ built (#1394) | AssetTagSchemeController.get (primary), .previewNextTag | settings:manage, human-only | read | — |
+| 16j | `asset_tag_scheme_get` ✅ built (#1394) | AssetTagSchemeController.summary (primary, since #1428) | asset:write, human-only | read | — |
 | 16k | `asset_tag_scheme_update` ✅ built (#1394; only on an explicit request to change the general scheme) | AssetTagSchemeController.update (primary), .get, .previewNextTag | settings:manage, human-only | elevated·D (`INSTANCE_CONFIGURATION`) | assetTagScheme updated |
 | 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
 | 18 | `application_get` ✅ built (W2-6) | ApplicationsController.findOne (+grants, articles facets) | application:read | read | — |
@@ -1130,7 +1130,7 @@ route). The update needs `settings:manage` (administrators); the read needs **`a
   the backfill rewrites existing tags in bulk, forward-only with no undo; it stays in the lazyit settings.
 - **Every caller gets the rule:** `asset_create` and `asset_create_batch` say it too ("omit `assetTag`
   unless the person gives one: the instance tag scheme assigns it; never build one from a pattern"), since
-  a non-administrator cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
+  a caller without `asset:write` (and every Service Account) cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
   `/settings/instance` (`entity-href.ts`), where the scheme editor lives.
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so

@@ -3,7 +3,7 @@ title: "ADR-0048: Service Accounts — a non-human principal with a lazyit-nativ
 tags: [adr, auth, authz, service-accounts, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-12
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -155,6 +155,44 @@ Add a first-class **`ServiceAccount`** principal:
    the once-only `ServiceAccountWithSecretSchema`. Permissions validated against the existing
    `PermissionSchema` catalog.
 
+## Amendment — a Service Account as an AI principal (ADR-0097, #1315, 2026-09-26)
+
+[[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] makes a Service Account the principal of two AI
+channels. Nothing above changes — the token, the DB-first verification, the fail-closed `RolesGuard`
+posture, the actor columns — but the SA gains a bounded AI surface:
+
+1. **Headless API.** An SA holding `ai:use` may start a run (`POST /ai/runs`, channel `HEADLESS`). The run
+   is **autonomous within the SA's grants**: no approval card, no step-up, every write attributed to the SA
+   in `ai_action_log` (INV-SA-4, INV-AI-10). An SA never uses `/ai/conversations` (human-only, 403).
+2. **MCP (R10).** `/mcp` accepts an SA token **only if the SA holds `ai:connect`**, fail-closed. There is
+   no OAuth flow for an SA: its token is the credential, verified by the shared authenticator (see
+   [[0080-service-account-secret-retrieval]]'s amendment).
+3. **Per-SA AI access** (`ai_service_account_settings`, CTO interpretation of "Autonomo total, pero
+   configurable in-app tambien", confirmed on review): `off` / `read-only` / `read-write` — an absent row
+   reads `read-write` — plus an optional `maxMutationsPerRun`. `read-only` caps the tool classes at `read`;
+   the cap counts **changes, not calls** (a batch tool's non-skipped rows, SEC-081), per run over headless
+   and per rolling hour over MCP, and a call that would pass it is refused whole before anything runs. The
+   setting lives at `GET`/`PUT /config/ai/service-accounts/:id` (`settings:manage` +
+   `ServicePrincipalForbiddenGuard`, so an SA can never raise its own), audited in `ai_config_audit_log`,
+   and on each Service Account's page.
+4. **Headless limits that no grant lifts.**
+   - An SA holding **`infra:report`** (the fleet-wide reporting-agent token) never gets AI access, on either
+     channel (ADR-0097 default 16).
+   - **No workflow authoring, ever** (INV-AI-17): reads, run retry and replay, and unassigned manual tasks
+     only; every authoring tool is chat-only.
+   - **No write on a critical application** (`CRITICAL_APPLICATION` is refused over MCP and headless —
+     there is no step-up to ask for).
+   - **No provider web search** (search results are the one input anyone on the internet can write, and a
+     headless write runs unapproved).
+   - The SA-ungrantable verbs (`user:manage`, `settings:manage`, `import:run`, `secret:read`/`:manage`) stay ungrantable,
+     so the elevated tools behind them are out of reach by construction, and the catalog exclusions
+     (INV-AI-14) apply as on every channel.
+5. **The engine SA** (`lazyit-workflow-engine`, system-managed) is not an AI principal: it is locked, holds
+   no `ai:*` grant, and the AI never acts as it (INV-AI-1).
+
+→ [[ai-assistant/_synthesis|synthesis]] §1, §2 decision 13, §3 R10; [[authorization]] §9;
+[[INVARIANTS]] INV-AI-1, INV-AI-11, INV-AI-17.
+
 ## Consequences
 
 - **Positive.**
@@ -195,4 +233,5 @@ Add a first-class **`ServiceAccount`** principal:
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] ·
 [[0038-jit-user-provisioning]] · [[0041-soft-delete-reuse-and-restore]] · [[0005-id-strategy]] ·
-[[0006-soft-delete-and-auditing]] · [[INVARIANTS]] · [[_MOC]]
+[[0006-soft-delete-and-auditing]] · [[INVARIANTS]] · [[_MOC]] ·
+[[0097-ai-assistant-mcp-and-headless-api]] · [[authorization]]

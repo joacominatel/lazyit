@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-09-23
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -311,6 +311,42 @@ unaffected. The TTL only bounds how long a cached answer lives; it does not chan
 resolves. A cache entry expiring during a user's active session causes at most a single extra DB
 read on the next `@RequirePermission` check — no user-visible disruption.
 
+### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
+
+[[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] adds a domain to the catalog, `ai`, with two
+**access verbs** split by channel so an operator can allow one without the other:
+
+- **`ai:use`** — the in-app chat and the headless API (`POST /ai/runs` from a Service Account).
+- **`ai:connect`** — external agents over MCP: OAuth 2.1 grants on HTTPS instances, personal tokens on
+  `lan`, and the tokens of Service Accounts that hold it (R10, fail-closed).
+
+**They grant no domain capability.** The AI always acts as the invoking principal with exactly its own
+permissions (INV-AI-1), so holding `ai:use` adds a *channel*, not a *power*: every tool call still goes
+through the bound route's `@RequirePermission` via the delegated-identity branch of `JwtAuthGuard`, and a
+tool's permission is derived from that route at boot, never declared by hand (INV-AI-2). This is what
+keeps §2's catalog-as-code the single authorization vocabulary — the AI layer adds no parallel map.
+
+**Defaults.** Both are **MEMBER-default capabilities** (`MEMBER_DEFAULT_CAPABILITIES` in
+`permission.ts`): seeded to ADMIN (the full-catalog short-circuit, §5) and MEMBER, not VIEWER, and carried
+in the within-default `edit` tier of `permission-meta.ts`, so granting one is never an escalation. They
+reach existing instances through the seed-once ledger of #1314 on the next deploy — no data migration —
+and an admin who revokes one keeps it revoked. Both stay grantable to a Service Account (they are not in
+`SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`). The capability is also behind instance switches that are off
+by default (the chat's enable gate, the MCP switch), so the grant exposes nothing until an admin enables
+AI or MCP.
+
+**Enforcement is re-checked on every call**, not only at the HTTP entry: core re-reads `ai:use` /
+`ai:connect` for the principal before listing, invoking, proposing or approving a tool, so a revoke takes
+effect on the next tool call of a running conversation or MCP session.
+
+**A read widened on purpose (#1428).** `GET /config/asset-tag-scheme/summary` is gated by
+`asset:write` — the permission of `POST /assets` — rather than `settings:manage`, so whoever may create
+assets can follow the instance's tag pattern (the asset form and the AI tool `asset_tag_scheme_get`). It is
+read-only, human-only and returns no counter internals; every other asset-tag-scheme route stays
+`settings:manage`. The precedent is narrow: instance configuration stays `settings:manage` unless a
+domain permission already implies the need to read one non-sensitive projection of it.
+→ [[authorization]] §5, §9; [[INVARIANTS]] INV-AI-1, INV-AI-2.
+
 ## Consequences
 
 - **Positive:**
@@ -335,4 +371,5 @@ read on the next `@RequirePermission` check — no user-visible disruption.
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] ·
-[[INVARIANTS]] · [[user]] · [[shared-package]]
+[[INVARIANTS]] · [[user]] · [[shared-package]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
+[[authorization]]
