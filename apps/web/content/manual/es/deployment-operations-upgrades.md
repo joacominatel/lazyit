@@ -107,6 +107,20 @@ fijadas a versiones concretas para despliegues reproducibles. Solo cambian con u
 Antes de subir en particular el proveedor de identidad, respalda su base de datos **y** conserva la clave
 maestra correspondiente, ya que sus datos están ligados a esa clave.
 
+El **motor de búsqueda** es la excepción que no necesita preparación. Sus datos solo se abren con la
+versión exacta del motor que los escribió, así que cada actualización del motor de búsqueda arranca con
+un volumen de datos **nuevo** y lazyit reconstruye el índice de búsqueda a partir de tu base de datos
+automáticamente al arrancar. No hay nada que ejecutar: espera que los resultados de búsqueda estén
+**incompletos durante unos minutos** tras esa actualización, y luego completos. Todo lo demás — el
+inicio de sesión, los registros, la comprobación de salud que espera el script de actualización — no se
+ve afectado. El volumen de búsqueda anterior se conserva (una vuelta atrás a la versión anterior lo
+usa) y el script de arranque imprime el comando exacto para eliminarlo cuando ya no lo necesites, por
+ejemplo:
+
+```
+docker volume rm lazyit-prod_meili_data
+```
+
 ## Relacionado
 
 - [Autoalojamiento](/help/deployment-operations-self-hosting)

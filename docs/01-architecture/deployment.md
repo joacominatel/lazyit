@@ -109,9 +109,11 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   stays **internal-network only and never publishes a port in prod** (the dev override binds
   `127.0.0.1:7700`). The integration is **fail-soft**: the API **no-ops** when Meili is down, so an
   outage degrades search but never takes down the app. Its index is a **rebuildable projection** of
-  Postgres, so the `meili_data` **volume need not be backed up** — it is reconstructed with
-  `reindex:all` ([[backups]], [[0035-search-architecture]]). A **one-off `reindex:all` is required
-  after the first deploy** (and after any volume rebuild) or search returns no hits.
+  Postgres, so its volume **need not be backed up** — on boot the API rebuilds any empty or missing
+  index from the database in the background (no manual step), and `reindex:all` forces a full rebuild
+  ([[backups]], [[0035-search-architecture]]). The volume is named after the **exact** server version
+  (`meili_data_v1_53_2`): a Meilisearch data dir only opens on the engine version that wrote it, so a
+  server bump starts on a fresh volume and the index rebuilds itself (ADR-0035 amendment 2026-09-26).
 - **Secrets/config:** one `.env` per scope with a committed `.env.example`; the prod
   `infra/env/.env.prod` is gitignored, with `CHANGE_ME` placeholders and host-side protection. No
   Docker secrets block or external manager (YAGNI). New scoped env: **`REDIS_URL`** (the Valkey URL,

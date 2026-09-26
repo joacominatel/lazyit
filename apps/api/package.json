@@ -23,7 +23,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:wire": "jest --config ./test/jest-wire.json --runInBand"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.63",
@@ -49,7 +50,7 @@
     "jszip": "^3.10.2",
     "ldapts": "^9.2.0",
     "mammoth": "^1.12.3",
-    "meilisearch": "^0.60.0",
+    "meilisearch": "^0.62.0",
     "multer": "^2.4.0",
     "nestjs-pino": "^5.2.1",
     "nestjs-zod": "^5.5.0",

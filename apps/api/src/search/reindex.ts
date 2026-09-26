@@ -60,9 +60,9 @@ const FILTERABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
 export interface ReindexClient {
   index(uid: string): ReindexIndex;
   createIndex(uid: string, options: { primaryKey: 'id' }): AwaitableTask;
-  // Only `indexes` is sent: the newer `rename` field (added in later Meili/meilisearch-js) is
-  // rejected by the pinned server (v1.12.3), and `rename: false` is the swap default anyway, so
-  // omitting it preserves the swap-don't-rename behaviour and works against v1.12.x (#479).
+  // Only `indexes` is sent. `rename: false` is the swap default, so omitting the newer `rename` field
+  // keeps the swap-don't-rename behaviour (#479). The pinned server (ADR-0035 version policy) accepts
+  // the field; omitting it keeps the request minimal. Covered by test/search.wire.spec.ts (#1216).
   swapIndexes(params: { indexes: [string, string] }[]): AwaitableTask;
   deleteIndexIfExists(uid: string): Promise<boolean>;
 }
@@ -110,8 +110,7 @@ function extractCode(err: unknown): string | undefined {
   const record = err as { code?: unknown; error?: unknown; cause?: unknown };
   if (typeof record.code === 'string') return record.code;
   const nested = (record.error ?? record.cause) as
-    | { code?: unknown }
-    | undefined;
+    { code?: unknown } | undefined;
   return nested && typeof nested.code === 'string' ? nested.code : undefined;
 }
 

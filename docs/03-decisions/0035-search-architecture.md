@@ -3,7 +3,7 @@ title: "ADR-0035: Cross-cutting search architecture (Meilisearch)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-06-11
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -139,6 +139,62 @@ This makes the §3 fire-and-forget trade-off **self-healing on a timer** without
 write posture, mirroring the boot self-heal's "safe, background, never blocks" discipline — now extended
 from *empty index* to *drifted index*.
 
+## Amendment (2026-09-26) — client/server version policy, server upgrade, wire test (issue #1216)
+
+**Status: accepted — decided by the CEO 2026-09-26 ("new index + automatic reindex").** Until now the
+Meilisearch **server** (`getmeili/meilisearch:v1.12.3`) and the **client** (`meilisearch` npm, 0.60)
+drifted independently — the client's own CI had moved to server v1.50+ — and nothing in this repo made a
+real wire call (every search spec mocks the client), so a client/server break would have surfaced only
+as an operator's empty search. This amendment fixes the pair, states the policy, and makes it checkable.
+
+### What changed
+
+- **Server `v1.12.3` → `v1.53.2`** (community edition, `getmeili/meilisearch`, MIT-licensed; digest-
+  pinned in `compose.yaml`). **Client `^0.60.0` → `^0.62.0`** — this supersedes Dependabot PR #1302.
+  Client 0.62.0's CI (`.github/workflows/tests.yml` at tag `v0.62.0`) runs against Meilisearch v1.53.
+- **Nothing in our settings needed to change.** The routes we use — `createIndex`, `addDocuments`,
+  `deleteDocument`, `updateFilterableAttributes` (plain string-array form), `swapIndexes` (we still omit
+  the optional `rename`, default `false`), `deleteIndex`, `getStats().indexes[*].numberOfDocuments`,
+  `multiSearch` with `attributesToRetrieve` + `filter`, `/health` — behave identically on v1.53.2; the
+  breaking changes between v1.12 and v1.53 are in areas we do not use (embedders / `_vectors`, experimental
+  features, chat). `MEILI_MASTER_KEY`, `MEILI_ENV` and `MEILI_NO_ANALYTICS` are unchanged. The wire test
+  below is the evidence, not this paragraph.
+- **New data volume, automatic rebuild.** A Meilisearch database only opens on the **exact** engine
+  version that wrote it (major.minor.patch; `--upgrade-db` exists since v1.51 but cannot open pre-v1.12
+  data and is one-way). The index is derived data, so we do not migrate it: the compose volume is renamed
+  `meili_data` → **`meili_data_v1_53_2`**, the engine starts empty, and the existing boot self-heal
+  (2026-06-11 amendment) rebuilds **every** index from Postgres in the background. The self-heal now
+  first **waits for the engine to answer `/health`** (bounded: 30 × 10 s) before probing, because there is
+  no api → meilisearch `depends_on` and a one-shot probe against a still-starting engine would otherwise
+  give up until the hourly reconcile sweeper. Readiness (`/health/ready`) still gates on Postgres only, so
+  the rebuild never delays boot or trips the update health gate; search returns partial results (never an
+  error) for the few minutes the rebuild takes.
+- **The old volume is never deleted by us.** It stays on disk (compose never removes an undeclared
+  volume); a rollback to an earlier tag mounts it again and finds its v1.12 data intact. `start.sh` and
+  `update.sh` **print** a one-line hint with the exact `docker volume rm` command when they see it —
+  print-only, never delete.
+
+### The version policy (judge every future bump against this)
+
+1. **The server is the Meilisearch version the pinned client is tested against.** Look up the client
+   release's CI (`meilisearch-js` `.github/workflows/tests.yml` at the release tag) — it names the server
+   minor. Pin that minor's **latest patch**, community image, **by digest**.
+2. **Client and server move together, in one PR.** A Dependabot client bump is mergeable on its own
+   only when the new client's CI still targets our server minor **and** the `search-wire` CI job is
+   green. If the new client targets a newer server minor, the bump waits for (or becomes) a server-upgrade
+   PR under rule 3 — it is not merged alone.
+3. **Every server bump — patch included — renames the data volume** to `meili_data_v<major>_<minor>_<patch>`
+   and updates the old-volume hint in `infra/start.sh` / `infra/update.sh`. CI enforces the name (the
+   `search-wire` job fails when the volume does not encode the pinned version); forgetting it would
+   crash-loop Meilisearch on every existing instance. The rebuild is automatic (self-heal); the release
+   notes tell operators search is partial for a few minutes and how to remove the previous volume.
+4. **The wire test is the arbiter.** `apps/api/test/search.wire.spec.ts` (`bun run test:wire` in
+   `apps/api`, not part of the default unit run) runs in the `search-wire` CI job against the service
+   **started from `compose.yaml`** — the same pin, no second copy to drift. It covers the fresh-engine
+   self-heal, the real filterable-attribute settings, every document projector, the article folder
+   filter (including the fail-closed never-match expression), `upsert`/`remove`, and the swap rebuild.
+   A client or server change that fails it is not mergeable, whatever the changelog says.
+
 ## Deferred (explicit)
 
 - Faceting / filtered search, relevance tuning, highlighting, incremental/batched reindex, and
@@ -147,13 +203,14 @@ from *empty index* to *drifted index*.
 ## Hand-offs
 
 - **DevOps:** _delivered_ — `meilisearch` is in the canonical `compose.yaml` (+ `MEILI_MASTER_KEY`
-  secret, `MEILI_ENV=production`, port never published under `--profile prod`); run `reindex:all`
-  once on first deploy. (The old `infra/docker-compose.prod.yml` target was consolidated — §9 above.)
+  secret, `MEILI_ENV=production`, port never published under `--profile prod`). First deploy needs no
+  manual reindex any more — the boot self-heal fills empty indexes; `reindex:all` stays the manual full
+  repair. Server/client pins follow the 2026-09-26 version policy above. (The old `infra/docker-compose.prod.yml` target was consolidated — §9 above.)
 - **Frontend:** _delivered_ (#21) — a ⌘K command palette in the topbar consuming `GET /search`
   (`apps/web/components/global-search.tsx`); the response is typed in `@lazyit/shared` (`search`
   schema). Results group by entity and degrade gracefully where no detail page exists yet.
 
-Related: #383 · [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
+Related: #383 · #1216 · [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
 [[0031-logging-strategy]] · [[0032-soft-delete-middleware]] · [[0028-secrets-and-config]] ·
 [[0016-auth-strategy-deferred]] · [[0056-in-app-notification-bell]] (the retention sweeper this
 amendment's reconcile sweeper mirrors)

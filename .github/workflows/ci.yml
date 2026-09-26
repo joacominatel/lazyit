@@ -221,6 +221,82 @@ jobs:
         working-directory: apps/web
         run: bun run check:message-parity
 
+  # Search WIRE test (#1216, ADR-0035 amendment 2026-09-26). Every other search spec mocks the
+  # Meilisearch client, so a client/server incompatibility would pass the whole unit suite. This job
+  # starts the Meilisearch server EXACTLY as compose.yaml pins it (same image digest, same healthcheck —
+  # no second copy of the pin to drift) and runs apps/api/test/search.wire.spec.ts against it with the
+  # real `meilisearch` client: fresh-engine self-heal, the real index settings, the real document
+  # shapes, the real filters, upsert/remove and the swap-based rebuild. The spec FAILS (never skips)
+  # without MEILI_HOST/MEILI_MASTER_KEY, so this job cannot go green without making wire calls.
+  # A separate job (no `needs:`) so it runs in parallel with `verify`.
+  search-wire:
+    name: Search wire test (pinned Meilisearch)
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway key for the ephemeral CI engine — not a secret, never used outside this job.
+      MEILI_MASTER_KEY: ci-wire-test-master-key-not-a-secret
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # jest@30 does not initialize under Bun's runtime — same as the verify job's API tests.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # A Meilisearch data dir only opens on the exact engine version that wrote it, so every server
+      # bump MUST rename the data volume (ADR-0035 amendment 2026-09-26) — otherwise every existing
+      # instance crash-loops Meili on the old volume. Guard it: the volume name must encode the
+      # pinned image version (v1.53.2 -> meili_data_v1_53_2).
+      - name: Meilisearch data volume matches the pinned server version
+        run: |
+          set -euo pipefail
+          ver="$(grep -oE 'getmeili/meilisearch:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}' compose.yaml | head -n1 | sed -E 's#.*:v([0-9.]+)@.*#\1#')"
+          [ -n "$ver" ] || { echo "::error::no digest-pinned getmeili/meilisearch:vX.Y.Z image in compose.yaml"; exit 1; }
+          vol="meili_data_v$(echo "$ver" | tr . _)"
+          echo "pinned server v$ver -> expected volume $vol"
+          grep -qE "^      - ${vol}:/meili_data\$" compose.yaml || { echo "::error::compose.yaml meilisearch must mount ${vol}:/meili_data (rename the volume on every server bump)"; exit 1; }
+          grep -qE "^  ${vol}:\$" compose.yaml || { echo "::error::compose.yaml must declare the top-level volume ${vol}"; exit 1; }
+
+      # The dev compose (compose.yaml + the auto-loaded compose.override.yaml) publishes Meili on
+      # 127.0.0.1:7700. `--wait` blocks until the service's own healthcheck passes.
+      - name: Start the pinned Meilisearch (from compose.yaml)
+        run: |
+          docker compose up -d --wait meilisearch
+          docker compose images meilisearch
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build shared package
+        run: bun run --filter @lazyit/shared build
+
+      - name: Generate Prisma client
+        working-directory: apps/api
+        run: bunx prisma generate
+
+      - name: Search wire test
+        working-directory: apps/api
+        env:
+          MEILI_HOST: http://127.0.0.1:7700
+        run: node node_modules/.bin/jest --config ./test/jest-wire.json --runInBand
+
+      - name: Meilisearch logs (on failure)
+        if: failure()
+        run: docker compose logs meilisearch
+
   # The three images are built in PARALLEL (one matrix job per image, each on its own runner)
   # instead of sequentially in one job — docker wall-clock drops from the SUM of the three builds
   # to the MAX. This job is NOT gated on `verify` (no `needs:`): the image build and the quality

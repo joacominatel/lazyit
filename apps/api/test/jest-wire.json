@@ -1,0 +1,19 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": "\\.wire\\.spec\\.ts$",
+  "setupFiles": ["<rootDir>/jest.env-setup.ts"],
+  "transform": {
+    "^.+\\.ts$": "ts-jest",
+    "^.+\\.js$": [
+      "@swc/jest",
+      {
+        "sourceMaps": true,
+        "module": { "type": "commonjs" },
+        "jsc": { "target": "es2023", "parser": { "syntax": "ecmascript" } }
+      }
+    ]
+  },
+  "transformIgnorePatterns": ["/node_modules/(?!.*@nestjs|.*@ai-sdk|.*@workflow|.*meilisearch|(?:.*/)?ai/)"]
+}
