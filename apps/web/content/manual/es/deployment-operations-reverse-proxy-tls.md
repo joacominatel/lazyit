@@ -85,6 +85,29 @@ la petición (limitación de tasa, la auditoría del primer arranque) ven al cli
 falsificada. Esto viene preconfigurado; no necesitas cambiarlo para un despliegue estándar en un único
 servidor.
 
+## Content-Security-Policy
+
+La aplicación web envía su propia **Content-Security-Policy** en cada página. Es una segunda línea de
+defensa: si algo llegara a escaparse del saneado de los artículos de la Base de conocimiento o de las
+respuestas de la IA, el navegador igual se niega a ejecutar scripts inyectados o a cargar imágenes y
+conexiones de otros sitios. Los scripts se permiten con un valor de un solo uso generado para cada
+página, y las imágenes vienen solo del propio lazyit.
+
+Hoy la política funciona en modo **solo informe** (*report-only*): el navegador la evalúa y anota
+cualquier infracción en su consola de desarrollador como un mensaje `[Report Only]`, pero no bloquea
+nada. Insertar lazyit dentro de otro sitio (*framing*) ya está **bloqueado** en cualquier modo. Una
+versión posterior pasa la política a modo de bloqueo.
+
+Qué significa para ti:
+
+- **Nada que configurar** con el Caddy incluido. La política la envía la aplicación web, no Caddy.
+- **Tu propio proxy inverso** delante de lazyit **no debería agregar una segunda
+  `Content-Security-Policy`**. Los navegadores aplican todas las políticas que reciben, así que una
+  segunda puede bloquear los scripts que la aplicación permite. Si tu organización exige una en el
+  proxy, deja pasar sin cambios la cabecera de la aplicación.
+- **Las imágenes de otros sitios no se cargan**, ni en artículos ni en ningún otro lugar — es a
+  propósito. Sube la imagen como adjunto del artículo; los adjuntos los sirve el propio lazyit.
+
 ## Relacionado
 
 - [Autoalojamiento](/help/deployment-operations-self-hosting)

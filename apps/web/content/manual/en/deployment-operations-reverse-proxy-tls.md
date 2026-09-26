@@ -82,6 +82,26 @@ configured to trust exactly that one hop, so request-IP-based features (rate lim
 audit) see the real client and not a forged header. This is preconfigured; you don't need to change it
 for a standard single-host deploy.
 
+## Content-Security-Policy
+
+The web app sends its own **Content-Security-Policy** on every page. It is a second line of defence:
+if something ever slipped past the sanitizing of Knowledge Base articles or AI answers, the browser
+still refuses to run injected script or to load images and connections from other sites. Scripts are
+allowed by a one-time value generated for each page, and images come only from lazyit itself.
+
+Today the policy runs in **report-only** mode: the browser checks it and writes any breach to its
+developer console as a `[Report Only]` message, but blocks nothing. Framing lazyit inside another
+site is already **blocked** in every mode. A later version switches the policy to enforcing.
+
+What this means for you:
+
+- **Nothing to configure** with the bundled Caddy. The policy comes from the web app, not from Caddy.
+- **Your own reverse proxy** in front of lazyit should **not add a second `Content-Security-Policy`**.
+  Browsers apply every policy they receive, so a second one can block the scripts the app allows. If
+  your organization requires one at the proxy, pass the app's header through unchanged instead.
+- **Images from other sites don't load**, in articles or anywhere else — by design. Upload the image
+  as an attachment to the article instead; attachments are served by lazyit itself.
+
 ## Related
 
 - [Self-hosting](/help/deployment-operations-self-hosting)
