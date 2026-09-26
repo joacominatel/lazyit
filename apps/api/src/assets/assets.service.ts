@@ -29,6 +29,7 @@ import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
@@ -163,7 +164,9 @@ const ASSET_RELATIONS = {
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
-    include: { user: true },
+    // The owner through the PUBLIC column allowlist (SEC-085) — a whole-row `user: true` put the
+    // owner's passwordHash and session epochs on GET /assets/:id for every `asset:read` holder.
+    include: { user: { select: PUBLIC_USER_SELECT } },
   },
 } satisfies Prisma.AssetInclude;
 
