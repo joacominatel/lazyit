@@ -8,7 +8,7 @@ updated: 2026-09-26
 
 # UserSession
 
-> 🟢 implemented (API) · Area: Users — local authentication · issue #1420 · see
+> 🟢 implemented (API + web, #1455) · Area: Users — local authentication · issue #1420 · see
 > [[0086-local-authentication-mode]] §9
 
 ## Purpose
