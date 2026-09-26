@@ -7,7 +7,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useNow, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
@@ -70,8 +70,11 @@ export function UserDetailView({ id }: { id: string }) {
     () => ({ kind: "user", id }),
     [id],
   );
-  // Snapshot "now" once (not during render) so the expiry comparison stays pure and stable.
-  const [now] = useState(() => Date.now());
+  // "Now" for the expiry comparison. next-intl's `useNow` starts from the server-render instant seeded
+  // in the root layout, so the server and the hydrating client compare against the SAME value (#1448)
+  // — a per-pass `Date.now()` could flip a grant that expires in between — and then ticks each minute
+  // so a long-lived tab still sees a grant expire.
+  const now = useNow({ updateInterval: 60 * 1000 }).getTime();
 
   const breadcrumb = useMemo(
     () => (
