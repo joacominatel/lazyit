@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,10 +15,12 @@ deciders: [Joaquín Minatel]
 The depth lives in the design vault [[ai-assistant/_MOC|docs/ai-assistant/]], whose
 [[ai-assistant/_synthesis|synthesis]] is binding.
 
-**To amend on acceptance** (not edited by this ADR): [[0046-roles-permissions-v2]] (the `ai` permission
-domain), [[0048-service-accounts]] (SA tokens on `/mcp`, the per-SA AI access setting) and
-[[0080-service-account-secret-retrieval]] (SA bearer verification extracted into a shared
-authenticator; SA token issuance is never an AI tool). Builds on [[0086-local-authentication-mode]]
+**Amended on acceptance** (2026-09-26, W4-4 — each in its own record): [[0046-roles-permissions-v2]] (the
+`ai` permission domain), [[0048-service-accounts]] (a Service Account as an AI principal: headless, SA
+tokens on `/mcp`, the per-SA AI access setting and its limits) and [[0080-service-account-secret-retrieval]]
+(SA bearer verification extracted into a shared authenticator; SA token issuance and secret fetch are
+never AI tools). [[authorization]] §9 is the architecture view, and INV-AI-1…17 are binding in
+[[INVARIANTS]]. Builds on [[0086-local-authentication-mode]]
 (the local session; open PR #1313 amends its session expiry) and [[0087-plain-http-lan-deployment-axis]].
 Depends on #1314 and on #1310's direction (no OIDC).
 
@@ -226,6 +228,29 @@ The key forks only; each links its analysis.
    > → [[ai-assistant/provider-and-runtime|provider]] §6.3, §9.1; [[ai-assistant/security|security]] §6.11;
    > [[ai-assistant/frontend|frontend]] §5.3, §5.5.
 
+   > Amended 2026-09-25 (#1387, #1409): **many changes at once.** The CEO, after the assistant proposed 25
+   > asset edits in one step: "Si son 5 el limite estamos ok, pero el asistente debe saberlo para poder
+   > hacer, 5, despues otras 5, despues otras 5, y asi las que necesite", and the approvals should be "cards
+   > con paginas para cada aprobacion".
+   >
+   > - **The pending-approval limit stays 5 per step** (`AI_MAX_PENDING_PER_STEP`, approval fatigue). A
+   >   write proposed past it is **deferred**, not failed: it is answered with a hint to propose the rest
+   >   once these are decided, it does not use up the run's tool-call cap and the repeated-failure guard
+   >   ignores it. The prompt states the limit (`AI_PROMPT_VERSION` 6), so the model works in batches of 5
+   >   and reports progress.
+   > - **Two batch tools**, `asset_create_batch` (#1387) and `asset_update_batch` (#1409): up to 200 rows
+   >   as **one** ordinary `write` proposal with one card (rendered as a table), executed row by row
+   >   through the single-asset route, every row audited under the invocation. A row carrying a step-up
+   >   warning refuses the whole batch — step-up never hides in a batch. A batch counts its rows, not one,
+   >   toward a Service Account's mutation cap (SEC-081).
+   > - **One paged approval card per step** in the web, with "Approve all" / "Reject all". There is still
+   >   no batch endpoint: "Approve all" sends one decision per action, each authorized, stepped-up and
+   >   version-checked on its own, and it skips step-up, elevated and previously refused cards (they stay
+   >   individual).
+   >
+   > → [[ai-assistant/provider-and-runtime|provider]] §8.1 *The pending-approval limit*;
+   > [[ai-assistant/tools-and-execution|tools]] §7; [[ai-assistant/frontend|frontend]] §5.3.
+
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,
    once, before it expires; authorization and the target's version are re-checked at execute. Elevated
@@ -279,6 +304,14 @@ The key forks only; each links its analysis.
    > - **Not in this amendment** (follow-ups if the CEO wants them): an admin switch to disable the mode
    >   instance-wide, an expiry, and a cap on automatic writes per turn beyond the per-run tool-call cap.
 
+   > Amended 2026-09-25 (SEC-080, #1433): **what counts as an untrusted source.** A turn has read
+   > untrusted content when any tool result it received carries `<untrusted_content>` — other-authored
+   > text wrapped by the tool — whatever entity refs the tool returned (a read that names none adds a
+   > synthetic `toolResult` ref), and a resumed run counts the reads and answered forms of its paused
+   > steps. That marker, not the tool's entity refs, drives the untrusted-source banner, keeps a write out
+   > of auto-approve and out of "Approve all". An approval also re-reads the card's impact counts; if they
+   > moved the action stays pending with the fresh counts (`PREVIEW_CHANGED`, #1428).
+
 5. **Lazyit owns the agent loop; providers sit behind a port.** Each model step is one call through
    `ChatModelPort`, implemented over AI SDK 7 in `ai/providers/` — the only code that imports it. Adding
    a provider is a descriptor, one definition file and one registry line. Runs are BullMQ jobs carrying
@@ -316,6 +349,14 @@ The key forks only; each links its analysis.
    web invalidates every active query after an executed mutation, renders "Open" chips, and
    auto-navigates only for an explicit navigate tool when nothing unsaved is on screen. The web builds
    every href. → [[ai-assistant/_synthesis|synthesis]] §4.3, §4.6; [[ai-assistant/frontend|frontend]] §4.
+
+   > Amended 2026-09-25 (#1384, #1432, #1439): **server-built sentences reach the web as codes.** The API
+   > stays locale-agnostic (CEO/CTO, option A): next to each English sentence it builds — a preview's
+   > `action` row and other explanatory values, a result's `summary`, core and runtime refusals — it sends
+   > the same sentence as codes + params from a closed list (`AI_SENTENCES` in `@lazyit/shared`), and the
+   > web renders the code's template in the user's locale, falling back to the English when it does not
+   > know every code. The meaning is still decided on the server; the English stays what the ledger, the
+   > model, MCP and headless clients read. → [[ai-assistant/tools-and-execution|tools]] §9.1.
 
 7. **Configuration is an encrypted singleton, off by default.** `AiSettings` mirrors the SMTP
    precedent: `settings:manage` only, the provider key write-only under its own optional key axis
@@ -383,6 +424,13 @@ The key forks only; each links its analysis.
 12. **Fourteen invariants** (INV-AI-1…14) formalize the above and join [[INVARIANTS]] on acceptance.
     → [[ai-assistant/_synthesis|synthesis]] §7.
 
+    > Amended 2026-09-26 (W4-4): **seventeen invariants.** The workflow-engine amendment of decision 3 added
+    > INV-AI-15 (no unattended outbound integration), INV-AI-16 (workflow secrets are reference-only) and
+    > INV-AI-17 (a Service Account operates workflows, it never builds them) —
+    > [[ai-assistant/security|security]] §6.9. All seventeen joined [[INVARIANTS]] on 2026-09-26, each with
+    > its enforcement point and its tests; the INV-MCP-1…7 of the MCP note are kept there as a mapping onto
+    > them.
+
 13. **MCP client trust policy: a configurable allowlist, pre-seeded.** The CEO, on review: "Revise el
     adr, esta ok, lo unico del mcp que daria es que haya una allowlist configurable, pero por defecto
     todos o los que tengamos en cuenta, https, claude code, codex, opencode, pi, y algun otro que me
@@ -418,6 +466,17 @@ The key forks only; each links its analysis.
     > A settings row that already exists keeps its stored value — a row saved before this change may
     > hold `false` because that was the default then, and nothing distinguishes it from an admin's
     > choice, so it is not rewritten.
+
+    > Amended 2026-09-25 (#1413, #1426): **who is "verified".** CIMD shipped (the client's metadata document
+    > fetched from its `client_id` URL through the egress guard, with a bundled offline copy of Claude
+    > Code's). It does not bypass the allowlist: a CIMD client is admitted exactly like a DCR client, at
+    > consent, at code exchange and at every refresh. The CEO, asked which clients the consent page may call
+    > verified: **"Solo las de la lista"** — `client.verified` is true **only for a CIMD client matched by a
+    > `cimd_url` allowlist entry** (a curated default or an admin's). A CIMD client admitted only through its
+    > redirect URIs is *domain-verified*, not verified: the consent page and the connected-apps lists show
+    > it as unverified next to its real domain (`client.verifiedDomain`, the host of its `client_id` URL)
+    > and ask for the extra confirmation. A DCR client is never verified and has no domain.
+    > → [[ai-assistant/mcp-and-oauth|MCP]] §15; [[ai-assistant/frontend|frontend]] §5.8.
 
 ## Consequences
 
@@ -513,6 +572,14 @@ instance level, the grant exposes nothing until an admin enables it. Downgrading
 > pattern; `asset_tag_scheme_get` now binds it, so it is listed to MEMBER as well as ADMIN
 > ([[authorization]]). Every other asset-tag-scheme route stays `settings:manage`.
 
+> Amended 2026-09-26 (W4-4, recording #1387, #1409, #1384, SEC-080…083 and #1426 — decisions 3, 4, 6 and
+> 13): **no migration.** The batch tools, the deferred proposal (a `deferred` flag inside the step record's
+> JSON; a record without it is counted as before), the sentence codes (optional fields; a row stored
+> before them shows its English), the `toolResult` untrusted-source ref, the mutation weight, the
+> `CONSENT_STEP_UP_FAILED` audit action and `client.verifiedDomain` are all additive and read-tolerant.
+> The pending-approval rule changed the system prompt, so `AI_PROMPT_VERSION` went to 6: conversations
+> begun on 5 become read-only on the next message and the user starts a new one (default 7).
+
 ## Prerequisites
 
 - **#1314** — the seed must stop re-granting revoked default permissions before `ai:use` / `ai:connect`
@@ -527,14 +594,90 @@ The build follows the unified wave plan in [[ai-assistant/_synthesis|synthesis]]
 
 ## Not built
 
-Click-level UI driving; conversation summarization; approve-all (other than the per-conversation
-auto-approve mode for ordinary writes, decision 4 as amended 2026-09-24) or approve-with-edits; provider
+Click-level UI driving; conversation summarization; approve-all as one server decision (the
+per-conversation auto-approve mode for ordinary writes, decision 4 as amended 2026-09-24, and the web's
+"Approve all", which sends one decision per action, decision 3 as amended 2026-09-25, are not that) or
+approve-with-edits; provider
 fallback chains or per-user keys; MCP elicitation (the chat's input forms, decision 3 as amended
 2026-09-24 for #1388, have no MCP counterpart), resources, prompts or toolsets; any OIDC surface or
 OAuth over plain HTTP; lazyit as an MCP client; generic "call any endpoint" or file tools; a lazyit-side
 web search or URL fetch (the provider's own search is allowed, decision 3 as amended 2026-09-24 for #1389); admins reading
 other people's conversations; a per-request headless tool allowlist; workflow authoring over MCP or
 headless (MCP deferred, #1344; headless excluded for good, INV-AI-17); any tool over workflow secrets. → [[ai-assistant/_synthesis|synthesis]] §9.2.
+
+## As built (2026-09-26)
+
+What epic #1315 shipped against this decision, waves 0–4 of the [[ai-assistant/_synthesis|synthesis]]
+§10 plan. The design notes' *As built* sections carry the depth.
+
+**API** (`apps/api/src/`)
+
+- `ai/` — `core/` (the registry, the C3 dispatcher, `AiToolService`, boot validation, exclusions,
+  redaction, the ledger writer, sentence codes), `tools/` (15 toolsets, **78 tools**: the 44-tool v1 cut
+  plus the workflow engine, taxonomy, the asset tag scheme, the asset batches and `request_input`),
+  `providers/` (Anthropic, OpenAI, Gemini, OpenAI-compatible over AI SDK 7 — the only importer of `ai` /
+  `@ai-sdk/*`), `runtime/` (the agent loop as a BullMQ job, the orchestrator, sweeper, approvals, input
+  forms, limits, the in-process event bus), `prompt/` (the domain primer, `AI_PROMPT_VERSION` 6),
+  `settings/`, `status/`, `conversations/`, `runs/` (SSE), `headless/` (per-SA AI access) and
+  `retention/`.
+- `oauth/` — the hand-written OAuth 2.1 authorization server: metadata, authorize (validate + decision
+  with the `lazyit.admin` step-up), token, DCR, revocation, CIMD (`cimd/`), grants, personal tokens
+  (`personal-tokens/`), the client allowlist overlay and the sweeper.
+- `mcp/` — the stateless MCP resource server (SDK v2), its auth guard (`lzit_oat_` / `lzit_pat_` /
+  `lzit_sa_`), per-caller tool listing with class-derived annotations, the first-use notice, the
+  interrupted-write sweeper, and `distribution/` (the Claude Code plugin: an authenticated zip always, a
+  public marketplace on HTTPS instances).
+- `auth/` — the delegated-identity branch, `PrincipalLoaderService`, `ServiceAccountAuthenticator`,
+  `User.mcpCredentialEpoch`; `asset_history` / `user_history` stamp `aiInvocationId`.
+- Migrations: the one DDL migration of the synthesis §6 (`20260806000000_add_ai_assistant_and_oauth`) and
+  four follow-ups — `mcp_credential_epoch`, `mcp_allow_any_https_client_default` (a column default only),
+  `ai_conversation_settings`, `ai_web_search` — all additive; see *Upgrade safety*.
+
+**Web** (`apps/web/`): the navbar chat panel (`components/ai/`, `lib/ai/`), Settings → AI (the provider
+wizard, the editor, the MCP switch and client allowlist, web search, retention and budgets, every user's
+connected apps), the per-SA AI access control on each Service Account's page, `/account/ai` (install,
+connected apps, personal tokens on `lan`), the consent page `/oauth/authorize`, and the Manual's
+`ai-assistant-*` pages in `en` and `es`.
+
+**Infrastructure and verification**: Caddy routes `/mcp`, `/.well-known/oauth-*`, `/oauth/token`,
+`/oauth/register` and `/oauth/revoke` to the API and streams SSE unbuffered (W0-5); the W4-2 integrated
+security review ([[sweep-2026-09-25-ai-assistant]]) passed gates G1–G4 and its four findings, SEC-080…083,
+are closed; the W4-3 client × deployment matrix ([[ai-mcp-client-matrix]]) verified the MCP Inspector, an
+SDK-v2 client and Claude Code on `lan` and over an internal CA; INV-AI-1…17 are binding in
+[[INVARIANTS]].
+
+**Decided during the build** — each recorded above as a dated amendment: workflow engine in the catalog
+and `CRITICAL_APPLICATION` (decision 3); input forms (`request_input`, decision 3); provider-native web
+search (decision 3); batches and the pending-approval limit (decision 3); class-independent step-up and the
+manager change (decision 4); auto-approve (decision 4) and what counts as an untrusted source (decision 4);
+the model per conversation (decision 5); localized server sentences (decision 6); MCP credentials
+decoupled from the web logout (decision 8); native-app redirect schemes, any HTTPS client by default and
+the CIMD verified rule (decision 13); seventeen invariants (decision 12).
+
+**Deferred** — AI scope only, tracked in #1344 unless noted:
+
+- Workflow authoring and connections over MCP (headless stays excluded for good, INV-AI-17).
+- Requester-facing provisioning status; whether an admin may approve their own access request; deferred
+  tool loading now that the catalog passes ~60 tools.
+- A self-service "sign out everywhere" that bumps `mcpCredentialEpoch` (today only the admin *revoke
+  sessions* option does).
+- Model-supplied strings inside the server-built `action` sentence (quote, cap or mark them untrusted).
+- A route-level expected version on writes (assets, consumables, users, KB, access) to close the
+  approve→execute window rather than narrow it.
+- Per-user rate-limit keying on `/mcp`; IPv6 /64 keying and evict-oldest for DCR registrations.
+- Two nullable runtime columns (the frozen system prompt, the run's session epoch) to replace the
+  `lazyit-*` system rows in `ai_messages`.
+- A per-host plugin name (two instances installed side by side share the `lazyit` namespace).
+- From the OAuth review ([[ai-assistant/mcp-and-oauth|MCP]] §12, §15): snapshot `mcpCredentialEpoch` on
+  the authorization code, record the code → grant link so a replayed code revokes its grant, and a
+  distinct consent refusal for an unreachable CIMD document.
+- From the amendments: an admin switch, an expiry and a per-turn cap for auto-approve (decision 4); an
+  admin allow-list of pickable models, a per-model cost view and a provider-aware model-id rule for Google
+  (decision 5).
+- Not built yet from the v1 cut: the chat-only `navigate_to` tool (entity chips cover navigation); reads
+  over MCP are not written to `ai_tool_invocations`.
+- Operator runs still open in the client matrix: Cursor, claude.ai and ChatGPT identifiers, and the
+  Claude Code browser sign-in; CIMD against Claude Code's live document.
 
 ## Adopted by default — CEO to confirm on review
 
