@@ -87,6 +87,23 @@ their inverse restores → `<domain>:delete` (ADMIN-only); AccessGrant mutations
 (**never** `accessGrant:write`, an intentional MEMBER orphan); Users admin → `user:manage` (**not**
 `user:write`)).
 
+### 3.1 Local sessions — what the human branch checks (authN detail, [[0086-local-authentication-mode]])
+
+In `AUTH_MODE=local` the human branch re-loads the [[user]] every request and refuses a `sessionEpoch`
+mismatch, an inactive, soft-deleted or directory-only row. Since #1420 (§9 of the ADR) a token minted at
+sign-in also carries a `sid` naming its [[user-session]] row, and the guard refuses it once that row is gone,
+belongs to another user, carries another epoch or has expired — one uncached primary-key read, so ending one
+device is immediate. A token without a `sid` (issued before that release) keeps the epoch-only check. The
+guard records `request.localSession = { rememberMe, sessionId }` for the routes that need it
+(change-password, the session list).
+
+The session routes are **self-service and unannotated**: `GET /auth/sessions` and
+`DELETE /auth/sessions/:id` pass every human (INV-8 — each person manages their own sessions; every query is
+scoped to the caller's id, another user's session is a `404`) and refuse a service principal outright
+(`ServicePrincipalForbiddenGuard`). There is no admin per-session route: an admin ends a user's sessions with
+the existing `user:manage` levers (deactivate, offboard, password reset with *revoke sessions*), which bump
+the epoch. Personal MCP tokens and OAuth grants are not sessions (§9.3).
+
 ## 4. Reads tightened (the read-authz gap closed)
 
 41 read `GET`s now carry `@RequirePermission('<domain>:read')`. Every `<domain>:read` is seeded to all

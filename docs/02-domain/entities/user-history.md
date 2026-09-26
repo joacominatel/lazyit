@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-09-24
+updated: 2026-09-26
 ---
 
 # UserHistory
@@ -49,7 +49,9 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 `CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
 `PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED` ·
-`DEACTIVATED` · `REACTIVATED` (no payload — an `isActive` flip, issue #1375). The
+`DEACTIVATED` · `REACTIVATED` (no payload — an `isActive` flip, issue #1375) · `SESSION_ENDED` (payload
+`{ sessionId, current }` — the user ended one of their local sessions from the device list, issue #1420,
+[[user-session]]; actor == subject). The
 `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
 records a reset **link** being sent to the subject — by the IdP in OIDC mode, or by lazyit's own SMTP when an
 admin picks the `email` delivery in local mode ([[0086-local-authentication-mode]] §5, amended by #1268);
@@ -88,6 +90,9 @@ all from the [[user]] service:
   for a real, login-capable subject. The audit is written in the **detached** issuance path (fire-and-forget), so
   it never affects the response latency and never fires for an unknown/inactive/directory-only identifier — keeping
   the flow enumeration- and timing-uniform (issue #1006), actor == subject.
+- Per-device sessions (`UserSessionsService`, [[0086-local-authentication-mode]] §9, #1420) → `SESSION_ENDED`
+  on `DELETE /auth/sessions/:id`, in the same transaction as the row delete, actor == subject. "Sign out
+  everywhere" (`POST /auth/logout`) writes no row, as before.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 

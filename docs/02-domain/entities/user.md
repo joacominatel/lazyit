@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-09-26
 ---
 
 # User
@@ -79,6 +79,12 @@ the reverse.
   offboard** of an active person (#1308) — so reactivating or restoring a user, by hand or by the sync,
   never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
   row on every request.
+  **Per-device sessions (local mode, [[0086-local-authentication-mode]] §9, #1420):** every sign-in also
+  records a [[user-session]] row (browser, IP, dates, remember-me), and its token carries the row id.
+  `GET /auth/sessions` lists the caller's own live sessions (`current` flagged) and
+  `DELETE /auth/sessions/:id` ends one device without touching the others. `POST /auth/logout` stays
+  "sign out everywhere": it bumps `sessionEpoch` **and** deletes every session row. Tokens issued before
+  the upgrade have no row and keep the epoch-only check.
   **MCP credentials have their own counter.** `mcpCredentialEpoch` (`int`, default 0) is what every
   [[oauth-grant]] (OAuth connection or personal MCP token) snapshots. Every lever above bumps it together
   with `sessionEpoch` — password change or reset, admin reset (and the admin *revoke sessions* option),
