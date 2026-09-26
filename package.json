@@ -2,7 +2,7 @@
   "name": "lazyit",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
