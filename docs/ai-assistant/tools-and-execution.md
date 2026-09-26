@@ -208,6 +208,7 @@ Legend:
 | users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
 | users | `:id/access-grants` | accessGrant:read | R | facet of `user_get` (built, W2-9) |
 | users | `me` | self | R | v1 `session_context` |
+| users | `PATCH me` (own first / last name, #1421) | self (human-only) | W | not in the v1 cut (a profile-page action; `user_update` covers an admin rename) |
 | users | create / update | user:manage | W | v1 `user_create` / `user_update`, `elevated` (built, W2-9) |
 | users | offboard (delete alias) | user:manage | D + ext + cascade | v1 `user_offboard` binds `POST :id/offboard`; `DELETE :id` unexposed (built, W2-9) |
 | users | restore | user:manage | W | v1 `user_restore`, `elevated` (built, W2-9) |
