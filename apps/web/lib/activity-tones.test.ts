@@ -28,3 +28,12 @@ describe("activation verbs (issue #1375)", () => {
     expect(actionLabel("reactivated", esT)).toBe("Reactivado");
   });
 });
+
+// Issue #1420: a user ending one of their sessions surfaces as `session_ended` — tinted and localized.
+describe("session_ended (issue #1420)", () => {
+  test("reads as info and is localized in en and es", () => {
+    expect(actionTone("session_ended")).toBe("info");
+    expect(actionLabel("session_ended", translator(en.activity.action))).toBe("Session ended");
+    expect(actionLabel("session_ended", translator(es.activity.action))).toBe("Sesión cerrada");
+  });
+});

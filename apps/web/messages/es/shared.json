@@ -74,7 +74,8 @@
       "consumable_delivered": "Consumible entregado",
       "consumable_returned": "Consumible devuelto",
       "deactivated": "Desactivado",
-      "reactivated": "Reactivado"
+      "reactivated": "Reactivado",
+      "session_ended": "Sesión cerrada"
     }
   },
   "empty": {},
