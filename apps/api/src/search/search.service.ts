@@ -287,6 +287,22 @@ export class SearchService {
   }
 
   /**
+   * Whether the engine answers `GET /health` right now (#1216). `false` in disabled mode and on any
+   * transport error — never throws. The boot self-heal polls this before probing index stats, so a
+   * Meili container that is still starting (a fresh data volume after a server upgrade, or plain
+   * compose start ordering — there is no api → meilisearch `depends_on`) does not make the one-shot
+   * self-heal give up before the engine is reachable.
+   */
+  async isHealthy(): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      return await this.client.isHealthy();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * The indexes that are **missing or empty** right now (issue #370 self-heal). Asks Meili once for
    * its per-index stats: an index absent from the stats map has never been created, and one with
    * `numberOfDocuments === 0` is empty — both need a (re)build. Returns `[]` in disabled mode or if the
