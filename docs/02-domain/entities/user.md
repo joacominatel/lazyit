@@ -110,6 +110,13 @@ the reverse.
 
 - **ID:** `uuid()` — sensitive / externally-exposed entity ([[0005-id-strategy]]).
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt`.
+- **Wire shape is an allowlist ([[SEC-085-user-credential-columns-serialized\|SEC-085]]):** a User leaves the API
+  only through `PUBLIC_USER_SELECT` (`apps/api/src/users/public-user.ts`) — the `UserSchema` columns plus
+  the resolved `manager` descriptor. Every `/users` response goes through `serializeUsers`, and a relation
+  that embeds a User uses `include: { user: { select: PUBLIC_USER_SELECT } }`, never `user: true`.
+  `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`, `mustChangePassword`,
+  `notificationEmailOptOutTypes`, the raw manager columns and the AD reconcile keys never reach a client.
+  A new column stays server-side until it is added to both `UserSchema` and the allowlist.
 
 ## Fields
 

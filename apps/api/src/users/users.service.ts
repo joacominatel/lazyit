@@ -29,6 +29,8 @@ import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { pickPublicUserColumns } from './public-user';
+import type { PublicUserColumns } from './public-user';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -65,15 +67,13 @@ export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
 type ManagerColumns = { managerId: string | null; managerName: string | null };
 
 /**
- * The PUBLIC user shape the service returns (ADR-0058): a Prisma `User` row with the raw manager FK
- * columns DROPPED and the resolved `manager` descriptor attached. Timestamps stay Prisma `Date`s here —
+ * The PUBLIC user shape the service returns (ADR-0058, SEC-085): ONLY the allowlisted
+ * {@link PublicUserColumns} (never a credential, epoch or raw manager column) plus the resolved
+ * `manager` descriptor. Timestamps stay Prisma `Date`s here —
  * the API serializes them to the ISO-string wire shape (UserSchema) at the HTTP boundary, exactly like
  * every other endpoint. The controller's `UserDto` / `CloneUserResultDto` document that wire shape.
  */
-export type SerializedUser = Omit<
-  User,
-  'managerId' | 'managerName' | 'locale' | 'theme'
-> & {
+export type SerializedUser = Omit<PublicUserColumns, 'locale' | 'theme'> & {
   manager: ManagerDescriptor | null;
   locale: UiLocale | null;
   theme: ThemePreference | null;
@@ -385,7 +385,9 @@ export class UsersService {
         : [];
     const byId = new Map(managers.map((m) => [m.id, m]));
     return rows.map((row) => ({
-      ...this.stripManagerColumns(row),
+      // ALLOWLIST, never a spread of the row (SEC-085): only the PUBLIC_USER_SELECT columns reach the
+      // wire, so passwordHash, the session/MCP epochs and every future column stay server-side.
+      ...pickPublicUserColumns(row),
       manager: this.toManagerDescriptor(row, byId),
       // Per-user UI preferences (issue #1422), read-tolerant: an unknown stored value reads as null.
       locale: toUiLocale(row.locale),
@@ -429,21 +431,6 @@ export class UsersService {
       return { type: 'external', name: row.managerName };
     }
     return null;
-  }
-
-  /**
-   * Drop the raw `managerId` / `managerName` columns from a row's wire shape — the descriptor replaces
-   * them, and exposing the raw FK would leak a manager id the client has no descriptor for.
-   */
-  private stripManagerColumns(
-    row: User,
-  ): Omit<User, 'managerId' | 'managerName'> {
-    // Drop the raw FK columns from a shallow copy — the resolved descriptor replaces them on the wire,
-    // and leaving `managerId` would leak a manager id the client has no descriptor for.
-    const copy: Partial<User> = { ...row };
-    delete copy.managerId;
-    delete copy.managerName;
-    return copy as Omit<User, 'managerId' | 'managerName'>;
   }
 
   // --- manager write resolution + self/cycle guard (ADR-0058) -------------

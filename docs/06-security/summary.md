@@ -126,6 +126,15 @@ Snapshot of the security review. Updated each sweep. Method:
    trigger (INV-AI-10) is pinned only by application-level tests, since the Jest suite runs without
    Postgres.
 
+14. **2026-09-26 — User serialization leak (born closed).**
+   [[SEC-085-user-credential-columns-serialized\|SEC-085]] (**High**): `serializeUsers` spread the whole
+   `User` row, and the asset owner include was `user: true`, so the argon2id `passwordHash`, `sessionEpoch`,
+   `mcpCredentialEpoch` and the other internal columns reached every `user:read` holder (`/users`,
+   `/users/:id`), every caller of `/users/me`, and every `asset:read` holder, VIEWER included
+   (`/assets/:id`, `/assets/:id/assignments`). Affects every release from v1.3.0 through v1.11.0 (current
+   `master`). **✅ Closed the same day**: the wire shape is built from the `PUBLIC_USER_SELECT` allowlist,
+   which is pinned to `UserSchema`. A client-level Prisma `omit` is an escalated follow-up.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -163,6 +172,10 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 ## Top findings
 
+0. **SEC-085 ✅ Closed.** Born closed (fixed 2026-09-26): User responses and embedded asset owners go
+   through the `PUBLIC_USER_SELECT` allowlist, so credential columns and epochs never leave the API. No
+   data change. Released instances (v1.3.0–v1.11.0) exposed hashes until they upgrade, so local-mode
+   operators should consider password resets.
 0. **SEC-080 / SEC-081 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315). The untrusted-source
    marker is now derived from the `<untrusted_content>` wrapping of any read or answered form, using
    the result's refs or a synthetic `toolResult` ref. A write proposed after reading other-authored text

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AssetsService } from './assets.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
@@ -96,7 +97,7 @@ const EXPECTED_INCLUDE = {
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
-    include: { user: true },
+    include: { user: { select: PUBLIC_USER_SELECT } },
   },
 };
 
@@ -689,6 +690,33 @@ describe('AssetsService', () => {
       where: { id: 'a1' },
       include: EXPECTED_INCLUDE,
     });
+  });
+
+  it('findOne reads each owner through the public column allowlist — never a credential (SEC-085)', async () => {
+    asset.findFirst.mockResolvedValue(rawRow());
+
+    await service.findOne('a1');
+
+    const args = (asset.findFirst.mock.calls as unknown[][])[0][0] as {
+      include: {
+        assignments: { include: { user: unknown } };
+      };
+    };
+    const userArg = args.include.assignments.include.user;
+    // A whole-row `user: true` carried passwordHash + the session/MCP epochs to every asset:read holder.
+    expect(userArg).not.toBe(true);
+    const select = (userArg as { select: Record<string, unknown> }).select;
+    for (const col of [
+      'passwordHash',
+      'passwordUpdatedAt',
+      'sessionEpoch',
+      'mcpCredentialEpoch',
+      'mustChangePassword',
+      'notificationEmailOptOutTypes',
+    ]) {
+      expect(select).not.toHaveProperty(col);
+    }
+    expect(select).toMatchObject({ id: true, firstName: true, email: true });
   });
 
   it('findOne maps assignments -> activeAssignments and inlines model/category/location', async () => {

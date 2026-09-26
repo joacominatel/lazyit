@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { AssetAssignmentsService } from './asset-assignments.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -312,8 +313,32 @@ describe('AssetAssignmentsService', () => {
     expect(assetAssignment.findMany).toHaveBeenCalledWith({
       where: { assetId: 'a1', releasedAt: null },
       orderBy: { assignedAt: 'desc' },
-      include: { user: true },
+      include: { user: { select: PUBLIC_USER_SELECT } },
     });
+  });
+
+  it('findAll never inlines a credential column of the owner (SEC-085)', async () => {
+    assetAssignment.findMany.mockResolvedValue([]);
+
+    await service.findAll({ assetId: 'a1', includeUser: true });
+
+    const args = (assetAssignment.findMany.mock.calls as unknown[][])[0][0] as {
+      include: { user: unknown };
+    };
+    // GET /assets/:id/assignments (asset:read — VIEWER included) served the whole owner row.
+    expect(args.include.user).not.toBe(true);
+    const select = (args.include.user as { select: Record<string, unknown> })
+      .select;
+    for (const col of [
+      'passwordHash',
+      'passwordUpdatedAt',
+      'sessionEpoch',
+      'mcpCredentialEpoch',
+      'mustChangePassword',
+      'notificationEmailOptOutTypes',
+    ]) {
+      expect(select).not.toHaveProperty(col);
+    }
   });
 
   // --- findOne ------------------------------------------------------------
