@@ -3,7 +3,7 @@ title: "ADR-0080: Programmatic secret retrieval via a service account (headless,
 tags: [adr, secrets, security, crypto, service-accounts, automation]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-18
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -260,11 +260,34 @@ No code changes ship with this amendment — `apps/web` gets one caution line on
 confirmation dialog (mirrors the Manual note below) so an operator revoking a principal is not misled
 into thinking it also pulls vault access.
 
+## Amendment — shared SA bearer verification; the AI never mints or fetches (ADR-0097, #1315, 2026-09-26)
+
+Two consequences of [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] for this record:
+
+1. **One SA authenticator.** Service-account bearer verification (parse `lzit_sa_<id>_<secret>` → look the
+   row up by id, soft-deleted included → constant-time compare → refuse revoked / inactive / expired →
+   resolve the direct grants → best-effort `lastUsedAt`) moved out of `JwtAuthGuard` into
+   `auth/service-account-authenticator.ts` (`ServiceAccountAuthenticator`), built on the shared
+   `PrincipalLoaderService`. `JwtAuthGuard` (REST, including `GET /secret-fetch/:vaultId`) and
+   `McpAuthGuard` (`/mcp`, R10) both call it, so the token that fetches ciphertext here is verified by
+   exactly the same code everywhere; every refusal is still the generic 401 (INV-SA-1). The AI's
+   delegated-identity branch re-loads an SA through the same loader.
+2. **SA credentials and secret retrieval stay outside the AI, structurally.** Service Account token
+   **create** and **rotate** answer the token (and so the key that unwraps this record's SA private key) in
+   cleartext, so they are excluded handlers on every channel; so are the `secret-manager`, `secret-vaults`
+   and `secret-fetch` route prefixes (`ai/core/exclusions.ts`, enforced at boot). An SA running headless
+   or over MCP can therefore never mint, rotate or reveal a token, and never reaches `secret:fetch`
+   through a tool: this record's ciphertext-only fetch path and the client-side unwrap in `lazyit-fetch`
+   are the only secret-retrieval path an SA has (INV-10, INV-AI-5, INV-AI-14).
+
+No schema change; no change to the fetch endpoint or the CLI.
+
 ---
 
 Related: [[0061-secret-manager-zero-knowledge]] · [[0048-service-accounts]] ·
 [[0075-typed-secrets-client-payload-kind-metadata]] · [[0046-roles-permissions-v2]] ·
-[[secret-vault]] · [[vault-membership]] · [[user-keypair]] · [[INVARIANTS]] (INV-10) · [[_MOC]]
+[[secret-vault]] · [[vault-membership]] · [[user-keypair]] · [[INVARIANTS]] (INV-10) · [[_MOC]] ·
+[[0097-ai-assistant-mcp-and-headless-api]]
 
 Version handshake — `lazyit-fetch` is build-stamped and best-effort warns (stderr) when it is a MAJOR
 behind the server (`GET /instance/version`); warn-only, no INV-10 impact: see

@@ -8,207 +8,226 @@ subcategory: setup
 # Asistente de IA — configuración
 
 Todo lo relacionado con IA se configura en **Configuración → IA**, que requiere el permiso **Configurar
-la instancia**. La página tiene cinco partes: el proveedor del asistente (un asistente de configuración
-mientras está desactivado, un editor una vez activo), **Comportamiento y límites**, **Búsqueda web**,
-**Agentes de IA externos (MCP)** y — una vez activo — **Desactivar el asistente de IA**.
+la instancia**. La página tiene cinco tarjetas:
 
-La página se limita a etiquetas y controles. Junto a una opción, el **?** abre su explicación: pasa el
-mouse por encima, o haz clic, tócalo o pulsa Enter para dejarla abierta (Escape la cierra). La mayoría de
-las ayudas terminan con **Más información en el Manual**, que abre la sección correspondiente de esta
-página en una pestaña nueva; **Guía de configuración**, arriba en la página, también abre esta página.
+1. **El proveedor** — un asistente de configuración mientras el asistente está desactivado, y el editor
+   **Proveedor y modelo** una vez activo.
+2. **Comportamiento y límites** — retención, presupuestos e instrucciones del asistente.
+3. **Búsqueda web** — desactivada por defecto.
+4. **Agentes de IA externos (MCP)** — su propio interruptor, el endpoint y los clientes permitidos.
+5. **Desactivar el asistente de IA** — visible mientras está activo.
+
+Al lado de cada ajuste, el **?** lo explica (pasá el mouse por encima, o hacé clic, tocá o apretá Enter
+para dejarlo abierto; Escape lo cierra). La mayoría de las ayudas terminan con **Más información en el
+Manual**, que abre la sección correspondiente de esta página; **Guía de configuración**, arriba en
+Configuración → IA, también abre esta página.
+
+Antes de activar nada, leé [Qué sale de tu servidor](/help/ai-assistant-overview#qué-sale-de-tu-servidor).
 
 ## Antes de empezar: `AI_SECRET_KEY`
 
-Las claves de API de los proveedores se guardan cifradas con una clave propia, la variable de entorno
-`AI_SECRET_KEY` del servicio de la API. Genera una con `openssl rand -hex 32`, defínela y reinicia la API.
-Hasta que esté definida, Configuración → IA lo avisa arriba, no se puede guardar ninguna clave de API y solo
-se puede usar un servidor compatible con OpenAI sin clave. MCP no la necesita.
+Las claves de API de los proveedores se guardan cifradas con una clave propia: la variable de entorno
+`AI_SECRET_KEY` del servicio de la API. Una instalación nueva y `start.sh --reconfigure` la escriben por
+vos. Para agregarla a mano, generala con `openssl rand -hex 32`, configurala, reiniciá la API y
+respaldala junto con el resto de tu archivo de entorno.
+
+Mientras no esté, Configuración → IA lo avisa arriba de todo, no se puede guardar ninguna clave de API
+y solo se puede usar un servidor compatible con OpenAI que no pida clave. MCP no la necesita. Perderla
+solo implica volver a escribir la clave del proveedor.
 
 ## El asistente de configuración
 
-Mientras el asistente está desactivado, Configuración → IA te guía en cinco pasos. Cada paso guarda lo que
-ingresaste (todavía desactivado), así que puedes dejarlo y volver — se reabre donde lo dejaste.
+Mientras el asistente está desactivado, Configuración → IA te guía en cinco pasos. Cada paso guarda lo
+que ingresaste (todavía desactivado), así que podés parar y volver — el asistente retoma donde lo
+dejaste.
 
 1. **Proveedor** — Anthropic, OpenAI, Google Gemini o **compatible con OpenAI**: cualquier servidor que
-   hable la API de OpenAI, como un modelo que alojas en tu red o un gateway.
+   hable la API de OpenAI, como un modelo propio o un gateway.
 2. **Credenciales** — la clave de API del proveedor. Se guarda cifrada y **no se vuelve a mostrar**, ni
-   siquiera a los administradores; para cambiarla escribes una nueva. Para un servidor compatible con
-   OpenAI también indicas su **URL base** (normalmente terminada en `/v1`); consulta
-   [Servidores en red privada](#servidores-en-red-privada).
-3. **Modelo** — elige una sugerencia o escribe cualquier id de modelo que acepte tu proveedor (la prueba
-   del paso siguiente lo verifica) y, si quieres, el **esfuerzo de razonamiento** — más esfuerzo responde
-   mejor los pedidos difíciles, pero es más lento y usa más tokens. Para un servidor compatible con
-   OpenAI también puedes definir una **temperatura** entre 0 y 2; déjala en blanco para usar la del
-   servidor.
-4. **Prueba** — lazyit comprueba que el proveedor acepta la clave, conoce el modelo y que el modelo puede
-   **llamar herramientas**. El asistente no funciona sin llamadas a herramientas, así que no puedes
-   continuar hasta que la prueba pase. Si falla, la página explica por qué (una clave rechazada, un modelo
-   desconocido, un host inalcanzable…).
-5. **Activar** — revisa qué sale de tu servidor (el paso lo resume; **Qué se envía exactamente** abre
-   [Asistente de IA — visión general](/help/ai-assistant-overview#qué-sale-de-tu-servidor)), confirma que
-   puedes enviarlo al proveedor y pulsa **Activar el asistente de IA**. La página se recarga y las personas
-   con el permiso **Usar el asistente de IA** ven el asistente en la barra superior — el resto en menos de
-   un minuto o al recargar.
+   siquiera a los administradores. Para un servidor compatible con OpenAI también indicás su **URL
+   base** (suele terminar en `/v1`); mirá [Servidores en red privada](#servidores-en-red-privada).
+3. **Modelo** — elegí una sugerencia o escribí cualquier id de modelo que acepte tu proveedor, y
+   opcionalmente el **esfuerzo de razonamiento** (más esfuerzo responde mejor pedidos difíciles, pero es
+   más lento y usa más tokens). Para un servidor compatible con OpenAI también podés fijar una
+   **temperatura** entre 0 y 2.
+4. **Prueba** — lazyit comprueba que el proveedor acepte la clave, conozca el modelo y que el modelo
+   pueda **llamar herramientas**. Sin eso el asistente no funciona, así que no podés seguir hasta que la
+   prueba pase. Si falla, dice por qué; mirá
+   [Resolución de problemas](/help/ai-assistant-troubleshooting#la-prueba-de-conexión-falla).
+5. **Activar** — revisá qué sale de tu servidor, confirmá que podés enviárselo al proveedor y elegí
+   **Activar el asistente de IA**. La página se recarga; quienes tienen **Usar el asistente de IA** ven
+   el chat en la barra superior en menos de un minuto, o al recargar.
 
-lazyit vuelve a comprobar todo al activarlo: si en ese momento la prueba de conexión falla, no cambia nada
-y la página muestra el resultado de la prueba.
+lazyit vuelve a probar la conexión en el momento de activarlo: si falla ahí, no cambia nada.
 
 ## Cambiar el proveedor, el modelo o la clave
 
-Con el asistente activo, **Proveedor y modelo** reemplaza al asistente de configuración. Puedes cambiar de
-proveedor, cambiar el modelo o las opciones, o escribir una clave nueva para reemplazar la guardada;
-**Probar esta configuración** prueba tus cambios antes de guardarlos. Cualquier cambio en la conexión se
-vuelve a probar al guardar — si la prueba falla, no se guarda nada y el asistente sigue funcionando con la
-configuración anterior.
+Con el asistente activo, **Proveedor y modelo** reemplaza al asistente de configuración. Cambiá de
+proveedor, de modelo o de ajustes extra, o escribí una clave nueva para reemplazar la guardada; **Probar
+esta configuración** prueba tus cambios antes. Todo cambio de conexión se vuelve a probar al guardar —
+si la prueba falla, no se guarda nada y el asistente sigue funcionando con la configuración anterior.
 
-Cambiar el **proveedor** o la **URL base** descarta la clave guardada (una clave pertenece a un único
-destino), así que escribe la clave del nuevo destino en el mismo guardado.
+- Cambiar el **proveedor** o la **URL base** descarta la clave guardada (una clave pertenece a un único
+  destino), así que escribí la clave del destino nuevo en el mismo guardado.
+- Cambiar el **proveedor** deja de solo lectura todos los chats existentes. Cambiar el **modelo por
+  defecto** deja de solo lectura solo los chats que usaban el modelo por defecto; los chats donde la
+  persona eligió un modelo siguen funcionando. Para seguir, se empieza un chat nuevo.
 
 ## Servidores en red privada
 
-Para un modelo propio, elige **compatible con OpenAI** e indica su dirección en tu red. Activa **Servidor en
-una red privada** para permitir una dirección privada (10.x, 172.16–31.x, 192.168.x, o un nombre interno que
-resuelva a una); solo así se acepta una dirección `http://` sin cifrar. Algunas direcciones se rechazan
-siempre: `localhost` y otras de loopback (apuntarían al propio contenedor de la API), las link-local y las
-de metadatos de la nube. La URL base no puede contener usuario, contraseña, query string ni fragmento — la
-clave va en el campo de clave de API.
+Para un modelo propio, elegí **compatible con OpenAI** e indicá su dirección en tu red. Activá
+**Servidor en una red privada** para permitir una dirección privada (10.x, 172.16–31.x, 192.168.x, o un
+nombre interno que resuelva a una); solo así se acepta una dirección `http://` plana — y en ese caso la
+clave y los prompts cruzan tu red sin cifrar.
+
+Siempre se rechazan: `localhost` y demás direcciones de loopback (desde el contenedor de la API apuntan
+al propio contenedor), las direcciones link-local y las de metadatos de la nube. Para un modelo en el
+mismo host de Docker, mirá la nota sobre `host.docker.internal` en el runbook de despliegue. La URL base
+no puede llevar usuario, contraseña, query string ni fragmento — la clave va en el campo de la clave de
+API.
 
 ## Comportamiento y límites
 
-Se aplican a todas las conversaciones y se pueden cambiar en cualquier momento, con el asistente activo o
-no. Un cambio se aplica a los pedidos nuevos:
+Se aplican a todas las conversaciones, con el asistente activo o no, y rigen desde el siguiente pedido.
 
-| Opción | Por defecto | Qué hace |
+| Ajuste | Por defecto | Qué hace |
 | --- | --- | --- |
-| Guardar las conversaciones durante | 90 días | Las conversaciones más antiguas se borran automáticamente (7–3650 días). El registro de acciones ejecutadas se conserva. |
-| Las tarjetas de aprobación vencen a los | 30 minutos | Un cambio propuesto que nadie aprueba a tiempo ya no se puede aprobar. |
-| Presupuesto diario de tokens por persona | 2.000.000 | El máximo de tokens que una persona o cuenta de servicio puede usar en cualquier período de 24 horas. Desactívalo para no tener presupuesto. |
-| Largo máximo de respuesta, pasos máximos, tamaño de conversación | — | Límites para una respuesta, para cuántas herramientas puede encadenar un pedido y para cuánto puede crecer una conversación — al superar el tamaño, la persona empieza un chat nuevo. |
-| Instrucciones para el asistente | — | Tus propias indicaciones, agregadas a las de lazyit en cada conversación (convenciones de la casa, idioma preferido). No pueden ampliar lo que el asistente puede hacer. El contador bajo el cuadro muestra cuántos caracteres quedan. |
+| Guardar las conversaciones durante | 90 días | Las más viejas se borran automáticamente (7–3650 días). El registro de acciones de IA se conserva igual. |
+| Las tarjetas de aprobación vencen a los | 30 minutos | Un cambio propuesto — o un formulario de preguntas — que nadie responde a tiempo ya no se puede aprobar. |
+| Presupuesto diario de tokens por persona | 2.000.000 | Lo máximo que una persona o cuenta de servicio puede usar en 24 horas. Desactivalo para no tener presupuesto. |
+| Largo máximo de respuesta | — | La respuesta individual más larga. |
+| Pasos máximos por pedido | — | Cuántas llamadas a herramientas puede encadenar un pedido. |
+| Tamaño máximo de conversación | — | Pasado ese tamaño, el chat queda de solo lectura y la persona empieza uno nuevo. |
+| Instrucciones para el asistente | — | Tu propia guía, sumada a la de lazyit en cada conversación (convenciones de la casa, idioma preferido). No puede ampliar lo que el asistente puede hacer, y se envía al proveedor. |
 
 ## Búsqueda web
 
-**Permitir que el asistente busque en la web** deja que el chat busque en internet cuando los registros y la
-base de conocimiento de lazyit no tienen lo que necesita — por ejemplo, la documentación de un producto de
-terceros para el que alguien le pide configurar un workflow. Viene **desactivada**.
+**Permitir que el asistente busque en la web** deja que el chat busque en internet cuando los registros
+y la base de conocimiento de lazyit no tienen la respuesta — por ejemplo, la documentación de un
+producto de terceros para el que alguien le pide armar un workflow. Viene **desactivada**.
 
-- **Dónde se hace la búsqueda.** La hace el proveedor de IA en sus propios servidores; lazyit no hace ninguna
-  solicitud propia. Las consultas y el contexto de la conversación van al proveedor, que puede pasar las
-  consultas a su motor de búsqueda o a un socio de búsqueda, y puede facturar las búsquedas aparte. Revisá
-  tu contrato con el proveedor antes de activarla.
-- **Qué proveedores.** Anthropic, OpenAI y Google Gemini 3 o posterior. El proveedor compatible con OpenAI y
-  los modelos Gemini anteriores no tienen una búsqueda web que el asistente pueda usar junto con las
-  herramientas de lazyit; en ese caso el interruptor aparece deshabilitado y la tarjeta explica por qué.
-- **Solo el chat.** Las ejecuciones headless (cuentas de servicio) nunca buscan en la web, porque sus
-  cambios se aplican sin que nadie los apruebe.
-- **Los resultados se tratan como no confiables.** Las páginas web las escribe cualquiera. El asistente las
-  toma como información, nunca como instrucciones, y muestra debajo de su respuesta las páginas que usó.
-  **Una vez que buscó en la web en una conversación, nada en esa conversación se aprueba automáticamente**:
-  cada cambio que proponga ahí muestra su tarjeta de aprobación, aunque la persona haya activado la
-  aprobación automática — los resultados quedan en la conversación.
-- **OpenAI.** lazyit usa la búsqueda de OpenAI sobre su copia en caché e indexada de la web, no sobre
-  páginas en vivo, así que pueden faltar páginas muy recientes. La búsqueda de OpenAI también puede abrir
-  páginas; eso no se puede desactivar, pero nunca descarga una página en vivo desde su sitio.
-- **Conversaciones nuevas.** El interruptor se aplica a los chats que empiecen después del cambio. Al
-  desactivarla, los chats que la tenían pasan a ser de solo lectura; para seguir, se empieza un chat nuevo.
-- **Búsquedas por paso** (5 por defecto, de 1 a 20) es la cantidad máxima de búsquedas que el asistente puede
-  hacer en un paso, donde el proveedor admite un límite (Anthropic).
-- **Deshabilitada en el proveedor.** Tu cuenta del proveedor puede desactivar la búsqueda web de su lado
-  (Anthropic: la configuración de privacidad de la organización en la Claude Console; OpenAI: los permisos
-  de herramientas de la organización o del proyecto). Si está desactivada allá mientras el interruptor de
-  acá está activado, el proveedor rechaza el pedido y el chat dice *"El proveedor de IA rechazó la búsqueda
-  web porque está deshabilitada para esta cuenta."* Habilitá la búsqueda web en el proveedor, o desactivá
-  acá **Permitir que el asistente busque en la web** y empezá un chat nuevo.
+- **Qué sale.** La búsqueda la hace el proveedor; las consultas y el contexto de la conversación van a
+  él, y quizá a un socio de búsqueda. Las búsquedas se pueden cobrar aparte. Revisá antes tu contrato con
+  el proveedor. Mirá [Qué sale de tu servidor](/help/ai-assistant-overview#hacia-socios-de-búsqueda-búsqueda-web-desactivada-por-defecto).
+- **Qué proveedores.** Anthropic, OpenAI y Google Gemini 3 o posterior. El proveedor compatible con OpenAI
+  y los modelos Gemini anteriores no tienen una búsqueda que funcione junto con las herramientas de
+  lazyit; en ese caso el interruptor queda deshabilitado y la tarjeta explica por qué.
+- **Solo el chat.** Las ejecuciones headless nunca buscan, porque sus cambios se aplican sin que nadie
+  los apruebe. Los clientes MCP buscan con sus propias herramientas, si las tienen.
+- **Los resultados no son confiables.** Una vez que el asistente buscó en la web en una conversación,
+  **ya no se aprueba automáticamente nada en esa conversación** — cada cambio muestra su tarjeta, aunque
+  la aprobación automática esté activa.
+- **OpenAI** busca en su copia en caché e indexada de la web, no en páginas en vivo, así que puede faltar
+  lo muy reciente. Su búsqueda también puede "abrir" una página; eso no se puede desactivar, pero la
+  página sale de la caché, no de su sitio.
+- **Búsquedas por paso** (5 por defecto, entre 1 y 20) limita las búsquedas en un paso del modelo, donde
+  el proveedor soporta un límite (Anthropic).
+- **Rige para conversaciones nuevas.** Al desactivarla, los chats que la tenían quedan de solo lectura.
+
+Tu cuenta en el proveedor también puede tener la búsqueda web deshabilitada de su lado (Anthropic: la
+configuración de privacidad de la organización en la Claude Console; OpenAI: los permisos de
+herramientas de la organización o del proyecto). Si está deshabilitada ahí mientras este interruptor
+está activo, fallan los chats que tienen búsqueda web — mirá
+[Resolución de problemas](/help/ai-assistant-troubleshooting#la-búsqueda-web-está-deshabilitada-en-el-proveedor).
 
 ## Agentes de IA externos (MCP)
 
-**Permitir agentes de IA externos** deja que clientes MCP como Claude Code se conecten a lazyit, actuando
-como la persona que los conecta y con sus permisos (también necesitan el permiso **Conectar agentes de IA
-externos (MCP)**). Este interruptor es independiente del asistente: funciona sin ningún proveedor
-configurado. Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a valer al
+**Permitir agentes de IA externos** deja que clientes MCP como Claude Code se conecten a lazyit como la
+persona que los conecta (que además necesita **Conectar agentes de IA externos (MCP)**). Es
+independiente del asistente: funciona sin proveedor configurado y no necesita `AI_SECRET_KEY`.
+Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a funcionar al
 reactivarlo.
 
-La tarjeta muestra el **endpoint MCP** — la dirección que se le da a un cliente MCP configurado a mano: la
-dirección pública de `WEB_ORIGIN` en la API seguida de `/mcp`. Si no hay una dirección fijada, muestra la
-de la página en la que estás y lo indica; los clientes en otras máquinas pueden necesitar entonces la
-dirección de la instancia en tu red. La tarjeta también dice, en una línea, cómo
-inician sesión los clientes en **esta** instancia. Eso depende de la opción `WEB_ORIGIN` de la API — la
-dirección pública a la que está fijado lazyit —, no solo de si la página se muestra por HTTPS:
+La tarjeta muestra:
 
-- **`WEB_ORIGIN` es una dirección `https://`: OAuth.** El cliente abre una página de lazyit en el navegador donde la persona revisa el
-  acceso y lo aprueba — sin nada que copiar a mano, y cada conexión se puede revocar en **Cuenta → IA y
-  aplicaciones conectadas**. Si tu certificado lo emite una **autoridad de certificación interna**, Claude Code y
-  otros clientes Node.js deben iniciarse con ella, por ejemplo
-  `export NODE_EXTRA_CA_CERTS=/ruta/a/ca-interna.pem`.
-- **Sin un `WEB_ORIGIN` `https://` (por ejemplo, el modo `lan` por HTTP sin cifrar): tokens personales.**
-  El inicio de sesión con OAuth requiere HTTPS y una dirección pública fija — si no, los códigos y tokens
-  podrían viajar sin cifrar o a otro host —, así que no está disponible. Cada persona crea en su lugar un
-  token MCP personal y se lo da a su cliente. Poner un proxy TLS delante de lazyit **no** alcanza por sí
-  solo: define `WEB_ORIGIN` con la dirección `https://` que usan las personas y reinicia la API para pasar
-  a OAuth.
-- **Los conectores en la nube** — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan desde
-  los servidores del proveedor, no desde la computadora de la persona, así que solo funcionan si tu
-  instancia es alcanzable desde internet por HTTPS con un certificado de confianza pública.
+- **El endpoint MCP** — la dirección para un cliente que se configura a mano: el `WEB_ORIGIN` de la API
+  seguido de `/mcp`. Si no hay `WEB_ORIGIN` fijado, la tarjeta muestra la dirección de esta página y lo
+  aclara; los clientes en otras máquinas quizá necesiten la dirección de la instancia en tu red.
+- **Cómo inician sesión los clientes en esta instancia**, según el `WEB_ORIGIN` — no según si esta
+  página se ve por HTTPS:
 
-Con MCP activado, la tarjeta también muestra los pasos de **Instalar en Claude Code** (los mismos que en
-**Cuenta → IA y aplicaciones conectadas**). Las aplicaciones conectadas y los tokens personales de cada
-persona están en esa página de la cuenta.
+  | `WEB_ORIGIN` | Los clientes inician sesión con |
+  | --- | --- |
+  | una dirección `https://` | **OAuth** — el cliente abre una página de consentimiento de lazyit en el navegador; no hay nada que copiar. |
+  | cualquier otra cosa (por ejemplo el modo `lan` por HTTP plano) | **Tokens personales** que cada persona crea en **Cuenta → IA y apps conectadas**. |
+
+  Poner un proxy TLS delante de lazyit **no** alcanza por sí solo: configurá `WEB_ORIGIN` con la
+  dirección `https://` que usa la gente y reiniciá la API para pasar a OAuth. Si tu certificado viene de
+  una **autoridad certificante interna**, los clientes Node.js como Claude Code tienen que arrancar con
+  ella (`NODE_EXTRA_CA_CERTS`).
+- **Los pasos de Instalar en Claude Code** — los mismos que en **Cuenta → IA y apps conectadas**.
+
+**Los conectores en la nube** — claude.ai, los conectores de Claude Desktop y ChatGPT — se conectan
+desde los servidores del proveedor, así que solo funcionan si la instancia es accesible desde internet
+por HTTPS con un certificado de confianza pública. Los clientes de escritorio y de línea de comandos solo
+necesitan llegar a lazyit desde la computadora de la persona. Los pasos del lado de cada persona están en
+[Claude Code y MCP](/help/ai-assistant-claude-code-mcp).
 
 ### Clientes permitidos
 
-Qué clientes pueden conectarse lo deciden dos cosas, ambas en la tarjeta de MCP:
+Dos cosas de la tarjeta MCP deciden qué clientes pueden conectarse:
 
 - **Aceptar cualquier cliente con callback https:// — activado por defecto.** Cualquier cliente MCP cuyo
-  callback de inicio de sesión sea una dirección `https://` puede *pedirle* acceso a una persona, aunque no
-  esté en la lista. Esto por sí solo no otorga nada: la persona igual ve la página de consentimiento, que
-  muestra el host del callback del cliente y avisa cuando un cliente no estaba en la lista. Nunca admite un
-  callback de loopback (`http://127.0.0.1/…`) ni de esquema de aplicación como `cursor://…` — esos
-  necesitan una entrada. **Desactívalo para aceptar solo los clientes de la lista.**
-- **La lista.** lazyit trae una lista de **clientes incluidos** — Claude Code, OpenAI Codex, OpenCode,
-  Gemini CLI, Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop y ChatGPT —, cada uno con su
-  identificador y cómo se comprobó (**Verificado** desde el código o la documentación del propio cliente, o
-  **Docs del proveedor**). **Quita** un cliente incluido para que deje de conectarse (mientras “cualquier
-  cliente https://” esté activado, un cliente quitado con callback `https://` todavía puede pedir
-  consentimiento), y **Restáuralo** cuando quieras. Pi, Windsurf y Zed no vienen incluidos porque sus
-  identificadores no se pudieron verificar — agrégalos tú si tu equipo los usa. Si quitaste un cliente
-  incluido que una versión posterior de lazyit ya no trae, aparece en **Clientes quitados que ya no están
-  en la lista incluida**; restaurarlo solo borra tu eliminación.
+  callback de inicio de sesión sea una dirección `https://` puede *pedirle* acceso a una persona, aunque
+  no esté en la lista. Eso solo no otorga nada: la persona igual ve la página de consentimiento, que
+  muestra el host del callback y advierte si el cliente no está verificado. Nunca admite un callback de
+  loopback (`http://127.0.0.1/…`) ni uno con esquema de app como `cursor://…` — esos necesitan una
+  entrada en la lista. **Desactivalo para aceptar solo los clientes de la lista.**
+- **La lista.** lazyit trae **clientes incluidos** — Claude Code, OpenAI Codex, OpenCode, Gemini CLI,
+  Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop y ChatGPT — cada uno con su identificador
+  y cómo se comprobó (**Verificado** desde el propio código o documentación del cliente, o **Docs del
+  proveedor**). **Quitá** un cliente incluido para que deje de conectarse, y **Restauralo** cuando
+  quieras. Pi, Windsurf y Zed no vienen incluidos porque sus identificadores no se pudieron verificar —
+  agregalos vos. Un cliente incluido que quitaste y que una versión posterior de lazyit ya no trae
+  aparece en **Clientes quitados que ya no están en la lista incluida**; restaurarlo solo borra tu
+  exclusión.
 
-Para permitir otro cliente, usa **Agregar un cliente** con uno de estos datos:
+**Agregar un cliente** por una de estas vías:
 
-- su **URL de metadatos de cliente** — la URL `https://` que el cliente usa como id de cliente; o
-- su **dirección de callback** — la dirección exacta a la que devuelve a la persona después de iniciar
-  sesión: `https://…`, una dirección de loopback como `http://127.0.0.1/callback` (vale cualquier puerto),
-  o un esquema de aplicación como `com.example.app:/callback` o `cursor://…`.
+- su **URL de metadatos del cliente** — la URL `https://` que el cliente usa como id de cliente; o
+- su **dirección de callback** — la dirección exacta a la que devuelve a las personas después de
+  iniciar sesión: `https://…`, una dirección de loopback como `http://127.0.0.1/callback` (coincide
+  cualquier puerto) o un esquema de app como `com.example.app:/callback` o `cursor://…`.
 
-Un cliente solo se reconoce de esta forma — nunca por el nombre que se da a sí mismo. `http://` sin cifrar
-solo se acepta en una dirección de loopback, una dirección con usuario (`…@…`) se rechaza siempre, y los
-esquemas de aplicación solo se aceptan como entrada explícita.
+Un cliente se reconoce solo así — nunca por el nombre que se da a sí mismo. `http://` plano se acepta
+solo en loopback, una dirección con usuario (`…@…`) se rechaza siempre, y los esquemas de app solo se
+aceptan como entradas explícitas. Podés agregar hasta 100 clientes.
+
+En la página de consentimiento, un cliente aparece como **Verificada** solo cuando se identifica con una
+URL de metadatos **y** esa URL está en esta lista — mirá
+[La pantalla de consentimiento](/help/ai-assistant-claude-code-mcp#la-pantalla-de-consentimiento).
 
 ## Cuentas de servicio
 
-Las cuentas de servicio usan el asistente sin interfaz — por la API o por MCP — y sus cambios no se aprueban
-uno por uno. En **Configuración → Cuentas de servicio**, abre el menú de la fila de una cuenta y elige
-**Acceso a IA**:
+Las cuentas de servicio usan la IA sin personas — por la API (`POST /api/ai/runs`) o por MCP — y nadie
+aprueba sus cambios uno por uno. En **Configuración → Cuentas de servicio**, abrí el menú de la fila de
+una cuenta y elegí **Acceso a IA**:
 
-- **Desactivado** — ningún uso de IA para esta cuenta.
+- **Desactivado** — ningún uso de IA: se rechazan las ejecuciones headless y MCP.
 - **Solo lectura** — el asistente solo puede leer.
-- **Lectura y escritura** — el asistente también puede hacer cambios dentro de los permisos de la cuenta.
-  Es el valor por defecto de una cuenta nunca configurada.
-- **Limitar escrituras** (solo con lectura y escritura) — limita los cambios por ejecución sin interfaz y,
-  como MCP no tiene ejecuciones, por hora móvil en MCP. Cuenta cada registro que cambia: un lote que
-  actualiza 20 activos son 20 cambios, y un lote más grande que lo que queda del límite se rechaza entero,
-  sin cambiar nada.
+- **Lectura y escritura** — también puede hacer cambios dentro de los permisos de la cuenta. Es el valor
+  por defecto de una cuenta que nunca se configuró.
+- **Limitar escrituras** (solo con lectura y escritura) — pone un tope a los cambios por ejecución
+  headless y, como MCP no tiene ejecuciones, por hora móvil en MCP. **Cuenta cada registro**: un lote
+  que actualiza 20 activos son 20 cambios (las filas omitidas no cuentan), y un lote más grande que lo
+  que queda bajo el tope se rechaza entero, sin cambiar nada.
 
-El acceso a IA solo restringe lo que permiten los permisos de la cuenta; nunca otorga uno. La cuenta además
-necesita **Usar el asistente de IA** para las ejecuciones sin interfaz y **Conectar agentes de IA externos
-(MCP)** para MCP. Una cuenta con **Reportar inventario de servidores (agente)** — la credencial de reporte de
-los agentes — tiene rechazado el uso de IA elijas lo que elijas; crea una cuenta aparte para IA.
+El acceso a IA solo acota lo que ya permiten los permisos de la cuenta; nunca otorga uno. La cuenta
+además necesita **Usar el asistente de IA** para ejecuciones headless y **Conectar agentes de IA
+externos (MCP)** para MCP. A una cuenta que tiene **Reportar inventario de servidores (agente)** — la
+credencial de reporte de los agentes — se le niega el uso de IA elijas lo que elijas; creá una cuenta
+aparte para la IA. Mirá también [Cuentas de servicio](/help/users-permissions-service-accounts).
 
 ## Desactivarlo
 
-**Desactivar el asistente** (al final de la página) lo oculta para todos y rechaza los pedidos nuevos. Las
-conversaciones se conservan y se siguen borrando al vencer su retención; los cambios que esperan aprobación
-no se pueden aprobar mientras esté desactivado. El proveedor, el modelo y la clave cifrada se conservan, así
-que reactivarlo es un solo paso. Los agentes de IA externos no se ven afectados — tienen su propio
-interruptor.
+**Desactivar el asistente** (abajo de todo en la página) lo oculta para todos y rechaza pedidos nuevos
+al instante. Las conversaciones se conservan y se siguen borrando al vencer su retención; los cambios
+que esperan aprobación no se pueden aprobar mientras esté desactivado. El proveedor, el modelo y la
+clave cifrada se conservan, así que reactivarlo es un solo paso. Los agentes de IA externos no se ven
+afectados — tienen su propio interruptor.
+
+## Después de actualizar lazyit
+
+Una actualización que cambia las herramientas o las instrucciones del asistente deja **de solo lectura**
+los chats iniciados antes; para seguir, se empieza un chat nuevo. No hace falta nada más — la
+configuración, las claves, las apps conectadas y los tokens personales se mantienen.

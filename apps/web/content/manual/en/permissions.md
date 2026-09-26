@@ -59,6 +59,8 @@ limits.
 | **Activity history / reports** | Yes | No | No |
 | **Notifications** (the in-app bell) | Yes | No | No |
 | **Secret Manager** (see and manage vaults) | Yes | No | No |
+| **Use the AI assistant** (`ai:use`) | Yes | Yes | No |
+| **Connect external AI agents (MCP)** (`ai:connect`) | Yes | Yes | No |
 
 A few notes on the defaults:
 
@@ -68,6 +70,9 @@ A few notes on the defaults:
   notification bell, and the Secret Manager. These are the most sensitive surfaces, so they start
   locked to administrators. An administrator can still grant them to Member or Viewer if they choose.
 - **Deleting** records and **granting application access** are administrator-only by default.
+- **The two AI permissions add a channel, not a power.** The assistant and external agents act with the
+  person's own permissions, and nothing happens until an administrator turns AI or MCP on in
+  **Settings → AI**. See [AI assistant — overview](/help/ai-assistant-overview#who-can-use-it).
 
 ## Tuning Member and Viewer
 

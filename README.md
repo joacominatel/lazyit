@@ -181,7 +181,7 @@ Full runbook: [`docs/05-runbooks/deploy-self-hosted.md`](docs/05-runbooks/deploy
 ### Run it for development
 
 The fast, native loop: backing services in Docker, the apps on your machine via
-[Bun](https://bun.sh). You'll need **Bun `1.3.x`** (the repo pins `1.3.14`), **Docker**, and
+[Bun](https://bun.sh). You'll need **Bun `1.4.x`** (the repo pins `1.4.2`), **Docker**, and
 **Node** on your PATH.
 
 ```sh

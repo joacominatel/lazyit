@@ -631,6 +631,13 @@ When designing a plan or considering an escalation, the CTO scans this file for:
 
 ---
 
+**ADR-0097** — *AI assistant, MCP server and headless API*
+**Status**: accepted (design 2026-09-23, CEO review of PR #1317; as built 2026-09-26, epic #1315)
+**One-liner**: an opt-in, off-by-default AI capability over three channels sharing one tool catalog — the navbar chat (lazyit's own BullMQ agent loop against Anthropic / OpenAI / Gemini / OpenAI-compatible, AI SDK 7 behind `ChatModelPort`), MCP for external agents (lazyit's own OAuth 2.1 AS on HTTPS, personal tokens on `lan`, SA tokens with `ai:connect`), and headless runs for Service Accounts. The AI always acts AS the invoking principal; tools execute in-process through Nest's own pipeline (delegated identity re-loaded DB-first). Chat writes need an owner approval on a server-built preview; one permanent append-only `AiActionLog`.
+**CTO note**: amends ADR-0046 (`ai` domain), ADR-0048 (SA as AI principal) and ADR-0080 (shared SA authenticator). INV-AI-1…17 binding in `INVARIANTS.md`. Many dated amendments (workflow engine + `CRITICAL_APPLICATION`, input forms, provider web search, batches of 5, auto-approve, per-conversation model, localized sentences, MCP credentials decoupled from web logout via `mcpCredentialEpoch`, any-HTTPS clients by default, CIMD "verified" only when allowlisted). Headless never authors workflows (permanent). Deferrals in #1344.
+
+---
+
 ## Decisions made outside ADRs
 
 | Date | Decision | Context | Implication |

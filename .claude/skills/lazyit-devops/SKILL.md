@@ -68,8 +68,8 @@ Kubernetes/Nomad. If a simple solution suffices, use it.
 | **Postgres** | `postgres:18-alpine` | Same as dev. Named volume; **never** publish its port in prod (internal network only). |
 | **API** runtime | `node:26-alpine` | NestJS 11 runs on **Node** (`node dist/main`), not Bun — [[0009-bun-first-vs-app-stack]]. |
 | **Web** runtime | `node:26-alpine` | Next.js 16 standalone server (`node server.js`). |
-| **Build** stage | `oven/bun:1.3.14` (Debian) | Bun is the build/tooling default; builds `shared` + the app, runs `prisma generate` / `next build` / `nest build`. |
-| **Migrate+seed** | `oven/bun:1.3.14` (Debian) | One-shot job: `prisma migrate deploy && prisma db seed`. **Seed needs Bun** (`bun prisma/seed.ts`). Debian (glibc) avoids the Prisma schema-engine musl pitfall. |
+| **Build** stage | `oven/bun:1.4.2` (Debian) | Bun is the build/tooling default; builds `shared` + the app, runs `prisma generate` / `next build` / `nest build`. |
+| **Migrate+seed** | `oven/bun:1.4.2` (Debian) | One-shot job: `prisma migrate deploy && prisma db seed`. **Seed needs Bun** (`bun prisma/seed.ts`). Debian (glibc) avoids the Prisma schema-engine musl pitfall. |
 | **Reverse proxy** | `caddy:2-alpine` | Auto-HTTPS: internal CA for local, Let's Encrypt for a real domain. |
 
 Key facts that shape the images (verified against the repo):
@@ -121,7 +121,7 @@ Key facts that shape the images (verified against the repo):
 ## 5. CI/CD strategy
 
 CI runs on every **push to** and **PR targeting `master`/`dev`** (`.github/workflows/ci.yml`):
-1. Install (Bun, pinned `1.3.14`, cached on `bun.lock`).
+1. Install (Bun, pinned `1.4.2`, cached on `bun.lock`).
 2. `prisma generate` (**before** typecheck/test — the generated client is imported in code and specs).
 3. Typecheck (`tsc --noEmit` per workspace).
 4. Lint — **`eslint` without `--fix`** (the repo's `lint` script uses `--fix`, which mutates files

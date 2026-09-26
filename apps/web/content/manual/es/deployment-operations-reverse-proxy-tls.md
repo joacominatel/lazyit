@@ -85,6 +85,22 @@ la petición (limitación de tasa, la auditoría del primer arranque) ven al cli
 falsificada. Esto viene preconfigurado; no necesitas cambiarlo para un despliegue estándar en un único
 servidor.
 
+## El asistente de IA y los agentes externos
+
+Cuando la IA está activada, importan dos cosas:
+
+- **El chat transmite sus respuestas en streaming.** Caddy pasa el stream sin buffer y sin comprimir. Si
+  ponés **otro proxy o balanceador delante de Caddy**, tampoco tiene que bufferear ni comprimir
+  `text/event-stream` (nginx: `proxy_buffering off;` en la location de lazyit); si no, cada respuesta
+  aparece recién cuando está completa.
+- **El inicio de sesión de MCP necesita HTTPS y una dirección fija.** Caddy enruta el endpoint MCP
+  (`/mcp`) y las rutas de OAuth a la API. Los agentes de IA externos inician sesión con OAuth solo cuando
+  el origen público (`WEB_ORIGIN`) es una dirección `https://`; en una instancia HTTP plana (modo LAN)
+  usan tokens personales. Un proxy TLS delante de una instancia en modo LAN no alcanza: configurá
+  `WEB_ORIGIN` con la dirección `https://` y reiniciá la API. Los conectores en la nube (claude.ai,
+  ChatGPT) además necesitan que la instancia sea accesible desde internet con un certificado de confianza
+  pública. Mirá [Agentes de IA externos (MCP)](/help/ai-assistant-setup#agentes-de-ia-externos-mcp).
+
 ## Content-Security-Policy
 
 La aplicación web envía su propia **Content-Security-Policy** en cada página. Es una segunda línea de

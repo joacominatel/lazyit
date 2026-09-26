@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -687,7 +687,7 @@ domain data — `PasswordResetToken` precedent); grants are soft-deleted.
 ## 7. Security notes
 
 Candidate invariants. They are merged into the INV-AI-n set in [[ai-assistant/_synthesis|the synthesis]] §7 and
-are added to [[INVARIANTS]] only when ADR-0097 is accepted:
+joined [[INVARIANTS]] on 2026-09-26 (W4-4), where the INV-MCP → INV-AI mapping is kept:
 
 - **INV-MCP-1** OAuth/MCP tokens are opaque, CSPRNG 256-bit, SHA-256-hashed at rest, shown once, never logged,
   verified DB-first; accepted **only** on `/mcp`. Session JWTs are never accepted on `/mcp`, and MCP tokens are
@@ -998,9 +998,11 @@ revocation path (W3-4 reuses it for personal tokens with `personal: true`).
 4. **DCR pending-cap DoS:** the global cap of 500 pending registrations can be filled from many
    addresses. Key the register rate limit on the IPv6 /64 instead of the full address, and evict the
    oldest unused registration instead of refusing new ones.
-5. **Consent page (W3-9):** never auto-redirect for an unverified (DCR) client — the approve action is
-   always an explicit click — and never present `client_uri` as trusted (it is self-declared: show it,
-   if at all, as unverified text, not as a link that vouches for the client).
+5. ~~**Consent page (W3-9):** never auto-redirect for an unverified (DCR) client — the approve action is
+   always an explicit click — and never present `client_uri` as trusted~~ — **done in W3-9**
+   (`app/(auth)/oauth/authorize/_components/consent-form.tsx`): nothing redirects without a click, an
+   unverified client needs a second explicit confirmation, and `client_uri` is shown as plain "stated
+   website" text, never a link.
 6. **Runbook note:** during an incident, revoke through connected apps (Account → AI connections, or
    the admin list). Turning MCP off only **pauses** grants: they work again when MCP is re-enabled.
 7. Re-verify the ChatGPT, Cursor and VS Code identifiers in the W4-3 client matrix.
@@ -1407,11 +1409,12 @@ end to end with Claude Code's URL, online and offline).
 
 **Follow-ups.**
 
-1. **Web:** the consent page and the connected-apps list render `client.verifiedDomain` next to the
-   client name for every CIMD client, e.g. "domain: claude.ai" (security §6.3; draft §"OAuth Phishing
-   Attacks": "SHOULD display the hostname of the `client_id`"). Until then they show the badge and the
-   redirect host only.
+1. ~~**Web:** the consent page and the connected-apps list render `client.verifiedDomain` next to the
+   client name for every CIMD client~~ — **done in #1426** (2026-09-25): both show the domain set apart
+   from the self-declared name ([[ai-assistant/frontend|frontend]] §5.8, `lib/ai/client-domain.ts`).
 2. A distinct refusal for "the client's metadata document could not be fetched" (today `INVALID_CLIENT`)
    would let the consent page explain an offline instance; it needs a new refusal value and its labels.
 3. W4-3 re-verifies Claude Code's document against the bundled copy and exercises the offline path.
+   **Still open:** the W4-3 run (2026-09-25) predates CIMD on its test instance, so Claude Code registered
+   through DCR ([[ai-mcp-client-matrix]] F4); re-run its §4.3 step 4.
 

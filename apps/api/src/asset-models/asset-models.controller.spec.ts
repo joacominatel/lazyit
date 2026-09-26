@@ -20,7 +20,8 @@ import { AssetModelsService } from './asset-models.service';
 
 /**
  * `PATCH /asset-models/:id` over real HTTP (Express, Nest routing, the global zod pipe): a model's
- * category can be cleared with `categoryId: null` (#1315), and a non-cuid is still refused.
+ * category can be cleared with `categoryId: null` (#1315), its SKU and description with `null`
+ * (#1441), and a non-cuid or an empty SKU is still refused.
  */
 
 const USER = {
@@ -41,7 +42,7 @@ class SignedInGuard implements CanActivate {
   }
 }
 
-describe('AssetModelsController — PATCH categoryId', () => {
+describe('AssetModelsController — PATCH clearing categoryId, sku, description', () => {
   let app: INestApplication<App>;
   const service = { update: jest.fn() };
 
@@ -83,6 +84,25 @@ describe('AssetModelsController — PATCH categoryId', () => {
     expect(service.update).toHaveBeenCalledWith(MODEL_ID, {
       categoryId: CATEGORY_ID,
     });
+  });
+
+  it('clears the SKU and the description: null reaches the service (#1441)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/asset-models/${MODEL_ID}`)
+      .send({ sku: null, description: null })
+      .expect(200);
+    expect(service.update).toHaveBeenCalledWith(MODEL_ID, {
+      sku: null,
+      description: null,
+    });
+  });
+
+  it('refuses an empty SKU (null, not "", is how to clear it)', async () => {
+    await request(app.getHttpServer())
+      .patch(`/asset-models/${MODEL_ID}`)
+      .send({ sku: '' })
+      .expect(400);
+    expect(service.update).not.toHaveBeenCalled();
   });
 
   it('refuses a categoryId that is not a cuid', async () => {

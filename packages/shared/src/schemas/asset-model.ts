@@ -42,15 +42,17 @@ export const CreateAssetModelSchema = z.strictObject({
 
 /**
  * Partial update; any subset of the editable fields (an empty body is rejected). `categoryId: null`
- * clears the model's category (the column is nullable — a model without a category is valid).
+ * clears the model's category, and `sku: null` / `description: null` clear those fields (all three
+ * columns are nullable — a model without them is valid). An empty string is still refused: `null`
+ * is the one way to say "clear".
  */
 export const UpdateAssetModelSchema = requireAtLeastOneKey(
   z
     .strictObject({
       name: z.string().trim().min(1).max(200),
       manufacturer: z.string().trim().min(1).max(200),
-      sku: z.string().trim().min(1).max(100),
-      description: z.string().trim().min(1).max(2000),
+      sku: z.string().trim().min(1).max(100).nullable(),
+      description: z.string().trim().min(1).max(2000).nullable(),
       specs: ModelSpecsSchema,
       categoryId: z.cuid().nullable(),
     })

@@ -69,6 +69,23 @@ before wiring it into a system.
 > ability to read a specific vault, revoke it from **that vault's Members** list instead — see
 > [Vaults & members](/help/secret-manager-vaults-members).
 
+## Using the AI assistant headlessly
+
+A service account can drive the [AI assistant](/help/ai-assistant-overview) without a person — a
+script sends a prompt to `POST /api/ai/runs` and follows the run — or connect to lazyit over MCP with
+its token. Either way it acts with exactly its own permissions, and **nobody approves its changes one
+by one**. Three things bound it:
+
+- **Its permissions** — grant **Use the AI assistant** (`ai:use`) for the API, **Connect external AI
+  agents (MCP)** (`ai:connect`) for MCP, plus only the domain permissions the job needs.
+- **Its AI access** — row menu → **AI access**: off, read only, or read and write, with an optional
+  **Limit writes** cap per run (per rolling hour over MCP) that counts every record changed. See
+  [Service accounts](/help/ai-assistant-setup#service-accounts) on the AI setup page.
+- **The instance switches** — the assistant (for the API) or MCP must be on in **Settings → AI**.
+
+Headless runs never search the web. An account holding **Report server inventory (agent)** is refused
+AI use; create a separate account for AI.
+
 ## System-managed accounts
 
 Some accounts are created and owned by lazyit itself — for example the account the Applications Workflow

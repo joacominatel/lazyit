@@ -119,6 +119,22 @@ describe('AssetModelsService', () => {
     });
   });
 
+  it('clears the SKU and the description: null is written through to Prisma (#1441)', async () => {
+    assetModel.findFirst.mockResolvedValue({ id: 'm1', deletedAt: null });
+    assetModel.update.mockResolvedValue({
+      id: 'm1',
+      sku: null,
+      description: null,
+    });
+
+    await service.update('m1', { sku: null, description: null });
+
+    expect(assetModel.update).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { sku: null, description: null },
+    });
+  });
+
   it('soft-deletes by setting deletedAt (never hard delete)', async () => {
     assetModel.findFirst.mockResolvedValue({ id: 'm1', deletedAt: null });
     assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: new Date() });

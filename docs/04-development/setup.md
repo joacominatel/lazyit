@@ -12,7 +12,7 @@ Get lazyit running on your machine. Verified against the repo as of 2026-05-30.
 
 ## Prerequisites
 
-- **Bun** `1.3.x` (repo pins `bun@1.3.14`) — package manager and runtime.
+- **Bun** `1.4.x` (repo pins `bun@1.4.2`) — package manager and runtime.
 - **Docker** + Docker Compose — for the PostgreSQL dev database.
 - **Node** available on PATH — some CLIs still expect it (see [[stack]]).
 

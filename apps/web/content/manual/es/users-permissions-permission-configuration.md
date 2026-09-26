@@ -29,8 +29,11 @@ muestra pero bloqueado.
   razonable como punto de partida. A partir de ahí puedes ajustar capacidades individuales. Si tu
   conjunto no coincide con ningún ajuste, lazyit lo etiqueta como **Personalizado**.
 - **Conmutadores de capacidad** — interruptores en lenguaje sencillo agrupados por área (Inventario,
-  Acceso, Conocimiento, Gestión, Automatización). Cada conmutador corresponde a uno o varios permisos
-  subyacentes; actívalo o desactívalo para otorgar o quitar esa capacidad al rol.
+  Acceso, Conocimiento, Gestión, Automatización, IA). Cada conmutador corresponde a uno o varios permisos
+  subyacentes; actívalo o desactívalo para otorgar o quitar esa capacidad al rol. El área **IA** agrupa
+  **Usar el asistente de IA** (`ai:use`) y **Conectar agentes de IA externos (MCP)** (`ai:connect`);
+  ninguno es de nivel administrador, porque el asistente y los agentes solo actúan con los permisos del
+  propio rol — ver [Asistente de IA — visión general](/help/ai-assistant-overview#quién-puede-usarlo).
 - **Ajuste fino (avanzado)** — una sección opcional donde cada interruptor es un permiso individual en
   crudo (`área:acción`), para un control exacto. Cambiar uno aquí pasa el rol a un conjunto
   **Personalizado** y actualiza los conmutadores de capacidad de arriba para que coincidan.

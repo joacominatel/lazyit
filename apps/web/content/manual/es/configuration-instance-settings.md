@@ -36,6 +36,9 @@ La página de inicio de Configuración es una cuadrícula de tarjetas, cada una 
   aprovisionamiento. La automatización de cada aplicación se configura en su propia pestaña de Flujos.
 - **Instancia** — revisa cómo está configurada la instancia y gestiona el esquema de etiquetas de
   activos.
+- **Asistente de IA** — el asistente de IA opcional (proveedor, modelo y clave, límites, búsqueda web) y
+  el interruptor que permite que agentes de IA externos como Claude Code se conecten por MCP. Todo
+  empieza desactivado. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup).
 
 ## La página Instancia
 
@@ -167,6 +170,8 @@ gestiona:
   [Zona horaria y formatos](/help/configuration-time-zone-formats).
 - **Conexión del motor de búsqueda y reindexación** — entorno más un script de mantenimiento. Consulta
   [Índice de búsqueda](/help/configuration-search-index).
+- **La clave que cifra la clave de API del proveedor de IA** — la variable `AI_SECRET_KEY`. Mirá
+  [Asistente de IA — configuración](/help/ai-assistant-setup#antes-de-empezar-ai_secret_key).
 
 Esta separación es deliberada: la clasificación y el acceso del día a día viven en la interfaz,
 mientras que los ajustes de postura e infraestructura viven con el despliegue para que estén

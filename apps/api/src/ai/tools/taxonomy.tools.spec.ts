@@ -1360,6 +1360,46 @@ describe('taxonomy toolset (#1390)', () => {
       ).toMatchObject({ code: 'INVALID_INPUT' });
     });
 
+    it('clears the SKU and the description with null: before → none, the route gets null (#1441)', async () => {
+      models[0].description = 'Business laptop';
+      const action = await propose(
+        'asset_model_update',
+        { model: 'Latitude 7440', sku: null, description: null },
+        actor('MEMBER'),
+      );
+      expect(action.preview).toMatchObject({
+        target: { type: 'assetModel', id: M.latitude },
+        changes: [
+          { field: 'sku', before: 'LAT-7440', after: null, valueKind: 'text' },
+          {
+            field: 'description',
+            before: 'Business laptop',
+            after: null,
+            valueKind: 'text',
+          },
+        ],
+      });
+      await tools.approve(action.id, chat(actor('MEMBER')));
+      expect(modelsService.update).toHaveBeenCalledWith(M.latitude, {
+        sku: null,
+        description: null,
+      });
+      expect(models[0].sku).toBeNull();
+      expect(models[0].description).toBeNull();
+    });
+
+    it('clearing the SKU or description of a model that has none is a no-op (#1441)', async () => {
+      expect(
+        await refused('asset_model_update', { model: 'Pro 14', sku: null }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(
+        await refused('asset_model_update', {
+          model: 'Pro 14',
+          description: null,
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+    });
+
     it('refuses a no-op and a category that does not exist', async () => {
       expect(
         await refused('asset_model_update', {

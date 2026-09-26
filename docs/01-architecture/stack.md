@@ -12,7 +12,7 @@ Versions below are **verified against the repository** as of 2026-09-02, not jus
 
 | Layer | Choice | Version | Notes |
 | --- | --- | --- | --- |
-| Package manager / runtime | **Bun** | `1.3.14` | Workspaces; default runtime — see [[0001-monorepo-bun-turborepo]] |
+| Package manager / runtime | **Bun** | `1.4.2` | Workspaces; default runtime — see [[0001-monorepo-bun-turborepo]] |
 | Monorepo orchestration | **Turborepo** | `^2.9` | `turbo dev` / `turbo build` / `turbo lint` |
 | Frontend | **Next.js** (App Router) | `16.3.0` | React `19.2.8`, Tailwind v4, shadcn/ui, TypeScript |
 | Backend | **NestJS** | `12.0.1` | `@nestjs/platform-express`, TypeScript strict. v12 ships the core packages as **ESM**; the app stays CommonJS (Node loads them via `require(esm)`) and the Jest suite transpiles them — see [[0096-jest-commonjs-against-esm-nestjs]] |
