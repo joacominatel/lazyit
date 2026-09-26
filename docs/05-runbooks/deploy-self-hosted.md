@@ -47,8 +47,9 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 > ```
 >
 > It is **idempotent and non-destructive** — re-running it on an existing install (an existing
-> `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up; it
-> **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
+> `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up —
+> after appending any missing key from its short allowlist of safely generatable ones (§4, *Keys
+> `start.sh` adds on an existing install*); it **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
 > **BYOI**, **external Postgres**, and **Let's Encrypt/HSTS** it writes the relevant env values and
 > **prints** the one or two manual compose/Caddyfile edits to apply (it does not auto-edit those
 > files — see the BYOI / Caddyfile notes in steps 1 & 2 below). After it finishes, continue at
@@ -324,7 +325,8 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 
 > **Upgrade note — `REDIS_URL` is required (ADR-0053).** Deployments created **before** the async-workers
 > release have a `.env.prod` that predates `REDIS_URL`. The guided `start.sh` only writes it on a
-> **fresh** render — it never edits an existing `.env.prod` — so after pulling, add it by hand and
+> **fresh** render — on an existing `.env.prod` it appends nothing but the allowlisted generated keys
+> (see *Keys `start.sh` adds on an existing install* below) — so after pulling, add it by hand and
 > recreate the api container:
 >
 > ```sh
@@ -342,7 +344,9 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > The engine encrypts its connector credentials (`WorkflowSecret`, AES-256-GCM) with this key and
 > **fails loud at boot** if it is enabled while the key is missing or the wrong length. As with
 > `REDIS_URL` above, the guided `start.sh` only writes it on a **fresh** render — a `.env.prod` that
-> predates the engine has no such line — so add it by hand before turning the engine on:
+> predates the engine has no such line, and `start.sh` **never** generates this one for an existing
+> install (a fresh key would orphan any credential already encrypted) — so add it by hand before
+> turning the engine on:
 >
 > ```sh
 > grep -q '^WORKFLOW_SECRET_KEY=' infra/env/.env.prod \
@@ -359,8 +363,12 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > The instance SMTP password is encrypted at rest under this key. It is **optional at boot** — the API
 > starts fine without it and an *unauthenticated* relay keeps working — but saving an SMTP **password**
 > returns a clean **409 and stores nothing at all** (the encrypt runs *before* the upsert, so the whole
-> save is rejected, not partially applied). A guided install now generates the key, and `--reconfigure`
-> adds it to a file that lacks one while preserving every other secret. To do it by hand instead:
+> save is rejected, not partially applied). A guided install generates the key, and **re-running
+> `./infra/start.sh` on an existing install now adds it for you** — local, BYOI and bundled-Zitadel
+> installs alike (ADR-0047 amendment 2026-09-26, see *Keys `start.sh` adds on an existing install*
+> below). `--reconfigure` (local auth only) also adds it. `infra/update.sh` still never edits
+> `.env.prod`: it stops on the missing key, so either run `git pull` + `./infra/start.sh`, or add it by
+> hand:
 >
 > ```sh
 > grep -q '^SMTP_SECRET_KEY=' infra/env/.env.prod \
@@ -377,9 +385,39 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > This release adds two **optional** env keys, `AI_SECRET_KEY` and `AI_WORKER_CONCURRENCY`. Both ship
 > **commented** in `.env.prod.example` — a deliberate difference from `SMTP_SECRET_KEY` — so
 > `infra/update.sh` does **not** stop on them and an instance that never enables AI needs no change at
-> all. Add `AI_SECRET_KEY` only when an admin is about to store an AI provider API key (without it that
-> save is a clean 409): `./infra/start.sh --reconfigure` writes it, or add it by hand with the same
-> `grep -q` guard as above (`AI_SECRET_KEY=$(openssl rand -hex 32)`) and recreate the api container.
+> all. Without `AI_SECRET_KEY`, saving an AI provider API key is a clean 409. Re-running
+> `./infra/start.sh` on the existing install adds it for you (as does `--reconfigure`); by hand, use the
+> same `grep -q` guard as above (`AI_SECRET_KEY=$(openssl rand -hex 32)`) and recreate the api container.
+> `AI_WORKER_CONCURRENCY` stays unset unless you want to change its default of **4** — nothing writes it.
+
+> **Keys `start.sh` adds on an existing install (ADR-0047 amendment 2026-09-26).** When
+> `./infra/start.sh` finds an existing install (the `git pull` + `start.sh` upgrade path), it no longer
+> only brings the stack up: it first **appends** to `infra/env/.env.prod` every key that (1) this
+> checkout's `.env.prod.example` defines, (2) your file has no active line for, and (3) is on an explicit
+> allowlist of keys that are safe to generate at random for a populated install. Today the allowlist is
+> **`SMTP_SECRET_KEY`** and **`AI_SECRET_KEY`** (`openssl rand -hex 32` each). Both are at-rest keys for a
+> secret the API refuses to store while the key is unset, so a missing key proves nothing was ever
+> encrypted under it — a fresh one orphans nothing.
+>
+> - A **backup** is written first: `infra/env/.env.prod.bak-<UTC timestamp>` (mode 600, gitignored). It
+>   holds your secrets — keep it private, delete it once satisfied.
+> - Existing lines are **never modified or reordered**; the keys go at the end under a dated
+>   `# --- Added by infra/start.sh on … ---` comment. The file stays mode 600. Only the key **names** are
+>   printed, never their values. A key that is already present — whatever its value or encoding — is
+>   left alone. A second run writes nothing.
+> - Keys that protect existing data or identity are **never** generated this way: `WORKFLOW_SECRET_KEY`,
+>   `ZITADEL_MASTERKEY`, `AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD` /
+>   `ZITADEL_DB_PASSWORD`, `MEILI_MASTER_KEY`. If one of those (or any other key the example defines) is
+>   missing, `start.sh` only **names** it and tells you to add it by hand from the example's comment.
+> - `--dry-run` names what it would add and writes nothing.
+>
+> After it adds a key, back up the updated `.env.prod` off-host ([[backups]]).
+>
+> **Upgrading v1.11 → v2.0 with `git pull` + `./infra/start.sh`:** the v1.11 `.env.prod` has neither
+> key; `start.sh` appends `SMTP_SECRET_KEY` and `AI_SECRET_KEY`, backs up the old file, and brings v2.0
+> up with every existing secret untouched. With `infra/update.sh` the run stops at the missing-env step
+> on `SMTP_SECRET_KEY` (the one that ships active in the example) before touching the stack — add it by
+> hand as above, or take the `start.sh` path.
 > Caddy now also routes the external-agent paths to the API and streams SSE uncompressed (§7); the
 > update applies that with no action.
 
@@ -486,8 +524,9 @@ nothing to do: no required env key, no new container, no new port.
   (nginx: `proxy_buffering off;` on the lazyit location) — otherwise the chat shows each reply only once
   it is complete.
 - **Env** (`infra/env/.env.prod`, both optional):
-  - `AI_SECRET_KEY` — encrypts the AI provider's API key at rest. `start.sh` writes it on a fresh install
-    and on `--reconfigure`; to add it by hand, see the upgrade note in §4. Back it up with `.env.prod`
+  - `AI_SECRET_KEY` — encrypts the AI provider's API key at rest. `start.sh` writes it on a fresh install,
+    on `--reconfigure`, and when re-run on an existing install that lacks it; to add it by hand, see the
+    upgrade note in §4. Back it up with `.env.prod`
     ([[backups]]).
   - `AI_WORKER_CONCURRENCY` — how many AI runs execute at once inside the `api` container (default 4).
     Runs mostly wait on the provider; raise it only with memory and CPU headroom (§6).
