@@ -11,6 +11,7 @@ import {
   getUsers,
   type UserListParams,
 } from "../endpoints/users";
+import { useClientOnlyQuery } from "../client-only-query";
 import { createQueryKeys } from "../query-keys";
 
 /**
@@ -132,11 +133,15 @@ export function useUserRoleCounts() {
  * a session, and a stale read only briefly under- or over-shows a control that the API still gates.
  */
 export function useCurrentUser() {
-  return useQuery({
-    queryKey: userKeys.me(),
-    queryFn: getCurrentUser,
-    staleTime: 5 * 60 * 1000,
-  });
+  // Never server-prefetched: hydration-safe so a cache the app shell already warmed cannot make a
+  // later-hydrating page render differently from its server HTML (#1448).
+  return useClientOnlyQuery(
+    useQuery({
+      queryKey: userKeys.me(),
+      queryFn: getCurrentUser,
+      staleTime: 5 * 60 * 1000,
+    }),
+  );
 }
 
 /**

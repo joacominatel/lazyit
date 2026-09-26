@@ -1,9 +1,9 @@
 "use client";
 
 import { ArrowPathIcon, PrinterIcon } from "@heroicons/react/24/outline";
-import { useTranslations } from "next-intl";
+import { useNow, useTranslations } from "next-intl";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUser } from "@/lib/api/hooks/use-users";
@@ -87,8 +87,10 @@ export default function OffboardingActPage() {
     () => selectOffboardConsumables(consumables, excluded),
     [consumables, excluded],
   );
-  // Snapshot the issue date once so a re-render (or the print dialog) can't shift it.
-  const [issuedAt] = useState(() => new Date().toISOString());
+  // The issue date: next-intl's `useNow()` without an update interval is the server-render instant
+  // seeded in the root layout — fixed for the page's life (a re-render or the print dialog can't shift
+  // it) and identical on the server and the hydrating client (#1448).
+  const issuedAt = useNow().toISOString();
 
   const isLoading = userLoading || dataLoading;
   const org = orgMounted ? orgName : DEFAULT_ORG_NAME;
