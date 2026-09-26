@@ -39,10 +39,23 @@ export interface SessionSubject {
  */
 export const REMEMBER_ME_CLAIM = 'rememberMe';
 
+/**
+ * The payload claim naming the per-device session row (`UserSession.id`) a token belongs to (issue #1420,
+ * ADR-0086 §9). Optional: a token minted before per-device sessions existed has none, and the guard keeps
+ * the epoch-only check for it. When present it must be a uuid, and the guard refuses the token once that
+ * row is gone. Signed like every other claim.
+ */
+export const SESSION_ID_CLAIM = 'sid';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Options for {@link LocalCredentialService.mintSession}. */
 export interface MintSessionOptions {
   /** Mint a token with no time-based expiry (ends only through a `sessionEpoch` bump). Default false. */
   rememberMe?: boolean;
+  /** The per-device session row this token belongs to (issue #1420); carried as the `sid` claim. */
+  sessionId?: string;
 }
 
 /** A freshly minted session token and when it stops being accepted by time. */
@@ -60,6 +73,8 @@ export interface SessionClaims {
   epoch: number;
   /** Whether this is a "keep me signed in" token (no time-based expiry). */
   rememberMe: boolean;
+  /** The per-device session row id (`sid`), or null for a token minted before per-device sessions (#1420). */
+  sid: string | null;
 }
 
 /**
@@ -69,6 +84,8 @@ export interface SessionClaims {
  */
 export interface LocalSessionContext {
   rememberMe: boolean;
+  /** The verified token's session row id, or null for a pre-#1420 token (the session list's `current`). */
+  sessionId: string | null;
 }
 
 /** The outcome of {@link LocalCredentialService.verify}. */
@@ -221,6 +238,7 @@ export class LocalCredentialService {
       sub: subject.id,
       epoch: subject.sessionEpoch,
       iat: now,
+      ...(options.sessionId ? { [SESSION_ID_CLAIM]: options.sessionId } : {}),
       ...(expiresAt === null
         ? { [REMEMBER_ME_CLAIM]: true }
         : { exp: expiresAt }),
@@ -239,7 +257,8 @@ export class LocalCredentialService {
    *      `alg:none` downgrade and RS256/alg-confusion forgery (mirrors the OIDC path's RS256 pin).
    *   2. CONSTANT-TIME signature check: recompute the HMAC over `header.payload` and `timingSafeEqual` it
    *      against the presented signature (no early-exit byte-compare leak — the SA-token discipline).
-   *   3. Enforce `exp` (expiry) and require a valid string `sub` + integer `epoch`. A token may omit `exp`
+   *   3. Enforce `exp` (expiry) and require a valid string `sub` + integer `epoch`; a present `sid`
+   *      (issue #1420) must be a uuid. A token may omit `exp`
    *      ONLY when it carries {@link REMEMBER_ME_CLAIM} set to exactly `true` (ADR-0086 §8); a marker-less
    *      token without a valid future `exp` is rejected, and a present `exp` is always enforced.
    * NEVER trusts a role/permission from the token (there is none in it).
@@ -303,7 +322,17 @@ export class LocalCredentialService {
     if (typeof epoch !== 'number' || !Number.isInteger(epoch)) {
       throw new Error('session token is missing a valid epoch claim');
     }
-    return { sub, epoch, rememberMe };
+    // `sid` is optional (a pre-#1420 token has none), but a present one must be a uuid — never let a
+    // malformed value reach the uuid column.
+    let sid: string | null = null;
+    if (SESSION_ID_CLAIM in claims) {
+      const raw = claims[SESSION_ID_CLAIM];
+      if (typeof raw !== 'string' || !UUID_REGEX.test(raw)) {
+        throw new Error('session token has a malformed session id');
+      }
+      sid = raw;
+    }
+    return { sub, epoch, rememberMe, sid };
   }
 
   /**

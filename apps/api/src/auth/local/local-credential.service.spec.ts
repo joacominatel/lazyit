@@ -144,6 +144,7 @@ describe('LocalCredentialService', () => {
         sub: '11111111-1111-1111-1111-111111111111',
         epoch: 7,
         rememberMe: false,
+        sid: null,
       });
       // Decode the payload and assert no role/permissions leaked into the token.
       const payload = decodeSeg(token, 1);
@@ -301,6 +302,7 @@ describe('LocalCredentialService', () => {
           sub: SUB,
           epoch: 4,
           rememberMe: true,
+          sid: null,
         });
       });
 
@@ -346,6 +348,50 @@ describe('LocalCredentialService', () => {
         await expect(service.verifySession(forged)).rejects.toThrow(
           /algorithm/,
         );
+      });
+    });
+
+    describe('session id claim (per-device sessions, #1420)', () => {
+      const SID = '33333333-3333-4333-8333-333333333333';
+      const SUB = '11111111-1111-1111-1111-111111111111';
+
+      it('carries the session id as a signed `sid` claim and returns it on verify', async () => {
+        const { token } = await service.mintSession(
+          { id: SUB, sessionEpoch: 2 },
+          { sessionId: SID },
+        );
+        expect(decodeSeg(token, 1).sid).toBe(SID);
+        await expect(service.verifySession(token)).resolves.toEqual({
+          sub: SUB,
+          epoch: 2,
+          rememberMe: false,
+          sid: SID,
+        });
+      });
+
+      it('a token minted before per-device sessions has no sid and still verifies (sid null)', async () => {
+        const { token } = await service.mintSession({
+          id: SUB,
+          sessionEpoch: 0,
+        });
+        expect(decodeSeg(token, 1)).not.toHaveProperty('sid');
+        await expect(service.verifySession(token)).resolves.toMatchObject({
+          sid: null,
+        });
+      });
+
+      it('refuses a signed token whose sid is not a uuid', async () => {
+        const exp = Math.floor(Date.now() / 1000) + 60;
+        for (const sid of ['not-a-uuid', 42, null, '']) {
+          const forged = forgeToken(
+            { alg: 'HS256', typ: 'JWT' },
+            { sub: SUB, epoch: 0, exp, sid },
+            SECRET,
+          );
+          await expect(service.verifySession(forged)).rejects.toThrow(
+            /session id/,
+          );
+        }
       });
     });
 
