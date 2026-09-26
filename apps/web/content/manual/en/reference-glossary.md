@@ -41,6 +41,24 @@ The role with full control of the instance: manage users, change settings, delet
 what the other roles may do. An administrator always holds every permission and cannot be reduced.
 See [Roles](/help/users-permissions-roles).
 
+## AI assistant
+
+The opt-in chat inside lazyit that looks things up and proposes changes, acting with the permissions of
+the person using it. Off until an administrator turns it on. See [AI assistant —
+overview](/help/ai-assistant-overview).
+
+## AI provider
+
+The company or server that runs the model behind the AI assistant — Anthropic, OpenAI, Google Gemini,
+or an OpenAI-compatible server you may host yourself. What the assistant reads is sent to it. See [What
+leaves your server](/help/ai-assistant-overview#what-leaves-your-server).
+
+## Approval card
+
+The card in the AI chat that shows exactly what a proposed change will do — built by lazyit from the
+real change, not from the model's words. Nothing changes until the person approves it. See [Approving
+changes](/help/ai-assistant-approvals).
+
 ## Assignment
 
 The timestamped link between an **asset and the person who has it**, with a start date and (when the
@@ -77,6 +95,12 @@ tags](/help/assets-asset-tags).
 The instance-wide rule that defines how asset tags are shaped (prefix, number width) and the running
 counter behind them. See [Asset tag scheme](/help/configuration-asset-tag-scheme).
 
+## Connected app
+
+An AI app — Claude Code, Cursor or another MCP client — that a person authorized to act as them, or a
+personal token they created for one. Listed, and revocable, under **Account → AI & connected apps**. See
+[Connected apps](/help/ai-assistant-connected-apps).
+
 ## Consumable
 
 A **stock-counted** supply item — cables, adapters, toner, screws — where you care about *how many*
@@ -101,6 +125,13 @@ A **human step** inside an access-automation workflow. When a workflow reaches a
 pauses and waits for a person to complete it from the tasks inbox; once done, the workflow continues.
 It is a provisioning queue, not a general ticketing system. See [Manual
 tasks](/help/access-automation-manual-tasks).
+
+## MCP
+
+The **Model Context Protocol**, the open standard AI apps use to call tools. lazyit exposes its tools
+over MCP so an **MCP client** (Claude Code, Cursor, VS Code…) can work in lazyit as a person. On an HTTPS
+instance the client signs in as an **OAuth client**, approved on a consent screen. See [Claude Code &
+MCP](/help/ai-assistant-claude-code-mcp).
 
 ## Member
 
@@ -133,6 +164,12 @@ Your **backup key** for the Secret Manager: a long, one-time code shown in a fiv
 it to reset your Secret Manager password if you forget it. It is shown **exactly once**, at setup —
 store it somewhere safe and outside lazyit. See [Passwords & recovery
 keys](/help/secret-manager-passwords-recovery-keys).
+
+## Personal token
+
+A revocable, expiring credential a person creates for an AI app to connect over MCP on an instance
+without an HTTPS address. Shown once. See [Personal
+tokens](/help/ai-assistant-connected-apps#personal-tokens).
 
 ## Role
 

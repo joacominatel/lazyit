@@ -73,11 +73,36 @@ sesión termina las sesiones de la persona en **todos** sus dispositivos, y lo m
 restablecer la contraseña, al desactivar la cuenta o al darla de baja. Consulta
 [Tu perfil](/help/getting-started-your-profile) para ver lo que ve cada persona.
 
+**Las apps de IA conectadas por MCP no son sesiones.** Cerrar sesión no las desconecta; cambiar o
+restablecer la contraseña, desactivar la cuenta o darla de baja sí, y cada persona puede revocar una
+cuando quiera. Mirá [Qué termina una conexión](/help/ai-assistant-connected-apps#qué-termina-una-conexión).
+
 El **Gestor de Secretos** tiene su propio desbloqueo, separado de tu inicio de sesión: está cifrado
 de extremo a extremo, así que, aunque hayas iniciado sesión, debes desbloquearlo con una contraseña
 específica del Gestor de Secretos que nunca sale de tu navegador. Consulta
 [Gestor de Secretos](/help/secret-manager) para ver cómo funciona y por qué ni siquiera un
 administrador puede leer tus secretos.
+
+## El asistente de IA y los agentes externos
+
+La IA está desactivada hasta que un administrador la activa, y nunca amplía los derechos de nadie: el
+asistente integrado, los agentes externos por MCP y las ejecuciones headless de cuentas de servicio
+actúan **como** una persona o cuenta de servicio, y lazyit lo verifica en cada llamada igual que un clic
+en la app. Lo que cambia es adónde van los datos y quién decide:
+
+- **Los datos salen hacia el proveedor de IA.** Lo que el asistente lee para una persona — cualquier
+  registro que esa persona puede ver — se envía al proveedor que eligió el administrador, bajo tu
+  contrato con él. Los secretos, nunca. Leé [Qué sale de tu servidor](/help/ai-assistant-overview#qué-sale-de-tu-servidor)
+  antes de activarla.
+- **Un texto puede intentar manejar al modelo** (inyección de prompts). El asistente integrado no puede
+  cambiar nada sin una tarjeta de aprobación que lazyit arma a partir del cambio real; un cambio
+  propuesto después de leer contenido de otra persona queda marcado y nunca se aprueba automáticamente;
+  los cambios de privilegios e identidad piden la contraseña de la persona. Mirá
+  [Cómo lazyit mantiene al asistente bajo control](/help/ai-assistant-overview#cómo-lazyit-mantiene-al-asistente-bajo-control).
+- **Los agentes externos deciden por su cuenta.** Por MCP, el cliente — no lazyit — pregunta antes de un
+  cambio, y los datos de lazyit van al proveedor del propio cliente. El acceso de nivel administrador
+  nunca viene preseleccionado y pide contraseña. Mirá
+  [Antes de conectar](/help/ai-assistant-claude-code-mcp#antes-de-conectar-en-qué-confiás).
 
 ## Lo que esto te da
 

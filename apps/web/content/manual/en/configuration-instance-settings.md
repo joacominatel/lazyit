@@ -33,6 +33,9 @@ The Settings home is a grid of cards, each opening a focused sub-area:
 - **Integrations & workflows** — the cross-application manual-task inbox for provisioning workflows.
   Per-application automation is configured on each application's own Workflows tab.
 - **Instance** — review how this instance is configured and manage the asset-tag scheme.
+- **AI assistant** — the opt-in AI assistant (provider, model and key, limits, web search) and the
+  switch that lets external AI agents such as Claude Code connect over MCP. Everything starts off. See
+  [AI assistant — setup](/help/ai-assistant-setup).
 
 ## The Instance page
 
@@ -153,6 +156,8 @@ Not every instance-level setting is a form in Settings. Several are deliberately
   [Time zone & formats](/help/configuration-time-zone-formats).
 - **Search engine connection and reindexing** — environment plus a maintenance script. See
   [Search index](/help/configuration-search-index).
+- **The key that encrypts the AI provider's API key** — the `AI_SECRET_KEY` variable. See
+  [AI assistant — setup](/help/ai-assistant-setup#before-you-start-ai_secret_key).
 
 This split is on purpose: day-to-day classification and access live in the UI, while
 posture-and-infrastructure settings live with the deployment so they are versioned and reproducible.

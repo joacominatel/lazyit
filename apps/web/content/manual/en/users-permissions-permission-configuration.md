@@ -28,8 +28,11 @@ but locked.
   there you can adjust individual capabilities. If your set matches no preset, lazyit labels it
   **Custom**.
 - **Capability toggles** — plain-language switches grouped by area (Inventory, Access, Knowledge,
-  Manage, Automation). Each toggle maps to one or more underlying permissions; flip it to grant or
-  remove that capability for the role.
+  Manage, Automation, AI). Each toggle maps to one or more underlying permissions; flip it to grant or
+  remove that capability for the role. The **AI** area holds **Use the AI assistant** (`ai:use`) and
+  **Connect external AI agents (MCP)** (`ai:connect`); neither is admin-level, because the assistant and
+  agents only ever act with the role's own permissions — see
+  [AI assistant — overview](/help/ai-assistant-overview#who-can-use-it).
 - **Fine-tune (advanced)** — an optional disclosure where each switch is a single raw permission
   (`area:action`), for exact control. Changing one here flips the role to a **Custom** set and updates
   the capability toggles above to match.

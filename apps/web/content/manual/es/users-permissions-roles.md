@@ -25,7 +25,9 @@ pueden ajustar. El rol es lo que un usuario *tiene*; los permisos son lo que un 
 - **Miembro** — el rol de trabajo cotidiano. Por defecto un Miembro puede leer y crear/editar la
   mayoría de las cosas (activos, aplicaciones, consumibles, la Base de Conocimiento, ubicaciones,
   modelos, categorías), pero no puede eliminar registros ni realizar acciones reservadas al
-  administrador.
+  administrador. Un Miembro también puede usar el [asistente de IA](/help/ai-assistant-overview) y
+  conectar agentes de IA externos, una vez que un administrador los activa — siempre con los permisos
+  del propio Miembro.
 - **Lector** — solo lectura. Por defecto un Lector puede mirar la mayoría de las áreas pero no cambiar
   nada. Además, algunas vistas sensibles (el directorio de usuarios y el registro de concesiones de
   acceso) quedan ocultas para el Lector por defecto.
