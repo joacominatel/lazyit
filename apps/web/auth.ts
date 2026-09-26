@@ -32,6 +32,7 @@ import { LoginRequestSchema, type LoginResponse } from "@lazyit/shared";
 
 import { apiFetch } from "@/lib/api/client";
 import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
+import { loginClientHeaders } from "@/lib/auth/login-client-headers";
 
 // Zero-touch bootstrap (ADR-0043 Phase 3): before any AUTH_* read below, back-fill them from the
 // sidecar's oidc-client.json (mounted read-only) for any var the operator did not set, so the
@@ -340,7 +341,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
         rememberMe: { label: "Keep me signed in", type: "checkbox" },
       },
-      async authorize(rawCredentials) {
+      // `request` is the browser's sign-in request as Auth.js received it (headers intact), per the
+      // Credentials provider's `authorize(credentials, request)` signature.
+      async authorize(rawCredentials, request) {
         // Validate against the SHARED login contract before touching the network (never trust the form).
         // `rememberMe` arrives as a form string and is converted to the contract's boolean first.
         const parsed = LoginRequestSchema.safeParse({
@@ -353,6 +356,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const result = await apiFetch<LoginResponse>("/auth/login", {
             method: "POST",
             body: parsed.data,
+            // The real client for the session row and the login rate limit (#1420, ADR-0086 §9): the
+            // browser's User-Agent and the proxy's X-Forwarded-For, passed through untouched.
+            headers: loginClientHeaders(request?.headers),
           });
           const name =
             [result.user.firstName, result.user.lastName]

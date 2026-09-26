@@ -464,6 +464,16 @@ proxy reported (a client-forged hop is left of it and ignored), which also turns
 the per-client limit it was meant to be. That forwarding is the web unit's half of this amendment; without
 it the rows record the web container.
 
+*As built (web, #1420):* `authorize(credentials, request)` reads the sign-in request Auth.js received and
+`apps/web/lib/auth/login-client-headers.ts` forwards exactly two headers on the `POST /auth/login` call:
+`User-Agent`, and `X-Forwarded-For` **verbatim** — never appended to, never synthesized from `X-Real-IP`,
+never reduced to one entry, and not sent at all when absent or empty. One nuance: when a request reaches
+the Next.js server with no `X-Forwarded-For` (the web reached directly, which only happens in development),
+Next.js itself fills it with the TCP peer's address, so what is forwarded is still that real peer. Behind
+Caddy the header is always Caddy's. The account hub's security panel lists the sessions and ends one; ending
+the current one signs this browser out locally (the secret session locked first) **without** calling
+`POST /auth/logout`, which would end the other devices too.
+
 **Consequences.** One indexed read per authenticated local request with a `sid`, plus at most one write per
 session every 5 minutes. A new mutable table with a sweeper, which §3 had declined — accepted now that the
 account hub needs it. The user agent and IP are self-reported or proxy-derived: informational, never an
