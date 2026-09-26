@@ -173,7 +173,7 @@ A caret range stays satisfiable by the committed lockfile across patch releases,
 resolving to exactly what CI tested.
 
 A manifest change and its regenerated `bun.lock` belong in the **same commit**, produced with the
-Bun version pinned in `packageManager` (`1.3.14`) — the one the Dockerfiles and CI use.
+Bun version pinned in `packageManager` (`1.4.2`) — the one the Dockerfiles and CI use.
 
 Symptoms and recovery: [[docker-build-troubleshooting]] § `error: lockfile had changes`.
 
