@@ -56,7 +56,7 @@ function value(raw: string | undefined): string | undefined {
  *
  * Environment wins, matching every other setting the agent has, so a container or an image-baked
  * install can set them without a file. The **lowercase** spelling wins over the UPPERCASE one when a
- * host sets both — measured on curl 8.7.1 and Bun 1.3.14 rather than recalled: both take the
+ * host sets both — measured on curl 8.7.1 and Bun 1.3.14/1.4.2 rather than recalled: both take the
  * lowercase value, and curl ignores a bare `HTTP_PROXY` outright. An operator who copies a working
  * pair off a host has to get the same answer here as the tools they copied it from.
  */
@@ -182,13 +182,14 @@ const AMBIENT_PROXY_KEYS = [
  *    inherited — and `test` would cheerfully print "bypassed for this host (NO_PROXY)" about a
  *    request that went through the proxy anyway.
  *  - **An ambient `NO_PROXY` overrides even an EXPLICIT `proxy` option.** Measured, not assumed: with
- *    `NO_PROXY=*` in the environment, Bun 1.3.14 ignores `fetch(url, { proxy })` and connects
- *    directly. A host-wide bypass list would therefore silently defeat the config file's proxy.
+ *    `NO_PROXY=*` in the environment, Bun (1.3.14 and 1.4.2) ignores `fetch(url, { proxy })` and
+ *    connects directly. A host-wide bypass list would therefore silently defeat the config file's
+ *    proxy.
  *
- * BLANKED, NOT DELETED, and that is not a style choice: on Bun 1.3.14 `delete process.env.HTTP_PROXY`
- * leaves the proxy in force, while assigning `""` reads as "no proxy". A key the host never set is
- * left absent rather than added as an empty string, so the environment inherited by `dmidecode`,
- * `dpkg-query` and the rest is the one the host actually has.
+ * BLANKED, NOT DELETED, and that is not a style choice: on Bun 1.3.14 and 1.4.2
+ * `delete process.env.HTTP_PROXY` leaves the proxy in force, while assigning `""` reads as "no
+ * proxy". A key the host never set is left absent rather than added as an empty string, so the
+ * environment inherited by `dmidecode`, `dpkg-query` and the rest is the one the host actually has.
  */
 export function disableAmbientProxy(env: Record<string, string | undefined>): void {
   for (const key of AMBIENT_PROXY_KEYS) {

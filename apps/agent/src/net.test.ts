@@ -43,7 +43,7 @@ describe("networkFrom — env wins over the config file, key by key", () => {
     });
   });
 
-  // Measured on curl 8.7.1 and Bun 1.3.14, not recalled: with both spellings set to different
+  // Measured on curl 8.7.1 and Bun 1.3.14/1.4.2, not recalled: with both spellings set to different
   // proxies, both tools take the LOWERCASE one — and curl ignores a bare `HTTP_PROXY` entirely.
   // An operator who copies a working pair off a host must get the same answer here.
   test("the lowercase spelling wins when a host sets both, matching curl and Bun", () => {
@@ -159,8 +159,9 @@ describe("agentFetchInit — what actually rides on every request", () => {
 
 describe("disableAmbientProxy — the agent's own resolution is the WHOLE decision (#1137)", () => {
   test("a proxy variable present in the environment is blanked, not deleted", () => {
-    // Measured on Bun 1.3.14: `delete process.env.HTTP_PROXY` does NOT stop Bun proxying a fetch,
-    // while assigning "" does. The distinction is load-bearing, so it is pinned here.
+    // Measured on Bun 1.3.14 and 1.4.2: `delete process.env.HTTP_PROXY` does NOT stop Bun
+    // proxying a fetch, while assigning "" does. The distinction is load-bearing, so it is pinned
+    // here.
     const env: Record<string, string | undefined> = {
       HTTPS_PROXY: "http://ambient:3128",
       no_proxy: "lazyit.corp",
