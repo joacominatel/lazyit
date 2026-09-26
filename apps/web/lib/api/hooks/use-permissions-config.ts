@@ -5,6 +5,7 @@ import {
   getPermissionMatrix,
   updatePermissionMatrix,
 } from "../endpoints/config";
+import { useClientOnlyQuery } from "../client-only-query";
 
 /**
  * Query keys for the Roles & Permissions v2 config surface (ADR-0046 P5/P7, ADR-0020 data layer).
@@ -43,11 +44,15 @@ export function usePermissionMatrix() {
  * just-edited permission set is reflected without a reload.
  */
 export function useMyPermissionsQuery() {
-  return useQuery({
-    queryKey: permissionConfigKeys.mine(),
-    queryFn: getMyPermissions,
-    staleTime: 5 * 60 * 1000,
-  });
+  // Never server-prefetched: hydration-safe so every `can()` gate renders its fail-closed branch
+  // during hydration, exactly as on the server, even when the cache is already warm (#1448).
+  return useClientOnlyQuery(
+    useQuery({
+      queryKey: permissionConfigKeys.mine(),
+      queryFn: getMyPermissions,
+      staleTime: 5 * 60 * 1000,
+    }),
+  );
 }
 
 /**

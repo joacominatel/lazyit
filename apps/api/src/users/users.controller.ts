@@ -328,7 +328,9 @@ export class UsersController {
   // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
   // Exempt from the forced-change gate (ADR-0086 §F4): a user who still owes a one-time-credential change
-  // must be able to self-read (the payload carries `mustChangePassword`) so the web can render the wall.
+  // must be able to self-read so the web can load its shell and render the wall. The wall itself is
+  // driven by the 403 PASSWORD_CHANGE_REQUIRED code; the self-read carries only the public UserSchema
+  // columns (SEC-085 — never `mustChangePassword`, a hash or an epoch).
   @AllowPasswordChangeRequired()
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',

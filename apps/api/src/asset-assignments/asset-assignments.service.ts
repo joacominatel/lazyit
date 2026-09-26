@@ -13,6 +13,7 @@ import type {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -58,8 +59,11 @@ export class AssetAssignmentsService {
         ...(activeOnly ? { releasedAt: null } : {}),
       },
       orderBy: { assignedAt: 'desc' },
-      // Inline the owner only when asked (other callers keep the lean shape).
-      ...(includeUser ? { include: { user: true } } : {}),
+      // Inline the owner only when asked (other callers keep the lean shape) — through the PUBLIC column
+      // allowlist, never the whole row (SEC-085: `user: true` served the owner's passwordHash).
+      ...(includeUser
+        ? { include: { user: { select: PUBLIC_USER_SELECT } } }
+        : {}),
     };
     return this.prisma.assetAssignment.findMany(args);
   }

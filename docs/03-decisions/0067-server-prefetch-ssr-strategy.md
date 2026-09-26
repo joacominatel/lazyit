@@ -3,7 +3,7 @@ title: "ADR-0067: Server-prefetch + hydration rendering strategy for high-traffi
 tags: [adr, frontend, rendering, ssr, tanstack-query, nextjs]
 status: accepted
 created: 2026-06-16
-updated: 2026-06-16
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -295,6 +295,35 @@ Still deliberately client-fetched (each marked with a `// ponytail:` note where 
   paint read), and the workflows builder/run-detail (polling/no stable primary).
 - **Per-segment shape-matched detail skeletons** — the group-level `(app)/loading.tsx` still covers
   every segment; bespoke per-detail skeletons remain a low-priority polish item.
+
+### Client-only queries during hydration (issue #1448, 2026-09-26)
+
+A query the server never prefetches is cold during SSR, but it is **not** reliably cold when a page
+hydrates. The app shell (top bar, sidebar) hydrates first and starts fetching the caller's
+`/users/me`, `/config/my-permissions` and `/config/status`. A page segment inside a streamed Suspense
+boundary hydrates later and can find that cache already warm. A control gated on the data (an
+`AdminGate`, the ADMIN "Show archived" toggle, a `can()`-gated button) then renders on the client but
+was absent from the server HTML. The result is React #418 and a client re-render of the whole segment.
+It is timing-dependent, so it showed on some loads of eleven list, detail and settings pages and not
+on others.
+
+The rule: **a query no route prefetches must read, during hydration, exactly what the server
+rendered.** `lib/api/client-only-query.ts` does this at the source. `useClientOnlyQuery(result)`
+returns the server's view (`pending`, `idle`, no data) while the component hydrates, and the live
+result from the next render on. A component that mounts after hydration (client-side navigation)
+gets the live result straight away.
+
+- `useCurrentUser` and `useMyPermissionsQuery` go through it, so `usePermissions`, `useMyPermissions`
+  and `useCan` are hydration-safe everywhere without a per-call-site `useMounted` gate.
+- `/config/status` **is** prefetched on `/settings/instance`, so its shared hook stays plain.
+  Components on other routes read `useClientOnlyConfigStatus()`.
+- Do not wrap a prefetched query. There the server has the data, and masking it would create the
+  mismatch in the other direction.
+- For "now", use next-intl's `useNow()`. It is seeded with the server-render instant in the root
+  layout. A `useState(() => Date.now())` snapshot differs between the two passes.
+
+`apps/web/scripts/hydration-smoke.mjs` signs in and loads each page against a running build. It
+fails on any hydration error. It is not in CI because it needs a browser and a seeded API.
 
 ### Follow-ups (historical)
 
