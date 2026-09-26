@@ -1,8 +1,14 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { LoginResponse } from '@lazyit/shared';
 import type { User } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalCredentialService } from './local-credential.service';
+import { UserSessionStore, type SessionDeviceMeta } from './user-session.store';
 
 /**
  * Per-account brute-force backoff (ADR-0086 §3, decision E). NOT a hard lockout (a hard lock on a known
@@ -38,11 +44,17 @@ interface AttemptRecord {
 export class LoginService {
   private readonly logger = new Logger(LoginService.name);
   private readonly attempts = new Map<string, AttemptRecord>();
+  private readonly sessions: UserSessionStore;
 
+  // The session store is provided by AuthModule; @Optional with an equivalent default so a service built
+  // by hand from the two original dependencies (the existing specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly credentials: LocalCredentialService,
-  ) {}
+    @Optional() sessions?: UserSessionStore,
+  ) {
+    this.sessions = sessions ?? new UserSessionStore(prisma);
+  }
 
   /**
    * Authenticate an `identifier` (email OR username) + password. Returns the session token, its expiry and
@@ -50,11 +62,15 @@ export class LoginService {
    * password, null hash, directory-only, inactive, soft-deleted, backed-off) so nothing distinguishes them
    * (no oracle). `rememberMe` mints a token with no time-based expiry (`expiresAt: null`, ADR-0086 §8); it
    * is applied only AFTER every check has passed, so it never changes what a failure looks like.
+   *
+   * A successful sign-in opens a per-device session (issue #1420, ADR-0086 §9): a `UserSession` row holding
+   * the request's User-Agent and client IP (`meta`), whose id the token carries as `sid`.
    */
   async login(
     identifier: string,
     password: string,
     rememberMe = false,
+    meta: SessionDeviceMeta = { userAgent: null, ip: null },
   ): Promise<LoginResponse> {
     const invalid = () => new UnauthorizedException('Invalid credentials');
 
@@ -120,9 +136,13 @@ export class LoginService {
       }
     }
 
-    const { token, expiresAt } = await this.credentials.mintSession(
-      { id: user!.id, sessionEpoch: user!.sessionEpoch },
-      { rememberMe },
+    const { token, expiresAt } = await this.sessions.open(
+      { userId: user!.id, epoch: user!.sessionEpoch, rememberMe, meta },
+      (sessionId) =>
+        this.credentials.mintSession(
+          { id: user!.id, sessionEpoch: user!.sessionEpoch },
+          { rememberMe, sessionId },
+        ),
     );
 
     return {
@@ -153,14 +173,20 @@ export class LoginService {
    * IDEMPOTENT. The bump is conditional on the epoch the guard just validated, so two concurrent sign-outs
    * with the same token advance the epoch once; a repeat with the now-revoked token never reaches here (the
    * guard 401s it). Outside local mode there is no lazyit-minted session to revoke, so it is a no-op.
+   *
+   * It stays "sign out EVERYWHERE" (issue #1420, CEO decision): besides the bump it deletes every per-device
+   * session row of the user, in the same transaction. Ending ONE device is `DELETE /auth/sessions/:id`.
    */
   async logout(user: User): Promise<void> {
     if (process.env.AUTH_MODE !== 'local') {
       return;
     }
-    await this.prisma.user.updateMany({
-      where: { id: user.id, sessionEpoch: user.sessionEpoch },
-      data: { sessionEpoch: { increment: 1 } },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id: user.id, sessionEpoch: user.sessionEpoch },
+        data: { sessionEpoch: { increment: 1 } },
+      });
+      await this.sessions.endAll(user.id, tx);
     });
   }
 

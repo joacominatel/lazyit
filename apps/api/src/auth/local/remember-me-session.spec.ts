@@ -32,6 +32,7 @@ import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigg
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { IDENTITY_PROVIDER } from '../identity/identity-provider.interface';
 import { DirectoryReconcileService } from '../../directory/directory-reconcile.service';
+import { inMemoryUserSessions } from './user-session-table.harness-spec';
 import type { DirectoryConnectionService } from '../../directory/directory-connection.service';
 import type {
   DirectoryEntry,
@@ -198,6 +199,8 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
     };
     prisma = {
       user,
+      // Per-device session rows (#1420): login opens one, the guard checks it on every request.
+      userSession: inMemoryUserSessions().delegate,
       passwordResetToken: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
@@ -273,7 +276,7 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
     await guard.canActivate(ctx);
     return req as {
       user?: Row;
-      localSession?: { rememberMe: boolean };
+      localSession?: { rememberMe: boolean; sessionId: string | null };
     };
   }
 
@@ -287,7 +290,7 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
     const token = await rememberMeLogin();
     const req = await authenticate(token);
     expect(req.user?.id).toBe(USER_ID);
-    expect(req.localSession).toEqual({ rememberMe: true });
+    expect(req.localSession).toMatchObject({ rememberMe: true });
   });
 
   it('a default token is recorded as a non-remember-me session', async () => {
@@ -297,7 +300,7 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
     );
     expect(typeof expiresAt).toBe('number');
     const req = await authenticate(token);
-    expect(req.localSession).toEqual({ rememberMe: false });
+    expect(req.localSession).toMatchObject({ rememberMe: false });
   });
 
   it('outlives the 12h window that kills a default token', async () => {

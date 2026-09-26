@@ -86,6 +86,9 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
   let resolveConfig: jest.Mock;
   let prisma: Record<string, unknown>;
   let service: PasswordLifecycleService;
+  let txSessionDeleteMany: jest.Mock;
+  let txSessionUpdateMany: jest.Mock;
+  let txSessionCreate: jest.Mock;
 
   beforeAll(() => {
     process.env.SESSION_SIGNING_SECRET =
@@ -112,6 +115,11 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       .fn()
       .mockResolvedValue({ id: VALID_ID, sessionEpoch: 1 });
     historyRecord = jest.fn().mockResolvedValue({});
+    txSessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    txSessionUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    txSessionCreate = jest.fn(({ data }: { data: { id: string } }) =>
+      Promise.resolve({ id: data.id }),
+    );
     resolveConfig = jest.fn().mockResolvedValue(null); // SMTP off by default
 
     prisma = {
@@ -129,6 +137,11 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
             deleteMany: txTokDeleteMany,
           },
           user: { update: txUserUpdate },
+          userSession: {
+            deleteMany: txSessionDeleteMany,
+            updateMany: txSessionUpdateMany,
+            create: txSessionCreate,
+          },
         }),
       ),
     };
@@ -183,12 +196,89 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
 
       // A fresh token minted at the NEW epoch (1) so the caller stays logged in — a default session
       // stays a default (12h) session, and the response reports its expiry.
-      await expect(credentials.verifySession(res.token)).resolves.toEqual({
-        sub: VALID_ID,
-        epoch: 1,
-        rememberMe: false,
-      });
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        {
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: false,
+        },
+      );
       expect(typeof res.expiresAt).toBe('number');
+    });
+
+    describe('per-device sessions (#1420)', () => {
+      const SID = '33333333-3333-4333-8333-333333333333';
+
+      it('keeps the calling session row (same sid, new epoch) and ends every other one in the tx', async () => {
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          false,
+          { sessionId: SID, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
+        );
+        expect(txSessionDeleteMany).toHaveBeenCalledWith({
+          where: { userId: VALID_ID, id: { not: SID } },
+        });
+        const [carry] = txSessionUpdateMany.mock.calls[0] as [
+          { where: unknown; data: { epoch: number; expiresAt: Date | null } },
+        ];
+        expect(carry.where).toEqual({ id: SID, userId: VALID_ID });
+        expect(carry.data.epoch).toBe(1);
+        expect(carry.data.expiresAt).toEqual(new Date(res.expiresAt! * 1000));
+        expect(txSessionCreate).not.toHaveBeenCalled();
+        await expect(credentials.verifySession(res.token)).resolves.toEqual({
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: false,
+          sid: SID,
+        });
+      });
+
+      it('a caller on a pre-upgrade token (no sid) ends every row and gets a new session row', async () => {
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          true,
+          { sessionId: null, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
+        );
+        expect(txSessionDeleteMany).toHaveBeenCalledWith({
+          where: { userId: VALID_ID },
+        });
+        expect(txSessionCreate).toHaveBeenCalledTimes(1);
+        const { data } = (
+          txSessionCreate.mock.calls[0] as [{ data: Record<string, unknown> }]
+        )[0];
+        expect(data).toMatchObject({
+          userId: VALID_ID,
+          epoch: 1,
+          rememberMe: true,
+          expiresAt: null,
+          userAgent: 'UA',
+          ip: '198.51.100.4',
+        });
+        await expect(
+          credentials.verifySession(res.token),
+        ).resolves.toMatchObject({ sid: data.id });
+      });
+
+      it('opens a new row when the calling session was ended meanwhile', async () => {
+        txSessionUpdateMany.mockResolvedValue({ count: 0 });
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          false,
+          { sessionId: SID },
+        );
+        expect(txSessionCreate).toHaveBeenCalledTimes(1);
+        const claims = await credentials.verifySession(res.token);
+        expect(claims.sid).not.toBe(SID);
+      });
     });
 
     it('keeps a "keep me signed in" session: the re-minted token has no time expiry (ADR-0086 §8)', async () => {
@@ -203,11 +293,13 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       );
 
       expect(res.expiresAt).toBeNull();
-      await expect(credentials.verifySession(res.token)).resolves.toEqual({
-        sub: VALID_ID,
-        epoch: 1,
-        rememberMe: true,
-      });
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        {
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: true,
+        },
+      );
     });
 
     it('rejects a wrong current password with a generic 401 and writes nothing', async () => {
@@ -447,6 +539,10 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         userId: VALID_ID,
         eventType: 'PASSWORD_RESET_COMPLETED',
         actor: { userId: VALID_ID },
+      });
+      // Every per-device session row ends with the epoch bump (#1420).
+      expect(txSessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: VALID_ID },
       });
     });
 

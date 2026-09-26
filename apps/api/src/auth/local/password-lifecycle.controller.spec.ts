@@ -50,6 +50,7 @@ describe('PasswordLifecycleController (ADR-0086 §F4)', () => {
       'old',
       'NewPass1!',
       false,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
     );
     expect(res).toEqual({ token: 'new-token', expiresAt: null });
   });
@@ -70,6 +71,7 @@ describe('PasswordLifecycleController (ADR-0086 §F4)', () => {
       'old',
       'NewPass1!',
       true,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
     );
   });
 
@@ -85,6 +87,28 @@ describe('PasswordLifecycleController (ADR-0086 §F4)', () => {
       'old',
       'NewPass1!',
       false,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
+    );
+  });
+
+  it('change-password passes the calling session id and device to the service (#1420)', async () => {
+    const user = { id: 'u1' } as never;
+    const sid = '33333333-3333-4333-8333-333333333333';
+    await controller.changePassword(
+      { currentPassword: 'old', newPassword: 'NewPass1!' },
+      {
+        localSession: { rememberMe: false, sessionId: sid },
+        headers: { 'user-agent': 'UA' },
+        ip: '198.51.100.4',
+      } as never,
+      user,
+    );
+    expect(service.changePassword).toHaveBeenCalledWith(
+      user,
+      'old',
+      'NewPass1!',
+      false,
+      { sessionId: sid, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
     );
   });
 
