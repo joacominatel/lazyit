@@ -21,7 +21,7 @@ type Config = {
   session: { maxAge?: number };
   providers: Array<{
     id?: string;
-    authorize?: (raw: Record<string, unknown>) => Promise<unknown>;
+    authorize?: (raw: Record<string, unknown>, request?: Request) => Promise<unknown>;
   }>;
   callbacks: {
     jwt: (params: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
@@ -82,10 +82,10 @@ describe("cookie lifetime", () => {
 });
 
 describe("Credentials authorize", () => {
-  const authorize = (raw: Record<string, unknown>) => {
+  const authorize = (raw: Record<string, unknown>, request?: Request) => {
     const provider = config().providers.find((p) => p.id === "credentials");
     if (!provider?.authorize) throw new Error("no credentials provider");
-    return provider.authorize(raw);
+    return provider.authorize(raw, request);
   };
 
   const loginResponse = (expiresAt: number | null) => ({
@@ -102,10 +102,16 @@ describe("Credentials authorize", () => {
   });
 
   /** Answer `POST /auth/login` with `response` and record what was sent. */
-  function stubLogin(response: unknown): Array<{ url: string; body: unknown }> {
-    const sent: Array<{ url: string; body: unknown }> = [];
+  function stubLogin(
+    response: unknown,
+  ): Array<{ url: string; body: unknown; headers: Headers }> {
+    const sent: Array<{ url: string; body: unknown; headers: Headers }> = [];
     fetchImpl = (input, init) => {
-      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      sent.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)),
+        headers: new Headers(init?.headers),
+      });
       return Promise.resolve(Response.json(response));
     };
     return sent;
@@ -132,6 +138,32 @@ describe("Credentials authorize", () => {
       expect(sent[0]?.body).toMatchObject({ rememberMe: false });
       expect(user).toMatchObject({ expiresAt: 1_900_000_000 });
     }
+  });
+
+  // #1420: the API records the real client on the session row only if the web forwards it.
+  test("forwards the browser's User-Agent and the proxy's X-Forwarded-For verbatim", async () => {
+    const sent = stubLogin(loginResponse(null));
+    const request = new Request("http://web/api/auth/callback/credentials", {
+      method: "POST",
+      headers: {
+        "user-agent": "Mozilla/5.0 Test",
+        "x-forwarded-for": "198.51.100.9, 203.0.113.7",
+        "x-real-ip": "10.0.0.1",
+      },
+    });
+    await authorize({ identifier: "alice", password: "pw" }, request);
+    expect(sent[0]?.headers.get("user-agent")).toBe("Mozilla/5.0 Test");
+    expect(sent[0]?.headers.get("x-forwarded-for")).toBe("198.51.100.9, 203.0.113.7");
+    expect(sent[0]?.headers.get("x-real-ip")).toBeNull();
+  });
+
+  test("sends no X-Forwarded-For when the sign-in request carried none", async () => {
+    const sent = stubLogin(loginResponse(null));
+    const request = new Request("http://web/api/auth/callback/credentials", {
+      method: "POST",
+    });
+    await authorize({ identifier: "alice", password: "pw" }, request);
+    expect(sent[0]?.headers.get("x-forwarded-for")).toBeNull();
   });
 
   test("invalid credentials never reach the API", async () => {

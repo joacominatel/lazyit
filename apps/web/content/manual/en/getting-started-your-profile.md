@@ -29,7 +29,8 @@ account. Everyone can open it; it shows only what applies to you:
 - **Password & sessions** — who owns your password (lazyit, or your organization's sign-in provider),
   a **Change password** shortcut on local-account instances, and a sign-out button. On local accounts it
   reads **Sign out on all devices**, because signing out already ends every session you have (see
-  [Signing in and out](#signing-in-and-out)). lazyit does not list your individual sessions or devices.
+  [Signing in and out](#signing-in-and-out)), and below it **Your sessions** lists every device you are
+  signed in on so you can end just one (see [Your sessions](#your-sessions)).
 - **Preferences** — your **language** and **theme** (light, dark or follow your device). See
   [Your language and theme on every device](#your-language-and-theme-on-every-device).
 
@@ -106,6 +107,33 @@ If your instance uses **local accounts** (a lazyit email/username and password):
 > **On single sign-on (SSO)**, there is no **Keep me signed in** box — how long you stay signed in is
 > governed by your identity provider, and signing out ends your session in this browser.
 
+### Your sessions
+
+On local-account instances, **Account → Password & sessions** lists **Your sessions**: every device
+signed in to your account, most recently active first. Each one shows:
+
+- the **browser and operating system** (for example *Firefox · Windows*), or *Unknown browser*,
+- its **IP address**, when it **signed in** and when it was **last active** (updated every few minutes,
+  so it is approximate),
+- a **This device** badge on the one you are using, and **Keep me signed in** where you ticked that box.
+
+**End** signs that one device out; lazyit asks you to confirm first. The device is signed out the next
+time it does anything, and your other devices stay signed in. Ending **This device** signs you out here
+and takes you to the sign-in screen, without touching your other devices. To end all of them at once,
+use **Sign out on all devices**.
+
+> **Ending a session is not enough for a lost or stolen device.** It only signs that device out of
+> lazyit in the browser. If a device was lost or stolen, **change your password** instead: that signs out
+> every device and also disconnects your AI apps and personal tokens (see
+> [Connected apps](/help/ai-assistant-connected-apps)).
+
+If you signed in on this device **before your instance was updated** to list sessions, you see one entry
+reading *This device — signed in before the update*. It cannot be ended on its own: **Sign out on all
+devices** ends it. Other devices signed in before the update are not listed; they end when their sign-in
+expires, when you sign out on all devices, or when you change your password.
+
+The list is not shown on single sign-on (SSO), where your identity provider manages your sessions.
+
 ## Changing your password
 
 If your instance uses **local accounts** (a lazyit email/username and password, rather than your
@@ -114,8 +142,12 @@ organization's single sign-on), your profile also has a **Change your password**
 - Enter your **current** password, then your **new** password twice. The new password must meet the
   live checklist (length, upper- and lower-case, a number and a symbol) and must differ from the
   current one.
-- On success you **stay signed in on this device**; every *other* session is signed out — so a password
-  change is also how you boot a forgotten or shared session.
+- On success you **stay signed in on this device**; every *other* session is signed out, and your AI
+  apps and personal tokens are disconnected — so a password change is also how you boot a forgotten,
+  shared, lost or stolen session.
+- If your session was ended while you were changing it (an administrator reset your password, or you
+  signed out on all devices from somewhere else), nothing is changed: lazyit says your session was
+  revoked and takes you to the sign-in screen.
 
 > **On single sign-on (SSO)**, there is no password panel — your identity provider owns your password,
 > and you change it there. This section applies to local-account instances only.

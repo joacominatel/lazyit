@@ -29,8 +29,9 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
 - **Contraseña y sesiones** — quién gestiona tu contraseña (lazyit o el proveedor de inicio de sesión de
   tu organización), un atajo a **Cambiar contraseña** en instancias con cuentas locales y un botón para
   cerrar sesión. Con cuentas locales dice **Cerrar sesión en todos los dispositivos**, porque cerrar
-  sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)). lazyit
-  no lista tus sesiones ni dispositivos uno por uno.
+  sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)), y
+  debajo **Tus sesiones** lista cada dispositivo con la sesión iniciada para que puedas cerrar solo uno
+  (ver [Tus sesiones](#tus-sesiones)).
 - **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Mirá
   [Tu idioma y tu tema en todos tus dispositivos](#tu-idioma-y-tu-tema-en-todos-tus-dispositivos).
 
@@ -115,6 +116,36 @@ Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseñ
 > seguís con la sesión iniciada lo define tu proveedor de identidad, y cerrar sesión termina tu sesión
 > en este navegador.
 
+### Tus sesiones
+
+En instancias con cuentas locales, **Cuenta → Contraseña y sesiones** muestra **Tus sesiones**: cada
+dispositivo con la sesión iniciada en tu cuenta, del más reciente al menos reciente. Cada uno muestra:
+
+- el **navegador y el sistema operativo** (por ejemplo *Firefox · Windows*), o *Navegador desconocido*,
+- su **dirección IP**, cuándo **inició sesión** y su **última actividad** (se actualiza cada pocos
+  minutos, así que es aproximada),
+- la etiqueta **Este dispositivo** en el que estás usando, y **Mantener la sesión iniciada** donde
+  marcaste esa casilla.
+
+**Cerrar** cierra la sesión de ese dispositivo; lazyit te pide confirmación antes. El dispositivo queda
+fuera la próxima vez que haga algo, y tus otros dispositivos siguen con la sesión iniciada. Cerrar
+**Este dispositivo** cierra tu sesión acá y te lleva a la pantalla de inicio de sesión, sin tocar tus
+otros dispositivos. Para cerrarlas todas a la vez, usá **Cerrar sesión en todos los dispositivos**.
+
+> **Cerrar una sesión no alcanza si perdiste un dispositivo o te lo robaron.** Solo cierra la sesión de
+> lazyit de ese dispositivo en el navegador. Si perdiste un dispositivo o te lo robaron, **cambiá tu
+> contraseña**: eso cierra la sesión en todos los dispositivos y además desconecta tus apps de IA y tus
+> tokens personales (ver [Apps conectadas](/help/ai-assistant-connected-apps)).
+
+Si iniciaste sesión en este dispositivo **antes de que tu instancia se actualizara** para listar las
+sesiones, vas a ver una entrada que dice *Este dispositivo — sesión iniciada antes de la actualización*.
+No se puede cerrar por separado: la cierra **Cerrar sesión en todos los dispositivos**. Los otros
+dispositivos que iniciaron sesión antes de la actualización no aparecen; terminan cuando vence su inicio
+de sesión, cuando cerrás sesión en todos los dispositivos o cuando cambiás tu contraseña.
+
+La lista no se muestra con inicio de sesión único (SSO), donde tu proveedor de identidad gestiona tus
+sesiones.
+
 ## Cambiar tu contraseña
 
 Si tu instancia usa **cuentas locales** (un email/nombre de usuario y contraseña de lazyit, en lugar del
@@ -123,8 +154,12 @@ inicio de sesión único de tu organización), tu perfil también tiene un panel
 - Ingresá tu contraseña **actual** y luego tu **nueva** contraseña dos veces. La nueva debe cumplir la
   lista de requisitos en vivo (longitud, mayúscula y minúscula, un número y un símbolo) y debe ser
   distinta de la actual.
-- Al cambiarla **seguís con la sesión iniciada en este dispositivo**; cualquier *otra* sesión se cierra,
-  así que cambiar la contraseña también sirve para cerrar una sesión olvidada o compartida.
+- Al cambiarla **seguís con la sesión iniciada en este dispositivo**; cualquier *otra* sesión se cierra
+  y tus apps de IA y tokens personales se desconectan, así que cambiar la contraseña también sirve para
+  cerrar una sesión olvidada, compartida, perdida o robada.
+- Si tu sesión se cerró mientras la cambiabas (un administrador restableció tu contraseña, o cerraste
+  sesión en todos los dispositivos desde otro lado), no se cambia nada: lazyit te avisa que tu sesión se
+  revocó y te lleva a la pantalla de inicio de sesión.
 
 > **Con inicio de sesión único (SSO)** no hay panel de contraseña: tu proveedor de identidad es dueño de
 > tu contraseña y la cambiás allí. Esta sección aplica solo a instancias con cuentas locales.
