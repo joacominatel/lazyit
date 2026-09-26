@@ -24,6 +24,10 @@
 #     lazyit-prod_* volume is present), generation is SKIPPED and we go straight to `up`.
 #   - ZITADEL_MASTERKEY (the unrotatable DR linchpin) is NEVER regenerated and existing secrets
 #     are NEVER overwritten. There is NO teardown / down -v / volume rm path anywhere here.
+#   - The ONE write on an existing install (ADR-0047 amendment 2026-09-26): keys on the explicit
+#     SAFE_GENERATABLE_KEYS allowlist that this release's .env.prod.example defines and .env.prod lacks
+#     are APPENDED (backup first, existing lines untouched, file stays 600, names printed, never values).
+#     See add_missing_safe_keys. Nothing else in an existing .env.prod is ever written.
 #
 # Decisions that are PRINT-ONLY by design (the script never auto-edits compose/Caddyfile):
 #   BYOI (bring-your-own-IdP), external Postgres, and TLS/HSTS for a real domain. The script
@@ -138,7 +142,9 @@ WHAT IT DOES
   Detects your environment, asks ~6 questions, generates infra/env/.env.prod with real
   random secrets (chmod 600), and brings the prod stack up. Then it points you at the
   in-app /setup wizard to create the first ADMIN. It is idempotent and non-destructive:
-  if an install already exists it skips generation and just brings the stack up.
+  if an install already exists it skips generation and just brings the stack up — after
+  appending any key this release added that is safe to generate (today SMTP_SECRET_KEY and
+  AI_SECRET_KEY; backup first, existing lines never touched, key names printed, never values).
 
 OPTIONS
   --reconfigure                  Re-run the network-mode / host / ports questions on an EXISTING
@@ -778,6 +784,107 @@ load_existing_env() {
 }
 
 # =============================================================================
+# add_missing_safe_keys — EXISTING-install path only (ADR-0047 amendment 2026-09-26, CEO decision).
+#
+# Appends to $ENV_FILE every key that is ALL of:
+#   (1) defined in this checkout's $ENV_EXAMPLE (an active line, or a commented `# KEY=` placeholder for
+#       an optional key such as AI_SECRET_KEY — either way this release knows the key),
+#   (2) MISSING from $ENV_FILE (no ACTIVE `KEY=` line — a present line of any value is never touched), and
+#   (3) on SAFE_GENERATABLE_KEYS below.
+#
+# The allowlist is the safety gate. A key belongs on it ONLY if a random fresh value can never orphan data
+# or identity on an install that lacks it: each of today's keys is an at-rest key for a secret the API
+# REFUSES to store (409) while the key is unset, so a missing key proves nothing was ever encrypted under
+# it. Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, ZITADEL_MASTERKEY, AUTH_SECRET,
+# SESSION_SIGNING_SECRET, the DB passwords, MEILI_MASTER_KEY — are NEVER generated here: they are only
+# REPORTED, with the manual instruction, exactly like every other missing key.
+#
+# Write discipline: existing lines are never modified or reordered (the new file must start with the old
+# file byte-for-byte — asserted before it goes live); a mode-600 backup ($ENV_FILE.bak-<UTC timestamp>) is
+# taken first; the result is written through a mode-600 temp + atomic mv, so the file stays 600. Only KEY
+# NAMES are printed, never values. Idempotent: a second run finds nothing missing and writes nothing.
+# =============================================================================
+SAFE_GENERATABLE_KEYS="SMTP_SECRET_KEY AI_SECRET_KEY"
+
+add_missing_safe_keys() {
+  step "Checking $ENV_FILE for keys this release added"
+
+  _to_add=""
+  for _k in $SAFE_GENERATABLE_KEYS; do
+    grep -qE "^(#[[:space:]]*)?${_k}=" "$ENV_EXAMPLE" || continue     # (1) unknown to this checkout
+    if grep -qE "^${_k}=" "$ENV_FILE"; then                            # (2) present -> never touched
+      [ -n "$(_read_env "$_k")" ] \
+        || warn "$_k is present in $ENV_FILE but EMPTY — left untouched (start.sh never edits an existing line). Set a value by hand if you need it: openssl rand -hex 32"
+      continue
+    fi
+    _to_add="$_to_add $_k"
+  done
+
+  # Report-only: active example keys missing from the file that are NOT safe to generate (or need the
+  # operator's own value). A key the renderer deliberately left commented (`# KEY=` — e.g. the Zitadel keys
+  # in local mode) is not missing. Never written, never failed on here: the API fails loud at boot for a
+  # required one, and infra/update.sh stops on any of them before touching the stack.
+  _manual=""
+  for _k in $(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_EXAMPLE" | sed 's/=.*//' | sort -u); do
+    case " $SAFE_GENERATABLE_KEYS " in *" $_k "*) continue ;; esac
+    grep -qE "^(#[[:space:]]*)?${_k}=" "$ENV_FILE" && continue
+    _manual="$_manual $_k"
+  done
+  if [ -n "$_manual" ]; then
+    warn "$ENV_FILE lacks key(s) this release's $ENV_EXAMPLE defines. start.sh will NOT generate these (they protect existing data or identity, or need your own value):"
+    for _k in $_manual; do info "    $_k"; done
+    info "  Review each against the comment above it in $ENV_EXAMPLE — some apply only to one mode (e.g. ZITADEL_* only with the bundled Zitadel)."
+    info "  Add the ones your deployment needs by hand, then re-run ./infra/start.sh. infra/update.sh stops on any of them until they exist."
+  fi
+
+  if [ -z "$_to_add" ]; then
+    ok "no missing auto-generatable keys (${SAFE_GENERATABLE_KEYS}) — $ENV_FILE left unchanged"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    warn "DRY RUN: would append to $ENV_FILE (freshly generated, values never shown):$_to_add"
+    return 0
+  fi
+
+  _stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  _bak="${ENV_FILE}.bak-${_stamp}"
+  [ -e "$_bak" ] && _bak="${_bak}.$$"
+  (umask 077; cp "$ENV_FILE" "$_bak") || die "cannot back up $ENV_FILE to $_bak — refusing to modify it."
+  chmod 600 "$_bak" 2>/dev/null || true
+
+  _atmp="${ENV_FILE}.tmp.$$"
+  trap 'rm -f "$_atmp" 2>/dev/null || true' EXIT INT TERM
+  (umask 077; cp "$ENV_FILE" "$_atmp") || die "cannot create the temp env file ($_atmp)."
+  chmod 600 "$_atmp"
+  # A file whose last line has no trailing newline would glue our first line onto it — terminate it first.
+  [ -s "$_atmp" ] && [ -n "$(tail -c 1 "$_atmp")" ] && printf '\n' >>"$_atmp"
+  printf '\n# --- Added by infra/start.sh on %s (UTC): missing key(s) generated for this release (ADR-0047) ---\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$_atmp"
+  for _k in $_to_add; do
+    _v=$(openssl rand -hex 32)
+    [ "${#_v}" -eq 64 ] || die "internal error: generated $_k is ${#_v} chars, expected exactly 64 (32 hex bytes). $ENV_FILE was NOT modified."
+    printf '%s=%s\n' "$_k" "$_v" >>"$_atmp"
+  done
+
+  # Never modify or reorder an existing line: the new file must begin with the old one, byte-for-byte.
+  _osz=$(wc -c <"$ENV_FILE" | tr -d ' ')
+  head -c "$_osz" "$_atmp" | cmp -s - "$ENV_FILE" \
+    || die "internal error: the appended file does not start with the original $ENV_FILE — NOT writing it (backup: $_bak)."
+  for _k in $_to_add; do
+    [ "$(grep -cE "^${_k}=" "$_atmp")" -eq 1 ] || die "internal error: $_k is not present exactly once — NOT writing $ENV_FILE."
+  done
+
+  mv "$_atmp" "$ENV_FILE"
+  trap - EXIT INT TERM
+  _perm=$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo "?")
+  [ "$_perm" = "600" ] || warn "$ENV_FILE permissions are '$_perm' (expected 600). Run: chmod 600 $ENV_FILE"
+  ok "added to $ENV_FILE (freshly generated; values not shown):$_to_add"
+  info "  previous file backed up to $_bak (mode 600) — it holds your secrets: keep it private or delete it once you are satisfied."
+  info "  these are at-rest keys for secrets lazyit could not store without them, so nothing existing is affected. Back up the updated $ENV_FILE off-host."
+}
+
+# =============================================================================
 # hint_legacy_meili_volume — PRINT-ONLY notice about the pre-v1.53 Meilisearch data volume (#1216).
 #   The Meilisearch server bump (ADR-0035 amendment 2026-09-26) moved search onto a NEW volume
 #   (<project>_meili_data_v1_53_2) because a Meilisearch database only opens on the engine version that
@@ -1245,7 +1352,7 @@ EOF
 
   if [ "$_existing" -eq 1 ]; then
     ok "existing install detected: $_reason"
-    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable ZITADEL_MASTERKEY) are LEFT UNTOUCHED."
+    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable ZITADEL_MASTERKEY) are LEFT UNTOUCHED — only allowlisted keys this release added are appended if missing."
     if [ ! -f "$ENV_FILE" ]; then
       die "prod volumes exist but $ENV_FILE is MISSING. Restore the original .env.prod (it holds the unrotatable ZITADEL_MASTERKEY) from your off-host backup before bringing the stack up. The script will NOT regenerate it — a new MASTERKEY cannot decrypt the existing Zitadel data."
     fi
@@ -1264,16 +1371,10 @@ EOF
       warn "this $ENV_FILE predates ADR-0086 (no AUTH_MODE line). AUTH_MODE is now EXPLICIT-REQUIRED — the API refuses to boot without it. Add 'AUTH_MODE=oidc' to $ENV_FILE BEFORE upgrading (detected mode: $IDP_MODE)."
     fi
     info "existing deploy auth mode: $IDP_MODE (AUTH_MODE=${_am:-<unset>})"
-    # SMTP_SECRET_KEY upgrade awareness (ADR-0079). This branch NEVER writes $ENV_FILE, so we cannot add
-    # the key here — but an operator whose file predates it hits a bare 409 the first time they save an
-    # authenticated SMTP password, with nothing explaining why. Say it out loud instead. (The key itself is
-    # never printed — there is none to print, and none of this branch's output ever carries a secret.)
-    if ! grep -qE '^SMTP_SECRET_KEY=' "$ENV_FILE"; then
-      warn "this $ENV_FILE has no SMTP_SECRET_KEY (ADR-0079). Outbound email works with an UNAUTHENTICATED relay, but saving an SMTP PASSWORD in Settings -> Instance -> SMTP fails with a 409 until the key exists. Fix it either way:"
-      info "    ./infra/start.sh --reconfigure     # adds the key, preserves every other secret"
-      info "    # or by hand, then recreate the api container:"
-      info "    printf 'SMTP_SECRET_KEY=%s\\n' \"\$(openssl rand -hex 32)\" >> $ENV_FILE"
-    fi
+    # Missing, SAFELY GENERATABLE keys (ADR-0047 amendment 2026-09-26). An upgrade via `git pull` +
+    # start.sh lands here, so a key the new release introduced would otherwise stay missing. Only the
+    # allowlisted keys are ever written (APPENDED, with a backup first); everything else is print-only.
+    add_missing_safe_keys
     # We cannot recover the operator's earlier port/domain answers from the file reliably for the
     # guidance banner; read back the browser origin so the CTA is accurate.
     _wo=$(grep -E '^WEB_ORIGIN=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
