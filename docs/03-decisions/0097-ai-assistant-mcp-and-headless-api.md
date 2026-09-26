@@ -11,7 +11,9 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**accepted** — 2026-09-23 (CEO review of PR #1317; epic #1315). The build follows the wave plan.
+**Accepted (2026-09-26, CEO)** — as built (epic #1315, wave 4 unit W4-4). The design was accepted on
+2026-09-23 (CEO review of PR #1317) and the build followed the wave plan; the dated amendments below record
+what the build decided, and *As built* lists what shipped and what is deferred.
 The depth lives in the design vault [[ai-assistant/_MOC|docs/ai-assistant/]], whose
 [[ai-assistant/_synthesis|synthesis]] is binding.
 
