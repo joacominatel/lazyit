@@ -53,6 +53,39 @@
         "unknown": "Signing out ends your session in this browser.",
         "signOutEverywhere": "Sign out on all devices",
         "signOut": "Sign out"
+      },
+      "devices": {
+        "title": "Your sessions",
+        "description": "The devices signed in to your account, most recently active first.",
+        "containment": "Ending a session signs that device out of lazyit in the browser only. If a device was lost or stolen, change your password instead: that signs out every device and also disconnects your AI apps and personal tokens.",
+        "unknownDevice": "Unknown browser",
+        "thisDevice": "This device",
+        "keepSignedIn": "Keep me signed in",
+        "ip": "IP address",
+        "signedIn": "Signed in",
+        "lastActive": "Last active",
+        "unknownIp": "Unknown",
+        "legacyTitle": "This device — signed in before the update",
+        "legacyNote": "This session started before lazyit listed devices, so it can't be ended on its own. Sign out on all devices to end it. Other devices signed in before the update aren't listed either.",
+        "empty": "No active sessions to show.",
+        "end": "End",
+        "endAria": "End the session on {device}",
+        "error": {
+          "title": "Couldn't load your sessions",
+          "description": "The list of signed-in devices isn't available right now."
+        },
+        "confirm": {
+          "title": "End this session?",
+          "description": "{device} will be signed out of lazyit the next time it does anything.",
+          "currentTitle": "Sign out of this device?",
+          "currentDescription": "This ends the session you're using now and takes you to the sign-in page. Your other devices stay signed in.",
+          "cancel": "Cancel",
+          "confirm": "End session",
+          "currentConfirm": "Sign out here"
+        },
+        "ended": "Session ended. That device is signed out.",
+        "alreadyEnded": "That session had already ended.",
+        "endError": "Couldn't end the session. Please try again."
       }
     },
     "preferences": {

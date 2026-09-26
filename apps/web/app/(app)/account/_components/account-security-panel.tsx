@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import { passwordOwner } from "../_lib/account-sections";
+import { AccountSessionsList } from "./account-sessions-list";
 
 /**
  * The hub's "Password & sessions" panel (issue #1404). It EXPLAINS and LINKS; it changes no
@@ -21,7 +22,9 @@ import { passwordOwner } from "../_lib/account-sections";
  *   out does, including locking the in-memory secret session first (#512). In local mode that already
  *   ends every session on every device, so the copy says so; in OIDC mode it ends this browser's.
  *
- * There is no per-device session list: the API exposes none (see the PR follow-ups).
+ * - **Your sessions** (local mode only, #1420, ADR-0086 §9) — the per-device list, where one device can
+ *   be ended on its own ({@link AccountSessionsList}). Hidden in OIDC mode, where the IdP owns sessions,
+ *   and when the API reports no `authMode`.
  */
 export function AccountSecurityPanel() {
   const t = useTranslations("account.hub.security");
@@ -91,6 +94,11 @@ export function AccountSecurityPanel() {
                 : t("sessions.signOut")}
             </Button>
           </div>
+          {owner === "lazyit" ? (
+            <div className="pt-4">
+              <AccountSessionsList />
+            </div>
+          ) : null}
         </div>
       )}
     </DetailPanel>

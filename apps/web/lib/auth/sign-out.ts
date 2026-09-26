@@ -27,6 +27,16 @@ export async function signOutAndRevoke(loginPath = "/login"): Promise<void> {
   } catch {
     // Already revoked, unreachable or too slow — sign out locally regardless.
   }
+  await signOutLocally(loginPath);
+}
+
+/**
+ * Drop this browser's Auth.js cookie and land on /login, WITHOUT asking the API to revoke anything.
+ * {@link signOutAndRevoke} ends with it; ending the current device from the session list (#1420) calls it
+ * directly, because `DELETE /auth/sessions/:id` already ended that one session and `POST /auth/logout`
+ * would end every other device's too.
+ */
+export async function signOutLocally(loginPath = "/login"): Promise<void> {
   // #1052: sign out WITHOUT letting Auth.js follow the server-resolved absolute URL, then navigate
   // client-side to a RELATIVE path. In host-agnostic LAN mode (AUTH_URL unset) the server origin is the
   // Next standalone bind host `0.0.0.0`, so a `callbackUrl` redirect would land on

@@ -53,6 +53,39 @@
         "unknown": "Cerrar sesión termina tu sesión en este navegador.",
         "signOutEverywhere": "Cerrar sesión en todos los dispositivos",
         "signOut": "Cerrar sesión"
+      },
+      "devices": {
+        "title": "Tus sesiones",
+        "description": "Los dispositivos con sesión iniciada en tu cuenta, del más reciente al menos reciente.",
+        "containment": "Cerrar una sesión cierra la sesión de lazyit de ese dispositivo solo en el navegador. Si perdiste un dispositivo o te lo robaron, cambiá tu contraseña: eso cierra la sesión en todos los dispositivos y además desconecta tus apps de IA y tus tokens personales.",
+        "unknownDevice": "Navegador desconocido",
+        "thisDevice": "Este dispositivo",
+        "keepSignedIn": "Mantener la sesión iniciada",
+        "ip": "Dirección IP",
+        "signedIn": "Inició sesión",
+        "lastActive": "Última actividad",
+        "unknownIp": "Desconocida",
+        "legacyTitle": "Este dispositivo — sesión iniciada antes de la actualización",
+        "legacyNote": "Esta sesión empezó antes de que lazyit listara los dispositivos, así que no se puede cerrar por separado. Usá Cerrar sesión en todos los dispositivos para terminarla. Los otros dispositivos que iniciaron sesión antes de la actualización tampoco aparecen.",
+        "empty": "No hay sesiones activas para mostrar.",
+        "end": "Cerrar",
+        "endAria": "Cerrar la sesión en {device}",
+        "error": {
+          "title": "No se pudieron cargar tus sesiones",
+          "description": "La lista de dispositivos con sesión iniciada no está disponible ahora."
+        },
+        "confirm": {
+          "title": "¿Cerrar esta sesión?",
+          "description": "{device} va a quedar fuera de lazyit la próxima vez que haga algo.",
+          "currentTitle": "¿Cerrar la sesión en este dispositivo?",
+          "currentDescription": "Esto termina la sesión que estás usando ahora y te lleva a la pantalla de inicio de sesión. Tus otros dispositivos siguen con la sesión iniciada.",
+          "cancel": "Cancelar",
+          "confirm": "Cerrar sesión",
+          "currentConfirm": "Cerrar sesión acá"
+        },
+        "ended": "Sesión cerrada. Ese dispositivo quedó fuera.",
+        "alreadyEnded": "Esa sesión ya estaba cerrada.",
+        "endError": "No se pudo cerrar la sesión. Probá de nuevo."
       }
     },
     "preferences": {
