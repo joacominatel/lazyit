@@ -24,3 +24,31 @@ describe("UpdateAssetModelSchema — categoryId", () => {
     expect(UpdateAssetModelSchema.safeParse({}).success).toBe(false);
   });
 });
+
+// #1441: a model's SKU and description can be cleared with `null`; an empty string is still refused.
+describe("UpdateAssetModelSchema — sku and description", () => {
+  test("accepts null to clear the SKU and the description", () => {
+    const parsed = UpdateAssetModelSchema.safeParse({
+      sku: null,
+      description: null,
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toEqual({ sku: null, description: null });
+  });
+
+  test("still accepts a value to change them", () => {
+    expect(
+      UpdateAssetModelSchema.safeParse({
+        sku: " LAT-7440 ",
+        description: "Business laptop",
+      }).data,
+    ).toEqual({ sku: "LAT-7440", description: "Business laptop" });
+  });
+
+  test("rejects an empty or blank string", () => {
+    expect(UpdateAssetModelSchema.safeParse({ sku: "" }).success).toBe(false);
+    expect(UpdateAssetModelSchema.safeParse({ description: "   " }).success).toBe(
+      false,
+    );
+  });
+});
