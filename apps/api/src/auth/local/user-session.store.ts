@@ -160,21 +160,23 @@ export class UserSessionStore {
   }
 
   /**
-   * Move a session row onto a new epoch and expiry — the caller's own session across a password change,
-   * which re-mints its token under the same `sid`. Returns false when the row is gone (ended meanwhile),
-   * in which case the caller opens a new one.
+   * Move a session row from `fromEpoch` onto `toEpoch` and a new expiry — the caller's own session across
+   * a password change, which re-mints its token under the same `sid`. Conditional on the row still being
+   * at `fromEpoch`, so a row left stale by a concurrent bump is never revived. Returns false when the row
+   * is gone or stale, in which case the caller opens a new one.
    */
   async carryOver(
     sessionId: string,
     userId: string,
-    epoch: number,
+    fromEpoch: number,
+    toEpoch: number,
     expiresAt: number | null,
     db: SessionDb = this.prisma,
   ): Promise<boolean> {
     const result = await db.userSession.updateMany({
-      where: { id: sessionId, userId },
+      where: { id: sessionId, userId, epoch: fromEpoch },
       data: {
-        epoch,
+        epoch: toEpoch,
         expiresAt: expiresAt === null ? null : new Date(expiresAt * 1000),
         lastSeenAt: new Date(),
       },

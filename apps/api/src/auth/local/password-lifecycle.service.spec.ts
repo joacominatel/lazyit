@@ -82,6 +82,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
   let txTokUpdateMany: jest.Mock;
   let txTokDeleteMany: jest.Mock;
   let txUserUpdate: jest.Mock;
+  let txUserUpdateMany: jest.Mock;
   let historyRecord: jest.Mock;
   let resolveConfig: jest.Mock;
   let prisma: Record<string, unknown>;
@@ -115,6 +116,8 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       .fn()
       .mockResolvedValue({ id: VALID_ID, sessionEpoch: 1 });
     historyRecord = jest.fn().mockResolvedValue({});
+    // change-password's conditional write (only while the epoch is still the caller's).
+    txUserUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
     txSessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     txSessionUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
     txSessionCreate = jest.fn(({ data }: { data: { id: string } }) =>
@@ -136,11 +139,13 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
             updateMany: txTokUpdateMany,
             deleteMany: txTokDeleteMany,
           },
-          user: { update: txUserUpdate },
+          user: { update: txUserUpdate, updateMany: txUserUpdateMany },
           userSession: {
             deleteMany: txSessionDeleteMany,
             updateMany: txSessionUpdateMany,
             create: txSessionCreate,
+            // The per-user cap's overflow query: nothing over the cap here.
+            findMany: jest.fn().mockResolvedValue([]),
           },
         }),
       ),
@@ -168,8 +173,12 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       );
 
       // The stored write (inside the tx): a NEW hash, epoch increment, flag cleared, timestamp set.
-      expect(txUserUpdate).toHaveBeenCalledTimes(1);
-      const data = firstArg<UpdateArg>(txUserUpdate).data;
+      expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+      const { where, data } = firstArg<UpdateArg & { where: unknown }>(
+        txUserUpdateMany,
+      );
+      // Conditional on the epoch the caller authenticated with (#1420 review).
+      expect(where).toEqual({ id: VALID_ID, sessionEpoch: 0 });
       expect(data.sessionEpoch).toEqual({ increment: 1 });
       // A password change or reset also kills every MCP credential (ADR-0097 decision 8, amended).
       expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
@@ -224,7 +233,8 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         const [carry] = txSessionUpdateMany.mock.calls[0] as [
           { where: unknown; data: { epoch: number; expiresAt: Date | null } },
         ];
-        expect(carry.where).toEqual({ id: SID, userId: VALID_ID });
+        // Only a row still at the caller's epoch is carried over.
+        expect(carry.where).toEqual({ id: SID, userId: VALID_ID, epoch: 0 });
         expect(carry.data.epoch).toBe(1);
         expect(carry.data.expiresAt).toEqual(new Date(res.expiresAt! * 1000));
         expect(txSessionCreate).not.toHaveBeenCalled();
@@ -263,6 +273,31 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         await expect(
           credentials.verifySession(res.token),
         ).resolves.toMatchObject({ sid: data.id });
+      });
+
+      it('a concurrent admin reset (epoch already bumped) makes the change a 401 SESSION_REVOKED that writes nothing', async () => {
+        // The admin's reset committed between the guard's check and this write: the conditional update
+        // matches no row, so the admin's temporary password is NOT overwritten.
+        txUserUpdateMany.mockResolvedValue({ count: 0 });
+        const hash = await credentials.hash('old-pw-123');
+        const err = await service
+          .changePassword(
+            makeUser({ passwordHash: hash }) as never,
+            'old-pw-123',
+            'NewPass1!',
+            false,
+            { sessionId: SID },
+          )
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(UnauthorizedException);
+        expect((err as UnauthorizedException).getResponse()).toMatchObject({
+          code: 'SESSION_REVOKED',
+        });
+        expect(txTokDeleteMany).not.toHaveBeenCalled();
+        expect(historyRecord).not.toHaveBeenCalled();
+        expect(txSessionDeleteMany).not.toHaveBeenCalled();
+        expect(txSessionUpdateMany).not.toHaveBeenCalled();
+        expect(txSessionCreate).not.toHaveBeenCalled();
       });
 
       it('opens a new row when the calling session was ended meanwhile', async () => {
@@ -308,7 +343,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'wrong-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
     });
 
@@ -320,7 +355,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         service.changePassword(user as never, 'Samepass1!', 'Samepass1!'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.$transaction as jest.Mock).not.toHaveBeenCalled();
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
     });
 
@@ -329,7 +364,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'anything', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
     });
 
     it('refuses a directory-only person', async () => {
@@ -346,7 +381,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'old-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
     });
   });
 

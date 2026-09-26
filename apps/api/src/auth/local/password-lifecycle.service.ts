@@ -164,9 +164,14 @@ export class PasswordLifecycleService {
     // lower epoch), so a compromised session dies the moment the real owner changes their password
     // (ADR-0086 §3 revocation); the token sweep does the same for any live emailed reset link (symmetry
     // with resetPassword, which invalidates siblings), so a change also closes that vector.
+    //
+    // The write is CONDITIONAL on the epoch the caller authenticated with (#1420 review): if anything
+    // bumped it since — an admin reset, a deactivation, a sign-out everywhere — this request's session is
+    // already revoked, and applying the change would silently overwrite that (e.g. an admin's temporary
+    // password). Zero rows → 401 `SESSION_REVOKED`, nothing written.
     return this.prisma.$transaction(async (tx) => {
-      const row = await tx.user.update({
-        where: { id: user.id },
+      const changed = await tx.user.updateMany({
+        where: { id: user.id, sessionEpoch: user.sessionEpoch },
         data: {
           passwordHash: newHash,
           passwordUpdatedAt: new Date(),
@@ -177,6 +182,15 @@ export class PasswordLifecycleService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (changed.count === 0) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'SESSION_REVOKED',
+          message:
+            'Your session was revoked while changing the password. Sign in again.',
+        });
+      }
+      const row = { id: user.id, sessionEpoch: user.sessionEpoch + 1 };
       // Any outstanding (unused) reset token is now stale — a self-service change supersedes it. Delete
       // rather than mark used: these rows are already GC-pruned, and a hard delete leaves nothing to leak.
       await tx.passwordResetToken.deleteMany({
@@ -203,6 +217,7 @@ export class PasswordLifecycleService {
           await this.sessions.carryOver(
             keepId,
             user.id,
+            user.sessionEpoch,
             row.sessionEpoch,
             minted.expiresAt,
             tx,
