@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { ChangePasswordForm } from "@/components/change-password-form";
 import { DetailPanel } from "@/components/detail-panel";
-import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
+import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 
 /**
  * Self-service "Change password" panel on `/profile` — local mode ONLY (ADR-0086 §F4b). Gated on
@@ -14,7 +14,7 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
  */
 export function ChangePasswordPanel() {
   const t = useTranslations("auth.changePassword");
-  const { data: status } = useConfigStatus();
+  const { data: status } = useClientOnlyConfigStatus();
 
   if (status?.authMode !== "local") return null;
 

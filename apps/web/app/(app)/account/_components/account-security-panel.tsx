@@ -7,7 +7,7 @@ import { useSecretSession } from "@/app/(app)/secrets/_components/secret-session
 import { DetailPanel } from "@/components/detail-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
+import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import { passwordOwner } from "../_lib/account-sections";
 
@@ -25,7 +25,7 @@ import { passwordOwner } from "../_lib/account-sections";
  */
 export function AccountSecurityPanel() {
   const t = useTranslations("account.hub.security");
-  const { data: status, isPending } = useConfigStatus();
+  const { data: status, isPending } = useClientOnlyConfigStatus();
   const { lock } = useSecretSession();
   const [signingOut, startSignOut] = useTransition();
   const owner = passwordOwner(status?.authMode);

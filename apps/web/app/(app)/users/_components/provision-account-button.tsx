@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
+import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useProvisionUserAccount } from "@/lib/api/hooks/use-user-mutations";
 import { classifyProvisionError } from "./provision-account-error";
 import { ProvisionLocalAccountButton } from "./provision-local-account-button";
@@ -45,7 +45,7 @@ const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = "@directory.local";
 export function ProvisionAccountButton({ user }: { user: User }) {
   const t = useTranslations("users");
   const provision = useProvisionUserAccount();
-  const configStatus = useConfigStatus();
+  const configStatus = useClientOnlyConfigStatus();
   // The inline 400 message (server says this person can't be promoted as-is — the real cause, #1048).
   const [inlineError, setInlineError] = useState<string | null>(null);
 
