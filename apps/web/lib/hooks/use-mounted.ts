@@ -12,10 +12,14 @@ const emptySubscribe = () => () => {};
  * stays lint-clean under the React Compiler rules (mirrors {@link useLocalStorage}'s `mounted`).
  *
  * Use it to gate anything the SERVER could not know — chiefly a value read from a client-only React
- * Query cache that may be WARM on the client but is always cold on the server (permissions,
- * `/users/me`, `/config/status`). Gating such a value on `mounted` keeps the server HTML and the first
- * client render tree identical (no hydration mismatch), then reveals the real value on the next
- * (post-hydration) render.
+ * Query cache that may be WARM on the client but is always cold on the server. Gating such a value on
+ * `mounted` keeps the server HTML and the first client render tree identical (no hydration mismatch),
+ * then reveals the real value on the next (post-hydration) render.
+ *
+ * The caller's own `/users/me` and `/config/my-permissions` are already gated at the source (their
+ * hooks go through `useClientOnlyQuery`, #1448), so `usePermissions` / `useMyPermissions` / `useCan`
+ * need no extra `mounted` check. `/config/status` is prefetched on `/settings/instance`, so its plain
+ * hook is not gated; elsewhere read it through `useClientOnlyConfigStatus`.
  */
 export function useMounted(): boolean {
   return useSyncExternalStore(
