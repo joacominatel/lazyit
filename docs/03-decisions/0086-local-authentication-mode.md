@@ -421,7 +421,8 @@ phone in the user's hand.
 
 - **Sign-in** (`POST /auth/login`) picks a session id, signs the token with it as a new, optional, signed
   `sid` claim, and records the row (user agent, IP, epoch, remember-me, the token's expiry). If the row
-  cannot be written, no token is handed out.
+  cannot be written, no token is handed out. In the same step the user's least recently active rows
+  beyond **50** are deleted — a bound on a table every sign-in grows (the evicted devices sign in again).
 - **The guard**, for a token **with** a `sid`, additionally requires its row to exist for that user and
   epoch and not to have expired — one primary-key read per request, deliberately **uncached** so ending a
   session is immediate on every replica. `lastSeenAt` is refreshed at most once every 5 minutes per session
@@ -437,10 +438,17 @@ phone in the user's hand.
   session, an unknown, malformed, stale or already-ended id — is one indistinguishable `404`.
 - **"Sign out everywhere" is unchanged in meaning.** `POST /auth/logout` still bumps `sessionEpoch` and now
   also deletes every session row, in one transaction. Password change keeps the calling device's row (same
-  `sid`, moved to the new epoch) and deletes the others; password reset deletes them all.
+  `sid`, moved to the new epoch — only if the row is still at the caller's epoch) and deletes the others;
+  password reset deletes them all.
+- **Password change is conditional on the caller's epoch.** Its write only applies while `sessionEpoch`
+  is still the one the request authenticated with. If a concurrent lever bumped it first (an admin reset,
+  a deactivation, a sign-out everywhere) the change is refused with `401 { code: "SESSION_REVOKED" }` and
+  nothing is written — so it can never overwrite an admin's temporary password or revive a revoked
+  session. (The race predates #1420; the session row made it worth closing.)
 - **Every other epoch bump** (admin reset, deactivation, offboarding, the directory sync, the recovery CLI)
   needs no change: the row's `epoch` snapshot no longer matches, so it drops out of the list at once and the
-  hourly `UserSessionSweeper` purges it, together with expired rows. Session rows are protocol state and
+  hourly `UserSessionSweeper` purges it, together with expired rows and remember-me rows unused for
+  **400 days** (the web cookie's own ceiling, §8). Session rows are protocol state and
   hard-deleted (the `PasswordResetToken` / OAuth token precedent); the audit record is the history row.
 - **Not sessions:** personal MCP tokens, OAuth grants and service-account tokens are not listed or ended
   here, and signing out still leaves MCP connections alive ([[0097-ai-assistant-mcp-and-headless-api]]
@@ -463,10 +471,21 @@ identity. An in-flight AI run keeps the principal snapshot it started with (dele
 epoch, not the session row), so ending one session does not interrupt a run already under way; "sign out
 everywhere" does.
 
+**Ending one session is not full containment.** It ends that device's web session only. For a lost or
+stolen device the complete answer is **changing the password**: that bumps both `sessionEpoch` and
+`mcpCredentialEpoch`, so it also ends every other session and every OAuth connection and personal MCP
+token (ADR-0097 decision 8). The Manual says so next to the session list.
+
 **Upgrade-safety.** An additive migration: a new, empty `user_sessions` table (FK to `users`, cascade), one
 appended enum value (`SESSION_ENDED`) and the `recent_activity` view re-created with one extra summary
 branch. No existing row is touched and nobody is signed out. Rolling the API back leaves `sid` as a claim
 the older verifier ignores, so new tokens keep working under the epoch-only check.
+
+**Rollback caveat.** Ending one session only deletes its row. After a rollback to an API older than #1420
+the guard no longer reads the table, so a token whose session was ended individually is accepted again
+until its `exp` — never, for a remember-me token. After such a rollback, the users concerned should
+**sign out everywhere** (or an admin resets or deactivates them): an epoch bump ends every token on any
+version.
 
 ## Consequences
 

@@ -53,19 +53,25 @@ user's sessions from the list at once, without each of those code paths knowing 
 
 - **Opened** by `POST /auth/login` (and by `POST /auth/change-password` when the caller's token predates
   this table). The id is chosen, the token is signed with it, then the row is written; if the write fails
-  no token is handed out.
+  no token is handed out. In the same step the user's least recently active rows beyond **50** are
+  deleted.
 - **Kept across a password change** for the calling device: the row moves to the new epoch and expiry and
-  the re-minted token keeps the same `sid`. Every other row of the user is deleted in the same transaction.
+  the re-minted token keeps the same `sid` (only while it is still at the caller's epoch). Every other row
+  of the user is deleted in the same transaction. The change itself is conditional on the caller's epoch:
+  if a concurrent lever bumped it first, it is refused with `401 SESSION_REVOKED` and nothing is written.
 - **Ended** by `DELETE /auth/sessions/:id` (one row, audited `SESSION_ENDED` with `{ sessionId, current }`),
   by `POST /auth/logout` (every row, with the epoch bump) and by a password reset (every row).
-- **Purged** hourly by `UserSessionSweeper`: rows past `expiresAt`, and rows whose `epoch` no longer
-  matches their user's `sessionEpoch`. A remember-me row stays until it is ended or goes stale.
+- **Purged** hourly by `UserSessionSweeper`: rows past `expiresAt`, rows whose `epoch` no longer matches
+  their user's `sessionEpoch`, and remember-me rows not seen for 400 days.
 
 ## Rules
 
 - **Self-service only.** A user lists and ends their own sessions; another user's session id is a `404`,
   indistinguishable from an unknown one. An admin ends another user's sessions through the existing levers
   (deactivate, offboard, admin password reset with *revoke sessions*), all of which bump the epoch.
+- **Not full containment.** Ending a session signs that device out of the web only. For a lost or stolen
+  device, changing the password is the complete answer: it also ends every OAuth connection and personal
+  MCP token.
 - **Not a session:** personal MCP tokens, OAuth grants and service-account tokens. They have their own
   lifecycle ([[oauth-grant]], [[service-account]]) and are neither listed here nor ended by it
   ([[0097-ai-assistant-mcp-and-headless-api]] decision 8).
@@ -77,4 +83,6 @@ check for them, so nobody is signed out by the deploy (CEO decision, 2026-09-26)
 individually; when the caller's own token is one, `GET /auth/sessions` says so with `currentIsLegacy`, and
 the UI shows one synthetic "signed in before the update" entry. They end at their `exp` or on any epoch
 bump — "sign out everywhere" included. Rolling the API back leaves `sid` as an unknown claim the older
-verifier ignores; the table is simply unused.
+verifier ignores; the table is simply unused. **Rollback caveat:** a session ended individually only lost
+its row, so after a rollback to a pre-#1420 API its token works again until `exp` (never, for remember-me);
+after a rollback, affected users should sign out everywhere.

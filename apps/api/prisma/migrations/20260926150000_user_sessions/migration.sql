@@ -17,6 +17,10 @@
 --   * The view keeps its exact column list, order and names — only one summary branch is added.
 --   * Rolling the API back: the older guard ignores the unknown `sid` claim, so new tokens keep working
 --     under the epoch-only check; the table is simply unused.
+--   * ROLLBACK CAVEAT: ending ONE session only deletes its row. After a rollback to a pre-#1420 API those
+--     tokens are accepted again (the old guard never reads this table) until their `exp` — or forever for
+--     a remember-me token. After a rollback, have affected users "sign out everywhere" (or change their
+--     password / have an admin reset or deactivate them): an epoch bump ends every token on any version.
 
 -- AlterEnum
 ALTER TYPE "UserHistoryEventType" ADD VALUE 'SESSION_ENDED';
