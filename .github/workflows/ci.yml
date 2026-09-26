@@ -165,6 +165,16 @@ jobs:
       - name: Test Caddy routing
         run: sh infra/test/caddy-routing.sh
 
+      # infra/start.sh secret handling (ADR-0047, ADR-0087), offline through the script's own test
+      # seams — no Docker, no real .env.prod. --reconfigure preserves every secret byte-for-byte; an
+      # existing-install run appends only the allowlisted, safely generatable keys a release added
+      # (backup first, existing lines untouched, mode 600, idempotent) and never generates any other.
+      # Only needs openssl, preinstalled on the ubuntu-latest runner.
+      - name: Test start.sh secret handling
+        run: |
+          sh infra/test/reconfigure-preserves-secrets.sh
+          sh infra/test/start-adds-missing-keys.sh
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
