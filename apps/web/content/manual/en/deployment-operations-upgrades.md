@@ -103,6 +103,18 @@ versions for reproducible deploys. They move only on a deliberate bump. Before b
 provider in particular, back up its database **and** keep the matching master key, since its data is
 tied to that key.
 
+The **search engine** is the exception that needs no preparation. Its data only opens on the exact
+engine version that wrote it, so each search-engine upgrade starts on a **new** data volume and lazyit
+rebuilds the search index from your database automatically when it starts. There is nothing to run:
+expect search results to be **incomplete for a few minutes** after such an upgrade, then complete.
+Everything else — sign-in, records, the health check the update script waits on — is unaffected. The
+previous search volume is left in place (a rollback to the earlier version uses it) and the startup
+script prints the exact command to remove it once you no longer need it, for example:
+
+```
+docker volume rm lazyit-prod_meili_data
+```
+
 ## Related
 
 - [Self-hosting](/help/deployment-operations-self-hosting)
