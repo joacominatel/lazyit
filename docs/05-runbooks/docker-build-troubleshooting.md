@@ -55,11 +55,14 @@ stops emitting standalone, confirm `output: 'standalone'` is still set.
 `NEXT_PUBLIC_API_URL` is baked at **build** time (default `/api`, a build ARG). To point the web
 app elsewhere, rebuild with `--build-arg NEXT_PUBLIC_API_URL=…` — it cannot be changed at runtime.
 
-The workspace install and `@lazyit/shared` build use the pinned Bun 1.3.14 tooling stage, but the
+The workspace install and `@lazyit/shared` build use the pinned Bun 1.4.2 tooling stage, but the
 Dockerfile copies that workspace into a `node:26-trixie-slim` stage and invokes the Next.js CLI with
 `node`. Do not replace that command with `bun run --filter @lazyit/web build`: with Next.js 16.3,
-Bun can finish route generation and then crash during process teardown with `SIGILL` / exit 132.
-The failure is in the build runtime, not in route generation or the standalone output.
+Bun 1.3.14 could finish route generation and then crash during process teardown with `SIGILL` /
+exit 132. The failure was in the build runtime, not in route generation or the standalone output.
+It no longer reproduces on Bun 1.4.2 (3/3 clean builds), but the web build stays on Node by design
+([[0025-containerization-strategy]]); if you see exit 132 from a web build, check that it is not
+running the Next.js CLI under Bun.
 
 ## API exits immediately: `DATABASE_URL is not set`
 
@@ -149,7 +152,7 @@ Two causes, and they need different answers:
 
 1. **A manifest changed without the lockfile.** Someone edited a `package.json` and did not commit
    the regenerated `bun.lock`. Fix it in the repository: run `bun install` with the pinned Bun
-   (`1.3.14`) and commit `bun.lock` in the same change.
+   (`1.4.2`) and commit `bun.lock` in the same change.
 2. **A manifest uses a dist-tag or an open range.** `"latest"` and `"*"` are not semver ranges, so
    Bun re-resolves them against the registry on every install. The moment upstream publishes, a
    lockfile that nobody touched is out of date and every build breaks — including an operator's

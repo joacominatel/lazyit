@@ -47,23 +47,23 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
   [[stack]]). With the bundled IdP, a **Zitadel** server + DB + one-shot bootstrap sidecar also run
   ([[auth-zitadel-sot]]).
-- **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.3.14, and
+- **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.4.2, and
   application runtimes on Node (`node:26-alpine`). The API compiles in its Bun builder and runs
   `node dist/src/main`; the web runs `next build` under a real Node 26 Debian build stage and serves
   the resulting standalone bundle on Node. The migrate job runs on Bun (the seed needs it). Details:
   [[0025-containerization-strategy]].
-- **Reporting-agent binaries:** the API image bakes the Bun-compiled Linux collector
-  (`apps/agent`, `x64` + `x64-baseline` + `arm64`) into `AGENT_BIN_DIR` (`/app/agent/bin`) via an
-  extra build stage, and serves the right one over the token-gated `GET /api/agent/download`; the
-  public `install.sh` (web `/public`) installs it as a systemd timer. `x64-baseline` is the pre-AVX2
-  build, picked automatically by the installer from `/proc/cpuinfo` — the ordinary `x64` target
-  assumes AVX2 (Haswell, 2013) and SIGILLs on older or EVC-masked hosts. Each artifact ships a
-  `.sha256` beside it, published by `GET /api/agent/checksum` and verified by the installer (an
-  integrity check, not a signature). The agent embeds the Bun runtime, so it has a glibc/kernel floor
-  on the target host; rather than hardcode a version, `install.sh` **runs the binary once** before it
-  arms a timer and refuses if the host cannot start it. (Measured on Bun 1.3.14: the artifacts link
-  no symbol newer than `GLIBC_2.17`.) Same-origin, version-locked, air-gapped-safe — no GitHub
-  Release. → [[0074-server-reporting-agent]] §6.
+- **Reporting-agent binaries:** the API image bakes the Bun-compiled Linux collector (`apps/agent`,
+  `x64` + `x64-baseline` + `arm64`) into `AGENT_BIN_DIR` (`/app/agent/bin`) via an extra build
+  stage, and serves the right one over the token-gated `GET /api/agent/download`; the public
+  `install.sh` (web `/public`) installs it as a systemd timer. `x64-baseline` is the pre-AVX2 build,
+  picked automatically by the installer from `/proc/cpuinfo` — the ordinary `x64` target assumes
+  AVX2 (Haswell, 2013) and SIGILLs on older or EVC-masked hosts. Each artifact ships a `.sha256`
+  beside it, published by `GET /api/agent/checksum` and verified by the installer (an integrity
+  check, not a signature). The agent embeds the Bun runtime, so it has a glibc/kernel floor on the
+  target host; rather than hardcode a version, `install.sh` **runs the binary once** before it arms
+  a timer and refuses if the host cannot start it. (Measured on Bun 1.3.14 and again on 1.4.2: the
+  artifacts link no symbol newer than `GLIBC_2.17`.) Same-origin, version-locked, air-gapped-safe —
+  no GitHub Release. → [[0074-server-reporting-agent]] §6.
 - **Reverse proxy / TLS:** **Caddy**, with a **network/TLS mode chosen at install** (three, orthogonal
   to `AUTH_MODE` — [[0087-plain-http-lan-deployment-axis]]):
   - **`lan`** — `LAZYIT_SITE_ADDRESS=:80` (port-only) → Caddy serves **plain HTTP for any Host**, no TLS,

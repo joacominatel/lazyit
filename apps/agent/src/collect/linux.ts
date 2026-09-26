@@ -61,10 +61,10 @@ async function readText(path: string): Promise<string | null> {
  * Does a REGULAR FILE exist at this path? Used to tell a physical NIC from a virtual one, where both
  * probed paths (`/sys/class/net/<n>/type`, `.../device/uevent`) are ordinary sysfs files.
  *
- * REGULAR FILE is the whole caveat, and it is not obvious: `Bun.file(path).exists()` resolves `false`
- * for anything that is not a file — a directory, a device, and (verified on Bun 1.3.14) a unix SOCKET.
- * `collectContainers` gated on this helper and was therefore dead on every host on earth; it now
- * `stat`s the path itself. Do not reach for this function to test a non-file.
+ * REGULAR FILE is the whole caveat, and it is not obvious: `Bun.file(path).exists()` resolves
+ * `false` for anything that is not a file — a directory, a device, and (verified on Bun 1.3.14 and
+ * 1.4.2) a unix SOCKET. `collectContainers` gated on this helper and was therefore dead on every
+ * host on earth; it now `stat`s the path itself. Do not reach for this function to test a non-file.
  */
 async function exists(path: string): Promise<boolean> {
   try {
@@ -419,11 +419,11 @@ export async function collectContainers(
   socket = DOCKER_SOCKET,
 ): Promise<Host["containers"]> {
   // `stat`, NOT `Bun.file().exists()` — the latter is a REGULAR-FILE check and answers `false` for a
-  // unix socket (verified on Bun 1.3.14), which silently disabled this entire collector on every
-  // host. `node:fs/promises` is the exception the repo's Bun-first rule leaves room for: Bun exposes
-  // no API that can tell a socket from a missing path. The ASYNC form, because `collectHost` fires
-  // every collector concurrently and the sync one would park the whole event loop on a filesystem
-  // call — the pathological-host failure mode #1133 exists to prevent.
+  // unix socket (verified on Bun 1.3.14 and 1.4.2), which silently disabled this entire collector
+  // on every host. `node:fs/promises` is the exception the repo's Bun-first rule leaves room for:
+  // Bun exposes no API that can tell a socket from a missing path. The ASYNC form, because
+  // `collectHost` fires every collector concurrently and the sync one would park the whole event
+  // loop on a filesystem call — the pathological-host failure mode #1133 exists to prevent.
   //
   // A throw here is the overwhelmingly common "this box does not run containers" case (ENOENT) or an
   // unsearchable parent, and so is a path holding something that is not a socket. All are SILENT:

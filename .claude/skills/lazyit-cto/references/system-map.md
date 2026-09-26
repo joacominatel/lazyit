@@ -16,7 +16,7 @@ This file is structured for **scanning, not reading end-to-end**. The CTO opens 
 
 ## High-level shape
 
-> **Monorepo**: Bun `1.3.14` workspaces + Turborepo `^2.9`
+> **Monorepo**: Bun `1.4.2` workspaces + Turborepo `^2.9`
 > **Apps**: `apps/api` (NestJS `11.0.1`), `apps/web` (Next.js `16.2.12` + React `19.2.8`), **`apps/agent`** (the self-installing Linux reporting agent — ADR-0074)
 > **Shared**: `packages/shared` (zod schemas, types, utilities) + **`packages/fetch-cli`** (headless SA secret-retrieval CLI + client-side decrypt — ADR-0080)
 > **Infra**: consolidated root `compose.yaml` (canonical, all services) + committed `compose.override.yaml` (dev tuning) + a `prod` profile + a thin `infra/docker-compose.prod.yaml` overlay; Caddy, env templates, Dockerfiles, bootstrap scripts. **Now also `valkey`** (Redis-compatible; backs BullMQ — ADR-0053).
@@ -33,7 +33,7 @@ Ports: Web → `:3000` · API → `:3001` · Postgres → `:5432` (loopback) · 
 
 ### Framework and runtime
 
-- NestJS `11.0.1` application, runs on Node 24/26 in CI/prod
+- NestJS `11.0.1` application, runs on Node 26 in CI/prod
 - Entry point: `apps/api/src/main.ts`
 - Module registry: `apps/api/src/app.module.ts`
 - Runs under Node at runtime (Bun is for build/tooling only — ADR-0009)
@@ -427,7 +427,7 @@ The old root `docker-compose.yml` and `infra/docker-compose.prod.yml` are **gone
   - **verify**: typecheck (shared, api, web) → lint [non-blocking] → test API (Node/Jest) + shared (bun test) → build all
   - **docker**: build all three images (no push) — needs `verify`
 - Lint is `continue-on-error: true` — **non-blocking** (pre-existing ~168 warnings; known debt)
-- Node 24 set up alongside Bun for Jest (jest@30 can't run under Bun's runtime — local-node-for-jest)
+- Node 26 set up alongside Bun for Jest (jest@30 can't run under Bun's runtime — local-node-for-jest)
 
 ---
 

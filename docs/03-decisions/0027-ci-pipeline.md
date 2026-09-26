@@ -23,7 +23,7 @@ customer), so CD is premature.
 
 Repo facts that shape the pipeline:
 
-- **Bun** is the pinned package manager (`bun@1.3.14`); install should be cached on `bun.lock`.
+- **Bun** is the pinned package manager (`bun@1.4.2`); install should be cached on `bun.lock`.
 - The API unit specs **mock the generated Prisma client** (`jest.mock('../../generated/prisma/client')`)
   → **no database is needed in CI**. But the generated client must **exist** for compilation, so
   `prisma generate` must run **before** typecheck/test ([[0012-testing-strategy]]).
@@ -44,7 +44,7 @@ Repo facts that shape the pipeline:
 `.github/workflows/ci.yml`, triggered on `pull_request` and `push` to `master` and `dev`:
 
 - **Job `verify`** (ordered): checkout (`fetch-depth: 0`, for the diff-lint merge-base) →
-  setup-bun `1.3.14` → cache `~/.bun/install/cache` (key on `bun.lock`) →
+  setup-bun `1.4.2` → cache `~/.bun/install/cache` (key on `bun.lock`) →
   `bun install --frozen-lockfile` → build `@lazyit/shared` → **`prisma generate`** (in `apps/api`)
   → typecheck (`tsc --noEmit` per workspace) → **lint** (see below) → test (api Jest, no DB; shared
   `bun test`) → `turbo build` → **API boot smoke** (see below).
