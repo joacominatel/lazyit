@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -504,10 +504,11 @@ precedent); the ledgers are never pruned. Downgrading leaves inert tables.
 
 ---
 
-## 7. Invariants (proposed)
+## 7. Invariants (binding since 2026-09-26 — [[INVARIANTS]])
 
-The security note's INV-AI-n, merged with the MCP note's INV-MCP-n. They join
-[[INVARIANTS]] **only when ADR-0097 is accepted** (wave 4).
+The security note's INV-AI-n, merged with the MCP note's INV-MCP-n. **They joined [[INVARIANTS]] on
+2026-09-26 (W4-4)** together with INV-AI-15…17 ([[ai-assistant/security|security]] §6.9), each with its
+enforcement point and test; [[INVARIANTS]] is now the binding text and this list the design summary.
 
 - **INV-AI-1 — One real principal, exactly its authority** *(absorbs INV-MCP-2)*. The AI acts as the
   invoking human (chat, MCP) or Service Account (headless), never as a synthetic, system or engine

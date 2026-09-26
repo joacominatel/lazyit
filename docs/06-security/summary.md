@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Security summary
@@ -118,6 +118,13 @@ Snapshot of the security review. Updated each sweep. Method:
    in a node label loaded a remote image for every reader (a tracking pixel; strict mode still stripped
    script). **✅ Closed the same day**: the root `htmlLabels: false`, listed in `secure` so a diagram's
    directive or front matter cannot re-enable it.
+
+13. **2026-09-26 — AI invariants join [[INVARIANTS]] (epic #1315, W4-4).** Not a sweep: INV-AI-1…17
+   (with INV-MCP-1…7 mapped onto them) became binding invariants with their enforcement points and tests,
+   re-verified against `dev` at 23038bae after the SEC-080…083 fixes, #1428, #1432/#1439 and #1435. All
+   seventeen hold; no new finding. One test gap is recorded, not filed: the `ai_action_log` append-only
+   trigger (INV-AI-10) is pinned only by application-level tests, since the Jest suite runs without
+   Postgres.
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11

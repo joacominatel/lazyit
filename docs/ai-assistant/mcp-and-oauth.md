@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -687,7 +687,7 @@ domain data — `PasswordResetToken` precedent); grants are soft-deleted.
 ## 7. Security notes
 
 Candidate invariants. They are merged into the INV-AI-n set in [[ai-assistant/_synthesis|the synthesis]] §7 and
-are added to [[INVARIANTS]] only when ADR-0097 is accepted:
+joined [[INVARIANTS]] on 2026-09-26 (W4-4), where the INV-MCP → INV-AI mapping is kept:
 
 - **INV-MCP-1** OAuth/MCP tokens are opaque, CSPRNG 256-bit, SHA-256-hashed at rest, shown once, never logged,
   verified DB-first; accepted **only** on `/mcp`. Session JWTs are never accepted on `/mcp`, and MCP tokens are

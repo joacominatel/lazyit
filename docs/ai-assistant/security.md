@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # AI Assistant — Security & Threat Model
@@ -797,7 +797,7 @@ Open items recorded by the G2 review of #1354 (W2-14):
   grant whose grantee is offboarded or that is revoked, so the card is refused even when the caller
   lacks `user:read` (the tool's own `GET /users/:id` check stays as a second layer).
 
-**Proposed invariants** (join §7 on the W4-2 security re-review):
+**Invariants** (proposed here; binding in [[INVARIANTS]] since 2026-09-26, W4-4):
 - **INV-AI-15 — No unattended outbound integration.** A workflow, a workflow version or a workflow
   connection is created, changed or enabled by the AI only through a chat approval by a human; no
   Service Account and no MCP client does it.
