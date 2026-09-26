@@ -179,6 +179,9 @@ model User {
   // delete of a user drops their tokens; a soft-delete (deletedAt) leaves them but the reset flow re-loads
   // the user on the LIVE-filtered client, so a soft-deleted user can never complete a reset regardless.
   passwordResetTokens PasswordResetToken[] @relation("PasswordResetTokens")
+  // Per-device local sessions (issue #1420, ADR-0086 §9): one row per signed-in browser. Cascade — a
+  // session record is protocol state, meaningless without its user.
+  userSessions        UserSession[]        @relation("UserSessions")
 
   // Consumable stock movements this user performed (ConsumableMovement.performedById). SetNull.
   consumableMovements ConsumableMovement[] @relation("ConsumableMovementActor")
@@ -1154,6 +1157,9 @@ enum UserHistoryEventType {
   // appends), so the DB enum order matches this declaration.
   DEACTIVATED
   REACTIVATED
+  // The user ended ONE local session from the per-device list (issue #1420, ADR-0086 §9). Payload
+  // `{ sessionId, current }`. Appended at the tail, like the activation pair.
+  SESSION_ENDED
 }
 
 /// A single-use, short-TTL local-mode password-reset token (ADR-0086 §F4 / SECURITY GAP #7). Created by
@@ -1185,6 +1191,43 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+/// A per-device LOCAL session (issue #1420, ADR-0086 §9): one row per sign-in in AUTH_MODE=local. The token
+/// minted at sign-in carries this row's id as its `sid` claim, and the guard refuses a `sid` whose row is
+/// gone, belongs to another user, carries another epoch or has expired — so deleting a row ends exactly that
+/// device. Protocol state, not domain data (the PasswordResetToken / OAuthToken precedent): ending a session
+/// HARD-deletes its row, and `UserSessionSweeper` purges expired rows and rows left behind by a
+/// `sessionEpoch` bump. The audit trail is the `SESSION_ENDED` UserHistory row, not this table.
+/// Tokens issued before this table existed carry no `sid` and have no row: they keep the epoch-only check.
+/// See docs/02-domain/entities/user-session.md
+model UserSession {
+  // uuid: the id is exposed on the wire (GET /auth/sessions, DELETE /auth/sessions/:id) and in the token.
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
+  // The user's `sessionEpoch` when the session was minted. A later bump (sign out everywhere, password
+  // change, admin reset, deactivation, offboarding, directory offboard) kills the token by the epoch check;
+  // this snapshot lets the list hide — and the sweeper purge — the rows such a bump left behind without
+  // every bump site having to know about this table.
+  epoch      Int
+  // "Keep me signed in" (ADR-0086 §8): no time-based expiry, so `expiresAt` is null.
+  rememberMe Boolean   @default(false)
+  // The sign-in request's User-Agent, truncated to 512 characters. Browser/OS are parsed on read.
+  userAgent  String?
+  // The sign-in client IP as Express resolves it (`req.ip`, `trust proxy` — SEC-010). Never a raw
+  // X-Forwarded-For.
+  ip         String?
+  createdAt  DateTime  @default(now())
+  // Last authenticated request, written at most once per throttle window per session — never per request.
+  lastSeenAt DateTime  @default(now())
+  // The token's `exp`; null for a remember-me session.
+  expiresAt  DateTime?
+
+  // userId powers the per-user list and "sign out everywhere"; expiresAt powers the sweep.
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
 
 /// User-managed grouping for knowledge-base Articles, EVOLVED into a hierarchical Folder (ADR-0059
