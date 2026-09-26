@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { AccountPreferencesController } from './account-preferences.controller';
+import { UserPreferencesService } from './user-preferences.service';
 import { AssetAssignmentsModule } from '../asset-assignments/asset-assignments.module';
 import { AssetHistoryModule } from '../asset-history/asset-history.module';
 import { AccessGrantsModule } from '../access-grants/access-grants.module';
@@ -28,8 +30,9 @@ import { LocalAuthModule } from '../auth/local/local-auth.module';
     // rendering — reused rather than duplicated. No cycle: LocalAuthModule does not import UsersModule.
     LocalAuthModule,
   ],
-  controllers: [UsersController],
-  providers: [UsersService],
+  // Issue #1422: the caller's per-user language/theme (`/account/preferences`) lives with the User row.
+  controllers: [UsersController, AccountPreferencesController],
+  providers: [UsersService, UserPreferencesService],
   exports: [UsersService],
 })
 export class UsersModule {}

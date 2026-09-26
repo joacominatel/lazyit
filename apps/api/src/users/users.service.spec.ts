@@ -320,6 +320,9 @@ describe('UsersService', () => {
     await expect(service.create(dto)).resolves.toEqual({
       ...linked,
       manager: null,
+      // Issue #1422: the wire always carries the UI preferences (null = never chosen).
+      locale: null,
+      theme: null,
     });
     // ADR-0043: an omitted role defaults to VIEWER (least-privilege), set explicitly by the service.
     expect(user.create).toHaveBeenCalledWith({
@@ -422,6 +425,9 @@ describe('UsersService', () => {
     await expect(service.create(dto)).resolves.toEqual({
       ...created,
       manager: null,
+      // Issue #1422: the wire always carries the UI preferences (null = never chosen).
+      locale: null,
+      theme: null,
     });
     expect(user.update).not.toHaveBeenCalled();
     expect(user.delete).not.toHaveBeenCalled();
@@ -1326,6 +1332,89 @@ describe('UsersService', () => {
   });
 
   // ADR-0040 RBAC safety guards — last-admin protection + no self-role-change.
+  describe('updateOwnProfile — PATCH /users/me (issue #1421)', () => {
+    const SELF = {
+      id: 'self-1',
+      firstName: 'Old',
+      lastName: 'Name',
+      email: 'me@b.com',
+      role: 'VIEWER',
+      isActive: true,
+      externalId: null,
+      directoryOnly: false,
+      directorySource: null,
+      deletedAt: null,
+    };
+
+    it('renames the caller and records UPDATED { fields: [name] } with the caller as actor', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue({ ...SELF, firstName: 'New' });
+
+      await service.updateOwnProfile(SELF as never, { firstName: 'New' });
+
+      // Only the name keys reach the write — never role / email / activation.
+      expect(user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'self-1' },
+          data: { firstName: 'New' },
+        }),
+      );
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'self-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['name'] },
+        actor: { userId: 'self-1' },
+      });
+      expect(search.upsert).toHaveBeenCalled();
+    });
+
+    it('reads the CURRENT row, not the request snapshot, before deciding', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue(SELF);
+      await service.updateOwnProfile(SELF as never, { lastName: 'Name' });
+      expect(user.findFirst).toHaveBeenCalledWith({ where: { id: 'self-1' } });
+      // Resending the stored value is not a change: no history row.
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses (409 PROFILE_MANAGED_BY_DIRECTORY) a person the AD/LDAP sync owns', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directorySource: 'ad' });
+
+      const err = await service
+        .updateOwnProfile(SELF as never, { firstName: 'New' })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'PROFILE_MANAGED_BY_DIRECTORY' }),
+      );
+      expect(user.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses a directory-only person the same way', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directoryOnly: true });
+      await expect(
+        service.updateOwnProfile(SELF as never, { firstName: 'New' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('mirrors the new name to the IdP for a linked user, like an admin edit', async () => {
+      const linked = { ...SELF, externalId: 'sub-1' };
+      user.findFirst.mockResolvedValue(linked);
+      user.update.mockResolvedValue({ ...linked, lastName: 'Newer' });
+
+      await service.updateOwnProfile(linked as never, { lastName: 'Newer' });
+
+      expect(idp.updateUser).toHaveBeenCalledWith('sub-1', {
+        firstName: 'Old',
+        lastName: 'Newer',
+      });
+    });
+  });
+
   describe('role-change guards (ADR-0040)', () => {
     it('forbids a user from changing their OWN role (403)', async () => {
       user.findFirst.mockResolvedValue({
@@ -1593,6 +1682,37 @@ describe('UsersService', () => {
     });
   });
 
+  describe('serializeUser — UI preferences (issue #1422)', () => {
+    const ROW = {
+      id: 'u-1',
+      firstName: 'A',
+      lastName: 'B',
+      managerId: null,
+      managerName: null,
+    };
+
+    it('carries locale/theme, null when never chosen', async () => {
+      await expect(
+        service.serializeUser({ ...ROW, locale: null, theme: null } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: null, theme: null }),
+      );
+      await expect(
+        service.serializeUser({ ...ROW, locale: 'es', theme: 'dark' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: 'es', theme: 'dark' }),
+      );
+    });
+
+    it('reads an unknown stored value as null (tolerant read)', async () => {
+      await expect(
+        service.serializeUser({ ...ROW, locale: 'fr', theme: 'x' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: null, theme: null }),
+      );
+    });
+  });
+
   describe('findPage', () => {
     it('defaults to createdAt desc, scopes to live users, and returns the Page envelope', async () => {
       user.findMany.mockResolvedValue([{ id: 'u1' }]);
@@ -1614,7 +1734,14 @@ describe('UsersService', () => {
         // The list items are SERIALIZED (ADR-0058): each gains a resolved `manager` (null here) and the
         // #386 list-only activity counts (default 0 here — the groupBy mocks return no rows).
         items: [
-          { id: 'u1', manager: null, assetsInPossession: 0, appAccesses: 0 },
+          {
+            id: 'u1',
+            manager: null,
+            locale: null,
+            theme: null,
+            assetsInPossession: 0,
+            appAccesses: 0,
+          },
         ],
         total: 1,
         limit: 50,
@@ -1731,7 +1858,14 @@ describe('UsersService', () => {
         includeSoftDeleted: true,
       });
       expect(page.items).toEqual([
-        { id: 'gone', manager: null, assetsInPossession: 0, appAccesses: 0 },
+        {
+          id: 'gone',
+          manager: null,
+          locale: null,
+          theme: null,
+          assetsInPossession: 0,
+          appAccesses: 0,
+        },
       ]);
     });
 
@@ -1805,18 +1939,24 @@ describe('UsersService', () => {
           {
             id: 'u1',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 2,
             appAccesses: 3,
           },
           {
             id: 'u2',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 1,
             appAccesses: 0,
           },
           {
             id: 'u3',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 0,
             appAccesses: 1,
           },

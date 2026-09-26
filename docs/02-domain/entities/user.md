@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-09-26
 ---
 
 # User
@@ -138,6 +138,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
+| `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
+| `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
 | `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
@@ -237,6 +239,8 @@ absent = both, issue #1375), `GET /users/role-counts` (per-role LIVE counts `{ A
 literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
+`PATCH /users/me` (the caller edits **their own first and last name** — see the self-service note below),
+`GET` / `PUT /account/preferences` (the caller's language and theme — see the preferences note below),
 `GET /users/:id`, `POST /users`, `POST /users/:id/clone` (clone-with-chosen-actions —
 [[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
 `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
@@ -249,7 +253,8 @@ reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in 
 `user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
 nested reads below) are gated `@RequirePermission('user:read')` — ADMIN + MEMBER (a VIEWER gets 403;
 this is the pre-tightening). `GET /users/me` stays OPEN (the self-read the web gates its UI off; the
-OIDC token doesn't carry the lazyit role). Bodies validated against the
+OIDC token doesn't carry the lazyit role), and so does `PATCH /users/me` (a self-write of the caller's
+own name only). Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
@@ -267,6 +272,38 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > additive**: the single-user reads (`GET /users/:id`, `/me`, create/update) return the bare
 > `UserSchema` and DON'T carry them, so existing consumers are unaffected. The page envelope itself is
 > unchanged (ADR-0030 `Page<T>` — the counts ride on each row).
+
+> [!note] Self-service name edit — `PATCH /users/me` (issue #1421)
+> Any signed-in **human** — VIEWER included — may change **their own `firstName` and `lastName`, and
+> nothing else** (CEO decision). The body is `UpdateOwnProfileSchema` in `@lazyit/shared`: a strict
+> object with those two optional keys (at least one), same bounds as the admin edit; **any other key is
+> a 400**. Email, role, legajo, username, manager and activation stay on the ADMIN-only
+> `PATCH /users/:id` (`user:manage`). The subject is always the caller (the id comes from the
+> principal, never the body), so there is no cross-user write and no permission gate.
+> - **Directory-owned people are refused** with **409 `{ code: 'PROFILE_MANAGED_BY_DIRECTORY' }`**:
+>   when `directorySource` is set the AD/LDAP sync owns the name and would overwrite the edit on the next
+>   run ([[0091-on-prem-ad-ldap-directory-source]]). `UserSchema` now carries the optional
+>   `directorySource` so the web can disable the form instead of offering a request that always fails.
+>   (A `directoryOnly` person has no login and cannot reach the route; it is refused the same way.)
+> - **Service accounts are refused** (403 — fail-closed on an unannotated route, INV-SA-2, plus a
+>   handler backstop with `code: 'SERVICE_ACCOUNT_NOT_ALLOWED'`); a bot has no person record.
+> - It runs through the **same update path as the admin edit**: the name is mirrored to the bundled
+>   Zitadel with the 503-and-revert rule (INV-5), the search index is refreshed, and one
+>   **`UPDATED { fields: ['name'] }`** [[user-history]] row is written with the **caller as actor**.
+>   Resending the stored name is not a change and writes nothing. Under BYOI the name is local only
+>   (lazyit never writes to a foreign IdP), and a later sign-in does **not** overwrite it — the JIT
+>   path only refreshes a name that still looks like a seed placeholder ([[0038-jit-user-provisioning]]).
+
+> [!note] Per-user language and theme — `/account/preferences` (issue #1422)
+> The CEO chose **"the browser's value wins"**. `GET /account/preferences` returns `{ locale, theme }`
+> (`UserPreferencesSchema`); `PUT /account/preferences` takes either key (`UpdateUserPreferencesSchema`:
+> strict, at least one key; omitted = unchanged, `null` = back to never chosen). `GET /users/me` also
+> carries `locale` and `theme`. Self-only (the id is the principal's), any signed-in human, no
+> permission; service accounts get 403. **Precedence on the web:** the browser's own value (the
+> `NEXT_LOCALE` cookie, next-themes' `localStorage`) wins; the stored value is applied **only** in a
+> browser with no preference of its own; changing either in the UI also saves it here, so it follows the
+> user to other devices ([[0051-i18n-next-intl]] amendment). **No [[user-history]] row** — a display
+> preference is not a change to the person record (the same call as the email opt-outs, #879).
 
 > [!note] RBAC safety guards (ADR-0040, Round 3)
 > Changing a `role` is governed by two service-level guards. The API **refuses to remove the last

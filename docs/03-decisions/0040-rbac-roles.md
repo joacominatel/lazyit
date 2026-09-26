@@ -3,7 +3,7 @@ title: "ADR-0040: Minimal RBAC — ADMIN / MEMBER / VIEWER role on User"
 tags: [adr, auth, authz, rbac, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -173,6 +173,10 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   another, so a single admin can never quietly elevate/strip their own role. The controller passes
   the resolved actor id into `update(id, dto, actorId)` to enforce this; non-role edits (name,
   email, isActive) by yourself are unaffected.
+  *Amended 2026-09-26 (#1421):* a **non-admin** may now edit their own **first and last name only**,
+  through the separate self-service `PATCH /users/me` (strict body; every other key is a 400; refused
+  for a directory-synced person and for a service account). It never carries `role`, so it cannot
+  reach this guard or the last-admin guard. See [[user]] → *Self-service name edit*.
 - **Frontend** — `UserRoleSelect` (Users list cell + detail Profile panel) reads the caller via
   `GET /users/me`: a non-admin sees a read-only badge; an admin editing themselves sees a disabled
   badge; an admin editing someone else gets an ADMIN/MEMBER/VIEWER Select with a confirmation step.

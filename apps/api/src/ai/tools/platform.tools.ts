@@ -20,6 +20,7 @@ import { ServiceAccountKeypairController } from '../../secret-manager/service-ac
 import { VaultsController } from '../../secret-manager/vaults.controller';
 import { ServiceAccountsController } from '../../service-accounts/service-accounts.controller';
 import { NotificationPreferencesController } from '../../smtp/notification-preferences.controller';
+import { AccountPreferencesController } from '../../users/account-preferences.controller';
 import { SmtpController } from '../../smtp/smtp.controller';
 import { WorkflowSecretsController } from '../../workflow-engine/definitions/workflow-secrets.controller';
 import { PluginDistributionController } from '../../mcp/distribution/plugin-distribution.controller';
@@ -146,6 +147,11 @@ export const platformToolset: AiToolset = {
       UpdateController,
       ['getStatus', 'getSettings', 'updateSettings', 'enqueue', 'cancel'],
       'Deferred: instance update status is v1.1; update settings and triggering an update are elevated configuration, later.',
+    ),
+    unexposed(
+      AccountPreferencesController,
+      ['get', 'update'],
+      'Not in the v1 cut: the language and theme are set from the UI, where the browser value wins (#1422).',
     ),
     unexposed(
       NotificationPreferencesController,
