@@ -806,10 +806,10 @@ const assetModelUpdate = defineTool({
   name: 'asset_model_update',
   title: 'Update an asset model',
   description:
-    'Change an asset model (by id or exact name): rename it, correct its manufacturer or SKU, change ' +
-    'its description, file it under another asset category (by id or exact name; null removes its ' +
-    'category), or set / remove its default attributes (`specs`, merged). Every asset of the model ' +
-    'sees the change.',
+    'Change an asset model (by id or exact name): rename it, correct or clear its SKU (null clears ' +
+    'it), correct its manufacturer, change or clear its description (null clears it), file it under ' +
+    'another asset category (by id or exact name; null removes its category), or set / remove its ' +
+    'default attributes (`specs`, merged). Every asset of the model sees the change.',
   domain: 'reference',
   class: 'write',
   destructive: true,
@@ -817,8 +817,22 @@ const assetModelUpdate = defineTool({
     model: referenceString('The asset model: its id or exact name.'),
     name: z.string().trim().min(1).max(200).optional(),
     manufacturer: z.string().trim().min(1).max(200).optional(),
-    sku: z.string().trim().min(1).max(100).optional(),
-    description: z.string().trim().min(1).max(2000).optional(),
+    sku: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .nullable()
+      .optional()
+      .describe('The SKU, or null to clear it.'),
+    description: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2000)
+      .nullable()
+      .optional()
+      .describe('The description, or null to clear it.'),
     category: referenceString(
       'The asset category to file it under: its id or exact name.',
     )
@@ -876,6 +890,8 @@ const assetModelUpdate = defineTool({
         params: { id: resolved.id },
       }),
     );
+    // A `null` SKU or description is a before → none row; clearing one the model does not have is
+    // no change (`diff` skips null → null), so a lone one is a no-op.
     const changes = diff(current, MODEL_SCALARS, fields);
     const categoryBefore = async () =>
       current.categoryId

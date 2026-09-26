@@ -1044,7 +1044,8 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
   route replaces `specs` whole; `category: null` removes the model's category — the card shows the
   category before → "None (no category)", and clearing one the model does not have is no change; the
-  route takes `categoryId: null` since #1315, CEO 2026-09-25), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
+  route takes `categoryId: null` since #1315, CEO 2026-09-25; `sku: null` / `description: null` clear
+  those fields the same way — a before → none row, a no-op when already empty, #1441), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
   top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
   `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to
