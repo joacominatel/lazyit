@@ -778,6 +778,22 @@ load_existing_env() {
 }
 
 # =============================================================================
+# hint_legacy_meili_volume — PRINT-ONLY notice about the pre-v1.53 Meilisearch data volume (#1216).
+#   The Meilisearch server bump (ADR-0035 amendment 2026-09-26) moved search onto a NEW volume
+#   (<project>_meili_data_v1_53_2) because a Meilisearch database only opens on the engine version that
+#   wrote it; the API rebuilds the index from Postgres on boot. The old volume is left in place — it is
+#   what a rollback to an earlier tag uses. This NEVER deletes anything (red line): it only tells the
+#   operator the volume exists and the exact command to reclaim the space once they are done with it.
+# =============================================================================
+hint_legacy_meili_volume() {
+  [ "${LAZYIT_SKIP_DOCKER:-0}" = 1 ] && return 0
+  _old_meili="${1}_meili_data"
+  docker volume inspect "$_old_meili" >/dev/null 2>&1 || return 0
+  info "search: Meilisearch now runs on a new data volume (${1}_meili_data_v1_53_2); the API rebuilds the index from the database in the background, so search results may be incomplete for a few minutes."
+  info "search: the previous volume '$_old_meili' (Meilisearch v1.12) is no longer used. It is kept for a rollback to an earlier release; once you no longer need that, reclaim the space with:  docker volume rm $_old_meili"
+}
+
+# =============================================================================
 # bring_up — print the print-only manual steps, then run the canonical prod bring-up.
 # =============================================================================
 bring_up() {
@@ -1277,6 +1293,7 @@ EOF
     ZITADEL_ADMIN_PASSWORD=""   # never re-surface an existing admin password
     bring_up
     print_post_up_guidance
+    hint_legacy_meili_volume "$PROD_PROJECT"   # print-only (#1216) — never removes a volume
     exit 0
   fi
   ok "no existing install — proceeding to a fresh bootstrap"
