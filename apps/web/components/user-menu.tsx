@@ -24,8 +24,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LocaleSwitcher } from "@/components/locale-switcher";
+import { PreferenceAdoption } from "@/components/preference-adoption";
 import { avatarColorFor } from "@/lib/avatar-color";
 import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
+import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { signOutAndRevoke } from "@/lib/auth/sign-out";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,10 @@ import { cn } from "@/lib/utils";
  * `useCan('secret:read')` AND `isUnlocked`, so a holder who has an unlocked session can see the state
  * and `lock()` it from anywhere. It renders nothing otherwise. The UserMenu now sits inside the
  * `SecretManagerProvider` (hoisted in `(app)/layout.tsx`), so `useSecretSession()` is always available.
+ *
+ * Issue #1422: it also hosts {@link PreferenceAdoption}, which applies the user's saved language and
+ * theme to a browser with none of its own. It lives here because this is the one client component
+ * mounted once in the app shell, and the shell layout is a shared-critical file.
  */
 export function UserMenu() {
   const t = useTranslations("shared");
@@ -65,7 +71,11 @@ export function UserMenu() {
   const aiStatus = useAiStatus();
   const showAiConnections = canConnectAi && aiStatus.isSuccess;
 
-  const name = session?.user?.name ?? "—";
+  // Prefer the lazyit row (`GET /users/me`, already warm) so a self-edited name (#1421) shows at once;
+  // the sign-in token's name is the fallback until it loads.
+  const { data: me } = useCurrentUser();
+  const meName = me ? `${me.firstName} ${me.lastName}`.trim() : "";
+  const name = meName || session?.user?.name || "—";
   const email = session?.user?.email ?? "";
 
   // Initials: first character of each word in the name (max 2).
@@ -89,103 +99,106 @@ export function UserMenu() {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="rounded-full"
-          aria-label={t("chrome.openUserMenu")}
-        >
-          <Avatar className="size-8">
-            {/* Seed the current user's own chip from the same canonical palette so they read the
-                identity colour here that they wear on Users, asset owners and grants. Falls back to
-                the bare muted chip only when the session carries no email to seed from. */}
-            <AvatarFallback
-              className={cn("font-medium", email && avatarColorFor(email))}
-            >
-              {initials || "?"}
-            </AvatarFallback>
-          </Avatar>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium">{name}</span>
-            {email && (
-              <span className="text-xs text-muted-foreground">{email}</span>
-            )}
-            {role && (
-              <span className="mt-0.5">
-                <UserRoleBadge role={role} />
-              </span>
-            )}
-          </div>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {/* Account (#1404): the hub for everything scoped to the caller's own account — identity, the
-            per-user pages below, password & sessions, preferences. Any signed-in user; no gate. */}
-        <DropdownMenuItem asChild>
-          <Link href="/account">
-            <Cog6ToothIcon aria-hidden />
-            {t("chrome.account")}
-          </Link>
-        </DropdownMenuItem>
-        {/* My profile (#947): the self-service view of the caller's OWN assets + application access.
-            Any authenticated user (esp. a VIEWER) reaches it here — the admin `/users/[id]` 360 view is
-            gated on `user:read`. A real link so middle/modifier-click behave; navigates in-app. */}
-        <DropdownMenuItem asChild>
-          <Link href="/profile">
-            <UserCircleIcon aria-hidden />
-            {t("chrome.myProfile")}
-          </Link>
-        </DropdownMenuItem>
-        {/* Notification email preferences (#879): the self-service per-type EMAIL opt-out. Any
-            authenticated user reaches it here — self-scope, no permission gate. */}
-        <DropdownMenuItem asChild>
-          <Link href="/account/notifications">
-            <BellAlertIcon aria-hidden />
-            {t("chrome.notificationPreferences")}
-          </Link>
-        </DropdownMenuItem>
-        {showAiConnections ? (
+    <>
+      <PreferenceAdoption />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full"
+            aria-label={t("chrome.openUserMenu")}
+          >
+            <Avatar className="size-8">
+              {/* Seed the current user's own chip from the same canonical palette so they read the
+                  identity colour here that they wear on Users, asset owners and grants. Falls back to
+                  the bare muted chip only when the session carries no email to seed from. */}
+              <AvatarFallback
+                className={cn("font-medium", email && avatarColorFor(email))}
+              >
+                {initials || "?"}
+              </AvatarFallback>
+            </Avatar>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuLabel>
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">{name}</span>
+              {email && (
+                <span className="text-xs text-muted-foreground">{email}</span>
+              )}
+              {role && (
+                <span className="mt-0.5">
+                  <UserRoleBadge role={role} />
+                </span>
+              )}
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {/* Account (#1404): the hub for everything scoped to the caller's own account — identity, the
+              per-user pages below, password & sessions, preferences. Any signed-in user; no gate. */}
           <DropdownMenuItem asChild>
-            <Link href="/account/ai">
-              <PuzzlePieceIcon aria-hidden />
-              {t("chrome.aiAndConnectedApps")}
+            <Link href="/account">
+              <Cog6ToothIcon aria-hidden />
+              {t("chrome.account")}
             </Link>
           </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
-        <LocaleSwitcher />
-        <DropdownMenuSeparator />
-        {/* Help (#953): the in-app Manual was previously reachable only by guessing the `/help` URL —
-            this is the user-menu counterpart to the sidebar footer affordance. Opens in a new tab (a
-            real link, so middle/modifier-click behave) rather than navigating the caller away. */}
-        <DropdownMenuItem asChild>
-          <Link href="/help" target="_blank" rel="noopener noreferrer">
-            <QuestionMarkCircleIcon aria-hidden />
-            {t("chrome.help")}
-          </Link>
-        </DropdownMenuItem>
-        {/* SM-WEB-04: app-wide Secret Manager lock. Shown only to a `secret:read` holder whose session
-            is currently unlocked. Clicking locks the session (drops the in-memory key + DEK cache). */}
-        {showLock ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={lock}>
-              <LockOpenIcon className="text-pillar-knowledge" aria-hidden />
-              {ts("session.lockApp")}
+          {/* My profile (#947): the self-service view of the caller's OWN assets + application access.
+              Any authenticated user (esp. a VIEWER) reaches it here — the admin `/users/[id]` 360 view is
+              gated on `user:read`. A real link so middle/modifier-click behave; navigates in-app. */}
+          <DropdownMenuItem asChild>
+            <Link href="/profile">
+              <UserCircleIcon aria-hidden />
+              {t("chrome.myProfile")}
+            </Link>
+          </DropdownMenuItem>
+          {/* Notification email preferences (#879): the self-service per-type EMAIL opt-out. Any
+              authenticated user reaches it here — self-scope, no permission gate. */}
+          <DropdownMenuItem asChild>
+            <Link href="/account/notifications">
+              <BellAlertIcon aria-hidden />
+              {t("chrome.notificationPreferences")}
+            </Link>
+          </DropdownMenuItem>
+          {showAiConnections ? (
+            <DropdownMenuItem asChild>
+              <Link href="/account/ai">
+                <PuzzlePieceIcon aria-hidden />
+                {t("chrome.aiAndConnectedApps")}
+              </Link>
             </DropdownMenuItem>
-          </>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleSignOut}>
-          {t("chrome.signOut")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          ) : null}
+          <DropdownMenuSeparator />
+          {/* Locale switcher (ADR-0051): a Globe sub-menu with EN / ES. */}
+          <LocaleSwitcher />
+          <DropdownMenuSeparator />
+          {/* Help (#953): the in-app Manual was previously reachable only by guessing the `/help` URL —
+              this is the user-menu counterpart to the sidebar footer affordance. Opens in a new tab (a
+              real link, so middle/modifier-click behave) rather than navigating the caller away. */}
+          <DropdownMenuItem asChild>
+            <Link href="/help" target="_blank" rel="noopener noreferrer">
+              <QuestionMarkCircleIcon aria-hidden />
+              {t("chrome.help")}
+            </Link>
+          </DropdownMenuItem>
+          {/* SM-WEB-04: app-wide Secret Manager lock. Shown only to a `secret:read` holder whose session
+              is currently unlocked. Clicking locks the session (drops the in-memory key + DEK cache). */}
+          {showLock ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={lock}>
+                <LockOpenIcon className="text-pillar-knowledge" aria-hidden />
+                {ts("session.lockApp")}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleSignOut}>
+            {t("chrome.signOut")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   );
 }

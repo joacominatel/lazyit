@@ -1,4 +1,8 @@
-import type { NotificationType } from "@lazyit/shared";
+import type {
+  NotificationType,
+  UpdateUserPreferences,
+  UserPreferences,
+} from "@lazyit/shared";
 import { apiFetch } from "../client";
 
 /**
@@ -44,5 +48,19 @@ export function putNotificationPreferences(
   return apiFetch<NotificationPreferences>(BASE, {
     method: "PUT",
     body: { optedOutTypes },
+  });
+}
+
+/**
+ * Save the caller's language and/or theme (`PUT /account/preferences`, issue #1422). An omitted key is
+ * left unchanged and `null` clears it. Returns the stored `{ locale, theme }`. The browser's own value
+ * still wins on every device — see `lib/preferences/preference-sync.ts`.
+ */
+export function putUserPreferences(
+  patch: UpdateUserPreferences,
+): Promise<UserPreferences> {
+  return apiFetch<UserPreferences>("/account/preferences", {
+    method: "PUT",
+    body: patch,
   });
 }

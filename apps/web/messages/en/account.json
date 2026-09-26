@@ -59,11 +59,11 @@
       "title": "Preferences",
       "language": {
         "label": "Language",
-        "description": "Saved in this browser."
+        "description": "Saved in this browser and to your account, so a new browser starts with it."
       },
       "theme": {
         "label": "Theme",
-        "description": "Saved in this browser. System follows your device's setting.",
+        "description": "Saved in this browser and to your account. System follows your device's setting.",
         "system": "System",
         "light": "Light",
         "dark": "Dark"

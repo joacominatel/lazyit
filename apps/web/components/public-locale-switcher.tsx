@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { setLocale } from "@/i18n/actions";
 import { type Locale, localeLabels, locales } from "@/i18n/config";
+import { useSavePreference } from "@/lib/api/hooks/use-account-preferences";
+import { localePreferencePatch } from "@/lib/preferences/preference-sync";
 
 /**
  * Public locale switcher for the `(marketing)` chrome (ADR-0062 + ADR-0051). The existing
@@ -32,10 +34,13 @@ export function PublicLocaleSwitcher() {
   const activeLocale = useLocale();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const savePreference = useSavePreference();
 
   function onSelect(value: string) {
     const locale = value as Locale;
     if (locale === activeLocale) return;
+    // The cookie is this browser's value; also save it to the account (#1422), without waiting.
+    savePreference(localePreferencePatch(locale));
     startTransition(async () => {
       await setLocale(locale);
       router.refresh();
