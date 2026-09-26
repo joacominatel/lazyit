@@ -82,6 +82,7 @@ export function Providers({
   messages,
   now,
   session,
+  nonce,
 }: {
   children: React.ReactNode;
   /** Active locale (cookie-mode, ADR-0051) — resolved server-side in the root layout. */
@@ -104,6 +105,12 @@ export function Providers({
    * (issue #498, ADR-0039).
    */
   session: Session | null;
+  /**
+   * This request's CSP nonce (#1440, set by `proxy.ts`). next-themes renders an inline script that
+   * applies the theme class before paint; under the nonce-based `script-src` it only runs when it
+   * carries this nonce. `undefined` (a request the proxy did not match) renders it without one.
+   */
+  nonce?: string;
 }) {
   const queryClient = getQueryClient();
 
@@ -130,6 +137,7 @@ export function Providers({
             defaultTheme="system"
             enableSystem
             disableTransitionOnChange
+            nonce={nonce}
           >
             {children}
             <Toaster />

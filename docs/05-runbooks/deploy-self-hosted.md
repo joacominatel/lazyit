@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -532,6 +532,30 @@ trust Caddy's root, or the agent refuses the TLS connection before OAuth starts.
 > [[ai-mcp-client-matrix]] records which cells of this table were run end to end (2026-09-25: personal
 > tokens on `lan`, OAuth over an internal CA, Claude Code honoring `NODE_EXTRA_CA_CERTS`) and holds the
 > operator checklists for the rest — claude.ai on a public instance, Cursor, the Claude Code sign-in.
+
+## 8. Content-Security-Policy and your own reverse proxy
+
+The web app sends its own CSP on every page (#1440, [[content-security-policy]]): a per-request
+**nonce** for scripts, `img-src 'self' data: blob:`, `connect-src 'self'`, and the rest of the policy
+documented there. The bundled Caddy adds **no** CSP — nothing to configure for a standard deploy.
+
+- **Status.** The content policy ships as `Content-Security-Policy-Report-Only`: the browser logs what
+  it would block (`[Report Only]` in the developer console) and blocks nothing. Framing is enforced
+  separately (`Content-Security-Policy: frame-ancestors 'none'`, on every response). A console
+  message on your instance is worth reporting — it is what the switch to enforcing is waiting on.
+- **Check it.** `curl -sI https://<your-domain>/login | grep -i content-security` shows both headers;
+  the nonce changes on every request.
+- **Your own proxy (a load balancer, an ingress, a corporate gateway) in front of Caddy or instead of
+  it must not add a second `Content-Security-Policy`.** Browsers enforce every policy they receive,
+  and a static policy cannot know the per-request nonce, so it would block every page's scripts. If
+  policy requires a CSP at the edge, pass the app's headers through unchanged (and do not strip
+  `Content-Security-Policy-Report-Only`).
+- **Embedding external images (widening `img-src`): don't.** Refusing remote images is the point —
+  a remote image in rendered content is a tracking pixel that leaks each reader's IP (SEC-084). The
+  Markdown sanitizer drops external images anyway, so a wider `img-src` adds risk and no feature.
+  Upload the image as an attachment instead; attachments are served by lazyit itself.
+- **A split-origin build** (a custom image whose `NEXT_PUBLIC_API_URL` is an absolute URL rather than
+  the default `/api`) is covered: the policy adds that URL's origin to `connect-src` automatically.
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
 [[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·

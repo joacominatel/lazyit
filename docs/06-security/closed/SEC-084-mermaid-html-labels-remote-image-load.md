@@ -123,3 +123,7 @@ string), sequence (with `<br>`), class and state diagrams render correctly in bo
 None for labels. The web still has no content CSP (`img-src` is unrestricted), as tracked in
 `apps/web/next.config.ts`. A future render path that emits author HTML would load remote images again,
 so the CSP pass remains the defence-in-depth follow-up.
+
+> [!note] Follow-up landed (#1440)
+> The web now sends a content CSP with `img-src 'self' data: blob:` — see [[content-security-policy]].
+> It ships report-only first, so until it enforces a remote image would still load, but it is logged.
