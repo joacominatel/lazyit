@@ -20,6 +20,7 @@ import type {
   ManagerInput,
   PageQuery,
   PasswordResetCapabilities,
+  UpdateOwnProfile,
   UpdateUser,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
@@ -89,8 +90,7 @@ export type SerializedUserListItem = SerializedUser & {
  * null). `undefined` here means "leave both columns untouched" (an update that didn't mention manager).
  */
 type ManagerWrite =
-  | { managerId: string | null; managerName: string | null }
-  | undefined;
+  { managerId: string | null; managerName: string | null } | undefined;
 
 /** Optional filters for listing users. */
 export interface UserFilters {
@@ -1219,6 +1219,43 @@ export class UsersService {
 
     this.search.upsert('users', projectUser(user));
     return this.serializeUser(user);
+  }
+
+  /**
+   * SELF-SERVICE name edit — `PATCH /users/me` (issue #1421, CEO decision "only first and last name").
+   * The caller is the subject AND the actor; the id comes from the authenticated principal, never the
+   * body, so there is no cross-user write. `UpdateOwnProfileSchema` (strict) has already rejected every
+   * key but `firstName` / `lastName`, so email, role, legajo, username, manager and activation stay on
+   * the ADMIN-only `PATCH /users/:id`.
+   *
+   * Refused with 409 `PROFILE_MANAGED_BY_DIRECTORY` when the AD/LDAP sync owns the person
+   * (`directorySource` set, ADR-0091): the next sync would overwrite the name, so accepting it would be
+   * a change that silently reverts. A `directoryOnly` person has no login and cannot reach here, but is
+   * refused the same way for completeness.
+   *
+   * Everything else delegates to {@link update} with ONLY the name keys, so a self-edit gets exactly the
+   * admin edit's behaviour: the Zitadel write-back with the 503 revert (INV-5), the search re-index and
+   * the same `UPDATED { fields: ['name'] }` history row, attributed to the caller. No role / activation
+   * key is ever passed, so the RBAC and last-admin guards are untouched.
+   */
+  async updateOwnProfile(self: User, data: UpdateOwnProfile) {
+    const current = await this.findOne(self.id);
+    if (current.directorySource != null || current.directoryOnly) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PROFILE_MANAGED_BY_DIRECTORY',
+        message:
+          'Your name comes from the company directory, so it cannot be changed here. Ask an administrator to change it in the directory.',
+      });
+    }
+    return this.update(
+      self.id,
+      {
+        ...(data.firstName !== undefined ? { firstName: data.firstName } : {}),
+        ...(data.lastName !== undefined ? { lastName: data.lastName } : {}),
+      },
+      self.id,
+    );
   }
 
   /**

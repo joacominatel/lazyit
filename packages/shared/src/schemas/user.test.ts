@@ -6,6 +6,7 @@ import {
   RoleSchema,
   RoleSourceSchema,
   TempPasswordSchema,
+  UpdateOwnProfileSchema,
   UpdateUserSchema,
   UserSchema,
 } from "./user";
@@ -404,5 +405,37 @@ describe("CreateDirectoryPersonSchema (SEC-006 + identity guarantee, CEO Q5)", (
     const parsed = CreateDirectoryPersonSchema.safeParse({ name: "Ivan", email: "  Bob@X.COM " });
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.email).toBe("bob@x.com");
+  });
+});
+
+// Issue #1421 — the self-service name edit accepts ONLY firstName/lastName.
+describe("UpdateOwnProfileSchema (#1421)", () => {
+  test("accepts either or both names, trimmed", () => {
+    expect(UpdateOwnProfileSchema.parse({ firstName: " Ada " })).toEqual({ firstName: "Ada" });
+    expect(UpdateOwnProfileSchema.safeParse({ firstName: "Ada", lastName: "L" }).success).toBe(true);
+  });
+
+  test("rejects every other key, an empty body and a blank name", () => {
+    for (const extra of [
+      { email: "a@b.com" },
+      { role: "ADMIN" },
+      { legajo: "1" },
+      { username: "ada" },
+      { manager: null },
+      { isActive: true },
+      { externalId: "sub" },
+    ]) {
+      expect(UpdateOwnProfileSchema.safeParse({ firstName: "Ada", ...extra }).success).toBe(false);
+    }
+    expect(UpdateOwnProfileSchema.safeParse({}).success).toBe(false);
+    expect(UpdateOwnProfileSchema.safeParse({ lastName: "  " }).success).toBe(false);
+  });
+});
+
+describe("UserSchema.directorySource (#1421)", () => {
+  test("is optional and nullable (additive)", () => {
+    expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, directorySource: "ad" }).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, directorySource: null }).success).toBe(true);
   });
 });

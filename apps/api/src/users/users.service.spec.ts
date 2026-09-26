@@ -1326,6 +1326,89 @@ describe('UsersService', () => {
   });
 
   // ADR-0040 RBAC safety guards — last-admin protection + no self-role-change.
+  describe('updateOwnProfile — PATCH /users/me (issue #1421)', () => {
+    const SELF = {
+      id: 'self-1',
+      firstName: 'Old',
+      lastName: 'Name',
+      email: 'me@b.com',
+      role: 'VIEWER',
+      isActive: true,
+      externalId: null,
+      directoryOnly: false,
+      directorySource: null,
+      deletedAt: null,
+    };
+
+    it('renames the caller and records UPDATED { fields: [name] } with the caller as actor', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue({ ...SELF, firstName: 'New' });
+
+      await service.updateOwnProfile(SELF as never, { firstName: 'New' });
+
+      // Only the name keys reach the write — never role / email / activation.
+      expect(user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'self-1' },
+          data: { firstName: 'New' },
+        }),
+      );
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'self-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['name'] },
+        actor: { userId: 'self-1' },
+      });
+      expect(search.upsert).toHaveBeenCalled();
+    });
+
+    it('reads the CURRENT row, not the request snapshot, before deciding', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue(SELF);
+      await service.updateOwnProfile(SELF as never, { lastName: 'Name' });
+      expect(user.findFirst).toHaveBeenCalledWith({ where: { id: 'self-1' } });
+      // Resending the stored value is not a change: no history row.
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses (409 PROFILE_MANAGED_BY_DIRECTORY) a person the AD/LDAP sync owns', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directorySource: 'ad' });
+
+      const err = await service
+        .updateOwnProfile(SELF as never, { firstName: 'New' })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'PROFILE_MANAGED_BY_DIRECTORY' }),
+      );
+      expect(user.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses a directory-only person the same way', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directoryOnly: true });
+      await expect(
+        service.updateOwnProfile(SELF as never, { firstName: 'New' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('mirrors the new name to the IdP for a linked user, like an admin edit', async () => {
+      const linked = { ...SELF, externalId: 'sub-1' };
+      user.findFirst.mockResolvedValue(linked);
+      user.update.mockResolvedValue({ ...linked, lastName: 'Newer' });
+
+      await service.updateOwnProfile(linked as never, { lastName: 'Newer' });
+
+      expect(idp.updateUser).toHaveBeenCalledWith('sub-1', {
+        firstName: 'Old',
+        lastName: 'Newer',
+      });
+    });
+  });
+
   describe('role-change guards (ADR-0040)', () => {
     it('forbids a user from changing their OWN role (403)', async () => {
       user.findFirst.mockResolvedValue({

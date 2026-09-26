@@ -105,7 +105,11 @@ three roles **except** two tighter tiers:
   same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
   Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
 
-`GET /users/me` stays open (the self-read the web gates its UI off). This closed the long-standing
+`GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
+`PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the
+subject is the principal, never a body id, so it needs no permission; a strict body 400s any other key,
+a directory-synced person gets 409 `PROFILE_MANAGED_BY_DIRECTORY`, and a service account 403s (the
+fail-closed rule above plus a handler backstop). This closed the long-standing
 read-authz gap (the old DEF-001 residual / "reads open to any authenticated user"). The seed is derived
 1:1 from `DEFAULT_ROLE_PERMISSIONS` in [[shared-package]] (a golden test fails CI on drift). See
 [[role-permission]] and [[0046-roles-permissions-v2]] §4.

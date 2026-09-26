@@ -134,6 +134,10 @@ export const UserSchema = z.object({
   // person sub-field with no native home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb,
   // unvalidated per-field in this MVP); null/absent for normal accounts.
   directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional(),
+  // AD/LDAP directory-source discriminator (ADR-0091): "ad" for a person the directory sync owns, null
+  // otherwise. OPTIONAL on the wire (additive). Non-null means the directory owns the name, so
+  // `PATCH /users/me` refuses a self-edit (issue #1421) — the web disables the form off this field.
+  directorySource: z.string().nullable().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -293,3 +297,20 @@ export type User = z.infer<typeof UserSchema>;
 export type CreateUser = z.infer<typeof CreateUserSchema>;
 export type CreateDirectoryPerson = z.infer<typeof CreateDirectoryPersonSchema>;
 export type UpdateUser = z.infer<typeof UpdateUserSchema>;
+
+/**
+ * `PATCH /users/me` — a signed-in human edits THEIR OWN name (issue #1421, CEO decision "only first and
+ * last name"). Deliberately NARROW: a strictObject with exactly `firstName` / `lastName`, so any other
+ * key (email, role, legajo, username, manager, isActive, externalId, …) is a 400 — those stay on the
+ * ADMIN-only `PATCH /users/:id`. Same bounds as the admin edit; at least one key is required. The API
+ * refuses it (409 `PROFILE_MANAGED_BY_DIRECTORY`) for a person the AD/LDAP sync owns (ADR-0091).
+ */
+export const UpdateOwnProfileSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      firstName: z.string().trim().min(1).max(100),
+      lastName: z.string().trim().min(1).max(100),
+    })
+    .partial(),
+);
+export type UpdateOwnProfile = z.infer<typeof UpdateOwnProfileSchema>;
