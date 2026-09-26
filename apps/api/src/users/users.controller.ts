@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   NotImplementedException,
@@ -37,6 +38,7 @@ import {
   ResolveUserIdsSchema,
   RoleCountsSchema,
   RoleSchema,
+  UpdateOwnProfileSchema,
   UpdateUserSchema,
   UserListPageSchema,
   UserSchema,
@@ -49,7 +51,7 @@ import type {
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
-import type { Principal } from '../auth/principal';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AllowPasswordChangeRequired } from '../auth/allow-password-change-required.decorator';
 import { ActorService } from '../common/actor.service';
@@ -72,6 +74,7 @@ class UserListPageDto extends createZodDto(UserListPageSchema) {}
 class RoleCountsDto extends createZodDto(RoleCountsSchema) {}
 class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
+class UpdateOwnProfileDto extends createZodDto(UpdateOwnProfileSchema) {}
 class CloneUserDto extends createZodDto(CloneUserSchema) {}
 class CloneUserResultDto extends createZodDto(CloneUserResultSchema) {}
 // Local-mode (AUTH_MODE=local) admin-reset result: the one-time temp-password (ADR-0086 §5). Kept for
@@ -348,6 +351,43 @@ export class UsersController {
     await this.vaultSetupNudge.notifyIfVaultSetupNeeded(user);
     // Resolve the manager descriptor (ADR-0058) so /me matches the full UserSchema the web consumes.
     return this.users.serializeUser(user);
+  }
+
+  // SELF-SERVICE name edit (issue #1421). Like `GET /users/me` it is INTENTIONALLY not permission-gated:
+  // it only ever writes the caller's own row (id from the principal, never the body), so any signed-in
+  // human — VIEWER included — may fix their own name. The strict body accepts ONLY firstName/lastName.
+  // Declared ABOVE `@Patch(':id')` so the literal `me` never reaches the uuid route.
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Edit my own first and last name (any signed-in user)',
+    description:
+      'Self-service: only `firstName` and `lastName` are accepted — any other key (email, role, legajo, ' +
+      'username, manager, …) is a 400; those stay on the ADMIN-only `PATCH /users/:id`. 409 ' +
+      '`PROFILE_MANAGED_BY_DIRECTORY` when the AD/LDAP directory sync owns the person (ADR-0091) — the ' +
+      'next sync would overwrite it. Service accounts are refused (403). Mirrored to the bundled IdP ' +
+      'like an admin edit (503 + revert on failure) and recorded as an UPDATED user-history row with ' +
+      'the caller as actor.',
+  })
+  @ApiBody({ type: UpdateOwnProfileDto })
+  @ApiOkResponse({ type: UserDto })
+  updateMe(
+    @Body() dto: UpdateOwnProfileDto,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    // Backstop: the permission guard already 403s a service account on an unannotated route
+    // (INV-SA-2). A bot has no person record to rename.
+    if (isServicePrincipal(principal)) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'SERVICE_ACCOUNT_NOT_ALLOWED',
+        message: 'Service accounts have no profile to edit.',
+      });
+    }
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.users.updateOwnProfile(user, dto);
   }
 
   // A cross-user DIRECTORY read (identity of another user) — gated on `user:read` (ADR-0046

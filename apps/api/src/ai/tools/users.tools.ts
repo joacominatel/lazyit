@@ -1161,6 +1161,11 @@ export const usersToolset: AiToolset = {
     ),
     unexposed(
       UsersController,
+      ['updateMe'],
+      'Not in the v1 cut: a person renames themselves from their profile page (#1421); user_update covers an admin rename.',
+    ),
+    unexposed(
+      UsersController,
       ['resetPassword', 'provisionLocalAccount'],
       'Excluded: may return a temporary password in cleartext (ADR-0097 decision 11; structural exclusion).',
     ),

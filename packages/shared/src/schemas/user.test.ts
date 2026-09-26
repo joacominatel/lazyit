@@ -6,7 +6,12 @@ import {
   RoleSchema,
   RoleSourceSchema,
   TempPasswordSchema,
+  ThemePreferenceSchema,
+  UiLocaleSchema,
+  UpdateOwnProfileSchema,
+  UpdateUserPreferencesSchema,
   UpdateUserSchema,
+  UserPreferencesSchema,
   UserSchema,
 } from "./user";
 
@@ -404,5 +409,66 @@ describe("CreateDirectoryPersonSchema (SEC-006 + identity guarantee, CEO Q5)", (
     const parsed = CreateDirectoryPersonSchema.safeParse({ name: "Ivan", email: "  Bob@X.COM " });
     expect(parsed.success).toBe(true);
     if (parsed.success) expect(parsed.data.email).toBe("bob@x.com");
+  });
+});
+
+// Issue #1421 — the self-service name edit accepts ONLY firstName/lastName.
+describe("UpdateOwnProfileSchema (#1421)", () => {
+  test("accepts either or both names, trimmed", () => {
+    expect(UpdateOwnProfileSchema.parse({ firstName: " Ada " })).toEqual({ firstName: "Ada" });
+    expect(UpdateOwnProfileSchema.safeParse({ firstName: "Ada", lastName: "L" }).success).toBe(true);
+  });
+
+  test("rejects every other key, an empty body and a blank name", () => {
+    for (const extra of [
+      { email: "a@b.com" },
+      { role: "ADMIN" },
+      { legajo: "1" },
+      { username: "ada" },
+      { manager: null },
+      { isActive: true },
+      { externalId: "sub" },
+    ]) {
+      expect(UpdateOwnProfileSchema.safeParse({ firstName: "Ada", ...extra }).success).toBe(false);
+    }
+    expect(UpdateOwnProfileSchema.safeParse({}).success).toBe(false);
+    expect(UpdateOwnProfileSchema.safeParse({ lastName: "  " }).success).toBe(false);
+  });
+});
+
+describe("UserSchema.directorySource (#1421)", () => {
+  test("is optional and nullable (additive)", () => {
+    expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, directorySource: "ad" }).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, directorySource: null }).success).toBe(true);
+  });
+});
+
+// Issue #1422 — per-user UI preferences. null = never chosen; validated on write.
+describe("UI preferences (#1422)", () => {
+  test("catalogs", () => {
+    expect(UiLocaleSchema.options).toEqual(["en", "es"]);
+    expect(ThemePreferenceSchema.options).toEqual(["light", "dark", "system"]);
+  });
+
+  test("read shape: both nullable, both required", () => {
+    expect(UserPreferencesSchema.safeParse({ locale: null, theme: null }).success).toBe(true);
+    expect(UserPreferencesSchema.safeParse({ locale: "es", theme: "system" }).success).toBe(true);
+    expect(UserPreferencesSchema.safeParse({ locale: "es" }).success).toBe(false);
+  });
+
+  test("write: partial, null clears, strict, non-empty", () => {
+    expect(UpdateUserPreferencesSchema.safeParse({ locale: "en" }).success).toBe(true);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: null }).success).toBe(true);
+    expect(UpdateUserPreferencesSchema.safeParse({}).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ locale: "fr" }).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: "sepia" }).success).toBe(false);
+    expect(UpdateUserPreferencesSchema.safeParse({ theme: "dark", userId: "x" }).success).toBe(false);
+  });
+
+  test("UserSchema carries them optionally (additive)", () => {
+    expect(UserSchema.safeParse(READ_BASE).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, locale: null, theme: null }).success).toBe(true);
+    expect(UserSchema.safeParse({ ...READ_BASE, locale: "es", theme: "dark" }).success).toBe(true);
   });
 });
