@@ -45,8 +45,8 @@ password in the environment file.
 
 The background-job broker (Valkey) is unreachable. The usual cause is a missing `REDIS_URL` in the
 environment file — common on instances created before background workers shipped, because the guided
-bootstrap only writes new values on a fresh render, never into an existing file. Add it and recreate
-the API:
+bootstrap writes it only on a fresh install — on an existing file it adds nothing but a few generated
+keys (see [Upgrades](/help/deployment-operations-upgrades)). Add it and recreate the API:
 
 ```sh
 grep -q '^REDIS_URL=' infra/env/.env.prod || echo 'REDIS_URL=redis://valkey:6379' >> infra/env/.env.prod
