@@ -51,8 +51,8 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `id` | `cuid` | `@default(cuid())`. |
 | `name` | `string` | required (e.g. "Dell Latitude 5520"). |
 | `manufacturer` | `string` | required (e.g. "Dell"). |
-| `sku` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
-| `description` | `string?` | optional. |
+| `sku` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). `null` on `PATCH` clears it (#1441). |
+| `description` | `string?` | optional; `null` on `PATCH` clears it (#1441). |
 | `specs` | `jsonb?` | model-level default specs (e.g. "ships with 16GB"). **Distinct from `Asset.specs`** (type-level vs per-unit). Any JSON object for now ([[0007-flexible-asset-specs-jsonb]]). |
 | `categoryId` | `cuid?` | optional FK → [[asset-category]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -77,5 +77,9 @@ picker can search/page authoritatively (issue #199, [[0030-list-pagination-contr
 write returns `400` (FK → [[0018-api-documentation-swagger]]). `PATCH /:id` with `categoryId: null`
 **clears** the category (the model becomes uncategorized; its assets keep pointing at it) — the same
 state `onDelete: SetNull` produces when a category is deleted (CEO 2026-09-25, #1315).
+`sku: null` and `description: null` on `PATCH /:id` **clear** those fields (both columns are
+nullable; a cleared SKU is simply absent, and the partial unique index treats NULLs as distinct, so any
+number of models can have none). An empty string is still refused — `null` is the one way to clear
+(#1441).
 
 Related: [[asset]] · [[asset-category]] · [[conventions]] · [[0018-api-documentation-swagger]]
