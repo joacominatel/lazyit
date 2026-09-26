@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChangePasswordPanel } from "./change-password-panel";
+import { ProfileNamePanel } from "./profile-name-panel";
 import { AccessRequestStatusBadge } from "@/app/(app)/applications/_components/access-request-status-badge";
 import { AssetStatusBadge } from "@/app/(app)/assets/_components/asset-status-badge";
 import { UserRoleBadge } from "@/app/(app)/users/_components/user-role-badge";
@@ -34,7 +35,9 @@ import { useCan } from "@/lib/hooks/use-permissions";
  * (any authenticated human, no `asset:read`/`accessGrant:read`), so a VIEWER — who cannot reach the
  * admin `/users/[id]` 360 view — can still see their own estate here.
  *
- * READ-ONLY by design (v1): no edit/offboard/role controls (that is the admin `UserDetailView`). It
+ * Mostly read-only: the one self-service write is the caller's own first and last name
+ * ({@link ProfileNamePanel}, issue #1421). No offboard/role/email controls (that is the admin
+ * `UserDetailView`). It
  * reuses the shared detail primitives (`PageHeader`, `DetailPanel`, `UserAvatar`, the asset/role
  * badges, `useFormatters`) rather than the admin monolith, whose per-person panels resolve labels from
  * catalog reads a VIEWER can partly hit and are wired to `user:manage` affordances. The `mine` asset
@@ -109,6 +112,8 @@ export function ProfileView() {
         subtitle={t("subtitle")}
         badge={user.role ? <UserRoleBadge role={user.role} /> : undefined}
       />
+
+      <ProfileNamePanel user={user} />
 
       <DetailPanel title={t("identity.title")}>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">

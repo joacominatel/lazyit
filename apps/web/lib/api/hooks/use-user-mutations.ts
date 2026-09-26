@@ -5,7 +5,9 @@ import type {
   CloneUser,
   CreateUser,
   Role,
+  UpdateOwnProfile,
   UpdateUser,
+  User,
 } from "@lazyit/shared";
 import { applicationKeys } from "./use-applications";
 import { assetKeys } from "./use-assets";
@@ -19,6 +21,7 @@ import {
   provisionUserAccount,
   resetUserPassword,
   restoreUser,
+  updateOwnProfile,
   updateUser,
 } from "../endpoints/users";
 import { userKeys } from "./use-users";
@@ -191,5 +194,25 @@ export function useProvisionLocalUserAccount() {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
     },
+  });
+}
+
+/**
+ * Edit the caller's own name (`PATCH /users/me`, issue #1421). Seeds `/users/me` with the returned row,
+ * then invalidates the users cache so the caller's row in the directory and any detail view refetch;
+ * a failure re-reads `/users/me`.
+ * Error messages stay with the form (409 directory-managed, 403 service account, 503 IdP mirror).
+ */
+export function useUpdateOwnProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: UpdateOwnProfile) => updateOwnProfile(data),
+    onSuccess: (user: User) => {
+      queryClient.setQueryData(userKeys.me(), user);
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+    },
+    // A refusal can mean the row changed under us (e.g. the directory sync claimed the person, 409), so
+    // re-read `/users/me` and let the panel reflect it.
+    onError: () => queryClient.invalidateQueries({ queryKey: userKeys.me() }),
   });
 }

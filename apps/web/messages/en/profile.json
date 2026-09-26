@@ -1,6 +1,24 @@
 {
   "title": "My profile",
   "subtitle": "Your identity, the assets assigned to you and the applications you can access.",
+  "name": {
+    "title": "Name",
+    "edit": "Edit name",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "save": "Save",
+    "cancel": "Cancel",
+    "saved": "Your name was updated.",
+    "fieldInvalid": "Enter between 1 and 100 characters.",
+    "managedByDirectory": "Your name comes from your company directory. Ask an administrator to change it there.",
+    "errors": {
+      "managedByDirectory": "Your name comes from your company directory, so it can't be changed here. Ask an administrator to change it there.",
+      "serviceAccount": "Service accounts don't have a profile to edit.",
+      "identityProviderUnavailable": "The sign-in service couldn't be updated, so nothing was changed. Try again in a moment.",
+      "invalid": "Check both names and try again.",
+      "generic": "Couldn't update your name."
+    }
+  },
   "identity": {
     "title": "Identity",
     "email": "Email",
