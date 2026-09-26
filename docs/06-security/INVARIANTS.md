@@ -301,9 +301,12 @@ avoids leaking which check failed. BYOI-safe: no IdP on the bot's auth path.
 **Where enforced.**
 - `apps/api/src/service-accounts/service-account-token.ts` — `mintToken`/`hashSecret`/`verifySecret`
   (constant-time, fails closed on a length/encoding mismatch); never logs a secret.
-- `apps/api/src/auth/jwt-auth.guard.ts` — the SA branch runs BEFORE the OIDC/shim branches: parse → look
-  up by id INCLUDING soft-deleted (so a revoked account is *seen*) → constant-time secret compare →
-  reject revoked/inactive/expired → set `request.principal = {kind:'service', …}`.
+- `apps/api/src/auth/jwt-auth.guard.ts` — the SA branch runs BEFORE the OIDC/shim branches and sets
+  `request.principal = {kind:'service', …}`; the verification itself (parse → look up by id INCLUDING
+  soft-deleted, so a revoked account is *seen* → constant-time secret compare → reject
+  revoked/inactive/expired) lives in `apps/api/src/auth/service-account-authenticator.ts`
+  (`ServiceAccountAuthenticator`, extracted for ADR-0097 R10), which `/mcp`'s guard calls too, so both
+  surfaces verify an SA token with the same code ([[0080-service-account-secret-retrieval]] amendment).
 - Tests: `apps/api/src/service-accounts/service-account-token.spec.ts`,
   `apps/api/src/auth/jwt-auth.guard.service-account.spec.ts`.
 
