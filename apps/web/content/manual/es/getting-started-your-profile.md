@@ -31,16 +31,18 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
   cerrar sesión. Con cuentas locales dice **Cerrar sesión en todos los dispositivos**, porque cerrar
   sesión ya termina todas tus sesiones (ver [Iniciar y cerrar sesión](#iniciar-y-cerrar-sesión)). lazyit
   no lista tus sesiones ni dispositivos uno por uno.
-- **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Ambos se guardan
-  en el navegador donde los elegís.
+- **Preferencias** — tu **idioma** y tu **tema** (claro, oscuro o el de tu dispositivo). Mirá
+  [Tu idioma y tu tema en todos tus dispositivos](#tu-idioma-y-tu-tema-en-todos-tus-dispositivos).
 
 Una fila de pestañas arriba de **Cuenta**, **Mi perfil**, **Correos de notificación** e **IA y apps
 conectadas** te permite pasar de una a otra sin volver al menú.
 
 ## Qué vas a ver
 
-- **Identidad** — tu nombre, correo, rol y la fecha de alta. Así es exactamente como te ve el resto
-  del equipo.
+- **Nombre** — tu nombre y apellido, que podés editar vos mismo (ver
+  [Editar tu nombre](#editar-tu-nombre)).
+- **Identidad** — tu correo, rol y la fecha de alta. Junto con tu nombre, así es exactamente como te ve
+  el resto del equipo.
 - **Mis activos** — cada activo **actualmente asignado a vos** (una asignación vigente). Cada fila
   muestra el nombre del activo, su modelo y ubicación, y su estado. Elegí **Ver** para abrir la página
   completa del activo.
@@ -49,6 +51,43 @@ conectadas** te permite pasar de una a otra sin volver al menú.
   **Vencido**.
 - **Accesos anteriores** — un historial de las aplicaciones a las que *tenías* acceso, con cuándo
   empezó cada concesión y cuándo se revocó. Esta sección aparece solo si tenés accesos pasados.
+
+## Editar tu nombre
+
+Podés corregir tu propio **nombre y apellido**: un error de tipeo, un cambio de apellido, el nombre con
+el que realmente te conocen.
+
+1. Abrí **Mi perfil** y elegí **Editar nombre** en el panel **Nombre**.
+2. Cambiá el nombre, el apellido o los dos (de 1 a 100 caracteres cada uno) y elegí **Guardar**.
+
+El nombre nuevo aparece en todos lados al instante: en el menú de arriba a la derecha, en los
+responsables de activos y concesiones, y en la lista de **Usuarios**. Si tu organización inicia sesión
+con el servicio de inicio de sesión incluido en lazyit, tu nombre también se actualiza ahí. El cambio
+queda registrado en tu historial de usuario, como cualquier otro cambio de nombre.
+
+Solo se puede editar el nombre. Tu correo, rol, legajo, nombre de usuario y responsable siguen en manos
+de los administradores.
+
+**Cuando tu nombre viene del directorio de la empresa.** Si tu instancia sincroniza personas desde
+Active Directory o LDAP y vos sos una de ellas, el directorio es dueño de tu nombre. El panel **Nombre**
+lo muestra de solo lectura, con una nota que lo explica: un cambio acá solo se sobrescribiría en la
+próxima sincronización. Pedile a un administrador que lo cambie en el directorio.
+
+**Si no se puede guardar.** Si en ese momento no se puede actualizar el servicio de inicio de sesión,
+lazyit no cambia nada y te lo avisa: probá de nuevo en un momento. Las cuentas de servicio no tienen
+perfil, así que no pueden editar un nombre.
+
+## Tu idioma y tu tema en todos tus dispositivos
+
+Tu **idioma** y tu **tema** se guardan en el navegador donde los elegís **y** en tu cuenta. Cambialos
+donde quieras —el panel **Preferencias** de **Cuenta**, la fila de idioma del menú del avatar o el botón
+de tema de la barra superior— y las dos cosas pasan a la vez.
+
+**Siempre gana el navegador que estás usando.** Tu elección guardada se usa solo en un navegador que no
+tiene una propia: normalmente la primera vez que iniciás sesión en una computadora o un teléfono nuevo,
+lazyit toma el idioma y el tema que elegiste en otro lado. Un navegador donde ya elegiste algo conserva
+su propia elección, así podés tener tema oscuro en casa y claro en el trabajo. Mirá
+[Idiomas](/help/getting-started-languages).
 
 ## Iniciar y cerrar sesión
 
@@ -107,7 +146,7 @@ sesión. Si el correo no está configurado, pedile a un administrador que restab
 
 ## De solo lectura por diseño
 
-Salvo tu propia contraseña (arriba), tu perfil es una **vista**, no un editor. No podés reasignar un
+Salvo tu propio nombre y tu contraseña (arriba), tu perfil es una **vista**, no un editor. No podés reasignar un
 activo ni otorgarte acceso desde acá: esas acciones quedan en manos de los administradores, así la página
 siempre es una foto segura y fiel de tu situación actual. Si algo se ve mal (un activo que ya no tenés,
 un acceso que todavía necesitás), contactá a un administrador — cada asignación y concesión tiene marca

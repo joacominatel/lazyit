@@ -124,6 +124,13 @@ without replacing the cookie:
   the language or theme in the UI keeps writing the browser value **and** saves it to the user.
 - **No history row** — a display preference is not a change to the person record.
 - **Upgrade** — every existing user reads `null`, so behaviour is exactly today's until they choose.
+- **Web (as built)** — the pure rules live in `apps/web/lib/preferences/preference-sync.ts`
+  (`resolveAdoption`, the payload builders). `components/preference-adoption.tsx` reads `/users/me` and,
+  only when the cookie / `localStorage` key is absent, writes the stored value into the browser (the
+  cookie via `setLocale`, the theme via `setTheme`). It is mounted inside the topbar `UserMenu`, because
+  `app/(app)/layout.tsx` is shared-critical. Every switcher (user-menu language row, public globe, theme
+  toggle, the Account → Preferences panel) switches the browser first and then saves through
+  `useSavePreference` — fire-and-forget, skipped without a session token, failures ignored.
 
 ## Consequences
 
