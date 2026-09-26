@@ -11,6 +11,13 @@ import { normalizeClientIp, normalizeUserAgent } from './user-agent';
  */
 export const SESSION_LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
 
+/**
+ * Most session rows one user keeps (#1420 review). Opening a session beyond it deletes the user's least
+ * recently active rows in the same step — a bound on a table any sign-in grows, and on what one scripted
+ * login loop can write. Far above what one person uses; the evicted devices simply sign in again.
+ */
+export const MAX_SESSIONS_PER_USER = 50;
+
 /** What the sign-in request says about the device, stored on the session row. */
 export interface SessionDeviceMeta {
   userAgent: string | null;
@@ -86,7 +93,23 @@ export class UserSessionStore {
       },
       select: { id: true },
     });
+    await this.evictBeyondCap(session.userId, db);
     return minted;
+  }
+
+  /** Delete the user's least recently active rows beyond {@link MAX_SESSIONS_PER_USER}. */
+  private async evictBeyondCap(userId: string, db: SessionDb): Promise<void> {
+    const overflow = await db.userSession.findMany({
+      where: { userId },
+      orderBy: [{ lastSeenAt: 'desc' }, { createdAt: 'desc' }],
+      skip: MAX_SESSIONS_PER_USER,
+      select: { id: true },
+    });
+    if (overflow.length > 0) {
+      await db.userSession.deleteMany({
+        where: { id: { in: overflow.map((row) => row.id) } },
+      });
+    }
   }
 
   /**

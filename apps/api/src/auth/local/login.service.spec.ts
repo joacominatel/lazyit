@@ -69,7 +69,11 @@ describe('LoginService', () => {
   let sessionDeleteMany: jest.Mock;
   let prisma: {
     user: { findFirst: jest.Mock; update: jest.Mock };
-    userSession: { create: jest.Mock; deleteMany: jest.Mock };
+    userSession: {
+      create: jest.Mock;
+      deleteMany: jest.Mock;
+      findMany: jest.Mock;
+    };
     $transaction: jest.Mock;
   };
   let service: LoginService;
@@ -89,7 +93,12 @@ describe('LoginService', () => {
     sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     prisma = {
       user: { findFirst, update },
-      userSession: { create: sessionCreate, deleteMany: sessionDeleteMany },
+      userSession: {
+        create: sessionCreate,
+        deleteMany: sessionDeleteMany,
+        // The per-user cap's overflow query: nothing over the cap here.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn(),
     };
     prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>

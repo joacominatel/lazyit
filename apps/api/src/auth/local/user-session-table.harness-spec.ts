@@ -18,10 +18,11 @@ export interface SessionRow {
 }
 
 interface SessionWhere {
-  id?: string | { not: string };
+  id?: string | { not: string } | { in: string[] };
   userId?: string;
   epoch?: number;
-  lastSeenAt?: { lte: Date };
+  rememberMe?: boolean;
+  lastSeenAt?: { lte?: Date; lt?: Date };
   expiresAt?: { lte: Date };
   OR?: Array<{ expiresAt: null | { gt: Date } }>;
 }
@@ -30,6 +31,7 @@ const KNOWN_KEYS = new Set([
   'id',
   'userId',
   'epoch',
+  'rememberMe',
   'lastSeenAt',
   'expiresAt',
   'OR',
@@ -42,10 +44,26 @@ function matches(row: SessionRow, where: SessionWhere): boolean {
     }
   }
   if (typeof where.id === 'string' && row.id !== where.id) return false;
-  if (typeof where.id === 'object' && row.id === where.id.not) return false;
+  if (
+    typeof where.id === 'object' &&
+    'not' in where.id &&
+    row.id === where.id.not
+  )
+    return false;
+  if (
+    typeof where.id === 'object' &&
+    'in' in where.id &&
+    !where.id.in.includes(row.id)
+  )
+    return false;
+  if (where.rememberMe !== undefined && row.rememberMe !== where.rememberMe)
+    return false;
   if (where.userId !== undefined && row.userId !== where.userId) return false;
   if (where.epoch !== undefined && row.epoch !== where.epoch) return false;
-  if (where.lastSeenAt && row.lastSeenAt > where.lastSeenAt.lte) return false;
+  if (where.lastSeenAt?.lte && row.lastSeenAt > where.lastSeenAt.lte)
+    return false;
+  if (where.lastSeenAt?.lt && row.lastSeenAt >= where.lastSeenAt.lt)
+    return false;
   if (where.expiresAt) {
     if (row.expiresAt === null || row.expiresAt > where.expiresAt.lte) {
       return false;
@@ -89,11 +107,24 @@ export function inMemoryUserSessions() {
       return Promise.resolve(row ? { ...row } : null);
     }),
     findMany: jest.fn(
-      ({ where, take }: { where: SessionWhere; take?: number }) => {
+      ({
+        where,
+        take,
+        skip,
+      }: {
+        where: SessionWhere;
+        take?: number;
+        skip?: number;
+      }) => {
+        // Both callers order by lastSeenAt desc, then createdAt desc.
         const found = [...rows.values()]
           .filter((row) => matches(row, where))
-          .sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime())
-          .slice(0, take ?? Infinity)
+          .sort(
+            (a, b) =>
+              b.lastSeenAt.getTime() - a.lastSeenAt.getTime() ||
+              b.createdAt.getTime() - a.createdAt.getTime(),
+          )
+          .slice(skip ?? 0, (skip ?? 0) + (take ?? Infinity))
           .map((row) => ({ ...row }));
         return Promise.resolve(found);
       },

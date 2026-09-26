@@ -18,7 +18,7 @@ import { LocalCredentialService } from './local-credential.service';
 import { LoginService } from './login.service';
 import { UserSessionsService } from './user-sessions.service';
 import { UserSessionSweeper } from './user-session.sweeper';
-import { UserSessionStore } from './user-session.store';
+import { MAX_SESSIONS_PER_USER, UserSessionStore } from './user-session.store';
 import {
   inMemoryUserSessions,
   type SessionRow,
@@ -348,7 +348,7 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
     expect(list.sessions[0].current).toBe(true);
 
     const swept = await sweeper.sweep();
-    expect(swept).toEqual({ expired: 0, stale: 1 });
+    expect(swept).toEqual({ expired: 0, stale: 1, idle: 0 });
     expect(table.size).toBe(1);
   });
 
@@ -365,13 +365,62 @@ describe('per-device sessions (#1420, ADR-0086 §9)', () => {
     expect(table.size).toBe(0);
   });
 
-  it('a remember-me session survives the sweeper', async () => {
+  it('a remember-me session survives the sweeper while it is used within 400 days', async () => {
     await signIn(FIREFOX, '203.0.113.7', true);
     const swept = await sweeper.sweep(
       new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
     );
-    expect(swept).toEqual({ expired: 0, stale: 0 });
+    expect(swept).toEqual({ expired: 0, stale: 0, idle: 0 });
     expect(table.size).toBe(1);
+  });
+
+  it('a remember-me session idle for more than 400 days is purged', async () => {
+    await signIn(FIREFOX, '203.0.113.7', true);
+    await signIn(SAFARI_IPHONE, '198.51.100.4', true);
+    const [idle] = [...table.values()];
+    idle.lastSeenAt = new Date(Date.now() - 401 * 24 * 60 * 60 * 1000);
+
+    const swept = await sweeper.sweep();
+
+    expect(swept).toEqual({ expired: 0, stale: 0, idle: 1 });
+    expect(table.has(idle.id)).toBe(false);
+    expect(table.size).toBe(1);
+  });
+
+  it('a sign-in beyond 50 sessions evicts the least recently active ones', async () => {
+    const base = Date.now() - 1000 * 60 * 60;
+    for (let i = 0; i < MAX_SESSIONS_PER_USER; i += 1) {
+      const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+      table.set(id, {
+        id,
+        userId: USER_ID,
+        epoch: 0,
+        rememberMe: true,
+        userAgent: null,
+        ip: null,
+        createdAt: new Date(base),
+        // Row 0 is the least recently active.
+        lastSeenAt: new Date(base + i * 1000),
+        expiresAt: null,
+      });
+    }
+    const oldest = '00000000-0000-4000-8000-000000000000';
+    const foreign = '66666666-6666-4666-8666-666666666666';
+    table.set(foreign, {
+      ...table.get(oldest)!,
+      id: foreign,
+      userId: OTHER_USER_ID,
+    });
+
+    const res = await signIn(FIREFOX, '203.0.113.7');
+
+    const mine = [...table.values()].filter((s) => s.userId === USER_ID);
+    expect(mine).toHaveLength(MAX_SESSIONS_PER_USER);
+    expect(table.has(oldest)).toBe(false);
+    // Another user's rows are never counted or evicted.
+    expect(table.has(foreign)).toBe(true);
+    // The new session is kept and authenticates.
+    await expect(authenticate(res.token)).resolves.toBeDefined();
   });
 
   it('outside local mode the list is empty', async () => {
