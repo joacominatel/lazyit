@@ -19,11 +19,11 @@
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/joacominatel/lazyit/raw/master/brand/video.mp4" controls width="820"></video>
+  <a href="brand/video.mp4"><img src="brand/demo-poster.jpg" alt="Watch the lazyit demo" width="820"></a>
 </p>
 
 <p align="center">
-  <em>▶ <a href="brand/video.mp4">Watch the demo</a> — “On the Record”: a short tour through the audit tape, topology blast-radius, the self-installing agent, and the zero-knowledge vault.</em>
+  <em>▶ <a href="brand/video.mp4">Watch the demo</a> (55 s) — the everyday inventory, servers that map themselves, access that provisions itself, a zero-knowledge vault, linked runbooks and an AI assistant that asks before it acts. All of it on the record.</em>
 </p>
 
 ---

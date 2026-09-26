@@ -48,6 +48,13 @@ bun generate.mjs --svg  # SVGs only, no Chrome
 PNGs are rasterized with headless Chrome so the SVG glow filter and the real
 typeface render faithfully.
 
+## Demo video
+
+`video.mp4` (1920×1080, 60 fps, ~55 s, with a soft soundtrack) is the README demo; `demo-poster.jpg`
+is its clickable poster, since GitHub strips `<video>` tags pointing at repository files. Both are
+rendered from a local Remotion project in the repo-root `video/` folder, which is git-ignored and
+recreates the app UI from the `apps/web` tokens, fonts and icons.
+
 ## Figma source
 
 Editable source file: **lazyit — Brand** —
