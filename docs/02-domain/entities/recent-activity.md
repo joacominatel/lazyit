@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-09-24
+updated: 2026-09-26
 ---
 
 # RecentActivity
@@ -27,7 +27,7 @@ con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-ac
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
 | [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` (a delivery's target is not carried into the summary yet — deferred by [[0098-consumable-delivery-targets]]) |
-| [[user-history]] (DEBT-2, #185 / ADR-0058 / ADR-0086) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` · `password_reset_by_admin` (local-mode admin reset) · `password_changed` · `password_reset_requested` · `password_reset_completed` (local-mode self-service, ADR-0086 §F4) · `deactivated` · `reactivated` (an `isActive` flip, issue #1375) |
+| [[user-history]] (DEBT-2, #185 / ADR-0058 / ADR-0086) | the event row | `user` | the lowercased `eventType`: `created` · `updated` · `role_changed` · `manager_changed` · `deleted` · `restored` · `password_reset_sent` · `password_reset_by_admin` (local-mode admin reset) · `password_changed` · `password_reset_requested` · `password_reset_completed` (local-mode self-service, ADR-0086 §F4) · `deactivated` · `reactivated` (an `isActive` flip, issue #1375) · `session_ended` (a user ended one of their local sessions, issue #1420) |
 
 The full closed verb set is the single source of truth for the `action` filter's allowlist
 (`RECENT_ACTIVITY_ACTIONS` in `@lazyit/shared`). An unknown verb on the filter is a 400, never a

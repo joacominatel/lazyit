@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ChangePasswordResponse } from '@lazyit/shared';
@@ -18,6 +19,15 @@ import {
 } from '../../smtp/email.mailer';
 import { LocalCredentialService } from './local-credential.service';
 import { hashResetToken, mintResetToken } from './password-reset-token';
+import { UserSessionStore, type SessionDeviceMeta } from './user-session.store';
+
+/** The calling session of a password change (issue #1420): which row it is, and the request's device. */
+export interface CallingSession {
+  /** The verified token's `sid`, or null for a token minted before per-device sessions. */
+  sessionId?: string | null;
+  /** The request's device, used when a new session row has to be opened. */
+  meta?: SessionDeviceMeta;
+}
 
 /** Reset-token TTL — ≤1h per ADR-0086 §F4 / SECURITY GAP #7. */
 const RESET_TTL_MINUTES = 60;
@@ -38,9 +48,7 @@ const MAX_ACTIVE_TOKENS_PER_USER = 3;
  * runtime one: the config was there and the relay refused, so it maps to a 503, not a 409.
  */
 export type AdminResetLinkFailure =
-  | 'smtp-not-configured'
-  | 'origin-unknown'
-  | 'send-failed';
+  'smtp-not-configured' | 'origin-unknown' | 'send-failed';
 
 /**
  * A named failure of {@link PasswordLifecycleService.sendAdminResetLink}. Carries a machine-readable
@@ -73,13 +81,19 @@ export class AdminResetLinkError extends Error {
 @Injectable()
 export class PasswordLifecycleService {
   private readonly logger = new Logger(PasswordLifecycleService.name);
+  private readonly sessions: UserSessionStore;
 
+  // The session store is provided by AuthModule; @Optional with an equivalent default so a service built
+  // by hand from the four original dependencies (the existing specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly credentials: LocalCredentialService,
     private readonly history: UserHistoryService,
     private readonly smtp: SmtpService,
-  ) {}
+    @Optional() sessions?: UserSessionStore,
+  ) {
+    this.sessions = sessions ?? new UserSessionStore(prisma);
+  }
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
   private isLocalMode(): boolean {
@@ -98,6 +112,10 @@ export class PasswordLifecycleService {
    * body): a "keep me signed in" session stays one, so changing a password never silently shortens it
    * (ADR-0086 §8). The response carries the new token's `expiresAt`, like the login response.
    *
+   * Per-device sessions (issue #1420): every OTHER session row of the user is deleted in the same
+   * transaction. The CALLING session keeps its row (and its id, so the device list stays stable) when its
+   * token carried one; a caller on a pre-#1420 token gets a new row opened from `calling.meta`.
+   *
    * The `user` is the row the guard loaded THIS request (@CurrentUser) — already live, active and not
    * directoryOnly (handleLocal rejects those). Defensive re-checks are kept fail-closed regardless.
    */
@@ -106,6 +124,7 @@ export class PasswordLifecycleService {
     currentPassword: string,
     newPassword: string,
     rememberMe = false,
+    calling: CallingSession = {},
   ): Promise<ChangePasswordResponse> {
     if (!this.isLocalMode()) {
       // Not applicable outside local mode — OIDC users have no lazyit-owned password to change.
@@ -145,9 +164,14 @@ export class PasswordLifecycleService {
     // lower epoch), so a compromised session dies the moment the real owner changes their password
     // (ADR-0086 §3 revocation); the token sweep does the same for any live emailed reset link (symmetry
     // with resetPassword, which invalidates siblings), so a change also closes that vector.
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.user.update({
-        where: { id: user.id },
+    //
+    // The write is CONDITIONAL on the epoch the caller authenticated with (#1420 review): if anything
+    // bumped it since — an admin reset, a deactivation, a sign-out everywhere — this request's session is
+    // already revoked, and applying the change would silently overwrite that (e.g. an admin's temporary
+    // password). Zero rows → 401 `SESSION_REVOKED`, nothing written.
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.user.updateMany({
+        where: { id: user.id, sessionEpoch: user.sessionEpoch },
         data: {
           passwordHash: newHash,
           passwordUpdatedAt: new Date(),
@@ -158,6 +182,15 @@ export class PasswordLifecycleService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (changed.count === 0) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'SESSION_REVOKED',
+          message:
+            'Your session was revoked while changing the password. Sign in again.',
+        });
+      }
+      const row = { id: user.id, sessionEpoch: user.sessionEpoch + 1 };
       // Any outstanding (unused) reset token is now stale — a self-service change supersedes it. Delete
       // rather than mark used: these rows are already GC-pruned, and a hard delete leaves nothing to leak.
       await tx.passwordResetToken.deleteMany({
@@ -169,14 +202,42 @@ export class PasswordLifecycleService {
         eventType: 'PASSWORD_CHANGED',
         actor: { userId: user.id },
       });
-      return row;
-    });
 
-    // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just died).
-    return this.credentials.mintSession(
-      { id: updated.id, sessionEpoch: updated.sessionEpoch },
-      { rememberMe },
-    );
+      // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just
+      // died), and end every other device's session row (#1420). The calling session keeps its row.
+      const subject = { id: row.id, sessionEpoch: row.sessionEpoch };
+      const keepId = calling.sessionId ?? null;
+      await this.sessions.endAll(user.id, tx, keepId);
+      if (keepId !== null) {
+        const minted = await this.credentials.mintSession(subject, {
+          rememberMe,
+          sessionId: keepId,
+        });
+        if (
+          await this.sessions.carryOver(
+            keepId,
+            user.id,
+            user.sessionEpoch,
+            row.sessionEpoch,
+            minted.expiresAt,
+            tx,
+          )
+        ) {
+          return minted;
+        }
+      }
+      return this.sessions.open(
+        {
+          userId: row.id,
+          epoch: row.sessionEpoch,
+          rememberMe,
+          meta: calling.meta ?? { userAgent: null, ip: null },
+        },
+        (sessionId) =>
+          this.credentials.mintSession(subject, { rememberMe, sessionId }),
+        tx,
+      );
+    });
   }
 
   // ---------- 3. forgot-password (public, enumeration-safe) ------------------
@@ -535,6 +596,9 @@ export class PasswordLifecycleService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
+
+      // Every per-device session row goes with the epoch bump (#1420).
+      await this.sessions.endAll(user.id, tx);
 
       // Append-only audit (self-service reset via token: actor == subject).
       await this.history.record(tx, {

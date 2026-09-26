@@ -28,13 +28,18 @@ describe('LocalAuthController (ADR-0086 §3/§8)', () => {
     controller = new LocalAuthController(service as unknown as LoginService);
   });
 
-  it('login forwards identifier, password and the rememberMe choice', async () => {
-    await controller.login({
-      identifier: 'alice',
-      password: 'pw',
-      rememberMe: true,
+  it('login forwards identifier, password, the rememberMe choice and the device (#1420)', async () => {
+    await controller.login(
+      { identifier: 'alice', password: 'pw', rememberMe: true },
+      {
+        headers: { 'user-agent': 'Mozilla/5.0 Firefox/128.0' },
+        ip: '::ffff:203.0.113.7',
+      } as never,
+    );
+    expect(service.login).toHaveBeenCalledWith('alice', 'pw', true, {
+      userAgent: 'Mozilla/5.0 Firefox/128.0',
+      ip: '203.0.113.7',
     });
-    expect(service.login).toHaveBeenCalledWith('alice', 'pw', true);
   });
 
   it('logout revokes the authenticated caller server-side', async () => {

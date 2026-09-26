@@ -47,6 +47,7 @@ Servers list + Meili search); the reporting agent is a future major. See [[0070-
 
 - 🟢 [[user]] — central to access, peripheral to assets (role + DB-first permissions).
 - 🟢 [[user-history]] — append-only log of user lifecycle events. [[0050-user-history-and-activity-user-entity]]
+- 🟢 [[user-session]] — one signed-in device in local mode: listed by its owner, ended one at a time. [[0086-local-authentication-mode]] §9
 
 ## Auth / AuthZ
 

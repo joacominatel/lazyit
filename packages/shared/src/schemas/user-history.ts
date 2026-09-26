@@ -40,6 +40,9 @@ export const UserHistoryEventTypeSchema = z.enum([
   // (REACTIVATED) on PATCH /users/:id — via the web UI, the API or an AI tool call. No payload.
   "DEACTIVATED",
   "REACTIVATED",
+  // The user ended ONE of their local sessions from the per-device list (issue #1420, ADR-0086 §9).
+  // Payload `{ sessionId, current }`. Actor == subject.
+  "SESSION_ENDED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }` on ROLE_CHANGED). Unvalidated jsonb. */

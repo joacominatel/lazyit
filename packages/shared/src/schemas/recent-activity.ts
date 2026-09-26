@@ -167,6 +167,8 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // view emits when an admin disables or re-enables a user (via the UI, the API or an AI tool call).
   "deactivated",
   "reactivated",
+  // A user ended one of their local sessions (issue #1420) — the lowercased SESSION_ENDED verb.
+  "session_ended",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */

@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-09-23
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -17,6 +17,9 @@ proceeds in phases F1–F4.
 no time-based expiry, server-side sign-out, and the web ending a session whose token has expired.
 **Amended** — 2026-09-23 (issue #1308): §8 open item resolved — the directory sync revokes local sessions
 when it offboards an active person.
+**Amended** — 2026-09-26 (issue #1420): §9 per-device sessions — a `UserSession` row per sign-in, listed by
+its owner and ended one at a time, **on top of** the `sessionEpoch` model (CEO decisions). The "session table
+is over-scoped" call in §3's options and §8 is revised by it.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
@@ -87,7 +90,8 @@ Within option 3, the sub-decisions (each an adversarial-review finding) and the 
   (granular but a new mutable table + GC). Chosen: a `User.sessionEpoch` embedded in the token; the guard
   already re-reads the `User` row every request (for `isActive`), so the epoch/active/soft-delete check is
   ~free and closes logout + password-change + offboard at once. A session table is over-scoped for the
-  target.
+  target. *(Revised 2026-09-26, #1420: a session table was added **alongside** the epoch — the epoch
+  stays the revocation lever for "everything", the table adds per-device listing and ending. See §9.)*
 - **Peppering:** server-held pepper (stronger against a DB-only leak — INV-10's threat model — but a new
   hard DR linchpin) vs. **none in v1 (chosen)**, with the column shaped to tolerate one later.
 - **Brute-force:** hard per-account lockout (DoS-able against a known admin) vs. **per-account
@@ -311,7 +315,8 @@ future `exp` is rejected, and a present `exp` is always enforced. Everything §3
 on sign and verify, `sub` + `sessionEpoch`, nothing authorization-bearing (INV-1). The marker is covered by
 the HMAC, so it cannot be grafted onto an existing token without `SESSION_SIGNING_SECRET`. A very long
 `exp` (years) was considered and rejected: it is the same risk with a misleading bound, and it is not what
-the CEO asked for. A per-device session table stays rejected for the reason §3 gives.
+the CEO asked for. A per-device session table stays rejected for the reason §3 gives. *(Revised
+2026-09-26 — see §9.)*
 
 **Revocation is now the only thing that ends a remember-me session**, so every lever had to be real:
 
@@ -392,6 +397,95 @@ field. Rolling the API back leaves any remember-me token without `exp`, which th
 fail-closed, one re-login. On the web, a session cookie issued before the upgrade carries no `expiresAt`,
 so it is not ended by time: it keeps working until its token's own `exp` (at most 12h later), when the API
 401s and the marked `/login` landing ends it once, without a loop. Nobody is signed out by the deploy.
+
+### 9. Per-device sessions — amendment (issue #1420, 2026-09-26)
+
+**The gap.** With only the epoch, a user could not see where they were signed in, and "sign out" ended every
+device at once — the epoch model's inherent granularity that §8 accepted. The account hub (#1404) needed a
+per-device list and a way to end one session, so a lost laptop can be signed out without signing out the
+phone in the user's hand.
+
+**CEO decisions (2026-09-26).**
+
+1. **Existing sessions on upgrade: "siguen vivas".** No forced re-login. Tokens issued before the upgrade
+   carry no session id; they keep working until they expire or an epoch bump ends them. They are not listed
+   individually.
+2. **Data per session: "navegador + IP + fechas".** Browser and OS (parsed from the User-Agent, raw value
+   stored truncated, no new dependency), the client IP as the API already resolves it behind the trusted
+   proxy, created and last-seen times (throttled writes), the remember-me flag, and `current` for the
+   caller's own session. Rows go away when the session is closed or expires. Visible to the user
+   themselves; an admin ends another user's sessions through the existing offboarding / deactivation /
+   reset levers.
+
+**Decision.** A new `UserSession` table ([[user-session]]) **on top of** the epoch, not instead of it:
+
+- **Sign-in** (`POST /auth/login`) picks a session id, signs the token with it as a new, optional, signed
+  `sid` claim, and records the row (user agent, IP, epoch, remember-me, the token's expiry). If the row
+  cannot be written, no token is handed out. In the same step the user's least recently active rows
+  beyond **50** are deleted — a bound on a table every sign-in grows (the evicted devices sign in again).
+- **The guard**, for a token **with** a `sid`, additionally requires its row to exist for that user and
+  epoch and not to have expired — one primary-key read per request, deliberately **uncached** so ending a
+  session is immediate on every replica. `lastSeenAt` is refreshed at most once every 5 minutes per session
+  by a conditional write, best-effort. A token **without** a `sid` (issued before the upgrade) keeps
+  exactly the epoch-only check. A present `sid` must be a uuid or the token is rejected.
+- **`GET /auth/sessions`** lists the caller's live sessions — rows minted at the user's *current* epoch
+  and not expired — with `current` flagged and `currentIsLegacy` when the caller's own token has no `sid`
+  (the UI shows one synthetic "signed in before the update" entry; other pre-upgrade devices cannot be
+  detected and are documented, not listed). Empty outside local mode.
+- **`DELETE /auth/sessions/:id`** ends one of the caller's sessions: the row is deleted, the token dies on
+  its next request, and `SESSION_ENDED` (`{ sessionId, current }`) is recorded in [[user-history]] in the
+  same transaction. Ending the current session signs this device out. Anything else — another user's
+  session, an unknown, malformed, stale or already-ended id — is one indistinguishable `404`.
+- **"Sign out everywhere" is unchanged in meaning.** `POST /auth/logout` still bumps `sessionEpoch` and now
+  also deletes every session row, in one transaction. Password change keeps the calling device's row (same
+  `sid`, moved to the new epoch — only if the row is still at the caller's epoch) and deletes the others;
+  password reset deletes them all.
+- **Password change is conditional on the caller's epoch.** Its write only applies while `sessionEpoch`
+  is still the one the request authenticated with. If a concurrent lever bumped it first (an admin reset,
+  a deactivation, a sign-out everywhere) the change is refused with `401 { code: "SESSION_REVOKED" }` and
+  nothing is written — so it can never overwrite an admin's temporary password or revive a revoked
+  session. (The race predates #1420; the session row made it worth closing.)
+- **Every other epoch bump** (admin reset, deactivation, offboarding, the directory sync, the recovery CLI)
+  needs no change: the row's `epoch` snapshot no longer matches, so it drops out of the list at once and the
+  hourly `UserSessionSweeper` purges it, together with expired rows and remember-me rows unused for
+  **400 days** (the web cookie's own ceiling, §8). Session rows are protocol state and
+  hard-deleted (the `PasswordResetToken` / OAuth token precedent); the audit record is the history row.
+- **Not sessions:** personal MCP tokens, OAuth grants and service-account tokens are not listed or ended
+  here, and signing out still leaves MCP connections alive ([[0097-ai-assistant-mcp-and-headless-api]]
+  decision 8).
+- **No admin endpoint.** An admin ends a user's sessions with the levers that already exist; a per-session
+  admin view was not built.
+
+**Client IP and user agent at sign-in.** The web signs in server-side — the Auth.js Credentials provider
+calls `POST /auth/login` from the web container — so the API sees the web container's address and Node's
+user agent unless the web forwards the browser's `User-Agent` and the `X-Forwarded-For` it received from
+the reverse proxy on that one call. With `TRUST_PROXY=1` Express then resolves `req.ip` to the address the
+proxy reported (a client-forged hop is left of it and ignored), which also turns the login rate limit into
+the per-client limit it was meant to be. That forwarding is the web unit's half of this amendment; without
+it the rows record the web container.
+
+**Consequences.** One indexed read per authenticated local request with a `sid`, plus at most one write per
+session every 5 minutes. A new mutable table with a sweeper, which §3 had declined — accepted now that the
+account hub needs it. The user agent and IP are self-reported or proxy-derived: informational, never an
+identity. An in-flight AI run keeps the principal snapshot it started with (delegated identity checks the
+epoch, not the session row), so ending one session does not interrupt a run already under way; "sign out
+everywhere" does.
+
+**Ending one session is not full containment.** It ends that device's web session only. For a lost or
+stolen device the complete answer is **changing the password**: that bumps both `sessionEpoch` and
+`mcpCredentialEpoch`, so it also ends every other session and every OAuth connection and personal MCP
+token (ADR-0097 decision 8). The Manual says so next to the session list.
+
+**Upgrade-safety.** An additive migration: a new, empty `user_sessions` table (FK to `users`, cascade), one
+appended enum value (`SESSION_ENDED`) and the `recent_activity` view re-created with one extra summary
+branch. No existing row is touched and nobody is signed out. Rolling the API back leaves `sid` as a claim
+the older verifier ignores, so new tokens keep working under the epoch-only check.
+
+**Rollback caveat.** Ending one session only deletes its row. After a rollback to an API older than #1420
+the guard no longer reads the table, so a token whose session was ended individually is accepted again
+until its `exp` — never, for a remember-me token. After such a rollback, the users concerned should
+**sign out everywhere** (or an admin resets or deactivates them): an epoch bump ends every token on any
+version.
 
 ## Consequences
 

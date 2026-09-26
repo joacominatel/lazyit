@@ -34,6 +34,7 @@ import {
   type LocalSessionContext,
   type SessionClaims,
 } from './local/local-credential.service';
+import { UserSessionStore } from './local/user-session.store';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,8 +107,9 @@ export class JwtAuthGuard implements CanActivate {
 
   private readonly principals: PrincipalLoaderService;
   private readonly serviceAccounts: ServiceAccountAuthenticator;
+  private readonly sessions: UserSessionStore;
 
-  // The two collaborators are provided by AuthModule. They are @Optional with an equivalent default so a
+  // The three collaborators are provided by AuthModule. They are @Optional with an equivalent default so a
   // guard built by hand from the three original dependencies (the existing auth specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
@@ -115,11 +117,13 @@ export class JwtAuthGuard implements CanActivate {
     private readonly localCredentials: LocalCredentialService,
     @Optional() principals?: PrincipalLoaderService,
     @Optional() serviceAccounts?: ServiceAccountAuthenticator,
+    @Optional() sessions?: UserSessionStore,
   ) {
     this.principals = principals ?? new PrincipalLoaderService(prisma);
     this.serviceAccounts =
       serviceAccounts ??
       new ServiceAccountAuthenticator(prisma, this.principals);
+    this.sessions = sessions ?? new UserSessionStore(prisma);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -310,6 +314,10 @@ export class JwtAuthGuard implements CanActivate {
    *   3. Reject (401) when: the token's `epoch` ≠ the row's `sessionEpoch` (REVOCATION — logout /
    *      password-change / deactivate bump the epoch, killing all prior tokens), the account is inactive,
    *      or it is `directoryOnly` (a login-incapable directory person must never authenticate).
+   *   4. Per-device sessions (issue #1420, ADR-0086 §9): a token carrying a `sid` is refused (401) unless
+   *      its `UserSession` row still exists for this user and epoch and has not expired — so ending ONE
+   *      session kills exactly that device. A token WITHOUT a `sid` (minted before the upgrade) keeps the
+   *      epoch-only check above: it is never forced out by the upgrade (CEO decision, 2026-09-26).
    *
    * A local token is only accepted in local mode; in oidc mode it falls to handleOidc and is rejected
    * (cross-mode rejection, asserted in tests). Sets request.user and `request.localSession` (whether the
@@ -344,8 +352,17 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException(LOCAL_REFUSAL_MESSAGES[loaded.reason]);
     }
 
+    // Per-device session check — one primary-key read, only for a token that names a session.
+    const sessionId = claims.sid ?? null;
+    if (
+      sessionId !== null &&
+      !(await this.sessions.isLive(sessionId, claims.sub, claims.epoch))
+    ) {
+      throw new UnauthorizedException(LOCAL_REFUSAL_MESSAGES.session_revoked);
+    }
+
     request.user = loaded.principal.user;
-    request.localSession = { rememberMe: claims.rememberMe };
+    request.localSession = { rememberMe: claims.rememberMe, sessionId };
     return true;
   }
 

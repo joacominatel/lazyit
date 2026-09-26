@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiNoContentResponse,
   ApiOkResponse,
@@ -17,6 +25,7 @@ import { CurrentUser } from '../current-user.decorator';
 import { AllowPasswordChangeRequired } from '../allow-password-change-required.decorator';
 import { LoginService } from './login.service';
 import { LoginRateLimitGuard } from './login-rate-limit.guard';
+import { sessionMetaFromRequest } from './user-session.store';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe) + TS types + OpenAPI schema.
 class LoginRequestDto extends createZodDto(LoginRequestSchema) {}
@@ -49,14 +58,19 @@ export class LocalAuthController {
       'Exchanges an email-or-username + password for a first-party session token (HS256 JWT). ' +
       '`rememberMe: true` mints a token with no time-based expiry (`expiresAt: null`); otherwise it ' +
       'expires after 12h (`expiresAt` in epoch seconds). Only functional in AUTH_MODE=local. Returns a ' +
-      'uniform 401 for every failure (no user-enumeration).',
+      'uniform 401 for every failure (no user-enumeration). Each sign-in opens a per-device session ' +
+      "recording the request's User-Agent and client IP (see GET /auth/sessions).",
   })
   @ApiOkResponse({ type: LoginResponseDto })
-  async login(@Body() dto: LoginRequestDto): Promise<LoginResponse> {
+  async login(
+    @Body() dto: LoginRequestDto,
+    @Req() req: Request,
+  ): Promise<LoginResponse> {
     return this.loginService.login(
       dto.identifier,
       dto.password,
       dto.rememberMe,
+      sessionMetaFromRequest(req),
     );
   }
 
@@ -68,8 +82,9 @@ export class LocalAuthController {
     summary:
       'Sign out and revoke sessions server-side (authenticated, local mode)',
     description:
-      "Bumps the caller's session epoch, so the presented token and every other session the user holds " +
-      'stop authenticating. Idempotent: a repeat with the revoked token is a 401 and changes nothing. ' +
+      "Bumps the caller's session epoch and ends every per-device session, so the presented token and " +
+      'every other session the user holds stop authenticating (sign out everywhere; to end one device use ' +
+      'DELETE /auth/sessions/:id). Idempotent: a repeat with the revoked token is a 401 and changes nothing. ' +
       'A no-op outside AUTH_MODE=local.',
   })
   @ApiNoContentResponse()

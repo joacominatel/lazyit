@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { ChangePasswordResponseSchema } from "./auth-password";
-import { LoginRequestSchema, LoginResponseSchema } from "./auth-login";
+import {
+  LoginRequestSchema,
+  LoginResponseSchema,
+  UserSessionListSchema,
+  UserSessionSchema,
+} from "./auth-login";
 
 // ADR-0086 §3 + §8 (#1307) — the local login contract. `rememberMe` is optional and defaults to false so
 // an older client that never sends it keeps the default 12h session; `expiresAt` tells the web when the
@@ -92,5 +97,57 @@ describe("auth-login schemas (ADR-0086 §3/§8)", () => {
         false,
       );
     });
+  });
+});
+
+// Issue #1420 (ADR-0086 §9) — the per-device session list.
+describe("UserSessionListSchema (#1420)", () => {
+  const session = {
+    id: "33333333-3333-4333-8333-333333333333",
+    browser: "Firefox",
+    os: "Windows",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    ip: "203.0.113.7",
+    createdAt: "2026-09-26T10:00:00.000Z",
+    lastSeenAt: "2026-09-26T11:00:00.000Z",
+    expiresAt: "2026-09-26T22:00:00.000Z",
+    rememberMe: false,
+    current: true,
+  };
+
+  test("accepts a list with a current session and a remember-me one", () => {
+    const parsed = UserSessionListSchema.safeParse({
+      sessions: [
+        session,
+        {
+          ...session,
+          id: "44444444-4444-4444-8444-444444444444",
+          browser: null,
+          os: null,
+          userAgent: null,
+          ip: null,
+          expiresAt: null,
+          rememberMe: true,
+          current: false,
+        },
+      ],
+      currentIsLegacy: false,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("accepts an empty list for a caller on a pre-upgrade token", () => {
+    expect(
+      UserSessionListSchema.safeParse({ sessions: [], currentIsLegacy: true })
+        .success,
+    ).toBe(true);
+  });
+
+  test("rejects a non-uuid session id and a missing current flag", () => {
+    expect(UserSessionSchema.safeParse({ ...session, id: "abc" }).success).toBe(
+      false,
+    );
+    const { current: _current, ...withoutCurrent } = session;
+    expect(UserSessionSchema.safeParse(withoutCurrent).success).toBe(false);
   });
 });

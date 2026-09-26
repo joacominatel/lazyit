@@ -24,6 +24,8 @@ describe("UserHistoryEventTypeSchema (ADR-0058)", () => {
       // Issue #1375 — activation flips.
       "DEACTIVATED",
       "REACTIVATED",
+      // Issue #1420 — a user ended one of their local sessions.
+      "SESSION_ENDED",
     ]);
   });
 

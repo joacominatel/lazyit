@@ -1,6 +1,7 @@
 import { AppController } from '../../app.controller';
 import { LocalAuthController } from '../../auth/local/local-auth.controller';
 import { PasswordLifecycleController } from '../../auth/local/password-lifecycle.controller';
+import { UserSessionsController } from '../../auth/local/user-sessions.controller';
 import { DirectoryController } from '../../directory/directory.controller';
 import { HealthController } from '../../health/health.controller';
 import { ImportController } from '../../import/import.controller';
@@ -70,6 +71,11 @@ export const platformToolset: AiToolset = {
       PasswordLifecycleController,
       ['changePassword', 'forgotPassword', 'resetPassword'],
       'Excluded: credentials (structural exclusion).',
+    ),
+    unexposed(
+      UserSessionsController,
+      ['list', 'end'],
+      'Excluded: authentication — the per-device sessions are the credentials themselves (structural exclusion).',
     ),
     unexposed(
       KeypairController,

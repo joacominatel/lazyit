@@ -29,6 +29,7 @@ import { ServicePrincipalForbiddenGuard } from '../service-principal-forbidden.g
 import { PasswordLifecycleService } from './password-lifecycle.service';
 import type { LocalSessionContext } from './local-credential.service';
 import { PasswordResetRateLimitGuard } from './password-reset-rate-limit.guard';
+import { sessionMetaFromRequest } from './user-session.store';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe) + TS types + OpenAPI schema.
 class ChangePasswordRequestDto extends createZodDto(
@@ -103,6 +104,11 @@ export class PasswordLifecycleController {
       dto.currentPassword,
       dto.newPassword,
       req.localSession?.rememberMe === true,
+      // The calling device keeps its per-device session row (#1420); the others end.
+      {
+        sessionId: req.localSession?.sessionId ?? null,
+        meta: sessionMetaFromRequest(req),
+      },
     );
   }
 

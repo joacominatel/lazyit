@@ -10,6 +10,7 @@ import { createIdentityProvider } from './identity/identity-provider.factory';
 import { LocalCredentialService } from './local/local-credential.service';
 import { LocalProvisioningService } from './local/local-provisioning.service';
 import { PasswordStepUpVerifier } from './local/password-step-up.verifier';
+import { UserSessionStore } from './local/user-session.store';
 import { PrincipalLoaderService } from './principal-loader.service';
 import { ServiceAccountAuthenticator } from './service-account-authenticator';
 
@@ -72,6 +73,9 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     // branches, the AI tool layer and `/mcp`.
     PrincipalLoaderService,
     ServiceAccountAuthenticator,
+    // Per-device local sessions (issue #1420, ADR-0086 §9): the guard's `sid` check and the login /
+    // logout / password flows' session rows share this one store.
+    UserSessionStore,
     // Authentication first: populate request.user.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     // Forced password change (ADR-0086 §F4) second: a local user who still owes a one-time-credential
@@ -108,6 +112,7 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     PasswordStepUpVerifier,
     PrincipalLoaderService,
     ServiceAccountAuthenticator,
+    UserSessionStore,
   ],
 })
 export class AuthModule {}

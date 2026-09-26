@@ -188,3 +188,44 @@ export const PasswordResetCapabilitiesSchema = z.object({
 export type PasswordResetCapabilities = z.infer<
   typeof PasswordResetCapabilitiesSchema
 >;
+
+/* ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Per-device local sessions (issue #1420, ADR-0086 §9). AUTH_MODE=local only: every sign-in records one
+ * session row, and its token carries that row's id. A user lists their own sessions and ends one; "sign out
+ * everywhere" stays `POST /auth/logout`. Outside local mode the list is always empty.
+ * ────────────────────────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One of the caller's live sessions (`GET /auth/sessions`). `browser` and `os` are parsed server-side from
+ * the stored User-Agent (best effort; `null` when unrecognised) and `userAgent` is the raw value, truncated
+ * to 512 characters. `ip` is the sign-in client address as the API resolved it behind the trusted proxy —
+ * informational, never an identity. `lastSeenAt` is throttled (written at most once every few minutes per
+ * session), so it is approximate. `expiresAt` is null for a "keep me signed in" session. `current` marks
+ * the session the request was made with.
+ */
+export const UserSessionSchema = z.object({
+  id: z.uuid(),
+  browser: z.string().nullable(),
+  os: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  ip: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  lastSeenAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime().nullable(),
+  rememberMe: z.boolean(),
+  current: z.boolean(),
+});
+export type UserSession = z.infer<typeof UserSessionSchema>;
+
+/**
+ * `GET /auth/sessions` response. `sessions` is newest-activity first. `currentIsLegacy` is true when the
+ * caller's own token was issued before per-device sessions existed (it carries no session id, so it has no
+ * row and cannot be ended individually): the UI shows one synthetic "signed in before the update" entry for
+ * it. Other devices signed in before the update cannot be detected and are not listed; they end at their
+ * expiry or with "sign out everywhere".
+ */
+export const UserSessionListSchema = z.object({
+  sessions: z.array(UserSessionSchema),
+  currentIsLegacy: z.boolean(),
+});
+export type UserSessionList = z.infer<typeof UserSessionListSchema>;

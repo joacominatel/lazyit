@@ -164,6 +164,8 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // Issue #1375 — activation flips.
       "deactivated",
       "reactivated",
+      // Issue #1420 — a user ended one of their local sessions.
+      "session_ended",
     ]);
   });
 

@@ -7,10 +7,16 @@ import { LoginRateLimitGuard } from './login-rate-limit.guard';
 import { PasswordLifecycleController } from './password-lifecycle.controller';
 import { PasswordLifecycleService } from './password-lifecycle.service';
 import { PasswordResetRateLimitGuard } from './password-reset-rate-limit.guard';
+import { UserSessionSweeper } from './user-session.sweeper';
+import { UserSessionsController } from './user-sessions.controller';
+import { UserSessionsService } from './user-sessions.service';
 
 /**
  * LocalAuthModule — the AUTH_MODE=local first-party auth surface (ADR-0086). Registers:
  *   - `POST /auth/login` (F1b) + its LoginService + per-IP rate-limit guard.
+ *   - Per-device sessions (issue #1420, ADR-0086 §9): `GET /auth/sessions`, `DELETE /auth/sessions/:id`
+ *     + {@link UserSessionsService} + the {@link UserSessionSweeper}. The store they share
+ *     (UserSessionStore) is provided by the @Global AuthModule, because the guard needs it too.
  *   - The password LIFECYCLE (F4a, ADR-0086 §F4): `POST /auth/change-password`, `/forgot-password`,
  *     `/reset-password` + {@link PasswordLifecycleService} + its per-IP rate-limit guard.
  *
@@ -22,12 +28,19 @@ import { PasswordResetRateLimitGuard } from './password-reset-rate-limit.guard';
  */
 @Module({
   imports: [SmtpModule, UserHistoryModule],
-  controllers: [LocalAuthController, PasswordLifecycleController],
+  controllers: [
+    LocalAuthController,
+    PasswordLifecycleController,
+    UserSessionsController,
+  ],
   providers: [
     LoginService,
     LoginRateLimitGuard,
     PasswordLifecycleService,
     PasswordResetRateLimitGuard,
+    // Per-device sessions (issue #1420): list / end one, and the hourly purge of dead rows.
+    UserSessionsService,
+    UserSessionSweeper,
   ],
   // EXPORTED for the ADMIN-initiated reset (issue #1268): `UsersService.requestPasswordReset`'s local
   // `email` delivery reuses this service's token + mail machinery instead of growing a second, divergent
