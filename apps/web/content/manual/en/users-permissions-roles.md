@@ -23,7 +23,9 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
   this guarantees the instance is always operable by someone with full power.
 - **Member** — the everyday working role. By default a Member can read and create/edit most things
   (assets, applications, consumables, the Knowledge Base, locations, models, categories) but cannot
-  delete records or perform admin-only actions.
+  delete records or perform admin-only actions. A Member can also use the
+  [AI assistant](/help/ai-assistant-overview) and connect external AI agents, once an administrator
+  turns them on — always with the Member's own permissions.
 - **Viewer** — read-only. By default a Viewer can look at most areas but change nothing. A few
   sensitive views (the user directory and the access-grant ledger) are also hidden from Viewer by
   default.

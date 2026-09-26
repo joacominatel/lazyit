@@ -82,6 +82,21 @@ configured to trust exactly that one hop, so request-IP-based features (rate lim
 audit) see the real client and not a forged header. This is preconfigured; you don't need to change it
 for a standard single-host deploy.
 
+## The AI assistant and external agents
+
+Two things matter here once AI is turned on:
+
+- **The chat streams its answers.** Caddy passes the stream through unbuffered and uncompressed. If you
+  put **another proxy or load balancer in front of Caddy**, it must not buffer or compress
+  `text/event-stream` either (nginx: `proxy_buffering off;` on the lazyit location) — otherwise each reply
+  appears only once it is complete.
+- **MCP sign-in needs HTTPS and a pinned address.** Caddy routes the MCP endpoint (`/mcp`) and the OAuth
+  paths to the API. External AI agents sign in with OAuth only when the public origin (`WEB_ORIGIN`) is an
+  `https://` address; on a plain-HTTP (LAN) instance they use personal tokens instead. A TLS proxy in
+  front of a LAN-mode instance is not enough — set `WEB_ORIGIN` to the `https://` address and restart the
+  API. Cloud connectors (claude.ai, ChatGPT) also need the instance reachable from the internet with a
+  publicly trusted certificate. See [External AI agents (MCP)](/help/ai-assistant-setup#external-ai-agents-mcp).
+
 ## Related
 
 - [Self-hosting](/help/deployment-operations-self-hosting)

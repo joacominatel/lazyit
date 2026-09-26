@@ -23,7 +23,8 @@ A working restore needs **more than that**:
 - **Your environment / secrets file** — the deployment secrets (database password, encryption keys
   for the sign-in service and for workflow connector credentials, the app secret). Some of these keys
   **cannot be regenerated**: restore a database without the matching key and that data is
-  unreadable.
+  unreadable. (Losing `AI_SECRET_KEY`, which encrypts the AI provider's key, only means typing that
+  provider key again.)
 
 Treat the secrets file as **irreplaceable**: keep an encrypted copy **off the host**, and never let
 the running server be its only copy. Test a restore before you rely on lazyit for real — an untested
@@ -65,6 +66,15 @@ When a credential or an account may have been exposed, work in this order.
    removes their access; if you run your own provider, also disable them there.
 2. **Revoke their application access and vault membership.** Removing a person from a vault stops them
    reaching its secrets through lazyit going forward.
+3. **Their AI connections end with the account.** Offboarding, deactivating or resetting the password
+   ends every AI app and personal MCP token the person connected — signing them out does not. See
+   [What ends a connection](/help/ai-assistant-connected-apps#what-ends-a-connection).
+
+### An AI app you don't recognize connected to your account
+
+lazyit notifies you the first time a new AI app or personal token is used on your account. If it wasn't
+you, [revoke it](/help/ai-assistant-connected-apps#revoking) at once and change your password (which also
+ends every other connection), then tell an administrator.
 
 ### A shared secret may have leaked
 
@@ -91,4 +101,8 @@ encrypted, off-host backup and on a tightly controlled host.
   token if it may have been exposed.
 - **Offboard promptly.** Because ownership and access in lazyit follow the live user, removing a
   person cleanly removes their reach.
+- **Treat AI as a data flow.** Before turning the assistant on, check your contract with the AI provider
+  (retention, training, region). Review **Connected apps** now and then, keep personal MCP tokens short,
+  and grant service accounts the narrowest **AI access**. See
+  [AI assistant — overview](/help/ai-assistant-overview).
 - **Keep your identity provider patched and protected** — it's the front door, and lazyit trusts it.

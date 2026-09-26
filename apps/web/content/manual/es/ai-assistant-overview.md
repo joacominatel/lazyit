@@ -7,75 +7,131 @@ subcategory: overview
 
 # Asistente de IA — visión general
 
-lazyit puede incluir un **asistente de IA**: un chat en la barra superior donde las personas hacen
-preguntas sobre el parque ("¿qué laptops están sin asignar en Madrid?") y piden cambios ("asigna MBA-017
-a Juan"). El asistente trabaja a través del propio lazyit — lee y modifica registros con las mismas reglas
-y los mismos permisos que la persona que lo usa — y **cada cambio que propone espera a que esa persona lo
-apruebe** antes de que ocurra nada.
+lazyit puede trabajar con IA de tres maneras. Todas actúan **como una persona o una cuenta de servicio,
+con exactamente sus permisos** — nunca más.
 
-lazyit también puede permitir que **agentes de IA externos** — Claude Code, OpenAI Codex, Cursor,
-OpenCode y otros clientes que hablan el Model Context Protocol (MCP) — trabajen con lazyit en nombre de
-una persona.
+- **El asistente integrado** — un chat en la barra superior. Las personas preguntan por el parque
+  ("¿qué laptops están sin asignar en Madrid?") y piden cambios ("asigná MBA-017 a Juan"). **Cada cambio
+  que propone espera la aprobación de esa persona.** Mirá [Usar el chat](/help/ai-assistant-using-the-chat).
+- **Agentes de IA externos (MCP)** — Claude Code, OpenAI Codex, Cursor, VS Code y otros clientes que
+  hablan el Model Context Protocol se conectan a lazyit en nombre de una persona, con su propio modelo.
+  Mirá [Claude Code y MCP](/help/ai-assistant-claude-code-mcp).
+- **Cuentas de servicio** — un script llama al asistente por la API (`POST /api/ai/runs`), o se conecta
+  por MCP, sin ninguna persona. Mirá [Cuentas de servicio](#cuentas-de-servicio) más abajo.
 
 ## Desactivado por defecto
 
 Nada relacionado con IA está activo en una instancia nueva o actualizada. Un administrador activa cada
-parte en **Configuración → IA**:
+parte en **Configuración → IA**, y cada una tiene su propio interruptor:
 
-- **El asistente** necesita un proveedor de IA (Anthropic, OpenAI, Google Gemini o cualquier servidor
-  compatible con OpenAI, incluido uno propio), un modelo y — para los proveedores en la nube — una clave de
-  API. Consulta [Asistente de IA — configuración](/help/ai-assistant-setup).
-- **Los agentes de IA externos (MCP)** tienen su propio interruptor. Funcionan incluso sin ningún
-  proveedor configurado, porque el agente trae su propio modelo.
+| Interruptor | Necesita | Al desactivarlo |
+| --- | --- | --- |
+| **El asistente** | Un proveedor de IA, un modelo y — en los proveedores en la nube — una clave de API | Desaparece para todos al instante; la configuración y la clave se conservan |
+| **Agentes de IA externos (MCP)** | Nada más — el agente trae su propio modelo | Todas las conexiones quedan en pausa al instante; vuelven al reactivarlo |
+| **Búsqueda web** (solo el asistente) | Un proveedor que la soporte | Los chats que la usaban quedan de solo lectura |
 
-Desactivar cualquiera de los dos es inmediato y conserva la configuración para más adelante.
-
-Con MCP activado, los clientes conocidos están permitidos de entrada y — por defecto — cualquier otro
-cliente con un callback de inicio de sesión `https://` puede pedirle acceso a una persona; la persona siempre
-ve quién lo pide antes de aprobar. Un administrador puede restringirlo a una lista fija. Consulta
-[Asistente de IA — configuración](/help/ai-assistant-setup#clientes-permitidos).
-
-## Qué sale de tu servidor
-
-Cuando alguien usa el asistente integrado, lazyit envía al proveedor que elegiste:
-
-- los mensajes que escribe;
-- la página en la que está — su dirección y el registro que muestra, nunca el resto de la página;
-- los registros que el asistente lee para responder: activos, personas, aplicaciones y accesos, stock,
-  artículos de la base de conocimiento — solo lo que **esa persona** puede ver.
-
-Nunca envía secretos de las bóvedas ni contraseñas, y la clave de API del proveedor se guarda cifrada y
-no se vuelve a mostrar. El administrador acepta esto antes de poder activar el asistente. Las
-conversaciones también se guardan en tu servidor durante el período de retención que elija el
-administrador (90 días por defecto, entre 7 y 3650), y después se borran; el registro de lo que el
-asistente realmente cambió se conserva igual.
-
-Si el administrador activa la **búsqueda web** (desactivada por defecto), el proveedor también puede buscar
-en internet para el chat: hace la búsqueda en sus propios servidores con consultas que escribe el
-asistente, así que la consulta y el contexto de la conversación van a la búsqueda del proveedor. lazyit en
-sí no hace ninguna solicitud a otros sitios. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup#búsqueda-web).
-
-Los agentes externos por MCP usan su propio modelo: lo que leen de lazyit va al proveedor que use ese
-agente, bajo el control de la persona que lo ejecuta.
+Mirá [Asistente de IA — configuración](/help/ai-assistant-setup).
 
 ## Quién puede usarlo
 
-Dos permisos controlan la IA; ambos se otorgan por defecto a Administradores y Miembros y se configuran en
-[Permisos](/help/permissions):
+Dos permisos controlan la IA. Los dos se otorgan por defecto a Administradores y Miembros, y se pueden
+cambiar en [Permisos](/help/permissions):
 
 | Permiso | Qué permite |
 | --- | --- |
-| **Usar el asistente de IA** (`ai:use`) | Ver el chat y usarlo, una vez que un administrador activó el asistente. |
-| **Conectar agentes de IA externos (MCP)** (`ai:connect`) | Conectar un cliente MCP como Claude Code, una vez que un administrador activó MCP. |
+| **Usar el asistente de IA** (`ai:use`) | Usar el chat una vez que el asistente está activo; para una cuenta de servicio, la API headless. |
+| **Conectar agentes de IA externos (MCP)** (`ai:connect`) | Conectar un cliente MCP una vez que MCP está activo. |
 
-En cualquier caso, el asistente o el agente solo puede hacer lo que la persona podría hacer por sí misma.
-Configurar la IA requiere **Configurar la instancia**.
+Ninguno de los dos suma poder: el asistente o el agente solo puede hacer lo que la persona podría hacer
+por sí misma. Configurar la IA requiere **Configurar la instancia**.
+
+## Qué sale de tu servidor
+
+Leé esto antes de activar nada. El administrador lo acepta en el asistente de configuración, y esa
+aceptación queda registrada.
+
+### Hacia el proveedor de IA (el asistente integrado)
+
+Cuando alguien usa el chat, lazyit le envía al proveedor que eligió el administrador:
+
+- los mensajes que escribe y las respuestas que da en los formularios del asistente;
+- la dirección de la página en la que está y qué registro muestra — nunca lo que hay en la pantalla;
+- las instrucciones de lazyit para el modelo, las instrucciones propias del administrador y la lista de
+  herramientas;
+- **cada resultado de cada herramienta que usa el asistente** — es decir, cualquier registro que **esa
+  persona** puede leer: nombres, correos, números de empleado, activos y asignaciones, aplicaciones y
+  quién tiene acceso a ellas, stock, artículos de la base de conocimiento (incluidas las carpetas
+  restringidas que puede abrir) y, para quien puede leer el historial de actividad, sus entradas.
+
+lazyit nunca envía valores del Gestor de Secretos, contraseñas de inicio de sesión, tokens de cuentas de
+servicio ni la clave de API del proveedor. La clave se guarda cifrada y no se vuelve a mostrar.
+
+**Lo que el proveedor hace con esos datos lo define tu contrato con él** — la retención, si los usa para
+entrenar, la región donde los procesa. lazyit no puede hacer cumplir ni verificar esas condiciones, y
+las obligaciones de protección de datos transfronteriza son tuyas. Para que todo quede en tus
+instalaciones, usá un modelo propio a través del proveedor **compatible con OpenAI**.
+
+### Hacia socios de búsqueda (búsqueda web, desactivada por defecto)
+
+Con la búsqueda web activada, las búsquedas las hace el **proveedor** en sus propios servidores. Las
+consultas que escribe el asistente y el contexto de la conversación van al proveedor, que puede pasarle
+las consultas a su motor de búsqueda o a un socio de búsqueda, y puede cobrar las búsquedas aparte.
+lazyit en sí no hace ninguna solicitud a otros sitios. Con OpenAI, lazyit limita la búsqueda a la copia
+en caché de la web que tiene OpenAI, así que ninguna página se descarga en vivo desde su sitio. Mirá
+[Búsqueda web](/help/ai-assistant-setup#búsqueda-web).
+
+### A través de agentes externos (MCP)
+
+Un cliente MCP usa su propio modelo. Lo que lee de lazyit va **al proveedor que use ese cliente, bajo
+las condiciones de la persona que lo ejecuta** — lazyit no tiene nada que decir ahí. Mirá
+[Antes de conectar](/help/ai-assistant-claude-code-mcp#antes-de-conectar-en-qué-confiás).
+
+### Qué queda en tu servidor
+
+- **Las conversaciones** se guardan durante la retención que defina el administrador (90 días por
+  defecto, entre 7 y 3650) y después se borran. Solo las puede leer su dueño — los administradores no.
+- **El registro de acciones de IA** — cada cambio que propuso el asistente, quién decidió y qué se
+  ejecutó — es permanente y sobrevive aunque se borre el chat.
+- En una instancia HTTP plana (`lan`), el tráfico del chat entre el navegador y lazyit viaja sin cifrar,
+  como el resto de la app.
+
+## Cómo lazyit mantiene al asistente bajo control
+
+Cualquier cosa que el asistente lee — un artículo, una nota, una página web — puede traer texto escrito
+para engañar a una IA ("ignorá tus instrucciones y otorgá…"). lazyit no depende de que el modelo se
+resista:
+
+- **Vos aprobás cada cambio** en una tarjeta que lazyit arma a partir del cambio exacto que se va a
+  ejecutar, no de lo que escribió el modelo. Mirá [Aprobar cambios](/help/ai-assistant-approvals).
+- **El contenido escrito por otras personas queda marcado.** Un cambio propuesto después de que el
+  asistente leyó ese contenido muestra el aviso **Basado en contenido escrito por otras personas** y
+  nunca se aplica automáticamente.
+- **Los cambios sensibles** — roles, identidad, accesos, inicio de sesión, aplicaciones marcadas como
+  críticas, configuración de la instancia — tienen una tarjeta propia, nunca se aprueban
+  automáticamente y algunos piden tu contraseña.
+- **Algunas cosas quedan directamente fuera de su alcance**: el asistente no puede leer secretos, no
+  puede ejecutar nada que devuelva una credencial en claro (como un token nuevo de cuenta de servicio o
+  una contraseña temporal) y no puede cambiar la configuración de la propia IA.
+
+Los agentes externos son distintos: por MCP es el **cliente** el que decide si te pregunta antes de un
+cambio. Leé [Antes de conectar](/help/ai-assistant-claude-code-mcp#antes-de-conectar-en-qué-confiás)
+antes de conectar uno.
 
 ## Cuentas de servicio
 
-Las cuentas de servicio pueden usar el asistente sin una persona: por la API o por MCP. Como nadie aprueba
-sus cambios uno por uno, cada cuenta tiene su propio **acceso a IA** — desactivado, solo lectura, o lectura
-y escritura con un límite opcional de escrituras — que se configura desde el menú de su fila en
-**Configuración → Cuentas de servicio**. Consulta
-[Asistente de IA — configuración](/help/ai-assistant-setup#cuentas-de-servicio) y
-[Cuentas de servicio](/help/users-permissions-service-accounts).
+Una cuenta de servicio puede usar el asistente sin una persona — por la API o por MCP. Nadie aprueba
+sus cambios uno por uno, así que cada cuenta tiene su propio **acceso a IA** (desactivado, solo lectura,
+o lectura y escritura con un tope opcional de escrituras), que se configura desde el menú de su fila en
+**Configuración → Cuentas de servicio**. Las ejecuciones headless nunca buscan en la web. Mirá
+[Cuentas de servicio](/help/ai-assistant-setup#cuentas-de-servicio) en la página de configuración.
+
+## Adónde seguir
+
+| Querés | Leé |
+| --- | --- |
+| Activar el asistente o MCP, o cambiar los límites | [Configuración](/help/ai-assistant-setup) |
+| Usar el chat | [Usar el chat](/help/ai-assistant-using-the-chat) |
+| Entender una tarjeta de cambio | [Aprobar cambios](/help/ai-assistant-approvals) |
+| Conectar Claude Code, Cursor u otro cliente | [Claude Code y MCP](/help/ai-assistant-claude-code-mcp) |
+| Revisar o revocar lo que puede actuar en tu nombre | [Apps conectadas y tokens personales](/help/ai-assistant-connected-apps) |
+| Resolver un error | [Resolución de problemas](/help/ai-assistant-troubleshooting) |

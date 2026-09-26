@@ -25,12 +25,24 @@ El rol con control total de la instancia: gestionar usuarios, cambiar la configu
 registros y ajustar lo que pueden hacer los demás roles. Un administrador siempre tiene todos los
 permisos y no se puede reducir. Consulta [Roles](/help/users-permissions-roles).
 
+## Asistente de IA
+
+El chat opcional dentro de lazyit que busca información y propone cambios, con los permisos de la
+persona que lo usa. Está desactivado hasta que un administrador lo activa. Mirá [Asistente de IA —
+visión general](/help/ai-assistant-overview).
+
 ## Asignación
 
 El vínculo con fecha entre un **activo y la persona que lo tiene**, con una fecha de inicio y (cuando
 el activo se devuelve) una fecha de fin. Como las asignaciones se conservan en el tiempo, el historial
 de propiedad de un activo es automático. Un activo puede tener más de un propietario activo a la vez.
 Consulta [Asignaciones e historial](/help/assets-assignments-history).
+
+## App conectada
+
+Una app de IA — Claude Code, Cursor u otro cliente MCP — que una persona autorizó a actuar en su nombre,
+o un token personal que creó para una. Se listan, y se pueden revocar, en **Cuenta → IA y apps
+conectadas**. Mirá [Apps conectadas](/help/ai-assistant-connected-apps).
 
 ## Automatización de accesos
 
@@ -125,6 +137,14 @@ El rol de solo lectura. Los lectores pueden mirar la mayoría de las áreas pero
 y algunas vistas sensibles (el directorio de usuarios y el registro de concesiones de acceso) quedan
 ocultas para ellos por defecto. Consulta [Roles](/help/users-permissions-roles).
 
+## MCP
+
+El **Model Context Protocol**, el estándar abierto que usan las apps de IA para llamar herramientas.
+lazyit expone sus herramientas por MCP para que un **cliente MCP** (Claude Code, Cursor, VS Code…) pueda
+trabajar en lazyit como una persona. En una instancia con HTTPS, el cliente inicia sesión como **cliente
+OAuth**, aprobado en una pantalla de consentimiento. Mirá [Claude Code y
+MCP](/help/ai-assistant-claude-code-mcp).
+
 ## Miembro
 
 El rol de trabajo cotidiano. Los miembros pueden leer y crear o editar la mayoría de las cosas —
@@ -157,6 +177,12 @@ Una sola capacidad escrita como `área:acción` — por ejemplo, `asset:write` (
 vez que actúas. La lista completa de permisos es fija y se publica con el producto. Consulta
 [Permisos](/help/permissions).
 
+## Proveedor de IA
+
+La empresa o el servidor que ejecuta el modelo detrás del asistente de IA — Anthropic, OpenAI, Google
+Gemini o un servidor compatible con OpenAI, que podés alojar vos. Lo que el asistente lee se le envía.
+Mirá [Qué sale de tu servidor](/help/ai-assistant-overview#qué-sale-de-tu-servidor).
+
 ## Rol
 
 Uno de los tres roles fijos — **Administrador**, **Miembro**, **Lector** — y cada usuario tiene
@@ -169,12 +195,24 @@ Una petición pendiente, sujeta a aprobación, para acceder a una aplicación. U
 en una **concesión de acceso** una vez aprobada. Consulta [Solicitudes de
 acceso](/help/applications-access-requests).
 
+## Tarjeta de aprobación
+
+La tarjeta del chat de IA que muestra exactamente qué va a hacer un cambio propuesto — la arma lazyit a
+partir del cambio real, no de lo que escribió el modelo. No cambia nada hasta que la persona la
+aprueba. Mirá [Aprobar cambios](/help/ai-assistant-approvals).
+
 ## Tarea manual
 
 Un **paso humano** dentro de un flujo de trabajo de automatización de accesos. Cuando un flujo de
 trabajo llega a una tarea manual, se pausa y espera a que una persona la complete desde la bandeja de
 tareas; una vez hecha, el flujo continúa. Es una cola de aprovisionamiento, no un sistema de tickets
 general. Consulta [Tareas manuales](/help/access-automation-manual-tasks).
+
+## Token personal
+
+Una credencial revocable y con vencimiento que una persona crea para que una app de IA se conecte por
+MCP en una instancia sin dirección HTTPS. Se muestra una sola vez. Mirá [Tokens
+personales](/help/ai-assistant-connected-apps#tokens-personales).
 
 ## Ubicación
 

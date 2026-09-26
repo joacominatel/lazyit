@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # AI assistant — Frontend surfaces
@@ -894,6 +894,32 @@ Edits to existing pages (en + es):
 - `getting-started-your-profile`: Account → AI & connected apps
 - `deployment-operations-reverse-proxy-tls`: streaming + HTTPS note
 - `configuration-instance-settings`: link to Settings → AI
+
+> **As built — W4-1 Manual consolidation (#1315).** The seven `ai-assistant-*` pages (en + es) were
+> rewritten from the ~40 incremental sections into task-ordered pages that cross-link instead of
+> repeating, with every behaviour claim re-checked against `dev`:
+> - **Where things live.** The full egress disclosure (to the provider, to search partners, through MCP
+>   clients, what stays on the server — security §6.4 (a)–(g), §6.11) and the injection/approval model
+>   are in `ai-assistant-overview`; the **MCP risk statement** (T-24 / E3: the client owns confirmation,
+>   data goes to the client's provider, don't combine lazyit with fetch/email servers without review,
+>   least scope, `lazyit.admin` needs step-up) is `ai-assistant-claude-code-mcp` § "Before you connect";
+>   `ai-assistant-using-the-chat` defers card mechanics to `ai-assistant-approvals` and error handling to
+>   `ai-assistant-troubleshooting`.
+> - **`ai-assistant-troubleshooting`** is symptom → cause → fix for the wizard's test codes and enable
+>   gates, `AI_SECRET_KEY`, `WEB_SEARCH_DISABLED`, every chat run error (`PROVIDER_*`, `EGRESS_DENIED`,
+>   `BUDGET_EXCEEDED`, `CONTEXT_LIMIT`, `MAX_STEPS`, `ENGINE_RESTART`, read-only chats incl.
+>   `VERSION_CHANGED`), buffered SSE, the repeated-failure stop, STALE / PREVIEW_CHANGED, the shared
+>   step-up lockout, the per-step pending limit, auto-approve exclusions (SEC-080), MCP connection
+>   failures (mirrors [[ai-mcp-client-matrix]] §5), consent refusals incl. the allowlist and the CIMD
+>   offline fallback, what ends a connection, and the SA write cap (SEC-081).
+> - **Anchors kept.** Every heading linked from `messages/{en,es}/aiSettings.json` `links.*`,
+>   `configuration-taxonomies` and the other pages was kept verbatim; no link string in `apps/web` changed.
+> - **Corrected.** "Administrators can see and revoke every user's connected apps in Settings → AI" was
+>   not true — `GET/DELETE /oauth/grants` exist (`settings:manage`) and `useAllOAuthGrants` is defined,
+>   but no screen uses it. The page now says so and lists the admin levers that do exist (deactivate,
+>   offboard, password reset, the MCP switch). An admin connections screen remains a gap.
+> - **The §8.2 edits** to the existing pages above landed in the same change
+>   (`getting-started-your-profile` already carried its link).
 
 ---
 

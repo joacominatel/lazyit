@@ -7,208 +7,175 @@ subcategory: using-the-chat
 
 # Usar el chat
 
-El asistente de IA es un chat dentro de lazyit. Le pedís las cosas con tus palabras — "¿qué laptops no
-están asignadas?", "asigná MBP-042 a Ana Ruiz", "llevame a la aplicación VPN" — y el asistente busca
-información, propone cambios y te abre páginas. Trabaja **con tus permisos**: solo puede ver y hacer lo que
-vos podés ver y hacer.
+El asistente de IA es un chat dentro de lazyit. Pedile las cosas con tus palabras — "¿qué laptops están
+sin asignar?", "asigná MBP-042 a Ana Ruiz", "llevame a la aplicación VPN" — y busca información, propone
+cambios y te abre páginas. Trabaja **con tus permisos**: ve y hace solo lo que podrías hacer vos, y
+**cada cambio espera tu aprobación**.
 
-El chat solo aparece cuando un administrador activó el asistente y tu rol incluye el permiso **Usar el
-asistente de IA** (`ai:use`). Si no lo ves, pedíselo a un administrador — mirá
-[Permisos](/help/permissions).
+El chat aparece cuando un administrador activó el asistente y tu rol incluye **Usar el asistente de IA**
+(`ai:use`). Si no lo ves, pedíselo a un administrador — mirá [Permisos](/help/permissions).
+
+> [!WARNING]
+> No pegues contraseñas, claves de API ni otros secretos en el chat. Lo que escribís, y lo que el
+> asistente lee para responderte, se envía al proveedor de IA que configuró tu administrador — mirá
+> [Qué sale de tu servidor](/help/ai-assistant-overview#qué-sale-de-tu-servidor).
 
 ## Abrir y cerrar el chat
 
-- Hacé clic en la **burbuja de chat** de la barra superior, o presioná **⌘J** (Mac) / **Ctrl+J** (Windows,
+- Hacé clic en la **burbuja de chat** de la barra superior, o apretá **⌘J** (Mac) / **Ctrl+J** (Windows,
   Linux).
-- En una pantalla ancha el chat queda al lado de la página, así podés seguir trabajando y ver cómo se
-  actualiza. En una pantalla más chica flota sobre el lado derecho, y en el celular ocupa toda la pantalla.
-- Presioná **Esc** o la **×** para cerrarlo. Cerrar el chat no detiene una respuesta en curso; cuando lo
-  volvés a abrir, sigue donde estaba.
+- En una pantalla ancha el chat queda al costado de la página, así ves cómo se actualiza. En una más
+  chica flota sobre el lado derecho; en un teléfono ocupa toda la pantalla.
+- Apretá **Esc** o **×** para cerrarlo. Cerrarlo no frena una respuesta en curso; al abrirlo de nuevo
+  sigue donde estaba.
 
 ### Agrandar el chat
 
-Cuando una respuesta o una tarjeta de cambio necesita más lugar, ensanchá el chat:
-
-- Elegí **Ampliar** (las flechas al lado de la **×**) para ensancharlo; elegilo de nuevo para volver al ancho
-  normal.
+- Elegí **Ampliar** (las flechas al lado de **×**); elegilo de nuevo para volver al ancho normal.
 - O arrastrá el borde izquierdo del chat. Con el teclado, llegá al borde con **Tab** y usá **←** / **→**
-  (mantené **Shift** para pasos más grandes), **Inicio** / **Fin** para el más angosto y el más ancho, y
-  **Enter** para volver al ancho normal. Hacer doble clic en el borde hace lo mismo.
+  (con **Shift** para pasos más grandes), **Inicio** / **Fin** para el más angosto y el más ancho, y
+  **Enter** — o doble clic — para el ancho normal.
 
-Un chat más ancho de lo normal flota **sobre** la página en lugar de achicarla; la página de abajo queda como
-estaba. lazyit recuerda el ancho que elegiste en este navegador. En el celular el chat siempre ocupa toda la
-pantalla.
+Un chat más ancho que lo normal flota **sobre** la página en vez de achicarla. lazyit recuerda el ancho
+en este navegador.
 
 ## Preguntar algo
 
-Escribí en el cuadro de abajo y presioná **Enter** para enviar. **Shift+Enter** agrega una línea nueva.
+Escribí en el cuadro y apretá **Enter** para enviar; **Shift+Enter** empieza una línea nueva. Apretá
+**Detener** para cortar una respuesta — lo que ya escribió se conserva.
 
-Mientras el asistente trabaja, ves qué está haciendo, una línea corta por paso — por ejemplo
-"Listo: Buscar activos". Cuando repite la misma búsqueda varias veces seguidas, los pasos comparten una
-línea con la cantidad, como "Listo: Buscar usuarios ×5". Elegí **Ver detalles** en una línea para ver qué
-encontró. La respuesta aparece a medida que se escribe.
-
-Para detener una respuesta, presioná el botón **Detener**. Lo que ya se escribió se conserva.
-
-> [!WARNING]
-> No pegues contraseñas, claves de API ni otros secretos en el chat. Lo que escribís, y lo que el asistente
-> lee para responderte, se envía al proveedor de IA que configuró tu administrador.
-
-### Comandos
-
-Escribí **/** al principio del cuadro de mensaje para ver los comandos. Seguí escribiendo para filtrarlos,
-movete con **↑** / **↓** y presioná **Enter** (o **Tab**) para ejecutar uno; **Esc** cierra la lista. También
-podés escribir el comando completo, como `/copy`, y presionar **Enter**.
-
-| Comando | Qué hace |
-| --- | --- |
-| `/copy` | Copia toda la conversación al portapapeles como Markdown — tus mensajes, las respuestas, los pasos y las tarjetas de cambio. |
-| `/new` | Empieza un chat nuevo. |
-| `/help` | Muestra los comandos y los atajos de teclado dentro del chat. |
-| `/model` | Abre el selector de modelo. `/model <id>` fija el modelo directamente — por ejemplo `/model gpt-4o-mini`. Solo antes del primer mensaje del chat. |
-| `/auto on` · `/auto off` | Activa o desactiva la [aprobación automática](/help/ai-assistant-approvals) en este chat. `/auto` solo la alterna. |
-
-Los comandos se ejecutan en tu navegador: nunca se envían al asistente ni al proveedor de IA. Si tu mensaje
-solo empieza con una barra pero no es un comando (por ejemplo, una ruta de archivo), se envía como un
-mensaje normal — y lo mismo pasa con un comando seguido de palabras que no entiende, como `/auto quizás`.
+Mientras trabaja ves una línea corta por paso, como "Listo: Buscar activos". Las búsquedas repetidas
+comparten una línea con un contador ("Listo: Buscar usuarios ×5"). Elegí **Ver detalles** en una línea
+para ver qué encontró.
 
 ### Elegir el modelo
 
-Cada chat puede usar su propio modelo. Elegí el botón de **ajustes** a la derecha, debajo del cuadro de
-mensaje — muestra el modelo que usa el chat — para abrir los ajustes del chat:
+Elegí el botón de **configuración** debajo del cuadro de mensaje (muestra el modelo del chat) **antes de
+tu primer mensaje**:
 
-- **Modelo** — los modelos que ofrece tu proveedor de IA y el **Modelo predeterminado** que eligió tu
-  administrador. Para usar un modelo que no está en la lista (por ejemplo, un despliegue propio), escribí
-  su id en el buscador y elegí **Usar "‹id›"**. Si el proveedor no devuelve su lista, igual podés escribir
-  un id o dejar el predeterminado.
-- **Esfuerzo de razonamiento** — *Bajo*, *Medio* o *Alto*, cuando tu proveedor lo admite. Más esfuerzo
-  piensa más y usa más tokens. **Predeterminado** usa el ajuste de tu administrador.
-- **Temperatura** — de 0 a 2, solo para los proveedores que la aceptan (un servidor propio compatible con
-  OpenAI). Dejala vacía para usar la predeterminada.
+- **Modelo** — los modelos que ofrece tu proveedor, o el **Modelo predeterminado** del administrador. Para
+  uno que no aparece, escribí su id en el buscador y elegí **Usar "‹id›"**.
+- **Esfuerzo de razonamiento** — *Bajo*, *Medio* o *Alto*, cuando el proveedor lo soporta. Más esfuerzo
+  piensa más y usa más tokens.
+- **Temperatura** — de 0 a 2, solo para un servidor propio compatible con OpenAI.
 - **Aprobar automáticamente los cambios básicos** — mirá
-  [Aprobación automática](/help/ai-assistant-approvals).
+  [Aprobación automática](/help/ai-assistant-approvals#aprobación-automática).
 
-Elegí todo esto **antes de tu primer mensaje**. Una vez que el chat empezó, el modelo, el esfuerzo y la
-temperatura quedan fijos para ese chat — el botón muestra un **candado** — y para usar otro tenés que
-empezar un chat nuevo. La aprobación automática se puede cambiar en cualquier momento.
-
-Si el proveedor no sirve el modelo que escribiste, el chat te lo dice cuando mandás el primer mensaje;
-empezá un chat nuevo y elegí otro.
+Una vez empezado el chat, el modelo, el esfuerzo y la temperatura quedan fijos (el botón muestra un
+**candado**); para cambiarlos, empezá un chat nuevo. La aprobación automática se puede cambiar cuando
+quieras.
 
 ### La página actual
 
-Cuando estás en la página de un elemento — un activo, un usuario, una aplicación, una ubicación, un
-consumible — el chat muestra un chip como **Sobre: Activo de esta página** arriba del cuadro de mensaje. Así
-el asistente sabe a qué elemento te referís con "este". Solo se envía la dirección de la página, nunca lo
-que hay en pantalla. Elegí la **×** del chip para no incluirlo en tu próximo mensaje.
+En una página sobre un elemento — un activo, un usuario, una aplicación, una ubicación, un consumible —
+el chat muestra una etiqueta como **Sobre: Activo de esta página**, así el asistente sabe a qué te
+referís con "este". Solo se envían la dirección de la página y qué registro es, nunca lo que hay en
+pantalla. Elegí **×** en la etiqueta para no incluirla en tu próximo mensaje.
 
-## Los cambios necesitan tu aprobación
+### Comandos
 
-El asistente nunca cambia nada por su cuenta. Cuando quiere crear, editar, asignar, archivar u otorgar algo,
-muestra una **tarjeta** que describe exactamente qué va a pasar y espera que lo **Apruebes** o lo
-**Rechaces**. Mirá [Aprobar cambios](/help/ai-assistant-approvals).
+Escribí **/** al principio del cuadro de mensaje para ver los comandos; seguí escribiendo para filtrar,
+**↑** / **↓** para moverte, **Enter** o **Tab** para ejecutar, **Esc** para cerrar.
 
-Si activás la **aprobación automática** en un chat, los cambios básicos se aplican sin tarjeta y aparecen
-como **Aplicado automáticamente**; todo lo crítico sigue esperándote. Una etiqueta **Auto** arriba del chat
-te recuerda que está activada.
+| Comando | Qué hace |
+| --- | --- |
+| `/copy` | Copia toda la conversación como Markdown — mensajes, respuestas, pasos y tarjetas de cambio. |
+| `/new` | Empieza un chat nuevo. |
+| `/help` | Muestra los comandos y atajos de teclado. |
+| `/model` | Abre el selector de modelo; `/model <id>` lo fija directamente. Solo antes del primer mensaje. |
+| `/auto on` · `/auto off` | Activa o desactiva la [aprobación automática](/help/ai-assistant-approvals#aprobación-automática) en este chat; `/auto` solo la alterna. |
 
-Cuando aprobás, el cambio se hace con tu cuenta, como cualquier otro cambio tuyo, y la página que tenés
-abierta se actualiza sola — un activo nuevo aparece en la lista que estás mirando.
+Los comandos corren en tu navegador y nunca se envían al proveedor. Un mensaje que solo empieza con una
+barra (una ruta de archivo, por ejemplo), o un comando seguido de palabras que no entiende, se envía
+como mensaje normal.
+
+## Aprobar lo que propone
+
+Cuando el asistente quiere crear, editar, asignar, archivar u otorgar algo, muestra una **tarjeta** con
+exactamente lo que va a pasar y espera **Aprobar** o **Rechazar**. El cambio aprobado se hace con tu
+cuenta, y la página que tenés abierta se actualiza sola. Cómo leer una tarjeta, los cambios en lote, las
+contraseñas y la aprobación automática están en [Aprobar cambios](/help/ai-assistant-approvals).
+
+Las tarjetas y las líneas de pasos se escriben en tu idioma; una frase que lazyit todavía no tiene
+traducida se muestra en inglés.
 
 ## Cuando el asistente te pide datos
 
-A veces el asistente necesita información que no encuentra en lazyit — el sitio adonde van las laptops
-nuevas, sus números de serie, una fecha. En lugar de adivinar, muestra un **formulario** corto en el chat,
-con el encabezado **El asistente pregunta**, un título y una línea que explica para qué necesita los datos.
-El asistente arma el formulario él mismo, así que las preguntas cambian según lo que le pediste.
+Cuando necesita algo que no encuentra en lazyit — el sitio adonde van las laptops nuevas, sus números de
+serie, una fecha — el asistente muestra un **formulario** corto con el título **El asistente pregunta**,
+en vez de adivinar.
 
-- Los campos marcados con **\*** son **obligatorios**: el asistente no puede seguir sin ellos.
-- Los campos con la etiqueta **Recomendado** lo ayudan a hacer un mejor trabajo.
-- Los campos **Opcionales** quedan guardados en **Más detalles** — abrilo solo si querés completarlos.
-- Algunos formularios piden una lista, una **fila** por elemento (una por laptop, por ejemplo). Usá
-  **Agregar una fila** y el ícono de la **papelera** de cada fila, dentro de la cantidad de filas que pide
-  el formulario.
-- Las listas de ubicaciones, categorías, modelos o fabricantes vienen de lazyit y solo muestran lo que vos
-  podés ver.
-
-Después elegí uno de tres botones:
+- Los campos marcados con **\*** son obligatorios; los **Recomendado** lo ayudan a hacerlo mejor; los
+  **Opcional** están en **Más detalles**.
+- Algunos formularios piden una lista, una **fila** por elemento: usá **Agregar una fila** y el ícono de
+  **papelera**, dentro de la cantidad de filas que pide el formulario.
+- Las listas de sitios, categorías, modelos o fabricantes salen de lazyit y muestran solo lo que podés
+  ver.
 
 | Botón | Qué pasa |
 | --- | --- |
-| **Enviar** | Tu respuesta va al asistente y sigue con ella. Si falta algo o algo no corresponde, el campo se marca y no se envía nada. |
-| **Continuar sin esto** | Omitís el formulario esta vez. El asistente sigue sin los datos — puede hacer menos, o preguntarte con palabras. |
-| **No preguntar** | Lo rechazás. Se le indica al asistente que no vuelva a pedir estos datos en este chat. |
+| **Enviar** | Tu respuesta va al asistente. Un campo faltante o inválido queda resaltado y no se envía nada. |
+| **Continuar sin esto** | El asistente sigue sin esos datos — puede hacer menos, o preguntarte con palabras. |
+| **No preguntar** | Se le indica al asistente que no vuelva a pedir esos datos en este chat. |
 
-Mientras un formulario espera, el cuadro de mensaje queda en pausa y muestra lo que preguntó el asistente,
-con un botón **Ir al formulario**. El historial marca el chat con **Espera tu respuesta**. Podés cerrar el
-chat y volver más tarde — el formulario sigue ahí.
-
-Un formulario espera lo mismo que una tarjeta de cambio (30 minutos por defecto; el formulario muestra
-**Respondé antes de las …**). Si nadie responde a tiempo, el formulario se cierra como **vencido** y el asistente se detiene;
-enviá un mensaje nuevo para continuar. Después de elegir **Enviar**, el formulario muestra
-**Enviado** hasta que el asistente toma tu respuesta.
-
-Una vez respondido, el formulario queda en la conversación en modo de solo lectura, con lo que enviaste (o
-indicando que lo omitiste o lo rechazaste).
+Mientras un formulario espera, el cuadro de mensaje queda en pausa con un botón **Ir al formulario**, y
+el historial marca el chat con **Espera tu respuesta**. El formulario espera lo mismo que una tarjeta de
+cambio (30 minutos por defecto; muestra **Respondé antes de las …**); si nadie responde, vence y el
+asistente se detiene — mandá un mensaje nuevo para seguir. Los formularios respondidos quedan en la
+conversación, de solo lectura.
 
 > [!WARNING]
 > El asistente nunca pide contraseñas, claves ni otros secretos en un formulario, y lazyit rechaza un
-> formulario que lo haga. Tampoco escribas secretos en los campos de texto de un formulario.
+> formulario que lo haga. Tampoco escribas secretos en los campos de texto.
 
 ## Enlaces y apertura de páginas
 
-Cuando el asistente crea o cambia algo, el chat muestra un botón **Abrir ‹elemento›** que te lleva ahí. Si le
-pedís que te lleve a algún lado ("abrí la laptop de Ana"), te abre esa página — salvo que tengas cambios sin
-guardar en un formulario: en ese caso muestra el botón **Abrir** para que no pierdas lo que escribiste.
+Después de un cambio, el chat muestra un botón **Abrir ‹elemento›**. Si le pedís que te lleve a algún
+lado ("abrí la laptop de Ana"), abre la página — salvo que un formulario de la página tenga cambios sin
+guardar; en ese caso muestra el botón **Abrir**, así no perdés nada.
 
-Los enlaces a otros sitios que escribe el asistente se abren en una pestaña nueva y muestran su dirección
-completa al lado — revisala antes de hacer clic. Las imágenes de las respuestas nunca se cargan.
+Los enlaces a otros sitios se abren en una pestaña nueva y muestran su dirección completa — revisala
+antes de hacer clic. Las imágenes de las respuestas nunca se cargan.
 
 ## Fuentes de la web
 
-Si tu administrador activó la **búsqueda web** (Configuración → IA), el asistente puede buscar en internet —
-pero solo cuando los registros y la base de conocimiento de lazyit no tienen la respuesta. Cuando no conoce
-un producto o un término y la búsqueda web está desactivada, te pide la documentación.
+Si tu administrador activó la **búsqueda web**, el asistente puede buscar en internet cuando los
+registros y la base de conocimiento de lazyit no tienen la respuesta; si está desactivada, te pide la
+documentación. Las páginas que usó aparecen debajo de la respuesta como **Fuentes de la web**, y cada
+una se abre en una pestaña nueva. Las escribieron otras personas: verificalas antes de basarte en ellas.
 
-Cuando buscó, las páginas que usó aparecen debajo de su respuesta como **Fuentes de la web**. Cada una se
-abre en una pestaña nueva. Las escribieron terceros: revisalas antes de basarte en ellas. Una vez que el
-asistente buscó en la web en un chat, nada en ese chat se aprueba automáticamente: cada cambio que proponga
-ahí necesita tu aprobación, aunque tengas la aprobación automática activada. Empezá un chat nuevo para
-volver a usar la aprobación automática.
+Una vez que el asistente buscó en la web en un chat, **ya no se aprueba automáticamente nada en ese
+chat** — cada cambio necesita tu aprobación. Empezá un chat nuevo para volver a usar la aprobación
+automática.
 
 ## Tu historial de chats
 
-Elegí **Historial de chats** arriba del chat para ver tus chats anteriores, agrupados por día. Solo vos podés
-ver tus chats — los administradores no pueden leerlos.
+Elegí **Historial de chats** arriba del chat para ver tus chats anteriores, agrupados por día. Solo vos
+los ves — los administradores no.
 
-- Elegí un chat para continuarlo.
-- Elegí **Nuevo chat** para empezar de cero.
-- Elegí el ícono de la **papelera** para eliminar un chat. Eliminarlo borra la conversación definitivamente;
-  los cambios que hizo el asistente quedan en el registro de actividad. Un chat que todavía está
-  respondiendo no se puede eliminar — detenelo primero.
+- Elegí un chat para seguirlo, o **Nuevo chat** para empezar de cero.
+- Elegí el ícono de **papelera** para borrar un chat para siempre. Los cambios que hizo el asistente
+  quedan en el registro de actividad y en el registro de acciones de IA. Un chat que todavía está
+  respondiendo no se puede borrar — detenelo primero.
 
-Los chats también se eliminan automáticamente después de la cantidad de días que configuró tu administrador;
-el historial lo indica.
+Los chats también se borran solos después de la retención que fijó tu administrador; el historial lo
+indica.
 
 ### Chats de solo lectura
 
-Un chat pasa a ser de **solo lectura** cuando tu administrador cambia el proveedor de IA, cuando desactiva la
-búsqueda web y el chat la usaba, cuando cambia el
-modelo predeterminado y el chat usaba el predeterminado, o cuando la conversación se vuelve demasiado larga
-para que la IA la siga. Un chat en el que elegiste el modelo vos sigue funcionando si solo cambia el
-predeterminado. Podés seguir leyéndolo; elegí **Empezar un
-nuevo chat** para continuar.
+Un chat pasa a **solo lectura** — lo podés leer, pero no seguir — cuando:
+
+- un administrador cambió el proveedor de IA, o el modelo por defecto que usaba el chat (un chat donde
+  elegiste el modelo sobrevive a un cambio del modelo por defecto);
+- un administrador desactivó la búsqueda web y el chat la tenía;
+- lazyit se actualizó y cambiaron las herramientas o las instrucciones del asistente;
+- la conversación se hizo demasiado larga para el modelo.
+
+Elegí **Empezar un nuevo chat** para seguir.
 
 ## Cuando algo sale mal
 
-El chat te lo dice con palabras simples y te ofrece qué hacer:
-
-| Mensaje | Qué hacer |
-| --- | --- |
-| El proveedor de IA está ocupado / no responde | Elegí **Reintentar**, o esperá un momento. |
-| Esta conversación es demasiado larga para continuar | Elegí **Empezar un nuevo chat**. |
-| Otra ventana ya está respondiendo en este chat | El chat muestra esa respuesta; esperá a que termine. |
-| Se alcanzó el presupuesto diario de IA | Probá de nuevo mañana, o consultá a un administrador. |
-| El proveedor de IA rechazó las credenciales | Un administrador tiene que revisar la configuración de IA. |
-| Se perdió la conexión | Elegí **Reconectar**. La respuesta sigue en el servidor; no se pierde nada. |
-| Se desactivó el asistente de IA | El chat se cierra. Un administrador desactivó el asistente. |
+El chat te dice qué pasó con palabras simples y ofrece el paso siguiente — **Reintentar**, **Empezar un
+nuevo chat** o **Reconectar**. Cerrar el chat o perder la conexión nunca pierde una respuesta: sigue en
+el servidor. Para cada mensaje, su causa y su solución, mirá
+[Resolución de problemas](/help/ai-assistant-troubleshooting#mensajes-del-chat).
