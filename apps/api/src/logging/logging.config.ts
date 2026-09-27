@@ -10,6 +10,58 @@ const REQUEST_ID_HEADER = 'x-request-id';
 const RESPONSE_ID_HEADER = 'X-Request-Id';
 const ACTOR_HEADER = 'x-user-id';
 
+/** Request-body fields of the OAuth endpoints that carry a credential, redacted wherever logged. */
+export const OAUTH_BODY_REDACT_PATHS = [
+  'req.body.code',
+  'req.body.code_verifier',
+  'req.body.refresh_token',
+  'req.body.access_token',
+  'req.body.token',
+  'req.body.password',
+] as const;
+
+/**
+ * Query parameters that may carry a bearer credential. lazyit never accepts a token in a URL — `/mcp`
+ * refuses it (400) and revokes it on sight — but a client that sends one must not get it written to the
+ * request log (ADR-0097, #1315 G3 review F1): the parsed `req.query` is redacted and the logged URL is
+ * scrubbed.
+ */
+export const QUERY_CREDENTIAL_PARAMS = ['access_token', 'token'] as const;
+
+/** `url` with the value of every {@link QUERY_CREDENTIAL_PARAMS} parameter replaced by `[redacted]`. */
+export function scrubUrlCredentials(url: string): string {
+  const q = url.indexOf('?');
+  if (q === -1) return url;
+  const hashAt = url.indexOf('#', q);
+  const end = hashAt === -1 ? url.length : hashAt;
+  const query = url
+    .slice(q + 1, end)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      const rawKey = eq === -1 ? pair : pair.slice(0, eq);
+      let key = rawKey;
+      try {
+        key = decodeURIComponent(rawKey.replace(/\+/g, ' '));
+      } catch {
+        // A malformed escape: compare the raw key.
+      }
+      return (QUERY_CREDENTIAL_PARAMS as readonly string[]).includes(
+        key.toLowerCase(),
+      )
+        ? `${rawKey}=[redacted]`
+        : pair;
+    })
+    .join('&');
+  return `${url.slice(0, q + 1)}${query}${url.slice(end)}`;
+}
+
+/** The request serializer's last step: scrub credentials from the URL pino-http records. */
+function scrubRequest<T extends { url?: unknown }>(req: T): T {
+  if (typeof req.url === 'string') req.url = scrubUrlCredentials(req.url);
+  return req;
+}
+
 /** Honor an inbound X-Request-Id (else generate one) and echo it on the response for client-side
  *  correlation. nestjs-pino stamps the returned id on every log line of the request. */
 function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
@@ -79,6 +131,9 @@ export function buildLoggerParams(
             },
           },
       genReqId: resolveRequestId,
+      // pino-http wraps this around its standard request serializer, so it receives the serialized
+      // request (method, url, query, headers…) and only rewrites its URL.
+      serializers: { req: scrubRequest },
       customProps: resolveActor,
       customLogLevel: resolveLevel,
       redact: {
@@ -86,6 +141,13 @@ export function buildLoggerParams(
           'req.headers.authorization',
           'req.headers.cookie',
           'req.headers["x-user-id"]',
+          // OAuth credential material (ADR-0097, INV-AI-9). pino-http's request serializer never logs
+          // bodies, so these are defense in depth for any log line that carries `req.body` — the
+          // `/oauth/token` form (code, code_verifier, refresh_token), `/oauth/revoke` (token) and the
+          // consent decision's step-up password.
+          ...OAUTH_BODY_REDACT_PATHS,
+          // A credential sent in a query string (refused, and revoked, by `/mcp`).
+          ...QUERY_CREDENTIAL_PARAMS.map((param) => `req.query.${param}`),
         ],
         censor: '[redacted]',
       },

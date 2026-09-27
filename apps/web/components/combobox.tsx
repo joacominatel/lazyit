@@ -86,6 +86,10 @@ export interface ComboboxProps {
   id?: string;
   /** Forwarded to the trigger so a `Controller` field error rings it (matches `SelectTrigger`). */
   "aria-invalid"?: boolean;
+  /** Forwarded to the trigger: ids of the help and error text that describe the field. */
+  "aria-describedby"?: string;
+  /** Forwarded to the trigger when the field must be filled. */
+  "aria-required"?: boolean;
   className?: string;
   /**
    * Server-search mode switch: when provided, cmdk's built-in filter is disabled and the debounced
@@ -140,6 +144,8 @@ export function Combobox({
   disabled,
   id,
   "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  "aria-required": ariaRequired,
   className,
   onSearchChange,
   loading = false,
@@ -236,6 +242,8 @@ export function Combobox({
         role="combobox"
         aria-expanded={open}
         aria-invalid={ariaInvalid || undefined}
+        aria-describedby={ariaDescribedBy}
+        aria-required={ariaRequired || undefined}
         disabled={disabled}
         className={cn(
           "flex h-8 w-full items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",

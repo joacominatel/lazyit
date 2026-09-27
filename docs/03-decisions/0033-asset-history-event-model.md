@@ -3,7 +3,7 @@ title: "ADR-0033: AssetHistory event model"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-09-25
 deciders: [Joaquín Minatel]
 ---
 
@@ -82,6 +82,44 @@ event, **transactionally** (`$transaction`) so the log row commits atomically wi
   hatch of [[0032-soft-delete-middleware]] to find the deleted row. (It was unemitted until ADR-0041.)
 - **Follow-up:** migrate `AccessGrantsService` to `ActorService` (finishing the
   [[0024-asset-assignment-actor-shim]] dedupe); a frontend timeline on the asset detail page.
+
+## Amendment — 2026-09-25: plain-field edits write one `UPDATED { fields }` row (#1382)
+
+**CEO decision, 2026-09-25.** Until now an asset edit that touched only *plain* fields — `name`,
+`serial`, `assetTag`, `notes`, `company`, `purchaseDate`, `warrantyEnd`, `purchaseCost`,
+`usefulLifeMonths`, `salvageValue`: every `UpdateAsset` field without a discrete event of its own —
+wrote **no** history row on any path (UI, API, the AI `asset_update` tool). Such edits never reached
+the `recent_activity` view or Reports, and an AI-made plain edit left no `aiInvocationId`-stamped trail
+in the domain history (only [[ai-action-log]]).
+
+**Decision.**
+
+- `AssetsService.update` writes **one** `UPDATED` row per PATCH, payload `{ fields: [...] }`, naming the
+  plain fields whose stored value **actually changed** (before snapshot vs updated row; a date compared by
+  instant, a missing value as `null`, so clearing `purchaseCost` to `null` counts). No row when nothing
+  plain changed — a no-op edit writes nothing. Field order is fixed (the declaration order above).
+- **Field names only — never the old or new values.** Rationale: auditability needs *what* was touched,
+  *when* and *by whom*; the values live on the asset itself. Copying them into an append-only log would
+  duplicate cost data (`purchaseCost`, `salvageValue`) and free text that may hold sensitive notes into a
+  table that can never be edited or pruned. Mirrors `UserHistory.UPDATED { fields }` ([[0050-user-history-and-activity-user-entity]]).
+- **Discrete events keep their own rows.** A PATCH that changes a discrete dimension (status / location /
+  model / specs) *and* plain fields writes both: the discrete row(s) as before, then one `UPDATED` listing
+  **only** the plain fields. `specs` stays `SPECS_CHANGED` and is never listed in `fields`.
+- **Every path lands on the one emitter.** The web UI, the REST API, the AI `asset_update` tool and each
+  row of `asset_update_batch` all dispatch to `PATCH /assets/:id`, so the row carries the actor
+  (`performedById` / `serviceAccountId`, [[0048-service-accounts]]) and, for an AI call, the
+  `aiInvocationId` ([[0097-ai-assistant-mcp-and-headless-api]] decision 11).
+- **Re-import (#1061) unchanged in spirit.** A migrator re-import that changes plain fields writes this
+  same `UPDATED { fields }` row with the `{ source, sessionId, rowIndex }` provenance merged in; the bare
+  provenance-only `UPDATED` marker is written only when nothing changed at all. Still exactly one
+  `UPDATED` row per re-imported asset.
+- The exhaustive plain-field list is typed against `UpdateAsset`, so a new editable field fails the type
+  check until it is either listed or given its own discrete event.
+
+**No migration.** `AssetHistoryEventType.UPDATED` already exists (#1061) and the `recent_activity` view
+reads the asset branch generically (`action = 'updated'`, summary "Asset updated"), so Reports shows the
+row with its actor as soon as it is written. **Upgrade-safety:** existing history is untouched; plain
+edits made before the update have no row and none is backfilled — new rows only from now.
 
 Related: [[asset-history]] · [[asset]] · [[asset-assignment]] · [[user]] ·
 [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[0022-draft-visibility-auth-shim]] ·

@@ -1,8 +1,10 @@
 import type { ConsumableMovementQuery } from "@lazyit/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
+  type ConsumableDeliveryParams,
   type ConsumableListParams,
   getConsumable,
+  getConsumableDeliveries,
   getConsumableMovements,
   getConsumables,
 } from "../endpoints/consumables";
@@ -19,6 +21,13 @@ export const consumableKeys = {
   detail: (id: string) => [...consumableKeys.all, "detail", id] as const,
   movements: (id: string, query: ConsumableMovementQuery) =>
     [...consumableKeys.all, "detail", id, "movements", query] as const,
+  /**
+   * Deliveries to one target (ADR-0098). Under `all`, so every movement write (which invalidates `all`)
+   * refreshes the user / asset / location deliveries panels and the offboarding sheet too.
+   */
+  deliveries: () => [...consumableKeys.all, "deliveries"] as const,
+  deliveryList: (params: ConsumableDeliveryParams) =>
+    [...consumableKeys.all, "deliveries", params] as const,
 };
 
 /**
@@ -53,5 +62,23 @@ export function useConsumableMovements(
     queryKey: consumableKeys.movements(id ?? "", query),
     queryFn: () => getConsumableMovements(id as string, query),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * The deliveries made to one user / asset / location (ADR-0098), a `Page` envelope, newest first.
+ * `enabled` lets a caller hold the read (e.g. until a sheet opens). A 403 (the caller lacks the target
+ * domain's read permission) is a 4xx, so the app-wide retry predicate settles it at once — callers read
+ * `error` and hide the section instead of showing a failure.
+ */
+export function useConsumableDeliveries(
+  params: ConsumableDeliveryParams,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: consumableKeys.deliveryList(params),
+    queryFn: ({ signal }) => getConsumableDeliveries(params, signal),
+    enabled,
+    placeholderData: keepPreviousData,
   });
 }

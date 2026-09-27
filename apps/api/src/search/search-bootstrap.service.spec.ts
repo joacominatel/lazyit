@@ -16,6 +16,7 @@ import type { SearchService, SearchIndex } from './search.service';
 // Minimal doubles: the bootstrap only calls a few methods on each collaborator.
 type SearchMock = {
   enabled: boolean;
+  isHealthy: jest.Mock;
   emptyOrMissingIndexes: jest.Mock;
   rebuildIndex: jest.Mock;
 };
@@ -52,6 +53,7 @@ describe('SearchBootstrapService', () => {
   beforeEach(() => {
     search = {
       enabled: true,
+      isHealthy: jest.fn().mockResolvedValue(true),
       emptyOrMissingIndexes: jest.fn(),
       rebuildIndex: jest.fn().mockResolvedValue(undefined),
     };
@@ -112,6 +114,60 @@ describe('SearchBootstrapService', () => {
 
       await expect(build(search, prisma).selfHeal()).resolves.toEqual([]);
       expect(search.rebuildIndex).not.toHaveBeenCalled();
+    });
+
+    it('waits for the engine to answer /health before probing (fresh volume / start ordering, #1216)', async () => {
+      // Meili is still starting: two failed health probes, then healthy.
+      search.isHealthy
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValue(true);
+      search.emptyOrMissingIndexes.mockResolvedValue([
+        'assets',
+      ] satisfies SearchIndex[]);
+
+      const healed = await build(search, prisma).selfHeal({
+        attempts: 5,
+        intervalMs: 0,
+      });
+
+      expect(search.isHealthy).toHaveBeenCalledTimes(3);
+      expect(healed).toEqual(['assets']);
+      expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
+        { id: 'a1' },
+      ]);
+    });
+
+    it('gives up after the bounded wait without probing or rebuilding (the sweeper is the backstop)', async () => {
+      search.isHealthy.mockResolvedValue(false);
+
+      const healed = await build(search, prisma).selfHeal({
+        attempts: 3,
+        intervalMs: 0,
+      });
+
+      expect(healed).toEqual([]);
+      expect(search.isHealthy).toHaveBeenCalledTimes(3);
+      expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
+      expect(search.rebuildIndex).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds every index when the engine starts on an empty data volume (server upgrade, #1216)', async () => {
+      // A new volume holds no index at all → every index is "missing".
+      search.emptyOrMissingIndexes.mockResolvedValue([
+        'assets',
+        'articles',
+        'users',
+        'locations',
+        'applications',
+        'infra',
+        'consumables',
+      ] satisfies SearchIndex[]);
+
+      const healed = await build(search, prisma).selfHeal();
+
+      expect(healed).toHaveLength(7);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
     });
 
     it('continues to the next index when one rebuild fails', async () => {
@@ -196,9 +252,8 @@ describe('SearchBootstrapService', () => {
       );
 
       build(search, prisma).onApplicationBootstrap();
-      // The probe was scheduled on the microtask queue; let it run.
-      await Promise.resolve();
-      await Promise.resolve();
+      // The health wait + probe run in the background; let the queued work drain.
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(search.emptyOrMissingIndexes).toHaveBeenCalledTimes(1);
     });

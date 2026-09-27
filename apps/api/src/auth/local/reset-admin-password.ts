@@ -46,6 +46,7 @@ export interface ResetAdminPasswordClient {
         passwordHash: string;
         passwordUpdatedAt: Date;
         sessionEpoch: { increment: number };
+        mcpCredentialEpoch: { increment: number };
       };
     }): Promise<unknown>;
   };
@@ -69,7 +70,8 @@ export interface ResetAdminPasswordResult {
  * tool only, never a general password-set. On success: hashes `password` via `credentials.hash`
  * (the app's argon2id, so the result verifies exactly like any app-set hash), sets
  * `passwordHash`/`passwordUpdatedAt`, and increments `sessionEpoch` by 1 (revokes every existing
- * session for the account, ADR-0086 §3).
+ * session for the account, ADR-0086 §3) and `mcpCredentialEpoch` by 1 (revokes every MCP connection and
+ * personal token, ADR-0097 decision 8 as amended).
  */
 export async function resetAdminPassword(
   prisma: ResetAdminPasswordClient,
@@ -112,6 +114,8 @@ export async function resetAdminPassword(
       // Revoke every existing session for this account (ADR-0086 §3) — a stale token minted before
       // the reset compares its `epoch` claim against the row's (now-bumped) `sessionEpoch` and fails.
       sessionEpoch: { increment: 1 },
+      // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+      mcpCredentialEpoch: { increment: 1 },
     },
   });
 

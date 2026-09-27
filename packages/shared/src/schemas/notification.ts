@@ -105,6 +105,13 @@ import { pageSchema } from "./pagination";
  *     is a known human (a null / service-account assigner has no bell). De-duped per assignment
  *     (`asset_assignment.acknowledged:<assignmentId>`; an assignment acknowledges exactly once). Deep-links
  *     to the asset (`entityType: 'asset'`). Metadata is REDACTED (asset name/tag + assignee name/ids only).
+ *   - `mcp.client_connected` — a TARGETED security notice (ADR-0097; docs/ai-assistant/security.md §6.3,
+ *     gate G3 "Abuse"): a new external AI agent connection (an OAuth grant or a personal MCP token) was
+ *     used on the recipient's account for the first time. Delivered targeted (`recipientUserId` = the
+ *     account's owner) and emailed (opt-out-able), because local mode has no MFA and a phished consent
+ *     would otherwise go unnoticed. No `entityType` (it deep-links by TYPE to the user's AI connections).
+ *     De-duped per connection (`mcp.client_connected:<grantId>`). Metadata is REDACTED (client name or
+ *     token label, the connection kind and its scopes — never a token).
  */
 export const NOTIFICATION_TYPES = [
   "critical_app_access",
@@ -122,6 +129,7 @@ export const NOTIFICATION_TYPES = [
   "warranty_expiring",
   "access_grant_expiring",
   "asset_assignment.acknowledged",
+  "mcp.client_connected",
 ] as const;
 
 /** A single known notification type. The wire shape validates against this enum (→ 400 otherwise). */
@@ -200,7 +208,8 @@ export type Notification = z.infer<typeof NotificationSchema>;
 /**
  * Paginated `GET /notifications` envelope: `{ items: Notification[], total, limit, offset }`. Offset
  * pagination per ADR-0030 — NOT a bare array. Newest-first; `total` is the count over the caller's
- * whole (retained) notification set. Each item carries its per-caller `read` flag.
+ * whole (retained) notification set, excluding the rows the caller has DISMISSED from their own bell
+ * (issue #1309). Each item carries its per-caller `read` flag.
  */
 export const NotificationPageSchema = pageSchema(NotificationSchema);
 export type NotificationPage = z.infer<typeof NotificationPageSchema>;
@@ -228,6 +237,39 @@ export const MarkReadResultSchema = z.object({
   unread: z.number().int().min(0),
 });
 export type MarkReadResult = z.infer<typeof MarkReadResultSchema>;
+
+/**
+ * The result of a dismiss action (`PATCH /notifications/:id/dismiss` and `PATCH /notifications/dismiss-all`,
+ * ADR-0056 §7 amendment, issue #1309). Dismiss is PER USER: it hides the notification from the caller's
+ * own bell only — the shared event is never deleted, and other users (e.g. another admin on a broadcast)
+ * still see it. Dismiss implies read, so the fresh `unread` count drops accordingly. Idempotent:
+ * re-dismissing succeeds with `dismissed: 0`; an id the caller cannot see is also `dismissed: 0` (never a
+ * 404, so existence is not disclosed). Neither endpoint takes a request body; dismiss-all takes an
+ * optional `upTo` query ({@link DismissAllNotificationsQuerySchema}).
+ */
+export const DismissNotificationsResultSchema = z.object({
+  /** How many notifications this action newly hid from the caller's bell (idempotent: may be 0). */
+  dismissed: z.number().int().min(0),
+  /** The caller's unread count AFTER the action — drives the badge without a refetch. */
+  unread: z.number().int().min(0),
+});
+export type DismissNotificationsResult = z.infer<
+  typeof DismissNotificationsResultSchema
+>;
+
+/**
+ * Query params for `PATCH /notifications/dismiss-all` (issue #1309). `upTo` bounds "Clear all" to what
+ * the caller has SEEN: only notifications created at or before it are dismissed, so one that arrives
+ * after the bell loaded stays, unread. The web sends the newest `createdAt` among the rows it rendered.
+ * Optional so an older client without it keeps the unbounded behavior (every visible notification).
+ * An ISO 8601 UTC datetime, the same form `Notification.createdAt` is serialized in.
+ */
+export const DismissAllNotificationsQuerySchema = z.object({
+  upTo: z.iso.datetime().optional(),
+});
+export type DismissAllNotificationsQuery = z.infer<
+  typeof DismissAllNotificationsQuerySchema
+>;
 
 /**
  * Per-user, per-type EMAIL notification preferences (issue #879). A user can opt OUT of receiving

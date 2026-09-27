@@ -19,7 +19,8 @@ import { pageSchema, PageQuerySchema } from "./pagination";
  *   - AccessGrant        → entityType "application" · action "granted" / "revoked"
  *   - ConsumableMovement → entityType "consumable"  · action "stock_in" / "stock_out" / "stock_adjustment"
  *   - UserHistory        → entityType "user"        · action "created" / "updated" / "role_changed" /
- *                          "deleted" / "restored" / "password_reset_sent" (DEBT-2, issue #185)
+ *                          "deleted" / "restored" / "password_reset_sent" / "deactivated" /
+ *                          "reactivated" / … (DEBT-2, issue #185; activation: issue #1375)
  *
  * Date fields are ISO-8601 strings (wire shape). The list is newest-first and **offset-paginated**
  * per ADR-0030 (default page size 20).
@@ -111,7 +112,8 @@ export type RecentActivityPage = z.infer<typeof RecentActivityPageSchema>;
  *   - AccessGrant: granted · revoked
  *   - ConsumableMovement: stock_in · stock_out · stock_adjustment
  *   - UserHistory (lowercased `UserHistoryEventType`, DEBT-2 / issue #185 + ADR-0058): created ·
- *     updated · role_changed · manager_changed · deleted · restored · password_reset_sent.
+ *     updated · role_changed · manager_changed · deleted · restored · password_reset_sent ·
+ *     deactivated · reactivated (issue #1375).
  *     `created` / `deleted` / `restored` are already in the list (shared with AssetHistory); only the
  *     user-specific verbs are added below.
  * Keep this in sync with the view if a new source verb is added.
@@ -135,6 +137,12 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // lowercases the enum generically, so a verb missing from this allowlist is silently dropped from the
   // distinct-actions menu (GET /dashboard/activity/filters) and rejected as an `action` filter.
   "agent_linked",
+  // A consumable delivered to / returned from an asset (ADR-0098, #1364) — the lowercased
+  // CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED AssetHistory events, which the view surfaces generically.
+  // Listed for the same reason as `agent_linked`: a verb missing here is dropped from the distinct-actions
+  // menu and rejected as an `action` filter.
+  "consumable_delivered",
+  "consumable_returned",
   "granted",
   "revoked",
   "stock_in",
@@ -155,6 +163,12 @@ export const RECENT_ACTIVITY_ACTIONS = [
   "password_changed",
   "password_reset_requested",
   "password_reset_completed",
+  // Activation flips (issue #1375) — the lowercased DEACTIVATED / REACTIVATED verbs the recent_activity
+  // view emits when an admin disables or re-enables a user (via the UI, the API or an AI tool call).
+  "deactivated",
+  "reactivated",
+  // A user ended one of their local sessions (issue #1420) — the lowercased SESSION_ENDED verb.
+  "session_ended",
 ] as const;
 
 /** A single known activity verb. The `action` filter validates against this enum (→ 400 otherwise). */

@@ -3,7 +3,7 @@ title: "ADR-0093: Chassis routing — adopt an existing Asset by corroborated se
 tags: [adr, infra, topology, agent, inventory, asset, backend, frontend, shared]
 status: proposed
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-09-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -252,6 +252,37 @@ state. The decision:
 - The same mechanism generalises to the other known canvas-noise class — a Docker host's CONTAINER
   children (#1145) — but that is **not** in this ADR.
 
+> **Amendment (2026-09-09, #1295) — the default is inverted: endpoints are DRAWN by default.**
+> The first bullet above is retired. Everything else in §5 stands: the same client-side class filter,
+> over the same rows, on the same URL-backed control, on the same one surface.
+>
+> **What changed.** The canvas draws `chassis ∈ { laptop, desktop }` **by default**; the toolbar
+> control now *removes* them — *"Hide 142 user devices"* — and the count still says how many it acts
+> on. Nothing about the filter's mechanics, its scope or its vocabulary moves.
+>
+> **Why.** The CEO asked for the control to be dropped entirely and endpoints always shown. Removing
+> it outright would reinstate the unusable board this ADR exists to fix, with no escape hatch for the
+> operator running 400 workstations — so the choice put back to him was *remove the control* or
+> *invert the default*, and he chose to invert it, verbatim: **"Invertir el default"**. The reasoning
+> the original bullet rests on is not wrong; it simply prices the two failures differently. Hiding
+> most of an estate from someone who has never seen this screen is the more expensive surprise, and
+> it lands on the first visit, before the operator knows there is a control to look for. A busy map
+> is legible-once-clicked; an absent one is not knowably absent at all.
+>
+> **The URL param keeps its name and changes its value.** `?endpoints=0` hides;
+> `showEndpointsFromParam` returns true for everything else. A link saved by the previous release
+> carries `?endpoints=1` — meaning, then, *show them* — and under the new reading it still resolves
+> to a board with endpoints on it. The degradation an old bookmark gets is therefore the picture its
+> author saved, and the only failure mode that mattered here — a stale link quietly emptying a map —
+> is unreachable by construction.
+>
+> **Unchanged:** decision 5 (hiding is canvas-only; the Servers table, the hypervisor and fleet views
+> stay unfiltered), decision 1 (the hidden set is still exactly `{ laptop, desktop }`), decision 2
+> (still no per-node pin), the "no signal is not an endpoint" rule, and every §8 upgrade property —
+> this is a client-side default in one component and its URL param. There is no migration, no API
+> change and no stored preference: an install that updates simply renders a fuller board on the next
+> page load, and an operator who wants the old one clicks once.
+
 ### §6 — Chassis in the tray and in auto-confirm rules
 
 - **Visible:** the review tray row and the node drill-in show the chassis, so a human confirming 40
@@ -398,6 +429,11 @@ amending it in passing.
    it answers the one question a human reading a curated Asset's history will ask.
 5. **Endpoint hiding is canvas-only**; the Servers *table* keeps showing everything (§5). The map is
    the surface that drowns at ~200 endpoints; the table is not.
+
+> **None of the five above changed on 2026-09-09** (#1295) — but the §5 *default* they were decided
+> against did. Endpoints are now drawn by default and the control hides them; the hidden set is still
+> exactly `{ laptop, desktop }` (decision 1) and hiding is still canvas-only (decision 5). See the §5
+> amendment; the CEO's words were "Invertir el default".
 
 ## Links
 

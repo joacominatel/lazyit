@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-09
+updated: 2026-09-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -342,6 +342,42 @@ list) and **Assets › Diagram** (the canvas). A static HTML tree is rejected (c
 > ADR-0049's budget and `prefers-reduced-motion` (the cinematic deep-link fit-view at ~400ms is the
 > one allowed exception). The pure helpers (`edgeStyle`/`layoutNodes`/`placementOffset`) are
 > unit-tested in `apps/web/lib/infra/canvas.test.ts`.
+
+> **Amendment (2026-09-09, #1295) — "DEPENDS_ON only" is retired as the animation rule; every edge
+> can carry a decorative packet flow.**
+> The clause above reading *"colour + line-style + marker + (DEPENDS_ON only) animated flow"* named
+> four **encoders**, and treated motion as the fourth. It is now three encoders and one ornament.
+>
+> **What ships.** Each drawn edge may render a SECOND `<path>` on the same geometry — the kind's own
+> stroke at low opacity, its own short dash (`2 14`), `pointer-events: none`, marching source→target
+> via a CSS keyframe. It is decoration, asked for as decoration ("simplemente por estética"), and it
+> encodes nothing: it is identical on every kind, so nothing about it can be read off the legend.
+>
+> **The base path is untouched, and that is the point of overlaying.** `edgeStyle(kind).dashArray`
+> still lands on the real line unmodified — solid, `6 4`, `1 5` — so the line-style encoder this ADR
+> locked against colour-alone survives intact underneath the ornament. A reader who cannot separate
+> the kinds by colour separates them by dash and marker exactly as before.
+>
+> **How DEPENDS_ON stays distinguishable.** By all three surviving encoders (its own colour, the
+> unique `6 4` dash, the open `Arrow` marker) and, still, by a motion of its own: `.infra-edge-flow`
+> marches DEPENDS_ON's *own dash pattern* along the base line at 0.9s, where the ornament is a
+> distinct short dash on a separate path at 1.6s. DEPENDS_ON is therefore the only kind whose real
+> line moves, and the two motions read as different things when they share an edge.
+>
+> **The gates, and why there are three.** (1) An edge animates only when NEITHER endpoint is
+> `OFFLINE` — deliberately not `=== "ONLINE"`, because a hand-added node defaults to `UNKNOWN` and a
+> strict gate would leave a manually built map completely static, which reads as broken. (2) Nothing
+> animates above an edge-count cutoff (`EDGE_FLOW_MAX_EDGES = 500`): `stroke-dashoffset` is not
+> compositable, so every animated path repaints on the main thread that also serves panning and
+> dragging. (3) `prefers-reduced-motion: reduce` freezes it — inherited from `globals.css`'s single
+> consolidated block, which is precisely why this is a CSS keyframe and not SVG SMIL: that media
+> query reaches `animation`, and does not reach `<animate>`. The gate lives in
+> `apps/web/lib/infra/edge-flow.ts` and is unit-tested in `edge-flow.test.ts`.
+>
+> **It is not a liveness readout, and the Manual says so in both languages.** `OFFLINE` means the
+> agent has been silent for ~45 minutes ([[0074-server-reporting-agent]]'s staleness sweeper), so a
+> machine powered off five minutes ago keeps flowing. Nothing in lazyit should ever be operated off
+> this cue.
 
 > **Amendment (2026-08-02, #1181 + #1182) — the drill-in is a tabbed modal, click no longer opens it,
 > and the Map can reach the agent.** Three sentences above are now wrong about the shipped screen.

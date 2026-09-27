@@ -32,6 +32,12 @@ import {
  * - It runs `onApplicationBootstrap` un-awaited (fire-and-forget), so it NEVER blocks boot/readiness:
  *   the app is serving requests while any rebuild proceeds. A rebuild uses the same zero-downtime
  *   temp-index-swap as `reindex:all` ({@link SearchService.rebuildIndex} → `reindexIndex`).
+ * - It first WAITS (bounded, {@link SELF_HEAL_ENGINE_WAIT}) for the engine to answer `/health` (#1216).
+ *   There is no api → meilisearch `depends_on` (fail-soft), so on `up -d` the API can finish booting
+ *   before Meili is reachable — most visibly right after a server upgrade, which starts Meili on a NEW,
+ *   empty data volume (ADR-0035 amendment 2026-09-26). Without the wait, the single boot probe would
+ *   fail, be logged, and leave search empty until the hourly reconcile sweeper. If the engine never
+ *   answers inside the window, the pass is skipped and the reconcile sweeper remains the backstop.
  * - It is a no-op in search-disabled mode (no `MEILI_HOST`) and under `NODE_ENV=test` (the Jest suite
  *   has no real Meili/DB), and any failure is caught and logged — index-health probing must never
  *   crash the API.
@@ -39,6 +45,36 @@ import {
  * The live set mirrors the read-path / `reindex:all` visibility exactly: soft-deleted rows are excluded
  * (`deletedAt: null`) and only PUBLISHED articles are indexed (draft privacy — ADR-0022/0035).
  */
+/** How long the boot self-heal waits for the engine to answer `/health` before probing (#1216). */
+export interface EngineWait {
+  /** Health probes before giving up (the first probe is immediate). */
+  attempts: number;
+  /** Delay between probes, in milliseconds. */
+  intervalMs: number;
+}
+
+/**
+ * Default engine wait: 30 probes × 10s ≈ 5 minutes. Generous for a container that is still starting,
+ * bounded so a Meili that is genuinely down does not keep a background task alive forever (the hourly
+ * reconcile sweeper covers that case).
+ */
+export const SELF_HEAL_ENGINE_WAIT: EngineWait = {
+  attempts: 30,
+  intervalMs: 10_000,
+};
+
+/** An `unref`'d sleep, so a pending wait never holds the process open during shutdown. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (ms <= 0) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
 @Injectable()
 export class SearchBootstrapService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SearchBootstrapService.name);
@@ -64,8 +100,17 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
    * a test or operator can trigger it directly. The whole pass is try/caught so a transient Meili/DB
    * error never escapes the background task. Returns the indexes it (attempted to) rebuild.
    */
-  async selfHeal(): Promise<SearchIndex[]> {
+  async selfHeal(
+    wait: EngineWait = SELF_HEAL_ENGINE_WAIT,
+  ): Promise<SearchIndex[]> {
     try {
+      if (!(await this.waitForEngine(wait))) {
+        this.logger.warn(
+          `Search self-heal skipped: Meilisearch did not answer /health after ${wait.attempts} attempt(s). ` +
+            'The drift-reconcile sweeper will rebuild the indexes once it is reachable.',
+        );
+        return [];
+      }
       const stale = await this.search.emptyOrMissingIndexes();
       if (stale.length === 0) {
         // Every index already has documents — nothing to do (the safe, common prod path).
@@ -84,6 +129,23 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
       );
       return [];
     }
+  }
+
+  /**
+   * Poll the engine's health until it answers or the bounded window runs out (#1216). Returns whether
+   * the engine became reachable. The first probe is immediate, so a healthy engine costs one call.
+   */
+  private async waitForEngine(wait: EngineWait): Promise<boolean> {
+    const attempts = Math.max(1, wait.attempts);
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      if (await this.search.isHealthy()) {
+        return true;
+      }
+      if (attempt < attempts) {
+        await sleep(wait.intervalMs);
+      }
+    }
+    return false;
   }
 
   /**

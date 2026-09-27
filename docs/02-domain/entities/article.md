@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-09-24
 ---
 
 # Article
@@ -72,6 +72,18 @@ deferred.
   list, detail, versions, links, backlinks and aliases reads all compose this gate, and **`/search`**
   drops a restricted hit a non-matching caller may not see. You can never alias/share an article you
   cannot yourself access (no-escalation — **INV-9**).
+- **Moving between folders is an authorization write** (🟢 implemented #1296,
+  [[0060-kb-folder-access-control]] §9): because the home [[folder]] **is** the article's access rule,
+  a `PATCH /articles/:id` carrying `categoryId` is gated, not free. Moving **into** a folder the actor
+  cannot read is **refused** — with the *same* `400` a non-existent folder returns, so a restricted
+  destination is never leaked (existence-hiding on a body field; the article in the URL demonstrably
+  exists, so its 404 is not available). Moving **out of** a restricted folder into a more permissive one
+  **is allowed**: refusing it would strand every document that started life restricted, so the widening
+  is confirmed in the UI rather than blocked, and the move now **appends an [[article-version]]** so the
+  access change lands on the append-only timeline with its actor. **ADMIN** may move anywhere (§5
+  god-mode); a non-admin `article:manage` holder must pass the destination check like anyone else. The
+  rule is **write-path only** — an article already sitting in a folder its author cannot read is never
+  re-validated, and repeating the folder it is already in is not a move.
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
@@ -191,7 +203,10 @@ Versioning + linking ([[0042-article-versioning-and-linking]]):
   `DELETE /articles/:id/links/:linkId` — unlink; `GET /articles/:id/links` — list links.
 - `GET /assets/:id/articles` — reverse: PUBLISHED articles linked to an asset (lean list shape).
 
-For a non-author write on a **published** article the API returns `403`; on a **draft**, `404`.
+For a non-author write on a **published** article the API returns `403`; on a **draft**, `404`. A
+published article in a home folder the caller cannot read is `404` on every write path, the same as a
+missing id: the folder check runs before the authorship verdict ([[0060-kb-folder-access-control]] §4,
+INV-9, SEC-074).
 
 ## Not yet implemented (deferred)
 

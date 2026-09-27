@@ -22,10 +22,18 @@ Base de conocimiento.
   así que nunca revela más de lo que mostraría la lista de la carpeta. Una **carpeta restringida que
   no puedes leer no muestra número**, y las carpetas en un servidor más antiguo simplemente no
   muestran ninguno hasta que se actualice.
-- **Crea una carpeta** desde el botón **+** del formulario de artículo (o desde donde se gestionan las
-  carpetas): dale un nombre y, opcionalmente, una carpeta padre.
+- **Crea una carpeta de primer nivel** con **Nueva carpeta**, arriba de la barra lateral de carpetas.
+- **Crea una subcarpeta** desde el menú **⋯** de la carpeta dentro de la que la quieres → **Nueva
+  subcarpeta aquí**. No hay límite de profundidad: anida tanto como necesite tu documentación. La
+  carpeta nueva se abre en cuanto se crea.
+- **Renombra o mueve una carpeta** desde ese mismo menú **⋯**. **Mover a…** te deja elegir cualquier
+  otra carpeta como nuevo padre, o **Primer nivel (sin padre)** para devolverla a la raíz; sus
+  subcarpetas y sus artículos se mueven con ella.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
-  `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no.
+  `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no. Si el nombre ya está
+  ocupado donde estás creando o moviendo, la app te lo dice y no se cambia nada.
+- **Una carpeta no puede moverse dentro de sí misma** ni de una de sus subcarpetas: eso desprendería
+  la rama del árbol. El movimiento se rechaza con una explicación.
 - **Eliminar una carpeta** la quita junto con todo su contenido — sus subcarpetas y todos sus
   artículos — de la Base de conocimiento. La confirmación te indica cuántas carpetas y artículos se
   ven afectados. Los artículos se eliminan de forma lógica (recuperables por un administrador desde la
@@ -70,6 +78,12 @@ sus hijas heredan esa restricción; un administrador puede añadir una regla en 
 restringirla *aún más*, pero nunca para ampliarla más allá del padre. Una carpeta que no tiene regla
 propia pero está bajo un padre restringido se muestra como **Restringido (heredado de …)**, no como
 Público.
+
+**Mover una carpeta cambia lo que hereda.** Si la colocas bajo un padre restringido, ella — y todo su
+contenido — pasa a estar al menos tan restringida como ese padre, de inmediato. Si la devuelves al
+primer nivel, solo queda su *propia* regla. Un movimiento nunca concede acceso que la Base de
+conocimiento no permitiera ya, pero sí puede devolver una carpeta a su regla propia, así que revisa el
+destino antes de mover una carpeta que dependía de la restricción de su padre.
 
 ## Qué significa "restringido" para quien lee
 

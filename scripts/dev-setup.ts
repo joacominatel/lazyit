@@ -48,6 +48,9 @@ const DEV_VOLUMES = [
   "lazyit_db_data",
   "lazyit_zitadel_db_data",
   "lazyit_zitadel_secrets",
+  // Meilisearch data is one volume per server version (ADR-0035 amendment 2026-09-26). The legacy
+  // v1.12 `lazyit_meili_data` stays listed so --fresh also reclaims it on machines that still have it.
+  "lazyit_meili_data_v1_53_2",
   "lazyit_meili_data",
   "lazyit_valkey_data",
 ] as const;

@@ -97,7 +97,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 16 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 18 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
@@ -123,12 +123,16 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     // not (no deletedAt — a closed edge sets endedAt, an ADR-0019 lifecycle marker, and cascades).
     expect(SOFT_DELETABLE_MODELS.has('InfraNode')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('InfraEdge')).toBe(false);
+    // OAuth grants (ADR-0097): soft delete = revoked; the credential rows are hard-deleted protocol state.
+    expect(SOFT_DELETABLE_MODELS.has('OAuthGrant')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('OAuthToken')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.has('OAuthAuthorizationCode')).toBe(false);
     // Auto-confirm rules (ADR-0074 §1 amendment, #1145) soft-delete: a deleted rule must stop matching
     // reports, so its reads are auto-scoped like every other mutable domain entity.
     expect(SOFT_DELETABLE_MODELS.has('InfraAutoConfirmRule')).toBe(true);
     // File attachments (ADR-0082): delete = soft delete; the GC sweep adjudicates the blob later.
     expect(SOFT_DELETABLE_MODELS.has('Attachment')).toBe(true);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(17);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(18);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {

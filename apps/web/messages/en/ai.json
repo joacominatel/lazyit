@@ -1,0 +1,1001 @@
+{
+  "launcher": {
+    "open": "Open the AI assistant",
+    "close": "Close the AI assistant"
+  },
+  "panel": {
+    "title": "AI assistant",
+    "close": "Close",
+    "newChat": "New chat",
+    "history": "Chat history",
+    "backToChat": "Back to the chat",
+    "loading": "Loading the conversation…",
+    "loadError": "This conversation could not be loaded.",
+    "conversationGone": "This conversation no longer exists.",
+    "expand": "Expand the assistant",
+    "restore": "Restore the assistant's width",
+    "resize": "Resize the assistant",
+    "resizeHint": "Drag, or use the arrow keys, to resize. Double-click or Enter resets the width.",
+    "widthValue": "{width} pixels wide"
+  },
+  "history": {
+    "title": "Your chats",
+    "empty": "No chats yet. Ask something to start one.",
+    "retention": "Chats are deleted automatically after {days, plural, one {# day} other {# days}}.",
+    "retentionNone": "Chats are kept until you delete them.",
+    "private": "Only you can see your chats.",
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "Previous 7 days",
+      "older": "Older"
+    },
+    "untitled": "New chat",
+    "readOnly": "Read-only",
+    "running": "Answering",
+    "awaiting": "Needs your approval",
+    "loadError": "Your chats could not be loaded.",
+    "delete": "Delete chat \"{title}\"",
+    "deleteTitle": "Delete this chat?",
+    "deleteBody": "The conversation \"{title}\" is deleted permanently. Changes the assistant made stay recorded in the activity log.",
+    "deleteConfirm": "Delete",
+    "cancel": "Cancel",
+    "deleted": "Chat deleted.",
+    "deleteInProgress": "The assistant is still answering in this chat. Stop it first, then delete it.",
+    "deleteFailed": "The chat could not be deleted.",
+    "awaitingInput": "Needs your answer"
+  },
+  "composer": {
+    "label": "Message the assistant",
+    "placeholder": "Ask lazyit… (Enter to send, Shift+Enter for a new line)",
+    "send": "Send",
+    "stop": "Stop",
+    "stopping": "Stopping…",
+    "hint": "Type / for commands. Don't paste passwords or secrets. Every change needs your approval.",
+    "busyApproval": "Approve or reject the pending change to continue.",
+    "readOnlyTitle": "This chat is read-only",
+    "readOnlyBody": "It was started with an earlier AI configuration, or it grew too long. Start a new chat to continue.",
+    "hintAuto": "Type / for commands. Don't paste passwords or secrets. Auto-approve is on: basic changes apply without asking.",
+    "busyInput": "Answer, skip or decline the assistant's form to continue.",
+    "inputWaiting": "The assistant asked: {title}",
+    "inputWaitingGeneric": "The assistant is waiting for your answer.",
+    "goToForm": "Go to the form"
+  },
+  "context": {
+    "label": "About: {page}",
+    "remove": "Don't send the current page",
+    "add": "Send the current page",
+    "entity": "{type} on this page",
+    "route": "this page"
+  },
+  "message": {
+    "you": "You",
+    "assistant": "Assistant",
+    "thinking": "Thinking…",
+    "awaitingApproval": "Waiting for your approval",
+    "stopped": "Stopped.",
+    "unsupported": "This part of the conversation can't be shown in this version.",
+    "emptyTitle": "What can I help you with?",
+    "emptyBody": "Ask about your inventory, access or knowledge base, or ask for a change. You approve every change before it happens.",
+    "examples": {
+      "one": "Which laptops are unassigned?",
+      "two": "Who has access to the VPN?",
+      "three": "Assign MBP-042 to Ana Ruiz"
+    },
+    "awaitingInput": "Waiting for your answer"
+  },
+  "sources": {
+    "title": "Sources from the web",
+    "newTab": "(opens in a new tab)",
+    "note": "Found by the AI provider's web search. Written by others — check before relying on it."
+  },
+  "tools": {
+    "generic": {
+      "EXECUTING": "Working: {tool}",
+      "SUCCEEDED": "Done: {tool}",
+      "FAILED": "Failed: {tool}",
+      "DENIED": "Not allowed: {tool}",
+      "AWAITING_APPROVAL": "Proposed: {tool}",
+      "AWAITING_INPUT": "Waiting for your answer: {tool}",
+      "REJECTED": "Rejected: {tool}",
+      "EXPIRED": "Expired: {tool}",
+      "CANCELLED": "Cancelled: {tool}",
+      "OUTCOME_UNKNOWN": "Unknown outcome: {tool}",
+      "unknown": "{tool}"
+    },
+    "showDetails": "Show details",
+    "hideDetails": "Hide details",
+    "outcomeUnknown": "lazyit could not confirm whether this change was applied. Check the item before trying again.",
+    "repeated": "{tool} ×{count}"
+  },
+  "approval": {
+    "classes": {
+      "write": "Proposed change",
+      "elevated": "Sensitive change"
+    },
+    "states": {
+      "pending": "Pending",
+      "approving": "Approving",
+      "rejecting": "Rejecting",
+      "executed": "Done",
+      "failed": "Failed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "noAction": "The assistant proposes this change.",
+    "target": "Applies to",
+    "field": "Field",
+    "before": "Before",
+    "after": "After",
+    "empty": "—",
+    "redacted": "Hidden",
+    "yes": "Yes",
+    "no": "No",
+    "quoted": "Written by someone else — shown as plain text.",
+    "warningsTitle": "Before you approve",
+    "warnings": {
+      "EXTERNAL_PROVISIONING": "Creates access in an outside system through an automation.",
+      "EXTERNAL_DEPROVISIONING": "Removes access in an outside system through an automation.",
+      "CASCADE_RELEASES_ASSIGNMENTS": "Also ends the current assignments of this item.",
+      "CASCADE_REVOKES_GRANTS": "Also revokes the access grants tied to it.",
+      "ROLE_CHANGE": "Changes someone's role in lazyit.",
+      "IDENTITY_CHANGE": "Changes someone's identity in lazyit (name, email or sign-in).",
+      "PRIVILEGE_GRANT": "Gives someone access or privileges.",
+      "CREDENTIAL_DELIVERY": "Sends someone a way to sign in.",
+      "LEDGER_APPEND": "Adds a permanent record that can't be edited later.",
+      "SOFT_DELETE": "Archives it. It can be restored later.",
+      "PUBLISHES_TO_READERS": "Makes the content visible to its readers.",
+      "VISIBILITY_CHANGE": "Changes who can see it.",
+      "NOTIFIES_USERS": "Sends notifications to people.",
+      "IRREVERSIBLE": "This can't be undone.",
+      "OUTBOUND_INTEGRATION": "Changes an outside integration or where lazyit sends data.",
+      "CRITICAL_APPLICATION": "Touches an application marked critical.",
+      "INSTANCE_CONFIGURATION": "Changes instance-wide configuration: it applies to everyone from now on.",
+      "unknown": "Additional check: {code}"
+    },
+    "passwordRequired": "Needs your password",
+    "newWarning": "New",
+    "changed": "This change was updated since it was proposed. Review the highlighted points and decide again.",
+    "impacted": "Also affects {count, plural, one {# {type}} other {# {type}}}",
+    "untrustedTitle": "Based on content written by others",
+    "untrustedBody": "The assistant read content other people wrote before proposing this. Check that the change is what you asked for.",
+    "elevatedNote": "This is a sensitive change. Read it carefully before approving.",
+    "expiresAt": "Waits for you until {time}.",
+    "password": "Your lazyit password",
+    "passwordHint": "Sensitive changes need your password to confirm it's you.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "executedNote": "The change was applied.",
+    "failedNote": "The change was not applied: {message}",
+    "rejectedNote": "You rejected this change. Nothing was changed.",
+    "expiredNote": "This proposal expired. Ask again if you still want the change.",
+    "notices": {
+      "duplicatesUnchecked": "The duplicate check could not be completed — you can't read every asset, or a tag or serial number contains a comma and couldn't be looked up. A row whose tag or serial is already taken will be refused when it runs, and the others still run."
+    },
+    "table": {
+      "rowNumber": "#",
+      "problems": "Problems",
+      "noProblems": "—",
+      "showing": "{shown, plural, one {# row} other {# rows}} of {total}",
+      "onlyProblems": "Only rows with problems ({count})",
+      "willBeSkipped": "Skipped — won't be applied",
+      "defaulted": "default",
+      "duplicateExisting": "{field} “{value}” already belongs to",
+      "duplicateRow": "{field} “{value}” is also used by row {row}"
+    },
+    "cancelledNote": "This proposal was cancelled. Nothing was changed.",
+    "errors": {
+      "stepUpRequired": "Enter your password to approve this change.",
+      "stepUpFailed": "That password is not correct.",
+      "stepUpUnavailable": "Password confirmation isn't available with your sign-in method, so this change can't be approved from the chat. Make it from its page instead.",
+      "stepUpRateLimited": "Too many wrong passwords. Try again in {seconds, plural, one {# second} other {# seconds}}.",
+      "stepUpRateLimitedNoTime": "Too many wrong passwords. Wait a moment and try again.",
+      "previewChanged": "This change was updated since it was proposed. Review it and decide again.",
+      "notAwaiting": "This change is no longer waiting for a decision.",
+      "aiDisabled": "The AI assistant was turned off, so this change can't be approved.",
+      "stale": "The item changed since this was proposed. Nothing was applied; the assistant will check it again.",
+      "expired": "This proposal expired. Ask again if you still want the change.",
+      "alreadyDecided": "This change was already decided, maybe in another window.",
+      "forbidden": "You're no longer allowed to make this change.",
+      "notFound": "This proposal no longer exists.",
+      "unknown": "The decision could not be sent. Try again."
+    },
+    "auto": {
+      "title": "Applied automatically",
+      "note": "Auto-approve is on in this chat. The change is recorded like any other, under your name."
+    }
+  },
+  "pager": {
+    "title": "Proposed changes",
+    "count": "{count, plural, one {# change} other {# changes}}",
+    "position": "{page} of {total}",
+    "live": "Change {page} of {total}",
+    "previous": "Previous change",
+    "next": "Next change",
+    "pages": "Changes in this step",
+    "pageLabel": "Change {page}: {state}",
+    "progress": "{decided} of {total} decided",
+    "approveAll": "Approve all ({count})",
+    "rejectAll": "Reject all ({count})",
+    "bulkCovers": "{count, plural, =0 {None of the changes still waiting can be decided all at once.} one {Approve all and Reject all cover # change still waiting.} other {Approve all and Reject all cover # changes still waiting.}}",
+    "excludedTitle": "Decide these on their own page:",
+    "excluded": {
+      "stepUp": "{count, plural, one {# needs your password} other {# need your password}}",
+      "elevated": "{count, plural, one {# is a sensitive change} other {# are sensitive changes}}",
+      "needsReview": "{count, plural, one {# needs another look} other {# need another look}}"
+    },
+    "bulkRunning": "{decision, select, approve {Approving} other {Rejecting}} {done} of {total}…",
+    "bulkDone": "{decision, select, approve {Approved} other {Rejected}} {count, plural, one {# change} other {# changes}}.",
+    "bulkFailed": "{count, plural, one {# change couldn't be decided:} other {# changes couldn't be decided:}}",
+    "bulkSkipped": "{count, plural, one {# more was not sent.} other {# more were not sent.}}",
+    "goTo": "Change {page}",
+    "allDecided": "Every change in this step is decided."
+  },
+  "refused": {
+    "summary": "{count, plural, one {# change couldn't be proposed} other {# changes couldn't be proposed}}",
+    "item": "{tool}: {message}",
+    "itemRepeated": "{tool} ×{count}: {message}",
+    "noReason": "no reason given"
+  },
+  "effects": {
+    "open": "Open {label}",
+    "opened": "Opened {label}"
+  },
+  "entities": {
+    "asset": "Asset",
+    "assetAssignment": "Assignment",
+    "assetModel": "Model",
+    "location": "Location",
+    "category": "Category",
+    "application": "Application",
+    "accessGrant": "Access grant",
+    "accessRequest": "Access request",
+    "consumable": "Consumable",
+    "consumableMovement": "Stock movement",
+    "article": "Article",
+    "user": "User",
+    "infraNode": "Infrastructure node",
+    "infraEdge": "Infrastructure link",
+    "workflowRun": "Workflow run",
+    "manualTask": "Manual task",
+    "assetTagScheme": "Asset tag scheme",
+    "webSearch": "Web search results",
+    "toolResult": "Content read by the assistant",
+    "unknown": "Item"
+  },
+  "errors": {
+    "run": {
+      "AI_DISABLED": "The AI assistant was turned off.",
+      "FORBIDDEN": "You no longer have access to the assistant.",
+      "PROVIDER_AUTH": "The AI provider rejected the credentials. An administrator needs to check Settings → AI.",
+      "PROVIDER_RATE_LIMIT": "The AI provider is busy.",
+      "PROVIDER_UNAVAILABLE": "The AI provider isn't responding right now.",
+      "PROVIDER_BAD_REQUEST": "The AI provider couldn't process this request.",
+      "PROVIDER_REFUSED": "The AI provider declined to answer this.",
+      "EGRESS_DENIED": "lazyit isn't allowed to reach the AI provider. An administrator needs to check the network settings.",
+      "BUDGET_EXCEEDED": "The daily AI budget has been reached. Try again tomorrow.",
+      "CONTEXT_LIMIT": "This conversation is too long to continue.",
+      "MAX_STEPS": "The assistant stopped after too many steps. Try a simpler request.",
+      "CANCELLED": "Stopped.",
+      "ENGINE_RESTART": "The answer was interrupted by a restart.",
+      "RUN_IN_PROGRESS": "Another window is already answering in this chat. Showing that answer.",
+      "CONVERSATION_READ_ONLY": "This chat used an earlier AI configuration and is read-only.",
+      "STEP_UP_REQUIRED": "A change needs your password.",
+      "WEB_SEARCH_DISABLED": "The AI provider refused web search because it is disabled for this account. An administrator needs to enable web search at the provider, or turn it off in Settings → AI.",
+      "NETWORK": "Connection lost.",
+      "RATE_LIMITED": "Too many requests.",
+      "EXPIRED": "A proposed change expired before it was decided.",
+      "generic": "Something went wrong."
+    },
+    "retryIn": "Try again in {seconds, plural, one {# second} other {# seconds}}.",
+    "retry": "Try again",
+    "newChat": "Start a new chat",
+    "reconnect": "Reconnect",
+    "dismiss": "Dismiss"
+  },
+  "connection": {
+    "reconnecting": "Reconnecting…",
+    "lost": "Connection lost. The answer continues on the server."
+  },
+  "live": {
+    "replied": "The assistant replied.",
+    "approvalNeeded": "Approval needed: {action}",
+    "inputNeeded": "The assistant needs some details: {title}"
+  },
+  "markdown": {
+    "imageRemoved": "[image: {alt}]",
+    "imageRemovedNoAlt": "[image removed]",
+    "externalLink": "opens {host} in a new tab"
+  },
+  "commands": {
+    "label": "Commands",
+    "empty": "No command matches. Press Enter to send it as a message.",
+    "keys": "↑↓ to choose · Enter to run · Esc to close",
+    "copy": {
+      "label": "Copy the conversation",
+      "description": "Copy the whole chat to the clipboard as Markdown."
+    },
+    "new": {
+      "label": "New chat",
+      "description": "Start over in a new chat."
+    },
+    "help": {
+      "label": "Help",
+      "description": "Show the commands and keyboard shortcuts."
+    },
+    "copied": "Conversation copied as Markdown.",
+    "copyEmpty": "There is nothing to copy yet.",
+    "copyFailed": "The conversation could not be copied: the browser blocked the clipboard.",
+    "helpTitle": "Commands and shortcuts",
+    "helpClose": "Close help",
+    "helpShortcutsTitle": "Shortcuts",
+    "shortcuts": {
+      "toggle": "⌘J / Ctrl+J — open or close the assistant",
+      "send": "Enter — send · Shift+Enter — new line",
+      "slash": "/ at the start of the message — commands",
+      "close": "Esc — close the assistant"
+    },
+    "helpManual": "Read the Manual page",
+    "model": {
+      "label": "Choose the model",
+      "description": "Open the model picker, or set it: /model <id>. Only before the first message."
+    },
+    "auto": {
+      "label": "Auto-approve",
+      "description": "Turn auto-approve on or off for this chat: /auto on, /auto off."
+    }
+  },
+  "toolNames": {
+    "lazyit_search": "Search lazyit",
+    "session_context": "Session context",
+    "request_input": "Ask you for details",
+    "asset_archive": "Archive an asset",
+    "asset_check_in": "Check an asset in",
+    "asset_check_out": "Check an asset out",
+    "asset_create": "Create an asset",
+    "asset_create_batch": "Create several assets",
+    "asset_update_batch": "Update several assets",
+    "asset_get": "Get an asset",
+    "asset_model_create": "Create an asset model",
+    "asset_restore": "Restore an asset",
+    "asset_search": "Search assets",
+    "asset_update": "Update an asset",
+    "location_create": "Create a location",
+    "reference_lookup": "Look up reference data",
+    "user_search": "Search users",
+    "user_get": "Get a user",
+    "user_create": "Create a user",
+    "user_update": "Update a user",
+    "user_offboard": "Offboard a user",
+    "user_restore": "Restore a user",
+    "dashboard_summary": "Dashboard summary",
+    "activity_list": "List recent activity",
+    "consumable_search": "Search consumables",
+    "consumable_get": "Get a consumable",
+    "consumable_create": "Create a consumable",
+    "consumable_update": "Update a consumable",
+    "consumable_record_movement": "Record a stock movement",
+    "kb_create_article": "Create an article",
+    "kb_get_article": "Read an article",
+    "kb_search": "Search the knowledge base",
+    "kb_set_publication": "Publish or unpublish an article",
+    "kb_update_article": "Update an article",
+    "infra_node_get": "Get an infrastructure node",
+    "infra_node_search": "Search infrastructure",
+    "application_search": "Search applications",
+    "application_get": "Get an application",
+    "application_create": "Create an application",
+    "application_update": "Update an application",
+    "access_grant_list": "List access grants",
+    "access_grant_create": "Grant access",
+    "access_grant_revoke": "Revoke access",
+    "access_request_list": "List access requests",
+    "access_request_create": "Request access",
+    "access_request_decide": "Decide an access request",
+    "workflow_connection_list": "List workflow connections",
+    "workflow_get": "Explain a workflow",
+    "workflow_run_get": "Explain a workflow run",
+    "workflow_run_list": "List workflow runs",
+    "workflow_run_replay": "Replay a workflow run",
+    "workflow_run_retry": "Retry a workflow run",
+    "workflow_search": "Search workflows",
+    "workflow_task_get": "Get a manual task",
+    "workflow_task_list": "List manual tasks",
+    "workflow_task_resolve": "Resolve a manual task",
+    "workflow_archive": "Archive a workflow",
+    "workflow_author_version": "Save a workflow's steps",
+    "workflow_connection_archive": "Archive a workflow connection",
+    "workflow_connection_create": "Create a workflow connection",
+    "workflow_connection_test": "Test a workflow connection",
+    "workflow_connection_update": "Update a workflow connection",
+    "workflow_create": "Create a workflow",
+    "workflow_set_enabled": "Turn a workflow on or off",
+    "workflow_update": "Update a workflow",
+    "kb_folder_create": "Create a knowledge-base folder",
+    "kb_folder_rename": "Rename a knowledge-base folder",
+    "category_create": "Create a category",
+    "category_update": "Update a category",
+    "category_archive": "Archive a category",
+    "asset_model_update": "Update an asset model",
+    "asset_model_archive": "Archive an asset model",
+    "asset_model_restore": "Restore an asset model",
+    "location_update": "Update a location",
+    "location_archive": "Archive a location",
+    "location_restore": "Restore a location",
+    "asset_tag_scheme_get": "Read the asset tag scheme",
+    "asset_tag_scheme_update": "Change the asset tag scheme"
+  },
+  "fields": {
+    "accessLevel": "Access level",
+    "address": "Address",
+    "application": "Application",
+    "archived": "Archived",
+    "asset": "Asset",
+    "assetTag": "Asset tag",
+    "audience": "Audience",
+    "authentication": "Authentication",
+    "category": "Category",
+    "categoryId": "Category",
+    "checkedInFrom": "Returned by",
+    "checkedOutTo": "Assigned to",
+    "company": "Company",
+    "content": "Content",
+    "costPerSeat": "Cost per seat",
+    "credential": "Credential",
+    "criticalApplicationAccess": "Access to critical applications",
+    "currentStock": "Current stock",
+    "dataSent": "Data sent",
+    "dataSentToNewHost": "Data sent to the new host",
+    "defaultHeadersSentToNewHost": "Default headers sent to the new host",
+    "defaultsApplied": "Defaults applied",
+    "deniedReason": "Reason for denial",
+    "deprovisionPolicy": "Deprovisioning policy",
+    "description": "Description",
+    "destination": "Destination",
+    "destinations": "Destinations",
+    "dryRun": "Dry run",
+    "dryRunSample": "Dry-run sample",
+    "duplicatesUnchecked": "Duplicate check incomplete (you cannot read every asset)",
+    "email": "Email",
+    "enabled": "Enabled",
+    "prefix": "Prefix",
+    "suffix": "Suffix",
+    "width": "Digits (zero-padded)",
+    "nextNumber": "Next number",
+    "nextTag": "Next tag",
+    "excerpt": "Excerpt",
+    "expiresAt": "Expires",
+    "firstName": "First name",
+    "floor": "Floor",
+    "folder": "Folder",
+    "invalidRows": "Rows skipped",
+    "isActive": "Active",
+    "isCritical": "Critical",
+    "justification": "Justification",
+    "kind": "Kind",
+    "lastName": "Last name",
+    "legajo": "Employee ID",
+    "location": "Location",
+    "manager": "Manager",
+    "manufacturer": "Manufacturer",
+    "minStock": "Minimum stock",
+    "model": "Model",
+    "name": "Name",
+    "notes": "Notes",
+    "order": "Sort order",
+    "outboundHost": "Outbound host",
+    "outboundHosts": "Outbound hosts",
+    "owners": "Owners",
+    "parent": "Parent",
+    "path": "Path",
+    "person": "Person",
+    "probe": "Check",
+    "prompt": "Prompt",
+    "purchaseCost": "Purchase cost",
+    "purchaseDate": "Purchase date",
+    "quantity": "Quantity",
+    "reason": "Reason",
+    "renewalDate": "Renewal date",
+    "requester": "Requester",
+    "requesterId": "Requester",
+    "requesterStatus": "Requester status",
+    "resumesAtStep": "Resumes at step",
+    "role": "Role",
+    "rowCount": "Rows",
+    "rows": "Assets to create",
+    "run": "Run",
+    "runsInFlight": "Runs in progress",
+    "salvageValue": "Salvage value",
+    "seatsPurchased": "Seats purchased",
+    "secretVaultMemberships": "Secret vault memberships",
+    "serial": "Serial number",
+    "sku": "SKU",
+    "slug": "URL slug",
+    "specs": "Attributes",
+    "specsSchema": "Attribute dictionary",
+    "status": "Status",
+    "steps": "Steps",
+    "task": "Task",
+    "title": "Title",
+    "trigger": "Trigger",
+    "type": "Type",
+    "unit": "Unit",
+    "url": "URL",
+    "usedBy": "Used by",
+    "usefulLifeMonths": "Useful life (months)",
+    "user": "User",
+    "userActiveGrantsOnApplication": "User's active access to the application",
+    "userId": "User",
+    "username": "Username",
+    "userStatus": "User status",
+    "validRows": "Rows to create",
+    "vendor": "Vendor",
+    "version": "Version",
+    "warrantyEnd": "Warranty ends",
+    "whatItDoes": "What it does",
+    "workflow": "Workflow"
+  },
+  "fieldPrefixes": {
+    "input": "Input: {name}",
+    "specs": "Attribute: {name}"
+  },
+  "settings": {
+    "title": "Chat settings",
+    "open": "Chat settings — model: {model}",
+    "model": {
+      "label": "Model",
+      "default": "Default model",
+      "defaultShort": "default",
+      "search": "Search or type a model id",
+      "listed": "Available models",
+      "customHeading": "Custom model",
+      "useCustom": "Use “{id}”",
+      "invalid": "Not a valid model id. Use letters, digits and . _ - : / @ only.",
+      "hint": "Pick one, or type the id of a model your provider serves.",
+      "loading": "Loading the provider's models…",
+      "unavailable": "The model list isn't available right now. You can still type a model id.",
+      "notListed": "The provider didn't return its models. Type a model id, or keep the default.",
+      "locked": "The model is fixed once the chat has started. Start a new chat to use a different one.",
+      "lockedTitle": "Chat settings — the model is fixed for this chat",
+      "set": "Model set to {model}."
+    },
+    "effort": {
+      "label": "Reasoning effort",
+      "default": "Default",
+      "defaultIs": "Default ({level})",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "description": "Higher effort thinks longer before answering and uses more tokens."
+    },
+    "temperature": {
+      "label": "Temperature",
+      "placeholder": "Default",
+      "description": "From 0 to 2. Lower is more predictable. Empty uses the default.",
+      "invalid": "Enter a number from 0 to 2, or leave it empty."
+    },
+    "auto": {
+      "label": "Auto-approve basic changes",
+      "description": "Basic edits apply without a card. Anything critical still asks for your approval.",
+      "badge": "Auto",
+      "badgeTitle": "Auto-approve is on: basic changes apply without asking",
+      "turnedOn": "Auto-approve is on for this chat.",
+      "turnedOff": "Auto-approve is off. Every change asks for your approval again.",
+      "alreadyOn": "Auto-approve is already on.",
+      "alreadyOff": "Auto-approve is already off."
+    },
+    "consent": {
+      "title": "Turn on auto-approve for this chat?",
+      "intro": "The assistant will make basic changes without showing you a card first.",
+      "points": {
+        "basic": "Basic edits — creating or updating assets, articles, consumables and similar — are applied right away, with your account and your permissions.",
+        "critical": "Anything critical still asks: roles, identity and sign-in, access grants, credentials, applications marked critical, and other sensitive changes.",
+        "othersContent": "A change proposed after the assistant read content written by other people also still asks.",
+        "logged": "Every change is recorded, under your name, as applied automatically.",
+        "off": "It stays on only in this chat. Turn it off at any time with the switch or /auto off."
+      },
+      "manual": "How auto-approve works",
+      "cancel": "Cancel",
+      "confirm": "Turn on"
+    },
+    "errors": {
+      "locked": "The model can't change once the chat has started. Start a new chat to use a different one.",
+      "readOnly": "This chat is read-only, so its settings can't change.",
+      "aiDisabled": "The AI assistant was turned off.",
+      "effortUnsupported": "This AI provider doesn't support a reasoning effort.",
+      "optionsUnsupported": "This AI provider doesn't support that option.",
+      "invalidModel": "That model id isn't valid.",
+      "notFound": "This chat no longer exists.",
+      "generic": "The chat settings could not be saved. Try again."
+    }
+  },
+  "input": {
+    "kicker": "The assistant asks",
+    "states": {
+      "pending": "Waiting for you",
+      "sending": "Sending",
+      "submitted": "Answered",
+      "skipped": "Skipped",
+      "declined": "Declined",
+      "expired": "Expired",
+      "cancelled": "Cancelled",
+      "sent": "Sent"
+    },
+    "importance": {
+      "required": "required",
+      "recommended": "Recommended",
+      "optional": "Optional"
+    },
+    "requiredLegend": "Fields marked * are required.",
+    "moreDetails": "More details ({count, plural, one {# optional field} other {# optional fields}})",
+    "lessDetails": "Hide the optional fields",
+    "row": "Row {number}",
+    "addRow": "Add a row",
+    "removeRow": "Remove row {number}",
+    "rowsBetween": "Between {min} and {max} rows.",
+    "rowsExactly": "{count, plural, one {Exactly # row.} other {Exactly # rows.}}",
+    "noRows": "No rows.",
+    "choose": "Choose…",
+    "search": "Search…",
+    "noMatch": "No match.",
+    "noOptions": "lazyit has nothing to choose from for this list. Continue without it, or decline.",
+    "optionsFrom": "Options from lazyit: {source}",
+    "sources": {
+      "manufacturers": "manufacturers",
+      "assetCategories": "asset categories",
+      "locations": "locations",
+      "assetModels": "asset models"
+    },
+    "yes": "Yes",
+    "no": "No",
+    "empty": "Not answered",
+    "submit": "Send",
+    "skip": "Continue without",
+    "decline": "Don't ask",
+    "skipHint": "The assistant continues without this information.",
+    "declineHint": "The assistant is told not to ask for this again.",
+    "actionsHint": "Continue without: the assistant goes on without these details. Don't ask: it won't ask for them again.",
+    "expiresAt": "Answer by {time}",
+    "yourAnswer": "Your answer",
+    "answerSent": "Your answer was sent.",
+    "notes": {
+      "submitted": "The assistant continues with your answer.",
+      "skipped": "You skipped this form. The assistant continued without the details.",
+      "declined": "You declined. The assistant won't ask for these details again.",
+      "expired": "Time ran out before an answer, and the assistant stopped. Send a new message to continue.",
+      "cancelled": "The assistant stopped before an answer."
+    },
+    "issues": {
+      "required": "This field is required.",
+      "maxChars": "At most {max} characters.",
+      "min": "At least {min}.",
+      "max": "At most {max}.",
+      "notOffered": "Choose one of the options offered.",
+      "invalid": "This value is not valid.",
+      "rows": "Between {min} and {max} rows.",
+      "unknown": "This field is not part of the form."
+    },
+    "errors": {
+      "invalid": "Check the highlighted fields.",
+      "notAwaiting": "This form is no longer waiting for an answer: it was answered in another window, or the assistant stopped.",
+      "expired": "This form expired and the assistant stopped. Send a new message to continue.",
+      "aiDisabled": "The AI assistant was turned off.",
+      "forbidden": "You can't answer this form.",
+      "notFound": "This form no longer exists.",
+      "unknown": "Your answer could not be sent. Try again."
+    },
+    "sentNote": "Sent. Waiting for the assistant to continue…",
+    "expiredLocally": "The time to answer this form has passed. The assistant stops shortly; send a new message to continue."
+  },
+  "sentences": {
+    "application_create": {
+      "action": "Add the application \"{name}\" to the catalog.",
+      "actionCritical": "It is marked critical: every later AI change to it needs your password in the chat.",
+      "summary": "Added the application \"{name}\" to the catalog."
+    },
+    "application_update": {
+      "action": "Change {fields} of the application \"{name}\".",
+      "actionCritical": "It is a critical application: confirm with your password.",
+      "summary": "Updated the application \"{name}\" ({fields})."
+    },
+    "access_grant_create": {
+      "actionSelf": "You are granting access to yourself.",
+      "action": "Give {self, select, yes {yourself} other {{person}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}{hasUntil, select, yes { until {until}} other {}}.",
+      "summary": "Granted {self, select, yes {you} other {user {userId}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}."
+    },
+    "access_grant_revoke": {
+      "action": "Remove {self, select, yes {your} other {{person}'s}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}.",
+      "summary": "Revoked {self, select, yes {you} other {user {userId}}}'s {hasLevel, select, yes {\"{level}\" access} other {access}} to application {applicationId}."
+    },
+    "access_request_create": {
+      "action": "Ask for {hasLevel, select, yes {\"{level}\" access} other {access}} to {application} for yourself. The people who can grant access are notified and approve or deny it.",
+      "summary": "Requested {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}; it now waits for an approver."
+    },
+    "access_request_decide": {
+      "actionSelf": "You are deciding your own request.",
+      "actionApprove": "Approve the request: give {self, select, yes {you} other {{person}}} {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}. An access grant is created and {self, select, yes {you are} other {{person} is}} notified.",
+      "actionDeny": "Deny {self, select, yes {your} other {{person}'s}} request for {hasLevel, select, yes {\"{level}\" access} other {access}} to {application}. {self, select, yes {You are} other {{person} is}} notified with your reason.",
+      "summaryApprove": "Approved the request: {self, select, yes {you} other {user {userId}}} now has {hasLevel, select, yes {\"{level}\" access} other {access}} to application {applicationId} (grant {grantId}).",
+      "summaryDeny": "Denied the request of {self, select, yes {you} other {user {userId}}} for application {applicationId}; they are notified with the reason."
+    },
+    "access": {
+      "outlook": {
+        "mayRun": "This may trigger {revoke, select, yes {automatic deprovisioning (removing the account in {application})} other {automatic provisioning (creating the account in {application})}} if a workflow is configured for this application.",
+        "none": "No automatic {revoke, select, yes {deprovisioning} other {provisioning}} workflow is set up for {application}: nothing changes outside lazyit.",
+        "provisions": "This triggers automatic provisioning (creating the account in {application}) after approval, through the workflow set up for {application}.",
+        "keepsOtherAccess": "The user keeps other access to {application}, so its deprovisioning workflow does not run.",
+        "deprovisions": "This triggers automatic deprovisioning (removing the account in {application}), through the workflow set up for {application}.",
+        "deprovisionsIfLast": "This triggers automatic deprovisioning (removing the account in {application}) if it is the user's last access to {application}, through the workflow set up for it."
+      },
+      "criticalNote": "{application} is a critical application: confirm with your password."
+    },
+    "asset_create": {
+      "summary": "Created the asset {asset}."
+    },
+    "asset_create_batch": {
+      "action": "Create {count} of {total} assets{skipped, plural, =0 {.} one {; # row skipped as requested.} other {; # rows skipped as requested.}}",
+      "summary": "Created {count} of {total} assets{failed, plural, =0 {.} other {; # not created (see problems).}}"
+    },
+    "asset_update": {
+      "summary": "Updated the asset {asset}."
+    },
+    "asset_update_batch": {
+      "action": "Update {count} of {total} assets{skipped, plural, =0 {.} one {; # row skipped as requested.} other {; # rows skipped as requested.}}",
+      "summary": "Updated {count} of {total} assets{failed, plural, =0 {.} other {; # not updated (see problems).}}"
+    },
+    "asset_archive": {
+      "summary": "Archived the asset {asset}."
+    },
+    "asset_restore": {
+      "summary": "Restored the asset {asset}."
+    },
+    "asset_check_out": {
+      "summary": "Checked {asset} out to {user}."
+    },
+    "asset_check_in": {
+      "summary": "Checked {asset} in from {user}."
+    },
+    "consumable_create": {
+      "summary": "Created consumable {consumable} with 0 {hasUnit, select, yes {{unit}} other {units}} in stock."
+    },
+    "consumable_update": {
+      "summary": "Updated consumable {consumable}."
+    },
+    "consumable_record_movement": {
+      "summary": "Recorded {type} {quantity} on {consumable}{hasStock, select, yes {; stock is now {stock}.} other {.}}"
+    },
+    "asset_model_create": {
+      "summary": "Created the asset model {model}."
+    },
+    "location_create": {
+      "summary": "Created the location {location}."
+    },
+    "category_create": {
+      "summary": "Created the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "category_update": {
+      "summary": "Updated the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "category_archive": {
+      "summary": "Archived the {kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}} {name}."
+    },
+    "asset_model_update": {
+      "summary": "Updated the asset model {model}."
+    },
+    "asset_model_archive": {
+      "summary": "Archived the asset model {model}."
+    },
+    "asset_model_restore": {
+      "summary": "Restored the asset model {model}."
+    },
+    "location_update": {
+      "summary": "Updated the location {location}."
+    },
+    "location_archive": {
+      "summary": "Archived the location {location}."
+    },
+    "location_restore": {
+      "summary": "Restored the location {location}."
+    },
+    "taxonomy": {
+      "categoryKind": "{kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}}",
+      "usedByUnknown": "Unknown to you: {kinds}"
+    },
+    "user_create": {
+      "summary": "Created {user} as {role}."
+    },
+    "user_update": {
+      "summary": "Updated {user}."
+    },
+    "user_offboard": {
+      "summary": "Offboarded {user}: released {released} asset(s), revoked {revoked} access grant(s).",
+      "summaryRotateVaults": "They could read {vaults} Secret Manager vault(s): an administrator should rotate those secrets in the lazyit UI.",
+      "criticalRevoked": "revoked",
+      "criticalUnknownGrants": "unknown: you cannot list this person’s grants, so they are treated as critical",
+      "criticalUnknownApplications": "unknown for {count} application(s) you cannot read — treated as critical",
+      "vaultMembershipsBefore": "any held",
+      "vaultMembershipsAfter": "dropped (not restored by user_restore)"
+    },
+    "user_restore": {
+      "summary": "Restored {user}. Access grants and asset assignments were not restored."
+    },
+    "kb_create_article": {
+      "summary": "Created as a draft."
+    },
+    "kb_update_article": {
+      "summary": "Article updated."
+    },
+    "kb_set_publication": {
+      "summaryPublish": "Published: every reader of its folder can now see it.",
+      "summaryUnpublish": "Unpublished: it is a draft again, visible only to its author."
+    },
+    "kb_folder_create": {
+      "summary": "Folder created.",
+      "topLevel": "None (top level)",
+      "noOwnRules": "None of its own: it inherits the audience above. Only an administrator can restrict a folder (folder access rules), and the assistant never sets them."
+    },
+    "kb_folder_rename": {
+      "summary": "Folder renamed."
+    },
+    "kb": {
+      "audience": {
+        "unknown": "Unknown to you: folder access rules are shown only to settings:manage holders",
+        "everyone": "Everyone who can read the knowledge base",
+        "restrictedByRules": "Restricted by folder access rules",
+        "restricted": "Restricted — only people matching every restricted folder on the path:",
+        "folder": "{folder}:",
+        "rule": "{rule, select, role {the {role} role} users {{count, plural, one {# named person} other {# named people}}} appGrant {people with access to application {applicationId}} assetAssignment {people assigned asset {assetId}} other {an unrecognized rule (matches nobody)}}{then, select, or { or} semicolon {;} other {}}",
+        "malformed": "{lead, select, yes {; } other {}}a folder with unreadable rules (matches nobody)"
+      }
+    },
+    "workflow_create": {
+      "whatItDoes": "Creates the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} automation of {application}, DISABLED and with no steps. Nothing is sent until steps are added and it is enabled.",
+      "summary": "Created the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application} (disabled)."
+    },
+    "workflow_update": {
+      "summary": "Updated the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow_archive": {
+      "whatItDoes": "Archives this workflow: from now on nothing runs every time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}. It cannot be restored from lazyit.",
+      "summary": "Archived the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow_author_version": {
+      "enabled": "The workflow is ENABLED: this version is live as soon as it is saved.",
+      "disabled": "The workflow is disabled: nothing runs until it is enabled.",
+      "summary": "Saved version {version} of the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}{live, select, yes { (live now)} other {}}."
+    },
+    "workflow_set_enabled": {
+      "whatItDoesOff": "Turns the workflow off: from now on nothing runs every time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}. Runs already started finish.",
+      "summary": "{enabled, select, yes {Enabled} other {Disabled}} the {trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}} workflow of {application}."
+    },
+    "workflow": {
+      "outbound": {
+        "manualOnly": "{fromNowOn, select, yes {From now on, every} other {Every}} time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}, lazyit will only create manual tasks; nothing is sent outside lazyit.",
+        "sends": "{fromNowOn, select, yes {From now on, every} other {Every}} time someone is {trigger, select, ACCESS_REVOKED {has their access revoked from} other {granted access to}} {application}, lazyit will send",
+        "noData": "requests with no lazyit data",
+        "dataWord": "{token, select, event {the event name} grantee_id {the person's lazyit id} grantee_email {the person's email} grantee_firstName {the person's first name} grantee_lastName {the person's last name} grantee_legajo {the person's employee number} grantee_username {the person's username} grantee_manager_name {the person's manager's name} grantee_manager_email {the person's manager's email} grantee_manager_isOffboarded {whether the person's manager left} application_id {the application's lazyit id} application_name {the application's name} grant_id {the access grant's lazyit id} grant_accessLevel {the access level} grant_grantedAt {when access was granted} grant_expiresAt {when access expires} steps {the \"{field}\" a person typed in the manual step \"{step}\"} other {an unknown value (renders empty)}}{then, select, comma {,} other {}}",
+        "to": "to {hosts}."
+      },
+      "auth": {
+        "webhookSigned": "signed with the stored secret{hasHeader, select, yes { in {header}} other {}}",
+        "webhookUnsigned": "unsigned (no signing secret attached)",
+        "noCall": "no external call",
+        "none": "no authentication",
+        "rest": "{scheme}{isHeader, select, yes { in header {header}} other {}}, {credential, select, yes {with the stored credential} other {no credential attached yet}}"
+      }
+    },
+    "workflow_connection_create": {
+      "summary": "Created the {kind} connection of {application}{hasHost, select, yes { to {host}} other {}}."
+    },
+    "workflow_connection_update": {
+      "movesPath": "Changes where on {host} the connection sends.",
+      "repoints": "Re-points the connection from {from} to {to}: every workflow step using it will send there instead.",
+      "credentialToNewHost": "The stored credential will be sent to {host}.",
+      "attachesCredential": "Attaches the stored credential {secretId}: it will be sent to {hasHost, select, yes {{host}} other {the connection}} on every call.",
+      "detachesCredential": "Detaches the credential: calls will be sent without it.",
+      "inFlight": "From the next step that calls it — including in {count} run(s) already in flight, waiting for a person or failed and retryable — workflows will send their data to {host}.",
+      "settingsOnly": "Changes the settings of this connection to {hasHost, select, yes {{host}} other {no external host}}.",
+      "runsInFlightUnknown": "Could not be checked (needs the workflow:read permission): runs already started may send to the new host.",
+      "credentialNone": "none",
+      "credentialStored": "stored credential {secretId}",
+      "summary": "Updated the {kind} connection of {application}."
+    },
+    "workflow_connection_archive": {
+      "whatItDoes": "Archives the connection to {hasHost, select, yes {{host}} other {no external host}}. {users, plural, =0 {No workflow uses it.} other {# workflow(s) still call it and their steps will fail.}}",
+      "summary": "Archived the {kind} connection of {application}."
+    },
+    "workflow_connection_test": {
+      "whatItDoes": "Sends one read-only {method} request to {host} (path {path}){credential, select, yes {, with the stored credential} other {, without a credential}}. Nothing is changed there.",
+      "summary": "Tested the connection of {application} to {hasHost, select, yes {{host}} other {its host}}: {ok, select, yes {it answered} other {it failed}}."
+    },
+    "workflow_run_retry": {
+      "action": "Retry the failed run of workflow {workflow} for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}), resuming at {hasStep, select, yes {step {step}} other {the step that failed}}. Steps that already succeeded are not repeated; the same data is sent again.",
+      "resumesAtUnknown": "the step that failed (the run is on an older workflow version, not shown)",
+      "summary": "Retried run {run} from step {step} (attempt {attempt}); read it again with workflow_run_get to see the outcome."
+    },
+    "workflow_run_replay": {
+      "action": "Start a new run of workflow {workflow} (latest version {version}) for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}), from the first step. The failed run stays as it is.",
+      "summary": "Started run {newRun} on the latest version, replacing failed run {run}; read it with workflow_run_get to see the outcome."
+    },
+    "workflow_task_resolve": {
+      "action": "{action, select, submit {Submit the form of} skip {Skip} other {Fail}} the manual task of workflow {workflow} for {person} on {application} ({trigger, select, ACCESS_GRANTED {access is granted} ACCESS_REVOKED {access is revoked} other {{trigger}}}); then {next, select, END_SUCCESS {the run finishes successfully} STOP_FAIL {the run stops as failed} ESCALATE_TO_MANUAL {a person is asked to finish it as a manual task} COMPENSATE {the steps already done are undone (compensation) and the run ends} step {it continues at step {index} ({key})} key {it continues at {key}} other {the run continues on its pinned version (not the latest one, so the next step is not shown)}}.",
+      "summary": "Task {task} {action, select, submit {submitted} skip {skipped} other {failed}}; run {run} resumes. Read it with workflow_run_get."
+    },
+    "workflows": {
+      "destinationsManualOnly": "no outbound call (manual steps only)",
+      "destinationsNone": "no outbound call",
+      "destinationsUnknown": "unknown (the run is on an older workflow version)",
+      "criticalUnknown": "unknown (the application cannot be read) — treated as critical"
+    },
+    "asset_tag_scheme_get": {
+      "summaryNotVisible": "The asset tag scheme is not visible to you.",
+      "summaryOn": "The asset tag scheme is on; the next tag would be {hasNext, select, yes {{tag}} other {none (the sequence is exhausted)}}.",
+      "summaryOff": "The asset tag scheme is off: assets get no automatic tag."
+    },
+    "asset_tag_scheme_update": {
+      "summary": "Updated the asset tag scheme (automatic tagging {enabled, select, yes {on} other {off}}). Existing asset tags are unchanged."
+    },
+    "request_input": {
+      "summary": "Asked for {count, plural, one {# field} other {# fields}}",
+      "summaryAnswered": "The user answered the form",
+      "summarySkipped": "The user skipped the form",
+      "summaryDeclined": "The user declined the form"
+    },
+    "refusal": {
+      "unknownTool": "Unknown tool: {tool}",
+      "notOnChannel": "{tool} is not available on this channel",
+      "mustPropose": "{tool} changes data: it must be proposed and approved, not invoked",
+      "notAWrite": "{tool} does not change data: invoke it",
+      "cannotProposeOnChannel": "{tool} cannot be proposed on this channel",
+      "invalidInput": "Invalid input: {detail}",
+      "invalidPreview": "This action cannot be proposed: its preview is invalid.",
+      "actionNotRecorded": "The action could not be recorded, so it was not executed.",
+      "approvalNotRecorded": "The approval could not be recorded, so the action was not executed.",
+      "userDeclined": "The user declined this action",
+      "userDeclinedWithReason": "The user declined this action: {reason}",
+      "approvalExpired": "The approval window for this action has passed",
+      "runCancelled": "The run was cancelled",
+      "runCancelledNothingExecuted": "The run was cancelled; nothing was executed",
+      "runEnded": "The run ended",
+      "runEndedBeforeCall": "The run ended before this call was executed",
+      "runInterrupted": "The run was interrupted; this call was not completed",
+      "aiTurnedOff": "The AI assistant was turned off; nothing was executed",
+      "outcomeUnknown": "The action was interrupted; whether it took effect is unknown. It will not be retried.",
+      "storedPreviewUnreadable": "The stored preview of this action is unreadable; it was not executed",
+      "storedInputMismatch": "The stored input of this action does not match what was approved; it was not executed",
+      "toolChanged": "The tool changed since this action was proposed; propose it again",
+      "toolGone": "The tool is no longer available",
+      "invalidStoredInput": "Invalid stored input",
+      "freshPreviewInvalid": "The preview of this action is invalid; it was not executed",
+      "stale": "The target changed after this action was proposed; read it again and propose a new action",
+      "headlessServiceAccountOnly": "Headless writes run only as a Service Account",
+      "noToolPermission": "You do not have permission to use {tool}",
+      "outsideSessionAccess": "{tool} is outside the access granted to this session",
+      "principalInvalid": "The acting principal is no longer valid",
+      "permissionRequired": "The {permission} permission is required",
+      "argumentsNotJson": "The arguments were not a valid JSON object",
+      "toolCallLimit": "The tool call limit of this run was reached",
+      "tooManyToolCalls": "Too many tool calls; wait a moment before calling more",
+      "mutationCap": "The mutation cap of this run ({cap}) was reached",
+      "mutationCapBatch": "This call would make {weight} changes, but the mutation cap of this run ({cap}) allows {left} more",
+      "pendingLimit": "Limit reached: {max} proposals are pending in this step; wait for the user's decisions and propose the rest in the next step.",
+      "repeatedFailure": "Not run: this exact {tool} call already failed {count} times in this turn",
+      "formChannel": "Nobody can answer a form on this channel",
+      "formStepWrites": "Ask for missing data in a step of its own, before proposing any change",
+      "formOneAtATime": "Ask with one form at a time; put every question in it",
+      "formNotBuilt": "The form could not be built",
+      "formNotStored": "The form could not be stored"
+    }
+  },
+  "sentenceValues": {
+    "taxonomyDependents": {
+      "assetModels": "asset models",
+      "assets": "assets",
+      "applications": "applications",
+      "consumables": "consumables",
+      "childLocations": "child locations"
+    }
+  }
+}

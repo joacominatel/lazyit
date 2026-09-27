@@ -22,6 +22,10 @@ import {
 } from '../auth/identity/identity-provider.interface';
 import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import {
+  AdminResetLinkError,
+  PasswordLifecycleService,
+} from '../auth/local/password-lifecycle.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -91,6 +95,13 @@ describe('UsersService', () => {
   let provisioning: {
     credentialFields: jest.Mock;
     generateTempPassword: jest.Mock;
+  };
+  // Issue #1268: the local password-lifecycle machinery the `email` delivery delegates the token + mail
+  // to. Its own token/SMTP behaviour is covered in password-lifecycle.service.spec.ts; here it stands in
+  // so the ORCHESTRATION (status mapping, audit, session revocation) is what gets asserted.
+  let passwordLifecycle: {
+    sendAdminResetLink: jest.Mock;
+    isOutboundEmailReady: jest.Mock;
   };
   // DEBT-2 (issue #185): the append-only UserHistory emitter. Mocked so each write-path assertion can
   // check WHICH event was recorded (and with which payload/actor) without a DB.
@@ -234,6 +245,13 @@ describe('UsersService', () => {
       }),
       generateTempPassword: jest.fn().mockReturnValue('Temp-Pass-9xZ!'),
     };
+    passwordLifecycle = {
+      sendAdminResetLink: jest.fn().mockResolvedValue({
+        sentTo: 'user@example.com',
+        expiresInMinutes: 60,
+      }),
+      isOutboundEmailReady: jest.fn().mockResolvedValue(true),
+    };
     // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
     const logger = {
       info: jest.fn(),
@@ -274,6 +292,7 @@ describe('UsersService', () => {
         { provide: AccessGrantsService, useValue: accessGrants },
         { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: LocalProvisioningService, useValue: provisioning },
+        { provide: PasswordLifecycleService, useValue: passwordLifecycle },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
@@ -301,6 +320,9 @@ describe('UsersService', () => {
     await expect(service.create(dto)).resolves.toEqual({
       ...linked,
       manager: null,
+      // Issue #1422: the wire always carries the UI preferences (null = never chosen).
+      locale: null,
+      theme: null,
     });
     // ADR-0043: an omitted role defaults to VIEWER (least-privilege), set explicitly by the service.
     expect(user.create).toHaveBeenCalledWith({
@@ -403,6 +425,9 @@ describe('UsersService', () => {
     await expect(service.create(dto)).resolves.toEqual({
       ...created,
       manager: null,
+      // Issue #1422: the wire always carries the UI preferences (null = never chosen).
+      locale: null,
+      theme: null,
     });
     expect(user.update).not.toHaveBeenCalled();
     expect(user.delete).not.toHaveBeenCalled();
@@ -963,6 +988,14 @@ describe('UsersService', () => {
     >;
     expect(updateCalls[0][0].where).toEqual({ id: 'uuid-1' });
     expect(updateCalls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    // Offboarding revokes every local session, so a later restore() cannot revive one (ADR-0086 §8).
+    expect(updateCalls[0][0].data).toHaveProperty('sessionEpoch', {
+      increment: 1,
+    });
+    // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+    expect(updateCalls[0][0].data).toHaveProperty('mcpCredentialEpoch', {
+      increment: 1,
+    });
 
     // Active grants are revoked inline (revokedAt + actor + audit note).
     const grantCalls = tx.accessGrant.updateMany.mock.calls as Array<
@@ -1149,6 +1182,136 @@ describe('UsersService', () => {
     expect(search.remove).not.toHaveBeenCalled();
   });
 
+  // ADR-0086 §8 (#1307): deactivation revokes every local session, so a later reactivation cannot revive a
+  // token minted before it (a "keep me signed in" token never expires by time).
+  describe('session revocation on deactivation (ADR-0086 §8)', () => {
+    type UpdateCall = [{ data: Record<string, unknown> }];
+
+    it('bumps sessionEpoch and mcpCredentialEpoch when an active user is deactivated', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false });
+
+      const [[arg]] = user.update.mock.calls as UpdateCall[];
+      expect(arg.data).toMatchObject({
+        isActive: false,
+        sessionEpoch: { increment: 1 },
+        mcpCredentialEpoch: { increment: 1 },
+      });
+    });
+
+    it('does not bump sessionEpoch on reactivation, a repeat deactivation, or a profile edit', async () => {
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { isActive: true });
+      await service.update('uuid-1', { isActive: false });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        lastName: 'Lovelace',
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { lastName: 'Byron' });
+
+      for (const [arg] of user.update.mock.calls as UpdateCall[]) {
+        expect(arg.data).not.toHaveProperty('sessionEpoch');
+        expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
+      }
+    });
+  });
+
+  // Issue #1375: an activation flip used to change silently — no UserHistory row, so it never reached
+  // the recent_activity view (Reports → Users). Every route (web UI, API, AI tool call) lands here.
+  describe('activation + identifier audit (issue #1375)', () => {
+    const ACTOR = 'actor-uuid';
+
+    it('records DEACTIVATED with the actor when an active user is deactivated', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false }, ACTOR);
+
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'DEACTIVATED',
+        actor: { userId: ACTOR },
+      });
+    });
+
+    it('records REACTIVATED when an inactive user is re-enabled', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: true });
+
+      await service.update('uuid-1', { isActive: true }, ACTOR);
+
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ eventType: 'REACTIVATED' }),
+      );
+    });
+
+    it('records nothing when isActive is resent unchanged', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: true });
+
+      await service.update('uuid-1', { isActive: true }, ACTOR);
+
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('records UPDATED { fields } for a legajo / username change, not for a resend', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        legajo: 'L-1',
+        username: null,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update('uuid-1', { legajo: 'L-2', username: 'ada' }, ACTOR);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['legajo', 'username'] },
+        actor: { userId: ACTOR },
+      });
+
+      history.record.mockClear();
+      await service.update('uuid-1', { legajo: 'L-1', username: null }, ACTOR);
+      expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
   it('re-indexes the user on update (upsert with the updated row)', async () => {
     user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
     user.update.mockResolvedValue({
@@ -1169,6 +1332,89 @@ describe('UsersService', () => {
   });
 
   // ADR-0040 RBAC safety guards — last-admin protection + no self-role-change.
+  describe('updateOwnProfile — PATCH /users/me (issue #1421)', () => {
+    const SELF = {
+      id: 'self-1',
+      firstName: 'Old',
+      lastName: 'Name',
+      email: 'me@b.com',
+      role: 'VIEWER',
+      isActive: true,
+      externalId: null,
+      directoryOnly: false,
+      directorySource: null,
+      deletedAt: null,
+    };
+
+    it('renames the caller and records UPDATED { fields: [name] } with the caller as actor', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue({ ...SELF, firstName: 'New' });
+
+      await service.updateOwnProfile(SELF as never, { firstName: 'New' });
+
+      // Only the name keys reach the write — never role / email / activation.
+      expect(user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'self-1' },
+          data: { firstName: 'New' },
+        }),
+      );
+      expect(history.record).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'self-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['name'] },
+        actor: { userId: 'self-1' },
+      });
+      expect(search.upsert).toHaveBeenCalled();
+    });
+
+    it('reads the CURRENT row, not the request snapshot, before deciding', async () => {
+      user.findFirst.mockResolvedValue(SELF);
+      user.update.mockResolvedValue(SELF);
+      await service.updateOwnProfile(SELF as never, { lastName: 'Name' });
+      expect(user.findFirst).toHaveBeenCalledWith({ where: { id: 'self-1' } });
+      // Resending the stored value is not a change: no history row.
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses (409 PROFILE_MANAGED_BY_DIRECTORY) a person the AD/LDAP sync owns', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directorySource: 'ad' });
+
+      const err = await service
+        .updateOwnProfile(SELF as never, { firstName: 'New' })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'PROFILE_MANAGED_BY_DIRECTORY' }),
+      );
+      expect(user.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses a directory-only person the same way', async () => {
+      user.findFirst.mockResolvedValue({ ...SELF, directoryOnly: true });
+      await expect(
+        service.updateOwnProfile(SELF as never, { firstName: 'New' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('mirrors the new name to the IdP for a linked user, like an admin edit', async () => {
+      const linked = { ...SELF, externalId: 'sub-1' };
+      user.findFirst.mockResolvedValue(linked);
+      user.update.mockResolvedValue({ ...linked, lastName: 'Newer' });
+
+      await service.updateOwnProfile(linked as never, { lastName: 'Newer' });
+
+      expect(idp.updateUser).toHaveBeenCalledWith('sub-1', {
+        firstName: 'Old',
+        lastName: 'Newer',
+      });
+    });
+  });
+
   describe('role-change guards (ADR-0040)', () => {
     it('forbids a user from changing their OWN role (403)', async () => {
       user.findFirst.mockResolvedValue({
@@ -1197,7 +1443,7 @@ describe('UsersService', () => {
         service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.count).toHaveBeenCalledWith({
-        where: { role: 'ADMIN', id: { not: 'admin-1' } },
+        where: { role: 'ADMIN', isActive: true, id: { not: 'admin-1' } },
       });
       expect(user.update).not.toHaveBeenCalled();
     });
@@ -1321,6 +1567,150 @@ describe('UsersService', () => {
       });
       expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
+
+    // SEC-021: an inactive account cannot authenticate, so deactivating an ADMIN strips its
+    // administrator powers exactly like a demotion — and an inactive ADMIN never counts as the admin
+    // that keeps the instance administrable.
+    describe('last-admin guard vs isActive (SEC-021)', () => {
+      // Simulates an instance where one OTHER admin row exists but is deactivated: a count that does not
+      // filter on isActive sees it (1); a count restricted to active admins does not (0).
+      const onlyAnInactiveOtherAdmin = ({
+        where,
+      }: {
+        where: Record<string, unknown>;
+      }) => Promise.resolve(where.isActive === true ? 0 : 1);
+
+      it('refuses to deactivate the LAST active ADMIN (409), including yourself', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockResolvedValue(0); // no other admin at all
+
+        await expect(
+          service.update('admin-1', { isActive: false }, 'admin-1'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        await expect(
+          service.update('admin-1', { isActive: false }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('allows deactivating an admin when another active admin remains', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockResolvedValue(1);
+        user.update.mockResolvedValue({ id: 'admin-1', isActive: false });
+
+        await service.update('admin-1', { isActive: false }, 'actor-99');
+        expect(user.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('never consults the guard when deactivating a non-admin or re-sending isActive=false', async () => {
+        user.update.mockResolvedValue({ id: 'u' });
+
+        user.findFirst.mockResolvedValue({
+          id: 'member-1',
+          role: 'MEMBER',
+          isActive: true,
+          deletedAt: null,
+        });
+        await service.update('member-1', { isActive: false }, 'actor-99');
+
+        user.findFirst.mockResolvedValue({
+          id: 'admin-2',
+          role: 'ADMIN',
+          isActive: false,
+          deletedAt: null,
+        });
+        await service.update('admin-2', { isActive: false }, 'actor-99');
+
+        expect(user.count).not.toHaveBeenCalled();
+        expect(user.update).toHaveBeenCalledTimes(2);
+      });
+
+      it('refuses to deactivate an admin whose only fellow admin is already inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.update('admin-1', { isActive: false }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses to demote an admin whose only fellow admin is inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(user.update).not.toHaveBeenCalled();
+      });
+
+      it('refuses to offboard an admin whose only fellow admin is inactive (409)', async () => {
+        user.findFirst.mockResolvedValue({
+          id: 'admin-1',
+          role: 'ADMIN',
+          isActive: true,
+          deletedAt: null,
+        });
+        user.count.mockImplementation(onlyAnInactiveOtherAdmin);
+
+        await expect(
+          service.remove('admin-1', { userId: 'actor-99' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('serializeUser — UI preferences (issue #1422)', () => {
+    const ROW = {
+      id: 'u-1',
+      firstName: 'A',
+      lastName: 'B',
+      managerId: null,
+      managerName: null,
+    };
+
+    it('carries locale/theme, null when never chosen', async () => {
+      await expect(
+        service.serializeUser({ ...ROW, locale: null, theme: null } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: null, theme: null }),
+      );
+      await expect(
+        service.serializeUser({ ...ROW, locale: 'es', theme: 'dark' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: 'es', theme: 'dark' }),
+      );
+    });
+
+    it('reads an unknown stored value as null (tolerant read)', async () => {
+      await expect(
+        service.serializeUser({ ...ROW, locale: 'fr', theme: 'x' } as never),
+      ).resolves.toEqual(
+        expect.objectContaining({ locale: null, theme: null }),
+      );
+    });
   });
 
   describe('findPage', () => {
@@ -1344,7 +1734,14 @@ describe('UsersService', () => {
         // The list items are SERIALIZED (ADR-0058): each gains a resolved `manager` (null here) and the
         // #386 list-only activity counts (default 0 here — the groupBy mocks return no rows).
         items: [
-          { id: 'u1', manager: null, assetsInPossession: 0, appAccesses: 0 },
+          {
+            id: 'u1',
+            manager: null,
+            locale: null,
+            theme: null,
+            assetsInPossession: 0,
+            appAccesses: 0,
+          },
         ],
         total: 1,
         limit: 50,
@@ -1461,7 +1858,14 @@ describe('UsersService', () => {
         includeSoftDeleted: true,
       });
       expect(page.items).toEqual([
-        { id: 'gone', manager: null, assetsInPossession: 0, appAccesses: 0 },
+        {
+          id: 'gone',
+          manager: null,
+          locale: null,
+          theme: null,
+          assetsInPossession: 0,
+          appAccesses: 0,
+        },
       ]);
     });
 
@@ -1535,18 +1939,24 @@ describe('UsersService', () => {
           {
             id: 'u1',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 2,
             appAccesses: 3,
           },
           {
             id: 'u2',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 1,
             appAccesses: 0,
           },
           {
             id: 'u3',
             manager: null,
+            locale: null,
+            theme: null,
             assetsInPossession: 0,
             appAccesses: 1,
           },
@@ -1670,6 +2080,28 @@ describe('UsersService', () => {
         user.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
       )[0][0];
       expect(call.where).not.toHaveProperty('role');
+    });
+
+    // issue #1375 — the activation filter ("list the deactivated users" in one call).
+    it('isActive scopes both the findMany and the count; absent adds no clause', async () => {
+      user.findMany.mockResolvedValue([]);
+      user.count.mockResolvedValue(0);
+
+      await service.findPage(
+        { isActive: false },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
+
+      const finds = user.findMany.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >;
+      const counts = user.count.mock.calls as Array<
+        [{ where: Record<string, unknown> }]
+      >;
+      expect(finds[0][0].where).toMatchObject({ isActive: false });
+      expect(counts[0][0].where).toMatchObject({ isActive: false });
+      expect(finds[1][0].where).not.toHaveProperty('isActive');
     });
   });
 
@@ -2255,6 +2687,15 @@ describe('UsersService', () => {
       };
     }
 
+    /** A LOCAL-mode subject: no IdP link by construction (the #1268 bug was gating the UI on this). */
+    function localUser(overrides: Record<string, unknown> = {}) {
+      return linkedActiveUser({
+        externalId: null,
+        directoryOnly: false,
+        ...overrides,
+      });
+    }
+
     it('calls idp.requestPasswordReset with the externalId for a linked, active user', async () => {
       user.findFirst.mockResolvedValue(linkedActiveUser());
 
@@ -2356,10 +2797,17 @@ describe('UsersService', () => {
             passwordUpdatedAt: new Date('2026-07-03T00:00:00.000Z'),
             mustChangePassword: true,
             sessionEpoch: { increment: 1 },
+            mcpCredentialEpoch: { increment: 1 },
           },
         });
-        // The plaintext is returned to the admin ONCE.
-        expect(result).toEqual({ temporaryPassword: 'Temp-Pass-9xZ!' });
+        // The plaintext is returned to the admin ONCE. Issue #1268 widened this into the delivery
+        // outcome; `.temporaryPassword` is still there, so a pre-#1268 web build reading only that field
+        // keeps working against a newer API (CLAUDE.md §8).
+        expect(result).toEqual({
+          delivery: 'temporary-password',
+          temporaryPassword: 'Temp-Pass-9xZ!',
+          sessionsRevoked: true,
+        });
         // NO IdP call in local mode.
         expect(idp.requestPasswordReset).not.toHaveBeenCalled();
         // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject.
@@ -2393,6 +2841,255 @@ describe('UsersService', () => {
         ).rejects.toBeInstanceOf(UnprocessableEntityException);
         expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
       });
+
+      // ---- issue #1268: the admin picks the delivery ------------------------
+
+      it('an explicit temporary-password delivery takes the SAME path as no body at all', async () => {
+        user.findFirst.mockResolvedValue(localUser());
+        user.update.mockResolvedValue(localUser());
+
+        const result = await service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'temporary-password',
+        });
+
+        expect(result).toEqual({
+          delivery: 'temporary-password',
+          temporaryPassword: 'Temp-Pass-9xZ!',
+          sessionsRevoked: true,
+        });
+        expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+      });
+
+      it('ignores revokeSessions:false on the temp-password path — the hash was replaced, so sessions MUST die', async () => {
+        user.findFirst.mockResolvedValue(localUser());
+        user.update.mockResolvedValue(localUser());
+
+        const result = await service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'temporary-password',
+          revokeSessions: false,
+        });
+
+        expect(user.update).toHaveBeenCalledWith({
+          where: { id: 'user-1' },
+          data: expect.objectContaining({
+            sessionEpoch: { increment: 1 },
+          }) as unknown,
+        });
+        expect(result).toMatchObject({ sessionsRevoked: true });
+      });
+
+      describe('email delivery', () => {
+        it('sends the link, audits PASSWORD_RESET_SENT (actor=admin, subject=user), and does NOT revoke by default', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockResolvedValue({
+            sentTo: 'a@b.com',
+            expiresInMinutes: 60,
+          });
+
+          const result = await service.requestPasswordReset(
+            'user-1',
+            'actor-1',
+            { delivery: 'email', linkOrigin: 'https://lazyit.example.com' },
+          );
+
+          expect(result).toEqual({
+            delivery: 'email',
+            sentTo: 'a@b.com',
+            expiresInMinutes: 60,
+            sessionsRevoked: false,
+          });
+          expect(passwordLifecycle.sendAdminResetLink).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
+            'https://lazyit.example.com',
+          );
+          // Sending a link does not change the stored credential, so live sessions stay valid.
+          expect(user.update).not.toHaveBeenCalled();
+          // No credential is minted at all on this path — the SUBJECT chooses their own password.
+          expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+          expect(history.record).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+              userId: 'user-1',
+              eventType: 'PASSWORD_RESET_SENT',
+              actor: { userId: 'actor-1' },
+            }),
+          );
+        });
+
+        it('bumps sessionEpoch and reports it when revokeSessions is true', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          user.update.mockResolvedValue(localUser());
+
+          const result = await service.requestPasswordReset(
+            'user-1',
+            'actor-1',
+            {
+              delivery: 'email',
+              revokeSessions: true,
+              linkOrigin: 'https://lazyit.example.com',
+            },
+          );
+
+          expect(user.update).toHaveBeenCalledWith({
+            where: { id: 'user-1' },
+            data: {
+              sessionEpoch: { increment: 1 },
+              mcpCredentialEpoch: { increment: 1 },
+            },
+          });
+          expect(result).toMatchObject({ sessionsRevoked: true });
+        });
+
+        it.each([
+          ['smtp-not-configured' as const],
+          ['origin-unknown' as const],
+        ])('409s with reason %s and audits NOTHING', async (reason) => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockRejectedValue(
+            new AdminResetLinkError(reason, 'nope'),
+          );
+
+          const err = await service
+            .requestPasswordReset('user-1', 'actor-1', { delivery: 'email' })
+            .catch((e: unknown) => e);
+
+          expect(err).toBeInstanceOf(ConflictException);
+          expect((err as ConflictException).getResponse()).toMatchObject({
+            reason,
+          });
+          // A reset that did not go out is never recorded as one, and nothing is written to the user.
+          expect(history.record).not.toHaveBeenCalled();
+          expect(user.update).not.toHaveBeenCalled();
+        });
+
+        it('503s when the relay refuses, and leaves the account untouched', async () => {
+          user.findFirst.mockResolvedValue(localUser());
+          passwordLifecycle.sendAdminResetLink.mockRejectedValue(
+            new AdminResetLinkError('send-failed', 'relay refused'),
+          );
+
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+              revokeSessions: true,
+            }),
+          ).rejects.toBeInstanceOf(ServiceUnavailableException);
+          // Ordering matters: a failed send must not leave the subject logged out for nothing.
+          expect(user.update).not.toHaveBeenCalled();
+          expect(history.record).not.toHaveBeenCalled();
+        });
+
+        it('422s a directory-only person before any mail is attempted', async () => {
+          user.findFirst.mockResolvedValue(localUser({ directoryOnly: true }));
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+            }),
+          ).rejects.toBeInstanceOf(UnprocessableEntityException);
+          expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+        });
+
+        it('422s an inactive user before any mail is attempted', async () => {
+          user.findFirst.mockResolvedValue(localUser({ isActive: false }));
+          await expect(
+            service.requestPasswordReset('user-1', 'actor-1', {
+              delivery: 'email',
+            }),
+          ).rejects.toBeInstanceOf(UnprocessableEntityException);
+          expect(passwordLifecycle.sendAdminResetLink).not.toHaveBeenCalled();
+        });
+      });
+    });
+
+    // OIDC/BYOI is unchanged EXCEPT that a delivery choice is now an honest 400 (issue #1268).
+    it('400s when a delivery is chosen in OIDC mode (never a 2xx over an ignored choice)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+
+      await expect(
+        service.requestPasswordReset('user-1', 'actor-1', {
+          delivery: 'email',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('keeps the OIDC path byte-identical when only a linkOrigin rides along (no delivery)', async () => {
+      user.findFirst.mockResolvedValue(linkedActiveUser());
+
+      const result = await service.requestPasswordReset('user-1', 'actor-1', {
+        linkOrigin: 'https://lazyit.example.com',
+      });
+
+      expect(result).toBeNull();
+      expect(idp.requestPasswordReset).toHaveBeenCalledWith('zitadel-user-9');
+    });
+  });
+
+  // Issue #1268 — what the reset dialog may offer, resolved server-side (GET /users/password-reset-capabilities).
+  describe('passwordResetCapabilities', () => {
+    it('local + SMTP ready + a known origin: every capability is available, no reason', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: true,
+        canMintTemporaryPassword: true,
+      });
+    });
+
+    it('local + SMTP off: email is unavailable with smtp-not-configured, temp-password still offered', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        emailUnavailableReason: 'smtp-not-configured',
+      });
+    });
+
+    it('local + SMTP ready but no resolvable origin: origin-unknown', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
+
+      await expect(service.passwordResetCapabilities(null)).resolves.toEqual({
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        emailUnavailableReason: 'origin-unknown',
+      });
+    });
+
+    it('names SMTP first when BOTH are missing — the operator should not be sent to the wrong setting', async () => {
+      idp.kind = 'local';
+      passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
+
+      await expect(
+        service.passwordResetCapabilities(null),
+      ).resolves.toMatchObject({
+        emailUnavailableReason: 'smtp-not-configured',
+      });
+    });
+
+    it('OIDC/BYOI: everything false and NO reason — the IdP owns resets, there is nothing to fix here', async () => {
+      idp.kind = 'zitadel';
+
+      await expect(
+        service.passwordResetCapabilities('https://lazyit.example.com'),
+      ).resolves.toEqual({
+        canResetLocally: false,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: false,
+      });
+      // Not even probed: SMTP readiness is irrelevant when the IdP sends the mail.
+      expect(passwordLifecycle.isOutboundEmailReady).not.toHaveBeenCalled();
     });
   });
 

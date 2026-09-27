@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { ConsumablesService } from './consumables.service';
@@ -9,6 +10,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SearchService } from '../search/search.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import {
+  CreateConsumableMovementSchema,
+  DEFAULT_ROLE_PERMISSIONS,
+  type Role,
+} from '@lazyit/shared';
 
 // Jest can't transform the ESM-only `meilisearch` package; ConsumablesService transitively imports it
 // via SearchService, so stub the module out (we never construct a real client in these tests).
@@ -33,6 +41,7 @@ type ConsumableModelMock = {
 type MovementModelMock = {
   findMany: jest.Mock;
   create: jest.Mock;
+  count: jest.Mock;
 };
 
 // The transaction client the movement goes through; $transaction runs the callback with it.
@@ -42,7 +51,17 @@ type TxMock = {
     update: jest.Mock;
     updateMany: jest.Mock;
   };
-  consumableMovement: { create: jest.Mock };
+  consumableMovement: {
+    create: jest.Mock;
+    findFirst: jest.Mock;
+    aggregate: jest.Mock;
+  };
+  // Delivery-target live-row guards (ADR-0098) and the return's row lock.
+  user: { findFirst: jest.Mock };
+  asset: { findFirst: jest.Mock };
+  location: { findFirst: jest.Mock };
+  assetHistory: { create: jest.Mock };
+  $queryRaw: jest.Mock;
 };
 
 type MovementData = Record<string, unknown>;
@@ -73,8 +92,14 @@ describe('ConsumablesService', () => {
   let prisma: {
     consumable: ConsumableModelMock;
     consumableMovement: MovementModelMock;
+    user: { findMany: jest.Mock };
+    asset: { findMany: jest.Mock };
+    location: { findMany: jest.Mock };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
+  // The role → permission set the resolver answers (the real seeded defaults, ADR-0046).
+  let permissions: { resolve: jest.Mock };
   let actor: ActorService;
   let notifications: { emit: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock };
@@ -88,18 +113,35 @@ describe('ConsumablesService', () => {
       count: jest.fn(),
       fields: { minStock: MIN_STOCK_FIELD },
     };
-    consumableMovement = { findMany: jest.fn(), create: jest.fn() };
+    consumableMovement = {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      count: jest.fn(),
+    };
     tx = {
       consumable: {
         findFirst: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
       },
-      consumableMovement: { create: jest.fn() },
+      consumableMovement: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        aggregate: jest.fn(),
+      },
+      user: { findFirst: jest.fn() },
+      asset: { findFirst: jest.fn() },
+      location: { findFirst: jest.fn() },
+      assetHistory: { create: jest.fn().mockResolvedValue({}) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
     prisma = {
       consumable,
       consumableMovement,
+      user: { findMany: jest.fn().mockResolvedValue([]) },
+      asset: { findMany: jest.fn().mockResolvedValue([]) },
+      location: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       // Handles BOTH forms: callback (createMovement) and array (findPage's [findMany, count]).
       $transaction: jest.fn(
         (arg: ((client: TxMock) => unknown) | Promise<unknown>[]) =>
@@ -115,6 +157,12 @@ describe('ConsumablesService', () => {
     // Fire-and-forget search sync (ADR-0035): upsert/remove are no-op jest.fns here (no live Meili).
     search = { upsert: jest.fn(), remove: jest.fn() };
 
+    permissions = {
+      resolve: jest.fn((role: Role) =>
+        Promise.resolve(new Set(DEFAULT_ROLE_PERMISSIONS[role])),
+      ),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConsumablesService,
@@ -122,6 +170,9 @@ describe('ConsumablesService', () => {
         { provide: ActorService, useValue: actor },
         { provide: NotificationsService, useValue: notifications },
         { provide: SearchService, useValue: search },
+        // The REAL writer (ADR-0033): it appends through whichever client it is handed — the tx mock here.
+        AssetHistoryService,
+        { provide: PermissionResolverService, useValue: permissions },
       ],
     }).compile();
 
@@ -660,6 +711,607 @@ describe('ConsumablesService', () => {
     await expect(service.restore('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  // --- deliveries + returns (ADR-0098, #1364) ------------------------------
+  describe('deliveries and returns (ADR-0098)', () => {
+    const USER = '22222222-2222-4222-8222-222222222222';
+    const ASSET = 'ckasset000000000000000001';
+    const LOCATION = 'cklocation000000000000001';
+    const MEMBER = {
+      kind: 'human',
+      user: { id: ACTOR_ID, role: 'MEMBER' },
+    } as never;
+    const VIEWER = {
+      kind: 'human',
+      user: { id: ACTOR_ID, role: 'VIEWER' },
+    } as never;
+
+    /** A delivery row as `lockReturnableDelivery` reads it. */
+    const delivery = (over: Record<string, unknown> = {}) => ({
+      id: 10,
+      consumableId: 'k1',
+      type: 'OUT',
+      quantity: 3,
+      returnable: true,
+      targetUserId: USER,
+      targetAssetId: null,
+      targetLocationId: null,
+      ...over,
+    });
+
+    /** Arrange a successful OUT: stock available, a live target, and the consumable snapshot. */
+    const arrangeOut = (returnable: boolean) => {
+      tx.consumable.updateMany.mockResolvedValue({ count: 1 });
+      tx.consumable.findFirst.mockResolvedValue({
+        name: 'Headset',
+        unit: 'units',
+        returnable,
+      });
+      tx.user.findFirst.mockResolvedValue({ id: USER });
+      tx.asset.findFirst.mockResolvedValue({ id: ASSET });
+      tx.location.findFirst.mockResolvedValue({ id: LOCATION });
+      tx.consumableMovement.create.mockResolvedValue({ id: 99 });
+    };
+
+    /** Arrange a successful return: the delivery, the returns so far, then the IN path. */
+    const arrangeReturn = (
+      row: Record<string, unknown> | null,
+      returnedSoFar: number | null,
+    ) => {
+      tx.consumableMovement.findFirst.mockResolvedValue(row);
+      tx.consumableMovement.aggregate.mockResolvedValue({
+        _sum: { quantity: returnedSoFar },
+      });
+      tx.consumable.findFirst.mockResolvedValue({
+        currentStock: 5,
+        name: 'Headset',
+        unit: 'units',
+      });
+      tx.consumable.update.mockResolvedValue({ id: 'k1' });
+      tx.consumableMovement.create.mockResolvedValue({ id: 11 });
+    };
+
+    const createdData = () =>
+      (tx.consumableMovement.create.mock.calls as CreateMovementCall[])[0][0]
+        .data;
+
+    // --- targeted OUT ------------------------------------------------------
+    it('a targeted OUT stores the target and SNAPSHOTS returnable, after a live-row check', async () => {
+      arrangeOut(true);
+
+      await service.createMovement(
+        'k1',
+        { type: 'OUT', quantity: 2, targetUserId: USER },
+        MEMBER,
+      );
+
+      expect(tx.user.findFirst).toHaveBeenCalledWith({
+        where: { id: USER, deletedAt: null },
+        select: { id: true },
+      });
+      // The snapshot is read AFTER the guarded decrement (the row lock is ours by then).
+      expect(tx.consumable.findFirst).toHaveBeenCalledWith({
+        where: { id: 'k1', deletedAt: null },
+        select: { name: true, unit: true, returnable: true },
+      });
+      expect(tx.consumable.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.consumable.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(createdData()).toEqual({
+        consumableId: 'k1',
+        type: 'OUT',
+        quantity: 2,
+        performedById: ACTOR_ID,
+        targetUserId: USER,
+        returnable: true,
+      });
+      // A user target writes no asset event.
+      expect(tx.assetHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('a targeted OUT of a NON-returnable consumable stores returnable=false (column default)', async () => {
+      arrangeOut(false);
+
+      await service.createMovement('k1', {
+        type: 'OUT',
+        quantity: 1,
+        targetLocationId: LOCATION,
+      });
+
+      expect(tx.location.findFirst).toHaveBeenCalledWith({
+        where: { id: LOCATION, deletedAt: null },
+        select: { id: true },
+      });
+      expect(createdData()).toEqual({
+        consumableId: 'k1',
+        type: 'OUT',
+        quantity: 1,
+        targetLocationId: LOCATION,
+      });
+      expect(tx.assetHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('an untargeted OUT (the quick −1) reads no snapshot and writes no delivery fields', async () => {
+      tx.consumable.updateMany.mockResolvedValue({ count: 1 });
+      tx.consumableMovement.create.mockResolvedValue({ id: 3 });
+
+      await service.createMovement('k1', { type: 'OUT', quantity: 1 });
+
+      expect(tx.consumable.findFirst).not.toHaveBeenCalled();
+      expect(tx.user.findFirst).not.toHaveBeenCalled();
+      expect(createdData()).toEqual({
+        consumableId: 'k1',
+        type: 'OUT',
+        quantity: 1,
+      });
+    });
+
+    it('a delivery to an ASSET appends CONSUMABLE_DELIVERED on the SAME transaction client', async () => {
+      arrangeOut(false);
+
+      await service.createMovement(
+        'k1',
+        { type: 'OUT', quantity: 2, targetAssetId: ASSET },
+        MEMBER,
+      );
+
+      expect(tx.assetHistory.create).toHaveBeenCalledWith({
+        data: {
+          assetId: ASSET,
+          eventType: 'CONSUMABLE_DELIVERED',
+          payload: {
+            consumableId: 'k1',
+            consumableName: 'Headset',
+            movementId: 99,
+            quantity: 2,
+            unit: 'units',
+          },
+          performedById: ACTOR_ID,
+        },
+      });
+      // In-tx: written after the movement (it carries its id), inside the one $transaction.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(
+        tx.consumableMovement.create.mock.invocationCallOrder[0],
+      ).toBeLessThan(tx.assetHistory.create.mock.invocationCallOrder[0]);
+    });
+
+    it('a SERVICE-ACCOUNT delivery keeps honest attribution on the movement AND the asset event (ADR-0048)', async () => {
+      arrangeOut(true);
+
+      await service.createMovement(
+        'k1',
+        { type: 'OUT', quantity: 1, targetAssetId: ASSET },
+        SA_PRINCIPAL,
+      );
+
+      expect(createdData()).toMatchObject({ serviceAccountId: SA_ID });
+      expect(createdData()).not.toHaveProperty('performedById');
+      const event = (
+        tx.assetHistory.create.mock.calls as [
+          { data: Record<string, unknown> },
+        ][]
+      )[0][0].data;
+      expect(event).toMatchObject({
+        eventType: 'CONSUMABLE_DELIVERED',
+        serviceAccountId: SA_ID,
+      });
+      expect(event).not.toHaveProperty('performedById');
+    });
+
+    it.each([
+      ['targetUserId', USER, 'user'],
+      ['targetAssetId', ASSET, 'asset'],
+      ['targetLocationId', LOCATION, 'location'],
+    ] as const)(
+      'a missing or soft-deleted %s → 400, before any stock moves',
+      async (key, id, kind) => {
+        tx[kind].findFirst.mockResolvedValue(null);
+
+        await expect(
+          service.createMovement('k1', { type: 'OUT', quantity: 1, [key]: id }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(tx.consumable.updateMany).not.toHaveBeenCalled();
+        expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+        expect(tx.assetHistory.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['IN', 'ADJUSTMENT'] as const)(
+      'a target on %s is refused by the service too (defense in depth) — 400',
+      async (type) => {
+        await expect(
+          service.createMovement('k1', {
+            type,
+            quantity: 1,
+            targetUserId: USER,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it('returnOfId on an OUT is refused by the service — 400', async () => {
+      await expect(
+        service.createMovement('k1', {
+          type: 'OUT',
+          quantity: 1,
+          returnOfId: 10,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('two targets never reach the service: the route schema rejects them (400)', () => {
+      const parsed = CreateConsumableMovementSchema.safeParse({
+        type: 'OUT',
+        quantity: 1,
+        targetUserId: USER,
+        targetAssetId: ASSET,
+      });
+      expect(parsed.success).toBe(false);
+      expect(
+        CreateConsumableMovementSchema.safeParse({
+          type: 'IN',
+          quantity: 1,
+          targetLocationId: LOCATION,
+        }).success,
+      ).toBe(false);
+    });
+
+    // --- returns -----------------------------------------------------------
+    it('a return LOCKS the delivery row (FOR UPDATE) before summing, then puts the stock back as a normal IN', async () => {
+      arrangeReturn(delivery(), 1);
+
+      await service.createMovement(
+        'k1',
+        { type: 'IN', quantity: 2, returnOfId: 10 },
+        MEMBER,
+      );
+
+      const [strings, ...values] = tx.$queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      expect(strings.join('?')).toMatch(
+        /SELECT "id" FROM "consumable_movements" WHERE "id" = \? FOR UPDATE/,
+      );
+      expect(values).toEqual([10]);
+      // Lock → read → sum, strictly in that order (two returns serialize on the lock).
+      expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.consumableMovement.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(
+        tx.consumableMovement.findFirst.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        tx.consumableMovement.aggregate.mock.invocationCallOrder[0],
+      );
+      expect(tx.consumableMovement.aggregate).toHaveBeenCalledWith({
+        where: { returnOfId: 10 },
+        _sum: { quantity: true },
+      });
+      expect(tx.consumable.update).toHaveBeenCalledWith({
+        where: { id: 'k1' },
+        data: { currentStock: { increment: 2 } },
+      });
+      expect(createdData()).toEqual({
+        consumableId: 'k1',
+        type: 'IN',
+        quantity: 2,
+        performedById: ACTOR_ID,
+        returnOfId: 10,
+      });
+      // A user delivery's return writes no asset event.
+      expect(tx.assetHistory.create).not.toHaveBeenCalled();
+    });
+
+    it('a PARTIAL return (less than outstanding) is accepted', async () => {
+      arrangeReturn(delivery({ quantity: 5 }), null);
+
+      await service.createMovement('k1', {
+        type: 'IN',
+        quantity: 1,
+        returnOfId: 10,
+      });
+
+      expect(createdData()).toMatchObject({ quantity: 1, returnOfId: 10 });
+    });
+
+    it('returning MORE than outstanding → 409, nothing written', async () => {
+      arrangeReturn(delivery({ quantity: 3 }), 2);
+
+      await expect(
+        service.createMovement('k1', {
+          type: 'IN',
+          quantity: 2,
+          returnOfId: 10,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.consumable.update).not.toHaveBeenCalled();
+      expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a missing delivery', null],
+      ["another consumable's delivery", delivery({ consumableId: 'k2' })],
+      ['an IN (not a delivery)', delivery({ type: 'IN', targetUserId: null })],
+      ['an untargeted OUT', delivery({ targetUserId: null })],
+      [
+        'a delivery that was not returnable when made',
+        delivery({ returnable: false }),
+      ],
+    ])('returning %s → 400, nothing written', async (_label, row) => {
+      arrangeReturn(row, null);
+
+      await expect(
+        service.createMovement('k1', {
+          type: 'IN',
+          quantity: 1,
+          returnOfId: 10,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.consumable.update).not.toHaveBeenCalled();
+      expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+    });
+
+    it('a return of an ASSET delivery appends CONSUMABLE_RETURNED (with returnOfId) in-tx', async () => {
+      arrangeReturn(
+        delivery({ targetUserId: null, targetAssetId: ASSET }),
+        null,
+      );
+
+      await service.createMovement(
+        'k1',
+        { type: 'IN', quantity: 3, returnOfId: 10 },
+        SA_PRINCIPAL,
+      );
+
+      expect(tx.assetHistory.create).toHaveBeenCalledWith({
+        data: {
+          assetId: ASSET,
+          eventType: 'CONSUMABLE_RETURNED',
+          payload: {
+            consumableId: 'k1',
+            consumableName: 'Headset',
+            movementId: 11,
+            quantity: 3,
+            unit: 'units',
+            returnOfId: 10,
+          },
+          serviceAccountId: SA_ID,
+        },
+      });
+    });
+
+    // --- listMovements: resolved, redaction-safe targets ---------------------
+    it('listMovements resolves targets through the soft-delete escape hatch, flagging a retired one', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1' });
+      consumableMovement.findMany.mockResolvedValue([
+        { id: 3, type: 'OUT', targetUserId: USER },
+        { id: 2, type: 'OUT', targetAssetId: ASSET },
+        { id: 1, type: 'IN' },
+      ]);
+      prisma.user.findMany.mockResolvedValue([
+        {
+          id: USER,
+          firstName: 'Ana',
+          lastName: 'Pérez',
+          deletedAt: new Date(),
+        },
+      ]);
+      prisma.asset.findMany.mockResolvedValue([
+        {
+          id: ASSET,
+          assetTag: null,
+          name: 'Printer 3F',
+          serial: 'SN1',
+          deletedAt: null,
+        },
+      ]);
+
+      const rows = await service.listMovements('k1', {}, MEMBER);
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [USER] } },
+        select: { id: true, firstName: true, lastName: true, deletedAt: true },
+        includeSoftDeleted: true,
+      });
+      expect(rows.map((r) => r.target)).toEqual([
+        {
+          type: 'user',
+          id: USER,
+          displayName: 'Ana Pérez',
+          isOffboarded: true,
+        },
+        { type: 'asset', id: ASSET, label: 'Printer 3F', isDeleted: false },
+        null,
+      ]);
+      // No location target on the page → no location query.
+      expect(prisma.location.findMany).not.toHaveBeenCalled();
+    });
+
+    it('listMovements REDACTS a user target for a caller without user:read (VIEWER, ADR-0046 P3)', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1' });
+      consumableMovement.findMany.mockResolvedValue([
+        { id: 3, type: 'OUT', targetUserId: USER },
+      ]);
+
+      const rows = await service.listMovements('k1', {}, VIEWER);
+
+      expect(rows[0].target).toEqual({
+        type: 'user',
+        id: USER,
+        displayName: null,
+        isOffboarded: null,
+      });
+      // Not even queried.
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('listMovements with no targeted row never resolves permissions', async () => {
+      consumable.findFirst.mockResolvedValue({ id: 'k1' });
+      consumableMovement.findMany.mockResolvedValue([{ id: 1, type: 'IN' }]);
+
+      const rows = await service.listMovements('k1', {}, MEMBER);
+
+      expect(rows[0].target).toBeNull();
+      expect(permissions.resolve).not.toHaveBeenCalled();
+    });
+
+    // --- findDeliveries ---------------------------------------------------------
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+    const CONSUMABLE = {
+      id: 'k1',
+      name: 'Headset',
+      sku: null,
+      unit: 'units',
+      deletedAt: new Date('2026-02-01T00:00:00.000Z'),
+    };
+
+    it('findDeliveries computes returned / outstanding per delivery (0 outstanding when not returnable)', async () => {
+      consumableMovement.findMany
+        .mockResolvedValueOnce([
+          {
+            id: 12,
+            type: 'OUT',
+            quantity: 3,
+            returnable: true,
+            targetUserId: USER,
+            consumable: CONSUMABLE,
+          },
+          {
+            id: 8,
+            type: 'OUT',
+            quantity: 4,
+            returnable: false,
+            targetUserId: USER,
+            consumable: CONSUMABLE,
+          },
+        ])
+        // The returns of the returnable rows on this page.
+        .mockResolvedValueOnce([
+          { returnOfId: 12, quantity: 1 },
+          { returnOfId: 12, quantity: 1 },
+        ]);
+      consumableMovement.count.mockResolvedValue(2);
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER, firstName: 'Ana', lastName: 'Pérez', deletedAt: null },
+      ]);
+
+      const page = await service.findDeliveries(
+        { targetUserId: USER, outstandingOnly: false },
+        PAGE,
+        MEMBER,
+      );
+
+      expect(consumableMovement.findMany).toHaveBeenNthCalledWith(1, {
+        where: { type: 'OUT', targetUserId: USER },
+        orderBy: { id: 'desc' },
+        take: 50,
+        skip: 0,
+        include: {
+          consumable: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              unit: true,
+              deletedAt: true,
+            },
+          },
+        },
+      });
+      expect(consumableMovement.count).toHaveBeenCalledWith({
+        where: { type: 'OUT', targetUserId: USER },
+      });
+      expect(consumableMovement.findMany).toHaveBeenNthCalledWith(2, {
+        where: { returnOfId: { in: [12] } },
+        select: { returnOfId: true, quantity: true },
+      });
+      expect(page.total).toBe(2);
+      expect(
+        page.items.map((d) => [
+          d.id,
+          d.returnedQuantity,
+          d.outstandingQuantity,
+        ]),
+      ).toEqual([
+        [12, 2, 1],
+        [8, 0, 0],
+      ]);
+      // A soft-deleted consumable's deliveries stay listed, flagged by its deletedAt.
+      expect(page.items[0].consumable.deletedAt).toEqual(CONSUMABLE.deletedAt);
+      expect(page.items[0].target).toEqual({
+        type: 'user',
+        id: USER,
+        displayName: 'Ana Pérez',
+        isOffboarded: false,
+      });
+    });
+
+    it('findDeliveries outstandingOnly narrows to the SQL-computed outstanding ids, with the date range', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ id: 12 }, { id: 15 }]);
+      consumableMovement.findMany.mockResolvedValueOnce([]);
+      consumableMovement.count.mockResolvedValue(0);
+      const from = '2026-01-01T00:00:00.000Z';
+      const to = '2026-03-01T00:00:00.000Z';
+
+      await service.findDeliveries(
+        { targetAssetId: ASSET, outstandingOnly: true, from, to },
+        PAGE,
+        MEMBER,
+      );
+
+      const [strings, ...values] = prisma.$queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      const sql = strings.join('?');
+      expect(sql).toContain('d."targetAssetId" = ?');
+      expect(sql).toContain('d."returnable" = true');
+      expect(sql).toContain('SUM(r."quantity")');
+      expect(values).toEqual([ASSET]);
+      expect(consumableMovement.count).toHaveBeenCalledWith({
+        where: {
+          type: 'OUT',
+          targetAssetId: ASSET,
+          id: { in: [12, 15] },
+          createdAt: { gte: new Date(from), lte: new Date(to) },
+        },
+      });
+    });
+
+    it("findDeliveries by user is 403 for a caller without user:read (a VIEWER can't enumerate a person's deliveries)", async () => {
+      await expect(
+        service.findDeliveries(
+          { targetUserId: USER, outstandingOnly: false },
+          PAGE,
+          VIEWER,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(consumableMovement.findMany).not.toHaveBeenCalled();
+    });
+
+    it('findDeliveries by asset is allowed for a VIEWER (holds asset:read) and fails closed for a grantless service account', async () => {
+      consumableMovement.findMany.mockResolvedValue([]);
+      consumableMovement.count.mockResolvedValue(0);
+
+      await expect(
+        service.findDeliveries(
+          { targetAssetId: ASSET, outstandingOnly: false },
+          PAGE,
+          VIEWER,
+        ),
+      ).resolves.toMatchObject({ items: [], total: 0 });
+      await expect(
+        service.findDeliveries(
+          { targetAssetId: ASSET, outstandingOnly: false },
+          PAGE,
+          SA_PRINCIPAL,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 
   // --- search sync (#873) --------------------------------------------------

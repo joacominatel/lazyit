@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type {
+  AdminPasswordResetDelivery,
+  AdminPasswordResetOutcome,
   AdminPasswordResetResult,
   CloneUser,
   CloneUserResult,
@@ -17,12 +19,18 @@ import type {
   ManagerDescriptor,
   ManagerInput,
   PageQuery,
+  PasswordResetCapabilities,
+  ThemePreference,
+  UiLocale,
+  UpdateOwnProfile,
   UpdateUser,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { pickPublicUserColumns } from './public-user';
+import type { PublicUserColumns } from './public-user';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -32,6 +40,7 @@ import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { UserHistoryService } from '../user-history/user-history.service';
+import { toThemePreference, toUiLocale } from './user-preferences.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import {
@@ -40,6 +49,10 @@ import {
   type IdentityProvider,
 } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import {
+  AdminResetLinkError,
+  PasswordLifecycleService,
+} from '../auth/local/password-lifecycle.service';
 
 /**
  * The reserved, non-routable email DOMAIN the bulk import synthesizes for a directory person identified
@@ -54,13 +67,16 @@ export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
 type ManagerColumns = { managerId: string | null; managerName: string | null };
 
 /**
- * The PUBLIC user shape the service returns (ADR-0058): a Prisma `User` row with the raw manager FK
- * columns DROPPED and the resolved `manager` descriptor attached. Timestamps stay Prisma `Date`s here —
+ * The PUBLIC user shape the service returns (ADR-0058, SEC-085): ONLY the allowlisted
+ * {@link PublicUserColumns} (never a credential, epoch or raw manager column) plus the resolved
+ * `manager` descriptor. Timestamps stay Prisma `Date`s here —
  * the API serializes them to the ISO-string wire shape (UserSchema) at the HTTP boundary, exactly like
  * every other endpoint. The controller's `UserDto` / `CloneUserResultDto` document that wire shape.
  */
-export type SerializedUser = Omit<User, 'managerId' | 'managerName'> & {
+export type SerializedUser = Omit<PublicUserColumns, 'locale' | 'theme'> & {
   manager: ManagerDescriptor | null;
+  locale: UiLocale | null;
+  theme: ThemePreference | null;
 };
 
 /**
@@ -82,8 +98,7 @@ export type SerializedUserListItem = SerializedUser & {
  * null). `undefined` here means "leave both columns untouched" (an update that didn't mention manager).
  */
 type ManagerWrite =
-  | { managerId: string | null; managerName: string | null }
-  | undefined;
+  { managerId: string | null; managerName: string | null } | undefined;
 
 /** Optional filters for listing users. */
 export interface UserFilters {
@@ -111,6 +126,11 @@ export interface UserFilters {
    * simply matches no row (silently ignored, never a 400). absent/undefined → no filter (default).
    */
   ids?: string[];
+  /**
+   * Activation filter (issue #1375). true → only active accounts; false → only deactivated ones.
+   * absent/undefined → both (default; no filter). Validated as exactly "true" | "false" at the controller.
+   */
+  isActive?: boolean;
 }
 
 /**
@@ -177,6 +197,10 @@ export class UsersService {
     // branches of create() + requestPasswordReset() to hash/store passwords and mint temp-passwords —
     // no IdP mirror. Global (AuthModule), so no module import is needed here.
     private readonly provisioning: LocalProvisioningService,
+    // Local password-lifecycle machinery (ADR-0086 §F4). Issue #1268 reuses its PasswordResetToken +
+    // reset-mail path for the admin `email` delivery rather than growing a second copy of it. Injected
+    // via LocalAuthModule (imported by UsersModule); it self-gates on local mode.
+    private readonly passwordLifecycle: PasswordLifecycleService,
     @InjectPinoLogger(UsersService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -282,6 +306,7 @@ export class UsersService {
     directoryOnly,
     role,
     ids,
+    isActive,
   }: UserFilters): Prisma.UserWhereInput {
     return {
       // Token-wise match (issue #1053): each whitespace-separated token of `q` must appear in
@@ -294,6 +319,8 @@ export class UsersService {
       // ids filter (issue #961): the batch id→name resolver — scope to exactly these ids. Absent or
       // empty → no filter. Unknown ids simply match nothing (the IN clause ignores them silently).
       ...(ids && ids.length > 0 ? { id: { in: ids } } : {}),
+      // isActive filter (issue #1375): absent → no filter (active and deactivated alike).
+      ...(isActive !== undefined ? { isActive } : {}),
     };
   }
 
@@ -358,8 +385,13 @@ export class UsersService {
         : [];
     const byId = new Map(managers.map((m) => [m.id, m]));
     return rows.map((row) => ({
-      ...this.stripManagerColumns(row),
+      // ALLOWLIST, never a spread of the row (SEC-085): only the PUBLIC_USER_SELECT columns reach the
+      // wire, so passwordHash, the session/MCP epochs and every future column stay server-side.
+      ...pickPublicUserColumns(row),
       manager: this.toManagerDescriptor(row, byId),
+      // Per-user UI preferences (issue #1422), read-tolerant: an unknown stored value reads as null.
+      locale: toUiLocale(row.locale),
+      theme: toThemePreference(row.theme),
     }));
   }
 
@@ -399,21 +431,6 @@ export class UsersService {
       return { type: 'external', name: row.managerName };
     }
     return null;
-  }
-
-  /**
-   * Drop the raw `managerId` / `managerName` columns from a row's wire shape — the descriptor replaces
-   * them, and exposing the raw FK would leak a manager id the client has no descriptor for.
-   */
-  private stripManagerColumns(
-    row: User,
-  ): Omit<User, 'managerId' | 'managerName'> {
-    // Drop the raw FK columns from a shallow copy — the resolved descriptor replaces them on the wire,
-    // and leaving `managerId` would leak a manager id the client has no descriptor for.
-    const copy: Partial<User> = { ...row };
-    delete copy.managerId;
-    delete copy.managerName;
-    return copy as Omit<User, 'managerId' | 'managerName'>;
   }
 
   // --- manager write resolution + self/cycle guard (ADR-0058) -------------
@@ -971,11 +988,20 @@ export class UsersService {
       if (actorId !== undefined && actorId === id) {
         throw new ForbiddenException('You cannot change your own role');
       }
-      // Never strip the LAST remaining ADMIN of its role — that would leave the instance with no
-      // administrator and no way to recover from the UI (409). Demoting any other admin is fine.
-      if (current.role === 'ADMIN' && data.role !== 'ADMIN') {
-        await this.assertNotLastAdmin(id);
-      }
+    }
+
+    // Never strip the LAST usable ADMIN of its administrator powers — that would leave the instance with
+    // no administrator and no way to recover from the UI (409). Both a demotion away from ADMIN and a
+    // deactivation do that: an inactive account cannot authenticate (JwtAuthGuard), so disabling the
+    // only active ADMIN — including yourself — bricks administration exactly like demoting it (SEC-021).
+    // Demoting or deactivating any other admin is fine.
+    const deactivating = data.isActive === false && current.isActive;
+    const demotingAdmin =
+      current.role === 'ADMIN' &&
+      data.role !== undefined &&
+      data.role !== 'ADMIN';
+    if (demotingAdmin || (deactivating && current.role === 'ADMIN')) {
+      await this.assertNotLastAdmin(id);
     }
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
@@ -988,6 +1014,18 @@ export class UsersService {
     const emailChanged =
       data.email !== undefined && data.email !== current.email;
     const profileChanged = nameChanged || emailChanged;
+    // Activation (issue #1375): a real flip of `isActive` is its own audited event — DEACTIVATED /
+    // REACTIVATED — so it surfaces in Reports → Users with its actor. A PATCH that resends the stored
+    // value is not a change and logs nothing. `deactivating` (above) is the true→false half.
+    const reactivating = data.isActive === true && !current.isActive;
+    // legajo / username (ADR-0058) are local-only directory identifiers: never mirrored to the IdP, but
+    // an edit is still a profile change the log records (issue #1375 — they used to change silently).
+    // `null` clears; a string is already normalized by the schema.
+    const legajoChanged =
+      data.legajo !== undefined && data.legajo !== (current.legajo ?? null);
+    const usernameChanged =
+      data.username !== undefined &&
+      data.username !== (current.username ?? null);
 
     // Resolve the manager either/or → DB columns (ADR-0058): validates the FK is live, rejects a
     // self-manager and a CYCLE (DFS up the chain, with `id` as the subject). `undefined` when manager
@@ -1004,9 +1042,22 @@ export class UsersService {
     // schema); they pass through. `manager` is voided so the rest-destructure isn't flagged unused.
     const { manager, ...scalarData } = data;
     void manager;
+    // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
+    // account, but without the epoch bump a later REACTIVATION would revive every token minted before it —
+    // including a "keep me signed in" token that never expires by time. Harmless outside local mode.
     const user = await this.prisma.user.update({
       where: { id },
-      data: { ...scalarData, ...(managerWrite ?? {}) },
+      data: {
+        ...scalarData,
+        ...(managerWrite ?? {}),
+        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+        ...(deactivating
+          ? {
+              sessionEpoch: { increment: 1 },
+              mcpCredentialEpoch: { increment: 1 },
+            }
+          : {}),
+      },
     });
 
     // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
@@ -1107,13 +1158,40 @@ export class UsersService {
     }
 
     // Emit UserHistory (DEBT-2, issue #185) only on the SUCCESS path — after any IdP mirror has
-    // committed, so a reverted update never produces a misleading log row. A role change, a manager
-    // change and a profile edit can all happen in one PATCH, so emit each that fired (a ROLE_CHANGED
-    // carries { from, to }; a MANAGER_CHANGED carries { from, to } where each side is a user-id |
-    // external-name | null; an UPDATED carries which fields changed). Atomic in one transaction with the
-    // durable final state (ADR-0033).
-    if (roleChanged || managerChanged || profileChanged) {
+    // committed, so a reverted update never produces a misleading log row. An activation flip, a role
+    // change, a manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
+    // DEACTIVATED / REACTIVATED has no payload; a ROLE_CHANGED carries { from, to }; a MANAGER_CHANGED
+    // carries { from, to } where each side is a user-id | external-name | null; an UPDATED carries which
+    // fields changed — name / email / legajo / username). Atomic in one transaction with the durable final
+    // state (ADR-0033). Every route into here — the web UI, the API and an AI tool call (which dispatches
+    // to this same PATCH route) — lands on this one emitter, so the AI path is stamped with its
+    // `aiInvocationId` by UserHistoryService (ADR-0097 decision 11).
+    // Activation and the local identifiers (legajo / username) are recorded the same way (issue #1375).
+    const identifierFields = [
+      ...(legajoChanged ? (['legajo'] as const) : []),
+      ...(usernameChanged ? (['username'] as const) : []),
+    ];
+    const updatedFields = [
+      ...(nameChanged ? (['name'] as const) : []),
+      ...(emailChanged ? (['email'] as const) : []),
+      ...identifierFields,
+    ];
+    if (
+      roleChanged ||
+      managerChanged ||
+      updatedFields.length > 0 ||
+      deactivating ||
+      reactivating
+    ) {
       await this.prisma.$transaction(async (tx) => {
+        if (deactivating || reactivating) {
+          await this.recordHistory(
+            tx,
+            id,
+            deactivating ? 'DEACTIVATED' : 'REACTIVATED',
+            actorId,
+          );
+        }
         if (roleChanged) {
           await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
             from: current.role,
@@ -1127,14 +1205,11 @@ export class UsersService {
             to: managerWrite.managerId ?? managerWrite.managerName ?? null,
           });
         }
-        if (profileChanged) {
+        if (updatedFields.length > 0) {
           await this.recordHistory(tx, id, 'UPDATED', actorId, {
             // WHICH fields changed (never the old/new values — the email is not a secret, but keep the
             // log shape consistent with the IdP write-back audit line: field names only).
-            fields: [
-              ...(nameChanged ? (['name'] as const) : []),
-              ...(emailChanged ? (['email'] as const) : []),
-            ],
+            fields: updatedFields,
           });
         }
       });
@@ -1142,6 +1217,43 @@ export class UsersService {
 
     this.search.upsert('users', projectUser(user));
     return this.serializeUser(user);
+  }
+
+  /**
+   * SELF-SERVICE name edit — `PATCH /users/me` (issue #1421, CEO decision "only first and last name").
+   * The caller is the subject AND the actor; the id comes from the authenticated principal, never the
+   * body, so there is no cross-user write. `UpdateOwnProfileSchema` (strict) has already rejected every
+   * key but `firstName` / `lastName`, so email, role, legajo, username, manager and activation stay on
+   * the ADMIN-only `PATCH /users/:id`.
+   *
+   * Refused with 409 `PROFILE_MANAGED_BY_DIRECTORY` when the AD/LDAP sync owns the person
+   * (`directorySource` set, ADR-0091): the next sync would overwrite the name, so accepting it would be
+   * a change that silently reverts. A `directoryOnly` person has no login and cannot reach here, but is
+   * refused the same way for completeness.
+   *
+   * Everything else delegates to {@link update} with ONLY the name keys, so a self-edit gets exactly the
+   * admin edit's behaviour: the Zitadel write-back with the 503 revert (INV-5), the search re-index and
+   * the same `UPDATED { fields: ['name'] }` history row, attributed to the caller. No role / activation
+   * key is ever passed, so the RBAC and last-admin guards are untouched.
+   */
+  async updateOwnProfile(self: User, data: UpdateOwnProfile) {
+    const current = await this.findOne(self.id);
+    if (current.directorySource != null || current.directoryOnly) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PROFILE_MANAGED_BY_DIRECTORY',
+        message:
+          'Your name comes from the company directory, so it cannot be changed here. Ask an administrator to change it in the directory.',
+      });
+    }
+    return this.update(
+      self.id,
+      {
+        ...(data.firstName !== undefined ? { firstName: data.firstName } : {}),
+        ...(data.lastName !== undefined ? { lastName: data.lastName } : {}),
+      },
+      self.id,
+    );
   }
 
   /**
@@ -1160,16 +1272,33 @@ export class UsersService {
    * (PASSWORD_RESET_SENT) emitted only after the IdP call SUCCEEDS — so a 422/501/503 never logs a
    * reset that did not go out.
    *
-   * LOCAL mode (ADR-0086 §5) diverges: there is no IdP to email a link. Instead an admin reset mints a
-   * one-time temp-password LOCALLY, hashes it to `passwordHash`, sets `mustChangePassword`, BUMPS the
-   * subject's `sessionEpoch` (killing their existing sessions), and audits `PASSWORD_RESET_BY_ADMIN`. The
-   * plaintext is RETURNED to the admin (shown once) — the only path that does so, and the reason the
-   * return type is `AdminPasswordResetResult | null` (OIDC returns null; the controller keeps its 204).
+   * LOCAL mode (ADR-0086 §5, amended by issue #1268) diverges: there is no IdP to email a link, so the
+   * ADMIN picks the delivery explicitly and lazyit performs it:
+   *   - `temporary-password` (and the DEFAULT when no body is sent) — mint a one-time temp-password
+   *     LOCALLY, hash it to `passwordHash`, set `mustChangePassword`, BUMP the subject's `sessionEpoch`
+   *     and audit `PASSWORD_RESET_BY_ADMIN`. The plaintext is RETURNED to the admin (shown once).
+   *   - `email` — mint a single-use reset link and send it through the instance SMTP (ADR-0079), audit
+   *     `PASSWORD_RESET_SENT`, and revoke sessions only if the admin asked. See {@link sendResetLink}.
+   *
+   * BACK-COMPAT (CLAUDE.md §8). `options` is OPTIONAL and omitting it reproduces the pre-#1268 behavior
+   * exactly, so an operator who updates the API before the web build keeps a working Users page. The
+   * temp-password outcome is a strict SUPERSET of the old body — `.temporaryPassword` is still there.
+   *
+   * OIDC/BYOI is UNCHANGED (204 / 501 / 503) with one addition: a `delivery` choice is meaningless there
+   * (the IdP owns the mail), so passing one is a 400 rather than a silently ignored field that would lie
+   * to the caller about what happened.
    */
   async requestPasswordReset(
     id: string,
     actorId?: string,
-  ): Promise<AdminPasswordResetResult | null> {
+    options?: {
+      delivery?: AdminPasswordResetDelivery;
+      /** `email` delivery only; the temp-password path always revokes. Defaults to false. */
+      revokeSessions?: boolean;
+      /** Pre-resolved link origin (see `./reset-link-origin`); null → the `origin-unknown` 409. */
+      linkOrigin?: string | null;
+    },
+  ): Promise<AdminPasswordResetOutcome | null> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
 
     if (!user.isActive) {
@@ -1178,13 +1307,16 @@ export class UsersService {
       );
     }
 
-    // LOCAL mode: mint a temp-password directly (no IdP). Reject a directory-only person (no login by
+    // LOCAL mode: lazyit owns the credential (no IdP). Reject a directory-only person (no login by
     // construction — INV: a directoryOnly row never gets a credential via any path, ADR-0086 §5 / #989).
     if (this.isLocalMode()) {
       if (user.directoryOnly) {
         throw new UnprocessableEntityException(
           'This is a directory-only person with no login, so a password cannot be set.',
         );
+      }
+      if (options?.delivery === 'email') {
+        return this.sendResetLink(user, actorId, options);
       }
       const temporaryPassword = this.provisioning.generateTempPassword();
       const credential = await this.provisioning.credentialFields(
@@ -1194,9 +1326,16 @@ export class UsersService {
       // Set the credential AND bump sessionEpoch atomically: the epoch bump revokes every existing session
       // the subject holds (the guard's handleLocal rejects any token minted at a lower epoch), so an admin
       // reset immediately invalidates a possibly-compromised session (ADR-0086 §3 revocation).
+      // `revokeSessions` is deliberately NOT honoured here: this path REPLACES passwordHash, so a
+      // surviving session would be holding a credential that no longer exists. Revocation is unconditional.
       await this.prisma.user.update({
         where: { id },
-        data: { ...credential, sessionEpoch: { increment: 1 } },
+        data: {
+          ...credential,
+          sessionEpoch: { increment: 1 },
+          // The MCP connections die with the replaced credential too (ADR-0097 decision 8, amended).
+          mcpCredentialEpoch: { increment: 1 },
+        },
       });
       this.auditWriteBack('resetPasswordByAdmin', actorId, id, { local: true });
       // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
@@ -1207,7 +1346,20 @@ export class UsersService {
         'PASSWORD_RESET_BY_ADMIN',
         actorId,
       );
-      return { temporaryPassword };
+      return {
+        delivery: 'temporary-password',
+        temporaryPassword,
+        sessionsRevoked: true,
+      };
+    }
+
+    // OIDC / BYOI: the IdP owns the credential AND the mail, so there is no delivery to choose. Reject an
+    // explicit choice instead of dropping it — a 2xx over an ignored `delivery: 'email'` would tell the
+    // admin lazyit sent something it never sent.
+    if (options?.delivery) {
+      throw new BadRequestException(
+        'A password-reset delivery method can only be chosen in local authentication mode; your identity provider owns the reset here.',
+      );
     }
 
     if (!user.externalId) {
@@ -1228,19 +1380,157 @@ export class UsersService {
   }
 
   /**
-   * Throws 409 Conflict if `userId` is the only remaining live ADMIN. Used before any action that
-   * would remove their administrator powers (role demotion, offboarding, delete), so a fresh install
-   * — or any instance — is never left without an administrator. Counts LIVE admins only (the read
-   * filter already excludes soft-deleted users), so an offboarded admin doesn't count toward the
-   * total. The check-then-act window is acceptable for a 5–20-person single-org tool: the worst case
-   * is two near-simultaneous demotions both passing, which is the same class of race ADR-0040 already
-   * accepts for first-user-ADMIN, and strictly safer than locking everyone out.
+   * The local-mode `email` delivery of {@link requestPasswordReset} (issue #1268): mint a single-use
+   * reset link and send it through the instance SMTP (ADR-0079), so the SUBJECT chooses their own
+   * password and lazyit never sees a plaintext at all.
+   *
+   * FAILS LOUDLY, on purpose. The public forgot-password flow is uniform-by-design so it cannot be an
+   * account-enumeration oracle; this caller is an authenticated `user:manage` admin who already knows the
+   * account exists, so there is no oracle to protect and a silent no-op would deceive the only person who
+   * needs the truth. A missing SMTP config or an unresolvable link origin is a 409 carrying the machine-
+   * readable `reason` (two different operator fixes), and a relay failure is a 503.
+   *
+   * ORDERING. The mail is sent BEFORE any write to the user row, so a failed send leaves the account
+   * exactly as it was — no half-applied "logged everyone out but sent nothing". Session revocation is
+   * therefore only ever reported when it actually happened.
+   */
+  private async sendResetLink(
+    user: User,
+    actorId: string | undefined,
+    options: { revokeSessions?: boolean; linkOrigin?: string | null },
+  ): Promise<AdminPasswordResetOutcome> {
+    let sent: { sentTo: string; expiresInMinutes: number };
+    try {
+      sent = await this.passwordLifecycle.sendAdminResetLink(
+        user,
+        options.linkOrigin ?? null,
+      );
+    } catch (err) {
+      if (err instanceof AdminResetLinkError) {
+        if (err.reason === 'send-failed') {
+          // The configuration was there and the relay refused — a transient/operational fault, not a
+          // misconfiguration the admin can fix in the dialog. Same 503 class as an IdP write failure.
+          throw new ServiceUnavailableException(err.message);
+        }
+        // `smtp-not-configured` / `origin-unknown`: the instance is not in a state where this delivery
+        // can work. 409 with the reason so the UI can point at the exact setting to fix.
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message: err.message,
+          reason: err.reason,
+        });
+      }
+      throw err;
+    }
+
+    // Opt-in revocation (default false). Sending a link does not change the stored credential, so the
+    // subject's live sessions are still legitimately theirs — killing them is a deliberate "I think this
+    // account is compromised" act, not a side effect of helping someone back in.
+    const sessionsRevoked = options.revokeSessions === true;
+    if (sessionsRevoked) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        // A deliberate "this account may be compromised" act: the MCP connections go too (ADR-0097
+        // decision 8, amended 2026-09-24).
+        data: {
+          sessionEpoch: { increment: 1 },
+          mcpCredentialEpoch: { increment: 1 },
+        },
+      });
+    }
+
+    this.auditWriteBack('resetPasswordLinkByAdmin', actorId, user.id, {
+      local: true,
+      sessionsRevoked,
+    });
+    // Append-only audit: PASSWORD_RESET_SENT (the existing event type — the OIDC branch already emits it
+    // for the same meaning: "a reset link went out"), actor = admin, subject = user. Written only AFTER a
+    // successful send, so a 409/503 never records a reset that did not happen. No raw token, no plaintext.
+    await this.recordHistory(
+      this.prisma,
+      user.id,
+      'PASSWORD_RESET_SENT',
+      actorId,
+    );
+
+    return {
+      delivery: 'email',
+      sentTo: sent.sentTo,
+      expiresInMinutes: sent.expiresInMinutes,
+      sessionsRevoked,
+    };
+  }
+
+  /**
+   * What the admin reset dialog may offer on THIS instance (`GET /users/password-reset-capabilities`,
+   * `user:manage`, issue #1268). Resolved server-side so the UI never has to guess from `externalId`
+   * (which is null for every local-mode user by construction — the #1268 bug).
+   *
+   * In OIDC/BYOI everything is false and NO reason is set: emailing a reset link is the identity
+   * provider's job, not a lazyit capability that happens to be switched off, so naming an "unavailable
+   * reason" would invite an operator to go fix an SMTP setting that would change nothing.
+   *
+   * `linkOrigin` is resolved by the caller from `WEB_ORIGIN` or (in ADR-0087 LAN mode) the request host —
+   * see `./reset-link-origin`.
+   */
+  async passwordResetCapabilities(
+    linkOrigin: string | null,
+  ): Promise<PasswordResetCapabilities> {
+    if (!this.isLocalMode()) {
+      return {
+        canResetLocally: false,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: false,
+      };
+    }
+
+    const smtpReady = await this.passwordLifecycle.isOutboundEmailReady();
+    if (!smtpReady || !linkOrigin) {
+      return {
+        canResetLocally: true,
+        canEmailResetLink: false,
+        canMintTemporaryPassword: true,
+        // SMTP first: with email off, the origin is moot and telling the admin to set WEB_ORIGIN would
+        // send them to the wrong setting.
+        emailUnavailableReason: !smtpReady
+          ? 'smtp-not-configured'
+          : 'origin-unknown',
+      };
+    }
+
+    return {
+      canResetLocally: true,
+      canEmailResetLink: true,
+      canMintTemporaryPassword: true,
+    };
+  }
+
+  /**
+   * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
+   * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
+   * administrable. The single definition of "usable admin" — the 409 guard below and the directory-sync
+   * offboard skip (ADR-0091) both call it, so the count is never duplicated.
+   */
+  async hasAnotherActiveAdmin(userId: string): Promise<boolean> {
+    const otherAdmins = await this.prisma.user.count({
+      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+    });
+    return otherAdmins > 0;
+  }
+
+  /**
+   * Throws 409 Conflict if `userId` is the only remaining usable ADMIN. Used before any action that
+   * would remove their administrator powers (role demotion, deactivation, offboarding, delete), so a
+   * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
+   * admins only: the read filter already excludes soft-deleted users, and `isActive: true` excludes
+   * deactivated ones, since neither can authenticate to administer anything (SEC-021). The
+   * check-then-act window is acceptable for a 5–20-person single-org tool: the worst case is two
+   * near-simultaneous demotions both passing, which is the same class of race ADR-0040 already accepts
+   * for first-user-ADMIN, and strictly safer than locking everyone out.
    */
   private async assertNotLastAdmin(userId: string) {
-    const otherAdmins = await this.prisma.user.count({
-      where: { role: 'ADMIN', id: { not: userId } },
-    });
-    if (otherAdmins === 0) {
+    if (!(await this.hasAnotherActiveAdmin(userId))) {
       throw new ConflictException(
         'Cannot remove the last administrator. Promote another user to ADMIN first.',
       );
@@ -1375,8 +1665,18 @@ export class UsersService {
         actor,
       );
 
-      // 3. Soft-delete the user.
-      await tx.user.update({ where: { id }, data: { deletedAt: now } });
+      // 3. Soft-delete the user, revoking every local session (ADR-0086 §3/§8): the live-filtered guard
+      // already refuses a soft-deleted row, but a later restore() would otherwise revive every token minted
+      // before the offboarding — including a "keep me signed in" token that never expires by time.
+      await tx.user.update({
+        where: { id },
+        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+        data: {
+          deletedAt: now,
+          sessionEpoch: { increment: 1 },
+          mcpCredentialEpoch: { increment: 1 },
+        },
+      });
 
       // 4. Append the DELETED history row (DEBT-2, issue #185) inside the SAME transaction, atomic with
       // the soft-delete (ADR-0033). Unlike create/update/reset (human-only @CurrentUser), offboarding

@@ -1,3 +1,4 @@
+import { SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS } from '@lazyit/shared';
 import { resolveServiceAccountPermissions } from './service-account-permissions';
 
 // Service-account permission resolution (ADR-0048): the direct grants resolve to a clean catalog Set —
@@ -32,5 +33,24 @@ describe('resolveServiceAccountPermissions', () => {
     expect(set.has('user:manage')).toBe(false);
     expect(set.has('settings:manage')).toBe(false);
     expect(set.has('asset:delete')).toBe(false);
+  });
+
+  // SEC-073 / INV-SA-3: a row for an SA-ungrantable verb persisted before the SEC-011 write-time
+  // refinement is stripped when the principal is built, so it is inert on every route and channel.
+  it('strips a legacy SA-ungrantable grant (user:manage) and keeps the grantable ones', () => {
+    const set = resolveServiceAccountPermissions([
+      { permission: 'user:manage' },
+      { permission: 'asset:read' },
+    ]);
+    expect([...set]).toEqual(['asset:read']);
+  });
+
+  it('never resolves ANY member of SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS (parity with the shared list)', () => {
+    const set = resolveServiceAccountPermissions(
+      SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS.map((permission) => ({
+        permission,
+      })),
+    );
+    expect(set.size).toBe(0);
   });
 });

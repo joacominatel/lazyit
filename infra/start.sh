@@ -24,6 +24,10 @@
 #     lazyit-prod_* volume is present), generation is SKIPPED and we go straight to `up`.
 #   - ZITADEL_MASTERKEY (the unrotatable DR linchpin) is NEVER regenerated and existing secrets
 #     are NEVER overwritten. There is NO teardown / down -v / volume rm path anywhere here.
+#   - The ONE write on an existing install (ADR-0047 amendment 2026-09-26): keys on the explicit
+#     SAFE_GENERATABLE_KEYS allowlist that this release's .env.prod.example defines and .env.prod lacks
+#     are APPENDED (backup first, existing lines untouched, file stays 600, names printed, never values).
+#     See add_missing_safe_keys. Nothing else in an existing .env.prod is ever written.
 #
 # Decisions that are PRINT-ONLY by design (the script never auto-edits compose/Caddyfile):
 #   BYOI (bring-your-own-IdP), external Postgres, and TLS/HSTS for a real domain. The script
@@ -112,6 +116,8 @@ ZITADEL_DB_PASSWORD=""
 MEILI_MASTER_KEY=""
 AUTH_SECRET=""
 WORKFLOW_SECRET_KEY=""
+SMTP_SECRET_KEY=""                # instance SMTP password at-rest key (ADR-0079); own axis, never reuse another key
+AI_SECRET_KEY=""                  # AI provider API key at-rest key (ADR-0097); optional, own axis, never reuse another key
 SESSION_SIGNING_SECRET=""         # local-mode HMAC session key (ADR-0086); generated always, written in local mode
 ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
@@ -136,7 +142,9 @@ WHAT IT DOES
   Detects your environment, asks ~6 questions, generates infra/env/.env.prod with real
   random secrets (chmod 600), and brings the prod stack up. Then it points you at the
   in-app /setup wizard to create the first ADMIN. It is idempotent and non-destructive:
-  if an install already exists it skips generation and just brings the stack up.
+  if an install already exists it skips generation and just brings the stack up — after
+  appending any key this release added that is safe to generate (today SMTP_SECRET_KEY and
+  AI_SECRET_KEY; backup first, existing lines never touched, key names printed, never values).
 
 OPTIONS
   --reconfigure                  Re-run the network-mode / host / ports questions on an EXISTING
@@ -376,6 +384,30 @@ generate_secrets() {
   fi
   ok "WORKFLOW_SECRET_KEY generated (exactly 64 hex chars — verified)"
 
+  # SMTP_SECRET_KEY — AES-256-GCM master key for the instance SMTP PASSWORD at rest (SmtpSettings,
+  # ADR-0079). Its OWN key axis, never WORKFLOW_SECRET_KEY reused ("one key per subsystem"). Must decode
+  # to EXACTLY 32 bytes -> 64 hex chars (openssl rand -hex 32). Unlike WORKFLOW_SECRET_KEY it is OPTIONAL
+  # at boot (the API starts fine without it and outbound email is simply unavailable) — but a guided
+  # install that omits it 409s the FIRST time an admin saves an authenticated SMTP password, forcing a
+  # hand-edit + api recreate. So we mint it up front. NOT a DR linchpin: losing it costs one re-typed
+  # SMTP password, no data loss. See docs/05-runbooks/backups.md.
+  SMTP_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#SMTP_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated SMTP_SECRET_KEY is ${#SMTP_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length makes every SMTP password write fail with a 409)."
+  fi
+  ok "SMTP_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
+  # AI_SECRET_KEY — AES-256-GCM master key for the AI provider API KEY at rest (Settings -> AI, ADR-0097).
+  # Its OWN key axis, like SMTP_SECRET_KEY, and OPTIONAL at boot the same way: without it the API runs
+  # unchanged and only saving a provider API key 409s. The example ships it COMMENTED (so infra/update.sh
+  # never stops an instance that does not use AI); a guided install still mints it so enabling AI later
+  # needs no hand-edit. NOT a DR linchpin: losing it costs one re-entered API key.
+  AI_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#AI_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated AI_SECRET_KEY is ${#AI_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length makes every AI provider key save fail with a 409)."
+  fi
+  ok "AI_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
   # SESSION_SIGNING_SECRET — HMAC key the API signs/verifies the first-party local session token with
   # (ADR-0086 §4). Required ONLY in local mode; the boot-config refine demands >= 32 chars and fails loud
   # at boot otherwise (mirrors WORKFLOW_SECRET_KEY). openssl rand -hex 32 -> 64 hex chars. Generated in
@@ -420,6 +452,14 @@ render_env_file() {
   # Track whether the template carried an AUTH_TRUST_HOST line; if not (a file predating ADR-0087) and we
   # need it active (lan mode), append it after the loop so lan reconfigure of an OLD file still works.
   _saw_auth_trust=0
+
+  # Same trick for SMTP_SECRET_KEY (ADR-0079): a .env.prod written before this key was generated has no
+  # line to rewrite, so append it after the loop. Fresh renders take the loop branch (the example ships it).
+  _saw_smtp_key=0
+
+  # And for AI_SECRET_KEY (ADR-0097): the example ships it commented (the loop activates that line), while a
+  # .env.prod written before it has no line at all (appended after the loop).
+  _saw_ai_key=0
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
@@ -499,6 +539,18 @@ render_env_file() {
         else printf 'AUTH_ISSUER=%s\n' "$ISSUER_URL" >>"$_tmp"; fi ;;
       AUTH_SECRET=*)            printf 'AUTH_SECRET=%s\n'            "$AUTH_SECRET"         >>"$_tmp" ;;
       WORKFLOW_SECRET_KEY=*)    printf 'WORKFLOW_SECRET_KEY=%s\n'    "$WORKFLOW_SECRET_KEY" >>"$_tmp" ;;
+      # SMTP_SECRET_KEY (ADR-0079) — always written ACTIVE. On --reconfigure the value comes from
+      #     load_existing_env, which PRESERVES an already-present key verbatim (regenerating it would
+      #     orphan the SMTP password already encrypted under it) and only mints one when absent.
+      "# SMTP_SECRET_KEY="*|SMTP_SECRET_KEY=*)
+        _saw_smtp_key=1
+        printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp" ;;
+      # AI_SECRET_KEY (ADR-0097) — written ACTIVE even though the example ships it commented. On
+      #     --reconfigure the value comes from load_existing_env: an already-present key is PRESERVED
+      #     verbatim (it decrypts the stored provider API key) and one is minted only when absent.
+      "# AI_SECRET_KEY="*|AI_SECRET_KEY=*)
+        _saw_ai_key=1
+        printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
   done <"$_template"
@@ -508,6 +560,25 @@ render_env_file() {
   # so a fresh render always takes the loop branch and never reaches here.
   if [ "$DEPLOY_MODE" = "lan" ] && [ "$_saw_auth_trust" -eq 0 ]; then
     printf 'AUTH_TRUST_HOST=true\n' >>"$_tmp"
+  fi
+
+  # Reconfigure of a file predating SMTP_SECRET_KEY (ADR-0079): the loop had no line to rewrite, so append
+  # the key now. The value is whatever load_existing_env resolved — a preserved hand-added key, or a fresh
+  # one when the file carried none. Never regenerated over a present value.
+  if [ "$_saw_smtp_key" -eq 0 ]; then
+    printf '\n# --- Instance SMTP password at-rest key (ADR-0079) — added by start.sh ---\n' >>"$_tmp"
+    printf '# AES-256-GCM master key for the SMTP password stored in Settings -> Instance -> SMTP. Its OWN\n' >>"$_tmp"
+    printf '# key axis. Losing it costs only a re-typed SMTP password (not a DR linchpin).\n' >>"$_tmp"
+    printf 'SMTP_SECRET_KEY=%s\n' "$SMTP_SECRET_KEY" >>"$_tmp"
+  fi
+
+  # A template with no AI_SECRET_KEY line (a .env.prod predating ADR-0097): append the key now, with the
+  # value load_existing_env resolved — a preserved hand-added key, or a fresh one. Never regenerated.
+  if [ "$_saw_ai_key" -eq 0 ]; then
+    printf '\n# --- AI provider API key at-rest key (ADR-0097) — added by start.sh ---\n' >>"$_tmp"
+    printf '# AES-256-GCM master key for the provider API key stored in Settings -> AI. Its OWN key axis;\n' >>"$_tmp"
+    printf '# optional at boot. Losing it costs only a re-entered API key (not a DR linchpin).\n' >>"$_tmp"
+    printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp"
   fi
 
   # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
@@ -579,6 +650,25 @@ render_env_file() {
   # WORKFLOW_SECRET_KEY must be 64 hex chars (32 bytes) — a wrong length fails the engine's boot check.
   _wsk=$(grep -E '^WORKFLOW_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
   [ "${#_wsk}" -eq 64 ] || die "render check failed: WORKFLOW_SECRET_KEY in the file is ${#_wsk} chars, not 64 (32 hex bytes)."
+  # SMTP_SECRET_KEY must be an ACTIVE line — an absent key 409s the first authenticated SMTP password save.
+  # On a FRESH render it is ours (openssl rand -hex 32) so we assert the exact 64 chars. On --reconfigure it
+  # may be an operator's hand-added key, and the API accepts three encodings (64 hex, base64 of 32 bytes, or
+  # a 32-char raw string) — asserting 64 there would refuse to reconfigure a perfectly working install, so
+  # we only require it to be present and let the API do the decode-length check at write time.
+  _ssk=$(grep -E '^SMTP_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    [ -n "$_ssk" ] || die "render check failed: SMTP_SECRET_KEY is missing/empty in the rendered file."
+  else
+    [ "${#_ssk}" -eq 64 ] || die "render check failed: SMTP_SECRET_KEY in the file is ${#_ssk} chars, not 64 (32 hex bytes)."
+  fi
+  # AI_SECRET_KEY: same rule as SMTP_SECRET_KEY — exactly 64 hex on a fresh render (ours), merely present on
+  # --reconfigure (an operator's hand-added key may use another encoding the API accepts).
+  _aik=$(grep -E '^AI_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    [ -n "$_aik" ] || die "render check failed: AI_SECRET_KEY is missing/empty in the rendered file."
+  else
+    [ "${#_aik}" -eq 64 ] || die "render check failed: AI_SECRET_KEY in the file is ${#_aik} chars, not 64 (32 hex bytes)."
+  fi
   if [ "$PG_MODE" = "internal" ]; then
     _du=$(grep -E '^DATABASE_URL=' "$_tmp" | head -n1 | cut -d= -f2-)
     case "$_du" in
@@ -586,7 +676,7 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY present, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
@@ -644,6 +734,8 @@ load_existing_env() {
   AUTH_SECRET=$(_read_env AUTH_SECRET)
   WORKFLOW_SECRET_KEY=$(_read_env WORKFLOW_SECRET_KEY)
   SESSION_SIGNING_SECRET=$(_read_env SESSION_SIGNING_SECRET)
+  SMTP_SECRET_KEY=$(_read_env SMTP_SECRET_KEY)
+  AI_SECRET_KEY=$(_read_env AI_SECRET_KEY)
 
   # Postgres topology from the DATABASE_URL host (internal `@db:5432` vs an external/managed URL).
   case "$DATABASE_URL_VAL" in
@@ -660,8 +752,152 @@ load_existing_env() {
     [ -n "$POSTGRES_PASSWORD" ]    || die "POSTGRES_PASSWORD missing from $ENV_FILE — refusing to reconfigure."
   fi
 
+  # SMTP_SECRET_KEY (ADR-0079) is the one key we may MINT here: a .env.prod rendered before it existed
+  # carries none, and without it the first authenticated SMTP password save 409s. Present => PRESERVE it
+  # verbatim (regenerating would orphan the SMTP password already encrypted under it — the operator would
+  # have to re-enter it with no warning). Absent => nothing can be encrypted under it yet, so a fresh key
+  # is free. Never validated for length here: the API accepts 64-hex, base64-of-32 and 32-char raw keys.
+  if [ -n "$SMTP_SECRET_KEY" ]; then
+    ok "SMTP_SECRET_KEY found in $ENV_FILE — PRESERVED verbatim (never regenerated; it decrypts the stored SMTP password)"
+  else
+    SMTP_SECRET_KEY=$(openssl rand -hex 32)
+    if [ "${#SMTP_SECRET_KEY}" -ne 64 ]; then
+      die "internal error: generated SMTP_SECRET_KEY is ${#SMTP_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
+    fi
+    info "SMTP_SECRET_KEY was absent from $ENV_FILE (file predates ADR-0079 wiring) — a fresh 64-hex key was generated. Nothing was encrypted under it, so nothing is lost; an SMTP password saved earlier could never have been stored."
+  fi
+
+  # AI_SECRET_KEY (ADR-0097) — exactly the SMTP_SECRET_KEY rule: present => PRESERVED verbatim (it decrypts
+  # the stored AI provider API key); absent => nothing can be encrypted under it yet, so a fresh key is free.
+  if [ -n "$AI_SECRET_KEY" ]; then
+    ok "AI_SECRET_KEY found in $ENV_FILE — PRESERVED verbatim (never regenerated; it decrypts the stored AI provider key)"
+  else
+    AI_SECRET_KEY=$(openssl rand -hex 32)
+    if [ "${#AI_SECRET_KEY}" -ne 64 ]; then
+      die "internal error: generated AI_SECRET_KEY is ${#AI_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
+    fi
+    info "AI_SECRET_KEY was absent from $ENV_FILE — a fresh 64-hex key was generated (optional; only needed to store an AI provider API key). Nothing was encrypted under it, so nothing is lost."
+  fi
+
   ok "preserved secrets loaded (WORKFLOW_SECRET_KEY, AUTH_SECRET, SESSION_SIGNING_SECRET, MEILI_MASTER_KEY, DB creds) — none regenerated"
   info "existing topology: AUTH_MODE=local, Postgres=${PG_MODE}"
+}
+
+# =============================================================================
+# add_missing_safe_keys — EXISTING-install path only (ADR-0047 amendment 2026-09-26, CEO decision).
+#
+# Appends to $ENV_FILE every key that is ALL of:
+#   (1) defined in this checkout's $ENV_EXAMPLE (an active line, or a commented `# KEY=` placeholder for
+#       an optional key such as AI_SECRET_KEY — either way this release knows the key),
+#   (2) MISSING from $ENV_FILE (no ACTIVE `KEY=` line — a present line of any value is never touched), and
+#   (3) on SAFE_GENERATABLE_KEYS below.
+#
+# The allowlist is the safety gate. A key belongs on it ONLY if a random fresh value can never orphan data
+# or identity on an install that lacks it: each of today's keys is an at-rest key for a secret the API
+# REFUSES to store (409) while the key is unset, so a missing key proves nothing was ever encrypted under
+# it. Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, ZITADEL_MASTERKEY, AUTH_SECRET,
+# SESSION_SIGNING_SECRET, the DB passwords, MEILI_MASTER_KEY — are NEVER generated here: they are only
+# REPORTED, with the manual instruction, exactly like every other missing key.
+#
+# Write discipline: existing lines are never modified or reordered (the new file must start with the old
+# file byte-for-byte — asserted before it goes live); a mode-600 backup ($ENV_FILE.bak-<UTC timestamp>) is
+# taken first; the result is written through a mode-600 temp + atomic mv, so the file stays 600. Only KEY
+# NAMES are printed, never values. Idempotent: a second run finds nothing missing and writes nothing.
+# =============================================================================
+SAFE_GENERATABLE_KEYS="SMTP_SECRET_KEY AI_SECRET_KEY"
+
+add_missing_safe_keys() {
+  step "Checking $ENV_FILE for keys this release added"
+
+  _to_add=""
+  for _k in $SAFE_GENERATABLE_KEYS; do
+    grep -qE "^(#[[:space:]]*)?${_k}=" "$ENV_EXAMPLE" || continue     # (1) unknown to this checkout
+    if grep -qE "^${_k}=" "$ENV_FILE"; then                            # (2) present -> never touched
+      [ -n "$(_read_env "$_k")" ] \
+        || warn "$_k is present in $ENV_FILE but EMPTY — left untouched (start.sh never edits an existing line). Set a value by hand if you need it: openssl rand -hex 32"
+      continue
+    fi
+    _to_add="$_to_add $_k"
+  done
+
+  # Report-only: active example keys missing from the file that are NOT safe to generate (or need the
+  # operator's own value). A key the renderer deliberately left commented (`# KEY=` — e.g. the Zitadel keys
+  # in local mode) is not missing. Never written, never failed on here: the API fails loud at boot for a
+  # required one, and infra/update.sh stops on any of them before touching the stack.
+  _manual=""
+  for _k in $(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_EXAMPLE" | sed 's/=.*//' | sort -u); do
+    case " $SAFE_GENERATABLE_KEYS " in *" $_k "*) continue ;; esac
+    grep -qE "^(#[[:space:]]*)?${_k}=" "$ENV_FILE" && continue
+    _manual="$_manual $_k"
+  done
+  if [ -n "$_manual" ]; then
+    warn "$ENV_FILE lacks key(s) this release's $ENV_EXAMPLE defines. start.sh will NOT generate these (they protect existing data or identity, or need your own value):"
+    for _k in $_manual; do info "    $_k"; done
+    info "  Review each against the comment above it in $ENV_EXAMPLE — some apply only to one mode (e.g. ZITADEL_* only with the bundled Zitadel)."
+    info "  Add the ones your deployment needs by hand, then re-run ./infra/start.sh. infra/update.sh stops on any of them until they exist."
+  fi
+
+  if [ -z "$_to_add" ]; then
+    ok "no missing auto-generatable keys (${SAFE_GENERATABLE_KEYS}) — $ENV_FILE left unchanged"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    warn "DRY RUN: would append to $ENV_FILE (freshly generated, values never shown):$_to_add"
+    return 0
+  fi
+
+  _stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  _bak="${ENV_FILE}.bak-${_stamp}"
+  [ -e "$_bak" ] && _bak="${_bak}.$$"
+  (umask 077; cp "$ENV_FILE" "$_bak") || die "cannot back up $ENV_FILE to $_bak — refusing to modify it."
+  chmod 600 "$_bak" 2>/dev/null || true
+
+  _atmp="${ENV_FILE}.tmp.$$"
+  trap 'rm -f "$_atmp" 2>/dev/null || true' EXIT INT TERM
+  (umask 077; cp "$ENV_FILE" "$_atmp") || die "cannot create the temp env file ($_atmp)."
+  chmod 600 "$_atmp"
+  # A file whose last line has no trailing newline would glue our first line onto it — terminate it first.
+  [ -s "$_atmp" ] && [ -n "$(tail -c 1 "$_atmp")" ] && printf '\n' >>"$_atmp"
+  printf '\n# --- Added by infra/start.sh on %s (UTC): missing key(s) generated for this release (ADR-0047) ---\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$_atmp"
+  for _k in $_to_add; do
+    _v=$(openssl rand -hex 32)
+    [ "${#_v}" -eq 64 ] || die "internal error: generated $_k is ${#_v} chars, expected exactly 64 (32 hex bytes). $ENV_FILE was NOT modified."
+    printf '%s=%s\n' "$_k" "$_v" >>"$_atmp"
+  done
+
+  # Never modify or reorder an existing line: the new file must begin with the old one, byte-for-byte.
+  _osz=$(wc -c <"$ENV_FILE" | tr -d ' ')
+  head -c "$_osz" "$_atmp" | cmp -s - "$ENV_FILE" \
+    || die "internal error: the appended file does not start with the original $ENV_FILE — NOT writing it (backup: $_bak)."
+  for _k in $_to_add; do
+    [ "$(grep -cE "^${_k}=" "$_atmp")" -eq 1 ] || die "internal error: $_k is not present exactly once — NOT writing $ENV_FILE."
+  done
+
+  mv "$_atmp" "$ENV_FILE"
+  trap - EXIT INT TERM
+  _perm=$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE" 2>/dev/null || echo "?")
+  [ "$_perm" = "600" ] || warn "$ENV_FILE permissions are '$_perm' (expected 600). Run: chmod 600 $ENV_FILE"
+  ok "added to $ENV_FILE (freshly generated; values not shown):$_to_add"
+  info "  previous file backed up to $_bak (mode 600) — it holds your secrets: keep it private or delete it once you are satisfied."
+  info "  these are at-rest keys for secrets lazyit could not store without them, so nothing existing is affected. Back up the updated $ENV_FILE off-host."
+}
+
+# =============================================================================
+# hint_legacy_meili_volume — PRINT-ONLY notice about the pre-v1.53 Meilisearch data volume (#1216).
+#   The Meilisearch server bump (ADR-0035 amendment 2026-09-26) moved search onto a NEW volume
+#   (<project>_meili_data_v1_53_2) because a Meilisearch database only opens on the engine version that
+#   wrote it; the API rebuilds the index from Postgres on boot. The old volume is left in place — it is
+#   what a rollback to an earlier tag uses. This NEVER deletes anything (red line): it only tells the
+#   operator the volume exists and the exact command to reclaim the space once they are done with it.
+# =============================================================================
+hint_legacy_meili_volume() {
+  [ "${LAZYIT_SKIP_DOCKER:-0}" = 1 ] && return 0
+  _old_meili="${1}_meili_data"
+  docker volume inspect "$_old_meili" >/dev/null 2>&1 || return 0
+  info "search: Meilisearch now runs on a new data volume (${1}_meili_data_v1_53_2); the API rebuilds the index from the database in the background, so search results may be incomplete for a few minutes."
+  info "search: the previous volume '$_old_meili' (Meilisearch v1.12) is no longer used. It is kept for a rollback to an earlier release; once you no longer need that, reclaim the space with:  docker volume rm $_old_meili"
 }
 
 # =============================================================================
@@ -1116,7 +1352,7 @@ EOF
 
   if [ "$_existing" -eq 1 ]; then
     ok "existing install detected: $_reason"
-    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable ZITADEL_MASTERKEY) are LEFT UNTOUCHED."
+    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable ZITADEL_MASTERKEY) are LEFT UNTOUCHED — only allowlisted keys this release added are appended if missing."
     if [ ! -f "$ENV_FILE" ]; then
       die "prod volumes exist but $ENV_FILE is MISSING. Restore the original .env.prod (it holds the unrotatable ZITADEL_MASTERKEY) from your off-host backup before bringing the stack up. The script will NOT regenerate it — a new MASTERKEY cannot decrypt the existing Zitadel data."
     fi
@@ -1135,6 +1371,10 @@ EOF
       warn "this $ENV_FILE predates ADR-0086 (no AUTH_MODE line). AUTH_MODE is now EXPLICIT-REQUIRED — the API refuses to boot without it. Add 'AUTH_MODE=oidc' to $ENV_FILE BEFORE upgrading (detected mode: $IDP_MODE)."
     fi
     info "existing deploy auth mode: $IDP_MODE (AUTH_MODE=${_am:-<unset>})"
+    # Missing, SAFELY GENERATABLE keys (ADR-0047 amendment 2026-09-26). An upgrade via `git pull` +
+    # start.sh lands here, so a key the new release introduced would otherwise stay missing. Only the
+    # allowlisted keys are ever written (APPENDED, with a backup first); everything else is print-only.
+    add_missing_safe_keys
     # We cannot recover the operator's earlier port/domain answers from the file reliably for the
     # guidance banner; read back the browser origin so the CTA is accurate.
     _wo=$(grep -E '^WEB_ORIGIN=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
@@ -1154,6 +1394,7 @@ EOF
     ZITADEL_ADMIN_PASSWORD=""   # never re-surface an existing admin password
     bring_up
     print_post_up_guidance
+    hint_legacy_meili_volume "$PROD_PROJECT"   # print-only (#1216) — never removes a volume
     exit 0
   fi
   ok "no existing install — proceeding to a fresh bootstrap"

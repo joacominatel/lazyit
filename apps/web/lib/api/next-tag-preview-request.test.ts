@@ -1,4 +1,4 @@
-import { expect, mock, test } from "bun:test";
+import { afterAll, expect, mock, test } from "bun:test";
 import { assetTagSchemeKeys } from "./query-keys";
 
 /**
@@ -22,7 +22,15 @@ import { assetTagSchemeKeys } from "./query-keys";
 
 // The endpoint module's only side effect is `apiFetch`; capture the URL it is handed.
 const calls: string[] = [];
-void mock.module("./client", () => ({
+// bun's `mock.module` is process-wide and outlives this file: without a restore, every later file would
+// get this stub instead of the real client (and no `ApiError`). Keep the real exports beside the stub
+// and hand them back when this file is done. The path is resolved once here because a relative
+// specifier inside a hook does not resolve against this file, so the restore would silently miss.
+const CLIENT = Bun.resolveSync("./client", import.meta.dir);
+const realClient = { ...(await import("./client")) };
+afterAll(() => mock.module(CLIENT, () => realClient));
+void mock.module(CLIENT, () => ({
+  ...realClient,
   apiFetch: (path: string) => {
     calls.push(path);
     return Promise.resolve({

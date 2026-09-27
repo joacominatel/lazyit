@@ -19,11 +19,11 @@
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/joacominatel/lazyit/raw/master/brand/video.mp4" controls width="820"></video>
+  <a href="brand/video.mp4"><img src="brand/demo-poster.jpg" alt="Watch the lazyit demo" width="820"></a>
 </p>
 
 <p align="center">
-  <em>▶ <a href="brand/video.mp4">Watch the demo</a> — “On the Record”: a short tour through the audit tape, topology blast-radius, the self-installing agent, and the zero-knowledge vault.</em>
+  <em>▶ <a href="brand/video.mp4">Watch the demo</a> (55 s) — the everyday inventory, servers that map themselves, access that provisions itself, a zero-knowledge vault, linked runbooks and an AI assistant that asks before it acts. All of it on the record.</em>
 </p>
 
 ---
@@ -181,7 +181,7 @@ Full runbook: [`docs/05-runbooks/deploy-self-hosted.md`](docs/05-runbooks/deploy
 ### Run it for development
 
 The fast, native loop: backing services in Docker, the apps on your machine via
-[Bun](https://bun.sh). You'll need **Bun `1.3.x`** (the repo pins `1.3.14`), **Docker**, and
+[Bun](https://bun.sh). You'll need **Bun `1.4.x`** (the repo pins `1.4.2`), **Docker**, and
 **Node** on your PATH.
 
 ```sh

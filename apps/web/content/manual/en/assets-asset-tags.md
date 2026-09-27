@@ -53,8 +53,9 @@ The create form tells you which tag that would be, in a line **below** the field
 this asset gets IT-1001."* That line only appears when the scheme is on, and it is the real
 next-available tag, not the raw counter. The greyed-out text **inside** the field is a different
 thing: it is only a formatting example (`e.g. LZ-0001`), and it never means "this is the tag you will
-get". If you can't see the hint line at all, you don't have the *manage settings* permission — the
-tag is still assigned for you on save.
+get". Anyone who can create assets sees the hint — you don't need the *manage settings* permission
+for it, only to change the scheme. If the line is missing while the scheme is on, the sequence has run
+out of numbers (see the scheme settings) or the preview couldn't be loaded; the asset still saves.
 
 ## The skip-existing rule
 

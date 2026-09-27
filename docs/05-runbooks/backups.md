@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-01
+updated: 2026-09-23
 ---
 
 # Runbook — backups & disaster recovery
@@ -24,10 +24,10 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` and `AI_SECRET_KEY` (both optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
 | 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
-| 4 | Meilisearch index | `meili_data` volume | No (rebuildable) | Re-run `reindex:all` — it rebuilds the index from the DBs ([[0035-search-architecture]]). |
+| 4 | Meilisearch index | `meili_data_v1_53_2` volume (named per server version) | No (rebuildable) | Nothing to do: on boot the API rebuilds any empty/missing index from the database; `reindex:all` forces a full rebuild ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
 | 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
 | 7 | **File attachments (blobs)** | `attachments_data` volume (asset documents + KB inline images, [[0082-attachments-storage]]) | ⚠ **NOT covered by any backup yet** — deferred to v1.1 **by decision** (see ADR-0082 "Deferred") | **Not recoverable today.** `pg_dump` captures only the `attachments` metadata rows (item #2), never the bytes. Until the sidecar tars the volume, copy it off-host manually if you care: `docker run --rm -v lazyit_attachments_data:/a -v "$PWD/backups":/b alpine tar czf /b/attachments-$(date +%F).tgz -C /a .` |
@@ -54,6 +54,39 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > and the loss is **cheap to recover** (one field, re-typed by an admin) — so it is a "nice to back up
 > alongside `.env.prod`", not a DR linchpin. Keep it with the same off-host copy of `.env.prod` for
 > zero-touch restores; regenerating it just means re-entering one SMTP password.
+>
+> A guided install **generates this key** (`infra/start.sh`, issue #1269) — so it is in `.env.prod` from
+> day one and an admin can save an authenticated SMTP password without hand-editing anything.
+> `--reconfigure` **preserves an already-present key verbatim** and only mints one when the file carries
+> none (nothing can be encrypted under a key that was never there). A `.env.prod` predating that change
+> has no key: re-running `./infra/start.sh` on the existing install appends one (any auth mode, backup
+> first — ADR-0047 amendment 2026-09-26), as does `./infra/start.sh --reconfigure`; or append one by hand and recreate the api
+> container — see **[[deploy-self-hosted]]**. Never regenerate a key that is already in the file: the
+> stored SMTP password becomes undecryptable and must be re-typed.
+
+> [!info] `AI_SECRET_KEY` — the AI provider key's at-rest key: OPTIONAL and low-DR, like `SMTP_SECRET_KEY` (ADR-0097)
+> When an admin configures the AI assistant (Settings → AI), the provider's API key is stored encrypted
+> (AES-256-GCM) under `AI_SECRET_KEY` — its own key axis, separate from `SMTP_SECRET_KEY` and
+> `WORKFLOW_SECRET_KEY`. **Back it up alongside `SMTP_SECRET_KEY`**, in the same off-host copy of
+> `.env.prod`. A DB restore **without the matching key** leaves the stored provider key undecryptable:
+> the assistant stops reaching its provider until an admin re-enters the API key — nothing else is lost
+> (conversations, the AI action ledger and MCP connections live in the app DB, item #2). The key is
+> **optional** (unset ⇒ the app boots unchanged and only saving a provider API key 409s), so it is not a
+> DR linchpin. A guided install, `./infra/start.sh --reconfigure`, and a re-run of `./infra/start.sh` on
+> an existing install that lacks it write it; all of them preserve a present key verbatim. Never
+> regenerate a key that is already in the file.
+>
+> Restoring a `.env.prod` backup **older than the key** onto a database whose stored secret was encrypted
+> under it: a re-run of `start.sh` sees the key missing and mints a fresh one, so that stored SMTP password
+> or provider key stays undecryptable — exactly as it would with no key at all — and an admin re-enters
+> it. This is why the off-host copy of `.env.prod` should be refreshed whenever `start.sh` reports it
+> added a key.
+>
+> **AI conversations outlive their retention in your dumps.** The app deletes a conversation for good
+> after the retention an admin sets (default 90 days) or when its owner deletes it — but a dump taken
+> before that still holds it until the dump itself is pruned (`BACKUP_RETENTION_DAYS`, or your off-host
+> copy's own retention). Restoring an old dump brings those transcripts back until the next retention
+> sweep. Keep backup retention in line with what your organization expects of AI transcripts.
 
 > [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
 > [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB

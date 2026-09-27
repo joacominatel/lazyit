@@ -1,110 +1,98 @@
-# AGENTS.md
+# lazyit
 
-Guidance for cloud agents working in the lazyit monorepo.
+A self-hosted, internal web app for small IT and Systems teams (5-20 people): asset inventory,
+application access, consumables, and a knowledge base. ServiceNow-grade capability, modern and
+opinionated. It runs in production on real instances that operators upgrade in place.
 
-## Before any change
+## Read these first
 
-`docs/` is the source of truth for vision, domain rules, ADRs, runbooks, and security
-findings. When docs and code disagree, **docs win** — then update both. Root `CLAUDE.md`
-is a short orientation; the vault in `docs/` is the full picture.
+`docs/` is the source of truth — an Obsidian vault with `[[wiki-links]]` and a `_MOC.md` index
+per folder. **When the documentation and the code disagree, the documentation wins**, and then
+both are corrected in the same change. Start at `docs/README.md`.
 
-**Default workflow** (full version: `docs/04-development/claude-workflow.md`):
+`.claude/charter.md` holds the operational facts: branches, commit style, lanes, shared critical
+files, the exact validation commands, and the three review dimensions every PR must clear.
 
-1. Read `docs/README.md` and `docs/04-development/claude-workflow.md`.
-2. Search `docs/` for the affected area: entities, domain rules, ADRs, conventions, runbooks.
-3. Investigate the codebase only after you understand the *why*.
-4. Ask the user when a decision is missing or critical (data model, auth, deletes, security).
-5. Keep `docs/` in sync with any core logic change (review affected notes before committing).
-
-| You need… | Read |
+| You need | Read |
 | --- | --- |
-| What/why the product is | `docs/00-overview/` |
-| Stack, monorepo, deploy, `@lazyit/shared` | `docs/01-architecture/` |
-| Domain model and rules | `docs/02-domain/` + `docs/02-domain/entities/` |
-| Why a decision was made | `docs/03-decisions/` (ADRs) |
-| Setup, workflow, conventions | `docs/04-development/` |
-| Operations / deploy / backups | `docs/05-runbooks/` |
-| Security findings (SEC-NNN) | `docs/06-security/` |
-| Vocabulary | `docs/99-glossary/` |
+| What and why the product is | `docs/00-overview/` |
+| Stack, monorepo, deployment, the shared contract | `docs/01-architecture/` |
+| Domain model and rules | `docs/02-domain/` and `docs/02-domain/entities/` |
+| Why a decision was made | `docs/03-decisions/` — ADRs |
+| Setup, conventions, how we work | `docs/04-development/` |
+| Operations, deploy, backups | `docs/05-runbooks/` |
+| Security findings | `docs/06-security/` |
 
-Front/back tasks: split into separate subagents; shared contracts live in `packages/shared`.
-Git: branch off `dev`, one file per commit, agents do not merge PRs (see `CLAUDE.md`).
+## How we work
 
-## Cursor Cloud specific instructions
+**1. Context before code.** Investigate the code for what was asked *and* search `docs/` for
+the affected entity, the domain rules, and the relevant ADRs. No edits from a cold start.
 
-### Services (native dev)
+**2. Ask, don't assume.** When a decision is needed and there is no reference to follow, ask.
+Anything that could be critical — the data model, authorization, delete or migrate semantics,
+security, irreversible actions — is escalated **before** acting. A wrong assumption costs more
+than a question.
 
-| Service | How to run | Port |
-| --- | --- | --- |
-| PostgreSQL | `docker compose up -d db` (or `bun run db:up` for full infra) | `127.0.0.1:5432` |
-| API | `bun run dev` (turbo) or `cd apps/api && bun run dev` | `3001` |
-| Web | `bun run dev` (turbo) or `cd apps/web && bun run dev` | `3000` |
-| Meilisearch / Zitadel | optional for shim-mode dev; started by `bun run db:up` | `7700` / `8080` |
+**3. Split front and back.** When work spans both, dispatch separate agents, one per side, each
+with its lane from the charter. The contract between them lives in `packages/shared`.
 
-Minimal E2E dev loop: **Postgres + API + Web**. Meilisearch and Zitadel are optional when `AUTH_MODE=shim`.
+**4. Documentation stays in sync.** Any change to behavior — especially core logic — reviews
+and updates the affected notes in the same change. Before committing, verify nothing references
+a removed file or a philosophy the change just altered. Stale documentation is a bug.
 
-### Docker in this VM
+**5. The Manual too.** Any **user-facing** change — a feature, a changed behavior, a new
+setting — also updates the in-app Manual at `apps/web/content/manual/` (`en` + `es`) in the
+same change, per ADR-0062 and `docs/04-development/manual-authoring.md`. The Manual documents
+lazyit for operators; a user-facing change is not done until its page is. This is separate from
+the `docs/` vault above — a change that is both core and user-facing updates both.
 
-Docker is not managed by systemd here. If `docker ps` fails with permission or connection errors:
+**6. Check current library documentation.** Before using or upgrading an external library, read
+its current official docs. Do not rely on memory; these versions move fast.
 
-1. Ensure `dockerd` is running (check `/tmp/dockerd.log` or start it with `sudo dockerd` in the background).
-2. Use the `docker` group (`sg docker -c "docker ..."`) or add the user to the group.
+**7. Upgrade-safe over production data.** Operators update an existing, populated database.
+Migrations are additive and nullable or defaulted; new validation enforces on write and stays
+tolerant on read; the PR body says what happens to existing data. This is a mandatory review
+dimension, not a nice-to-have — the full rule is in the charter and in
+`docs/04-development/claude-workflow.md` §7.
 
-Storage driver is `fuse-overlayfs` (see `/etc/docker/daemon.json`).
+## Delivery
 
-### Environment files
+Find the issue, branch from the base branch, work in a `.worktrees/` worktree, commit by
+responsibility, open the PR. **Opening the PR is the default — do not ask first.** It is the
+review surface, not the commitment: closing or amending one costs nothing, while waiting for
+permission parks finished work.
 
-Copy all three examples on first setup (see `docs/04-development/setup.md`):
+Only the CEO merges into the protected branch. History is append-only: no `--amend`, `rebase`,
+or `reset`, and never `add -A` or `add .`. No attribution trailers, generated-by notices, or
+session links anywhere — commits, PR titles, PR bodies.
 
-```sh
-cp .env.example .env
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
-```
+Branch names, prefixes, labels, and the validation commands are in the charter.
+`docs/05-runbooks/git-workflow.md` is the step-by-step.
 
-Fill `POSTGRES_PASSWORD` and `MEILI_MASTER_KEY` in the root `.env`; keep `DATABASE_URL` in `apps/api/.env` aligned with those Postgres credentials.
+## Philosophy
 
-**Boot gotcha:** do not leave `OIDC_ISSUER=` as an empty string in `apps/api/.env` when using `AUTH_MODE=shim`. An empty value fails zod URL validation at API boot. Either omit the line or comment it out.
+- **Asset-centric.** The `Asset` is the first-class citizen, not the User — assets persist,
+  people rotate. Ownership is a timestamped join (`AssetAssignment`), never a column, so history
+  is automatic. → `docs/02-domain/asset-centric.md`
+- **Auditability by default.** Never hard-delete domain data; soft delete instead. Logs and
+  ledgers are append-only and immutable.
+- **Opinionated over configurable.** A curated set of capabilities with sensible defaults.
+- **Self-hosted, single-org, small-team operable.** Boring, durable technology.
 
-Generate `AUTH_SECRET` for `apps/web/.env` with `openssl rand -base64 32`.
+## Bun is scoped
 
-### Prisma (first boot / after schema changes)
+Bun is the runtime, package manager, and the default for scripts and tooling. It is **not** the
+application server or data layer — those are deliberately NestJS and Prisma.
+→ `docs/03-decisions/0009-bun-first-vs-app-stack.md`
 
-From `apps/api`:
+Use Bun for tooling, scripts, and `packages/shared`: `bun`, `bunx`, `bun install`, `bun run` —
+never npm, yarn, pnpm, npx, or node. Do not replace the app layer with it: the API stays on
+NestJS, data access on Prisma, the frontend on Next.js, and API tests on Jest. The per-area
+detail loads with the area's rules under `.claude/rules/`.
 
-```sh
-bunx prisma generate      # required before seed/tests if client is missing
-bunx prisma migrate deploy # or migrate dev locally
-bunx prisma db seed
-```
+## Definition of done
 
-`@lazyit/shared` must be built before seed (`bun run build --filter=@lazyit/shared`).
-
-### Standard commands
-
-See root `package.json` and `docs/04-development/setup.md`:
-
-- `bun install` - workspace deps
-- `bun run dev` - web + api via turbo
-- `bun run lint` / `bun run test` / `bun run build`
-- `bun run db:up` / `bun run db:down` - docker compose backing services
-
-### Dev auth (shim)
-
-With `AUTH_MODE=shim`, authenticated API calls need `X-User-Id: <uuid>`. The seed creates `admin@lazyit.local`; query its id from Postgres or use the seeded admin for smoke tests. `/health/*` is public.
-
-`POST /users` returns 503 without Zitadel management configured - expected in shim-only dev. Prefer asset/dashboard endpoints for core hello-world checks.
-
-### Smoke test
-
-```sh
-curl http://localhost:3001/health/live
-curl http://localhost:3001/health/ready
-curl -H "X-User-Id: <admin-uuid>" http://localhost:3001/assets
-open http://localhost:3000
-open http://localhost:3001/api/docs
-```
-
-### Lint note
-
-`bun run lint` may fail on pre-existing ESLint errors in `apps/web` (react-hooks rules). Tests and build are the stronger CI signals for env verification.
+Code in place · tests per `docs/03-decisions/0012-testing-strategy.md` · `docs/` updated and
+consistent · the Manual updated for any user-facing change · the upgrade path over existing
+production data verified · commits scoped and correctly prefixed · all three review dimensions
+addressed in the PR body.

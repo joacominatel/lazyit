@@ -46,13 +46,14 @@ The set of triggers is fixed and deliberately small — the bell is a curated nu
 | **Warranty expiring** | An asset's warranty is within its look-ahead window (the last 90 days before it ends) and has not yet lapsed. One heads-up per asset, so you can renew or replace before the deadline instead of finding out after. Links to the asset. |
 | **Access expiring** | An active access grant is within two weeks of its expiry date and will be auto-revoked when it passes. One heads-up per grant so you can re-grant before a contractor or temp silently loses access. Links to the application. |
 | **Receipt acknowledged** | (Targeted) Someone confirmed receipt of an asset you assigned to them. Lands in your bell — and inbox, unless you opt out — so you know the handover is complete without asking. Links to the asset. |
+| **New AI agent connected** | (Targeted, security) An external AI agent — Claude Code, Cursor or another MCP client, or a personal MCP token — was used on your account for the first time. One per connection. Lands in your bell — and inbox, unless you opt out. If it wasn't you, revoke the connection in your AI connections and change your password. |
 
 Notifications are emitted **after** the originating action completes and are **best-effort**: a
 notification that fails to send never blocks or undoes the underlying change. Repeated triggers for
 the same event collapse into one notification, so a consumable hovering around its threshold will not
 spam the bell.
 
-## Reading and clearing
+## Reading notifications
 
 Open the bell to see the most recent notifications, newest first. Each row carries an icon, a short
 title, an optional one-line summary, and a relative time.
@@ -64,6 +65,30 @@ title, an optional one-line summary, and a relative time.
 
 Read state is per person: marking a broadcast read clears it for you only, not for other
 administrators.
+
+## Dismissing notifications
+
+Once you have dealt with a notification, you can remove it from your bell instead of waiting for it to
+age out:
+
+- **Dismiss one** — hover a row and select the **×** at its right edge. On a phone or tablet the × is
+  always shown; with a keyboard, tab to it. Dismissing does not open the notification.
+- **Clear all** — in the bell's header, removes every notification up to the newest one shown, all at once —
+  including older ones further down the list than the bell loads. Anything
+  newer stays: a notification that arrived after you opened the bell is not cleared, and it stays unread.
+  When the bell is empty it reads "You're all caught up."
+
+Dismissing also marks the notification read, so the badge drops with it. A notification that arrives
+after you select **Clear all** shows up normally.
+
+Dismissing is **per person**, like read state. It hides the notification from **your** bell only: the
+event itself is not deleted, and other administrators who see the same broadcast still have it in their
+own bells. The durable record in the activity history is untouched.
+
+> [!IMPORTANT]
+> Neither action asks for confirmation, there is **no undo**, and there is no view of dismissed
+> notifications. Once dismissed, a notification stays out of your bell until it is pruned with the rest
+> after 90 days. Dismiss what you have handled; leave in place anything you still need to act on.
 
 ## What a notification carries
 

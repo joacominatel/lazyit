@@ -21,7 +21,7 @@ export interface ResolvedSmtpConfig {
 }
 
 /**
- * Map the closed `security` mode to nodemailer's transport flags (verified against nodemailer 9 docs):
+ * Map the closed `security` mode to nodemailer's transport flags (verified against nodemailer 10 docs):
  *   - `tls`      → implicit TLS from the first byte (port 465): `secure:true`.
  *   - `starttls` → plaintext connect then upgrade: `secure:false, requireTLS:true` (fails cleanly if the
  *                  server can't STARTTLS, rather than silently sending in the clear).

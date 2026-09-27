@@ -28,23 +28,25 @@ máquinas que se reportan solas, con el comando que actualiza las que quedaron a
 > así que también requiere **dar de baja activos** ([más abajo](#rastrear-como-activo)). Sin un
 > permiso, sus controles simplemente no aparecen.
 
-## Las notebooks y los equipos de escritorio se mantienen fuera del mapa
+## Las notebooks y los equipos de escritorio, y cómo sacarlos del tablero
 
-**Si tu mapa se achicó, no se borró nada.** lazyit mantiene fuera del diagrama, por defecto, las
-**notebooks y los equipos de escritorio** reportados. Cuando hay alguno, aparece un botón en la
-esquina superior derecha del tablero que dice exactamente cuántos son — *Mostrar 142 equipos de
-usuario*. Al hacer clic aparecen todos; con *Ocultar 142 equipos de usuario* se van de nuevo. La
+El mapa dibuja **todo lo que lazyit conoce**, puestos de trabajo incluidos. En un parque con un par
+de cientos de notebooks eso puede enterrar la infraestructura que viniste a leer, así que hay una
+forma de sacarlos con un solo clic: un botón en la esquina superior derecha del tablero que dice
+exactamente cuántos son — *Ocultar 142 equipos de usuario*. Al hacer clic, todas las notebooks y
+equipos de escritorio reportados se van del tablero; con *Mostrar 142 equipos de usuario* vuelven. La
 elección queda en la dirección de la página, así que sobrevive a una recarga, al botón Atrás del
-navegador y a cambiar a la Tabla y volver.
+navegador y a cambiar a la Tabla y volver — los ocultás una vez y siguen ocultos mientras trabajás.
 
-**Por qué.** Un parque típico tiene un par de decenas de servidores y un par de *cientos* de puestos
-de trabajo. Dibujarlos todos convierte el mapa en una pared de cajas con la infraestructura enterrada
-en algún lugar adentro — y la topología del parque es justamente lo que viniste a leer acá. Cada
-máquina sigue perteneciendo a lazyit; simplemente no pertenece a esta imagen en particular por
-defecto.
+> **¿Venís de una versión anterior de lazyit?** Las versiones anteriores mantenían las notebooks y
+> los equipos de escritorio fuera de este tablero hasta que los pidieras. Eso se invirtió: ahora se
+> dibujan, así que la primera vez que abras el mapa después de actualizar puede verse más cargado de
+> lo que recordás. No se agregó nada ni cambió nada en tu inventario — las mismas máquinas
+> simplemente están en la imagen. Un clic en *Ocultar equipos de usuario* te devuelve la vista de
+> antes, y se queda así.
 
-**Nada salió de tu inventario.** Una máquina oculta sigue estando exactamente igual de presente que
-antes:
+**No se borra nada y nada sale de tu inventario.** Una máquina oculta sigue estando exactamente igual
+de presente que antes:
 
 - está en la [lista de servidores](/help/assets-topology-servers), que **muestra todo, siempre** —
   esta ocultación es solo del mapa,
@@ -57,17 +59,12 @@ Ocultar es una decisión de **dibujo** sobre una sola pantalla, y no es nada má
 
 **Solo se oculta una máquina que dice que lo es.** Cada agente de reporte le informa a lazyit el
 **formato** del host, leído del firmware de la propia máquina: *notebook*, *equipo de escritorio*,
-*servidor*, *máquina virtual*, *contenedor*. Solo los dos primeros salen del mapa. Todo lo demás se
-queda, y también se queda todo lo que no dijo nada: un nodo que dibujaste a mano, un servidor con un
-agente más viejo, una máquina cuyo hardware no reporta el formato, o una que simplemente no se
-reportó desde que actualizaste. **lazyit nunca oculta una máquina por una suposición** — un host que
-desapareciera de todas las pantallas sería mucho peor que un mapa cargado. Podés ver el formato de
-cualquier nodo en la pestaña **General** de su ventana de detalle.
-
-**Pasa de a poco, no de golpe.** En el momento de actualizar, el mapa es idéntico: ninguna máquina
-reportó todavía su formato. Cada una lo completa en su próximo reporte, así que a lo largo de los
-minutos siguientes los puestos de trabajo se van del tablero mientras los servidores se quedan. No
-hay nada que ejecutar ni nada que configurar.
+*servidor*, *máquina virtual*, *contenedor*. Solo los dos primeros salen del mapa cuando los ocultás.
+Todo lo demás se queda, y también se queda todo lo que no dijo nada: un nodo que dibujaste a mano, un
+servidor con un agente más viejo, una máquina cuyo hardware no reporta el formato, o una que
+simplemente todavía no se reportó. **lazyit nunca oculta una máquina por una suposición** — un host
+que desapareciera de una pantalla con la que contabas sería mucho peor que un mapa cargado. Podés ver
+el formato de cualquier nodo en la pestaña **General** de su ventana de detalle.
 
 ## El lienzo
 
@@ -76,8 +73,9 @@ Arrastra un nodo para reubicarlo: la nueva posición se guarda automáticamente 
 arrastre, así que la disposición que armes es la que todos verán la próxima vez. Usa los controles
 de la esquina (o tu trackpad/scroll) para hacer zoom y ajustar la vista.
 
-La esquina superior derecha del tablero es donde viven sus controles: el botón **Mostrar/Ocultar
-equipos de usuario** descrito arriba (lo ve todo el mundo) y —con el permiso de gestión— **Ordenar**.
+La esquina superior derecha del tablero es donde viven sus controles: el botón **Ocultar/Mostrar
+equipos de usuario** descrito arriba (lo ve todo el mundo: ocultar es una preferencia de dibujo, no
+una edición, así que no requiere ningún permiso) y —con el permiso de gestión— **Ordenar**.
 
 Con el permiso de gestión, un botón **Ordenar** aparece en la esquina superior derecha del tablero.
 Al hacer clic, reorganiza todo el mapa en una disposición limpia de arriba hacia abajo — los hosts
@@ -248,7 +246,18 @@ sino por **color, estilo de línea y punta de flecha** juntos: *corre sobre* y *
 sólidas (miembro-de un poco más gruesa, la columna de agrupación), *depende de* es discontinua con
 una animación que fluye suavemente señalando la dirección de la dependencia, *respalda a* es punteada
 y la simétrica *conecta con* es una línea fina y simple, sin flecha. Al pasar el cursor o seleccionar
-una línea aparece una pequeña etiqueta con el nombre de la relación. Una **referencia de conexiones**
+una línea aparece una pequeña etiqueta con el nombre de la relación.
+
+**Sobre los puntitos que viajan por las líneas.** Las conexiones entre máquinas que están activas
+llevan un suave flujo de puntos en movimiento. Es **decoración y nada más**: no es tráfico, no es
+caudal y no es un chequeo de salud. lazyit detiene el flujo en cualquier línea que toque una máquina
+marcada como **Desconectada**, así que un tablero de líneas quietas es un tablero de máquinas
+calladas; pero *Desconectada* significa que un agente no reporta desde hace unos 45 minutos, así que
+una máquina que apagaste hace cinco minutos se sigue dibujando con flujo. **Nunca leas el movimiento
+como un cable en vivo** — la píldora de estado de la tarjeta es la respuesta a "¿está activa?", y el
+[radio de afectación](#impacto--radio-de-afectación) es la respuesta a "¿a qué afecta esto?". Si
+pediste movimiento reducido en tu sistema, no se mueve nada; y en un mapa muy grande el flujo se
+apaga solo, porque dibujarlo ahí te costaría un desplazamiento fluido. Una **referencia de conexiones**
 plegable, en la esquina inferior izquierda, asocia cada tipo a su color y estilo — ábrela cuando
 necesites recordarlo. Pasar el cursor sobre un nodo también lo **destaca**: el resto del mapa se
 atenúa para que veas de un vistazo con qué está conectado ese nodo.
@@ -291,7 +300,8 @@ una sola cosa.
 **Las pestañas se adaptan al nodo.** Solo ves las que tienen algo que decir:
 
 - **General** *(siempre)* — qué es este nodo y quién es responsable de él: tipo, dirección IP,
-  **formato** (para hosts reportados por agente — lo que decide si se dibuja en el mapa por defecto),
+  **formato** (para hosts reportados por agente — sobre lo que actúa el botón *Ocultar equipos de
+  usuario* del mapa),
   fecha de agregado, estado, responsable(s), artículos de la base de conocimiento, referencias de
   secretos y accesos directos, además de **Quitar del mapa**.
 - **Datos reportados** *(solo nodos reportados por agente)* — lo que la máquina dice que es. Para un
@@ -340,10 +350,10 @@ Algunas cosas de la pestaña **General** que vale la pena señalar:
 - **Formato** — para un nodo reportado por un agente, lo que la máquina dice que es físicamente,
   leído de su firmware: *notebook*, *equipo de escritorio*, *servidor*, *máquina virtual* o
   *contenedor*. Se muestra, no se edita: el agente lo reescribe en cada reporte, así que una máquina
-  reinstalada o con una placa nueva lo mantiene honesto por sí sola. También es lo que decide si el
-  nodo se dibuja en el mapa por defecto (ver *Las notebooks y los equipos de escritorio se mantienen
-  fuera del mapa* más arriba). Un nodo dibujado a mano no tiene ninguno, y una máquina que no reportó
-  uno simplemente no muestra este campo.
+  reinstalada o con una placa nueva lo mantiene honesto por sí sola. También es sobre lo que actúa el
+  botón **Ocultar equipos de usuario** del mapa (ver *Las notebooks y los equipos de escritorio, y
+  cómo sacarlos del tablero* más arriba). Un nodo dibujado a mano no tiene ninguno, y una máquina que
+  no reportó uno simplemente no muestra este campo.
 - **IP duplicada** — si otro nodo del mapa ya tiene la *misma* IP exacta, un **aviso no bloqueante**
   lista el/los otro(s) nodo(s) — es un aviso, no un bloqueo: la dirección se guarda igual (lazyit no
   impone unicidad en las IP), y cada nodo listado está a un clic para que puedas saltar a él y

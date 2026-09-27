@@ -18,11 +18,26 @@
  *    ADMIN already exists) skips the check entirely, and any error talking to the API FAILS OPEN
  *    (normal flow proceeds) so a transient API blip never bricks navigation.
  *
+ * 3. Content-Security-Policy (#1440). Every page it lets through gets a fresh per-request nonce and
+ *    the policy from `lib/security/csp.ts` (report-only for now — see `CSP_ENFORCED` there) — on the
+ *    RESPONSE (the browser evaluates it) and on the
+ *    forwarded REQUEST (Next reads the nonce back out of it while rendering and stamps it on its own
+ *    scripts; the root layout reads `x-nonce` for next-themes' inline script). This is why the proxy
+ *    matches `/setup` too: an unmatched page would render with no nonce and no policy.
+ *
  * The `authorized` callback is called for every matched request.
  */
 import type { ConfigStatus } from "@lazyit/shared";
+import { NextResponse } from "next/server";
 
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
+import { loginCallbackPath } from "@/lib/auth/login-callback";
+import {
+  buildContentSecurityPolicy,
+  CSP_HEADER,
+  generateNonce,
+} from "@/lib/security/csp";
 
 /**
  * API base URL for the gate's server-side `GET /config/status`. Prefers an internal URL
@@ -96,7 +111,8 @@ export default auth(async (req) => {
 
   // A signed-in user implies an ADMIN already exists → the instance is configured. Skip the gate and
   // only run route protection. (Route protection itself is a no-op here since there IS a session.)
-  if (!session) {
+  // `hasSession`, not `!session`: a truthy error object is not a session (#1399, GHSA-8fpg-xm3f-6cx3).
+  if (!hasSession(session)) {
     // First-run gate. Only on top-level document navigations (not RSC/prefetch/data fetches) to avoid
     // a `GET /config/status` per sub-request — `Sec-Fetch-Mode: navigate` marks a real navigation.
     const isNavigation =
@@ -108,14 +124,35 @@ export default auth(async (req) => {
     }
 
     // Route protection: send unauthenticated visitors of protected routes to /login, preserving the
-    // intended destination so Auth.js can return them there after sign-in.
+    // intended destination — path AND query — so sign-in returns them there. The query matters for the
+    // OAuth consent page (`/oauth/authorize?…`), whose authorization request lives in it (#1315).
     if (!isPublicPath(pathname)) {
-      const loginUrl = new URL("/login", nextUrl.origin);
-      loginUrl.searchParams.set("callbackUrl", pathname);
-      return Response.redirect(loginUrl);
+      return Response.redirect(new URL(loginCallbackPath(nextUrl), nextUrl.origin));
     }
   }
+
+  return withContentSecurityPolicy(req.headers);
 });
+
+/**
+ * Let the request through with a fresh nonce-based CSP (#1440): the policy goes on the forwarded
+ * request (Next extracts the nonce from it during rendering; `x-nonce` hands it to the root layout)
+ * and on the response the browser evaluates.
+ */
+function withContentSecurityPolicy(requestHeaders: Headers): NextResponse {
+  const nonce = generateNonce();
+  const policy = buildContentSecurityPolicy({
+    nonce,
+    isDev: process.env.NODE_ENV === "development",
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+  });
+  const forwarded = new Headers(requestHeaders);
+  forwarded.set("x-nonce", nonce);
+  forwarded.set(CSP_HEADER, policy);
+  const response = NextResponse.next({ request: { headers: forwarded } });
+  response.headers.set(CSP_HEADER, policy);
+  return response;
+}
 
 export const config = {
   /**
@@ -123,11 +160,13 @@ export const config = {
    * - Next.js internals (_next/*)
    * - Static files (favicon, images, fonts, etc.)
    * - Auth.js OIDC endpoints (/api/auth/*)
-   * - The first-run setup wizard (/setup) — public, pre-login (ADR-0043 Phase 3)
+   *
+   * The first-run setup wizard (/setup) IS matched (it used to be excluded): it is public (see
+   * `isPublicPath` and the gate's own `/setup` check), but it needs the per-request CSP nonce (#1440).
    *
    * NB: unlike before, the marketing root (`$`) and /login ARE matched so the first-run gate can
    * redirect a fresh operator landing on them to /setup. The `isPublicPath` guard above keeps those
    * surfaces from being trapped by route protection.
    */
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|setup).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth).*)"],
 };

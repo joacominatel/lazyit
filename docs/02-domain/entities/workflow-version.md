@@ -79,7 +79,10 @@ collide with a reserved terminal token; every explicit edge resolves to a known 
   `deletedAt` ([[0006-soft-delete-and-auditing]]). The `steps` jsonb is frozen at author time.
 - **`(workflowId, version)` is the natural key** (`@@unique`) — the human handle ("v3") and the
   per-workflow timeline. `version` is **monotonic per-workflow** (1, 2, 3, …), allocated **server-side**
-  (the `CreateWorkflowVersion` DTO carries only `steps`).
+  (the `CreateWorkflowVersion` DTO carries `steps` and an optional `baseVersion`). Allocation runs in a
+  transaction that locks the parent [[application-workflow]] row; when `baseVersion` is given and is not
+  the current latest (`0` = none), the author gets **`409`** instead of silently stacking on a version
+  they never saw (SEC-077). The AI `workflow_author_version` tool sends it.
 - **Author attribution is human XOR service account.** An at-most-one-actor **CHECK** in the migration
   enforces that at most one of (`createdById`, `createdBySaId`) is set ([[0048-service-accounts]],
   the [[article-version]] precedent).

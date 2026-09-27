@@ -45,6 +45,16 @@ const SELF_SERVICE_CAPABILITIES_EXPECTED: Permission[] = [
 ];
 
 /**
+ * The MEMBER-default capabilities (ADR-0097 decision 1, CEO): the AI channel verbs, seeded to ADMIN +
+ * MEMBER and never to VIEWER. Hand-listed here ON PURPOSE (the golden expectation, stated independently,
+ * not derived from the thing under test).
+ */
+const MEMBER_DEFAULT_CAPABILITIES_EXPECTED: Permission[] = [
+  'ai:use',
+  'ai:connect',
+];
+
+/**
  * The ADMIN-ONLY reads (ADR-0046 extension, issue #175): strictly tighter than the pre-tightening —
  * excluded from BOTH MEMBER and VIEWER, held only by ADMIN's full catalog. Still admin-grantable from
  * the role matrix, but never seeded to MEMBER/VIEWER. Hand-listed here ON PURPOSE — this is the golden
@@ -66,12 +76,13 @@ function documentedMatrix(): RolePermissionMatrix {
   // ADMIN — the COMPLETE catalog (immutable/full, ADR-0046).
   const admin = sorted([...PERMISSIONS]);
 
-  // MEMBER — all reads + all writes + the self-service capabilities, MINUS the admin-only reads. No
-  // `:delete`, no coarse verb (all ADMIN-only per ADR-0040).
+  // MEMBER — all reads + all writes + the self-service and MEMBER-default capabilities, MINUS the
+  // admin-only reads. No `:delete`, no coarse verb (all ADMIN-only per ADR-0040).
   const member = sorted([
     ...readPerms.filter((p) => !ADMIN_ONLY_READS_EXPECTED.includes(p)),
     ...writePerms,
     ...SELF_SERVICE_CAPABILITIES_EXPECTED,
+    ...MEMBER_DEFAULT_CAPABILITIES_EXPECTED,
   ]);
 
   // VIEWER — all reads except the pre-tightened AND the admin-only reads, PLUS the self-service
@@ -171,6 +182,15 @@ describe('RolePermission golden matrix (ADR-0046)', () => {
     expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain('secret:manage');
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:read');
     expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain('secret:manage');
+  });
+
+  it('ai:use and ai:connect (ADR-0097) are held by ADMIN + MEMBER, never VIEWER', () => {
+    for (const p of MEMBER_DEFAULT_CAPABILITIES_EXPECTED) {
+      const holders = ROLES.filter((r) =>
+        DEFAULT_ROLE_PERMISSIONS[r].includes(p),
+      );
+      expect(new Set(holders)).toEqual(new Set(['ADMIN', 'MEMBER']));
+    }
   });
 
   it('MEMBER never holds a :delete or a coarse capability verb', () => {

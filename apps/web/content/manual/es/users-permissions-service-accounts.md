@@ -77,6 +77,25 @@ como esperas antes de cablearlo en un sistema.
 > otorgarlas. Si una cuenta de servicio debe perder la capacidad de leer una bóveda en particular,
 > revócala desde la lista de **Miembros** de esa bóveda — consulta [Bóvedas y miembros](/help/secret-manager-vaults-members).
 
+## Usar el asistente de IA sin una persona
+
+Una cuenta de servicio puede usar el [asistente de IA](/help/ai-assistant-overview) sin una persona —
+un script envía un prompt a `POST /api/ai/runs` y sigue la ejecución — o conectarse a lazyit por MCP
+con su token. En los dos casos actúa exactamente con sus propios permisos, y **nadie aprueba sus
+cambios uno por uno**. Tres cosas la acotan:
+
+- **Sus permisos** — otorgale **Usar el asistente de IA** (`ai:use`) para la API, **Conectar agentes de
+  IA externos (MCP)** (`ai:connect`) para MCP, y solo los permisos de dominio que el trabajo necesita.
+- **Su acceso a IA** — menú de la fila → **Acceso a IA**: desactivado, solo lectura, o lectura y
+  escritura, con un tope opcional (**Limitar escrituras**) por ejecución (por hora móvil en MCP) que
+  cuenta cada registro modificado. Mirá [Cuentas de servicio](/help/ai-assistant-setup#cuentas-de-servicio)
+  en la página de configuración de la IA.
+- **Los interruptores de la instancia** — el asistente (para la API) o MCP tienen que estar activos en
+  **Configuración → IA**.
+
+Las ejecuciones headless nunca buscan en la web. A una cuenta que tiene **Reportar inventario de
+servidores (agente)** se le niega el uso de IA; creá una cuenta aparte para la IA.
+
 ## Cuentas gestionadas por el sistema
 
 Algunas cuentas las crea y posee lazyit en sí — por ejemplo la cuenta con la que el Motor de Flujos de

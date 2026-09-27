@@ -3,7 +3,7 @@ title: "ADR-0034: Consumables design (cached stock + append-only movements)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-09-24
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,8 @@ accepted — 2026-05-26. Fourth front of the backend-completion epic (#4, sub-is
 the consumables area that [[0008-consumables-vs-assets]] separated from assets; reuses the
 soft-delete extension ([[0032-soft-delete-middleware]]) and the `X-User-Id` shim via the shared
 `ActorService` ([[0033-asset-history-event-model]] / [[0022-draft-visibility-auth-shim]]).
+Extended by [[0098-consumable-delivery-targets]] (2026-09-24): an optional delivery target on an `OUT`,
+returnable items and returns. The stock model below is unchanged.
 
 ## Context
 

@@ -29,8 +29,11 @@ muestra pero bloqueado.
   razonable como punto de partida. A partir de ahí puedes ajustar capacidades individuales. Si tu
   conjunto no coincide con ningún ajuste, lazyit lo etiqueta como **Personalizado**.
 - **Conmutadores de capacidad** — interruptores en lenguaje sencillo agrupados por área (Inventario,
-  Acceso, Conocimiento, Gestión, Automatización). Cada conmutador corresponde a uno o varios permisos
-  subyacentes; actívalo o desactívalo para otorgar o quitar esa capacidad al rol.
+  Acceso, Conocimiento, Gestión, Automatización, IA). Cada conmutador corresponde a uno o varios permisos
+  subyacentes; actívalo o desactívalo para otorgar o quitar esa capacidad al rol. El área **IA** agrupa
+  **Usar el asistente de IA** (`ai:use`) y **Conectar agentes de IA externos (MCP)** (`ai:connect`);
+  ninguno es de nivel administrador, porque el asistente y los agentes solo actúan con los permisos del
+  propio rol — ver [Asistente de IA — visión general](/help/ai-assistant-overview#quién-puede-usarlo).
 - **Ajuste fino (avanzado)** — una sección opcional donde cada interruptor es un permiso individual en
   crudo (`área:acción`), para un control exacto. Cambiar uno aquí pasa el rol a un conjunto
   **Personalizado** y actualiza los conmutadores de capacidad de arriba para que coincidan.
@@ -63,6 +66,20 @@ Guardar reemplaza por completo el conjunto de permisos del rol elegido. El cambi
   activos. lazyit no tiene permisos por registro como función general. Las dos excepciones deliberadas
   son las carpetas de la Base de Conocimiento y las bóvedas del Gestor de Secretos, donde el acceso se
   acota a una carpeta o a una bóveda.
+
+## Tus cambios se mantienen tras las actualizaciones
+
+Lo que guardas aquí se mantiene cuando lazyit se actualiza. Un permiso que quitaste a Miembro o a Lector
+no vuelve a otorgarse con una actualización posterior.
+
+Cuando una actualización añade un permiso **nuevo**, cada rol recibe el valor por defecto de ese permiso
+**una sola vez**, en la primera actualización que lo incluye. A partir de ahí se comporta como cualquier
+otro permiso: si lo quitas, sigue quitado en todas las actualizaciones siguientes.
+
+> [!IMPORTANT]
+> Antes de este comportamiento, una actualización podía devolver en silencio un permiso por defecto que
+> habías quitado. Después de la actualización que lo incorpora, abre esta pantalla una vez y comprueba
+> que Miembro y Lector tienen solo lo que pretendes. A partir de entonces, tus cambios se conservan.
 
 ## Los permisos se quedan dentro de lazyit
 

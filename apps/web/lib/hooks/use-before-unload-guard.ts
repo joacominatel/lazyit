@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { registerUnsavedChanges } from "@/lib/ai/unsaved-changes";
 
 /**
  * Warn the user before they LEAVE the page (close the tab, reload, or navigate away via the browser)
@@ -8,6 +9,9 @@ import { useEffect } from "react";
  * Scope note: this covers hard navigations (close/reload/address-bar). In-app navigations via the
  * Next.js router are NOT intercepted here (the App Router has no stable navigation-guard API yet) — a
  * screen that needs that pairs this with an explicit confirm on its own discard/leave controls.
+ *
+ * While enabled it also registers in the unsaved-changes registry (`lib/ai/unsaved-changes.ts`), so the
+ * AI assistant never navigates away on its own from a screen with unsaved edits (frontend.md Fork D3).
  */
 export function useBeforeUnloadGuard(enabled: boolean): void {
   useEffect(() => {
@@ -18,6 +22,10 @@ export function useBeforeUnloadGuard(enabled: boolean): void {
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
+    const release = registerUnsavedChanges();
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+      release();
+    };
   }, [enabled]);
 }

@@ -12,7 +12,7 @@ Get lazyit running on your machine. Verified against the repo as of 2026-05-30.
 
 ## Prerequisites
 
-- **Bun** `1.3.x` (repo pins `bun@1.3.14`) — package manager and runtime.
+- **Bun** `1.4.x` (repo pins `bun@1.4.2`) — package manager and runtime.
 - **Docker** + Docker Compose — for the PostgreSQL dev database.
 - **Node** available on PATH — some CLIs still expect it (see [[stack]]).
 
@@ -46,7 +46,7 @@ prep but stop before starting the apps (useful in CI/tests):
 > (`AUTH_MODE=local` + a dev `SESSION_SIGNING_SECRET`, OIDC vars off) and `apps/web/.env`
 > (`AUTH_MODE=local`). No `jq`/`curl` needed — only `docker`. The steps below are the **`--zitadel`**
 > path (the bundled dev Zitadel + OIDC), which mirrors the prod zero-touch bootstrap. In order:
-> 1. **removes the dev Docker volumes** (`lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data,valkey_data}`) — this is the destructive step it asks you to confirm;
+> 1. **removes the dev Docker volumes** (`lazyit_{db_data,zitadel_db_data,zitadel_secrets,meili_data_v1_53_2,meili_data,valkey_data}`) — this is the destructive step it asks you to confirm;
 > 2. `docker compose up -d` — the `compose.override.yaml` `zitadel-secrets-init-dev` chmods the
 >    secrets volume so Zitadel no longer crash-loops on a fresh volume (#477);
 > 3. waits for `db` healthy + Zitadel `/debug/healthz` 200;

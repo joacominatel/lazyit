@@ -3,7 +3,7 @@ title: "ADR-0060: Knowledge Base access control — folders as the permission bo
 tags: [adr, knowledge-base, kb, authorization, security]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-13
+updated: 2026-09-10
 deciders: [Joaquín Minatel]
 ---
 
@@ -271,6 +271,83 @@ an SA principal** on author-bound KB writes (INV-SA-4): the KB's identity model 
 service account **fails closed** on restricted folders (it can read a PUBLIC folder iff its direct grants
 include `article:read`, per INV-SA-2; it can never satisfy a restriction rule). A future SA-as-folder-
 subject is a separate, additive decision — not v1.
+
+### §9. Moving an article between folders — blind destination refused, widening allowed with confirmation
+
+> [!note] Amendment — 2026-09-10, decided by the CEO, implemented in #1296
+> §1–§8 fixed how an article's access is *evaluated*. They never said what happens when the article
+> **changes folder** — and because the home folder **is** the article's rule (§1, an article carries
+> none of its own), a move is an **authorization write**, not a metadata edit. `PATCH /articles/:id`
+> accepted `categoryId` with no §4 check at all: it verified only that the destination folder row
+> existed and was live. This section closes that.
+
+**The destination rule.** Moving an article **into** a folder the actor cannot read is **REFUSED**.
+It is the move-shaped twin of the §6 / INV-9 alias rule: you may not place a document into a space
+you cannot see, any more than you may surface one you cannot read. Enforcement reuses the **same**
+`FolderAccessService` §4 evaluator the read path and the alias gate use — there is exactly one
+visibility evaluator, never a second.
+
+The refusal is expressed as the **same `400` the endpoint already returns for a `categoryId` that is
+not a live folder, with the identical message**, so an invisible destination is indistinguishable
+from a non-existent one. This is the §4 existence-hiding rule applied to a **request-body field**
+rather than to a URL: a `403` would confirm the restricted folder exists, and the article's own `404`
+is not available here — the article in the URL demonstrably exists and the actor may write it.
+
+**The widening rule.** Moving an article **out of** a restricted folder into a more permissive one
+**stays ALLOWED**. It widens who may read the document, and it is not refused.
+
+> [!info] The CEO's reasoning, accepted as decided
+> Refusing a widening move would make it **impossible to ever publish a document that started life
+> in a restricted folder** — drafting an incident write-up in the restricted runbook folder and
+> promoting it to the public KB once sanitized is a normal, intended workflow, not an attack. The
+> honest control for it is **informed consent, not prohibition**: the widening gets an **explicit
+> confirmation step in the UI**, and the API's job is to make the widening **expressible and
+> auditable**, not to block it.
+
+This is a deliberate *narrowing* of what §6 / INV-9 covers. INV-9 says you may never **surface** an
+article you cannot yourself read; it does **not** say an article's audience may never grow. A
+widening move is performed by someone who can read **both** folders (the destination check above
+guarantees the destination; the article's own write gate guarantees the source), so nothing is ever
+surfaced *to the actor* that they could not already see. What changes is the audience — and that is
+a content decision for the person who owns the document, taken knowingly.
+
+**Auditability.** A `categoryId`-only `PATCH` previously wrote **no** `ArticleVersion`, so a move
+that changed an article's access left no trace but the overwritten `lastEditedById`. A folder move
+now **appends an `ArticleVersion`** in the same transaction as the write, even though no versioned
+field changed: the move lands on the append-only timeline with its actor and timestamp
+([[0006-soft-delete-and-auditing]]). The snapshot's body is identical to the previous revision **by
+design** — it dates the *move*, it is not a content diff.
+
+> [!warning] Partial by design — the full move record needs a schema change
+> The version row records **that** an access-affecting edit happened, **when**, and **by whom**. It
+> does **not** record the **source and destination folder**: `ArticleVersion` has no `categoryId`
+> column, and adding one is a schema change that was explicitly **not authorized** for #1296. A
+> complete `from → to` move record is therefore **open, not decided** — it needs its own additive,
+> nullable migration and a follow-up amendment here.
+
+**Write-path only.** This is new validation on a live, populated database, so it binds **writes and
+nothing else**. An article already sitting in a folder its author cannot read stays exactly as
+readable as it was; no existing row is re-validated, no read path is narrowed, and a `PATCH` that
+repeats the folder the article is **already in** is not a move and is not checked. Only a genuine
+change of `categoryId` is evaluated.
+
+**ADMIN and `article:manage`.** An ADMIN resolves to `'ALL'` (§5), so the destination check is a
+no-op for them: an administrator may move an article anywhere. That is god-mode working as
+specified, not an oversight. A **non-admin** `article:manage` holder gets **no** exemption — they
+already have to pass §4 on the article's *home* folder to touch it at all, and they must now equally
+pass §4 on the *destination*.
+
+> [!question] Open, not decided by this amendment
+> - **Creating** an article directly into a folder the actor cannot read (`POST /articles` with a
+>   `categoryId`) is the same blind write and is **still unguarded**. It is a separate product call
+>   — may you author into a space you cannot see? — and was not part of this decision.
+> - **Aliasing** an article into a destination folder the actor cannot read (`POST /articles/:id/aliases`)
+>   is likewise unchecked on the *destination* side; §6 today only re-checks the *target article*.
+> - The frontend cannot compute folder visibility itself, and the only public-vs-restricted signal on
+>   a folder read (`accessRules`) is gated to `settings:manage` holders (#554), so an ordinary author
+>   currently has **no** way to tell that a move widens access. Exposing a minimal derived
+>   "restricted" flag to every `category:read` caller would relax that deliberate gate and is its own
+>   decision — the UI confirmation depends on it.
 
 ## Consequences
 

@@ -3,7 +3,7 @@ title: "ADR-0009: Bun-first guidance vs the chosen app stack"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-09-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -28,6 +28,8 @@ unreconciled, this confuses both contributors and AI assistants reading `CLAUDE.
 - **Scope `CLAUDE.md`** — clarify that Bun-first applies to *runtime, package management,
   scripts and tooling*, while the app server/data layer is intentionally NestJS + Prisma. Keep
   `bun test` for `@lazyit/shared`/scripts, Jest for the Nest app.
+  (This pin held through NestJS 12: the framework went ESM, the runner did not change —
+  [[0096-jest-commonjs-against-esm-nestjs]].)
 - **Delete the Bun API guidance** — simplest, but loses useful defaults for scripts/tooling.
 
 ## Decision

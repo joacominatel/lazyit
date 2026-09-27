@@ -27,20 +27,24 @@ updates any of them that have fallen behind
 > **delete assets** ([below](#track-as-asset)). Without a permission its controls simply don't
 > appear.
 
-## Laptops and desktops are kept off the map
+## Laptops and desktops, and how to clear them off
 
-**If your map has got smaller, nothing has been deleted.** lazyit keeps reported **laptops and
-desktops** off the diagram by default. When there are any, a button sits in the board's top-right
-corner saying exactly how many — *Show 142 endpoints*. Click it and they all appear; click *Hide 142
-endpoints* and they go away again. The choice is kept in the page address, so it survives a reload,
-the browser Back button, and a switch to the Table and back.
+The map draws **everything lazyit knows about**, workstations included. On an estate with a couple of
+hundred laptops that can bury the infrastructure you came here to read, so there is a one-click way
+to take them off: a button in the board's top-right corner saying exactly how many — *Hide 142 user
+devices*. Click it and every reported laptop and desktop leaves the board; click *Show 142 user
+devices* and they come back. The choice is kept in the page address, so it survives a reload, the
+browser Back button, and a switch to the Table and back — hide them once and they stay hidden while
+you work.
 
-**Why.** A typical estate is a couple of dozen servers and a couple of *hundred* workstations. Drawing
-all of them turns the map into a wall of boxes with the infrastructure buried somewhere inside it —
-and the estate topology is the thing you came here to read. Every machine still belongs in lazyit;
-it just doesn't belong on this particular picture by default.
+> **Coming from an older lazyit?** Earlier versions kept laptops and desktops off this board until
+> you asked for them. That is reversed: they are drawn now, so the first time you open the map after
+> updating it may look busier than you remember. Nothing was added and nothing changed in your
+> inventory — the same machines are simply on the picture. One click on *Hide user devices* gives you
+> the old view back, and it stays that way.
 
-**Nothing has left your inventory.** A hidden machine is exactly as present as it was before:
+**Nothing is deleted, and nothing leaves your inventory.** A hidden machine is exactly as present as
+it was before:
 
 - it is on the [Servers list](/help/assets-topology-servers), which **shows everything, always** —
   this hiding is the map's alone,
@@ -53,16 +57,12 @@ Hiding is a **drawing** decision about one screen, and it is the only thing it i
 
 **Only a machine that says it is one gets hidden.** Each reporting agent tells lazyit the host's
 **form factor**, read from the machine's own firmware — *laptop*, *desktop*, *server*, *virtual
-machine*, *container*. Only the first two come off the map. Anything else stays, and so does anything
-that hasn't said: a node you drew by hand, a server running an older agent, a machine whose hardware
-doesn't report a form factor, or one that simply hasn't checked in since you upgraded. **lazyit never
-hides a machine on a guess** — a host that vanished from every screen would be far worse than a busy
-map. You can see the form factor of any node on its details window's **General** tab.
-
-**It happens gradually, not all at once.** The moment you upgrade, the map is identical: no machine
-has reported a form factor yet. Each one fills it in on its next check-in, so over the following few
-minutes the workstations fade off the board while the servers stay. There is nothing to run and
-nothing to configure.
+machine*, *container*. Only the first two come off the map when you hide them. Anything else stays,
+and so does anything that hasn't said: a node you drew by hand, a server running an older agent, a
+machine whose hardware doesn't report a form factor, or one that simply hasn't checked in yet.
+**lazyit never hides a machine on a guess** — a host that vanished from a screen you were counting on
+would be far worse than a busy map. You can see the form factor of any node on its details window's
+**General** tab.
 
 ## The canvas
 
@@ -71,8 +71,9 @@ to reposition it — the new position is saved automatically after the drag sett
 you arrange is the layout everyone sees next time. Use the controls in the corner (or your
 trackpad/scroll) to zoom and fit the view.
 
-The board's top-right corner is where its controls live: the **Show/Hide endpoints** button described
-above (everyone sees it), and — with the manage permission — **Tidy**.
+The board's top-right corner is where its controls live: the **Hide/Show user devices** button
+described above (everyone sees it — hiding is a drawing preference, not an edit, so it needs no
+permission), and — with the manage permission — **Tidy**.
 
 With the manage permission, a **Tidy** button sits in the board's top-right corner. Click it to
 auto-arrange the whole map into a clean top-down layout — hosts above the machines that run on them,
@@ -232,7 +233,17 @@ alone, but by **colour, line style and arrowhead** together: *runs on* and *memb
 (member-of a touch heavier, the grouping backbone), *depends on* is dashed with a gently flowing
 animation pointing the way the dependency runs, *backs up to* is dotted, and the symmetric *connects
 to* is a thin plain line with no arrow. Hovering or selecting a line shows a small label naming the
-relationship. A collapsible **edge legend** in the bottom-left corner maps every kind to its colour
+relationship.
+
+**About the little dots travelling along the lines.** Connections between machines that are up carry
+a gentle flow of moving dots. It is **decoration and nothing else** — it is not traffic, not
+throughput, and not a health check. lazyit stops the flow on any line touching a machine it has
+marked **Offline**, so a board full of still lines is a board full of quiet machines; but *Offline*
+means an agent has not reported for about 45 minutes, so a machine you switched off five minutes ago
+is still drawn flowing. **Never read the movement as a live wire** — the status pill on the card is
+the answer to "is it up", and the [blast radius](#impact--blast-radius) is the answer to "what does
+this affect". If you have asked your system for reduced motion, nothing moves at all; and on a very
+large map the flow switches itself off, because drawing it there would cost you a smooth pan. A collapsible **edge legend** in the bottom-left corner maps every kind to its colour
 and style — open it whenever you need a reminder. Hovering a node also **spotlights** it: the rest of
 the map dims so you can see at a glance what that node is connected to.
 
@@ -271,7 +282,7 @@ scrolling past everything to reach one thing.
 **The tabs adapt to the node.** You only ever see the ones that have something to say:
 
 - **General** *(always)* — what this node is and who is responsible for it: kind, IP address,
-  **form factor** (for agent-reported hosts — what decides whether it's drawn on the map by default),
+  **form factor** (for agent-reported hosts — what the map's *Hide user devices* button acts on),
   added-on date, status, owner(s), knowledge-base articles, secret references and shortcuts, plus
   **Remove from map**.
 - **Reported facts** *(agent-reported nodes only)* — what the machine says it is made of. For a
@@ -315,9 +326,9 @@ A few things on the **General** tab worth calling out:
 - **Form factor** — for a node reported by an agent, what the machine says it physically is, read
   from its firmware: *laptop*, *desktop*, *server*, *virtual machine* or *container*. It's shown, not
   editable — the agent rewrites it on every check-in, so a machine that's re-imaged or gets a new
-  board keeps it honest by itself. It's also what decides whether the node is drawn on the map by
-  default (see *Laptops and desktops are kept off the map* above). A hand-drawn node has none, and a
-  machine that hasn't reported one simply doesn't show this field.
+  board keeps it honest by itself. It's also what the map's **Hide user devices** button acts on (see
+  *Laptops and desktops, and how to clear them off* above). A hand-drawn node has none, and a machine
+  that hasn't reported one simply doesn't show this field.
 - **Duplicate IP** — if another node on the map already carries the *exact same* IP, a **non-blocking
   warning** lists the other node(s) — a heads-up, not a block: the address is still saved (lazyit
   enforces no uniqueness on IPs), and each listed node is a click away so you can jump over and

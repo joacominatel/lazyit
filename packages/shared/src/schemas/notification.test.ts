@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DismissAllNotificationsQuerySchema,
+  DismissNotificationsResultSchema,
   MarkReadResultSchema,
   NOTIFICATION_TYPES,
   NotificationPageSchema,
@@ -46,6 +48,10 @@ describe("Notification type catalog (catalog-as-code)", () => {
 
   test("the targeted check-out acknowledgement nudge type is present (ADR-0089 Part B, #1029)", () => {
     expect(NOTIFICATION_TYPES).toContain("asset_assignment.acknowledged");
+  });
+
+  test("the new-MCP-connection security notice type is present (ADR-0097, security §6.3 G3)", () => {
+    expect(NOTIFICATION_TYPES).toContain("mcp.client_connected");
   });
 
   test("rejects an unknown type literal", () => {
@@ -165,6 +171,58 @@ describe("envelope + count shapes", () => {
     ).toBe(true);
     expect(
       MarkReadResultSchema.safeParse({ marked: -1, unread: 0 }).success,
+    ).toBe(false);
+  });
+
+  test("DismissNotificationsResultSchema carries dismissed + the fresh unread count", () => {
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: 3, unread: 0 })
+        .success,
+    ).toBe(true);
+    // Idempotent / invisible id: dismissed: 0 is a valid, non-error result.
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: 0, unread: 2 })
+        .success,
+    ).toBe(true);
+    expect(
+      DismissNotificationsResultSchema.safeParse({ dismissed: -1, unread: 0 })
+        .success,
+    ).toBe(false);
+    // The mark-read field name is NOT accepted in place of `dismissed`.
+    expect(
+      DismissNotificationsResultSchema.safeParse({ marked: 1, unread: 0 })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("DismissAllNotificationsQuerySchema (#1309)", () => {
+  test("accepts a createdAt as the API serializes it", () => {
+    expect(
+      DismissAllNotificationsQuerySchema.parse({
+        upTo: "2026-09-23T10:00:00.000Z",
+      }),
+    ).toEqual({ upTo: "2026-09-23T10:00:00.000Z" });
+  });
+
+  test("upTo is optional, so an older client without it still validates", () => {
+    expect(DismissAllNotificationsQuerySchema.parse({})).toEqual({});
+    expect(
+      DismissAllNotificationsQuerySchema.parse({ upTo: undefined }),
+    ).toEqual({});
+  });
+
+  test("rejects anything that is not an ISO datetime", () => {
+    for (const upTo of ["", "yesterday", "2026-09-23", "1727085600000"]) {
+      expect(DismissAllNotificationsQuerySchema.safeParse({ upTo }).success).toBe(
+        false,
+      );
+    }
+    // A repeated query param arrives as an array.
+    expect(
+      DismissAllNotificationsQuerySchema.safeParse({
+        upTo: ["2026-09-23T10:00:00.000Z", "2026-09-23T11:00:00.000Z"],
+      }).success,
     ).toBe(false);
   });
 });

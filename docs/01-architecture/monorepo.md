@@ -14,7 +14,7 @@ lazyit is a single repository managed with **Bun workspaces** and **Turborepo**.
 lazyit/
 ├── apps/
 │   ├── web/         # Next.js 16 frontend (@lazyit/web)
-│   └── api/         # NestJS 11 + Prisma backend (@lazyit/api)
+│   └── api/         # NestJS 12 + Prisma backend (@lazyit/api)
 ├── packages/
 │   └── shared/      # @lazyit/shared — types & zod schemas shared front↔back
 ├── docs/            # this vault

@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-09-07
 ---
 
 # Code Conventions
@@ -76,7 +76,10 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   via Tailwind classes (`size-4` / `size-5`), not by switching SVG variant. **`shadcn add` caveat:**
   shadcn's `iconLibrary` has no heroicons option, so a freshly-generated primitive will import
   `lucide-react` — re-map those imports to heroicons (per ADR-0045's mapping table) before
-  committing.
+  committing. **One scoped exception (ADR-0045 amendment, 2026-09-25):** the AI assistant's own
+  chrome is drawn with Hugeicons (free MIT set), and only through
+  `apps/web/components/ai/ai-icons.tsx` — an ESLint guard fails an `@hugeicons/*` import anywhere
+  else. Everything outside that module stays heroicons.
 - **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
   ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
   unnamed search/filter inputs). Three shared primitives now own them:
@@ -159,6 +162,20 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
 >
 > Don't "fix" Express→`Bun.serve` or Prisma→`Bun.sql` to match the old blanket Bun-first
 > wording; that divergence is deliberate and now documented in `CLAUDE.md`.
+
+## Dependency ranges
+
+Every dependency in every `package.json` declares a **semver range**, never a dist-tag. `"latest"`
+and `"*"` are resolved against the registry on each install, so they make `bun.lock` go stale on
+somebody else's release: `bun install --frozen-lockfile` — which is what the three Dockerfiles and
+CI run — then fails on a tree nobody changed, and an operator's in-place upgrade fails with it.
+A caret range stays satisfiable by the committed lockfile across patch releases, so the build keeps
+resolving to exactly what CI tested.
+
+A manifest change and its regenerated `bun.lock` belong in the **same commit**, produced with the
+Bun version pinned in `packageManager` (`1.4.2`) — the one the Dockerfiles and CI use.
+
+Symptoms and recovery: [[docker-build-troubleshooting]] § `error: lockfile had changes`.
 
 ## Testing
 

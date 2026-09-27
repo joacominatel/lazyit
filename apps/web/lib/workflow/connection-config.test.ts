@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   type RestConnectionConfig,
+  WORKFLOW_REDACTED_VALUE,
   WorkflowConnectionConfigSchema,
 } from "@lazyit/shared";
 import {
@@ -112,4 +113,27 @@ test("MANUAL build is the bare discriminant", () => {
     kind: "MANUAL",
   });
   expect(config).toEqual({ kind: "MANUAL" });
+});
+
+test("edit round-trips REDACTED header values untouched, so the API keeps the stored ones (SEC-075)", () => {
+  // What `GET /workflow-connections/:id` now returns: header names with redacted values.
+  const existing: RestConnectionConfig = {
+    kind: "REST",
+    baseUrl: "https://api.example.com",
+    authScheme: "NONE",
+    defaultHeaders: {
+      Authorization: WORKFLOW_REDACTED_VALUE,
+      Accept: WORKFLOW_REDACTED_VALUE,
+    },
+  };
+
+  const config = buildConnectionConfig(restForm, existing);
+
+  expect(config).toMatchObject({
+    defaultHeaders: {
+      Authorization: "[redacted]",
+      Accept: "[redacted]",
+    },
+  });
+  expect(WorkflowConnectionConfigSchema.safeParse(config).success).toBe(true);
 });

@@ -2,7 +2,11 @@
   "title": "Notificaciones",
   "ariaLabel": "{count, plural, =0 {Notificaciones} one {Notificaciones, # sin leer} other {Notificaciones, # sin leer}}",
   "markAllRead": "Marcar todo como leído",
+  "clearAll": "Descartar todas",
   "empty": "Estás al día.",
   "unreadDot": "Sin leer",
-  "occurredAt": "Ocurrió {datetime}"
+  "occurredAt": "Ocurrió {datetime}",
+  "dismiss": "Descartar notificación: {title}",
+  "dismissFailed": "No se pudo descartar la notificación.",
+  "clearAllFailed": "No se pudieron descartar tus notificaciones."
 }

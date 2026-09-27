@@ -17,6 +17,7 @@
  * now validates OIDC Bearer JWTs via its global auth guard (ADR-0038).
  */
 
+import { readSseStream, type SseMessage } from "../ai/sse-parser";
 import { getSessionToken } from "./session-token";
 
 /**
@@ -133,17 +134,69 @@ export async function apiFetchBlob(
     },
   });
 
-  if (!res.ok) {
-    const isJson = res.headers
-      .get("content-type")
-      ?.includes("application/json");
-    const payload = isJson ? await res.json().catch(() => undefined) : undefined;
-    const message =
-      (payload as { message?: string } | undefined)?.message ??
-      `API request failed: ${res.status} ${res.statusText}`;
-    const requestId = res.headers.get("x-request-id") ?? undefined;
-    throw new ApiError(res.status, message, payload, requestId);
-  }
+  if (!res.ok) throw await errorFromResponse(res);
 
   return res.blob();
+}
+
+/** Builds the {@link ApiError} for a non-2xx response whose body has not been read (best-effort JSON message). */
+async function errorFromResponse(res: Response): Promise<ApiError> {
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+  const payload = isJson ? await res.json().catch(() => undefined) : undefined;
+  const message =
+    (payload as { message?: string } | undefined)?.message ??
+    `API request failed: ${res.status} ${res.statusText}`;
+  const requestId = res.headers.get("x-request-id") ?? undefined;
+  return new ApiError(res.status, message, payload, requestId);
+}
+
+export interface ApiFetchStreamOptions extends Omit<ApiFetchOptions, "body"> {
+  /**
+   * The `id` of the last event the caller processed, sent as `Last-Event-ID` so the server resumes
+   * after it (the AI run stream replays from its buffer or answers with a snapshot). Omit on the
+   * first connection.
+   */
+  lastEventId?: string;
+}
+
+/**
+ * Open a Server-Sent Events stream at `path` and return its events as an async iterable — the fetch-based
+ * reader for the AI run stream (docs/ai-assistant/_synthesis.md §4.6). `EventSource` cannot carry the
+ * Bearer token, so this resolves the same token as {@link apiFetch} and parses the body itself.
+ *
+ * It always sends `Accept: text/event-stream`: the reverse proxy excludes a response from compression
+ * by that request header (infra, #1322), and a compressed stream would be buffered. Resolves once the
+ * response headers arrive; throws {@link ApiError} on a non-2xx status or when the body is not an event
+ * stream. Pass `signal` to abort — the fetch, or the iteration once it is running, then rejects with an
+ * `AbortError`. Breaking out of the iteration releases the connection.
+ */
+export async function apiFetchStream(
+  path: string,
+  { token, headers, lastEventId, ...init }: ApiFetchStreamOptions = {},
+): Promise<AsyncGenerator<SseMessage, void, undefined>> {
+  const resolvedToken = token ?? getSessionToken();
+  const requestHeaders = new Headers(headers);
+  if (resolvedToken) requestHeaders.set("Authorization", `Bearer ${resolvedToken}`);
+  if (lastEventId) requestHeaders.set("Last-Event-ID", lastEventId);
+  requestHeaders.set("Accept", "text/event-stream");
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    cache: "no-store",
+    headers: requestHeaders,
+  });
+
+  if (!res.ok) throw await errorFromResponse(res);
+  const isEventStream = res.headers.get("content-type")?.includes("text/event-stream");
+  if (!res.body || !isEventStream) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new ApiError(
+      res.status,
+      "API response is not an event stream",
+      undefined,
+      res.headers.get("x-request-id") ?? undefined,
+    );
+  }
+
+  return readSseStream(res.body);
 }

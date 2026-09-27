@@ -15,8 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api/client";
+import { handleAuthExpiry } from "@/lib/api/handle-auth-expiry";
 import { useChangePassword } from "@/lib/api/hooks/use-password-lifecycle";
 import { notifyError } from "@/lib/api/notify-error";
+import { isSessionRevoked } from "@/lib/api/session-revoked";
 import { setSessionToken } from "@/lib/api/session-token";
 import { toast } from "sonner";
 
@@ -87,8 +89,9 @@ export function ChangePasswordForm({
         onSuccess: async (result) => {
           // Swap to the fresh token BEFORE anything else so no client request races the dead one.
           setSessionToken(result.token);
-          // Persist it into the Auth.js session cookie (jwt callback honours a trigger:"update").
-          await update({ accessToken: result.token });
+          // Persist it into the Auth.js session cookie (jwt callback honours a trigger:"update"), with its
+          // expiry so the session still ends when the new token does (`null` = keep me signed in, #1307).
+          await update({ accessToken: result.token, expiresAt: result.expiresAt });
           form.reset();
           if (!forced) toast.success(t("success"));
           onSuccess?.();
@@ -97,6 +100,14 @@ export function ChangePasswordForm({
           // The API returns a 401 for a WRONG current password — surface it on that field, never as a
           // session sign-out (this mutation is exempt from the global handler). A 400 is the
           // new===current rejection (also caught client-side, but surface the server message if it slips).
+          // #1420: a 401 carrying `SESSION_REVOKED` is NOT a wrong password — a concurrent admin reset,
+          // deactivation or sign-out everywhere ended this session first and nothing was changed. Say so,
+          // then hand it to the global auth-expiry reaction, which signs this dead session out to /login.
+          if (isSessionRevoked(error)) {
+            toast.error(t("sessionRevoked"));
+            handleAuthExpiry(error);
+            return;
+          }
           if (error instanceof ApiError && error.status === 401) {
             form.setError("currentPassword", { message: t("currentIncorrect") });
             return;

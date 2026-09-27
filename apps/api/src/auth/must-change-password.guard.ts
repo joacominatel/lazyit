@@ -24,9 +24,9 @@ import { ALLOW_PASSWORD_CHANGE_REQUIRED_KEY } from './allow-password-change-requ
  *   - Only acts on an authenticated HUMAN with the flag set. A service principal (request.user undefined)
  *     and an anonymous request are never gated. A missing flag (the overwhelming majority) passes through.
  *   - EXEMPT: `@Public()` routes (no authenticated user to gate) and routes marked
- *     `@AllowPasswordChangeRequired()` — the change-password endpoint itself + `GET /users/me` (so the
- *     web can detect the state and render the forced-change screen). Logout is client-side (Auth.js drops
- *     the cookie), so there is no server route to exempt.
+ *     `@AllowPasswordChangeRequired()` — the change-password endpoint itself, `GET /users/me` (so the
+ *     web can detect the state and render the forced-change screen) and `POST /auth/logout` (signing out
+ *     must never be blocked, ADR-0086 §8).
  *
  * The 403 body carries `code` explicitly (a bare `ForbiddenException(string)` would not), so the web can
  * branch on the code rather than parse a message.

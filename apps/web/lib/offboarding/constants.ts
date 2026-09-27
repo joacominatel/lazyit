@@ -19,6 +19,13 @@ export const SHOW_ASSETS_KEY = "lazyit:offboarding:show-assets";
 /** Whether the printed act lists the access-revoked section. App-level setting (default on). */
 export const SHOW_ACCESS_KEY = "lazyit:offboarding:show-access";
 
+/**
+ * Whether the printed act lists the consumables section (ADR-0098). App-level setting (default on),
+ * like the two above. The per-row exclusions are per act, so they travel in the act URL instead — see
+ * `EXCLUDE_DELIVERIES_PARAM` in `lib/offboarding/consumables.ts`.
+ */
+export const SHOW_CONSUMABLES_KEY = "lazyit:offboarding:show-consumables";
+
 /** Sensible default handover note — the calm, respectful house voice. */
 export const DEFAULT_OFFBOARDING_MESSAGE =
   "Please return all listed equipment in working condition. Access to the systems below has been revoked as of today. Thank you for your contributions.";
@@ -26,6 +33,7 @@ export const DEFAULT_OFFBOARDING_MESSAGE =
 /** Default org name until the operator sets one. */
 export const DEFAULT_ORG_NAME = "lazyit";
 
-/** The act lists both sections by default — opt out per-act via the offboarding sheet. */
+/** The act lists every section by default — opt out per-act via the offboarding sheet. */
 export const DEFAULT_SHOW_ASSETS = true;
 export const DEFAULT_SHOW_ACCESS = true;
+export const DEFAULT_SHOW_CONSUMABLES = true;

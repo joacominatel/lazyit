@@ -42,7 +42,10 @@ describe('AssetModelsService', () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [AssetModelsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AssetModelsService,
+        { provide: PrismaService, useValue: prisma },
+      ],
     }).compile();
 
     service = moduleRef.get(AssetModelsService);
@@ -104,6 +107,34 @@ describe('AssetModelsService', () => {
     });
   });
 
+  it('clears the category: categoryId null is written through to Prisma (#1315)', async () => {
+    assetModel.findFirst.mockResolvedValue({ id: 'm1', deletedAt: null });
+    assetModel.update.mockResolvedValue({ id: 'm1', categoryId: null });
+
+    await service.update('m1', { categoryId: null });
+
+    expect(assetModel.update).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { categoryId: null },
+    });
+  });
+
+  it('clears the SKU and the description: null is written through to Prisma (#1441)', async () => {
+    assetModel.findFirst.mockResolvedValue({ id: 'm1', deletedAt: null });
+    assetModel.update.mockResolvedValue({
+      id: 'm1',
+      sku: null,
+      description: null,
+    });
+
+    await service.update('m1', { sku: null, description: null });
+
+    expect(assetModel.update).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { sku: null, description: null },
+    });
+  });
+
   it('soft-deletes by setting deletedAt (never hard delete)', async () => {
     assetModel.findFirst.mockResolvedValue({ id: 'm1', deletedAt: null });
     assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: new Date() });
@@ -139,7 +170,9 @@ describe('AssetModelsService', () => {
       take: 50,
       skip: 0,
     });
-    expect(assetModel.count).toHaveBeenCalledWith({ where: { deletedAt: null } });
+    expect(assetModel.count).toHaveBeenCalledWith({
+      where: { deletedAt: null },
+    });
     expect(result).toEqual({
       items: [{ id: 'm1' }],
       total: 1,

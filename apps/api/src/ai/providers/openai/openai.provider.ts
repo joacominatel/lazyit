@@ -1,0 +1,80 @@
+import { createOpenAI, openai } from '@ai-sdk/openai';
+
+import { fetchModelList, joinUrl, parseDataIdList } from '../model-listing';
+import type {
+  LlmProviderDefinition,
+  ProviderErrorPatterns,
+} from '../provider.types';
+
+const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const CONTEXT_LIMIT =
+  /context_length_exceeded|maximum context length|exceeds the context window/i;
+const ERROR_PATTERNS: ProviderErrorPatterns = { contextLimit: CONTEXT_LIMIT };
+/** Ids the OpenAI catalogue lists that are not chat models. */
+const NON_CHAT_MODEL =
+  /embedding|tts|whisper|dall-e|davinci|babbage|moderation|image|audio|realtime|transcribe|search|sora/i;
+
+/**
+ * OpenAI (Responses API) — provider-and-runtime.md §6.3.
+ *
+ * - `store: false`, so OpenAI keeps no copy of the generation. For the reasoning models the SDK then asks
+ *   for `reasoning.encrypted_content` and replays it statelessly from the persisted messages (W1-B
+ *   findings 4–5). A custom or aliased id the SDK does not recognise as a reasoning model is sent as a
+ *   plain model: forcing reasoning on would break the non-reasoning models (`gpt-4.1`, …).
+ * - `effort` maps to `reasoningEffort`, the one reasoning mechanism for this provider (finding 6).
+ * - The key and base URL are always explicit, so `OPENAI_API_KEY` / `OPENAI_BASE_URL` never apply.
+ * - Web search (#1389) is the Responses API `web_search` tool: OpenAI runs it. It takes no per-call cap;
+ *   with `store: false` the SDK does not replay the search item, only the answer that cites it. It runs
+ *   with `external_web_access: false` (cached / indexed content only): its `open_page` action cannot be
+ *   disabled, and live access would let an injected URL reach a third party directly.
+ * - Tools are sent `strict: false` (#1403). The Responses API treats an omitted `strict` as strict mode,
+ *   and strict mode makes the model fill every property of a tool's input (options, bounds and filters
+ *   that do not apply). lazyit's tool schemas are loose by design and validated server-side.
+ */
+export const openaiProvider: LlmProviderDefinition = {
+  kind: 'openai',
+  requiresApiKey: true,
+  defaultBaseUrl: OPENAI_BASE_URL,
+  errorPatterns: ERROR_PATTERNS,
+  toolStrict: false,
+
+  createModel(config, modelId, fetch) {
+    return createOpenAI({
+      apiKey: config.apiKey ?? '',
+      baseURL: config.baseUrl ?? OPENAI_BASE_URL,
+      fetch,
+    })(modelId);
+  },
+
+  webSearchTool() {
+    // `externalWebAccess: false` (Responses `external_web_access`): cached / indexed results only, no live
+    // fetch. The tool has an `open_page` action the API gives no way to turn off; offline, a URL an
+    // injected instruction makes up (data in its query string) is not fetched live from its host
+    // (#1389, G2 review; security.md §6.11).
+    return {
+      name: 'web_search',
+      tool: openai.tools.webSearch({ externalWebAccess: false }),
+    };
+  },
+
+  callSettings(config) {
+    return {
+      providerOptions: {
+        openai: {
+          store: false,
+          ...(config.effort ? { reasoningEffort: config.effort } : {}),
+        },
+      },
+    };
+  },
+
+  listModels(config, fetch) {
+    return fetchModelList(
+      fetch,
+      joinUrl(config.baseUrl ?? OPENAI_BASE_URL, 'models'),
+      { authorization: `Bearer ${config.apiKey ?? ''}` },
+      (body) => parseDataIdList(body).filter((m) => !NON_CHAT_MODEL.test(m.id)),
+      ERROR_PATTERNS,
+    );
+  },
+};

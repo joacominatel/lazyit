@@ -30,7 +30,9 @@ It detects your environment, asks a few questions, generates `infra/env/.env.pro
 secrets** (including a correctly-sized `ZITADEL_MASTERKEY`) in a file that is **mode 600 from creation**
 (secrets are never world-readable, even briefly), and brings the stack up
 — then points you at the in-app `/setup` wizard. It is **idempotent and non-destructive**: re-running
-it on an existing install skips generation and just brings the stack up.
+it on an existing install skips generation and just brings the stack up (appending only missing keys
+from its allowlist of safely generatable ones — see [[deploy-self-hosted]] and ADR-0047's 2026-09-26
+amendment).
 
 ```sh
 ./infra/start.sh            # interactive, guided
@@ -148,7 +150,7 @@ $DC down -v              # stop AND delete ALL volumes (incl. zitadel_db_data; s
 ## Teardown
 
 `down` keeps every named volume (your data survives). `down -v` removes **all five** volumes —
-`db_data`, `zitadel_db_data` (the whole IdP: users + OIDC client), `meili_data`, `caddy_data`,
+`db_data`, `zitadel_db_data` (the whole IdP: users + OIDC client), `meili_data_v1_53_2`, `caddy_data`,
 `caddy_config` — a full clean slate. Use it for a local reset only. To restore a real deployment do
 **not** use `down -v`: remove just the targeted volume (`docker volume rm lazyit-prod_db_data`) —
 see [[backups]].

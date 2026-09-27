@@ -85,6 +85,45 @@ la petición (limitación de tasa, la auditoría del primer arranque) ven al cli
 falsificada. Esto viene preconfigurado; no necesitas cambiarlo para un despliegue estándar en un único
 servidor.
 
+## El asistente de IA y los agentes externos
+
+Cuando la IA está activada, importan dos cosas:
+
+- **El chat transmite sus respuestas en streaming.** Caddy pasa el stream sin buffer y sin comprimir. Si
+  ponés **otro proxy o balanceador delante de Caddy**, tampoco tiene que bufferear ni comprimir
+  `text/event-stream` (nginx: `proxy_buffering off;` en la location de lazyit); si no, cada respuesta
+  aparece recién cuando está completa.
+- **El inicio de sesión de MCP necesita HTTPS y una dirección fija.** Caddy enruta el endpoint MCP
+  (`/mcp`) y las rutas de OAuth a la API. Los agentes de IA externos inician sesión con OAuth solo cuando
+  el origen público (`WEB_ORIGIN`) es una dirección `https://`; en una instancia HTTP plana (modo LAN)
+  usan tokens personales. Un proxy TLS delante de una instancia en modo LAN no alcanza: configurá
+  `WEB_ORIGIN` con la dirección `https://` y reiniciá la API. Los conectores en la nube (claude.ai,
+  ChatGPT) además necesitan que la instancia sea accesible desde internet con un certificado de confianza
+  pública. Mirá [Agentes de IA externos (MCP)](/help/ai-assistant-setup#agentes-de-ia-externos-mcp).
+
+## Content-Security-Policy
+
+La aplicación web envía su propia **Content-Security-Policy** en cada página. Es una segunda línea de
+defensa: si algo llegara a escaparse del saneado de los artículos de la Base de conocimiento o de las
+respuestas de la IA, el navegador igual se niega a ejecutar scripts inyectados o a cargar imágenes y
+conexiones de otros sitios. Los scripts se permiten con un valor de un solo uso generado para cada
+página, y las imágenes vienen solo del propio lazyit.
+
+Hoy la política funciona en modo **solo informe** (*report-only*): el navegador la evalúa y anota
+cualquier infracción en su consola de desarrollador como un mensaje `[Report Only]`, pero no bloquea
+nada. Insertar lazyit dentro de otro sitio (*framing*) ya está **bloqueado** en cualquier modo. Una
+versión posterior pasa la política a modo de bloqueo.
+
+Qué significa para ti:
+
+- **Nada que configurar** con el Caddy incluido. La política la envía la aplicación web, no Caddy.
+- **Tu propio proxy inverso** delante de lazyit **no debería agregar una segunda
+  `Content-Security-Policy`**. Los navegadores aplican todas las políticas que reciben, así que una
+  segunda puede bloquear los scripts que la aplicación permite. Si tu organización exige una en el
+  proxy, deja pasar sin cambios la cabecera de la aplicación.
+- **Las imágenes de otros sitios no se cargan**, ni en artículos ni en ningún otro lugar — es a
+  propósito. Sube la imagen como adjunto del artículo; los adjuntos los sirve el propio lazyit.
+
 ## Relacionado
 
 - [Autoalojamiento](/help/deployment-operations-self-hosting)

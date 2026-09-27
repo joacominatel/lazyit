@@ -36,6 +36,7 @@ export const PERMISSION_PILLARS = [
   "knowledge",
   "manage",
   "automation",
+  "ai",
 ] as const;
 export type PermissionPillar = (typeof PERMISSION_PILLARS)[number];
 
@@ -65,6 +66,11 @@ export const PILLAR_META: Record<
     label: "Automation",
     description:
       "The Applications Workflow Engine — workflow definitions, runs, manual tasks and connector credentials.",
+  },
+  ai: {
+    label: "AI",
+    description:
+      "The AI assistant chat, the headless API and external agents over MCP — each acts with the user's own permissions.",
   },
 };
 
@@ -329,6 +335,20 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "automation",
     tier: "coarse",
   },
+  // ── AI (ADR-0097) ────────────────────────────────────────────────────────────
+  // Channel verbs, not capabilities: the AI acts as the principal with exactly its own permissions
+  // (INV-AI-1). Both are MEMBER defaults (MEMBER_DEFAULT_CAPABILITIES), so they carry the within-default
+  // `edit` tier — granting one is never an escalation, like `accessRequest:create`.
+  "ai:use": {
+    label: "Use the AI assistant",
+    pillar: "ai",
+    tier: "edit",
+  },
+  "ai:connect": {
+    label: "Connect external AI agents (MCP)",
+    pillar: "ai",
+    tier: "edit",
+  },
 };
 
 /**
@@ -393,6 +413,9 @@ export const CAPABILITY_IDS = [
   "workflow.run",
   "workflow.task",
   "workflow.secrets",
+  // AI (ADR-0097)
+  "ai.use",
+  "ai.connect",
 ] as const;
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];
 
@@ -702,6 +725,25 @@ export const CAPABILITIES: readonly Capability[] = [
     pillar: "automation",
     permissions: ["workflow:secrets"],
   },
+  // ── AI (ADR-0097) ────────────────────────────────────────────────────────────
+  // Separate toggles because they are separate channels (CEO: a distinct `ai:connect` for MCP). Both are
+  // within-default (no ⚠): the AI never does more than the user could do themselves.
+  {
+    id: "ai.use",
+    label: "Use the AI assistant",
+    description:
+      "Chat with the in-app AI assistant, and let a service account send prompts over the headless API. The assistant acts with this role's own permissions and asks before changing anything. Needs AI to be enabled for the instance.",
+    pillar: "ai",
+    permissions: ["ai:use"],
+  },
+  {
+    id: "ai.connect",
+    label: "Connect external AI agents (MCP)",
+    description:
+      "Connect tools such as Claude Code or Cursor to lazyit over MCP. The agent acts with this role's own permissions. Needs MCP to be enabled for the instance.",
+    pillar: "ai",
+    permissions: ["ai:connect"],
+  },
 ];
 
 /** Quick lookup of a capability by id. */
@@ -751,7 +793,7 @@ export const PERMISSION_PRESETS: readonly PermissionPreset[] = [
     id: "editor",
     label: "Editor",
     description: "Read and edit everything except deletes and admin actions.",
-    // === MEMBER seed default: all reads + all writes.
+    // === MEMBER seed default: all reads + all writes + the self-service and AI channel verbs.
     permissions: buildDefaultRolePermissions().MEMBER,
   },
   {

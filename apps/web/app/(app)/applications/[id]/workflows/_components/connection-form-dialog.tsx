@@ -272,6 +272,13 @@ function ConnectionForm({
               <FieldDescription>
                 {t("connectionForm.urlHint")}
               </FieldDescription>
+              {connection?.legacyUserinfo ? (
+                // SEC-076: a pre-existing URL with user:pass@ keeps working, but saving the connection
+                // requires removing it (write validation) — tell the operator where it goes instead.
+                <p role="alert" className="text-xs text-destructive">
+                  {t("connectionForm.legacyUserinfoWarning")}
+                </p>
+              ) : null}
             </Field>
           ) : null}
 

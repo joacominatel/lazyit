@@ -22,6 +22,11 @@ import type {
   RevealSecret,
   TestConnectionResult,
 } from '../handlers/step-handler';
+import {
+  redactConnection,
+  resolveRedactedHeaders,
+  storedHeadersOf,
+} from './connection-redaction';
 
 /** The api-internal connection patch (name / config / credential reference). Kind is immutable. */
 export interface UpdateWorkflowConnectionInput {
@@ -67,10 +72,17 @@ function hostOf(config: WorkflowConnectionConfig): string | null {
   return null;
 }
 
+/** The REST `defaultHeaders` of a config (none for another kind). */
+function headersOf(config: WorkflowConnectionConfig): Record<string, string> {
+  return config.kind === 'REST' ? (config.defaultHeaders ?? {}) : {};
+}
+
 /**
  * WorkflowConnection CRUD (contract C1, ADR-0054 §4) — the per-app connector INSTANCE. `config` is the
- * zod-validated-per-kind non-secret settings (base URL, auth scheme, header names) — NEVER a credential
- * (that is a `secretId` reference into the encrypted store, INV-6). Mutable + soft-delete.
+ * zod-validated-per-kind settings (base URL, auth scheme, header names) — the credential is a
+ * `secretId` reference into the encrypted store (INV-6). `defaultHeaders` VALUES and a legacy URL's
+ * userinfo are NOT validated against credentials, so every read returns them redacted (SEC-075 /
+ * SEC-076) and changing them is gated like a credential (CSEC-1). Mutable + soft-delete.
  */
 @Injectable()
 export class WorkflowConnectionsService {
@@ -84,7 +96,7 @@ export class WorkflowConnectionsService {
   /** Create a connection. `config.kind` must equal `kind` (the shared DTO refine already guarantees it). */
   async create(dto: CreateWorkflowConnection) {
     await this.assertApplicationUsable(dto.applicationId);
-    return this.prisma.workflowConnection.create({
+    const created = await this.prisma.workflowConnection.create({
       data: {
         applicationId: dto.applicationId,
         kind: dto.kind,
@@ -92,6 +104,7 @@ export class WorkflowConnectionsService {
         config: dto.config,
       },
     });
+    return redactConnection(created);
   }
 
   async findPage(applicationId: string | undefined, page: PageQuery) {
@@ -109,10 +122,16 @@ export class WorkflowConnectionsService {
       }),
       this.prisma.workflowConnection.count({ where }),
     ]);
-    return pageOf(items, total, page);
+    return pageOf(items.map(redactConnection), total, page);
   }
 
+  /** A connection as served to a reader: header values and URL userinfo redacted (SEC-075/076). */
   async findOne(id: string) {
+    return redactConnection(await this.findLive(id));
+  }
+
+  /** The raw, UNREDACTED live row — internal only (the patch merge, the probe); never returned. */
+  private async findLive(id: string) {
     const connection = await this.prisma.workflowConnection.findFirst({
       where: { id, deletedAt: null },
     });
@@ -131,23 +150,41 @@ export class WorkflowConnectionsService {
    * whatever host the config names). Those two moves additionally require `workflow:secrets`, so the
    * manage/secrets separation holds. Both permissions are ADMIN-by-default, so the default admin path
    * is unchanged. Name-only / non-host config edits / clearing the credential stay manage-only.
+   *
+   * SEC-075: `defaultHeaders` may hold a pasted credential, so they are treated like one — adding or
+   * changing a header VALUE, or re-pointing the host of a connection that carries (or will carry) any
+   * default header, also requires `workflow:secrets`. A header value equal to the redaction sentinel
+   * keeps the stored value, so the redacted read round-trips without overwriting it.
    */
   async update(
     id: string,
     dto: UpdateWorkflowConnectionInput,
     principal?: Principal,
   ) {
-    const connection = await this.findOne(id);
+    const connection = await this.findLive(id);
     if (dto.config && dto.config.kind !== connection.kind) {
       throw new BadRequestException(
         `config.kind (${dto.config.kind}) must match the connection kind (${connection.kind})`,
       );
     }
+    // Resolve redacted header values back to the stored ones BEFORE the SoD gate compares them.
+    if (dto.config?.kind === 'REST' && dto.config.defaultHeaders) {
+      dto = {
+        ...dto,
+        config: {
+          ...dto.config,
+          defaultHeaders: resolveRedactedHeaders(
+            dto.config.defaultHeaders,
+            storedHeadersOf(connection.config),
+          ),
+        },
+      };
+    }
     await this.assertMaySetCredentialBinding(dto, connection, principal);
     if (dto.secretId !== undefined && dto.secretId !== null) {
       await this.assertSecretUsable(dto.secretId, connection.applicationId);
     }
-    return this.prisma.workflowConnection.update({
+    const updated = await this.prisma.workflowConnection.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -155,6 +192,7 @@ export class WorkflowConnectionsService {
         ...(dto.secretId !== undefined ? { secretId: dto.secretId } : {}),
       },
     });
+    return redactConnection(updated);
   }
 
   async softDelete(id: string): Promise<void> {
@@ -182,7 +220,7 @@ export class WorkflowConnectionsService {
    * at the controller. 404 if the connection is missing/deleted.
    */
   async test(id: string, requestId: string): Promise<TestConnectionOutcome> {
-    const connection = await this.findOne(id);
+    const connection = await this.findLive(id);
     const handler = this.registry.get(connection.kind);
     if (!handler?.testConnection) {
       return {
@@ -231,8 +269,10 @@ export class WorkflowConnectionsService {
    * Enforce the manage/secrets SoD (CSEC-1). Requires `workflow:secrets` when the patch would either
    * (a) attach/change the credential reference to a real secret (`secretId` set to non-null), or
    * (b) RE-POINT the host of a connection that bears (or will bear) a secret — the exact move that
-   * sends the revealed BEARER credential to a new endpoint. Clearing the credential (`secretId: null`),
-   * renaming, and non-host config edits stay manage-only. 403 when the gate is not met.
+   * sends the revealed BEARER credential to a new endpoint. SEC-075 extends both to `defaultHeaders`:
+   * (c) adding or changing any header VALUE, and (b') re-pointing the host of a connection that carries
+   * default headers before or after the patch. Clearing the credential (`secretId: null`), renaming,
+   * removing headers and other non-host config edits stay manage-only. 403 when the gate is not met.
    */
   private async assertMaySetCredentialBinding(
     dto: UpdateWorkflowConnectionInput,
@@ -250,18 +290,30 @@ export class WorkflowConnectionsService {
       dto.secretId !== undefined
         ? dto.secretId !== null
         : connection.secretId !== null;
+    const stored = connection.config as unknown as WorkflowConnectionConfig;
     const changingHost =
-      dto.config !== undefined &&
-      hostOf(dto.config) !==
-        hostOf(connection.config as unknown as WorkflowConnectionConfig);
+      dto.config !== undefined && hostOf(dto.config) !== hostOf(stored);
+    // SEC-075: default headers may carry a pasted credential. `dto.config` headers are already
+    // resolved (sentinels → stored values), so this compares real values.
+    const beforeHeaders = storedHeadersOf(connection.config) ?? {};
+    const afterHeaders = dto.config ? headersOf(dto.config) : beforeHeaders;
+    const carriesHeaders =
+      Object.keys(beforeHeaders).length > 0 ||
+      Object.keys(afterHeaders).length > 0;
+    const changingHeaderValues = Object.entries(afterHeaders).some(
+      ([name, value]) =>
+        !Object.hasOwn(beforeHeaders, name) || beforeHeaders[name] !== value,
+    );
     const needsSecretsPermission =
-      attachingSecret || (willBearSecret && changingHost);
+      attachingSecret ||
+      (changingHost && (willBearSecret || carriesHeaders)) ||
+      changingHeaderValues;
     if (!needsSecretsPermission) {
       return;
     }
     if (!(await this.principalHoldsSecretsPermission(principal))) {
       throw new ForbiddenException(
-        'Attaching a credential to a connection, or re-pointing the host of a secret-bearing connection, requires the workflow:secrets permission',
+        'Attaching a credential to a connection, changing its default header values, or re-pointing the host of a connection that bears a secret or default headers, requires the workflow:secrets permission',
       );
     }
   }

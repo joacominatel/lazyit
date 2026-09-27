@@ -2,12 +2,19 @@
 
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
 import { useMemo } from "react";
+import { ApiError } from "@/lib/api/client";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useAssets } from "@/lib/api/hooks/use-assets";
+import { useConsumableDeliveries } from "@/lib/api/hooks/use-consumables";
 import {
   useUserAssignments,
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
+import {
+  groupOffboardConsumables,
+  type OffboardConsumables,
+} from "./consumables";
+import { deriveOffboardingState } from "./state";
 
 /**
  * Resolves everything the Offboarding Sheet AND the printable Return Act need for one user, from the
@@ -54,10 +61,20 @@ export interface OffboardGrantRow {
 export interface OffboardingData {
   assets: OffboardAssetRow[];
   grants: OffboardGrantRow[];
+  /**
+   * The consumables delivered to the person (ADR-0098): what to ask back (returnable, still
+   * outstanding) and what they received (informational). Offboarding itself moves no stock.
+   */
+  consumables: OffboardConsumables;
+  /**
+   * True when the operator may not read consumables (403) — the section is omitted with a note rather
+   * than failing the whole sheet. Never set on any other failure (that is `isError`).
+   */
+  consumablesUnavailable: boolean;
   /** True while any of the underlying reads are still loading — drive skeletons off this. */
   isLoading: boolean;
   /**
-   * True when ANY of the four underlying reads failed. Critical: a failed read collapses `assets`/
+   * True when ANY of the underlying reads failed (a consumables 403 excepted, see above). Critical: a failed read collapses `assets`/
    * `grants` to empty (`data ?? []`), so without this flag a fetch error is indistinguishable from
    * "user holds nothing" — and the Return Act would under-report. Surfaces MUST render an explicit
    * error state (never `isEmpty`) when this is true and must NOT present an act built from partial
@@ -65,11 +82,12 @@ export interface OffboardingData {
    */
   isError: boolean;
   /**
-   * True ONLY when every read succeeded and the user genuinely holds nothing to return and has no
-   * access to revoke. Never true while loading or on error.
+   * True ONLY when every read succeeded and the user genuinely holds nothing to return, has no access
+   * to revoke and received no consumables. Never true while loading, on error, or when the consumables
+   * could not be read.
    */
   isEmpty: boolean;
-  /** Refetch all four underlying reads — wire to a "retry" control in the error state. */
+  /** Refetch every underlying read — wire to a "retry" control in the error state. */
   refetch: () => void;
 }
 
@@ -155,35 +173,76 @@ export function useOffboardingData(
     });
   }, [grantsQuery.data, appById]);
 
-  const isLoading =
-    assignmentsQuery.isLoading ||
-    grantsQuery.isLoading ||
-    assetsQuery.isLoading ||
-    applicationsQuery.isLoading;
+  // The person's consumable deliveries (ADR-0098), two reads: the AUTHORITATIVE outstanding list (what
+  // to ask back — a single "all" page could miss an old loaner) and the newest deliveries of any kind
+  // (the informational non-returnable group). Both capped at the hard-max page; the rest is counted.
+  const consumablesEnabled = enabled && Boolean(userId);
+  const outstandingQuery = useConsumableDeliveries(
+    { targetUserId: userId ?? "", outstandingOnly: true, limit: MAX_PAGE_LIMIT },
+    consumablesEnabled,
+  );
+  const deliveriesQuery = useConsumableDeliveries(
+    { targetUserId: userId ?? "", limit: MAX_PAGE_LIMIT },
+    consumablesEnabled,
+  );
+  const consumables = useMemo(
+    () => groupOffboardConsumables(outstandingQuery.data, deliveriesQuery.data),
+    [outstandingQuery.data, deliveriesQuery.data],
+  );
+  const forbidden = (error: unknown) =>
+    error instanceof ApiError && error.status === 403;
+  const consumablesForbidden =
+    forbidden(outstandingQuery.error) || forbidden(deliveriesQuery.error);
+  const consumablesError =
+    (outstandingQuery.isError && !forbidden(outstandingQuery.error)) ||
+    (deliveriesQuery.isError && !forbidden(deliveriesQuery.error));
 
   // Any failed read makes the resolved lists untrustworthy (they silently collapse to empty), so a
   // single failure poisons the whole view — better to refuse than to under-report on a compliance act.
-  const isError =
-    assignmentsQuery.isError ||
-    grantsQuery.isError ||
-    assetsQuery.isError ||
-    applicationsQuery.isError;
+  // (The one exception, a consumables 403, degrades to an omitted section — see deriveOffboardingState.)
+  const { isLoading, isError, isEmpty, consumablesUnavailable } =
+    deriveOffboardingState({
+      loading:
+        assignmentsQuery.isLoading ||
+        grantsQuery.isLoading ||
+        assetsQuery.isLoading ||
+        applicationsQuery.isLoading ||
+        outstandingQuery.isLoading ||
+        deliveriesQuery.isLoading,
+      coreError:
+        assignmentsQuery.isError ||
+        grantsQuery.isError ||
+        assetsQuery.isError ||
+        applicationsQuery.isError,
+      consumablesError,
+      consumablesForbidden,
+      assetCount: assets.length,
+      grantCount: grants.length,
+      consumableCount:
+        consumables.toReturn.length +
+        consumables.delivered.length +
+        consumables.toReturnMore +
+        consumables.deliveredMore,
+    });
 
   const refetch = () => {
     void assignmentsQuery.refetch();
     void grantsQuery.refetch();
     void assetsQuery.refetch();
     void applicationsQuery.refetch();
+    void outstandingQuery.refetch();
+    void deliveriesQuery.refetch();
   };
 
   return {
     assets,
     grants,
+    consumables,
+    consumablesUnavailable,
     isLoading,
     isError,
     // Genuinely-empty requires success: never conflate a failed read with "nothing to return".
-    isEmpty:
-      !isLoading && !isError && assets.length === 0 && grants.length === 0,
+    isEmpty,
     refetch,
   };
 }

@@ -18,6 +18,9 @@ time, or a whole tree of Markdown at once. Use **Import** from the Knowledge Bas
 | `.docx` (Word) | One article — the text is extracted to Markdown |
 | `.zip` | **Bulk import** — many articles, see below |
 
+**Word (`.docx`) files are supported** — you do not have to convert a Word document to Markdown
+first. PDF is not: export or copy the text out of the PDF and import that instead.
+
 The **text** is imported, and **images embedded in the document are carried over** as article
 attachments (see [Embedded images](#embedded-images) below). The original file itself is **not
 stored**, and non-image binaries are not kept.
@@ -33,6 +36,11 @@ Import is an article-write action and runs as the importing **person**, never as
 
 Pick a `.md`, `.txt` or `.docx` file, choose a category and status, and **Import**. The file is
 processed and you are taken straight to the new article. Larger files take a moment.
+
+> [!NOTE]
+> The **New article** screen also lets you drag a file onto the form, but that shortcut reads the
+> file in your browser, so it only takes `.md`, `.markdown` and `.txt`. **Word documents and `.zip`
+> archives go through Import**, on this page.
 
 ## Bulk import from a `.zip`
 

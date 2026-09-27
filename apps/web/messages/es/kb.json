@@ -107,8 +107,9 @@
     }
   },
   "mdImport": {
-    "hint": "Arrastra aquí un archivo .md para rellenar el contenido",
+    "hint": "Arrastra aquí un archivo .md, .markdown o .txt para rellenar el contenido",
     "choose": "Elegir un archivo .md",
+    "uploadOnly": "¿Vas a importar un documento de Word (.docx) o un .zip? Usa Importar desde la Base de conocimiento.",
     "overlay": "Suelta para importar su contenido",
     "toast": {
       "imported": "Markdown importado en el editor",
@@ -200,7 +201,7 @@
     "title": "Importar un artículo",
     "description": "Sube un archivo Markdown, de texto plano, Word (.docx) o ZIP (.zip). Solo se importa el texto: el archivo original no se almacena.",
     "fileLabel": "Archivo",
-    "fileHint": "Acepta .md, .txt, .docx y .zip (importación en lote).",
+    "fileHint": "Documentos de Word (.docx), Markdown (.md, .markdown), texto plano (.txt), o un .zip de Markdown para importación en lote.",
     "categoryLabel": "Categoría",
     "categorySelect": "Selecciona una categoría",
     "categoryNone": "Aún no hay categorías",
@@ -249,9 +250,49 @@
     "childFolderCount": "{count, plural, one {# subcarpeta} other {# subcarpetas}}",
     "articleCount": "{count, plural, one {# artículo} other {# artículos}}",
     "emptyFolder": "Carpeta vacía",
-    "delete": {
+    "actions": {
       "menuTitle": "Acciones de carpeta",
-      "menuAriaLabel": "Acciones para {name}",
+      "menuAriaLabel": "Acciones de {name}",
+      "newChild": "Nueva subcarpeta aquí",
+      "rename": "Renombrar",
+      "move": "Mover a…"
+    },
+    "form": {
+      "newRoot": "Nueva carpeta",
+      "createRootTitle": "Nueva carpeta",
+      "createRootDescription": "Una carpeta de primer nivel en la Base de conocimiento.",
+      "createInTitle": "Nueva carpeta en {name}",
+      "createDescription": "Se crea dentro de la carpeta que elegiste. Las carpetas pueden anidarse sin límite de profundidad.",
+      "renameTitle": "Renombrar carpeta",
+      "renameDescription": "Renombrar una carpeta no la mueve ni cambia quién puede leerla.",
+      "nameLabel": "Nombre",
+      "namePlaceholder": "p. ej. Firewalls",
+      "nameRequired": "Escribe un nombre de carpeta",
+      "create": "Crear carpeta",
+      "save": "Guardar",
+      "created": "Carpeta creada",
+      "renamed": "Carpeta renombrada",
+      "createError": "No se pudo crear la carpeta",
+      "renameError": "No se pudo renombrar la carpeta"
+    },
+    "move": {
+      "title": "Mover carpeta",
+      "description": "Elige dónde debe vivir {name}. Sus subcarpetas y sus artículos se mueven con ella.",
+      "parentLabel": "Nueva carpeta padre",
+      "parentPlaceholder": "Elige una carpeta",
+      "root": "Primer nivel (sin padre)",
+      "confirm": "Mover carpeta",
+      "unchanged": "Esa carpeta ya está aquí.",
+      "moved": "Se movió {name}",
+      "error": "No se pudo mover la carpeta"
+    },
+    "errors": {
+      "cycle": "Una carpeta no puede moverse dentro de sí misma ni de una de sus subcarpetas.",
+      "deadParent": "Esa carpeta ya no existe; puede que alguien la haya eliminado. Recarga la página e inténtalo de nuevo.",
+      "duplicateName": "Ya existe una carpeta con este nombre aquí. Elige otro nombre.",
+      "duplicateInDestination": "El destino ya tiene una carpeta con este nombre. Renombra una de las dos primero."
+    },
+    "delete": {
       "action": "Eliminar carpeta",
       "title": "¿Eliminar esta carpeta?",
       "warning": "<b>{name}</b> y todo lo que contiene se eliminará de la base de conocimiento.",

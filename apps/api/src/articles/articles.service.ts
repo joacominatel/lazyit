@@ -442,12 +442,26 @@ export class ArticlesService {
    * edit changes any versioned field (title/content/excerpt), it appends a new ArticleVersion in the
    * same transaction (ADR-0042) — so the prior body is preserved, not overwritten (ADR-0006). A
    * metadata-only or no-op edit does NOT create a version (status is never touched by PATCH).
+   *
+   * A `categoryId` in the body is a MOVE between folders, and the home folder is the article's access
+   * rule (ADR-0060 §1). It is gated by the §4 destination check (moving into a folder the actor cannot
+   * read is refused — ADR-0060 §9) and, unlike other metadata, it DOES append a version so the move is
+   * auditable. Moving OUT of a restricted folder into a more permissive one stays allowed by design.
    */
   async update(id: string, data: UpdateArticle, principal?: Principal) {
     const cu = this.requireAuthor(principal);
     const manageAny = await this.canManageAny(principal);
     const current = await this.loadOwned(id, cu, manageAny, principal);
-    if (data.categoryId) await this.assertCategoryUsable(data.categoryId);
+    // A `categoryId` on a PATCH is a MOVE between folders — and the home folder IS the article's
+    // access rule (ADR-0060 §1), so it is an authorization write, not a metadata edit. It gets the
+    // §4 destination guard, placed HERE (after loadOwned) on purpose: loadOwned returns early for
+    // the author (the unchanged author path), so a check inside it would never run for them.
+    // A no-op `categoryId` (the folder the article is ALREADY in) is not a move and is deliberately
+    // NOT checked: validating it would retro-validate the article's current placement on an unrelated
+    // PATCH, which is exactly the upgrade-unsafe behaviour this guard must not have.
+    if (data.categoryId && data.categoryId !== current.categoryId) {
+      await this.assertMoveDestinationUsable(data.categoryId, principal);
+    }
     const { metadata, ...rest } = data;
     const article = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.article.update({
@@ -467,7 +481,16 @@ export class ArticlesService {
       });
       // Snapshot only when a versioned field actually changed (avoids a noise version on a
       // metadata-only or idempotent PATCH). status is never changed here (publish/unpublish do that).
-      if (this.versionedFieldsChanged(current, updated)) {
+      //
+      // A folder MOVE also snapshots (ADR-0060 §9), even though no versioned field changed: the home
+      // folder IS the article's access rule (§1), so a move can WIDEN who may read the document, and
+      // until now it left no append-only trace at all — only the overwritten `lastEditedById`. The
+      // snapshot dates the move on the ArticleVersion timeline with its actor (ADR-0006 append-only);
+      // its body is identical to the previous revision BY DESIGN — it records that the move happened
+      // and by whom, not a content diff. Recording the source/destination folder ON the version row
+      // would need a schema change and is deliberately NOT done here (ADR-0060 §9).
+      const movedFolder = current.categoryId !== updated.categoryId;
+      if (this.versionedFieldsChanged(current, updated) || movedFolder) {
         await this.snapshotVersion(
           tx,
           updated,
@@ -524,16 +547,17 @@ export class ArticlesService {
       throw new NotFoundException(`Article ${id} not found`);
     }
     if (article.authorId !== cu) {
-      // #877 authorship bypass: an ADMIN / `article:manage` holder may restore ANY article. A non-admin
-      // manage-holder still passes the folder ACL (ADR-0060 §4; ADMIN → 'ALL' no-op) — mirrors loadOwned.
+      // Visibility BEFORE authorization (SEC-074, INV-9) — mirrors loadOwned: any non-author who can't
+      // read the home folder gets 404 (ADR-0060 §4; ADMIN → 'ALL' no-op), and only then the authorship
+      // 403. #877: an ADMIN / `article:manage` holder may restore ANY article in a folder they can read.
+      await this.assertFolderVisible(article.categoryId, principal, () => {
+        throw new NotFoundException(`Article ${id} not found`);
+      });
       if (!manageAny) {
         throw new ForbiddenException(
           'Only the author can restore this article',
         );
       }
-      await this.assertFolderVisible(article.categoryId, principal, () => {
-        throw new NotFoundException(`Article ${id} not found`);
-      });
     }
     if (article.deletedAt === null) {
       return article; // already live — idempotent
@@ -1078,8 +1102,9 @@ export class ArticlesService {
   }
 
   /**
-   * Load an article for a write and enforce author-only: 404 if missing or a draft the caller can't
-   * see (hides existence), 403 if it's a published article owned by someone else.
+   * Load an article for a write and enforce author-only: 404 if missing, a draft the caller can't
+   * see, or (for any non-author) in a home folder the caller can't read (hides existence — SEC-074,
+   * INV-9); 403 only for a published article the caller CAN read but does not own.
    *
    * `canManageAny` (#877) is the AUTHORSHIP bypass: an ADMIN (god-mode, ADR-0060 §5) or a holder of the
    * delegatable `article:manage` verb may edit/publish/delete/restore ANY article, including another
@@ -1105,19 +1130,20 @@ export class ArticlesService {
     if (article.authorId === currentUserId) {
       return article; // the author — unchanged path
     }
-    // Not the author.
-    if (!canManageAny) {
-      // Original author-only gate: hide a foreign DRAFT's existence (404), else 403.
-      if (article.status === 'DRAFT') {
-        throw new NotFoundException(`Article ${id} not found`);
-      }
-      throw new ForbiddenException('Only the author can modify this article');
+    // Not the author. Visibility BEFORE authorization (SEC-074, INV-9): hide what the caller can't
+    // READ first — a foreign DRAFT (ADR-0022) and a folder-hidden article (ADR-0060 §4) both 404, the
+    // same as a missing id — and only then decide the authorship 403. Deciding the 403 first made the
+    // write paths an existence oracle for published articles in folders the caller cannot see.
+    if (!canManageAny && article.status === 'DRAFT') {
+      throw new NotFoundException(`Article ${id} not found`);
     }
-    // #877 authorship bypass: still enforce the folder ACL for a non-admin manage-holder so they can't
-    // reach a folder-hidden article they can't READ (ADR-0060 §4). ADMIN → 'ALL' → no-op.
+    // Applies to every non-author, including a non-admin manage-holder (#877). ADMIN → 'ALL' → no-op.
     await this.assertFolderVisible(article.categoryId, principal, () => {
       throw new NotFoundException(`Article ${id} not found`);
     });
+    if (!canManageAny) {
+      throw new ForbiddenException('Only the author can modify this article');
+    }
     return article;
   }
 
@@ -1196,9 +1222,52 @@ export class ArticlesService {
       select: { id: true },
     });
     if (!category) {
-      throw new BadRequestException(
-        `categoryId ${categoryId} does not reference a live category`,
-      );
+      throw this.unusableCategory(categoryId);
+    }
+  }
+
+  /**
+   * The 400 an unusable `categoryId` raises. Shared by the "not live" check and the move-destination
+   * visibility check so an INVISIBLE folder is byte-for-byte indistinguishable from a NON-EXISTENT
+   * one — the ADR-0060 §4 existence-hiding rule expressed on a request-body field.
+   */
+  private unusableCategory(categoryId: string): BadRequestException {
+    return new BadRequestException(
+      `categoryId ${categoryId} does not reference a live category`,
+    );
+  }
+
+  /**
+   * Destination guard for an article MOVE — `PATCH /articles/:id` carrying `categoryId` (ADR-0060 §9).
+   *
+   * An article has NO access rule of its own; it inherits its home folder's wholesale (§1). So moving
+   * it is an authorization write and needs the same §4 evaluation the read path runs — through the
+   * SAME {@link FolderAccessService} the no-escalation alias gate uses (§6 / INV-9), never a second
+   * evaluator.
+   *
+   * - **Into a folder the actor cannot read → REFUSED.** Placing a document in a space you cannot see
+   *   is a blind write; it is the move-shaped twin of the INV-9 alias rule.
+   * - **Out of a restricted folder into a more permissive one → ALLOWED** (§9). Refusing it would
+   *   strand every document that started life in a restricted folder — a normal publish workflow. The
+   *   widening is confirmed in the UI, not blocked here, and it is recorded on the version timeline
+   *   by {@link update}.
+   *
+   * The refusal reuses the "not a live category" 400 VERBATIM ({@link unusableCategory}): a 403 would
+   * confirm the restricted folder exists, and a 404 would falsely deny the ARTICLE, which is right
+   * there in the URL. ADMIN resolves to `'ALL'`, so this is a no-op for an admin (§5 god-mode).
+   *
+   * **Write-path only.** Nothing here re-validates where an article ALREADY sits: a legacy article in
+   * a folder its author cannot read stays exactly as readable as before, and no existing row is ever
+   * retro-validated. Only a NEW move is checked.
+   */
+  private async assertMoveDestinationUsable(
+    categoryId: string,
+    principal?: Principal,
+  ): Promise<void> {
+    await this.assertCategoryUsable(categoryId);
+    const visible = await this.folderAccess.visibleFolderIds(principal);
+    if (!folderVisible(visible, categoryId)) {
+      throw this.unusableCategory(categoryId);
     }
   }
 

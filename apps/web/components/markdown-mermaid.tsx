@@ -23,9 +23,12 @@ import { Lightbox } from "@/components/markdown-lightbox";
  * construction, and `rehype-raw` is never enabled.
  *
  * Security posture (SEC-003):
- *  - mermaid is initialised with `securityLevel: 'strict'` — it sanitises its own SVG output,
- *    HTML labels are disabled, and **no** click-handlers / `bindFunctions` are produced, so an
- *    untrusted diagram can neither inject markup nor wire script.
+ *  - mermaid is initialised with `securityLevel: 'strict'` — it sanitises its own SVG output and
+ *    **no** click-handlers / `bindFunctions` are produced, so an untrusted diagram cannot wire script.
+ *  - labels render as SVG `<text>`, not HTML: the root `htmlLabels: false`, which is also listed in
+ *    `secure` so a diagram's `%%{init}%%` directive or front-matter `config:` cannot turn HTML
+ *    labels back on (SEC-084). With HTML labels, an author's `<img src="https://…">` in a node
+ *    label survives strict mode and loads from the reader's browser — a tracking pixel.
  *  - `startOnLoad: false` — we never let mermaid auto-scan the DOM; rendering is explicit and
  *    off-DOM via `mermaid.render(id, text)`, whose returned string is the only thing mounted.
  *  - mermaid is a heavy, browser-only library (it touches `document`/`DOMPurify`), so it is
@@ -43,29 +46,53 @@ type RenderState =
   | { status: "error" };
 
 /**
- * Singleton mermaid loader. `mermaid.initialize` is idempotent and global, so we configure it
- * exactly once and share the module across every diagram on the page. Importing inside this
- * promise (not at module scope) keeps mermaid off the server and out of unrelated bundles.
+ * Singleton mermaid loader. The module is imported once and shared across every diagram on the
+ * page; importing inside this promise (not at module scope) keeps mermaid off the server and out of
+ * unrelated bundles. `mermaid.initialize` is global and rebuilds the site config from mermaid's
+ * defaults on every call, so it is re-run whenever the app theme flips — otherwise a diagram keeps
+ * the theme of whichever mode it was first loaded in.
  */
-let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
+/** Mermaid's own default `secure` list (mermaid 12 `config.schema.yaml`), kept when extending it. */
+const MERMAID_DEFAULT_SECURE_KEYS = [
+  "secure",
+  "securityLevel",
+  "startOnLoad",
+  "maxTextSize",
+  "suppressErrorRendering",
+  "maxEdges",
+];
 
-function loadMermaid(dark: boolean) {
+let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
+let initializedDark: boolean | null = null;
+
+export function loadMermaid(dark: boolean) {
   if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then(({ default: mermaid }) => {
+    mermaidPromise = import("mermaid").then(({ default: mermaid }) => mermaid);
+  }
+  return mermaidPromise.then((mermaid) => {
+    if (initializedDark !== dark) {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
-        // `theme: 'base'` lets the diagram inherit a neutral palette that reads on the warm-bone
-        // surface in both themes; the dark flag only flips it to mermaid's dark base. Colour is
+        // Mermaid 12 look (#1402): light mode sets no `theme`, so each diagram type gets
+        // mermaid's own default — `redux-color` + the `neo` look for flowchart, class, state, ER,
+        // sequence and the rest; `default` for the others. Dark mode needs an explicit theme
+        // (mermaid does not follow the page's colour scheme), so it takes the matching dark
+        // variant, `redux-dark-color`. Layout is left at mermaid's default (ELK). Colour is
         // mermaid's own (decorative, glyph-like), so it does not violate ADR-0049 §4 text-AA.
-        theme: dark ? "dark" : "base",
+        ...(dark ? { theme: "redux-dark-color" as const } : {}),
         fontFamily: "inherit",
-        flowchart: { htmlLabels: false },
+        // SEC-084: the ROOT option. `flowchart.htmlLabels` is deprecated (mermaid ≥ 11.12.3) and
+        // does not stop flowchart node labels rendering as HTML — do not move it back there.
+        htmlLabels: false,
+        // Keys a diagram's directive / front-matter config may not override. Setting `secure`
+        // replaces mermaid's default list, so the defaults are repeated before `htmlLabels`.
+        secure: [...MERMAID_DEFAULT_SECURE_KEYS, "htmlLabels"],
       });
-      return mermaid;
-    });
-  }
-  return mermaidPromise;
+      initializedDark = dark;
+    }
+    return mermaid;
+  });
 }
 
 /**

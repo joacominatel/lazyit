@@ -23,8 +23,17 @@ const APP_ID = 'app-cuid-1';
 const USER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const CONSUMABLE_ID = 'cons-cuid-1';
 
+/** The slice of an emitted notification these assertions read (typed so the mock calls aren't `any`). */
+interface Emitted {
+  type: string;
+  dedupeKey: string;
+  entityType?: string;
+  entityId?: string;
+}
+type EmitMock = jest.Mock<Promise<unknown>, [Emitted]>;
+
 describe('AccessGrant.create emitters (critical_app_access + admin_granted)', () => {
-  let notifications: { emit: jest.Mock };
+  let notifications: { emit: EmitMock };
   let prisma: {
     user: { findFirst: jest.Mock; findUnique: jest.Mock };
     application: { findFirst: jest.Mock; findUnique: jest.Mock };
@@ -41,7 +50,9 @@ describe('AccessGrant.create emitters (critical_app_access + admin_granted)', ()
   });
 
   beforeEach(() => {
-    notifications = { emit: jest.fn().mockResolvedValue('notif-1') };
+    notifications = {
+      emit: jest.fn<Promise<unknown>, [Emitted]>().mockResolvedValue('notif-1'),
+    };
     prisma = {
       user: {
         findFirst: jest.fn().mockResolvedValue({ id: USER_ID }),
@@ -83,7 +94,7 @@ describe('AccessGrant.create emitters (critical_app_access + admin_granted)', ()
     const calls = notifications.emit.mock.calls.map((c) => c[0]);
     const critical = calls.find((c) => c.type === 'critical_app_access');
     expect(critical).toBeDefined();
-    expect(critical.dedupeKey).toBe('critical_app_access:grant-1');
+    expect(critical?.dedupeKey).toBe('critical_app_access:grant-1');
     expect(critical).toMatchObject({
       entityType: 'application',
       entityId: APP_ID,
@@ -119,7 +130,7 @@ describe('AccessGrant.create emitters (critical_app_access + admin_granted)', ()
       .map((c) => c[0])
       .find((c) => c.type === 'admin_granted');
     expect(admin).toBeDefined();
-    expect(admin.dedupeKey).toBe('admin_granted:grant-1');
+    expect(admin?.dedupeKey).toBe('admin_granted:grant-1');
   });
 
   it('is BEST-EFFORT + POST-COMMIT: a throwing emit never fails the grant (create still returns)', async () => {
@@ -142,9 +153,13 @@ describe('AccessGrant.create emitters (critical_app_access + admin_granted)', ()
 });
 
 describe('Consumable.createMovement low_stock emitter (downward-crossing + dedupe)', () => {
-  let notifications: { emit: jest.Mock };
+  let notifications: { emit: EmitMock };
   let consumable: { findFirst: jest.Mock };
-  let txConsumable: { findFirst: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
+  let txConsumable: {
+    findFirst: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+  };
   let txMovement: { create: jest.Mock };
   let prisma: {
     consumable: { findFirst: jest.Mock };
@@ -153,24 +168,32 @@ describe('Consumable.createMovement low_stock emitter (downward-crossing + dedup
   let service: ConsumablesService;
 
   beforeEach(() => {
-    notifications = { emit: jest.fn().mockResolvedValue('notif-1') };
+    notifications = {
+      emit: jest.fn<Promise<unknown>, [Emitted]>().mockResolvedValue('notif-1'),
+    };
     consumable = { findFirst: jest.fn() };
     txConsumable = {
       findFirst: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     };
-    txMovement = { create: jest.fn().mockResolvedValue({ id: 1, type: 'OUT' }) };
+    txMovement = {
+      create: jest.fn().mockResolvedValue({ id: 1, type: 'OUT' }),
+    };
     prisma = {
       consumable,
       $transaction: jest.fn((cb: (tx: unknown) => unknown) =>
         cb({ consumable: txConsumable, consumableMovement: txMovement }),
       ),
     };
+    // The asset-history writer and the permission resolver (ADR-0098) are only reached by a delivery
+    // to an asset / a target resolution — never by these untargeted low-stock movements.
     service = new ConsumablesService(
       prisma as never,
       new ActorService(),
       notifications as never,
+      {} as never,
+      {} as never,
     );
   });
 
@@ -183,7 +206,7 @@ describe('Consumable.createMovement low_stock emitter (downward-crossing + dedup
     await service.createMovement(CONSUMABLE_ID, { type: 'OUT', quantity: 2 });
 
     expect(notifications.emit).toHaveBeenCalledTimes(1);
-    const emitted = notifications.emit.mock.calls[0]![0];
+    const emitted = notifications.emit.mock.calls[0][0];
     expect(emitted.type).toBe('low_stock');
     expect(emitted.entityType).toBe('consumable');
     expect(emitted.entityId).toBe(CONSUMABLE_ID);

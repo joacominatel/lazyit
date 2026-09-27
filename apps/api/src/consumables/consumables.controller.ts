@@ -18,6 +18,8 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ConsumableDeliveryPageSchema,
+  ConsumableDeliveryQuerySchema,
   ConsumableListPageSchema,
   ConsumableMovementQuerySchema,
   ConsumableMovementSchema,
@@ -46,6 +48,9 @@ class ConsumableListPageDto extends createZodDto(ConsumableListPageSchema) {}
 class CreateConsumableDto extends createZodDto(CreateConsumableSchema) {}
 class UpdateConsumableDto extends createZodDto(UpdateConsumableSchema) {}
 class ConsumableMovementDto extends createZodDto(ConsumableMovementSchema) {}
+class ConsumableDeliveryPageDto extends createZodDto(
+  ConsumableDeliveryPageSchema,
+) {}
 class CreateConsumableMovementDto extends createZodDto(
   CreateConsumableMovementSchema,
 ) {}
@@ -151,6 +156,104 @@ export class ConsumablesController {
     );
   }
 
+  // Declared BEFORE `:id` so `deliveries` is never captured as a consumable id. Gated on
+  // `consumable:read`; the service ALSO requires the target domain's read permission (`user:read` for a
+  // person — a VIEWER lacks it, the ADR-0046 P3 directory-relational rule — `asset:read`,
+  // `location:read`), else 403 (ADR-0098).
+  @Get('deliveries')
+  @RequirePermission('consumable:read')
+  @ApiOperation({
+    summary:
+      'List the consumable deliveries made to ONE user, asset or location (paginated, newest first; ADR-0098)',
+    description:
+      'Exactly one of targetUserId / targetAssetId / targetLocationId is required (400 otherwise). ' +
+      'Listing by targetUserId also requires user:read, by targetAssetId asset:read, by targetLocationId ' +
+      'location:read (403 otherwise). Deliveries of soft-deleted consumables stay listed (the consumable ' +
+      'carries its deletedAt), and a soft-deleted target is flagged in `target`, never a 404.',
+  })
+  @ApiQuery({
+    name: 'targetUserId',
+    required: false,
+    description: 'Deliveries made to this user (uuid).',
+  })
+  @ApiQuery({
+    name: 'targetAssetId',
+    required: false,
+    description: 'Deliveries made to this asset (cuid).',
+  })
+  @ApiQuery({
+    name: 'targetLocationId',
+    required: false,
+    description: 'Deliveries left at this location (cuid).',
+  })
+  @ApiQuery({
+    name: 'outstandingOnly',
+    required: false,
+    type: Boolean,
+    description:
+      'When true, only returnable deliveries with units still outstanding.',
+  })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    description: 'Inclusive lower bound on createdAt (ISO datetime).',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    description: 'Inclusive upper bound on createdAt (ISO datetime).',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size. Default 50, max 200 (ADR-0030).',
+  })
+  @ApiQuery({
+    name: 'offset',
+    required: false,
+    type: Number,
+    description: 'Zero-based offset. Mutually redundant with page.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: '1-based page number (alternative to offset).',
+  })
+  @ApiOkResponse({ type: ConsumableDeliveryPageDto })
+  findDeliveries(
+    @Query('targetUserId') targetUserId?: string,
+    @Query('targetAssetId') targetAssetId?: string,
+    @Query('targetLocationId') targetLocationId?: string,
+    @Query('outstandingOnly') outstandingOnly?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    const parsed = ConsumableDeliveryQuerySchema.safeParse({
+      targetUserId,
+      targetAssetId,
+      targetLocationId,
+      outstandingOnly,
+      from,
+      to,
+    });
+    if (!parsed.success) {
+      throw new BadRequestException(
+        'Invalid delivery filters: exactly one of targetUserId (uuid), targetAssetId (cuid) or targetLocationId (cuid); from/to (ISO datetime, from <= to)',
+      );
+    }
+    return this.consumables.findDeliveries(
+      parsed.data,
+      parsePageQuery({ limit, offset, page }),
+      principal,
+    );
+  }
+
   @Get(':id')
   @RequirePermission('consumable:read')
   @ApiOperation({ summary: 'Get a consumable by id' })
@@ -163,6 +266,10 @@ export class ConsumablesController {
   @RequirePermission('consumable:read')
   @ApiOperation({
     summary: "List a consumable's stock movements (newest first)",
+    description:
+      'Each row carries its resolved delivery `target` (ADR-0098) — null when untargeted. The display ' +
+      'fields are null when the caller lacks the target domain read permission (user:read / asset:read / ' +
+      'location:read).',
   })
   @ApiQuery({
     name: 'type',
@@ -185,6 +292,7 @@ export class ConsumablesController {
     @Query('type') type?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     const parsed = ConsumableMovementQuerySchema.safeParse({ type, from, to });
     if (!parsed.success) {
@@ -192,7 +300,7 @@ export class ConsumablesController {
         'Invalid movement filters: type (IN|OUT|ADJUSTMENT) and from/to (ISO datetime)',
       );
     }
-    return this.consumables.listMovements(id, parsed.data);
+    return this.consumables.listMovements(id, parsed.data, principal);
   }
 
   @Post()
@@ -239,6 +347,12 @@ export class ConsumablesController {
   @ApiOperation({
     summary:
       'Record a stock movement (IN adds, OUT subtracts, ADJUSTMENT sets) (ADMIN or MEMBER)',
+    description:
+      'Delivery (ADR-0098): an OUT may name ONE target — targetUserId | targetAssetId | targetLocationId ' +
+      '(a missing or soft-deleted target → 400); the consumable returnable flag is snapshotted onto it. ' +
+      'Return: an IN with returnOfId gives back (part of) a returnable delivery of THIS consumable — a ' +
+      'missing / foreign / untargeted / non-returnable delivery → 400; more than outstanding → 409. A ' +
+      'delivery to (or return from) an asset appends CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED to its history.',
   })
   @ApiCreatedResponse({ type: ConsumableMovementDto })
   createMovement(

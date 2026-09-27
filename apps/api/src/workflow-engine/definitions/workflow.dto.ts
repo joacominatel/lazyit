@@ -6,7 +6,9 @@ import {
   CreateWorkflowSecretSchema,
   CreateWorkflowVersionSchema,
   UpdateApplicationWorkflowSchema,
+  URL_USERINFO_REFUSAL,
   WorkflowConnectionConfigSchema,
+  connectionConfigHasUserinfo,
 } from '@lazyit/shared';
 
 /**
@@ -43,6 +45,14 @@ export const UpdateWorkflowConnectionApiSchema = z
   .refine(
     (v) => Object.keys(v).length > 0,
     'Provide at least one field to update',
+  )
+  // SEC-076: a destination URL may not carry userinfo on write (a stored legacy row still reads).
+  .refine(
+    (v) => v.config === undefined || !connectionConfigHasUserinfo(v.config),
+    {
+      message: URL_USERINFO_REFUSAL,
+      path: ['config'],
+    },
   );
 export class UpdateWorkflowConnectionDto extends createZodDto(
   UpdateWorkflowConnectionApiSchema,

@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-09-25
 ---
 
 # Asset
@@ -22,6 +22,12 @@ concrete instance of a generic [[asset-model]].
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
 - **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
 - **has** N [[asset-history]] entries — 🟢 implemented; see `GET /assets/:id/history`.
+- **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetAssetId` is this
+  asset, such as toner fitted to a printer or a spare disk left in a server. Each delivery and each
+  return appends `CONSUMABLE_DELIVERED` / `CONSUMABLE_RETURNED` to the asset's history. List them with
+  `GET /consumables/deliveries?targetAssetId=` (also needs `asset:read`). The FK is `Restrict`, so an
+  asset that received a delivery cannot be hard-deleted; a soft delete is unaffected
+  ([[0098-consumable-delivery-targets]]).
 
 ## Business rules
 
@@ -79,6 +85,23 @@ concrete instance of a generic [[asset-model]].
 > string values** (one `{ name, value }` row each); pre-existing non-scalar entries (arrays/objects) are
 > **preserved untouched** on edit — they round-trip and render as compact JSON, just not editable inline.
 
+> [!note] `specs` structural write bound (2026-09-23, SEC-072 / SEC-032, #1321)
+> The shape stays open, but a **write** (`POST /assets`, `PATCH /assets/:id`, an import row, anything
+> validated by `CreateAssetSchema` / `UpdateAssetSchema`) is rejected with a `400` pointing at the
+> offending path when its `specs` exceeds: **32 levels of nesting** (the specs object is level 1),
+> **256 keys** in any one object, **10 000 items** in any one array, or **10 000 characters** in any
+> string, keys included (`ASSET_SPECS_MAX_*` in `@lazyit/shared`). Each cap sits well above every
+> legitimate writer: the custom-fields editor writes flat rows, an import writes ≤64 string cells, and
+> the reporting agent's facts nest ~6 levels with ≤5000 `software` entries and strings ≤1024 chars.
+> **Reads stay tolerant**: `AssetSchema` keeps the unbounded record, so a row stored before the bound
+> still loads, lists and exports, and a `PATCH` that omits `specs` still succeeds on it. Re-sending an
+> over-bound `specs` is a `400`; replacing it with a compliant object heals the row. The web edit form
+> re-sends `specs` on every save, so an over-long scalar value is fixed by editing that row, while an
+> over-bound non-scalar entry (only writable through the API) is fixed with a `PATCH` that replaces
+> `specs`. The server-side
+> `SPECS_CHANGED` diff (`jsonDeepEqual`) is iterative, so it compares any stored depth exactly.
+> The bound covers `Asset.specs` only; [[asset-model]]`.specs` is still unbounded.
+
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`
 > (with the model's `category` nested), its `location`, and `activeAssignments` — the **active**
@@ -113,7 +136,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `assetTag` | `string?` | Optional human-facing company label (the physical sticker; distinct from the internal `id`). Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). **Auto-assigned** on create when the opt-in `AssetTagScheme` is enabled and no explicit value is supplied ([[0063-configurable-asset-tag-scheme]]); OFF by default. |
 | `status` | `AssetStatus` | required enum, **no default**. |
-| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object for now (see debt note). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
+| `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object within the structural write bound (see the notes above). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
@@ -164,6 +187,11 @@ three stored fields are echoed on create/update.
   `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. The same 90-day window
   also drives a proactive **`warranty_expiring`** notification (bell + email, admin broadcast) — a daily
   look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070).
+  `assetTags` / `serials` (#1387, list only — the CSV export does not take them) are **exact,
+  case-sensitive** value lists, comma-separated, at most 200 distinct values each (more → `400`; a value
+  cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
+  field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
+  batch create uses them for its duplicate check.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — powers the form autocomplete datalist and the list filter ([[0076-asset-company-grouping-field]]).
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
@@ -177,6 +205,9 @@ three stored fields are echoed on create/update.
   `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+  A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
+  salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
+  no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
 - `POST /assets/batch/receive` — **bulk receive** (ADR-0089 Part A, #1029): mint `quantity` assets from
   one [[asset-model]] in a single action (`asset:write` — ADMIN or MEMBER; creating assets is that verb,
   no new permission). Body `{ modelId, quantity (1..200), status, locationId?, company?, purchaseDate?,

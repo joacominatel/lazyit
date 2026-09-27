@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-20
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -173,6 +173,21 @@ seeded rows can never drift (a wrong seed fails CI).
 > `logs` GET annotation is a later wave, 3c-1b), so this is purely additive: the only thing that
 > changes today is the seeded matrix. This extends §4 without a new ADR.
 
+> **Note (issue #1314) — default grants are applied once per instance.** The seed runs on every
+> deploy (the `migrate` job), and it used to upsert every pair of `DEFAULT_ROLE_PERMISSIONS`. Because
+> the config endpoint revokes by deleting the `RolePermission` row, every default an admin had revoked
+> came back on the next update. The seed now consults an append-only ledger,
+> `AppliedRolePermissionDefault` (`applied_role_permission_defaults`): a default (role, permission)
+> pair is granted only when the ledger has no row for it, and the ledger row is written in the same
+> transaction. A revocation deletes the grant and never the ledger row, so it survives every deploy; a
+> permission newly added to the catalog has no ledger row, so each instance receives its defaults
+> exactly once, on the first deploy that ships it — still with no per-permission data migration. The
+> seed never deletes a grant. The migration that introduced the ledger backfilled it with every pair
+> an instance held at that point plus every pair `PermissionAuditLog` records as revoked, so existing
+> instances kept every grant they had. A revocation that an older seed had already silently undone
+> cannot be told apart from a deliberate re-grant (the old seed wrote no audit row), so operators were
+> advised to review the permission matrix once after that update. Mechanics: [[role-permission]].
+
 ### 5. ADMIN is immutable/full; permissions never touch the IdP
 
 The ADMIN permission set is, by decision, the entire catalog and is **never editable** — the future
@@ -296,6 +311,42 @@ unaffected. The TTL only bounds how long a cached answer lives; it does not chan
 resolves. A cache entry expiring during a user's active session causes at most a single extra DB
 read on the next `@RequirePermission` check — no user-visible disruption.
 
+### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
+
+[[0097-ai-assistant-mcp-and-headless-api|ADR-0097]] adds a domain to the catalog, `ai`, with two
+**access verbs** split by channel so an operator can allow one without the other:
+
+- **`ai:use`** — the in-app chat and the headless API (`POST /ai/runs` from a Service Account).
+- **`ai:connect`** — external agents over MCP: OAuth 2.1 grants on HTTPS instances, personal tokens on
+  `lan`, and the tokens of Service Accounts that hold it (R10, fail-closed).
+
+**They grant no domain capability.** The AI always acts as the invoking principal with exactly its own
+permissions (INV-AI-1), so holding `ai:use` adds a *channel*, not a *power*: every tool call still goes
+through the bound route's `@RequirePermission` via the delegated-identity branch of `JwtAuthGuard`, and a
+tool's permission is derived from that route at boot, never declared by hand (INV-AI-2). This is what
+keeps §2's catalog-as-code the single authorization vocabulary — the AI layer adds no parallel map.
+
+**Defaults.** Both are **MEMBER-default capabilities** (`MEMBER_DEFAULT_CAPABILITIES` in
+`permission.ts`): seeded to ADMIN (the full-catalog short-circuit, §5) and MEMBER, not VIEWER, and carried
+in the within-default `edit` tier of `permission-meta.ts`, so granting one is never an escalation. They
+reach existing instances through the seed-once ledger of #1314 on the next deploy — no data migration —
+and an admin who revokes one keeps it revoked. Both stay grantable to a Service Account (they are not in
+`SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`). The capability is also behind instance switches that are off
+by default (the chat's enable gate, the MCP switch), so the grant exposes nothing until an admin enables
+AI or MCP.
+
+**Enforcement is re-checked on every call**, not only at the HTTP entry: core re-reads `ai:use` /
+`ai:connect` for the principal before listing, invoking, proposing or approving a tool, so a revoke takes
+effect on the next tool call of a running conversation or MCP session.
+
+**A read widened on purpose (#1428).** `GET /config/asset-tag-scheme/summary` is gated by
+`asset:write` — the permission of `POST /assets` — rather than `settings:manage`, so whoever may create
+assets can follow the instance's tag pattern (the asset form and the AI tool `asset_tag_scheme_get`). It is
+read-only, human-only and returns no counter internals; every other asset-tag-scheme route stays
+`settings:manage`. The precedent is narrow: instance configuration stays `settings:manage` unless a
+domain permission already implies the need to read one non-sensitive projection of it.
+→ [[authorization]] §5, §9; [[INVARIANTS]] INV-AI-1, INV-AI-2.
+
 ## Consequences
 
 - **Positive:**
@@ -320,4 +371,5 @@ read on the next `@RequirePermission` check — no user-visible disruption.
 
 Related: [[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0038-jit-user-provisioning]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] ·
-[[INVARIANTS]] · [[user]] · [[shared-package]]
+[[INVARIANTS]] · [[user]] · [[shared-package]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
+[[authorization]]

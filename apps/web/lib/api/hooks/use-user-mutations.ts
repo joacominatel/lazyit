@@ -1,5 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CloneUser, CreateUser, Role, UpdateUser } from "@lazyit/shared";
+import type {
+  AdminPasswordResetOutcome,
+  AdminPasswordResetRequest,
+  CloneUser,
+  CreateUser,
+  Role,
+  UpdateOwnProfile,
+  UpdateUser,
+  User,
+} from "@lazyit/shared";
 import { applicationKeys } from "./use-applications";
 import { assetKeys } from "./use-assets";
 import { invalidateDashboard } from "./use-dashboard";
@@ -12,6 +21,7 @@ import {
   provisionUserAccount,
   resetUserPassword,
   restoreUser,
+  updateOwnProfile,
   updateUser,
 } from "../endpoints/users";
 import { userKeys } from "./use-users";
@@ -133,14 +143,21 @@ export function useRestoreUser() {
 }
 
 /**
- * Trigger an IdP-driven password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
- * The IdP (Zitadel) emails the reset link via its own SMTP — lazyit never sets the password, so there
- * is nothing in our cache to invalidate. Toasts and the honest 501/422/404 handling are owned by the
- * calling component (mapped on the {@link ApiError}'s `.status`); this only wraps the request.
+ * Trigger an admin password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
+ * Mode-dependent (ADR-0086 §5, issue #1268): in OIDC mode the IdP emails the link and the call resolves
+ * with nothing (204); in local mode the caller passes a `delivery` and gets an
+ * {@link AdminPasswordResetOutcome} back — either the address the link went to, or a one-time temporary
+ * password. Nothing here touches cached user rows (a reset changes no field the UI reads), so there is
+ * no invalidation — and the temp password rides ONLY the mutation result, deliberately never the cache.
+ * Toasts, the reveal, and the honest 409/422/501/503/404 mapping are owned by the calling component.
  */
 export function useResetUserPassword() {
-  return useMutation({
-    mutationFn: (id: string) => resetUserPassword(id),
+  return useMutation<
+    AdminPasswordResetOutcome | void,
+    unknown,
+    { id: string; body?: AdminPasswordResetRequest }
+  >({
+    mutationFn: ({ id, body }) => resetUserPassword(id, body),
   });
 }
 
@@ -177,5 +194,25 @@ export function useProvisionLocalUserAccount() {
       queryClient.invalidateQueries({ queryKey: userKeys.all });
       queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
     },
+  });
+}
+
+/**
+ * Edit the caller's own name (`PATCH /users/me`, issue #1421). Seeds `/users/me` with the returned row,
+ * then invalidates the users cache so the caller's row in the directory and any detail view refetch;
+ * a failure re-reads `/users/me`.
+ * Error messages stay with the form (409 directory-managed, 403 service account, 503 IdP mirror).
+ */
+export function useUpdateOwnProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: UpdateOwnProfile) => updateOwnProfile(data),
+    onSuccess: (user: User) => {
+      queryClient.setQueryData(userKeys.me(), user);
+      queryClient.invalidateQueries({ queryKey: userKeys.all });
+    },
+    // A refusal can mean the row changed under us (e.g. the directory sync claimed the person, 409), so
+    // re-read `/users/me` and let the panel reflect it.
+    onError: () => queryClient.invalidateQueries({ queryKey: userKeys.me() }),
   });
 }

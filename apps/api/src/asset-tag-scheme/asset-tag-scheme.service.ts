@@ -9,6 +9,7 @@ import type {
   AssetTagNextPreview,
   AssetTagNextPreviewQuery,
   AssetTagScheme,
+  AssetTagSchemeSummary,
   AssetTagSeedSuggestion,
   AssetTagSeedSuggestionQuery,
   UpdateAssetTagScheme,
@@ -295,6 +296,29 @@ export class AssetTagSchemeService {
    * null number/tag, so an operator typing in the editor sees a state rather than an error per
    * keystroke. The allocator's freeze is unchanged.
    */
+  /**
+   * The member-safe summary (`GET /config/asset-tag-scheme/summary`, #1315): the stored pattern and the
+   * tag the next untagged create would get — the same skip-existing preview as {@link previewNextTag},
+   * run on the STORED affixes only. Read-only; no counter internals or timestamps leave here.
+   */
+  async getSummary(): Promise<AssetTagSchemeSummary> {
+    const scheme = await this.getScheme();
+    const next = await this.previewNextTag({
+      ...(scheme.prefix !== null ? { prefix: scheme.prefix } : {}),
+      ...(scheme.suffix !== null ? { suffix: scheme.suffix } : {}),
+      ...(scheme.width !== null ? { width: scheme.width } : {}),
+    });
+    return {
+      enabled: scheme.enabled,
+      prefix: scheme.prefix,
+      suffix: scheme.suffix,
+      width: scheme.width,
+      nextTag: next.tag,
+      nextTagNumber: next.number,
+      exhausted: next.exhausted,
+    };
+  }
+
   async previewNextTag(
     query: AssetTagNextPreviewQuery,
   ): Promise<AssetTagNextPreview> {

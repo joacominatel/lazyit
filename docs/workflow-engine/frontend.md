@@ -640,7 +640,9 @@ decoupled model (§1) and the contrast with the synchronous Zitadel mirror.
 Two distinct test surfaces, both read-only-ish and clearly labelled:
 
 1. **Test connection** (§4c) — does the credential work? One probe, no provisioning.
-2. **Test run (dry-run)** in the builder — execute the workflow against a **chosen sample grant** in a
+2. **Test run (dry-run)** in the builder — execute the workflow against a **chosen sample grant** (an
+   active grant of a current user: the route refuses a revoked grant or an offboarded grantee with
+   `400`, SEC-078; default-header values and URL userinfo render as `[redacted]`, SEC-075/076) in a
    mode where the backend either (a) runs with a `dryRun` flag that **skips side-effecting calls and
    returns the resolved payloads + would-be requests**, or (b) runs for real against a sandbox the
    admin points the connection at. v1 should prefer **(a) payload-resolution dry-run** — it needs no

@@ -17,7 +17,7 @@ custodia las credenciales**. Hay cinco:
 | **`workflow:manage`** | Configurar el motor — crear, editar, eliminar y activar/desactivar flujos y conexiones. |
 | **`workflow:run`** | Reintentar o repetir manualmente una ejecución. |
 | **`workflow:task`** | Completar una tarea manual (además debes ser un destinatario permitido). |
-| **`workflow:secrets`** | Añadir, reemplazar o eliminar las credenciales que usa una conexión. |
+| **`workflow:secrets`** | Añadir, reemplazar o eliminar las credenciales que usa una conexión; cambiar los valores de las cabeceras por defecto de una conexión, o la dirección de una conexión que tiene una credencial o cabeceras por defecto. |
 
 ## Valor seguro por defecto: solo administrador
 

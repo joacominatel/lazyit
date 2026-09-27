@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   NotImplementedException,
@@ -11,11 +12,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import {
+  ApiBody,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -25,29 +28,37 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  AdminPasswordResetRequestSchema,
   AdminPasswordResetResultSchema,
   CloneUserResultSchema,
   CloneUserSchema,
   CreateUserSchema,
   MAX_RESOLVE_USER_IDS,
+  PasswordResetCapabilitiesSchema,
   ResolveUserIdsSchema,
   RoleCountsSchema,
   RoleSchema,
+  UpdateOwnProfileSchema,
   UpdateUserSchema,
   UserListPageSchema,
   UserSchema,
 } from '@lazyit/shared';
-import type { Role } from '@lazyit/shared';
+import type {
+  AdminPasswordResetOutcome,
+  AdminPasswordResetRequest,
+  Role,
+} from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
-import type { Principal } from '../auth/principal';
+import { isServicePrincipal, type Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AllowPasswordChangeRequired } from '../auth/allow-password-change-required.decorator';
 import { ActorService } from '../common/actor.service';
 import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
 import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
+import { resolveResetLinkOrigin } from './reset-link-origin';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
@@ -63,11 +74,21 @@ class UserListPageDto extends createZodDto(UserListPageSchema) {}
 class RoleCountsDto extends createZodDto(RoleCountsSchema) {}
 class CreateUserDto extends createZodDto(CreateUserSchema) {}
 class UpdateUserDto extends createZodDto(UpdateUserSchema) {}
+class UpdateOwnProfileDto extends createZodDto(UpdateOwnProfileSchema) {}
 class CloneUserDto extends createZodDto(CloneUserSchema) {}
 class CloneUserResultDto extends createZodDto(CloneUserResultSchema) {}
-// Local-mode (AUTH_MODE=local) admin-reset result: the one-time temp-password (ADR-0086 §5).
+// Local-mode (AUTH_MODE=local) admin-reset result: the one-time temp-password (ADR-0086 §5). Kept for
+// `POST /users/:id/provision-local-account` (issue #1072), whose body is exactly this shape.
 class AdminPasswordResetResultDto extends createZodDto(
   AdminPasswordResetResultSchema,
+) {}
+// Issue #1268 — the admin picks the delivery (email link | temporary password); the outcome is a
+// discriminated union whose `temporary-password` arm is a SUPERSET of AdminPasswordResetResultDto.
+class AdminPasswordResetRequestDto extends createZodDto(
+  AdminPasswordResetRequestSchema,
+) {}
+class PasswordResetCapabilitiesDto extends createZodDto(
+  PasswordResetCapabilitiesSchema,
 ) {}
 
 @ApiTags('users')
@@ -146,6 +167,13 @@ export class UsersController {
       'RBAC role filter (issue #693). Scope the list to one role (ADMIN | MEMBER | VIEWER). Unknown value → 400. Absent = all roles (default). Backs the Settings → Roles "View N members" deep-link.',
   })
   @ApiQuery({
+    name: 'isActive',
+    required: false,
+    enum: ['true', 'false'],
+    description:
+      'Activation filter (issue #1375). true = only active accounts; false = only deactivated ones; absent = both (default). Any other value → 400.',
+  })
+  @ApiQuery({
     name: 'ids',
     required: false,
     description:
@@ -165,6 +193,7 @@ export class UsersController {
     @Query('role') role?: string,
     @Query('ids') ids?: string | string[],
     @CurrentUser() user?: User,
+    @Query('isActive') isActive?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -189,14 +218,28 @@ export class UsersController {
     // ids is optional (issue #961): absent → no filter; present → split, de-duplicated and validated
     // (each a UUID, count ≤ cap) against ResolveUserIdsSchema, so a garbage/over-cap batch is a clean 400.
     const idsFilter = ids !== undefined ? this.parseIdsQuery(ids) : undefined;
+    // isActive is optional (issue #1375): absent → both (today's behaviour); present → strictly
+    // "true" | "false" (a raw @Query is otherwise unchecked, so anything else is a clean 400).
+    const isActiveFilter =
+      isActive !== undefined ? this.parseIsActiveQuery(isActive) : undefined;
     return this.users.findPage(
       {
         q,
         directoryOnly: directoryOnlyFilter,
         role: roleFilter,
         ids: idsFilter,
+        isActive: isActiveFilter,
       },
       pageQuery,
+    );
+  }
+
+  /** Validate a raw `?isActive=` query value: exactly "true" or "false"; anything else is a clean 400. */
+  private parseIsActiveQuery(raw: string): boolean {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    throw new BadRequestException(
+      'Invalid isActive filter: must be "true" or "false"',
     );
   }
 
@@ -253,13 +296,41 @@ export class UsersController {
     return this.users.roleCounts();
   }
 
+  // MUST stay ABOVE `@Get(':id')` — Nest matches routes in declaration order, so a dynamic `:id` declared
+  // first would swallow this literal path (and then 400 on the ParseUUIDPipe).
+  //
+  // Deliberately NOT on the `@Public` `GET /config/status` (issue #1268): whether this instance has
+  // working outbound email is operational detail an anonymous visitor has no business reading, so the
+  // capability sits behind the SAME permission that owns the action it describes.
+  @Get('password-reset-capabilities')
+  @RequirePermission('user:manage')
+  @ApiOperation({
+    summary:
+      'What the admin password-reset dialog may offer on this instance (issue #1268)',
+    description:
+      'LOCAL mode (AUTH_MODE=local): canResetLocally + canMintTemporaryPassword are true, and ' +
+      'canEmailResetLink is true only when instance SMTP is configured AND a link origin resolves ' +
+      '(WEB_ORIGIN, or the request host under AUTH_TRUST_HOST — ADR-0087). When it is false, ' +
+      'emailUnavailableReason names which of the two the operator must fix. OIDC/BYOI: everything is ' +
+      'false with NO reason — the identity provider owns password resets there, so there is nothing ' +
+      'in lazyit to configure.',
+  })
+  @ApiOkResponse({ type: PasswordResetCapabilitiesDto })
+  passwordResetCapabilities(@Req() req: Request) {
+    return this.users.passwordResetCapabilities(
+      resolveResetLinkOrigin(process.env, req.headers),
+    );
+  }
+
   // INTENTIONALLY NOT gated with `user:read` (ADR-0046 P3): a VIEWER must read its OWN record + role
   // here — the frontend reads it to decide which admin-only controls to show. It only ever returns the
   // caller (never another user), so it is a self-read, not a directory read. Gating it would break the
   // admin-UI gate for VIEWER. Only the cross-user DIRECTORY reads below carry `user:read`.
   @Get('me')
   // Exempt from the forced-change gate (ADR-0086 §F4): a user who still owes a one-time-credential change
-  // must be able to self-read (the payload carries `mustChangePassword`) so the web can render the wall.
+  // must be able to self-read so the web can load its shell and render the wall. The wall itself is
+  // driven by the 403 PASSWORD_CHANGE_REQUIRED code; the self-read carries only the public UserSchema
+  // columns (SEC-085 — never `mustChangePassword`, a hash or an epoch).
   @AllowPasswordChangeRequired()
   @ApiOperation({
     summary: 'The current authenticated user (including their RBAC role)',
@@ -282,6 +353,43 @@ export class UsersController {
     await this.vaultSetupNudge.notifyIfVaultSetupNeeded(user);
     // Resolve the manager descriptor (ADR-0058) so /me matches the full UserSchema the web consumes.
     return this.users.serializeUser(user);
+  }
+
+  // SELF-SERVICE name edit (issue #1421). Like `GET /users/me` it is INTENTIONALLY not permission-gated:
+  // it only ever writes the caller's own row (id from the principal, never the body), so any signed-in
+  // human — VIEWER included — may fix their own name. The strict body accepts ONLY firstName/lastName.
+  // Declared ABOVE `@Patch(':id')` so the literal `me` never reaches the uuid route.
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Edit my own first and last name (any signed-in user)',
+    description:
+      'Self-service: only `firstName` and `lastName` are accepted — any other key (email, role, legajo, ' +
+      'username, manager, …) is a 400; those stay on the ADMIN-only `PATCH /users/:id`. 409 ' +
+      '`PROFILE_MANAGED_BY_DIRECTORY` when the AD/LDAP directory sync owns the person (ADR-0091) — the ' +
+      'next sync would overwrite it. Service accounts are refused (403). Mirrored to the bundled IdP ' +
+      'like an admin edit (503 + revert on failure) and recorded as an UPDATED user-history row with ' +
+      'the caller as actor.',
+  })
+  @ApiBody({ type: UpdateOwnProfileDto })
+  @ApiOkResponse({ type: UserDto })
+  updateMe(
+    @Body() dto: UpdateOwnProfileDto,
+    @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    // Backstop: the permission guard already 403s a service account on an unannotated route
+    // (INV-SA-2). A bot has no person record to rename.
+    if (isServicePrincipal(principal)) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'SERVICE_ACCOUNT_NOT_ALLOWED',
+        message: 'Service accounts have no profile to edit.',
+      });
+    }
+    if (!user) {
+      throw new UnauthorizedException('Not authenticated');
+    }
+    return this.users.updateOwnProfile(user, dto);
   }
 
   // A cross-user DIRECTORY read (identity of another user) — gated on `user:read` (ADR-0046
@@ -411,7 +519,8 @@ export class UsersController {
     @CurrentUser() actor?: User,
   ) {
     // Pass the actor so the service can enforce the RBAC self-role-change guard (no self-escalation/
-    // demotion → 403) and the last-admin guard (refuse to demote the final ADMIN → 409). ADR-0040.
+    // demotion → 403) and the last-admin guard (refuse to demote or deactivate the final active ADMIN
+    // → 409). ADR-0040, SEC-021.
     return this.users.update(id, dto, this.actor.resolve(actor));
   }
 
@@ -419,37 +528,92 @@ export class UsersController {
   @RequirePermission('user:manage')
   @HttpCode(204)
   @ApiOperation({
-    summary: 'Trigger a password reset for a user — ADMIN only (issue #149)',
+    summary:
+      'Trigger a password reset for a user — ADMIN only (issue #149, #1268)',
     description:
       'OIDC mode: asks the identity provider to send the user a password-reset link. lazyit NEVER ' +
       'stores, sets or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own ' +
-      'SMTP. Returns 204 No Content. LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there is no IdP — an ' +
-      'admin reset mints a one-time temporary password, sets mustChangePassword, revokes the user’s ' +
-      'sessions and returns the temp password ONCE (200 with { temporaryPassword }). 422 if the user ' +
-      'is inactive (both modes) or is a directory-only person (local); 501 ("managed by your identity ' +
-      'provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if the Zitadel ' +
-      'Management call fails.',
+      'SMTP. Returns 204 No Content, and a `delivery` in the body is a 400 (the IdP owns the reset ' +
+      'there, so a choice would be silently ignored). LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there ' +
+      'is no IdP, so the ADMIN chooses the delivery (issue #1268). `temporary-password` — also the ' +
+      'behavior when NO body is sent, keeping older web builds working — mints a one-time password, ' +
+      'sets mustChangePassword, ALWAYS revokes the user’s sessions (the stored hash was replaced) and ' +
+      'returns the plaintext ONCE. `email` — mints a single-use link (≤1h, SHA-256 at rest) and sends ' +
+      'it via the instance SMTP, revoking sessions only when revokeSessions is true. Unlike the public ' +
+      'forgot-password flow this one reports honestly: 409 { reason: smtp-not-configured | ' +
+      'origin-unknown } when it cannot be sent, 503 when the relay refuses — never a false success. ' +
+      '422 if the user is inactive (both modes) or is a directory-only person (local); 501 ("managed by ' +
+      'your identity provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if ' +
+      'the Zitadel Management call fails.',
   })
+  @ApiBody({ type: AdminPasswordResetRequestDto, required: false })
   @ApiNoContentResponse({
     description:
       'OIDC mode: reset notification triggered (Zitadel will email the link).',
   })
+  // Documented as a schema rather than a createZodDto class: the outcome is a DISCRIMINATED UNION, and
+  // createZodDto only accepts a single object schema.
   @ApiOkResponse({
-    type: AdminPasswordResetResultDto,
     description:
-      'Local mode: the one-time temporary password to hand off to the user (shown once).',
+      'Local mode: the delivery outcome — the one-time temporary password (shown once), or the ' +
+      'mailbox the reset link went to.',
+    schema: {
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            delivery: { type: 'string', enum: ['temporary-password'] },
+            temporaryPassword: { type: 'string' },
+            sessionsRevoked: { type: 'boolean', enum: [true] },
+          },
+          required: ['delivery', 'temporaryPassword', 'sessionsRevoked'],
+        },
+        {
+          type: 'object',
+          properties: {
+            delivery: { type: 'string', enum: ['email'] },
+            sentTo: { type: 'string', format: 'email' },
+            expiresInMinutes: { type: 'integer' },
+            sessionsRevoked: { type: 'boolean' },
+          },
+          required: [
+            'delivery',
+            'sentTo',
+            'expiresInMinutes',
+            'sessionsRevoked',
+          ],
+        },
+      ],
+    },
   })
   async resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
+    // Typed `unknown`, NOT as the DTO: the global ZodValidationPipe validates any parameter whose metatype
+    // is a ZodDto, and an absent body arrives from express.json as `{}` — which the (delivery-requiring)
+    // schema would reject with a 400. The body must stay OPTIONAL so an operator who updates the API
+    // before the web build keeps a working reset button (CLAUDE.md §8), so it is parsed explicitly below.
+    @Body() body: unknown,
     @CurrentUser() actor?: User,
-  ): Promise<AdminPasswordResetResultDto | void> {
+  ): Promise<AdminPasswordResetOutcome | void> {
+    const dto = parseResetPasswordBody(body);
     try {
       const result = await this.users.requestPasswordReset(
         id,
         this.actor.resolve(actor),
+        {
+          ...(dto?.delivery ? { delivery: dto.delivery } : {}),
+          ...(dto?.revokeSessions !== undefined
+            ? { revokeSessions: dto.revokeSessions }
+            : {}),
+          // Resolved at the HTTP boundary because it may derive from the request host (ADR-0087 LAN
+          // mode); the service never reads a header. See ./reset-link-origin for why that derivation is
+          // confined to THIS authenticated route.
+          linkOrigin: resolveResetLinkOrigin(process.env, req.headers),
+        },
       );
-      // LOCAL mode returns the minted temp-password → 200 with a body (override the @HttpCode(204) default
+      // LOCAL mode returns the delivery outcome → 200 with a body (override the @HttpCode(204) default
       // via the passthrough response). OIDC mode returns null → keep the byte-identical 204 No Content.
       if (result) {
         res.status(200);
@@ -592,4 +756,29 @@ export class UsersController {
     // Pass the actor so the service attributes the audited UPDATED history row.
     return this.users.provisionLocalAccount(id, this.actor.resolve(actor));
   }
+}
+
+/**
+ * Parse the OPTIONAL `POST /users/:id/reset-password` body (issue #1268). An absent body — the pre-#1268
+ * request an older web build still sends — arrives from `express.json` as `{}`; treated as "no choice
+ * made", which keeps the endpoint byte-compatible. `{}` is unambiguous here because the schema REQUIRES
+ * `delivery`, so it can never be a legitimate payload. Anything else is validated strictly: a malformed
+ * `delivery` is a 400, never a silent fall-through to the temp-password path.
+ */
+function parseResetPasswordBody(
+  body: unknown,
+): AdminPasswordResetRequest | undefined {
+  if (
+    body == null ||
+    (typeof body === 'object' && Object.keys(body).length === 0)
+  ) {
+    return undefined;
+  }
+  const parsed = AdminPasswordResetRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new BadRequestException(
+      'Invalid password-reset request: delivery must be "email" or "temporary-password", and revokeSessions a boolean.',
+    );
+  }
+  return parsed.data;
 }

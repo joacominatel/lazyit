@@ -35,6 +35,13 @@ export interface InfraEdgeData {
   parallelIndex: number;
   /** How many edges share this node pair (1 = a lone edge, no offset). */
   parallelCount: number;
+  /**
+   * Draw the decorative packet flow on this edge (issue #1295). Resolved upstream by the canvas from
+   * `lib/infra/edge-flow.ts`: true only when NEITHER endpoint is `OFFLINE` **and** the board is
+   * under the edge-count cutoff. Purely ornamental — see that module for why it is not a liveness
+   * readout, and why `UNKNOWN` flows.
+   */
+  flow: boolean;
   [key: string]: unknown;
 }
 
@@ -64,11 +71,20 @@ function rectOf(node: ReturnType<typeof useInternalNode>): NodeRect | null {
  * loops / cross-map sweeps — after both Tidy and free-drag.
  *
  * Everything from #767 is unchanged: a hair of curvature reads "wired"; stroke/dash/width/arrowhead
- * come from `edgeStyle(kind)` upstream via `style`/`markerEnd`; DEPENDS_ON (the one animated kind)
- * gets `.infra-edge-flow` (a slow dash march that `prefers-reduced-motion` freezes); the kind label
+ * come from `edgeStyle(kind)` upstream via `style`/`markerEnd`; DEPENDS_ON gets `.infra-edge-flow`
+ * (a slow march of its OWN dash pattern, the one motion that carries a meaning); the kind label
  * rides an `EdgeLabelRenderer` portal pill shown ONLY on hover/selection; opacity dims under impact /
  * spotlight. When two edges share a node pair they fan apart by a perpendicular offset (#773) so the
  * parallel lines stay legible. Token-driven throughout; no colour-alone.
+ *
+ * **The packet flow (#1295) is a second `<path>`, not a change to the first.** When `data.flow` is
+ * set the same `d` is drawn again underneath the label, in the kind's own stroke at low opacity,
+ * with its own short dash and `.infra-edge-packet`. Overlaying rather than re-dashing is the whole
+ * point: the base line keeps the exact `stroke-dasharray` `edgeStyle(kind)` gave it — one of
+ * ADR-0070's redundant, colour-blind-safe encoders, and the one such a reader relies on — so no
+ * decoration can flatten two kinds into the same line. It is `pointer-events: none`, so it never
+ * steals a click from the edge it decorates, and being a CSS keyframe it is frozen by the global
+ * `prefers-reduced-motion` block for free.
  */
 export function InfraEdge({
   source,
@@ -117,7 +133,13 @@ export function InfraEdge({
   });
 
   const dimmed = data?.dimmed ?? false;
-  const animated = data?.kind === "DEPENDS_ON";
+  const flow = data?.flow ?? false;
+  // The DEPENDS_ON dash march is a semantic encoder, but it is still motion — so it answers to the
+  // same gate as the decoration: an edge touching an OFFLINE node, or a board over the cutoff, is
+  // completely still. The KIND stays readable regardless, off the dash pattern, colour and marker
+  // the base path keeps either way.
+  const dependsOnMarch = data?.kind === "DEPENDS_ON" && flow;
+  const stroke = typeof style?.stroke === "string" ? style.stroke : undefined;
 
   return (
     <>
@@ -126,7 +148,7 @@ export function InfraEdge({
         markerEnd={markerEnd}
         // The flow class only carries the animation; the dash pattern + colour + width arrive via
         // `style` (set from `edgeStyle` upstream). Opacity dims the line under impact/spotlight.
-        className={cn(animated && "infra-edge-flow")}
+        className={cn(dependsOnMarch && "infra-edge-flow")}
         style={{
           ...style,
           opacity: dimmed ? 0.18 : 1,
@@ -135,6 +157,24 @@ export function InfraEdge({
           transition: "opacity var(--dur-base) var(--ease-out-quad)",
         }}
       />
+
+      {flow ? (
+        <path
+          d={path}
+          fill="none"
+          // The kind's own colour, so the ornament never invents a hue the legend cannot explain.
+          // Low opacity keeps it a hint of movement rather than a second line competing with the
+          // real one, and it dims with the edge under impact / spotlight.
+          stroke={stroke}
+          strokeWidth={3}
+          strokeLinecap="round"
+          // Short marks, wide gaps — discrete "packets" travelling the path, and one full period
+          // (2 + 14) is exactly what the keyframe offsets, so the loop has no visible seam.
+          strokeDasharray="2 14"
+          className="infra-edge-packet pointer-events-none"
+          style={{ opacity: dimmed ? 0.12 : 0.55 }}
+        />
+      ) : null}
 
       {data?.showLabel ? (
         <EdgeLabelRenderer>

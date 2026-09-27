@@ -109,8 +109,15 @@ function WorkflowRow({
   const lastRun = runs?.items[0];
 
   function toggleEnabled(enabled: boolean) {
+    // SEC-077: enabling pins the version this row shows; if another version was authored since, the
+    // API answers 409 instead of making an unseen version live. The switch stays disabled until the
+    // detail has loaded (see below), and an enable never goes out without `expectedVersion`.
+    if (enabled && !detail) return;
+    const data = enabled
+      ? { enabled, expectedVersion: detail?.latestVersion?.version ?? 0 }
+      : { enabled };
     update.mutate(
-      { id: workflow.id, data: { enabled } },
+      { id: workflow.id, data },
       {
         onSuccess: () =>
           toast.success(
@@ -163,7 +170,7 @@ function WorkflowRow({
             <Switch
               checked={workflow.enabled}
               onCheckedChange={toggleEnabled}
-              disabled={update.isPending}
+              disabled={update.isPending || (!workflow.enabled && !detail)}
               aria-label={t("list.toggleAria", { name: workflow.name })}
             />
             <Button size="icon-sm" variant="ghost" asChild>

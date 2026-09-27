@@ -31,6 +31,11 @@ service account has **no role**, so its grants here are its *entire* authorizati
   grants, resolved DB-first into a Set; the role resolver (`PermissionResolverService`) is **never**
   consulted for it ([[INVARIANTS]] INV-SA-3). There is NO ADMIN / wildcard — a bot can never be
   ADMIN-equivalent.
+- **Ungrantable verbs are inert.** A row for a `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` verb
+  (`settings:manage`, `user:manage`, `import:run`, `secret:read`, `secret:manage`) can only exist if it was
+  written before 2026-06-12 (writes refuse it since SEC-011). It is ignored at resolve time, hidden from
+  the account's read shape, and removed by the next save of the grant set (SEC-073). It is never deleted
+  by an upgrade.
 - **Fail-closed.** A route passes only if its `@RequirePermission(...)` is **fully** contained in this
   grant Set; an unannotated, non-`@Public` route is a **403** (the SA does not inherit the human
   open-by-default — [[INVARIANTS]] INV-SA-2).

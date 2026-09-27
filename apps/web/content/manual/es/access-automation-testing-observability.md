@@ -30,9 +30,11 @@ ejecución por el flujo, con una **concesión real** — pero **no se envía nad
 
 - Elige una **Concesión de muestra** (una de las concesiones activas de la aplicación) contra cuyo
   contexto se resuelven las solicitudes. Si no hay concesiones activas, concede acceso a alguien
-  primero para tener algo que muestrear.
+  primero para tener algo que muestrear. Una concesión revocada, o la de una persona dada de baja, se
+  rechaza como muestra.
 - El resultado muestra el método, el destino, los **campos mapeados**, las cabeceras y el cuerpo de
-  cada paso (con los secretos ocultos), y dónde terminaría la ejecución.
+  cada paso (con los secretos y los valores de las cabeceras por defecto ocultos), y dónde terminaría
+  la ejecución.
 - Puedes **simular el fallo de un paso** para previsualizar la arista de fallo de ese paso (escalar /
   compensar / detener) sin que nada falle de verdad.
 

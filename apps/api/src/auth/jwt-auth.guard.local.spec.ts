@@ -56,13 +56,23 @@ describe('JwtAuthGuard — handleLocal (AUTH_MODE=local, ADR-0086)', () => {
   let guard: JwtAuthGuard;
   let findFirst: jest.Mock;
   let verifySession: jest.Mock;
+  let sessionFindUnique: jest.Mock;
+  let sessionUpdateMany: jest.Mock;
   const originalMode = process.env.AUTH_MODE;
 
   beforeEach(() => {
     process.env.AUTH_MODE = 'local';
     findFirst = jest.fn();
     verifySession = jest.fn();
-    const prisma = { user: { findFirst } } as unknown as PrismaService;
+    sessionFindUnique = jest.fn();
+    sessionUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      user: { findFirst },
+      userSession: {
+        findUnique: sessionFindUnique,
+        updateMany: sessionUpdateMany,
+      },
+    } as unknown as PrismaService;
     const credentials = {
       verifySession,
     } as unknown as LocalCredentialService;
@@ -86,6 +96,157 @@ describe('JwtAuthGuard — handleLocal (AUTH_MODE=local, ADR-0086)', () => {
     });
     // The re-load is on the LIVE-filtered client (no includeSoftDeleted) by the user id.
     expect(findFirst).toHaveBeenCalledWith({ where: { id: VALID_ID } });
+  });
+
+  it('records whether the session is "keep me signed in" on request.localSession (ADR-0086 §8)', async () => {
+    findFirst.mockResolvedValue(DB_USER);
+
+    verifySession.mockResolvedValue({
+      sub: VALID_ID,
+      epoch: 3,
+      rememberMe: true,
+    });
+    const remembered = bearer('remember-me-token');
+    await guard.canActivate(makeCtx(remembered));
+    expect((remembered as { localSession?: unknown }).localSession).toEqual({
+      rememberMe: true,
+      sessionId: null,
+    });
+
+    verifySession.mockResolvedValue({
+      sub: VALID_ID,
+      epoch: 3,
+      rememberMe: false,
+    });
+    const regular = bearer('regular-token');
+    await guard.canActivate(makeCtx(regular));
+    expect((regular as { localSession?: unknown }).localSession).toEqual({
+      rememberMe: false,
+      sessionId: null,
+    });
+  });
+
+  describe('per-device sessions (#1420, ADR-0086 §9)', () => {
+    const SID = '33333333-3333-4333-8333-333333333333';
+    const liveRow = (overrides: Record<string, unknown> = {}) => ({
+      userId: VALID_ID,
+      epoch: 3,
+      expiresAt: null,
+      lastSeenAt: new Date(),
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      findFirst.mockResolvedValue(DB_USER);
+      verifySession.mockResolvedValue({
+        sub: VALID_ID,
+        epoch: 3,
+        rememberMe: false,
+        sid: SID,
+      });
+    });
+
+    it('accepts a token whose session row is live and records its id on request.localSession', async () => {
+      sessionFindUnique.mockResolvedValue(liveRow());
+      const req = bearer('sid-token');
+      await expect(guard.canActivate(makeCtx(req))).resolves.toBe(true);
+      expect(sessionFindUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: SID } }),
+      );
+      expect((req as { localSession?: unknown }).localSession).toEqual({
+        rememberMe: false,
+        sessionId: SID,
+      });
+    });
+
+    it('rejects a token whose session was ended (row gone)', async () => {
+      sessionFindUnique.mockResolvedValue(null);
+      await expect(
+        guard.canActivate(makeCtx(bearer('sid-token'))),
+      ).rejects.toThrow('Session has been revoked');
+    });
+
+    it("rejects a sid that names another user's session", async () => {
+      sessionFindUnique.mockResolvedValue(
+        liveRow({ userId: '22222222-2222-4222-8222-222222222222' }),
+      );
+      await expect(
+        guard.canActivate(makeCtx(bearer('sid-token'))),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects a session row minted at another epoch or already expired', async () => {
+      sessionFindUnique.mockResolvedValue(liveRow({ epoch: 2 }));
+      await expect(
+        guard.canActivate(makeCtx(bearer('sid-token'))),
+      ).rejects.toThrow(UnauthorizedException);
+
+      sessionFindUnique.mockResolvedValue(
+        liveRow({ expiresAt: new Date(Date.now() - 1000) }),
+      );
+      await expect(
+        guard.canActivate(makeCtx(bearer('sid-token'))),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('a legacy token (no sid) keeps the epoch-only check and never reads the session table', async () => {
+      verifySession.mockResolvedValue({
+        sub: VALID_ID,
+        epoch: 3,
+        rememberMe: true,
+      });
+      await expect(
+        guard.canActivate(makeCtx(bearer('legacy-token'))),
+      ).resolves.toBe(true);
+      expect(sessionFindUnique).not.toHaveBeenCalled();
+    });
+
+    it('checks the user epoch first: a revoked user is refused whatever the session row says', async () => {
+      findFirst.mockResolvedValue({ ...DB_USER, sessionEpoch: 4 });
+      sessionFindUnique.mockResolvedValue(liveRow());
+      await expect(
+        guard.canActivate(makeCtx(bearer('sid-token'))),
+      ).rejects.toThrow('Session has been revoked');
+    });
+
+    describe('lastSeenAt throttling', () => {
+      it('does not write when the session was seen within the throttle window', async () => {
+        sessionFindUnique.mockResolvedValue(
+          liveRow({ lastSeenAt: new Date(Date.now() - 60 * 1000) }),
+        );
+        await guard.canActivate(makeCtx(bearer('sid-token')));
+        expect(sessionUpdateMany).not.toHaveBeenCalled();
+      });
+
+      it('writes once, conditionally, when the last write is older than the window', async () => {
+        sessionFindUnique.mockResolvedValue(
+          liveRow({ lastSeenAt: new Date(Date.now() - 10 * 60 * 1000) }),
+        );
+        await guard.canActivate(makeCtx(bearer('sid-token')));
+        expect(sessionUpdateMany).toHaveBeenCalledTimes(1);
+        const [arg] = sessionUpdateMany.mock.calls[0] as [
+          {
+            where: { id: string; lastSeenAt: { lte: Date } };
+            data: { lastSeenAt: Date };
+          },
+        ];
+        expect(arg.where.id).toBe(SID);
+        // The write is guarded on the stale value, so concurrent requests do not all write.
+        expect(arg.where.lastSeenAt.lte.getTime()).toBeLessThan(
+          arg.data.lastSeenAt.getTime(),
+        );
+      });
+
+      it('a failing lastSeenAt write never fails the request', async () => {
+        sessionFindUnique.mockResolvedValue(
+          liveRow({ lastSeenAt: new Date(0) }),
+        );
+        sessionUpdateMany.mockRejectedValue(new Error('db hiccup'));
+        await expect(
+          guard.canActivate(makeCtx(bearer('sid-token'))),
+        ).resolves.toBe(true);
+      });
+    });
   });
 
   it('rejects a missing Bearer token', async () => {

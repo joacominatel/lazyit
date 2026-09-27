@@ -21,6 +21,11 @@ describe("UserHistoryEventTypeSchema (ADR-0058)", () => {
       // ADR-0086 §F4 / issue #1006 — forgot-password issuance audit.
       "PASSWORD_RESET_REQUESTED",
       "PASSWORD_RESET_COMPLETED",
+      // Issue #1375 — activation flips.
+      "DEACTIVATED",
+      "REACTIVATED",
+      // Issue #1420 — a user ended one of their local sessions.
+      "SESSION_ENDED",
     ]);
   });
 

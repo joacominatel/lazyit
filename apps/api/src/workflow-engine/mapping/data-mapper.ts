@@ -191,6 +191,26 @@ export function renderTemplate(
 }
 
 /**
+ * The context paths a template reads, normalized EXACTLY as {@link renderTemplate} resolves them: the
+ * part before the first `|` (filters dropped), split on `.` with each segment trimmed — so
+ * `{{ grantee . email | lower }}` reads `grantee.email`. The single parser shared with anything that
+ * DESCRIBES a template (the AI authoring previews), so a description never drifts from what is sent.
+ */
+export function templatePaths(template: string): string[] {
+  const paths: string[] = [];
+  for (const match of template.matchAll(PLACEHOLDER)) {
+    const [path = ''] = match[1].split('|');
+    paths.push(
+      path
+        .split('.')
+        .map((s) => s.trim())
+        .join('.'),
+    );
+  }
+  return paths;
+}
+
+/**
  * Map a {@link WorkflowDataMapping} (target field → template) into rendered values. v1's mapping is a
  * flat string→string map (ADR-0054); each value is rendered with the given encoding `mode`. The
  * returned {@link MapResult.fieldNames} are safe to log; the values are NOT.

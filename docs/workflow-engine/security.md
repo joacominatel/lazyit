@@ -3,7 +3,7 @@ title: "Workflow Engine — Security & Threat Model"
 tags: [workflow-engine, security, threat-model, ssrf, secrets, rbac, audit, sandboxing]
 status: accepted
 created: 2026-06-07
-updated: 2026-06-16
+updated: 2026-09-24
 ---
 
 # Workflow Engine — Security & Threat Model
@@ -144,6 +144,15 @@ external system protects.
 4. **Secrets are decrypted only at the moment of the outbound call**, inside the executor, and never
    returned across the API boundary. The decrypted value lives only in process memory for the duration
    of the call.
+5. **Plain-config credential channels are treated as secrets (SEC-075 / SEC-076, as built).** A REST
+   connection's `defaultHeaders` are not validated against credential-like values, and a legacy URL may
+   carry `user:pass@`. So: every connection read (`GET /workflow-connections[/:id]`, the create/patch
+   responses, the dry-run preview) returns header **values** and URL userinfo as `[redacted]`; a PATCH
+   that sends `[redacted]` back keeps the stored value; adding/changing a header value, or re-pointing a
+   connection that carries default headers, requires `workflow:secrets` (CSEC-1, alongside `secretId`
+   attach and secret-bearing re-point); userinfo is refused on write, while a legacy row keeps running
+   and is flagged `legacyUserinfo: true` on read for the UI to warn (§3.1). Stored rows are never
+   rewritten.
 
 ### 2.2 Key management
 
@@ -208,6 +217,11 @@ A central guard that EVERY outbound request passes through. Defense in depth, in
 6. **Port sanity.** Optionally restrict to standard ports for external HTTPS; at minimum, do not let a
    workflow reach `:6379`/`:5432`/`:9300` etc. on a private host unless that host is an explicitly
    allowlisted target (§3.4).
+7. **Userinfo (as built, SEC-076).** Node's HTTP client turns `https://user:pass@host` into
+   `Authorization: Basic …`. New connection URLs with userinfo are refused on write. The guard offers an
+   opt-in `refuseUserinfo` (`userinfo-not-allowed`, no URL in the error) used by the AI tools' pre-check
+   of new destinations; the workflow run path does **not** use it, so a legacy row saved before the
+   rule keeps working after an upgrade (write-only validation) and is flagged `legacyUserinfo` on read.
 
 ### 3.2 Why not "just block private IPs"
 
@@ -267,8 +281,11 @@ convention:
 | `workflow:read` | View workflow definitions, run history, the manual-task inbox | **ADMIN-only** (treat like `logs:read` — run history reveals who-gets-provisioned-where + external payload shapes; it is sensitive). Configurable. |
 | `workflow:manage` | Create / edit / delete / enable workflow **definitions** (the automation logic, incl. the outbound URL + mapping) | **ADMIN-only**, configurable (⚠ "admin-level" delegation, like the existing coarse verbs) |
 | `workflow:secrets` | Configure / enter / rotate per-app connector **credentials** | **ADMIN-only**, configurable — **kept distinct from `workflow:manage`** to allow separation of duties (who writes the logic ≠ who holds the Jira token) |
-| `workflow:run` | Manually trigger / replay a run | **ADMIN-only**, configurable |
-| `workflow:action` | Claim / complete a **manual task** step | **ADMIN-only** by default, but expected to be delegated to MEMBERs who do operational provisioning (§6) |
+| `workflow:run` | Retry a failed run / replay it on the latest version (runs start only from grant events) | **ADMIN-only**, configurable |
+| `workflow:task` | Resolve a **manual task** step: submit, skip or fail | **ADMIN-only** by default, but expected to be delegated to MEMBERs who do operational provisioning (§6) |
+
+> Corrected 2026-09-24 (#1315): this note first named the manual-task verb `workflow:action`; it shipped
+> as `workflow:task` (`packages/shared/src/schemas/permission.ts`), and the note now uses that name.
 
 - **ADMIN stays immutable/full** (INV-8) — ADMIN holds all of the above automatically via the resolver's
   complete-catalog short-circuit; the seed never writes ADMIN rows.
@@ -340,7 +357,7 @@ injection/validation sink.
 
 ### 6.1 Controls
 
-1. **`workflow:action` is required** to complete any manual task (§4). Beyond the permission, the
+1. **`workflow:task` is required** to complete any manual task (§4). Beyond the permission, the
    completer must be a **valid assignee for *this* task** — a task assigned to a specific user or to a
    role/permission cohort is completable only by a matching principal. **Do not** look the task up by id
    and complete it on permission alone (that is the IDOR trap, cf. the Sentinel "mentally swap ids"
@@ -491,7 +508,7 @@ security justification is specifically the sandboxed processor and the async dec
   runs in a forked child with no ambient authority, over an allowlisted context.
 - **INV-WF-6 — Inbound webhooks (when added) are HMAC-verified + replay-protected before any work**, and
   only enqueue (never execute synchronously).
-- **INV-WF-7 — Manual tasks are completable only by an authorized matching assignee** (`workflow:action`
+- **INV-WF-7 — Manual tasks are completable only by an authorized matching assignee** (`workflow:task`
   AND assignee/cohort match), and human-entered values are zod-validated untrusted input.
 
 ---
@@ -512,7 +529,7 @@ security justification is specifically the sandboxed processor and the async dec
 - Per-app connector config + **encrypted secrets** (reuse `SecretEncryptionService`); write-only API.
 - **Outbound REST connector** + **logic-less mapping** (no expression eval) running in a **sandboxed
   processor**.
-- **Manual-step** connector + manual-task inbox (reuse Notifications/bell/SSE); `workflow:action` +
+- **Manual-step** connector + manual-task inbox (reuse Notifications/bell/SSE); `workflow:task` +
   assignee check.
 - **WorkflowRun/Step append-only audit** (at-most-one-actor); config-change audit.
 - Triggers: **access granted / access revoked**, fired **async via BullMQ, fully decoupled** from the
@@ -556,7 +573,7 @@ forgotten.
    sandboxed expression evaluator now?
 4. **Inbound webhooks (§9):** confirm **defer to Phase 2** (v1 = outbound + manual), with the
    signature/replay contract fixed now.
-5. **Default seed for `workflow:read`/`workflow:action`:** ADMIN-only like `logs:read`, or open
+5. **Default seed for `workflow:read`/`workflow:task`:** ADMIN-only like `logs:read`, or open
    `workflow:read` to MEMBER so operational staff can see run status?
 
 ---

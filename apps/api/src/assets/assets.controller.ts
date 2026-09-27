@@ -176,6 +176,18 @@ export class AssetsController {
       'Warranty-window filter (#955). expiring90d = warranty ends within the next 90 days and hasn’t lapsed (deep-linked from the dashboard tile); expired = warranty end already past. Invalid value → 400.',
   })
   @ApiQuery({
+    name: 'assetTags',
+    required: false,
+    description:
+      'Exact (case-sensitive) asset tags, comma-separated, at most 200 (#1387) — "which of these tags are taken". A value cannot contain a comma. Over 200 → 400.',
+  })
+  @ApiQuery({
+    name: 'serials',
+    required: false,
+    description:
+      'Exact (case-sensitive) serial numbers, comma-separated, at most 200 (#1387). A value cannot contain a comma. Over 200 → 400.',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -200,6 +212,8 @@ export class AssetsController {
     @Query('dir') dir?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
+    @Query('assetTags') assetTags?: string,
+    @Query('serials') serials?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -223,6 +237,8 @@ export class AssetsController {
         assignedToUserId,
         ownership,
         warranty,
+        assetTags,
+        serials,
       }),
       pageQuery,
     );
@@ -245,6 +261,9 @@ export class AssetsController {
     assignedToUserId?: string;
     ownership?: string;
     warranty?: string;
+    /** List read only (#1387): exact values, comma-separated. The CSV export does not take them. */
+    assetTags?: string;
+    serials?: string;
   }) {
     let parsedStatus: AssetStatus | undefined;
     if (raw.status !== undefined) {
@@ -288,6 +307,8 @@ export class AssetsController {
       ),
       ownership: parsedOwnership,
       warranty: parsedWarranty,
+      assetTags: parseExactValuesQuery(raw.assetTags, 'assetTags'),
+      serials: parseExactValuesQuery(raw.serials, 'serials'),
     };
   }
 
@@ -681,4 +702,34 @@ export class AssetsController {
   restore(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
     return this.assets.restore(id, principal);
   }
+}
+
+/** How many exact values one `assetTags` / `serials` filter takes (a page of 200 holds every match). */
+export const ASSET_EXACT_FILTER_MAX = 200;
+
+/**
+ * An exact-values list filter (#1387): comma-separated, trimmed, empty entries dropped, deduplicated.
+ * Absent (or only commas) → undefined; more than {@link ASSET_EXACT_FILTER_MAX} distinct values → 400.
+ * Tags and serials are unique among live assets, so the matches always fit one maximum page.
+ */
+function parseExactValuesQuery(
+  raw: string | undefined,
+  name: string,
+): string[] | undefined {
+  if (raw === undefined) return undefined;
+  const values = [
+    ...new Set(
+      raw
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => v.length > 0),
+    ),
+  ];
+  if (values.length === 0) return undefined;
+  if (values.length > ASSET_EXACT_FILTER_MAX) {
+    throw new BadRequestException(
+      `Invalid ${name}: at most ${ASSET_EXACT_FILTER_MAX} values`,
+    );
+  }
+  return values;
 }

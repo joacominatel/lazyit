@@ -48,10 +48,12 @@ describe('email allowlist (curated)', () => {
     expect(isEmailableNotificationType('asset_assignment.acknowledged')).toBe(
       true,
     );
+    // The new-AI-agent-connection security notice (ADR-0097, security §6.3) — emailed:
+    expect(isEmailableNotificationType('mcp.client_connected')).toBe(true);
     // Still bell-only — the per-user login nudge is not inbox-worthy:
     expect(isEmailableNotificationType('secret.vault_setup')).toBe(false);
   });
-  it('the allowlist is the twelve emailed types', () => {
+  it('the allowlist is the thirteen emailed types', () => {
     expect([...EMAIL_NOTIFICATION_TYPES].sort()).toEqual(
       [
         'access_grant_expiring',
@@ -61,6 +63,7 @@ describe('email allowlist (curated)', () => {
         'critical_app_access',
         'infra.agent_offline',
         'low_stock',
+        'mcp.client_connected',
         'permission_widened',
         'update.available',
         'warranty_expiring',

@@ -100,6 +100,22 @@ export const ManagerDescriptorSchema = z.discriminatedUnion("type", [
 export type ManagerDescriptor = z.infer<typeof ManagerDescriptorSchema>;
 
 /**
+ * The UI languages lazyit ships (ADR-0051) — the per-user `locale` preference (issue #1422). Mirrors
+ * `locales` in `apps/web/i18n/config.ts`; adding a language adds it in both places. Validated on WRITE
+ * only: the read path maps any stored value outside this list to `null` ("never chosen"), so dropping a
+ * language later never breaks a read.
+ */
+export const UiLocaleSchema = z.enum(["en", "es"]);
+export type UiLocale = z.infer<typeof UiLocaleSchema>;
+
+/**
+ * The per-user colour-theme preference (issue #1422) — the three values next-themes understands.
+ * `system` follows the operating system. Validated on write, tolerant on read (unknown → `null`).
+ */
+export const ThemePreferenceSchema = z.enum(["light", "dark", "system"]);
+export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
+
+/**
  * The full User entity as returned by the API. Date fields are ISO-8601 strings (the wire
  * shape): the API serializes Prisma `DateTime`s to strings, and `z.date()` cannot be
  * represented in JSON Schema / OpenAPI (see docs/03-decisions/0018-api-documentation-swagger.md).
@@ -134,6 +150,14 @@ export const UserSchema = z.object({
   // person sub-field with no native home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb,
   // unvalidated per-field in this MVP); null/absent for normal accounts.
   directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional(),
+  // AD/LDAP directory-source discriminator (ADR-0091): "ad" for a person the directory sync owns, null
+  // otherwise. OPTIONAL on the wire (additive). Non-null means the directory owns the name, so
+  // `PATCH /users/me` refuses a self-edit (issue #1421) — the web disables the form off this field.
+  directorySource: z.string().nullable().optional(),
+  // Per-user UI preferences (issue #1422). OPTIONAL + additive; `null` = never chosen on the server.
+  // The browser's own value always wins — see `UserPreferencesSchema`.
+  locale: UiLocaleSchema.nullable().optional(),
+  theme: ThemePreferenceSchema.nullable().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
@@ -293,3 +317,48 @@ export type User = z.infer<typeof UserSchema>;
 export type CreateUser = z.infer<typeof CreateUserSchema>;
 export type CreateDirectoryPerson = z.infer<typeof CreateDirectoryPersonSchema>;
 export type UpdateUser = z.infer<typeof UpdateUserSchema>;
+
+/**
+ * `PATCH /users/me` — a signed-in human edits THEIR OWN name (issue #1421, CEO decision "only first and
+ * last name"). Deliberately NARROW: a strictObject with exactly `firstName` / `lastName`, so any other
+ * key (email, role, legajo, username, manager, isActive, externalId, …) is a 400 — those stay on the
+ * ADMIN-only `PATCH /users/:id`. Same bounds as the admin edit; at least one key is required. The API
+ * refuses it (409 `PROFILE_MANAGED_BY_DIRECTORY`) for a person the AD/LDAP sync owns (ADR-0091).
+ */
+export const UpdateOwnProfileSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      firstName: z.string().trim().min(1).max(100),
+      lastName: z.string().trim().min(1).max(100),
+    })
+    .partial(),
+);
+export type UpdateOwnProfile = z.infer<typeof UpdateOwnProfileSchema>;
+
+/**
+ * The caller's UI preferences (issue #1422) — `GET /account/preferences` and the response of the write.
+ * `null` = never chosen on the server. Semantics for the web: the BROWSER's own value wins; the stored
+ * value is applied only in a browser that has no preference of its own; changing it in the UI also saves
+ * it here so it follows the user to other devices.
+ */
+export const UserPreferencesSchema = z.object({
+  locale: UiLocaleSchema.nullable(),
+  theme: ThemePreferenceSchema.nullable(),
+});
+export type UserPreferences = z.infer<typeof UserPreferencesSchema>;
+
+/**
+ * `PUT /account/preferences` body (issue #1422). Each key is OPTIONAL: an omitted key is left unchanged,
+ * `null` clears it back to "never chosen", a value sets it. So the language switcher and the theme toggle
+ * can each save their own key without clobbering the other. Strict (unknown key → 400); an empty body is
+ * a 400 too.
+ */
+export const UpdateUserPreferencesSchema = requireAtLeastOneKey(
+  z
+    .strictObject({
+      locale: UiLocaleSchema.nullable(),
+      theme: ThemePreferenceSchema.nullable(),
+    })
+    .partial(),
+);
+export type UpdateUserPreferences = z.infer<typeof UpdateUserPreferencesSchema>;

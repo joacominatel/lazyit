@@ -70,7 +70,12 @@
       "role_changed": "Rol cambiado",
       "password_reset_sent": "Restablecimiento de contraseña enviado",
       "deleted": "Eliminado",
-      "restored": "Restaurado"
+      "restored": "Restaurado",
+      "consumable_delivered": "Consumible entregado",
+      "consumable_returned": "Consumible devuelto",
+      "deactivated": "Desactivado",
+      "reactivated": "Reactivado",
+      "session_ended": "Sesión cerrada"
     }
   },
   "empty": {},
@@ -120,8 +125,12 @@
       "users": "Usuarios",
       "locations": "Ubicaciones",
       "new": "Nuevo",
-      "edit": "Editar"
-    }
+      "edit": "Editar",
+      "ai": "IA",
+      "account": "Cuenta"
+    },
+    "aiAndConnectedApps": "IA y apps conectadas",
+    "account": "Cuenta"
   },
   "dialog": {
     "deleteTitle": "¿Eliminar {entity, select, asset {activo} application {aplicación} consumable {consumible} article {artículo} user {usuario} location {ubicación} model {modelo} category {categoría} serviceAccount {cuenta de servicio} other {elemento}}?",

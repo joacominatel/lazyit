@@ -27,6 +27,7 @@ type ClientMock = {
   index: jest.Mock;
   multiSearch: jest.Mock;
   getStats: jest.Mock;
+  isHealthy: jest.Mock;
 };
 
 const MeilisearchMock = Meilisearch as unknown as jest.Mock;
@@ -140,6 +141,7 @@ describe('SearchService', () => {
         index: jest.fn().mockReturnValue(index),
         multiSearch: jest.fn(),
         getStats: jest.fn(),
+        isHealthy: jest.fn(),
       };
       MeilisearchMock.mockImplementation(() => client);
       logger = loggerMock();
@@ -649,6 +651,21 @@ describe('SearchService', () => {
       expect(result.assets).toEqual({ hits: [], total: 0 });
     });
 
+    // --- engine health (issue #1216) ------------------------------------------
+    describe('isHealthy', () => {
+      it('reports the client health check', async () => {
+        client.isHealthy.mockResolvedValue(true);
+        expect(await service.isHealthy()).toBe(true);
+        client.isHealthy.mockResolvedValue(false);
+        expect(await service.isHealthy()).toBe(false);
+      });
+
+      it('never throws: a transport error reads as unhealthy', async () => {
+        client.isHealthy.mockRejectedValue(new Error('ECONNREFUSED'));
+        expect(await service.isHealthy()).toBe(false);
+      });
+    });
+
     // --- self-heal probing (issue #370) --------------------------------------
     describe('emptyOrMissingIndexes', () => {
       it('reports indexes that are absent from stats or have zero documents', async () => {
@@ -697,6 +714,13 @@ describe('SearchService', () => {
       const logger = loggerMock();
       const service = await buildService(logger);
       expect(await service.emptyOrMissingIndexes()).toEqual([]);
+    });
+
+    it('isHealthy is false without calling the engine', async () => {
+      delete process.env.MEILI_HOST;
+      const logger = loggerMock();
+      const service = await buildService(logger);
+      expect(await service.isHealthy()).toBe(false);
     });
   });
 

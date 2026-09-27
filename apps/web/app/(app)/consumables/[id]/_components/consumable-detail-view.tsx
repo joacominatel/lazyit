@@ -8,7 +8,10 @@ import {
   ScaleIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import type { ConsumableMovementType } from "@lazyit/shared";
+import type {
+  ConsumableMovement,
+  ConsumableMovementType,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -39,6 +42,11 @@ import {
 } from "@/lib/api/hooks/use-consumables";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import {
+  deliveryReturnState,
+  returnedByDelivery,
+} from "@/lib/consumables/deliveries";
+import { DeliveryTargetLabel } from "../../_components/delivery-target-label";
 import { MovementTypeBadge } from "../../_components/movement-type-badge";
 import { QuickAdjustButtons } from "../../_components/quick-adjust-buttons";
 import { STOCK_STATUS_TONE, stockTone } from "../../_components/stock-badge";
@@ -56,6 +64,56 @@ function quantityLabel(type: ConsumableMovementType, quantity: number): string {
   if (type === "IN") return `+${quantity}`;
   if (type === "OUT") return `−${quantity}`;
   return `=${quantity}`;
+}
+
+/**
+ * The ledger's destination cell (ADR-0098). A delivery (a targeted OUT) names where it went and, when
+ * returnable, how much is back / still out; a return (an IN with `returnOfId`) names the delivery it gives
+ * back — by its ledger number, plus the recipient when that delivery is on the page. Anything else is "—".
+ */
+function MovementDestination({
+  movement,
+  returnState,
+  returnOf,
+}: {
+  movement: ConsumableMovement;
+  returnState: { returned: number; outstanding: number } | null;
+  returnOf: ConsumableMovement | undefined;
+}) {
+  const t = useTranslations("consumables.detail");
+  if (movement.returnOfId != null) {
+    return (
+      <div className="space-y-0.5 text-sm">
+        <p className="text-muted-foreground">
+          {t("returnOf", { id: movement.returnOfId })}
+        </p>
+        {returnOf?.target ? (
+          <p className="text-xs">
+            <DeliveryTargetLabel target={returnOf.target} />
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  if (!movement.target) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="space-y-0.5 text-sm">
+      <DeliveryTargetLabel target={movement.target} />
+      {returnState ? (
+        <p className="font-mono text-xs tabular-nums text-muted-foreground">
+          {returnState.outstanding > 0
+            ? t("deliveryOutstanding", {
+                id: movement.id,
+                outstanding: returnState.outstanding,
+                returned: returnState.returned,
+              })
+            : t("deliveryReturned", { id: movement.id })}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 export function ConsumableDetailView({ id }: { id: string }) {
@@ -87,6 +145,17 @@ export function ConsumableDetailView({ id }: { id: string }) {
     [movements],
   );
   const userById = useUserNames(actorIds);
+  // Units returned per delivery (ADR-0098), summed over the full (unfiltered) ledger, so each returnable
+  // delivery row can say how much is still out; and the ledger by id, so a return row can name the
+  // delivery it gives back.
+  const returned = useMemo(
+    () => returnedByDelivery(movements ?? []),
+    [movements],
+  );
+  const movementById = useMemo(
+    () => new Map((movements ?? []).map((movement) => [movement.id, movement])),
+    [movements],
+  );
 
   const breadcrumb = useMemo(
     () => (
@@ -131,6 +200,12 @@ export function ConsumableDetailView({ id }: { id: string }) {
       <PageHeader
         breadcrumb={breadcrumb}
         title={consumable.name}
+        badge={
+          // A quiet marker (ADR-0098): deliveries of this item are expected back.
+          consumable.returnable ? (
+            <Badge variant="outline">{t("detail.returnableBadge")}</Badge>
+          ) : undefined
+        }
         subtitle={
           consumable.sku ? (
             <span className="font-mono">{consumable.sku}</span>
@@ -244,6 +319,11 @@ export function ConsumableDetailView({ id }: { id: string }) {
           <DetailField label={t("detail.unitLabel")}>
             {consumable.unit}
           </DetailField>
+          <DetailField label={t("detail.returnableLabel")}>
+            {consumable.returnable
+              ? t("detail.returnableYes")
+              : t("detail.returnableNo")}
+          </DetailField>
         </dl>
         {consumable.description && (
           <div className="mt-4 space-y-1">
@@ -281,6 +361,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
                   <TableHead className="w-20 text-right">
                     {t("detail.movementColumns.qty")}
                   </TableHead>
+                  <TableHead>{t("detail.movementColumns.destination")}</TableHead>
                   <TableHead>{t("detail.movementColumns.reason")}</TableHead>
                   <TableHead>{t("detail.movementColumns.by")}</TableHead>
                   <TableHead className="text-right">
@@ -300,6 +381,17 @@ export function ConsumableDetailView({ id }: { id: string }) {
                       </TableCell>
                       <TableCell className="text-right font-mono font-medium tabular-nums">
                         {quantityLabel(movement.type, movement.quantity)}
+                      </TableCell>
+                      <TableCell>
+                        <MovementDestination
+                          movement={movement}
+                          returnState={deliveryReturnState(movement, returned)}
+                          returnOf={
+                            movement.returnOfId != null
+                              ? movementById.get(movement.returnOfId)
+                              : undefined
+                          }
+                        />
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {movement.reason ?? "—"}
@@ -347,6 +439,7 @@ export function ConsumableDetailView({ id }: { id: string }) {
         type={movementType ?? "IN"}
         currentStock={consumable.currentStock}
         unit={consumable.unit}
+        returnable={consumable.returnable ?? false}
       />
       <DeleteConfirmDialog
         open={deleteOpen}

@@ -79,6 +79,9 @@ describe("PERMISSION_META — covering set over the catalog", () => {
       // `create` (the self-service accessRequest:create, ADR-0085) is a within-default mutation — `edit`
       // tier, not coarse: it is seeded to every role, so granting it is never an escalation.
       else if (action === "create") expect(tier).toBe("edit");
+      // `use` / `connect` (the AI channel verbs, ADR-0097) are MEMBER defaults — `edit` tier: the AI acts
+      // with the user's own permissions, so granting a channel is never an escalation.
+      else if (action === "use" || action === "connect") expect(tier).toBe("edit");
       // grant / manage / run / task / secrets / report / fetch are the coarse verbs
       else expect(tier).toBe("coarse");
     }
@@ -323,5 +326,32 @@ describe("set helpers", () => {
       permissionSetsEqual(["asset:read", "asset:write"], ["asset:write", "asset:read", "asset:read"]),
     ).toBe(true);
     expect(permissionSetsEqual(["asset:read"], ["asset:read", "asset:write"])).toBe(false);
+  });
+});
+
+describe("AI pillar (ADR-0097)", () => {
+  test("the ai pillar exists with display copy", () => {
+    expect(PERMISSION_PILLARS).toContain("ai");
+    expect(PILLAR_META.ai.label.trim().length).toBeGreaterThan(0);
+    expect(PILLAR_META.ai.description.trim().length).toBeGreaterThan(0);
+  });
+
+  test("ai:use and ai:connect are within-default (no admin-level warning)", () => {
+    for (const permission of ["ai:use", "ai:connect"] as const) {
+      expect(PERMISSION_META[permission].pillar).toBe("ai");
+      expect(isAboveDefaultTier(permission)).toBe(false);
+    }
+  });
+
+  test("each AI verb has its own capability toggle", () => {
+    expect(CAPABILITY_BY_ID["ai.use"].permissions).toEqual(["ai:use"]);
+    expect(CAPABILITY_BY_ID["ai.connect"].permissions).toEqual(["ai:connect"]);
+  });
+
+  test("the editor preset (the MEMBER default) includes both AI verbs; read-only includes neither", () => {
+    expect(PRESET_BY_ID.editor.permissions).toContain("ai:use");
+    expect(PRESET_BY_ID.editor.permissions).toContain("ai:connect");
+    expect(PRESET_BY_ID.readOnly.permissions).not.toContain("ai:use");
+    expect(PRESET_BY_ID.readOnly.permissions).not.toContain("ai:connect");
   });
 });

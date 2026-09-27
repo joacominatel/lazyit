@@ -405,15 +405,18 @@ this build, which that section now states on screen rather than implying only on
   §3 amendment, #1143) — narrower than the name implied, and deliberately so: it records the tracked
   FACTS that moved (packages, OS/kernel/memory/disk/serial, a container's image digest), not every
   edit to every column. Curation changes (label, kind, position, asset linkage) are still not logged.
-- **Chassis routing** — *proposed, not built* ([[0093-chassis-routing-and-asset-adoption]], #1196).
-  `host.chassis` is collected on **both** platforms and acted on by essentially nothing: `inferNodeKind`
-  reads it only as the fallback branch, so a report carrying `host.virtualization` (the normal case on
-  both collectors) never reaches it. The proposal adds an agent-owned nullable **`chassis`** column,
-  hides `laptop`/`desktop` nodes from the topology **canvas** by default behind a "Show endpoints"
-  toggle (a view-level treatment — **no new `InfraNodeState`/`InfraNodeKind` member**, and impact /
-  search / the Servers table stay unfiltered), surfaces chassis in the review tray, adds it as an
-  `InfraAutoConfirmRule` condition, and makes a confirm **adopt** a corroborated live [[asset]] instead
-  of minting a duplicate.
+- ~~**Chassis routing** — *proposed, not built*.~~ **Shipped**
+  ([[0093-chassis-routing-and-asset-adoption]], #1196). The agent-owned nullable **`chassis`** column
+  exists and is written from `host.chassis` on every report; chassis shows in the review tray and is a
+  live `InfraAutoConfirmRule` condition (`RULE_CONDITION_KEYS`); and a confirm whose serial
+  corroborates a live [[asset]] now **adopts** that asset instead of minting a duplicate
+  (`AssetHistoryEventType.AGENT_LINKED`). `inferNodeKind` is unchanged — it still reads chassis only as
+  the fallback branch, and that was never what the ADR routed on.
+  **The canvas treatment shipped with the opposite default it was designed with.** §5 hid
+  `laptop`/`desktop` behind a "Show endpoints" toggle; the CEO inverted that on 2026-09-09 (#1295), so
+  endpoints are **drawn by default** and the same control hides them (`?endpoints=0`). Everything the
+  ADR fixed about the treatment's *scope* holds either way: it is view-level — **no new
+  `InfraNodeState`/`InfraNodeKind` member** — and impact, search and the Servers table stay unfiltered.
 - ~~**Assisted agent update + the fleet view**~~ **Shipped**
   ([[0094-assisted-agent-update]], #1204/#1206/#1207). `agentVersion` had been a first-class column since #907
   that nothing aggregated. `GET /infra/agents/fleet` (`infra:read`) now answers *how many agents, on what

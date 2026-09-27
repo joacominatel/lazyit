@@ -3,7 +3,7 @@ title: AccessRequest
 tags: [domain, entity]
 status: active
 created: 2026-05-25
-updated: 2026-07-02
+updated: 2026-09-25
 ---
 
 # AccessRequest
@@ -45,6 +45,13 @@ never edited or deleted (the append-only-family posture, [[0006-soft-delete-and-
   **deciding** reuses `accessGrant:grant` (no new verb); both approve/deny are **human-only**. Listing all
   requests needs `accessRequest:read` (ADMIN+MEMBER), but a requester always sees their **own** via
   `GET /access-requests/mine`. → [[0046-roles-permissions-v2]].
+- **Self-approval is allowed (CEO 2026-09-25, #1344).** A decider holding `accessGrant:grant` may approve
+  or deny their **own** request: the route does not block it and the web UI adds no warning. The AI
+  assistant's approval card only states the fact ("You are deciding your own request."), without a
+  warning flag or an extra step. The decision was "leave it as it is" (the same
+  `accessGrant:grant` already lets that person create the grant directly). The audit trail
+  still records it: `requesterId` and `decidedById` name the same person, and the grant is attributed
+  to the approver.
 - **Notified on create:** a broadcast `access_request.created` bell nudge to the admins who can decide
   ([[0056-in-app-notification-bell]]).
 - **Notified on decision (#1071):** a TARGETED `access_request.decided` bell + email nudge to the

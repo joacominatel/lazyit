@@ -3,7 +3,8 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { AssetHistory, AssetHistoryEventType } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useMemo } from "react";
+import Link from "next/link";
+import { type ReactNode, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
@@ -12,6 +13,10 @@ import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { cn } from "@/lib/utils";
+import {
+  formatChangedFields,
+  parseUpdatedPayload,
+} from "./asset-history-updated";
 
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
@@ -27,6 +32,9 @@ const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   ACKNOWLEDGED: "acknowledged",
   // AGENT_LINKED — an agent-reported node ADOPTED this asset at its confirm gate (ADR-0093 §4, #1198).
   AGENT_LINKED: "agentLinked",
+  // A consumable delivered to / returned from this asset (ADR-0098, #1364).
+  CONSUMABLE_DELIVERED: "consumableDelivered",
+  CONSUMABLE_RETURNED: "consumableReturned",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -68,6 +76,13 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   // than a solid status tone, on chart-5 — the next unused hue in the sequence, which keeps every
   // categorical event visually distinct in the margin.
   AGENT_LINKED: { kind: "categorical", dot: "bg-chart-5" },
+  // Consumable delivered to / returned from this asset (ADR-0098, #1364) — supplies fitted to or left
+  // in the machine, not a change to the asset itself, so the neutral pill again. The categorical ramp
+  // is exhausted at chart-5, and globals.css is explicit that Consumables SHARES the Inventory pillar
+  // hue ("differentiate by icon, never invent a 5th hue"), so both ride `bg-pillar-inventory`. The pair
+  // is told apart by its label, the same way the text — not the colour — carries every badge's meaning.
+  CONSUMABLE_DELIVERED: { kind: "categorical", dot: "bg-pillar-inventory" },
+  CONSUMABLE_RETURNED: { kind: "categorical", dot: "bg-pillar-inventory" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -112,6 +127,12 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function asPositiveInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
 /**
  * The AssetHistory event log (ADR-0033) as a vertical timeline. Reads its own paginated history
  * (cursor on id) plus a batch id→name resolve (#961) for the actors and the `{userId}` payloads of
@@ -129,6 +150,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   } = useAssetHistory(assetId);
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
+  const tForm = useTranslations("assets.form");
   const { dateTime, relative } = useFormatters();
 
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
@@ -153,8 +175,65 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     return user ? `${user.firstName} ${user.lastName}` : t("aUser");
   }
 
+  /**
+   * The consumable delivered / returned line (ADR-0098): "2 units of <Toner HP 85A> delivered", with the
+   * consumable linked. The payload is unvalidated jsonb, so a missing or odd field degrades to a static
+   * line instead of printing "undefined" — and the link only renders when the id is a real string.
+   */
+  function consumableDetail(
+    payload: Record<string, unknown>,
+    kind: "consumableDelivered" | "consumableReturned",
+  ): ReactNode {
+    const quantity = asPositiveInt(payload.quantity);
+    const name = asString(payload.consumableName)?.trim();
+    const unit = asString(payload.unit)?.trim();
+    const consumableId = asString(payload.consumableId);
+    if (quantity === undefined || !name) return t(`details.${kind}Fallback`);
+    return t.rich(`details.${kind}`, {
+      quantity,
+      unit: unit || t("details.consumableUnitFallback"),
+      name,
+      link: (chunks) =>
+        consumableId ? (
+          <Link
+            href={`/consumables/${consumableId}`}
+            className="font-medium hover:underline"
+          >
+            {chunks}
+          </Link>
+        ) : (
+          <span className="font-medium">{chunks}</span>
+        ),
+    });
+  }
+
+  /**
+   * The UPDATED line (#1382): "Changed: Name, Notes" from the `{ fields }` payload (names only, never
+   * values), labelled with the asset form's own field labels, an unknown name shown raw. A re-import row
+   * (`source: 'import'`, #1061) adds "via re-import"; a legacy row with no `fields` keeps the neutral line.
+   */
+  function updatedDetail(payload: unknown): ReactNode {
+    const { fields, viaImport } = parseUpdatedPayload(payload);
+    const list = formatChangedFields(fields, (field) => tForm(field));
+    const main = list
+      ? t("details.updatedFields", { count: fields.length, fields: list })
+      : viaImport
+        ? t("details.updatedViaImport")
+        : t("details.updated");
+    if (!list || !viaImport) return main;
+    return (
+      <>
+        {main}
+        <span className="text-muted-foreground">
+          {" · "}
+          {t("details.viaImport")}
+        </span>
+      </>
+    );
+  }
+
   /** Contextual detail for an event (the type itself is shown as a badge). */
-  function detail(event: AssetHistory): string | null {
+  function detail(event: AssetHistory): ReactNode {
     const payload = event.payload ?? {};
     switch (event.eventType) {
       case "STATUS_CHANGED": {
@@ -169,7 +248,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
       case "CREATED":
         return t("details.created");
       case "UPDATED":
-        return t("details.updated");
+        return updatedDetail(event.payload);
       case "LOCATION_CHANGED":
         return t("details.locationChanged");
       case "MODEL_CHANGED":
@@ -185,6 +264,10 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         // node would need its label, i.e. a fetch this timeline does not make. The event's job is to
         // answer WHEN a machine started writing to this row; the deep link is wave 2's call.
         return t("details.agentLinked");
+      case "CONSUMABLE_DELIVERED":
+        return consumableDetail(payload, "consumableDelivered");
+      case "CONSUMABLE_RETURNED":
+        return consumableDetail(payload, "consumableReturned");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

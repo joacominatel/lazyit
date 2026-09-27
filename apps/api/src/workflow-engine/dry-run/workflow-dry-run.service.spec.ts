@@ -360,3 +360,102 @@ describe('WorkflowDryRunService.dryRun — C4', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('WorkflowDryRunService — SEC-075 / SEC-076 preview redaction', () => {
+  it('redacts default-header VALUES and URL userinfo in the rendered request', async () => {
+    const h = makePrisma({
+      connRows: [
+        {
+          id: CONN1,
+          secretId: null,
+          config: {
+            kind: 'REST',
+            baseUrl: 'https://svc:hunter2@api.example.com',
+            authScheme: 'NONE',
+            defaultHeaders: { Authorization: 'Bearer sk_live_1' },
+          },
+        },
+        {
+          ...CONN_ROWS[1],
+          config: {
+            kind: 'WEBHOOK_OUT',
+            url: 'https://u:p@hooks.example.com/x',
+            signatureHeader: 'X-Signature',
+          },
+        },
+      ],
+    });
+    const result = await h.service.dryRun(byId, REQUEST_ID);
+
+    const [create, notify] = result.steps;
+    expect(create.request?.headers['Authorization']).toBe('[redacted]');
+    expect(create.request?.url).toBe(
+      'https://[redacted]@api.example.com/v3/user/usr_1',
+    );
+    expect(notify.request?.url).toBe('https://[redacted]@hooks.example.com/x');
+    const json = JSON.stringify(result);
+    expect(json).not.toContain('sk_live');
+    expect(json).not.toContain('hunter2');
+  });
+});
+
+describe('WorkflowDryRunService — SEC-078 sample grant must be live', () => {
+  const baseGrant = {
+    id: 'grant1',
+    applicationId: APP,
+    accessLevel: 'developer',
+    grantedAt: new Date('2026-06-08T00:00:00.000Z'),
+    expiresAt: null,
+    revokedAt: null,
+    user: {
+      id: 'usr_1',
+      email: 'ada@example.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      legajo: null,
+      username: null,
+      managerName: null,
+      manager: null,
+      deletedAt: null,
+    },
+  };
+
+  it('refuses (400) a sample grant whose grantee is offboarded (deletedAt set)', async () => {
+    const h = makePrisma({
+      grant: {
+        ...baseGrant,
+        user: { ...baseGrant.user, deletedAt: new Date('2026-09-01') },
+      },
+    });
+    await expect(h.service.dryRun(byId, REQUEST_ID)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('selects user.deletedAt on the nested include (the include is not soft-delete scoped)', async () => {
+    const h = makePrisma({ grant: baseGrant });
+    await h.service.dryRun(byId, REQUEST_ID);
+    const args = (
+      h.accessGrant.findFirst.mock.calls as Array<
+        [{ include: { user: { select: Record<string, unknown> } } }]
+      >
+    )[0][0];
+    expect(args.include.user.select.deletedAt).toBe(true);
+  });
+
+  it('refuses (400) a revoked sample grant', async () => {
+    const h = makePrisma({
+      grant: { ...baseGrant, revokedAt: new Date('2026-09-01') },
+    });
+    await expect(h.service.dryRun(byId, REQUEST_ID)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('accepts a live grant of an active user', async () => {
+    const h = makePrisma({ grant: baseGrant });
+    await expect(h.service.dryRun(byId, REQUEST_ID)).resolves.toMatchObject({
+      dryRun: true,
+    });
+  });
+});

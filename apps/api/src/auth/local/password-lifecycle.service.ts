@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ChangePasswordResponse } from '@lazyit/shared';
@@ -14,9 +15,19 @@ import {
   buildTransport,
   formatFrom,
   renderPasswordResetEmail,
+  type ResolvedSmtpConfig,
 } from '../../smtp/email.mailer';
 import { LocalCredentialService } from './local-credential.service';
 import { hashResetToken, mintResetToken } from './password-reset-token';
+import { UserSessionStore, type SessionDeviceMeta } from './user-session.store';
+
+/** The calling session of a password change (issue #1420): which row it is, and the request's device. */
+export interface CallingSession {
+  /** The verified token's `sid`, or null for a token minted before per-device sessions. */
+  sessionId?: string | null;
+  /** The request's device, used when a new session row has to be opened. */
+  meta?: SessionDeviceMeta;
+}
 
 /** Reset-token TTL — ≤1h per ADR-0086 §F4 / SECURITY GAP #7. */
 const RESET_TTL_MINUTES = 60;
@@ -29,6 +40,30 @@ const RESET_TTL_MS = RESET_TTL_MINUTES * 60 * 1000;
  * per-IP rate-limit guard on the endpoint.
  */
 const MAX_ACTIVE_TOKENS_PER_USER = 3;
+
+/**
+ * Why an ADMIN-initiated reset link could not be sent (issue #1268). The first two mirror
+ * `PasswordResetEmailUnavailableReason` in `@lazyit/shared` — two DISTINCT operator fixes, so the caller
+ * can map them to two distinct 409 bodies rather than one vague "unavailable". `send-failed` is the
+ * runtime one: the config was there and the relay refused, so it maps to a 503, not a 409.
+ */
+export type AdminResetLinkFailure =
+  'smtp-not-configured' | 'origin-unknown' | 'send-failed';
+
+/**
+ * A named failure of {@link PasswordLifecycleService.sendAdminResetLink}. Carries a machine-readable
+ * `reason` so the HTTP layer picks the status; the `message` is operator-facing copy and never contains
+ * token material, a password, or SMTP credentials.
+ */
+export class AdminResetLinkError extends Error {
+  constructor(
+    readonly reason: AdminResetLinkFailure,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AdminResetLinkError';
+  }
+}
 
 /**
  * PasswordLifecycleService — the self-service password flows for AUTH_MODE=local (ADR-0086 §F4, F4a):
@@ -46,13 +81,19 @@ const MAX_ACTIVE_TOKENS_PER_USER = 3;
 @Injectable()
 export class PasswordLifecycleService {
   private readonly logger = new Logger(PasswordLifecycleService.name);
+  private readonly sessions: UserSessionStore;
 
+  // The session store is provided by AuthModule; @Optional with an equivalent default so a service built
+  // by hand from the four original dependencies (the existing specs) behaves the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly credentials: LocalCredentialService,
     private readonly history: UserHistoryService,
     private readonly smtp: SmtpService,
-  ) {}
+    @Optional() sessions?: UserSessionStore,
+  ) {
+    this.sessions = sessions ?? new UserSessionStore(prisma);
+  }
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
   private isLocalMode(): boolean {
@@ -67,6 +108,13 @@ export class PasswordLifecycleService {
    * hash, BUMPS `sessionEpoch` (revoking every OTHER session the user holds), clears `mustChangePassword`,
    * and stamps `passwordUpdatedAt`. Audits PASSWORD_CHANGED. Returns a FRESH session token minted at the
    * new epoch so the caller who just changed their password stays logged in (their old token is now dead).
+   * `rememberMe` is the CALLING session's choice (read from the verified token by the guard, never from the
+   * body): a "keep me signed in" session stays one, so changing a password never silently shortens it
+   * (ADR-0086 §8). The response carries the new token's `expiresAt`, like the login response.
+   *
+   * Per-device sessions (issue #1420): every OTHER session row of the user is deleted in the same
+   * transaction. The CALLING session keeps its row (and its id, so the device list stays stable) when its
+   * token carried one; a caller on a pre-#1420 token gets a new row opened from `calling.meta`.
    *
    * The `user` is the row the guard loaded THIS request (@CurrentUser) — already live, active and not
    * directoryOnly (handleLocal rejects those). Defensive re-checks are kept fail-closed regardless.
@@ -75,6 +123,8 @@ export class PasswordLifecycleService {
     user: User,
     currentPassword: string,
     newPassword: string,
+    rememberMe = false,
+    calling: CallingSession = {},
   ): Promise<ChangePasswordResponse> {
     if (!this.isLocalMode()) {
       // Not applicable outside local mode — OIDC users have no lazyit-owned password to change.
@@ -114,16 +164,33 @@ export class PasswordLifecycleService {
     // lower epoch), so a compromised session dies the moment the real owner changes their password
     // (ADR-0086 §3 revocation); the token sweep does the same for any live emailed reset link (symmetry
     // with resetPassword, which invalidates siblings), so a change also closes that vector.
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.user.update({
-        where: { id: user.id },
+    //
+    // The write is CONDITIONAL on the epoch the caller authenticated with (#1420 review): if anything
+    // bumped it since — an admin reset, a deactivation, a sign-out everywhere — this request's session is
+    // already revoked, and applying the change would silently overwrite that (e.g. an admin's temporary
+    // password). Zero rows → 401 `SESSION_REVOKED`, nothing written.
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.user.updateMany({
+        where: { id: user.id, sessionEpoch: user.sessionEpoch },
         data: {
           passwordHash: newHash,
           passwordUpdatedAt: new Date(),
           mustChangePassword: false,
           sessionEpoch: { increment: 1 },
+          // A password change or reset also kills every MCP connection and personal token — the one
+          // credential event a web logout is not (ADR-0097 decision 8, amended 2026-09-24).
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (changed.count === 0) {
+        throw new UnauthorizedException({
+          statusCode: 401,
+          code: 'SESSION_REVOKED',
+          message:
+            'Your session was revoked while changing the password. Sign in again.',
+        });
+      }
+      const row = { id: user.id, sessionEpoch: user.sessionEpoch + 1 };
       // Any outstanding (unused) reset token is now stale — a self-service change supersedes it. Delete
       // rather than mark used: these rows are already GC-pruned, and a hard delete leaves nothing to leak.
       await tx.passwordResetToken.deleteMany({
@@ -135,15 +202,42 @@ export class PasswordLifecycleService {
         eventType: 'PASSWORD_CHANGED',
         actor: { userId: user.id },
       });
-      return row;
-    });
 
-    // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just died).
-    const token = await this.credentials.mintSession({
-      id: updated.id,
-      sessionEpoch: updated.sessionEpoch,
+      // Mint a fresh token at the NEW epoch so the caller stays authenticated (their prior token just
+      // died), and end every other device's session row (#1420). The calling session keeps its row.
+      const subject = { id: row.id, sessionEpoch: row.sessionEpoch };
+      const keepId = calling.sessionId ?? null;
+      await this.sessions.endAll(user.id, tx, keepId);
+      if (keepId !== null) {
+        const minted = await this.credentials.mintSession(subject, {
+          rememberMe,
+          sessionId: keepId,
+        });
+        if (
+          await this.sessions.carryOver(
+            keepId,
+            user.id,
+            user.sessionEpoch,
+            row.sessionEpoch,
+            minted.expiresAt,
+            tx,
+          )
+        ) {
+          return minted;
+        }
+      }
+      return this.sessions.open(
+        {
+          userId: row.id,
+          epoch: row.sessionEpoch,
+          rememberMe,
+          meta: calling.meta ?? { userAgent: null, ip: null },
+        },
+        (sessionId) =>
+          this.credentials.mintSession(subject, { rememberMe, sessionId }),
+        tx,
+      );
     });
-    return { token };
   }
 
   // ---------- 3. forgot-password (public, enumeration-safe) ------------------
@@ -265,6 +359,9 @@ export class PasswordLifecycleService {
     if (!config) {
       return; // Email off or incomplete — nothing to send (not an error).
     }
+    // WEB_ORIGIN ONLY. The admin path may additionally derive an origin from the request host
+    // (ADR-0087 LAN mode) because its caller is an authenticated admin; this anonymous flow never may —
+    // a forged Host header here would poison a link sent to someone else's mailbox.
     const origin = process.env.WEB_ORIGIN;
     if (!origin) {
       this.logger.warn(
@@ -272,6 +369,22 @@ export class PasswordLifecycleService {
       );
       return;
     }
+    await this.deliverResetEmail(config, email, rawToken, origin);
+  }
+
+  /**
+   * Render + send ONE reset email against an already-resolved SMTP config and link origin. The single
+   * place the link URL is built and handed to nodemailer — shared by the public {@link sendResetEmail}
+   * (fail-soft) and the admin {@link sendAdminResetLink} (fail-loud), so both produce the identical
+   * message and the identical `/reset-password?token=…` shape. The RAW token appears ONLY in the link;
+   * it is never logged, and no argument of this method is ever logged.
+   */
+  private async deliverResetEmail(
+    config: ResolvedSmtpConfig,
+    email: string,
+    rawToken: string,
+    origin: string,
+  ): Promise<void> {
     const resetUrl = `${origin.replace(/\/+$/, '')}/reset-password?token=${encodeURIComponent(rawToken)}`;
     const rendered = renderPasswordResetEmail({
       resetUrl,
@@ -286,6 +399,131 @@ export class PasswordLifecycleService {
       text: rendered.text,
       html: rendered.html,
     });
+  }
+
+  // ---------- 3b. admin-initiated reset link (issue #1268) -------------------
+
+  /**
+   * Whether the instance can send outbound email RIGHT NOW (SMTP enabled + complete). Reported to an
+   * authenticated `user:manage` admin so the reset dialog can offer — or explain the absence of — the
+   * email delivery. Deliberately NOT exposed on the `@Public` `GET /config/status`: whether an instance
+   * has working outbound email is operational detail an anonymous visitor has no business reading.
+   *
+   * A decrypt failure (e.g. a rotated SMTP_SECRET_KEY) is "not ready", not a 500 — the operator's fix is
+   * the same either way, and the admin still has the temp-password delivery.
+   */
+  async isOutboundEmailReady(): Promise<boolean> {
+    try {
+      return (await this.smtp.resolveConfig(true)) !== null;
+    } catch (err) {
+      this.logger.warn(
+        `SMTP config could not be resolved for password-reset capabilities: ${errText(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Mint + send a password-reset link on behalf of an ADMIN (issue #1268). Reuses the SAME machinery as
+   * the public flow — {@link mintResetToken}, the `PasswordResetToken` row (SHA-256 at rest, single-use,
+   * {@link RESET_TTL_MINUTES} TTL) and {@link deliverResetEmail} — and differs ONLY in how it reports.
+   *
+   * HONEST, SYNCHRONOUS REPORTING. The public `forgotPassword` is uniform-by-design so it cannot be used
+   * as an account-enumeration oracle (ADR-0086 §F4, issue #1006): it detaches issuance, swallows every
+   * error and always answers the same. NONE of that applies here. The caller is an authenticated admin
+   * who already knows the account exists, so there is nothing to conceal and a silent no-op would deceive
+   * the only person who needs the truth. Every failure therefore THROWS an {@link AdminResetLinkError}
+   * the caller maps to a real status — never a cheerful success over a mail that did not go out.
+   *
+   * NO PER-ACCOUNT CAP. {@link MAX_ACTIVE_TOKENS_PER_USER} throttles the PUBLIC flow because an anonymous
+   * stranger can otherwise email-bomb a mailbox by replaying forgot-password. An admin pressing a button
+   * in their own console is not that threat, and silently skipping the send would reintroduce exactly the
+   * dishonesty this path exists to remove. The opportunistic GC still runs, so the table stays bounded.
+   *
+   * The `origin` is resolved by the caller (see `../../users/reset-link-origin`) — this service never
+   * reads a request header.
+   */
+  async sendAdminResetLink(
+    /** The already-resolved, live, active, non-directory subject. Only its id + mailbox are needed. */
+    user: { id: string; email: string },
+    origin: string | null,
+  ): Promise<{ sentTo: string; expiresInMinutes: number }> {
+    if (!this.isLocalMode()) {
+      // Defensive: the caller already branches on mode. There are no local credentials to reset here.
+      throw new AdminResetLinkError(
+        'smtp-not-configured',
+        'Emailing a reset link is only available in local authentication mode.',
+      );
+    }
+    if (!origin) {
+      throw new AdminResetLinkError(
+        'origin-unknown',
+        'No public web origin is configured, so a working reset link cannot be built. Set WEB_ORIGIN.',
+      );
+    }
+
+    let config: ResolvedSmtpConfig | null = null;
+    try {
+      config = await this.smtp.resolveConfig(true);
+    } catch (err) {
+      this.logger.warn(
+        `SMTP config could not be resolved for an admin reset link: ${errText(err)}`,
+      );
+    }
+    if (!config) {
+      // Checked BEFORE minting, so a disabled-email instance never accumulates orphan tokens.
+      throw new AdminResetLinkError(
+        'smtp-not-configured',
+        'Outbound email is not configured, so a reset link cannot be sent. Configure SMTP under Settings → Instance, or hand off a temporary password instead.',
+      );
+    }
+
+    // NOTE: MAX_ACTIVE_TOKENS_PER_USER is deliberately NOT applied here. That cap exists so an anonymous
+    // stranger cannot email-bomb one mailbox through the PUBLIC forgot flow, where skipping silently is
+    // safe precisely because that flow's response is uniform anyway. Neither half holds on this path: the
+    // caller is an authenticated `user:manage` admin (not the threat the cap models), and this endpoint
+    // reports honestly — so a silent skip would answer "sent" for a mail that was never attempted, which
+    // is the exact deception the rest of this method is built to avoid.
+    // Opportunistic GC (same as the public path): drop this user's used/expired tokens so the table stays
+    // bounded. Best-effort — a failure never blocks the send.
+    try {
+      await this.prisma.passwordResetToken.deleteMany({
+        where: {
+          userId: user.id,
+          OR: [{ usedAt: { not: null } }, { expiresAt: { lt: new Date() } }],
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `password-reset token prune failed for user ${user.id}: ${errText(err)}`,
+      );
+    }
+
+    const { raw, tokenHash } = mintResetToken();
+    await this.prisma.passwordResetToken.create({
+      data: {
+        tokenHash,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + RESET_TTL_MS),
+      },
+    });
+
+    try {
+      await this.deliverResetEmail(config, user.email, raw, origin);
+    } catch (err) {
+      // The token row is deliberately LEFT IN PLACE. A send failure is ambiguous (a socket timeout can
+      // follow a message the relay already accepted), so deleting it could kill a link that did arrive.
+      // A stray token is harmless: single-use, ≤1h TTL, and GC'd on the next issuance for this user.
+      this.logger.warn(
+        `admin password-reset email failed for user ${user.id}: ${errText(err)}`,
+      );
+      throw new AdminResetLinkError(
+        'send-failed',
+        'The reset link could not be sent. Check the SMTP settings and try again, or hand off a temporary password instead.',
+      );
+    }
+
+    return { sentTo: user.email, expiresInMinutes: RESET_TTL_MINUTES };
   }
 
   // ---------- 4. reset-password (public, token) ------------------------------
@@ -353,8 +591,14 @@ export class PasswordLifecycleService {
           passwordUpdatedAt: new Date(),
           mustChangePassword: false,
           sessionEpoch: { increment: 1 },
+          // A password change or reset also kills every MCP connection and personal token — the one
+          // credential event a web logout is not (ADR-0097 decision 8, amended 2026-09-24).
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
+
+      // Every per-device session row goes with the epoch bump (#1420).
+      await this.sessions.endAll(user.id, tx);
 
       // Append-only audit (self-service reset via token: actor == subject).
       await this.history.record(tx, {

@@ -315,18 +315,28 @@
         "acknowledged": "Acknowledged",
         "agentLinked": "Agent linked",
         "deleted": "Deleted",
-        "restored": "Restored"
+        "restored": "Restored",
+        "consumableDelivered": "Consumable delivered",
+        "consumableReturned": "Consumable returned"
       },
       "details": {
         "created": "Asset created",
-        "updated": "Updated via re-import",
+        "updated": "Details updated",
+        "updatedFields": "Changed: {fields}",
+        "updatedViaImport": "Updated via re-import",
+        "viaImport": "via re-import",
         "locationChanged": "Location updated",
         "modelChanged": "Model updated",
         "specsChanged": "Specs updated",
         "acknowledged": "Confirmed receipt",
         "agentLinked": "An agent started reporting to this asset",
         "deleted": "Asset deleted",
-        "restored": "Asset restored"
+        "restored": "Asset restored",
+        "consumableDelivered": "{quantity} {unit} of <link>{name}</link> delivered",
+        "consumableReturned": "{quantity} {unit} of <link>{name}</link> returned",
+        "consumableDeliveredFallback": "A consumable was delivered to this asset",
+        "consumableReturnedFallback": "A consumable was returned from this asset",
+        "consumableUnitFallback": "units"
       }
     }
   },

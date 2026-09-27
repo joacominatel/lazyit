@@ -20,8 +20,10 @@ Normalmente no tienes que pensar en el índice — lazyit lo mantiene al día po
   índice en segundo plano. Esto es deliberadamente **tolerante a fallos**: si el motor de búsqueda no
   está disponible un momento, tu escritura igualmente se completa — la búsqueda solo se retrasa hasta
   que el índice se pone al día.
-- **Autorreparación al arrancar.** Cuando la aplicación arranca, comprueba cada índice y reconstruye
-  automáticamente cualquiera que falte o esté vacío. No hace nada cuando los índices ya tienen datos,
+- **Autorreparación al arrancar.** Cuando la aplicación arranca, espera a que el motor de búsqueda esté
+  disponible, comprueba cada índice y reconstruye automáticamente, en segundo plano, cualquiera que falte
+  o esté vacío. Esto cubre un primer despliegue y una actualización del motor de búsqueda (que arranca
+  con un índice nuevo y vacío) sin ningún paso manual. No hace nada cuando los índices ya tienen datos,
   así que es seguro en un parque grande.
 - **Reconciliación periódica.** Un proceso en segundo plano reconstruye periódicamente los índices a
   partir de la base de datos para reparar cualquier desfase por una actualización en segundo plano que
@@ -39,22 +41,22 @@ Si la búsqueda global no muestra resultados, distingue dos casos:
   y te lo indica, en lugar de fingir que no hay coincidencias. Suele resolverse solo cuando el motor
   vuelve; si persiste, comprueba que el servicio de búsqueda está en marcha. Consulta
   [Servicios](/help/deployment-operations-services).
-- **Resultados realmente vacíos, sobre todo justo después de desplegar.** Una instancia recién
-  desplegada o recién sembrada puede arrancar con los índices vacíos. La autorreparación al arrancar
-  cubre un índice totalmente vacío, pero la solución fiable es una reindexación completa.
+- **Resultados incompletos justo después de desplegar o actualizar.** Una instancia recién desplegada,
+  o cuyo motor de búsqueda se acaba de actualizar, arranca con los índices vacíos. La autorreparación al
+  arrancar los reconstruye en segundo plano — dale unos minutos. Si después siguen faltando resultados,
+  ejecuta una reindexación completa.
 
 ## Reindexar
 
 Una **reindexación completa** reconstruye todos los índices a partir de la base de datos. Es la
-reparación determinista para cualquier desfase y el paso esperado tras un primer despliegue. Se ejecuta
-desde el servicio de la API:
+reparación determinista para cualquier desfase. No hace falta tras un primer despliegue ni tras una
+actualización — de eso se encarga la autorreparación al arrancar. Se ejecuta desde el servicio de la API:
 
 ```
 bun run reindex:all
 ```
 
-Ejecútalo una vez en el primer despliegue para rellenar el índice, y cada vez que sospeches que la
-búsqueda está desfasada (por ejemplo tras restaurar una copia de seguridad o tras una caída prolongada
+Ejecútalo cada vez que sospeches que la búsqueda está desfasada (por ejemplo tras restaurar una copia de seguridad o tras una caída prolongada
 del motor de búsqueda). La reconstrucción es sin tiempo de inactividad — la búsqueda sigue sirviendo el
 índice antiguo hasta que el nuevo se intercambia.
 
@@ -65,8 +67,8 @@ del motor de búsqueda). La reconstrucción es sin tiempo de inactividad — la 
 
 - Los registros nuevos y modificados aparecen en la búsqueda en cuestión de momentos — si no, el motor
   puede estar caído.
-- Tras un despliegue, una restauración o una caída larga, ejecuta `reindex:all` para garantizar un
-  índice completo.
+- Tras un despliegue o una actualización, la búsqueda se completa sola en pocos minutos. Tras una
+  restauración o una caída larga, ejecuta `reindex:all` para garantizar un índice completo.
 - "Búsqueda no disponible" se refiere al motor, no a tus datos — tus registros están intactos y las
   escrituras siguen funcionando.
 

@@ -50,13 +50,14 @@ una manguera:
 | **Garantía por vencer** | La garantía de un activo está dentro de su ventana de anticipación (los últimos 90 días antes de terminar) y todavía no venció. Un aviso por activo, para que puedas renovar o reemplazar antes de la fecha límite en lugar de enterarte después. Enlaza al activo. |
 | **Acceso por vencer** | Una concesión de acceso activa está a menos de dos semanas de su fecha de vencimiento y se revocará automáticamente cuando pase. Un aviso por concesión para que puedas volver a otorgar el acceso antes de que un contratista o temporal lo pierda en silencio. Enlaza a la aplicación. |
 | **Recepción confirmada** | (Dirigida) Alguien confirmó la recepción de un activo que le asignaste. Llega a tu campana — y a tu correo, salvo que lo desactives — para que sepas que la entrega se completó sin tener que preguntar. Enlaza al activo. |
+| **Nuevo agente de IA conectado** | (Dirigida, de seguridad) Un agente de IA externo —Claude Code, Cursor u otro cliente MCP, o un token MCP personal— se usó en tu cuenta por primera vez. Una por conexión. Aparece en tu campana —y en tu correo, salvo que lo desactives—. Si no fuiste tú, revoca la conexión en tus conexiones de IA y cambia tu contraseña. |
 
 Las notificaciones se emiten **después** de que la acción que las origina se completa, y son **de mejor
 esfuerzo**: una notificación que no se logra enviar nunca bloquea ni deshace el cambio subyacente. Los
 disparos repetidos del mismo evento se agrupan en una sola notificación, así que un consumible que
 oscila alrededor de su umbral no inunda la campana.
 
-## Leer y limpiar
+## Leer notificaciones
 
 Abre la campana para ver las notificaciones más recientes, las más nuevas primero. Cada fila lleva un
 icono, un título corto, un resumen opcional de una línea y una hora relativa.
@@ -69,6 +70,31 @@ icono, un título corto, un resumen opcional de una línea y una hora relativa.
 
 El estado de lectura es por persona: marcar como leída una difusión la limpia solo para ti, no para los
 demás administradores.
+
+## Descartar notificaciones
+
+Cuando ya te ocupaste de una notificación, puedes quitarla de tu campana en lugar de esperar a que
+caduque:
+
+- **Descartar una** — pasa el cursor sobre una fila y selecciona la **×** de su borde derecho. En un
+  teléfono o una tableta la × se muestra siempre; con el teclado, llega a ella con Tab. Descartar no abre
+  la notificación.
+- **Descartar todas** — en la cabecera de la campana, quita de una vez todas las notificaciones hasta la
+  más reciente que se muestra, incluidas las más antiguas que la campana no llega a cargar. Lo más reciente se queda: una notificación que llegó después de abrir la campana no se
+  descarta y sigue sin leer. Cuando la campana queda vacía muestra «Estás al día.»
+
+Descartar también marca la notificación como leída, así que el indicador baja con ella. Una notificación
+que llega después de seleccionar **Descartar todas** aparece con normalidad.
+
+Descartar es **por persona**, igual que el estado de lectura. Oculta la notificación solo de **tu**
+campana: el evento en sí no se borra, y los demás administradores que ven la misma difusión la siguen
+teniendo en sus campanas. El registro duradero del historial de actividad no se toca.
+
+> [!IMPORTANT]
+> Ninguna de las dos acciones pide confirmación, **no se puede deshacer** y no hay una vista de
+> notificaciones descartadas. Una vez descartada, una notificación queda fuera de tu campana hasta que
+> se pode con las demás a los 90 días. Descarta lo que
+> ya resolviste; deja lo que todavía tengas que atender.
 
 ## Qué contiene una notificación
 

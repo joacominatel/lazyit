@@ -59,10 +59,33 @@ use `GET /infra/graph/nodes`; do not substitute the paged list for the map.
 
 ## New required settings after a pull
 
-A version that adds a feature may introduce a **new required environment value**. The guided bootstrap
-only writes new values on a fresh render — it never edits an existing environment file — so after
-pulling a version that needs one, add it by hand and recreate the affected service. Two examples that
-have shipped:
+A version that adds a feature may introduce a **new environment value**. A few of them the startup
+script can add for you (below); every other one you add by hand, then recreate the affected service.
+
+### Keys the startup script adds for you
+
+If you upgrade with `git pull` followed by `./infra/start.sh`, the script sees your existing install and,
+before bringing the stack up, **adds any missing key that is safe to generate** — today the email
+password key (`SMTP_SECRET_KEY`) and the AI provider key's storage key (`AI_SECRET_KEY`). Each only
+protects a secret lazyit refuses to save while the key is missing, so a new one can't lock you out of
+anything. It works whether you sign in with built-in accounts or an identity provider.
+
+- It **backs up** your environment file first, to `infra/env/.env.prod.bak-<date and time>`. That copy
+  holds your secrets: keep it private and delete it once you are satisfied.
+- It **only appends**, at the end of the file under a dated comment. Your existing lines are never
+  changed, and a key you already have is never replaced.
+- It prints the **names** of the keys it added, never their values. Running it again adds nothing.
+- `./infra/start.sh --dry-run` shows what it would add without writing anything.
+
+After it adds a key, back up the updated environment file off-host. Keys that protect data you already
+have — the workflow secret key, the identity-provider master key, the sign-in secrets, the database
+passwords — are **never** generated for you: if one is missing, the script names it and you add it by
+hand. The update script (`./infra/update.sh`) never edits the file either; it stops on a missing key and
+tells you which one.
+
+### Keys you add by hand
+
+Two examples that have shipped:
 
 - The **background-job broker URL** (`REDIS_URL`), required since background workers shipped. If it's
   missing, background document import fails.
@@ -102,6 +125,18 @@ The bundled images (database, identity provider, search, broker, proxy) are pinn
 versions for reproducible deploys. They move only on a deliberate bump. Before bumping the identity
 provider in particular, back up its database **and** keep the matching master key, since its data is
 tied to that key.
+
+The **search engine** is the exception that needs no preparation. Its data only opens on the exact
+engine version that wrote it, so each search-engine upgrade starts on a **new** data volume and lazyit
+rebuilds the search index from your database automatically when it starts. There is nothing to run:
+expect search results to be **incomplete for a few minutes** after such an upgrade, then complete.
+Everything else — sign-in, records, the health check the update script waits on — is unaffected. The
+previous search volume is left in place (a rollback to the earlier version uses it) and the startup
+script prints the exact command to remove it once you no longer need it, for example:
+
+```
+docker volume rm lazyit-prod_meili_data
+```
 
 ## Related
 

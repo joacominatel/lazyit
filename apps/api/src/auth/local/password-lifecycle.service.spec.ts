@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Logger as NestLogger,
   UnauthorizedException,
 } from '@nestjs/common';
 
@@ -81,10 +82,14 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
   let txTokUpdateMany: jest.Mock;
   let txTokDeleteMany: jest.Mock;
   let txUserUpdate: jest.Mock;
+  let txUserUpdateMany: jest.Mock;
   let historyRecord: jest.Mock;
   let resolveConfig: jest.Mock;
   let prisma: Record<string, unknown>;
   let service: PasswordLifecycleService;
+  let txSessionDeleteMany: jest.Mock;
+  let txSessionUpdateMany: jest.Mock;
+  let txSessionCreate: jest.Mock;
 
   beforeAll(() => {
     process.env.SESSION_SIGNING_SECRET =
@@ -111,6 +116,13 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       .fn()
       .mockResolvedValue({ id: VALID_ID, sessionEpoch: 1 });
     historyRecord = jest.fn().mockResolvedValue({});
+    // change-password's conditional write (only while the epoch is still the caller's).
+    txUserUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    txSessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    txSessionUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+    txSessionCreate = jest.fn(({ data }: { data: { id: string } }) =>
+      Promise.resolve({ id: data.id }),
+    );
     resolveConfig = jest.fn().mockResolvedValue(null); // SMTP off by default
 
     prisma = {
@@ -127,7 +139,14 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
             updateMany: txTokUpdateMany,
             deleteMany: txTokDeleteMany,
           },
-          user: { update: txUserUpdate },
+          user: { update: txUserUpdate, updateMany: txUserUpdateMany },
+          userSession: {
+            deleteMany: txSessionDeleteMany,
+            updateMany: txSessionUpdateMany,
+            create: txSessionCreate,
+            // The per-user cap's overflow query: nothing over the cap here.
+            findMany: jest.fn().mockResolvedValue([]),
+          },
         }),
       ),
     };
@@ -154,9 +173,15 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       );
 
       // The stored write (inside the tx): a NEW hash, epoch increment, flag cleared, timestamp set.
-      expect(txUserUpdate).toHaveBeenCalledTimes(1);
-      const data = firstArg<UpdateArg>(txUserUpdate).data;
+      expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+      const { where, data } = firstArg<UpdateArg & { where: unknown }>(
+        txUserUpdateMany,
+      );
+      // Conditional on the epoch the caller authenticated with (#1420 review).
+      expect(where).toEqual({ id: VALID_ID, sessionEpoch: 0 });
       expect(data.sessionEpoch).toEqual({ increment: 1 });
+      // A password change or reset also kills every MCP credential (ADR-0097 decision 8, amended).
+      expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
       expect(data.mustChangePassword).toBe(false);
       expect(typeof data.passwordHash).toBe('string');
       expect(data.passwordHash).not.toBe(hash); // genuinely rehashed
@@ -178,11 +203,138 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         actor: { userId: VALID_ID },
       });
 
-      // A fresh token minted at the NEW epoch (1) so the caller stays logged in.
-      await expect(credentials.verifySession(res.token)).resolves.toEqual({
-        sub: VALID_ID,
-        epoch: 1,
+      // A fresh token minted at the NEW epoch (1) so the caller stays logged in — a default session
+      // stays a default (12h) session, and the response reports its expiry.
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        {
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: false,
+        },
+      );
+      expect(typeof res.expiresAt).toBe('number');
+    });
+
+    describe('per-device sessions (#1420)', () => {
+      const SID = '33333333-3333-4333-8333-333333333333';
+
+      it('keeps the calling session row (same sid, new epoch) and ends every other one in the tx', async () => {
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          false,
+          { sessionId: SID, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
+        );
+        expect(txSessionDeleteMany).toHaveBeenCalledWith({
+          where: { userId: VALID_ID, id: { not: SID } },
+        });
+        const [carry] = txSessionUpdateMany.mock.calls[0] as [
+          { where: unknown; data: { epoch: number; expiresAt: Date | null } },
+        ];
+        // Only a row still at the caller's epoch is carried over.
+        expect(carry.where).toEqual({ id: SID, userId: VALID_ID, epoch: 0 });
+        expect(carry.data.epoch).toBe(1);
+        expect(carry.data.expiresAt).toEqual(new Date(res.expiresAt! * 1000));
+        expect(txSessionCreate).not.toHaveBeenCalled();
+        await expect(credentials.verifySession(res.token)).resolves.toEqual({
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: false,
+          sid: SID,
+        });
       });
+
+      it('a caller on a pre-upgrade token (no sid) ends every row and gets a new session row', async () => {
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          true,
+          { sessionId: null, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
+        );
+        expect(txSessionDeleteMany).toHaveBeenCalledWith({
+          where: { userId: VALID_ID },
+        });
+        expect(txSessionCreate).toHaveBeenCalledTimes(1);
+        const { data } = (
+          txSessionCreate.mock.calls[0] as [{ data: Record<string, unknown> }]
+        )[0];
+        expect(data).toMatchObject({
+          userId: VALID_ID,
+          epoch: 1,
+          rememberMe: true,
+          expiresAt: null,
+          userAgent: 'UA',
+          ip: '198.51.100.4',
+        });
+        await expect(
+          credentials.verifySession(res.token),
+        ).resolves.toMatchObject({ sid: data.id });
+      });
+
+      it('a concurrent admin reset (epoch already bumped) makes the change a 401 SESSION_REVOKED that writes nothing', async () => {
+        // The admin's reset committed between the guard's check and this write: the conditional update
+        // matches no row, so the admin's temporary password is NOT overwritten.
+        txUserUpdateMany.mockResolvedValue({ count: 0 });
+        const hash = await credentials.hash('old-pw-123');
+        const err = await service
+          .changePassword(
+            makeUser({ passwordHash: hash }) as never,
+            'old-pw-123',
+            'NewPass1!',
+            false,
+            { sessionId: SID },
+          )
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(UnauthorizedException);
+        expect((err as UnauthorizedException).getResponse()).toMatchObject({
+          code: 'SESSION_REVOKED',
+        });
+        expect(txTokDeleteMany).not.toHaveBeenCalled();
+        expect(historyRecord).not.toHaveBeenCalled();
+        expect(txSessionDeleteMany).not.toHaveBeenCalled();
+        expect(txSessionUpdateMany).not.toHaveBeenCalled();
+        expect(txSessionCreate).not.toHaveBeenCalled();
+      });
+
+      it('opens a new row when the calling session was ended meanwhile', async () => {
+        txSessionUpdateMany.mockResolvedValue({ count: 0 });
+        const hash = await credentials.hash('old-pw-123');
+        const res = await service.changePassword(
+          makeUser({ passwordHash: hash }) as never,
+          'old-pw-123',
+          'NewPass1!',
+          false,
+          { sessionId: SID },
+        );
+        expect(txSessionCreate).toHaveBeenCalledTimes(1);
+        const claims = await credentials.verifySession(res.token);
+        expect(claims.sid).not.toBe(SID);
+      });
+    });
+
+    it('keeps a "keep me signed in" session: the re-minted token has no time expiry (ADR-0086 §8)', async () => {
+      const hash = await credentials.hash('old-pw-123');
+      const user = makeUser({ passwordHash: hash });
+
+      const res = await service.changePassword(
+        user as never,
+        'old-pw-123',
+        'NewPass1!',
+        true,
+      );
+
+      expect(res.expiresAt).toBeNull();
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        {
+          sub: VALID_ID,
+          epoch: 1,
+          rememberMe: true,
+        },
+      );
     });
 
     it('rejects a wrong current password with a generic 401 and writes nothing', async () => {
@@ -191,7 +343,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'wrong-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
     });
 
@@ -203,7 +355,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         service.changePassword(user as never, 'Samepass1!', 'Samepass1!'),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.$transaction as jest.Mock).not.toHaveBeenCalled();
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
     });
 
@@ -212,7 +364,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'anything', 'NewPass1!'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
     });
 
     it('refuses a directory-only person', async () => {
@@ -229,7 +381,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       await expect(
         service.changePassword(user as never, 'old-pw', 'NewPass1!'),
       ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -411,6 +563,8 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       // The credential write: new hash, epoch increment, flag cleared.
       const data = firstArg<UpdateArg>(txUserUpdate).data;
       expect(data.sessionEpoch).toEqual({ increment: 1 });
+      // A password change or reset also kills every MCP credential (ADR-0097 decision 8, amended).
+      expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
       expect(data.mustChangePassword).toBe(false);
       await expect(
         credentials.verify(data.passwordHash, 'NewPass1!'),
@@ -420,6 +574,10 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
         userId: VALID_ID,
         eventType: 'PASSWORD_RESET_COMPLETED',
         actor: { userId: VALID_ID },
+      });
+      // Every per-device session row ends with the epoch bump (#1420).
+      expect(txSessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: VALID_ID },
       });
     });
 
@@ -481,7 +639,195 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       expect(tokFindFirst).not.toHaveBeenCalled();
     });
   });
+
+  // ---------- 5. admin-initiated reset link (issue #1268) -------------------
+
+  describe('isOutboundEmailReady', () => {
+    it('is true when SMTP resolves an enabled, complete config', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(service.isOutboundEmailReady()).resolves.toBe(true);
+      expect(resolveConfig).toHaveBeenCalledWith(true);
+    });
+
+    it('is false when SMTP is off or incomplete', async () => {
+      resolveConfig.mockResolvedValue(null);
+      await expect(service.isOutboundEmailReady()).resolves.toBe(false);
+    });
+
+    it('is false (not a throw) when the config cannot be decrypted', async () => {
+      resolveConfig.mockRejectedValue(new Error('bad SMTP_SECRET_KEY'));
+      await expect(service.isOutboundEmailReady()).resolves.toBe(false);
+    });
+  });
+
+  describe('sendAdminResetLink', () => {
+    const subject = { id: VALID_ID, email: 'alice@example.com' };
+
+    it('mints a token, emails the RAW token in the link, and stores ONLY its hash', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+
+      const result = await service.sendAdminResetLink(
+        subject,
+        'https://lazyit.example.com',
+      );
+
+      expect(result).toEqual({
+        sentTo: 'alice@example.com',
+        expiresInMinutes: 60,
+      });
+
+      // The row persisted carries a hash, never the raw token.
+      const created = firstArg<CreateTokenArg>(tokCreate).data;
+      expect(created.userId).toBe(VALID_ID);
+      expect(created.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      // The emailed link carries the RAW token, and hashing it yields exactly the stored value.
+      const url = renderedResetUrl();
+      expect(
+        url.startsWith('https://lazyit.example.com/reset-password?token='),
+      ).toBe(true);
+      const raw = decodeURIComponent(new URL(url).searchParams.get('token')!);
+      expect(raw.length).toBeGreaterThan(20);
+      expect(created.tokenHash).toBe(hashResetToken(raw));
+      expect(created.tokenHash).not.toBe(raw);
+
+      // The mail actually went out, to the subject's mailbox.
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(firstArg<{ to: string }>(sendMail)).toMatchObject({
+        to: 'alice@example.com',
+      });
+    });
+
+    it('throws origin-unknown and mints NOTHING when no link origin resolved', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(
+        service.sendAdminResetLink(subject, null),
+      ).rejects.toMatchObject({ reason: 'origin-unknown' });
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('throws smtp-not-configured and mints NOTHING when email is off (no orphan token)', async () => {
+      resolveConfig.mockResolvedValue(null);
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+
+    it('throws smtp-not-configured when the stored config cannot be decrypted', async () => {
+      resolveConfig.mockRejectedValue(new Error('bad SMTP_SECRET_KEY'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'smtp-not-configured' });
+      expect(tokCreate).not.toHaveBeenCalled();
+    });
+
+    it('throws send-failed when the relay refuses (never a silent success)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      sendMail.mockRejectedValueOnce(new Error('relay refused'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'send-failed' });
+    });
+
+    it('does NOT apply the public per-account cap: an admin can issue past 3 outstanding tokens', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      tokCount.mockResolvedValue(99); // way past MAX_ACTIVE_TOKENS_PER_USER
+
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).resolves.toMatchObject({ sentTo: 'alice@example.com' });
+      expect(tokCreate).toHaveBeenCalledTimes(1);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it("opportunistically GCs the subject's used/expired tokens", async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await service.sendAdminResetLink(subject, 'https://lazyit.example.com');
+      const where = firstArg<WhereArg>(tokDeleteMany).where;
+      expect(where.userId).toBe(VALID_ID);
+      expect(where.OR).toEqual([
+        { usedAt: { not: null } },
+        { expiresAt: { lt: expect.any(Date) as unknown } },
+      ]);
+    });
+
+    it('still sends when the GC sweep fails (best-effort, never blocking)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      tokDeleteMany.mockRejectedValueOnce(new Error('db hiccup'));
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).resolves.toMatchObject({ expiresInMinutes: 60 });
+      expect(sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it('normalizes a trailing slash on the origin (no // in the link)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await service.sendAdminResetLink(subject, 'https://lazyit.example.com/');
+      const url = renderedResetUrl();
+      expect(url).toContain('https://lazyit.example.com/reset-password?token=');
+    });
+
+    it('never lets the raw token reach the logger, even on a send failure', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      const warn = jest
+        .spyOn(NestLogger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const error = jest
+        .spyOn(NestLogger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      sendMail.mockRejectedValueOnce(new Error('relay refused'));
+
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toMatchObject({ reason: 'send-failed' });
+
+      // The raw token DID exist (it went into the link) — assert it appears in NOTHING that was logged.
+      const url = renderedResetUrl();
+      const raw = decodeURIComponent(new URL(url).searchParams.get('token')!);
+      const logged = [...warn.mock.calls, ...error.mock.calls]
+        .flat()
+        .map((a) => String(a))
+        .join(' | ');
+      expect(logged).not.toContain(raw);
+      expect(logged).not.toContain(url);
+      warn.mockRestore();
+      error.mockRestore();
+    });
+
+    it('fails closed outside local mode (no token, no mail)', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com'),
+      ).rejects.toBeInstanceOf(Error);
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+  });
 });
+
+/** A minimal resolved SMTP config — enough for buildTransport (mocked) and formatFrom (mocked). */
+const SMTP_CONFIG = {
+  host: 'smtp.example.com',
+  port: 587,
+  security: 'starttls',
+  username: null,
+  password: null,
+  fromAddress: 'noreply@lazyit.local',
+  fromName: null,
+  rejectUnauthorized: true,
+};
+
+/** The `resetUrl` the (mocked) renderer was handed — the one place the RAW token is allowed to appear. */
+function renderedResetUrl(call = 0): string {
+  return firstArg<{ resetUrl: string }>(
+    renderPasswordResetEmail as jest.Mock,
+    call,
+  ).resetUrl;
+}
 
 /** Flush the microtask/immediate queue so a fire-and-forget email send completes before assertions. */
 function flush(): Promise<void> {
@@ -497,6 +843,7 @@ function firstArg<T>(m: jest.Mock, call = 0): T {
 interface UpdateArg {
   data: {
     sessionEpoch: unknown;
+    mcpCredentialEpoch: unknown;
     mustChangePassword: boolean;
     passwordHash: string;
     passwordUpdatedAt?: Date;

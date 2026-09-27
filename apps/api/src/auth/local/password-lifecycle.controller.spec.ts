@@ -27,7 +27,9 @@ describe('PasswordLifecycleController (ADR-0086 §F4)', () => {
 
   beforeEach(() => {
     service = {
-      changePassword: jest.fn().mockResolvedValue({ token: 'new-token' }),
+      changePassword: jest
+        .fn()
+        .mockResolvedValue({ token: 'new-token', expiresAt: null }),
       forgotPassword: jest.fn().mockResolvedValue(undefined),
       resetPassword: jest.fn().mockResolvedValue(undefined),
     };
@@ -40,20 +42,81 @@ describe('PasswordLifecycleController (ADR-0086 §F4)', () => {
     const user = { id: 'u1' } as never;
     const res = await controller.changePassword(
       { currentPassword: 'old', newPassword: 'NewPass1!' },
+      { localSession: { rememberMe: false } } as never,
       user,
     );
     expect(service.changePassword).toHaveBeenCalledWith(
       user,
       'old',
       'NewPass1!',
+      false,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
     );
-    expect(res).toEqual({ token: 'new-token' });
+    expect(res).toEqual({ token: 'new-token', expiresAt: null });
+  });
+
+  it("change-password carries the CALLING session's remember-me choice from the guard, not the body", async () => {
+    const user = { id: 'u1' } as never;
+    await controller.changePassword(
+      {
+        currentPassword: 'old',
+        newPassword: 'NewPass1!',
+        rememberMe: false,
+      } as never,
+      { localSession: { rememberMe: true } } as never,
+      user,
+    );
+    expect(service.changePassword).toHaveBeenCalledWith(
+      user,
+      'old',
+      'NewPass1!',
+      true,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
+    );
+  });
+
+  it('change-password treats a request with no recorded local session as a default session', async () => {
+    const user = { id: 'u1' } as never;
+    await controller.changePassword(
+      { currentPassword: 'old', newPassword: 'NewPass1!' },
+      {} as never,
+      user,
+    );
+    expect(service.changePassword).toHaveBeenCalledWith(
+      user,
+      'old',
+      'NewPass1!',
+      false,
+      { sessionId: null, meta: { userAgent: null, ip: null } },
+    );
+  });
+
+  it('change-password passes the calling session id and device to the service (#1420)', async () => {
+    const user = { id: 'u1' } as never;
+    const sid = '33333333-3333-4333-8333-333333333333';
+    await controller.changePassword(
+      { currentPassword: 'old', newPassword: 'NewPass1!' },
+      {
+        localSession: { rememberMe: false, sessionId: sid },
+        headers: { 'user-agent': 'UA' },
+        ip: '198.51.100.4',
+      } as never,
+      user,
+    );
+    expect(service.changePassword).toHaveBeenCalledWith(
+      user,
+      'old',
+      'NewPass1!',
+      false,
+      { sessionId: sid, meta: { userAgent: 'UA', ip: '198.51.100.4' } },
+    );
   });
 
   it('change-password 401s an anonymous caller (no @CurrentUser)', async () => {
     await expect(
       controller.changePassword(
         { currentPassword: 'old', newPassword: 'NewPass1!' },
+        {} as never,
         undefined,
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);

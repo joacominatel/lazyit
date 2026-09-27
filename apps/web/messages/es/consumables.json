@@ -75,7 +75,9 @@
     "createdToast": "Consumible creado",
     "savedToast": "Consumible guardado",
     "createError": "No se pudo crear el consumible",
-    "saveError": "No se pudo guardar el consumible"
+    "saveError": "No se pudo guardar el consumible",
+    "returnableLabel": "Retornable",
+    "returnableDescription": "Se espera que las entregas de este ítem se devuelvan, por ejemplo adaptadores o auriculares en préstamo. Las unidades entregadas quedan pendientes hasta que se devuelven."
   },
   "detail": {
     "notFoundTitle": "Consumible no encontrado",
@@ -101,9 +103,34 @@
       "qty": "Cant.",
       "reason": "Motivo",
       "by": "Por",
-      "date": "Fecha"
+      "date": "Fecha",
+      "destination": "Entregado a"
     },
-    "system": "Sistema"
+    "system": "Sistema",
+    "returnableBadge": "Retornable",
+    "returnableLabel": "Retornable",
+    "returnableYes": "Sí: se espera que las entregas se devuelvan",
+    "returnableNo": "No",
+    "returnOf": "Devolución de la entrega #{id}",
+    "deliveryOutstanding": "#{id} · {returned} devueltas, {outstanding} pendientes",
+    "deliveryReturned": "#{id} · devuelta por completo",
+    "target": {
+      "kind": {
+        "user": "Persona:",
+        "asset": "Activo:",
+        "location": "Ubicación:"
+      },
+      "restricted": {
+        "user": "Una persona (restringido)",
+        "asset": "Un activo (restringido)",
+        "location": "Una ubicación (restringido)"
+      },
+      "gone": {
+        "user": "Dado de baja",
+        "asset": "Eliminado",
+        "location": "Archivada"
+      }
+    }
   },
   "stock": {
     "addCta": "Agregar…",
@@ -145,7 +172,88 @@
         "quantityLabel": "Nuevo conteo de stock",
         "quantityHint": "Establece lo disponible en este número exacto (un reconteo físico). Usa 1 o más.",
         "cta": "Establecer stock"
+      },
+      "deliveredToast": "Entrega registrada",
+      "target": {
+        "label": "Entregar a",
+        "hint": "Opcional. Indica quién recibió las unidades o dónde quedaron, y la entrega aparecerá en esa persona, activo o ubicación.",
+        "returnableHint": "Este ítem es retornable: se espera que quien lo recibe devuelva las unidades, y quedan pendientes hasta la devolución.",
+        "consumedHint": "Se registra como entregado. Este ítem no es retornable, así que no hay nada que devolver.",
+        "kinds": {
+          "none": "Nadie: solo quitar stock",
+          "user": "Una persona",
+          "asset": "Un activo",
+          "location": "Una ubicación"
+        },
+        "userPlaceholder": "Selecciona una persona",
+        "userSearch": "Buscar personas…",
+        "userEmpty": "No se encontraron personas activas",
+        "assetPlaceholder": "Selecciona un activo",
+        "assetSearch": "Buscar activos…",
+        "assetEmpty": "No se encontraron activos",
+        "locationPlaceholder": "Selecciona una ubicación",
+        "locationSearch": "Buscar ubicaciones…",
+        "locationEmpty": "No se encontraron ubicaciones",
+        "required": {
+          "user": "Elige la persona o selecciona “Nadie”.",
+          "asset": "Elige el activo o selecciona “Nadie”.",
+          "location": "Elige la ubicación o selecciona “Nadie”."
+        }
       }
+    }
+  },
+  "deliveries": {
+    "title": "Consumibles entregados",
+    "titleCount": "Consumibles entregados ({count})",
+    "deliverAction": "Entregar consumible",
+    "outstandingOnly": "Solo pendientes",
+    "rangeLabel": "Rango de fechas",
+    "range": {
+      "all": "Cualquier fecha",
+      "30d": "Últimos 30 días",
+      "90d": "Últimos 90 días",
+      "365d": "Últimos 12 meses"
+    },
+    "loadError": "No se pudieron cargar las entregas.",
+    "empty": "Aún no se entregaron consumibles.",
+    "emptyFiltered": "Ninguna entrega coincide con estos filtros.",
+    "archived": "Archivado",
+    "quantity": "{count} {unit}",
+    "by": "por {name}",
+    "outstanding": "{count} {unit} pendientes",
+    "returned": "Devuelto",
+    "returnAction": "Devolver…",
+    "picker": {
+      "option": "{name} · {count} {unit} disponibles"
+    },
+    "deliverDialog": {
+      "title": "Entregar consumible",
+      "description": "Saca unidades del stock y registra que se entregaron a {name}.",
+      "consumableLabel": "Consumible",
+      "consumablePlaceholder": "Selecciona un consumible",
+      "consumableSearch": "Buscar consumibles…",
+      "consumableEmpty": "No se encontraron consumibles",
+      "consumableRequired": "Elige el consumible a entregar.",
+      "onHand": "Disponible ahora: {count} {unit}.",
+      "onHandReturnable": "Disponible ahora: {count} {unit}. Retornable: se espera que quien lo recibe lo devuelva.",
+      "quantityLabel": "Cantidad",
+      "exceeds": "Solo hay {count} {unit} disponibles: se rechazará.",
+      "notesLabel": "Notas",
+      "cta": "Entregar",
+      "successToast": "Entrega a {name} registrada",
+      "errorToast": "No se pudo registrar la entrega"
+    },
+    "returnDialog": {
+      "title": "Devolver {name}",
+      "description": "{outstanding} de {quantity} {unit} siguen pendientes. Las unidades devueltas vuelven al stock.",
+      "quantityLabel": "Cantidad devuelta",
+      "quantityHint": "Se puede devolver una parte: el resto sigue pendiente.",
+      "tooMany": "Solo hay {count} pendientes en esta entrega.",
+      "notesLabel": "Notas",
+      "notesPlaceholder": "Opcional: por ejemplo, estado en que se devolvió",
+      "cta": "Registrar devolución",
+      "successToast": "Devolución registrada",
+      "errorToast": "No se pudo registrar la devolución"
     }
   }
 }

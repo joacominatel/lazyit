@@ -140,6 +140,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // ADR-0093 §4 (#1198) — the lowercased AGENT_LINKED verb, emitted once when an agent-reported
       // node adopts an existing asset at its confirm gate.
       "agent_linked",
+      // ADR-0098 (#1364) — the lowercased CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED verbs.
+      "consumable_delivered",
+      "consumable_returned",
       "granted",
       "revoked",
       "stock_in",
@@ -158,6 +161,11 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // ADR-0086 §F4 / issue #1006 — forgot-password issuance audit.
       "password_reset_requested",
       "password_reset_completed",
+      // Issue #1375 — activation flips.
+      "deactivated",
+      "reactivated",
+      // Issue #1420 — a user ended one of their local sessions.
+      "session_ended",
     ]);
   });
 

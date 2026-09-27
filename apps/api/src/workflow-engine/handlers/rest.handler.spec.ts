@@ -469,3 +469,23 @@ describe('RestStepHandler.testConnection', () => {
     expect(result.probedPath).toBe('/status');
   });
 });
+
+describe('RestStepHandler — SEC-076 legacy userinfo in the base URL (upgrade-safe)', () => {
+  it('a legacy row whose base URL carries user:pass@ still sends (read path stays tolerant)', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200, json: {} });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://svc:hunter2@api.example.com',
+      authScheme: 'NONE',
+    };
+    const result = await handler.execute(makeCtxFor(connection, makeStep()));
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].url.hostname).toBe('api.example.com');
+    expect(result.status).toBe('SUCCEEDED');
+    // The credential is never echoed into the redacted run metadata.
+    expect(JSON.stringify(result.metadata)).not.toContain('hunter2');
+  });
+});

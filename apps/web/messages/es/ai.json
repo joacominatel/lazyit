@@ -1,0 +1,1001 @@
+{
+  "launcher": {
+    "open": "Abrir el asistente de IA",
+    "close": "Cerrar el asistente de IA"
+  },
+  "panel": {
+    "title": "Asistente de IA",
+    "close": "Cerrar",
+    "newChat": "Nuevo chat",
+    "history": "Historial de chats",
+    "backToChat": "Volver al chat",
+    "loading": "Cargando la conversación…",
+    "loadError": "No se pudo cargar esta conversación.",
+    "conversationGone": "Esta conversación ya no existe.",
+    "expand": "Ampliar el asistente",
+    "restore": "Restaurar el ancho del asistente",
+    "resize": "Cambiar el ancho del asistente",
+    "resizeHint": "Arrastrá, o usá las flechas, para cambiar el ancho. Doble clic o Enter lo restablece.",
+    "widthValue": "{width} píxeles de ancho"
+  },
+  "history": {
+    "title": "Tus chats",
+    "empty": "Todavía no tenés chats. Preguntá algo para empezar uno.",
+    "retention": "Los chats se eliminan automáticamente después de {days, plural, one {# día} other {# días}}.",
+    "retentionNone": "Los chats se guardan hasta que los elimines.",
+    "private": "Solo vos podés ver tus chats.",
+    "groups": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "week": "Últimos 7 días",
+      "older": "Anteriores"
+    },
+    "untitled": "Nuevo chat",
+    "readOnly": "Solo lectura",
+    "running": "Respondiendo",
+    "awaiting": "Necesita tu aprobación",
+    "loadError": "No se pudieron cargar tus chats.",
+    "delete": "Eliminar el chat \"{title}\"",
+    "deleteTitle": "¿Eliminar este chat?",
+    "deleteBody": "La conversación \"{title}\" se elimina de forma permanente. Los cambios que hizo el asistente siguen registrados en el registro de actividad.",
+    "deleteConfirm": "Eliminar",
+    "cancel": "Cancelar",
+    "deleted": "Chat eliminado.",
+    "deleteInProgress": "El asistente todavía está respondiendo en este chat. Detenelo primero y después eliminalo.",
+    "deleteFailed": "No se pudo eliminar el chat.",
+    "awaitingInput": "Espera tu respuesta"
+  },
+  "composer": {
+    "label": "Mensaje para el asistente",
+    "placeholder": "Preguntale a lazyit… (Enter para enviar, Shift+Enter para una nueva línea)",
+    "send": "Enviar",
+    "stop": "Detener",
+    "stopping": "Deteniendo…",
+    "hint": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. Cada cambio necesita tu aprobación.",
+    "busyApproval": "Aprobá o rechazá el cambio pendiente para continuar.",
+    "readOnlyTitle": "Este chat es de solo lectura",
+    "readOnlyBody": "Se inició con una configuración de IA anterior o se volvió demasiado largo. Empezá un nuevo chat para continuar.",
+    "hintAuto": "Escribí / para ver los comandos. No pegues contraseñas ni secretos. La aprobación automática está activada: los cambios básicos se aplican sin preguntar.",
+    "busyInput": "Respondé, omití o rechazá el formulario del asistente para continuar.",
+    "inputWaiting": "El asistente preguntó: {title}",
+    "inputWaitingGeneric": "El asistente espera tu respuesta.",
+    "goToForm": "Ir al formulario"
+  },
+  "context": {
+    "label": "Sobre: {page}",
+    "remove": "No enviar la página actual",
+    "add": "Enviar la página actual",
+    "entity": "{type} de esta página",
+    "route": "esta página"
+  },
+  "message": {
+    "you": "Vos",
+    "assistant": "Asistente",
+    "thinking": "Pensando…",
+    "awaitingApproval": "Esperando tu aprobación",
+    "stopped": "Detenido.",
+    "unsupported": "Esta parte de la conversación no se puede mostrar en esta versión.",
+    "emptyTitle": "¿En qué te puedo ayudar?",
+    "emptyBody": "Preguntá por tu inventario, los accesos o la base de conocimiento, o pedí un cambio. Vos aprobás cada cambio antes de que se haga.",
+    "examples": {
+      "one": "¿Qué laptops no están asignadas?",
+      "two": "¿Quién tiene acceso a la VPN?",
+      "three": "Asigná MBP-042 a Ana Ruiz"
+    },
+    "awaitingInput": "Esperando tu respuesta"
+  },
+  "sources": {
+    "title": "Fuentes de la web",
+    "newTab": "(se abre en una pestaña nueva)",
+    "note": "Encontradas por la búsqueda web del proveedor de IA. Las escribieron terceros — verificalas antes de basarte en ellas."
+  },
+  "tools": {
+    "generic": {
+      "EXECUTING": "Trabajando: {tool}",
+      "SUCCEEDED": "Listo: {tool}",
+      "FAILED": "Falló: {tool}",
+      "DENIED": "No permitido: {tool}",
+      "AWAITING_APPROVAL": "Propuesto: {tool}",
+      "AWAITING_INPUT": "Esperando tu respuesta: {tool}",
+      "REJECTED": "Rechazado: {tool}",
+      "EXPIRED": "Vencido: {tool}",
+      "CANCELLED": "Cancelado: {tool}",
+      "OUTCOME_UNKNOWN": "Resultado desconocido: {tool}",
+      "unknown": "{tool}"
+    },
+    "showDetails": "Ver detalles",
+    "hideDetails": "Ocultar detalles",
+    "outcomeUnknown": "lazyit no pudo confirmar si este cambio se aplicó. Revisá el elemento antes de volver a intentarlo.",
+    "repeated": "{tool} ×{count}"
+  },
+  "approval": {
+    "classes": {
+      "write": "Cambio propuesto",
+      "elevated": "Cambio sensible"
+    },
+    "states": {
+      "pending": "Pendiente",
+      "approving": "Aprobando",
+      "rejecting": "Rechazando",
+      "executed": "Hecho",
+      "failed": "Falló",
+      "approved": "Aprobado",
+      "rejected": "Rechazado",
+      "expired": "Vencido",
+      "cancelled": "Cancelado"
+    },
+    "noAction": "El asistente propone este cambio.",
+    "target": "Se aplica a",
+    "field": "Campo",
+    "before": "Antes",
+    "after": "Después",
+    "empty": "—",
+    "redacted": "Oculto",
+    "yes": "Sí",
+    "no": "No",
+    "quoted": "Escrito por otra persona; se muestra como texto plano.",
+    "warningsTitle": "Antes de aprobar",
+    "warnings": {
+      "EXTERNAL_PROVISIONING": "Crea un acceso en un sistema externo mediante una automatización.",
+      "EXTERNAL_DEPROVISIONING": "Quita un acceso en un sistema externo mediante una automatización.",
+      "CASCADE_RELEASES_ASSIGNMENTS": "También termina las asignaciones actuales de este elemento.",
+      "CASCADE_REVOKES_GRANTS": "También revoca los accesos vinculados.",
+      "ROLE_CHANGE": "Cambia el rol de alguien en lazyit.",
+      "IDENTITY_CHANGE": "Cambia la identidad de alguien en lazyit (nombre, email o inicio de sesión).",
+      "PRIVILEGE_GRANT": "Le da a alguien acceso o privilegios.",
+      "CREDENTIAL_DELIVERY": "Le envía a alguien una forma de iniciar sesión.",
+      "LEDGER_APPEND": "Agrega un registro permanente que no se puede editar después.",
+      "SOFT_DELETE": "Lo archiva. Se puede restaurar después.",
+      "PUBLISHES_TO_READERS": "Hace visible el contenido para sus lectores.",
+      "VISIBILITY_CHANGE": "Cambia quién puede verlo.",
+      "NOTIFIES_USERS": "Envía notificaciones a personas.",
+      "IRREVERSIBLE": "No se puede deshacer.",
+      "OUTBOUND_INTEGRATION": "Cambia una integración externa o adónde envía datos lazyit.",
+      "CRITICAL_APPLICATION": "Afecta a una aplicación marcada como crítica.",
+      "INSTANCE_CONFIGURATION": "Cambia la configuración de toda la instancia: se aplica a todos desde ahora.",
+      "unknown": "Verificación adicional: {code}"
+    },
+    "passwordRequired": "Requiere tu contraseña",
+    "newWarning": "Nuevo",
+    "changed": "Este cambio se actualizó después de proponerse. Revisá los puntos resaltados y decidí de nuevo.",
+    "impacted": "También afecta a {count, plural, one {# {type}} other {# {type}}}",
+    "untrustedTitle": "Basado en contenido escrito por otras personas",
+    "untrustedBody": "El asistente leyó contenido que escribieron otras personas antes de proponer esto. Verificá que el cambio sea lo que pediste.",
+    "elevatedNote": "Es un cambio sensible. Leelo con atención antes de aprobarlo.",
+    "expiresAt": "Te espera hasta las {time}.",
+    "password": "Tu contraseña de lazyit",
+    "passwordHint": "Los cambios sensibles necesitan tu contraseña para confirmar que sos vos.",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "executedNote": "El cambio se aplicó.",
+    "failedNote": "El cambio no se aplicó: {message}",
+    "rejectedNote": "Rechazaste este cambio. No se modificó nada.",
+    "expiredNote": "Esta propuesta venció. Pedila de nuevo si todavía querés el cambio.",
+    "notices": {
+      "duplicatesUnchecked": "No se pudo completar la comprobación de duplicados — no podés ver todos los activos, o una etiqueta o número de serie contiene una coma y no se pudo buscar. Una fila cuya etiqueta o número de serie ya esté en uso se rechaza al ejecutarse, y las demás se ejecutan igual."
+    },
+    "table": {
+      "rowNumber": "#",
+      "problems": "Problemas",
+      "noProblems": "—",
+      "showing": "{shown, plural, one {# fila} other {# filas}} de {total}",
+      "onlyProblems": "Solo filas con problemas ({count})",
+      "willBeSkipped": "Omitida — no se aplica",
+      "defaulted": "por defecto",
+      "duplicateExisting": "{field} “{value}” ya pertenece a",
+      "duplicateRow": "{field} “{value}” también se usa en la fila {row}"
+    },
+    "cancelledNote": "Esta propuesta se canceló. No se modificó nada.",
+    "errors": {
+      "stepUpRequired": "Ingresá tu contraseña para aprobar este cambio.",
+      "stepUpFailed": "Esa contraseña no es correcta.",
+      "stepUpUnavailable": "La confirmación con contraseña no está disponible con tu forma de iniciar sesión, así que este cambio no se puede aprobar desde el chat. Hacelo desde su página.",
+      "stepUpRateLimited": "Demasiadas contraseñas incorrectas. Probá de nuevo en {seconds, plural, one {# segundo} other {# segundos}}.",
+      "stepUpRateLimitedNoTime": "Demasiadas contraseñas incorrectas. Esperá un momento y probá de nuevo.",
+      "previewChanged": "Este cambio se actualizó después de proponerse. Revisalo y decidí de nuevo.",
+      "notAwaiting": "Este cambio ya no está esperando una decisión.",
+      "aiDisabled": "Se desactivó el asistente de IA, así que este cambio no se puede aprobar.",
+      "stale": "El elemento cambió después de la propuesta. No se aplicó nada; el asistente lo va a revisar de nuevo.",
+      "expired": "Esta propuesta venció. Pedila de nuevo si todavía querés el cambio.",
+      "alreadyDecided": "Este cambio ya se decidió, quizás en otra ventana.",
+      "forbidden": "Ya no tenés permiso para hacer este cambio.",
+      "notFound": "Esta propuesta ya no existe.",
+      "unknown": "No se pudo enviar la decisión. Probá de nuevo."
+    },
+    "auto": {
+      "title": "Aplicado automáticamente",
+      "note": "La aprobación automática está activada en este chat. El cambio queda registrado como cualquier otro, a tu nombre."
+    }
+  },
+  "pager": {
+    "title": "Cambios propuestos",
+    "count": "{count, plural, one {# cambio} other {# cambios}}",
+    "position": "{page} de {total}",
+    "live": "Cambio {page} de {total}",
+    "previous": "Cambio anterior",
+    "next": "Cambio siguiente",
+    "pages": "Cambios de este paso",
+    "pageLabel": "Cambio {page}: {state}",
+    "progress": "{decided} de {total} decididos",
+    "approveAll": "Aprobar todos ({count})",
+    "rejectAll": "Rechazar todos ({count})",
+    "bulkCovers": "{count, plural, =0 {Ninguno de los cambios pendientes se puede decidir todos juntos.} one {Aprobar todos y Rechazar todos cubren # cambio pendiente.} other {Aprobar todos y Rechazar todos cubren # cambios pendientes.}}",
+    "excludedTitle": "Decidí estos en su propia página:",
+    "excluded": {
+      "stepUp": "{count, plural, one {# necesita tu contraseña} other {# necesitan tu contraseña}}",
+      "elevated": "{count, plural, one {# es un cambio sensible} other {# son cambios sensibles}}",
+      "needsReview": "{count, plural, one {# necesita otra revisión} other {# necesitan otra revisión}}"
+    },
+    "bulkRunning": "{decision, select, approve {Aprobando} other {Rechazando}} {done} de {total}…",
+    "bulkDone": "{decision, select, approve {Se aprobaron} other {Se rechazaron}} {count, plural, one {# cambio} other {# cambios}}.",
+    "bulkFailed": "{count, plural, one {# cambio no se pudo decidir:} other {# cambios no se pudieron decidir:}}",
+    "bulkSkipped": "{count, plural, one {# más no se envió.} other {# más no se enviaron.}}",
+    "goTo": "Cambio {page}",
+    "allDecided": "Todos los cambios de este paso están decididos."
+  },
+  "refused": {
+    "summary": "{count, plural, one {# cambio no se pudo proponer} other {# cambios no se pudieron proponer}}",
+    "item": "{tool}: {message}",
+    "itemRepeated": "{tool} ×{count}: {message}",
+    "noReason": "sin motivo informado"
+  },
+  "effects": {
+    "open": "Abrir {label}",
+    "opened": "Se abrió {label}"
+  },
+  "entities": {
+    "asset": "Activo",
+    "assetAssignment": "Asignación",
+    "assetModel": "Modelo",
+    "location": "Ubicación",
+    "category": "Categoría",
+    "application": "Aplicación",
+    "accessGrant": "Acceso otorgado",
+    "accessRequest": "Solicitud de acceso",
+    "consumable": "Consumible",
+    "consumableMovement": "Movimiento de stock",
+    "article": "Artículo",
+    "user": "Usuario",
+    "infraNode": "Nodo de infraestructura",
+    "infraEdge": "Conexión de infraestructura",
+    "workflowRun": "Ejecución de workflow",
+    "manualTask": "Tarea manual",
+    "assetTagScheme": "Esquema de etiquetas de activos",
+    "webSearch": "Resultados de búsqueda web",
+    "toolResult": "Contenido leído por el asistente",
+    "unknown": "Elemento"
+  },
+  "errors": {
+    "run": {
+      "AI_DISABLED": "Se desactivó el asistente de IA.",
+      "FORBIDDEN": "Ya no tenés acceso al asistente.",
+      "PROVIDER_AUTH": "El proveedor de IA rechazó las credenciales. Un administrador tiene que revisar Configuración → IA.",
+      "PROVIDER_RATE_LIMIT": "El proveedor de IA está ocupado.",
+      "PROVIDER_UNAVAILABLE": "El proveedor de IA no responde en este momento.",
+      "PROVIDER_BAD_REQUEST": "El proveedor de IA no pudo procesar este pedido.",
+      "PROVIDER_REFUSED": "El proveedor de IA se negó a responder esto.",
+      "EGRESS_DENIED": "lazyit no tiene permitido conectarse con el proveedor de IA. Un administrador tiene que revisar la configuración de red.",
+      "BUDGET_EXCEEDED": "Se alcanzó el presupuesto diario de IA. Probá de nuevo mañana.",
+      "CONTEXT_LIMIT": "Esta conversación es demasiado larga para continuar.",
+      "MAX_STEPS": "El asistente se detuvo después de demasiados pasos. Probá con un pedido más simple.",
+      "CANCELLED": "Detenido.",
+      "ENGINE_RESTART": "La respuesta se interrumpió por un reinicio.",
+      "RUN_IN_PROGRESS": "Otra ventana ya está respondiendo en este chat. Se muestra esa respuesta.",
+      "CONVERSATION_READ_ONLY": "Este chat usó una configuración de IA anterior y es de solo lectura.",
+      "STEP_UP_REQUIRED": "Un cambio necesita tu contraseña.",
+      "WEB_SEARCH_DISABLED": "El proveedor de IA rechazó la búsqueda web porque está deshabilitada para esta cuenta. Un administrador tiene que habilitarla en el proveedor o desactivarla en Configuración → IA.",
+      "NETWORK": "Se perdió la conexión.",
+      "RATE_LIMITED": "Demasiados pedidos.",
+      "EXPIRED": "Un cambio propuesto venció antes de que se decidiera.",
+      "generic": "Algo salió mal."
+    },
+    "retryIn": "Probá de nuevo en {seconds, plural, one {# segundo} other {# segundos}}.",
+    "retry": "Reintentar",
+    "newChat": "Empezar un nuevo chat",
+    "reconnect": "Reconectar",
+    "dismiss": "Descartar"
+  },
+  "connection": {
+    "reconnecting": "Reconectando…",
+    "lost": "Se perdió la conexión. La respuesta sigue en el servidor."
+  },
+  "live": {
+    "replied": "El asistente respondió.",
+    "approvalNeeded": "Se necesita aprobación: {action}",
+    "inputNeeded": "El asistente necesita algunos datos: {title}"
+  },
+  "markdown": {
+    "imageRemoved": "[imagen: {alt}]",
+    "imageRemovedNoAlt": "[imagen eliminada]",
+    "externalLink": "abre {host} en una pestaña nueva"
+  },
+  "commands": {
+    "label": "Comandos",
+    "empty": "Ningún comando coincide. Presioná Enter para enviarlo como mensaje.",
+    "keys": "↑↓ para elegir · Enter para ejecutar · Esc para cerrar",
+    "copy": {
+      "label": "Copiar la conversación",
+      "description": "Copia todo el chat al portapapeles como Markdown."
+    },
+    "new": {
+      "label": "Nuevo chat",
+      "description": "Empieza de nuevo en otro chat."
+    },
+    "help": {
+      "label": "Ayuda",
+      "description": "Muestra los comandos y los atajos de teclado."
+    },
+    "copied": "Conversación copiada como Markdown.",
+    "copyEmpty": "Todavía no hay nada para copiar.",
+    "copyFailed": "No se pudo copiar la conversación: el navegador bloqueó el portapapeles.",
+    "helpTitle": "Comandos y atajos",
+    "helpClose": "Cerrar la ayuda",
+    "helpShortcutsTitle": "Atajos",
+    "shortcuts": {
+      "toggle": "⌘J / Ctrl+J — abrir o cerrar el asistente",
+      "send": "Enter — enviar · Shift+Enter — nueva línea",
+      "slash": "/ al principio del mensaje — comandos",
+      "close": "Esc — cerrar el asistente"
+    },
+    "helpManual": "Leer la página del Manual",
+    "model": {
+      "label": "Elegir el modelo",
+      "description": "Abre el selector de modelo, o lo fija: /model <id>. Solo antes del primer mensaje."
+    },
+    "auto": {
+      "label": "Aprobación automática",
+      "description": "Activa o desactiva la aprobación automática en este chat: /auto on, /auto off."
+    }
+  },
+  "toolNames": {
+    "lazyit_search": "Búsqueda en lazyit",
+    "session_context": "Contexto de la sesión",
+    "request_input": "Pedirte datos",
+    "asset_archive": "Archivar un activo",
+    "asset_check_in": "Devolver un activo",
+    "asset_check_out": "Asignar un activo",
+    "asset_create": "Crear un activo",
+    "asset_create_batch": "Crear varios activos",
+    "asset_update_batch": "Actualizar varios activos",
+    "asset_get": "Ver un activo",
+    "asset_model_create": "Crear un modelo de activo",
+    "asset_restore": "Restaurar un activo",
+    "asset_search": "Buscar activos",
+    "asset_update": "Actualizar un activo",
+    "location_create": "Crear una ubicación",
+    "reference_lookup": "Consultar datos de referencia",
+    "user_search": "Buscar usuarios",
+    "user_get": "Ver un usuario",
+    "user_create": "Crear un usuario",
+    "user_update": "Actualizar un usuario",
+    "user_offboard": "Dar de baja a un usuario",
+    "user_restore": "Restaurar un usuario",
+    "dashboard_summary": "Resumen del panel",
+    "activity_list": "Ver la actividad reciente",
+    "consumable_search": "Buscar consumibles",
+    "consumable_get": "Ver un consumible",
+    "consumable_create": "Crear un consumible",
+    "consumable_update": "Actualizar un consumible",
+    "consumable_record_movement": "Registrar un movimiento de stock",
+    "kb_create_article": "Crear un artículo",
+    "kb_get_article": "Leer un artículo",
+    "kb_search": "Buscar en la base de conocimiento",
+    "kb_set_publication": "Publicar o despublicar un artículo",
+    "kb_update_article": "Actualizar un artículo",
+    "infra_node_get": "Ver un nodo de infraestructura",
+    "infra_node_search": "Buscar en la infraestructura",
+    "application_search": "Buscar aplicaciones",
+    "application_get": "Ver una aplicación",
+    "application_create": "Crear una aplicación",
+    "application_update": "Actualizar una aplicación",
+    "access_grant_list": "Ver accesos otorgados",
+    "access_grant_create": "Otorgar acceso",
+    "access_grant_revoke": "Revocar acceso",
+    "access_request_list": "Ver solicitudes de acceso",
+    "access_request_create": "Solicitar acceso",
+    "access_request_decide": "Resolver una solicitud de acceso",
+    "workflow_connection_list": "Ver conexiones de flujos",
+    "workflow_get": "Explicar un flujo",
+    "workflow_run_get": "Explicar una ejecución de flujo",
+    "workflow_run_list": "Ver ejecuciones de flujos",
+    "workflow_run_replay": "Repetir una ejecución de flujo",
+    "workflow_run_retry": "Reintentar una ejecución de flujo",
+    "workflow_search": "Buscar flujos",
+    "workflow_task_get": "Ver una tarea manual",
+    "workflow_task_list": "Ver tareas manuales",
+    "workflow_task_resolve": "Resolver una tarea manual",
+    "workflow_archive": "Archivar un flujo",
+    "workflow_author_version": "Guardar los pasos de un flujo",
+    "workflow_connection_archive": "Archivar una conexión de flujo",
+    "workflow_connection_create": "Crear una conexión de flujo",
+    "workflow_connection_test": "Probar una conexión de flujo",
+    "workflow_connection_update": "Actualizar una conexión de flujo",
+    "workflow_create": "Crear un flujo",
+    "workflow_set_enabled": "Activar o desactivar un flujo",
+    "workflow_update": "Actualizar un flujo",
+    "kb_folder_create": "Crear una carpeta de la base de conocimiento",
+    "kb_folder_rename": "Renombrar una carpeta de la base de conocimiento",
+    "category_create": "Crear una categoría",
+    "category_update": "Actualizar una categoría",
+    "category_archive": "Archivar una categoría",
+    "asset_model_update": "Actualizar un modelo de activo",
+    "asset_model_archive": "Archivar un modelo de activo",
+    "asset_model_restore": "Restaurar un modelo de activo",
+    "location_update": "Actualizar una ubicación",
+    "location_archive": "Archivar una ubicación",
+    "location_restore": "Restaurar una ubicación",
+    "asset_tag_scheme_get": "Leer el esquema de etiquetas de activos",
+    "asset_tag_scheme_update": "Cambiar el esquema de etiquetas de activos"
+  },
+  "fields": {
+    "accessLevel": "Nivel de acceso",
+    "address": "Dirección",
+    "application": "Aplicación",
+    "archived": "Archivado",
+    "asset": "Activo",
+    "assetTag": "Etiqueta de activo",
+    "audience": "Audiencia",
+    "authentication": "Autenticación",
+    "category": "Categoría",
+    "categoryId": "Categoría",
+    "checkedInFrom": "Devuelto por",
+    "checkedOutTo": "Asignado a",
+    "company": "Empresa",
+    "content": "Contenido",
+    "costPerSeat": "Costo por licencia",
+    "credential": "Credencial",
+    "criticalApplicationAccess": "Acceso a aplicaciones críticas",
+    "currentStock": "Stock actual",
+    "dataSent": "Datos enviados",
+    "dataSentToNewHost": "Datos enviados al nuevo host",
+    "defaultHeadersSentToNewHost": "Encabezados por defecto enviados al nuevo host",
+    "defaultsApplied": "Valores por defecto aplicados",
+    "deniedReason": "Motivo del rechazo",
+    "deprovisionPolicy": "Política de desaprovisionamiento",
+    "description": "Descripción",
+    "destination": "Destino",
+    "destinations": "Destinos",
+    "dryRun": "Prueba sin cambios",
+    "dryRunSample": "Muestra de la prueba",
+    "duplicatesUnchecked": "Comprobación de duplicados incompleta (no puedes ver todos los activos)",
+    "email": "Correo electrónico",
+    "enabled": "Activado",
+    "prefix": "Prefijo",
+    "suffix": "Sufijo",
+    "width": "Dígitos (con ceros)",
+    "nextNumber": "Próximo número",
+    "nextTag": "Próxima etiqueta",
+    "excerpt": "Extracto",
+    "expiresAt": "Vence",
+    "firstName": "Nombre",
+    "floor": "Piso",
+    "folder": "Carpeta",
+    "invalidRows": "Filas omitidas",
+    "isActive": "Activo",
+    "isCritical": "Crítica",
+    "justification": "Justificación",
+    "kind": "Tipo",
+    "lastName": "Apellido",
+    "legajo": "Legajo",
+    "location": "Ubicación",
+    "manager": "Responsable",
+    "manufacturer": "Fabricante",
+    "minStock": "Stock mínimo",
+    "model": "Modelo",
+    "name": "Nombre",
+    "notes": "Notas",
+    "order": "Orden",
+    "outboundHost": "Host de salida",
+    "outboundHosts": "Hosts de salida",
+    "owners": "Responsables",
+    "parent": "Superior",
+    "path": "Ruta",
+    "person": "Persona",
+    "probe": "Comprobación",
+    "prompt": "Instrucción",
+    "purchaseCost": "Costo de compra",
+    "purchaseDate": "Fecha de compra",
+    "quantity": "Cantidad",
+    "reason": "Motivo",
+    "renewalDate": "Fecha de renovación",
+    "requester": "Solicitante",
+    "requesterId": "Solicitante",
+    "requesterStatus": "Estado del solicitante",
+    "resumesAtStep": "Continúa en el paso",
+    "role": "Rol",
+    "rowCount": "Filas",
+    "rows": "Activos a crear",
+    "run": "Ejecución",
+    "runsInFlight": "Ejecuciones en curso",
+    "salvageValue": "Valor residual",
+    "seatsPurchased": "Licencias compradas",
+    "secretVaultMemberships": "Membresías de bóvedas de secretos",
+    "serial": "Número de serie",
+    "sku": "SKU",
+    "slug": "Slug de la URL",
+    "specs": "Atributos",
+    "specsSchema": "Diccionario de atributos",
+    "status": "Estado",
+    "steps": "Pasos",
+    "task": "Tarea",
+    "title": "Título",
+    "trigger": "Disparador",
+    "type": "Tipo",
+    "unit": "Unidad",
+    "url": "URL",
+    "usedBy": "Usado por",
+    "usefulLifeMonths": "Vida útil (meses)",
+    "user": "Usuario",
+    "userActiveGrantsOnApplication": "Accesos activos del usuario en la aplicación",
+    "userId": "Usuario",
+    "username": "Nombre de usuario",
+    "userStatus": "Estado del usuario",
+    "validRows": "Filas a crear",
+    "vendor": "Proveedor",
+    "version": "Versión",
+    "warrantyEnd": "Fin de la garantía",
+    "whatItDoes": "Qué hace",
+    "workflow": "Flujo"
+  },
+  "fieldPrefixes": {
+    "input": "Entrada: {name}",
+    "specs": "Atributo: {name}"
+  },
+  "settings": {
+    "title": "Ajustes del chat",
+    "open": "Ajustes del chat — modelo: {model}",
+    "model": {
+      "label": "Modelo",
+      "default": "Modelo predeterminado",
+      "defaultShort": "predeterminado",
+      "search": "Buscá o escribí el id de un modelo",
+      "listed": "Modelos disponibles",
+      "customHeading": "Modelo personalizado",
+      "useCustom": "Usar “{id}”",
+      "invalid": "No es un id de modelo válido. Usá solo letras, números y . _ - : / @.",
+      "hint": "Elegí uno, o escribí el id de un modelo que sirva tu proveedor.",
+      "loading": "Cargando los modelos del proveedor…",
+      "unavailable": "La lista de modelos no está disponible ahora. Igual podés escribir el id de un modelo.",
+      "notListed": "El proveedor no devolvió sus modelos. Escribí el id de un modelo o dejá el predeterminado.",
+      "locked": "El modelo queda fijo una vez que el chat empezó. Iniciá un chat nuevo para usar otro.",
+      "lockedTitle": "Ajustes del chat — el modelo está fijo en este chat",
+      "set": "Modelo cambiado a {model}."
+    },
+    "effort": {
+      "label": "Esfuerzo de razonamiento",
+      "default": "Predeterminado",
+      "defaultIs": "Predeterminado ({level})",
+      "low": "Bajo",
+      "medium": "Medio",
+      "high": "Alto",
+      "description": "Más esfuerzo piensa más antes de responder y usa más tokens."
+    },
+    "temperature": {
+      "label": "Temperatura",
+      "placeholder": "Predeterminada",
+      "description": "De 0 a 2. Más baja es más predecible. Vacía usa la predeterminada.",
+      "invalid": "Ingresá un número de 0 a 2, o dejalo vacío."
+    },
+    "auto": {
+      "label": "Aprobar automáticamente los cambios básicos",
+      "description": "Las ediciones básicas se aplican sin tarjeta. Todo lo crítico sigue pidiendo tu aprobación.",
+      "badge": "Auto",
+      "badgeTitle": "Aprobación automática activada: los cambios básicos se aplican sin preguntar",
+      "turnedOn": "La aprobación automática está activada en este chat.",
+      "turnedOff": "La aprobación automática está desactivada. Cada cambio vuelve a pedir tu aprobación.",
+      "alreadyOn": "La aprobación automática ya está activada.",
+      "alreadyOff": "La aprobación automática ya está desactivada."
+    },
+    "consent": {
+      "title": "¿Activar la aprobación automática en este chat?",
+      "intro": "El asistente va a hacer cambios básicos sin mostrarte antes una tarjeta.",
+      "points": {
+        "basic": "Las ediciones básicas — crear o actualizar activos, artículos, consumibles y similares — se aplican en el momento, con tu cuenta y tus permisos.",
+        "critical": "Todo lo crítico sigue preguntando: roles, identidad e inicio de sesión, accesos, credenciales, aplicaciones marcadas como críticas y otros cambios sensibles.",
+        "othersContent": "Un cambio propuesto después de que el asistente leyó contenido escrito por otras personas también sigue preguntando.",
+        "logged": "Cada cambio queda registrado, a tu nombre, como aplicado automáticamente.",
+        "off": "Queda activada solo en este chat. Desactivala cuando quieras con el interruptor o con /auto off."
+      },
+      "manual": "Cómo funciona la aprobación automática",
+      "cancel": "Cancelar",
+      "confirm": "Activar"
+    },
+    "errors": {
+      "locked": "El modelo no puede cambiar una vez que el chat empezó. Iniciá un chat nuevo para usar otro.",
+      "readOnly": "Este chat es de solo lectura, así que sus ajustes no pueden cambiar.",
+      "aiDisabled": "Se desactivó el asistente de IA.",
+      "effortUnsupported": "Este proveedor de IA no admite un esfuerzo de razonamiento.",
+      "optionsUnsupported": "Este proveedor de IA no admite esa opción.",
+      "invalidModel": "Ese id de modelo no es válido.",
+      "notFound": "Este chat ya no existe.",
+      "generic": "No se pudieron guardar los ajustes del chat. Probá de nuevo."
+    }
+  },
+  "input": {
+    "kicker": "El asistente pregunta",
+    "states": {
+      "pending": "Espera tu respuesta",
+      "sending": "Enviando",
+      "submitted": "Respondido",
+      "skipped": "Omitido",
+      "declined": "Rechazado",
+      "expired": "Vencido",
+      "cancelled": "Cancelado",
+      "sent": "Enviado"
+    },
+    "importance": {
+      "required": "obligatorio",
+      "recommended": "Recomendado",
+      "optional": "Opcional"
+    },
+    "requiredLegend": "Los campos marcados con * son obligatorios.",
+    "moreDetails": "Más detalles ({count, plural, one {# campo opcional} other {# campos opcionales}})",
+    "lessDetails": "Ocultar los campos opcionales",
+    "row": "Fila {number}",
+    "addRow": "Agregar una fila",
+    "removeRow": "Quitar la fila {number}",
+    "rowsBetween": "Entre {min} y {max} filas.",
+    "rowsExactly": "{count, plural, one {Exactamente # fila.} other {Exactamente # filas.}}",
+    "noRows": "Sin filas.",
+    "choose": "Elegí…",
+    "search": "Buscar…",
+    "noMatch": "Sin resultados.",
+    "noOptions": "lazyit no tiene opciones para esta lista. Continuá sin este dato o rechazá el formulario.",
+    "optionsFrom": "Opciones de lazyit: {source}",
+    "sources": {
+      "manufacturers": "fabricantes",
+      "assetCategories": "categorías de activos",
+      "locations": "ubicaciones",
+      "assetModels": "modelos de activo"
+    },
+    "yes": "Sí",
+    "no": "No",
+    "empty": "Sin respuesta",
+    "submit": "Enviar",
+    "skip": "Continuar sin esto",
+    "decline": "No preguntar",
+    "skipHint": "El asistente continúa sin esta información.",
+    "declineHint": "Se le indica al asistente que no vuelva a pedir esto.",
+    "actionsHint": "Continuar sin esto: el asistente sigue sin estos datos. No preguntar: no los vuelve a pedir.",
+    "expiresAt": "Respondé antes de las {time}",
+    "yourAnswer": "Tu respuesta",
+    "answerSent": "Tu respuesta se envió.",
+    "notes": {
+      "submitted": "El asistente continúa con tu respuesta.",
+      "skipped": "Omitiste este formulario. El asistente continuó sin los datos.",
+      "declined": "Lo rechazaste. El asistente no volverá a pedir estos datos.",
+      "expired": "Se terminó el tiempo sin una respuesta y el asistente se detuvo. Enviá un mensaje nuevo para continuar.",
+      "cancelled": "El asistente se detuvo antes de recibir una respuesta."
+    },
+    "issues": {
+      "required": "Este campo es obligatorio.",
+      "maxChars": "Como máximo {max} caracteres.",
+      "min": "Como mínimo {min}.",
+      "max": "Como máximo {max}.",
+      "notOffered": "Elegí una de las opciones ofrecidas.",
+      "invalid": "Este valor no es válido.",
+      "rows": "Entre {min} y {max} filas.",
+      "unknown": "Este campo no es parte del formulario."
+    },
+    "errors": {
+      "invalid": "Revisá los campos marcados.",
+      "notAwaiting": "Este formulario ya no espera una respuesta: se respondió en otra ventana o el asistente se detuvo.",
+      "expired": "Este formulario venció y el asistente se detuvo. Enviá un mensaje nuevo para continuar.",
+      "aiDisabled": "El asistente de IA fue desactivado.",
+      "forbidden": "No podés responder este formulario.",
+      "notFound": "Este formulario ya no existe.",
+      "unknown": "No se pudo enviar tu respuesta. Intentá de nuevo."
+    },
+    "sentNote": "Enviado. Esperando que el asistente continúe…",
+    "expiredLocally": "Se terminó el tiempo para responder este formulario. El asistente se detiene en breve; enviá un mensaje nuevo para continuar."
+  },
+  "sentences": {
+    "application_create": {
+      "action": "Agregar la aplicación “{name}” al catálogo.",
+      "actionCritical": "Queda marcada como crítica: cada cambio posterior que haga la IA sobre ella va a pedir tu contraseña en el chat.",
+      "summary": "Se agregó la aplicación “{name}” al catálogo."
+    },
+    "application_update": {
+      "action": "Cambiar {fields} de la aplicación “{name}”.",
+      "actionCritical": "Es una aplicación crítica: confirmá con tu contraseña.",
+      "summary": "Se actualizó la aplicación “{name}” ({fields})."
+    },
+    "access_grant_create": {
+      "actionSelf": "Te estás dando acceso a vos mismo.",
+      "action": "{self, select, yes {Darte} other {Darle a {person}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}{hasUntil, select, yes { hasta el {until}} other {}}.",
+      "summary": "Se {self, select, yes {te dio} other {le dio al usuario {userId}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}."
+    },
+    "access_grant_revoke": {
+      "action": "Quitar {self, select, yes {tu} other {el}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}{self, select, yes {} other { de {person}}}.",
+      "summary": "Se revocó {self, select, yes {tu} other {el}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a la aplicación {applicationId}{self, select, yes {} other { del usuario {userId}}}."
+    },
+    "access_request_create": {
+      "action": "Pedir {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application} para vos. Se avisa a las personas que pueden otorgar el acceso, y ellas lo aprueban o lo rechazan.",
+      "summary": "Se pidió {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}; ahora espera a quien lo apruebe."
+    },
+    "access_request_decide": {
+      "actionSelf": "Estás resolviendo tu propia solicitud.",
+      "actionApprove": "Aprobar la solicitud: {self, select, yes {darte} other {darle a {person}}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}. Se crea un acceso otorgado y se {self, select, yes {te avisa} other {le avisa a {person}}}.",
+      "actionDeny": "Rechazar la solicitud {self, select, yes {tuya} other {de {person}}} de {hasLevel, select, yes {acceso “{level}”} other {acceso}} a {application}. Se {self, select, yes {te avisa} other {le avisa a {person}}} con tu motivo.",
+      "summaryApprove": "Se aprobó la solicitud: {self, select, yes {ahora tenés} other {el usuario {userId} ahora tiene}} {hasLevel, select, yes {acceso “{level}”} other {acceso}} a la aplicación {applicationId} (acceso otorgado {grantId}).",
+      "summaryDeny": "Se rechazó la solicitud {self, select, yes {tuya} other {del usuario {userId}}} para la aplicación {applicationId}; se le avisa con el motivo."
+    },
+    "access": {
+      "outlook": {
+        "mayRun": "Esto puede disparar {revoke, select, yes {el desaprovisionamiento automático (quitar la cuenta en {application})} other {el aprovisionamiento automático (crear la cuenta en {application})}} si hay un flujo configurado para esta aplicación.",
+        "none": "No hay un flujo de {revoke, select, yes {desaprovisionamiento} other {aprovisionamiento}} automático configurado para {application}: no cambia nada fuera de lazyit.",
+        "provisions": "Esto dispara el aprovisionamiento automático (crear la cuenta en {application}) después de la aprobación, mediante el flujo configurado para {application}.",
+        "keepsOtherAccess": "El usuario conserva otro acceso a {application}, así que su flujo de desaprovisionamiento no se ejecuta.",
+        "deprovisions": "Esto dispara el desaprovisionamiento automático (quitar la cuenta en {application}), mediante el flujo configurado para {application}.",
+        "deprovisionsIfLast": "Esto dispara el desaprovisionamiento automático (quitar la cuenta en {application}) si es el último acceso del usuario a {application}, mediante el flujo configurado para ella."
+      },
+      "criticalNote": "{application} es una aplicación crítica: confirmá con tu contraseña."
+    },
+    "asset_create": {
+      "summary": "Se creó el activo {asset}."
+    },
+    "asset_create_batch": {
+      "action": "Crear {count} de {total} activos{skipped, plural, =0 {.} one {; se omite # fila, como se pidió.} other {; se omiten # filas, como se pidió.}}",
+      "summary": "Se crearon {count} de {total} activos{failed, plural, =0 {.} one {; # no se creó (ver problemas).} other {; # no se crearon (ver problemas).}}"
+    },
+    "asset_update": {
+      "summary": "Se actualizó el activo {asset}."
+    },
+    "asset_update_batch": {
+      "action": "Actualizar {count} de {total} activos{skipped, plural, =0 {.} one {; se omite # fila, como se pidió.} other {; se omiten # filas, como se pidió.}}",
+      "summary": "Se actualizaron {count} de {total} activos{failed, plural, =0 {.} one {; # no se actualizó (ver problemas).} other {; # no se actualizaron (ver problemas).}}"
+    },
+    "asset_archive": {
+      "summary": "Se archivó el activo {asset}."
+    },
+    "asset_restore": {
+      "summary": "Se restauró el activo {asset}."
+    },
+    "asset_check_out": {
+      "summary": "Se asignó {asset} a {user}."
+    },
+    "asset_check_in": {
+      "summary": "Se devolvió {asset}, que tenía {user}."
+    },
+    "consumable_create": {
+      "summary": "Se creó el consumible {consumable} con 0 {hasUnit, select, yes {{unit}} other {unidades}} en stock."
+    },
+    "consumable_update": {
+      "summary": "Se actualizó el consumible {consumable}."
+    },
+    "consumable_record_movement": {
+      "summary": "Se registró {type, select, IN {una entrada de} OUT {una salida de} ADJUSTMENT {un ajuste de} other {{type}}} {quantity} en {consumable}{hasStock, select, yes {; ahora hay {stock} en stock.} other {.}}"
+    },
+    "asset_model_create": {
+      "summary": "Se creó el modelo de activo {model}."
+    },
+    "location_create": {
+      "summary": "Se creó la ubicación {location}."
+    },
+    "category_create": {
+      "summary": "Se creó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "category_update": {
+      "summary": "Se actualizó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "category_archive": {
+      "summary": "Se archivó la {kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}} {name}."
+    },
+    "asset_model_update": {
+      "summary": "Se actualizó el modelo de activo {model}."
+    },
+    "asset_model_archive": {
+      "summary": "Se archivó el modelo de activo {model}."
+    },
+    "asset_model_restore": {
+      "summary": "Se restauró el modelo de activo {model}."
+    },
+    "location_update": {
+      "summary": "Se actualizó la ubicación {location}."
+    },
+    "location_archive": {
+      "summary": "Se archivó la ubicación {location}."
+    },
+    "location_restore": {
+      "summary": "Se restauró la ubicación {location}."
+    },
+    "taxonomy": {
+      "categoryKind": "{kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}}",
+      "usedByUnknown": "No lo podés ver: {kinds}"
+    },
+    "user_create": {
+      "summary": "Se creó a {user} como {role, select, ADMIN {administrador} MEMBER {miembro} VIEWER {lector} other {{role}}}."
+    },
+    "user_update": {
+      "summary": "Se actualizó a {user}."
+    },
+    "user_offboard": {
+      "summary": "Se dio de baja a {user}: se liberaron {released, plural, one {# activo} other {# activos}} y se revocaron {revoked, plural, one {# acceso} other {# accesos}}.",
+      "summaryRotateVaults": "Podía leer {vaults, plural, one {# bóveda} other {# bóvedas}} del Secret Manager: un administrador debería rotar esos secretos desde la interfaz de lazyit.",
+      "criticalRevoked": "revocado",
+      "criticalUnknownGrants": "desconocido: no podés ver los accesos de esta persona, así que se tratan como críticos",
+      "criticalUnknownApplications": "desconocido para {count, plural, one {# aplicación que no podés ver} other {# aplicaciones que no podés ver}}; se trata como crítico",
+      "vaultMembershipsBefore": "las que tenga",
+      "vaultMembershipsAfter": "se quitan (user_restore no las recupera)"
+    },
+    "user_restore": {
+      "summary": "Se restauró a {user}. Los accesos otorgados y las asignaciones de activos no se restauraron."
+    },
+    "kb_create_article": {
+      "summary": "Se creó como borrador."
+    },
+    "kb_update_article": {
+      "summary": "Se actualizó el artículo."
+    },
+    "kb_set_publication": {
+      "summaryPublish": "Publicado: ahora lo ve cualquiera que pueda leer su carpeta.",
+      "summaryUnpublish": "Despublicado: vuelve a ser un borrador, visible solo para quien lo escribió."
+    },
+    "kb_folder_create": {
+      "summary": "Se creó la carpeta.",
+      "topLevel": "Ninguna (nivel superior)",
+      "noOwnRules": "Ninguna propia: hereda el público de arriba. Solo un administrador puede restringir una carpeta (reglas de acceso de carpetas), y el asistente nunca las configura."
+    },
+    "kb_folder_rename": {
+      "summary": "Se renombró la carpeta."
+    },
+    "kb": {
+      "audience": {
+        "unknown": "No lo podés ver: las reglas de acceso de carpetas solo se muestran a quien tiene settings:manage",
+        "everyone": "Todos los que pueden leer la base de conocimiento",
+        "restrictedByRules": "Restringido por reglas de acceso de carpetas",
+        "restricted": "Restringido: solo las personas que cumplen con cada carpeta restringida de la ruta:",
+        "folder": "{folder}:",
+        "rule": "{rule, select, role {el rol {role, select, ADMIN {administrador} MEMBER {miembro} VIEWER {lector} other {{role}}}} users {{count, plural, one {# persona nombrada} other {# personas nombradas}}} appGrant {las personas con acceso a la aplicación {applicationId}} assetAssignment {las personas que tienen asignado el activo {assetId}} other {una regla desconocida (no incluye a nadie)}}{then, select, or { o} semicolon {;} other {}}",
+        "malformed": "{lead, select, yes {; } other {}}una carpeta con reglas ilegibles (no incluye a nadie)"
+      }
+    },
+    "workflow_create": {
+      "whatItDoes": "Crea el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}, DESACTIVADO y sin pasos. No se envía nada hasta que se le agreguen pasos y se active.",
+      "summary": "Se creó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application} (desactivado)."
+    },
+    "workflow_update": {
+      "summary": "Se actualizó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow_archive": {
+      "whatItDoes": "Archiva este flujo: desde ahora no se ejecuta nada cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}. No se puede restaurar desde lazyit.",
+      "summary": "Se archivó el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow_author_version": {
+      "enabled": "El flujo está ACTIVADO: esta versión queda en uso apenas se guarda.",
+      "disabled": "El flujo está desactivado: no se ejecuta nada hasta que se active.",
+      "summary": "Se guardó la versión {version} del flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}{live, select, yes { (ya en uso)} other {}}."
+    },
+    "workflow_set_enabled": {
+      "whatItDoesOff": "Desactiva el flujo: desde ahora no se ejecuta nada cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}. Las ejecuciones que ya empezaron terminan.",
+      "summary": "Se {enabled, select, yes {activó} other {desactivó}} el flujo {trigger, select, ACCESS_REVOKED {de acceso revocado} other {de acceso concedido}} de {application}."
+    },
+    "workflow": {
+      "outbound": {
+        "manualOnly": "{fromNowOn, select, yes {Desde ahora, cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}} other {Cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}}}, lazyit solo va a crear tareas manuales; no se envía nada fuera de lazyit.",
+        "sends": "{fromNowOn, select, yes {Desde ahora, cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}} other {Cada vez que {trigger, select, ACCESS_REVOKED {a alguien se le revoca el acceso a} other {a alguien se le concede acceso a}} {application}}}, lazyit va a enviar",
+        "noData": "solicitudes sin datos de lazyit",
+        "dataWord": "{token, select, event {el nombre del evento} grantee_id {el id de lazyit de la persona} grantee_email {el email de la persona} grantee_firstName {el nombre de la persona} grantee_lastName {el apellido de la persona} grantee_legajo {el legajo de la persona} grantee_username {el nombre de usuario de la persona} grantee_manager_name {el nombre del responsable de la persona} grantee_manager_email {el email del responsable de la persona} grantee_manager_isOffboarded {si el responsable de la persona se fue} application_id {el id de lazyit de la aplicación} application_name {el nombre de la aplicación} grant_id {el id de lazyit del acceso otorgado} grant_accessLevel {el nivel de acceso} grant_grantedAt {cuándo se otorgó el acceso} grant_expiresAt {cuándo vence el acceso} steps {el campo “{field}” que alguien completó en el paso manual “{step}”} other {un valor desconocido (queda vacío)}}{then, select, comma {,} other {}}",
+        "to": "a {hosts}."
+      },
+      "auth": {
+        "webhookSigned": "firmado con el secreto guardado{hasHeader, select, yes { en {header}} other {}}",
+        "webhookUnsigned": "sin firmar (no hay un secreto de firma asociado)",
+        "noCall": "sin llamada externa",
+        "none": "sin autenticación",
+        "rest": "{scheme, select, BEARER {token Bearer} BASIC {autenticación básica} HEADER {cabecera de API key} NONE {sin autenticación} other {{scheme}}}{isHeader, select, yes { en la cabecera {header}} other {}}, {credential, select, yes {con la credencial guardada} other {todavía sin credencial asociada}}"
+      }
+    },
+    "workflow_connection_create": {
+      "summary": "Se creó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}{hasHost, select, yes { hacia {host}} other {}}."
+    },
+    "workflow_connection_update": {
+      "movesPath": "Cambia a qué ruta de {host} envía la conexión.",
+      "repoints": "Cambia el destino de la conexión de {from} a {to}: cada paso de flujo que la use va a enviar ahí.",
+      "credentialToNewHost": "La credencial guardada se va a enviar a {host}.",
+      "attachesCredential": "Asocia la credencial guardada {secretId}: se va a enviar a {hasHost, select, yes {{host}} other {la conexión}} en cada llamada.",
+      "detachesCredential": "Quita la credencial: las llamadas se van a enviar sin ella.",
+      "inFlight": "A partir del próximo paso que la llame —incluso en {count, plural, one {# ejecución que ya está en curso} other {# ejecuciones que ya están en curso}}, esperando a una persona o fallidas y reintentables—, los flujos van a enviar sus datos a {host}.",
+      "settingsOnly": "Cambia la configuración de esta conexión a {hasHost, select, yes {{host}} other {ningún host externo}}.",
+      "runsInFlightUnknown": "No se pudo verificar (hace falta el permiso workflow:read): las ejecuciones que ya empezaron pueden enviar al nuevo host.",
+      "credentialNone": "ninguna",
+      "credentialStored": "credencial guardada {secretId}",
+      "summary": "Se actualizó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}."
+    },
+    "workflow_connection_archive": {
+      "whatItDoes": "Archiva la conexión a {hasHost, select, yes {{host}} other {ningún host externo}}. {users, plural, =0 {Ningún flujo la usa.} one {# flujo todavía la llama y sus pasos van a fallar.} other {# flujos todavía la llaman y sus pasos van a fallar.}}",
+      "summary": "Se archivó la conexión {kind, select, REST {API / HTTP} WEBHOOK_OUT {webhook} MANUAL {de tarea humana} other {{kind}}} de {application}."
+    },
+    "workflow_connection_test": {
+      "whatItDoes": "Envía una sola solicitud {method} de solo lectura a {host} (ruta {path}){credential, select, yes {, con la credencial guardada} other {, sin credencial}}. No se cambia nada ahí.",
+      "summary": "Se probó la conexión de {application} a {hasHost, select, yes {{host}} other {su host}}: {ok, select, yes {respondió} other {falló}}."
+    },
+    "workflow_run_retry": {
+      "action": "Reintentar la ejecución fallida del flujo {workflow} para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}), retomando en {hasStep, select, yes {el paso {step}} other {el paso que falló}}. Los pasos que ya salieron bien no se repiten; se vuelven a enviar los mismos datos.",
+      "resumesAtUnknown": "el paso que falló (la ejecución está en una versión anterior del flujo, que no se muestra)",
+      "summary": "Se reintentó la ejecución {run} desde el paso {step} (intento {attempt}); volvé a leerla con workflow_run_get para ver el resultado."
+    },
+    "workflow_run_replay": {
+      "action": "Iniciar una nueva ejecución del flujo {workflow} (última versión {version}) para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}), desde el primer paso. La ejecución fallida queda como está.",
+      "summary": "Se inició la ejecución {newRun} con la última versión, en reemplazo de la ejecución fallida {run}; leela con workflow_run_get para ver el resultado."
+    },
+    "workflow_task_resolve": {
+      "action": "{action, select, submit {Enviar el formulario de} skip {Omitir} other {Marcar como fallida}} la tarea manual del flujo {workflow} para {person} en {application} ({trigger, select, ACCESS_GRANTED {cuando se concede acceso} ACCESS_REVOKED {cuando se revoca acceso} other {{trigger}}}); después {next, select, END_SUCCESS {la ejecución termina con éxito} STOP_FAIL {la ejecución se detiene como fallida} ESCALATE_TO_MANUAL {se le pide a una persona que la termine como tarea manual} COMPENSATE {se deshacen los pasos ya hechos (compensación) y la ejecución termina} step {sigue en el paso {index} ({key})} key {sigue en {key}} other {la ejecución sigue en su versión fijada (no la última, así que no se muestra el paso siguiente)}}.",
+      "summary": "La tarea {task} se {action, select, submit {envió} skip {omitió} other {marcó como fallida}}; la ejecución {run} se retoma. Leela con workflow_run_get."
+    },
+    "workflows": {
+      "destinationsManualOnly": "sin llamada saliente (solo pasos manuales)",
+      "destinationsNone": "sin llamada saliente",
+      "destinationsUnknown": "desconocido (la ejecución está en una versión anterior del flujo)",
+      "criticalUnknown": "desconocido (no se puede leer la aplicación); se trata como crítico"
+    },
+    "asset_tag_scheme_get": {
+      "summaryNotVisible": "No podés ver el esquema de etiquetas de activos.",
+      "summaryOn": "El esquema de etiquetas de activos está activado; la próxima etiqueta sería {hasNext, select, yes {{tag}} other {ninguna (la secuencia se agotó)}}.",
+      "summaryOff": "El esquema de etiquetas de activos está desactivado: los activos no reciben una etiqueta automática."
+    },
+    "asset_tag_scheme_update": {
+      "summary": "Se actualizó el esquema de etiquetas de activos (etiquetado automático {enabled, select, yes {activado} other {desactivado}}). Las etiquetas existentes no cambian."
+    },
+    "request_input": {
+      "summary": "Se {count, plural, one {pidió # campo} other {pidieron # campos}}",
+      "summaryAnswered": "Completaste el formulario",
+      "summarySkipped": "Omitiste el formulario",
+      "summaryDeclined": "Rechazaste el formulario"
+    },
+    "refusal": {
+      "unknownTool": "Herramienta desconocida: {tool}",
+      "notOnChannel": "{tool} no está disponible en este canal",
+      "mustPropose": "{tool} cambia datos: hay que proponerla y aprobarla, no invocarla",
+      "notAWrite": "{tool} no cambia datos: invocala directamente",
+      "cannotProposeOnChannel": "{tool} no se puede proponer en este canal",
+      "invalidInput": "Datos no válidos: {detail}",
+      "invalidPreview": "Esta acción no se puede proponer: su vista previa no es válida.",
+      "actionNotRecorded": "No se pudo registrar la acción, así que no se ejecutó.",
+      "approvalNotRecorded": "No se pudo registrar la aprobación, así que la acción no se ejecutó.",
+      "userDeclined": "Rechazaste esta acción",
+      "userDeclinedWithReason": "Rechazaste esta acción: {reason}",
+      "approvalExpired": "Venció el plazo para aprobar esta acción",
+      "runCancelled": "Se canceló la respuesta",
+      "runCancelledNothingExecuted": "Se canceló la respuesta; no se ejecutó nada",
+      "runEnded": "La respuesta terminó",
+      "runEndedBeforeCall": "La respuesta terminó antes de que se ejecutara esta llamada",
+      "runInterrupted": "La respuesta se interrumpió; esta llamada no se completó",
+      "aiTurnedOff": "Se desactivó el asistente de IA; no se ejecutó nada",
+      "outcomeUnknown": "La acción se interrumpió; no se sabe si se aplicó. No se va a reintentar.",
+      "storedPreviewUnreadable": "No se puede leer la vista previa guardada de esta acción; no se ejecutó",
+      "storedInputMismatch": "Los datos guardados de esta acción no coinciden con lo que se aprobó; no se ejecutó",
+      "toolChanged": "La herramienta cambió desde que se propuso esta acción; hay que volver a proponerla",
+      "toolGone": "La herramienta ya no está disponible",
+      "invalidStoredInput": "Los datos guardados no son válidos",
+      "freshPreviewInvalid": "La vista previa de esta acción no es válida; no se ejecutó",
+      "stale": "El elemento cambió después de que se propuso esta acción; hay que volver a leerlo y proponer una acción nueva",
+      "headlessServiceAccountOnly": "Los cambios sin interfaz solo se ejecutan como una cuenta de servicio",
+      "noToolPermission": "No tenés permiso para usar {tool}",
+      "outsideSessionAccess": "{tool} está fuera del acceso otorgado a esta sesión",
+      "principalInvalid": "Quien actúa ya no es válido",
+      "permissionRequired": "Hace falta el permiso {permission}",
+      "argumentsNotJson": "Los argumentos no eran un objeto JSON válido",
+      "toolCallLimit": "Se alcanzó el límite de llamadas a herramientas de esta respuesta",
+      "tooManyToolCalls": "Demasiadas llamadas a herramientas; esperá un momento antes de hacer más",
+      "mutationCap": "Se alcanzó el límite de cambios de esta respuesta ({cap})",
+      "mutationCapBatch": "Esta llamada haría {weight, plural, one {# cambio} other {# cambios}}, pero el límite de cambios de esta respuesta ({cap}) permite {left} más",
+      "pendingLimit": "Se alcanzó el límite: hay {max} propuestas pendientes en este paso; hay que esperar tus decisiones y proponer el resto en el paso siguiente.",
+      "repeatedFailure": "No se ejecutó: esta misma llamada a {tool} ya falló {count, plural, one {# vez} other {# veces}} en este turno",
+      "formChannel": "Nadie puede responder un formulario en este canal",
+      "formStepWrites": "Pedí los datos que faltan en un paso aparte, antes de proponer cualquier cambio",
+      "formOneAtATime": "Pedí con un solo formulario a la vez; poné todas las preguntas en él",
+      "formNotBuilt": "No se pudo armar el formulario",
+      "formNotStored": "No se pudo guardar el formulario"
+    }
+  },
+  "sentenceValues": {
+    "taxonomyDependents": {
+      "assetModels": "modelos de activo",
+      "assets": "activos",
+      "applications": "aplicaciones",
+      "consumables": "consumibles",
+      "childLocations": "ubicaciones hijas"
+    }
+  }
+}

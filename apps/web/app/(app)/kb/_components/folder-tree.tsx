@@ -1,12 +1,16 @@
 "use client";
 
 import {
+  ArrowsRightLeftIcon,
   ChevronRightIcon,
   EllipsisHorizontalIcon,
   FolderIcon,
   FolderOpenIcon,
+  FolderPlusIcon,
   InboxIcon,
   LockClosedIcon,
+  PencilIcon,
+  PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { isPublicAccessRules, type Folder } from "@lazyit/shared";
@@ -16,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -27,8 +32,10 @@ import {
   ancestorFolderIds,
   buildFolderTree,
   descendantFolderCount,
+  folderPathOptions,
   restrictedAncestorOf,
   type FolderNode,
+  type FolderPathOption,
 } from "@/lib/utils/folder-tree";
 import { cn } from "@/lib/utils";
 import {
@@ -36,6 +43,8 @@ import {
   type RawAccessRules,
 } from "./folder-access-rule-editor";
 import { FolderDeleteDialog } from "./folder-delete-dialog";
+import { FolderFormDialog } from "./folder-form-dialog";
+import { FolderMoveDialog } from "./folder-move-dialog";
 
 /**
  * The folder `accessRules` field is a `Json?` on the Prisma model, returned in the API response
@@ -67,6 +76,14 @@ export type FolderWithRules = Folder & {
  *   - ADMIN-only: a settings Popover on each folder row exposes the {@link FolderAccessRuleEditor}.
  *     The padlock is presentation; the API enforces (INV-9).
  *
+ * #1291 — write affordances. With `category:write` the rail gains a "New folder" button (a ROOT
+ * folder) and every row's "⋯" menu gains "New sub-folder here" (create with this row's id as
+ * `parentId`), "Rename" and "Move to…". That is what makes sub-folders producible from the UI at
+ * all: the shared name-only quick-create always lands a folder at the root. The guards (cycle,
+ * dead parent, per-parent unique name) stay entirely server-side; the dialogs report what the API
+ * answers. After a create or a move the affected branch is expanded so the result is visible
+ * without a reload.
+ *
  * a11y: an `role="tree"` with `role="treeitem"` rows; each branch carries `aria-expanded`; the active
  * folder carries `aria-selected`. Rows are real `<button>`s, so Enter/Space select and Tab moves
  * between them for free; the chevron toggles expansion without changing selection.
@@ -76,6 +93,7 @@ export function FolderTree({
   selectedFolderId,
   onSelect,
   isAdmin,
+  canWrite,
   canDelete,
 }: {
   folders: FolderWithRules[];
@@ -84,6 +102,8 @@ export function FolderTree({
   onSelect: (folderId: string | null) => void;
   /** When true the per-folder access-rule editor affordance is rendered (ADMIN-only, ADR-0060). */
   isAdmin?: boolean;
+  /** When true the create / rename / move affordances are rendered (`category:write`, #1291). */
+  canWrite?: boolean;
   /** When true the per-folder "⋯ → Delete folder" cascade affordance is rendered (`category:delete`, #415). */
   canDelete?: boolean;
 }) {
@@ -147,6 +167,27 @@ export function FolderTree({
 
   const isExpanded = (id: string) => expanded.has(id) || ancestors.has(id);
 
+  /** Force a branch open — after a create or a move, so the affected folder is visible at once. */
+  const expand = (id: string) => {
+    setExpanded((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
+  // Destinations for "Move to…", path-labelled and sorted once for the whole tree (#1291). Each row
+  // drops its own id before handing the list to the dialog; descendants stay in — the cycle rule is
+  // the API's (ADR-0059 §1) and is reported, never recomputed here.
+  const moveOptions = useMemo(
+    () => (canWrite ? folderPathOptions(folders as Folder[]) : []),
+    [folders, canWrite],
+  );
+
+  // The root-level "New folder" dialog, owned by the rail rather than by a row.
+  const [newRootOpen, setNewRootOpen] = useState(false);
+
   const toggle = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -161,6 +202,30 @@ export function FolderTree({
 
   return (
     <nav aria-label={t("folders.treeLabel")} className="text-sm">
+      {/* #1291: a ROOT folder has no row to hang a "⋯" menu on, so the rail carries its own quiet
+          "New folder" action. A real <button> above the tree — outside role="tree", so it never
+          appears as a treeitem to a screen reader. */}
+      {canWrite ? (
+        <button
+          type="button"
+          onClick={() => setNewRootOpen(true)}
+          className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <PlusIcon className="size-3.5 shrink-0" aria-hidden />
+          {t("folders.form.newRoot")}
+        </button>
+      ) : null}
+
+      {newRootOpen ? (
+        <FolderFormDialog
+          open={newRootOpen}
+          onOpenChange={setNewRootOpen}
+          mode="create"
+          parentId={null}
+          onCreated={(id) => onSelect(id)}
+        />
+      ) : null}
+
       <ul role="tree" className="space-y-0.5">
         {/* "All articles" — clears the folder filter. The implicit root of the browse. The leading
             spacer matches the folder rows' chevron column so the labels align. */}
@@ -200,8 +265,11 @@ export function FolderTree({
               isExpanded={isExpanded}
               onToggle={toggle}
               onSelect={onSelect}
+              onExpand={expand}
               isAdmin={isAdmin}
+              canWrite={canWrite}
               canDelete={canDelete}
+              moveOptions={moveOptions}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
               nameById={nameById}
@@ -232,8 +300,11 @@ function FolderTreeNode({
   isExpanded,
   onToggle,
   onSelect,
+  onExpand,
   isAdmin,
+  canWrite,
   canDelete,
+  moveOptions,
   restrictedFolderIds,
   restrictedAncestorId,
   nameById,
@@ -245,8 +316,13 @@ function FolderTreeNode({
   isExpanded: (id: string) => boolean;
   onToggle: (id: string) => void;
   onSelect: (folderId: string | null) => void;
+  /** Force a branch open (create/move reveal) — distinct from `onToggle`, which flips it. */
+  onExpand: (id: string) => void;
   isAdmin?: boolean;
+  canWrite?: boolean;
   canDelete?: boolean;
+  /** Every folder as a path-labelled destination; this row removes itself before offering them. */
+  moveOptions: FolderPathOption[];
   restrictedFolderIds: Set<string>;
   restrictedAncestorId: (id: string) => string | null;
   nameById: Map<string, string>;
@@ -271,6 +347,11 @@ function FolderTreeNode({
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // #1291 write affordances. Each dialog is mounted only while open so a large tree never carries a
+  // form instance per row.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
 
   return (
     <li role="none">
@@ -409,18 +490,20 @@ function FolderTreeNode({
           </Popover>
         ) : null}
 
-        {/* #415: ADMIN-only ("category:delete") overflow menu with a cascade Delete. A "⋯" trigger
-            keeps the row calm until invoked; the delete opens a destructive confirm warning the
-            folder + its sub-folders + their articles will be removed from the KB. */}
-        {canDelete ? (
+        {/* The per-row overflow menu. A "⋯" trigger keeps the row calm until invoked. Items are gated
+            individually: create / rename / move on `category:write` (#1291), the cascade delete on
+            `category:delete` (#415). Radix renders the menu as a real `menu`/`menuitem` widget, so
+            every item is reachable with the keyboard (Enter/Space on the trigger, arrows, Escape)
+            and the tree's own treeitem semantics are untouched. */}
+        {canWrite || canDelete ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label={t("folders.delete.menuAriaLabel", {
+                aria-label={t("folders.actions.menuAriaLabel", {
                   name: folder.name,
                 })}
-                title={t("folders.delete.menuTitle")}
+                title={t("folders.actions.menuTitle")}
                 className="ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -428,17 +511,76 @@ function FolderTreeNode({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={4}>
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => setDeleteOpen(true)}
-              >
-                <TrashIcon className="size-4" aria-hidden />
-                {t("folders.delete.action")}
-              </DropdownMenuItem>
+              {canWrite ? (
+                <>
+                  <DropdownMenuItem onSelect={() => setCreateOpen(true)}>
+                    <FolderPlusIcon className="size-4" aria-hidden />
+                    {t("folders.actions.newChild")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                    <PencilIcon className="size-4" aria-hidden />
+                    {t("folders.actions.rename")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
+                    <ArrowsRightLeftIcon className="size-4" aria-hidden />
+                    {t("folders.actions.move")}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+              {canWrite && canDelete ? <DropdownMenuSeparator /> : null}
+              {canDelete ? (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => setDeleteOpen(true)}
+                >
+                  <TrashIcon className="size-4" aria-hidden />
+                  {t("folders.delete.action")}
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
       </div>
+
+      {/* #1291: create a sub-folder under THIS row. On success the branch is expanded and the new
+          folder selected, so it appears nested (and drives the list/breadcrumb) with no reload. */}
+      {createOpen ? (
+        <FolderFormDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          mode="create"
+          parentId={folder.id}
+          parentName={folder.name}
+          onCreated={(createdId) => {
+            onExpand(folder.id);
+            onSelect(createdId);
+          }}
+        />
+      ) : null}
+
+      {renameOpen ? (
+        <FolderFormDialog
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          mode="rename"
+          folderId={folder.id}
+          folderName={folder.name}
+        />
+      ) : null}
+
+      {moveOpen ? (
+        <FolderMoveDialog
+          open={moveOpen}
+          onOpenChange={setMoveOpen}
+          folderId={folder.id}
+          folderName={folder.name}
+          currentParentId={folder.parentId}
+          options={moveOptions.filter((option) => option.id !== folder.id)}
+          onMoved={(newParentId) => {
+            if (newParentId) onExpand(newParentId);
+          }}
+        />
+      ) : null}
 
       {canDelete ? (
         <FolderDeleteDialog
@@ -471,8 +613,11 @@ function FolderTreeNode({
               isExpanded={isExpanded}
               onToggle={onToggle}
               onSelect={onSelect}
+              onExpand={onExpand}
               isAdmin={isAdmin}
+              canWrite={canWrite}
               canDelete={canDelete}
+              moveOptions={moveOptions}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
               nameById={nameById}

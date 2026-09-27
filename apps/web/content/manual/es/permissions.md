@@ -59,6 +59,8 @@ partida, no límites infranqueables.
 | **Historial de actividad / informes** | Sí | No | No |
 | **Notificaciones** (la campana dentro de la app) | Sí | No | No |
 | **Gestor de Secretos** (ver y gestionar bóvedas) | Sí | No | No |
+| **Usar el asistente de IA** (`ai:use`) | Sí | Sí | No |
+| **Conectar agentes de IA externos (MCP)** (`ai:connect`) | Sí | Sí | No |
 
 Algunas notas sobre los valores por defecto:
 
@@ -70,6 +72,9 @@ Algunas notas sobre los valores por defecto:
   si lo desea.
 - **Eliminar** registros y **conceder acceso a aplicaciones** son acciones solo de administrador por
   defecto.
+- **Los dos permisos de IA suman un canal, no un poder.** El asistente y los agentes externos actúan con
+  los permisos de la propia persona, y no pasa nada hasta que un administrador activa la IA o MCP en
+  **Configuración → IA**. Mirá [Asistente de IA — visión general](/help/ai-assistant-overview#quién-puede-usarlo).
 
 ## Ajustar a Miembro y Lector
 

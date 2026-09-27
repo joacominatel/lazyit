@@ -41,6 +41,9 @@ import { DirectoryModule } from './directory/directory.module';
 import { AgentDistModule } from './agent-dist/agent-dist.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { SearchModule } from './search/search.module';
+import { AiModule } from './ai/ai.module';
+import { OAuthModule } from './oauth/oauth.module';
+import { McpModule } from './mcp/mcp.module';
 import { PrismaExceptionFilter } from './common/prisma-exception.filter';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { buildLoggerParams } from './logging/logging.config';
@@ -132,6 +135,14 @@ import { buildLoggerParams } from './logging/logging.config';
     // attachments volume (content-addressed by sha256), API-only serving behind the PARENT's authz
     // with hardened headers; sandboxed sharp re-encode + the daily four-pin GC sweep.
     AttachmentsModule,
+    // AI assistant, MCP server and headless API (ADR-0097, epic #1315). Off by default: nothing is served
+    // until an admin enables it. The AI core (tool registry + in-process dispatcher) validates its whole
+    // catalog at boot; every AI submodule is wired inside AiModule so later units never edit this file.
+    AiModule,
+    // lazyit's OAuth 2.1 authorization server for MCP clients (ADR-0097 R7) — no routes until built.
+    OAuthModule,
+    // The MCP resource server at /mcp + the Claude Code plugin distribution — no routes until built.
+    McpModule,
   ],
   controllers: [AppController],
   providers: [

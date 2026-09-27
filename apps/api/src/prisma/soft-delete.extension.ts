@@ -57,6 +57,10 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // File attachments (ADR-0082): delete = soft delete (the blob stays until the GC sweep proves
   // nothing restorable references it). The GC itself reads soft-deleted rows via includeSoftDeleted.
   'Attachment',
+  // OAuth connected apps (ADR-0097): a revoked grant is soft-deleted with its reason, so reads hide it by
+  // default. Relation reads (a token's `include: { grant }`) are not filtered by the extension and check
+  // `grant.deletedAt` explicitly. The credential rows (codes, tokens) are hard-deleted protocol state.
+  'OAuthGrant',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are

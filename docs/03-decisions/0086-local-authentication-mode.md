@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -13,6 +13,13 @@ deciders: [Joaquín Minatel]
 
 **accepted** — 2026-07-03 (issue #989). CEO ratified the direction and the resolved decisions; build
 proceeds in phases F1–F4.
+**Amended** — 2026-09-23 (issue #1307): §8 session lifetime — an opt-in "keep me signed in" session with
+no time-based expiry, server-side sign-out, and the web ending a session whose token has expired.
+**Amended** — 2026-09-23 (issue #1308): §8 open item resolved — the directory sync revokes local sessions
+when it offboards an active person.
+**Amended** — 2026-09-26 (issue #1420): §9 per-device sessions — a `UserSession` row per sign-in, listed by
+its owner and ended one at a time, **on top of** the `sessionEpoch` model (CEO decisions). The "session table
+is over-scoped" call in §3's options and §8 is revised by it.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
@@ -83,7 +90,8 @@ Within option 3, the sub-decisions (each an adversarial-review finding) and the 
   (granular but a new mutable table + GC). Chosen: a `User.sessionEpoch` embedded in the token; the guard
   already re-reads the `User` row every request (for `isActive`), so the epoch/active/soft-delete check is
   ~free and closes logout + password-change + offboard at once. A session table is over-scoped for the
-  target.
+  target. *(Revised 2026-09-26, #1420: a session table was added **alongside** the epoch — the epoch
+  stays the revocation lever for "everything", the table adds per-device listing and ending. See §9.)*
 - **Peppering:** server-held pepper (stronger against a DB-only leak — INV-10's threat model — but a new
   hard DR linchpin) vs. **none in v1 (chosen)**, with the column shaped to tolerate one later.
 - **Brute-force:** hard per-account lockout (DoS-able against a known admin) vs. **per-account
@@ -152,7 +160,8 @@ exists, **`AUTH_MODE` has no implicit default**: an unset value is a hard boot f
 - **Session revocation:** the guard's `handleLocal` re-loads the `User` every request and rejects when
   `token.sessionEpoch ≠ user.sessionEpoch` or `!isActive` or soft-deleted. Password change, admin reset,
   deactivate, and "sign out everywhere" **bump `sessionEpoch`** → all prior tokens die. Short token TTL is
-  belt-and-suspenders on top of the epoch check.
+  belt-and-suspenders on top of the epoch check — for a default sign-in only; a "keep me signed in"
+  session has no TTL at all, and sign-out became a server-side epoch bump (§8, #1307).
 - **Guard dispatch order** is unchanged: `@Public` → SA-token branch (unambiguous `lzit_sa_` prefix, no
   namespace overlap) → `handleLocal` / `handleOidc` by mode. A local token is rejected in OIDC mode and
   vice-versa (asserted in tests).
@@ -203,6 +212,48 @@ exist. Two existing guards actively break local mode and are fixed:
   method 400s in OIDC/BYOI (where `provisionAccount` / the foreign IdP own onboarding), so the invariant is
   unchanged there. INV-10 is untouched: onboarding grants **zero** additional Secret-Manager crypto access
   (the vault passphrase is a separate credential, §7).
+- **Amendment (issue #1268) — the admin reset gains a SECOND delivery, and the UI finally reaches it.**
+  Two problems, one root. First, the Users page gated its reset action on `externalId == null`, which is
+  true for **every** local-mode user by construction — so the local admin reset built above shipped
+  unreachable, and an operator on a local instance could not reset anyone from the UI at all. Second,
+  minting a temp password was the *only* delivery this ADR contemplated, because at the time lazyit had no
+  outbound email; [[0079-instance-smtp-outbound-email]] has since shipped, and the self-service
+  forgot-password flow (§F4) already mints a single-use, ≤1h `PasswordResetToken` and emails the link. An
+  admin had no way to trigger that same, better path for someone else.
+  **The admin now chooses the delivery explicitly** (`POST /users/:id/reset-password`, body
+  `{ delivery, revokeSessions? }`, `user:manage`):
+  - `email` — mint a reset link and send it through the instance SMTP. The subject sets their own
+    password; lazyit never learns it. Preferred when the mailbox is reachable.
+  - `temporary-password` — the original behavior above, unchanged. It stays available **even when email
+    works**, because it is the escape hatch for a subject who cannot reach their mailbox (wrong address,
+    locked out of email, no SMTP), and removing it would recreate the lockout this ADR exists to prevent.
+  **Honest reporting is the deliberate divergence from §F4.** The public forgot flow is uniform-by-design
+  so it cannot be used as an account-enumeration oracle, and it fails soft. Neither property is worth
+  anything here: the caller is an authenticated admin who already knows the account exists, so a silent
+  no-op would deceive only the person who needs the truth. This path therefore reports synchronously —
+  **409** (`reason: smtp-not-configured | origin-unknown`) when the link cannot be sent, **503** when the
+  relay refuses — and the per-account token cap does not silently skip. §F4's own semantics are untouched.
+  **Session revocation splits by delivery, and the asymmetry is not an oversight.** `temporary-password`
+  **always** bumps `sessionEpoch`: it replaces `passwordHash` on the spot, so a surviving session would
+  hold a credential that no longer exists. `email` revokes **only** when the admin opts in
+  (`revokeSessions`, default off): sending a link changes no credential, so the subject's live sessions are
+  still legitimately theirs, and killing them is a deliberate "I believe this account is compromised" act
+  rather than a side effect of routine help-desk work. The send happens **before** any revocation, so a
+  failed send leaves the account completely untouched and retryable.
+  **Link origin.** `WEB_ORIGIN` when pinned. When it is unset **and** `AUTH_TRUST_HOST=true` — the
+  host-agnostic LAN deploy of [[0087-plain-http-lan-deployment-axis]], where unset is *correct*, not a
+  mistake — the origin is derived from the requesting admin's own request host, which is the only reason
+  the email delivery is available on that deployment shape at all. That derivation is confined to this
+  authenticated `user:manage` route: a `Host` header shapes a URL landing in someone else's mailbox
+  (classic reset poisoning), and it is defensible here only because the header comes from an authenticated
+  admin's browser through the terminating proxy. It is **never** wired into the anonymous forgot flow,
+  which stays `WEB_ORIGIN`-only. Otherwise → `origin-unknown`.
+  **Upgrade-safety.** The request body is optional and the response is a superset of the old one, so an
+  API updated ahead of the web build keeps today's exact behavior (CLAUDE.md §8). OIDC/BYOI are byte-
+  identical; an explicit `delivery` there is a 400 rather than a silently ignored field. Availability is
+  published on a new `GET /users/password-reset-capabilities` behind `user:manage` — deliberately **not**
+  on the `@Public` `GET /config/status`, since whether an instance has working outbound email is not
+  anonymous-readable operational detail.
 - **Escape hatch:** a one-shot **recovery CLI** (`bun` script) resets a named admin's `passwordHash`
   directly against the DB — the only recovery when the last admin forgets their password and no SMTP
   exists ([[0079-instance-smtp-outbound-email]] pending).
@@ -235,6 +286,216 @@ receives a login password on every login. This ADR amends both:
 - **UX** presents the two as distinct credentials and **discourages reuse** (reusing the login password as
   the vault passphrase erodes INV-10's "survives full-server-compromise" guarantee in practice — worse over
   HTTP). Users in local mode therefore juggle two passwords by design; this is accepted.
+
+### 8. Session lifetime and "keep me signed in" — amendment (issue #1307, 2026-09-23)
+
+**The bug that forced the decision.** Two session clocks disagreed in local mode: the Auth.js cookie lives
+30 days (its default; no `maxAge` set), the API-minted token 12 hours. A user returning after 12h carried a
+live cookie holding a dead Bearer: `proxy.ts` admitted the request, every query 401'd, the client-side
+401 handler signed out and hard-navigated to `/login`, and `/login` — still seeing the not-yet-cleared
+cookie — bounced back into the app. The cycle ran for seconds of full-page reloads. Expiry was detected
+client-side, after render, instead of before the request was admitted.
+
+**Decision (CEO).** Two parts, one contract change:
+
+1. **The web ends a session whose token is dead.** `POST /auth/login` (and `POST /auth/change-password`)
+   now return **`expiresAt`** — the token's `exp` in seconds since the epoch, or `null` when it has no
+   time-based expiry. The web records it in the Auth.js JWT and invalidates the session server-side once
+   it passes, so `proxy.ts` and `/login` see "no session" and redirect cleanly. That enforcement lives in
+   `apps/web`; the API's part is only to report the expiry truthfully. `expiresAt` is an upper bound: a
+   `sessionEpoch` bump can still end the session earlier, and the guard stays the authority.
+2. **An opt-in "keep me signed in" on the local login form.** `LoginRequest` gains `rememberMe: boolean`,
+   optional, **default `false`**. Unchecked is exactly the 12h session this ADR always had. Checked mints a
+   token with **no time-based expiry**. Local mode only — the OIDC login and the OIDC path of the guard are
+   untouched.
+
+**Encoding.** A remember-me token omits `exp` and carries a signed `rememberMe: true` claim. The verifier
+accepts a missing `exp` **only** when that claim is exactly `true`; a marker-less token without a valid
+future `exp` is rejected, and a present `exp` is always enforced. Everything §3 pinned is unchanged: HS256
+on sign and verify, `sub` + `sessionEpoch`, nothing authorization-bearing (INV-1). The marker is covered by
+the HMAC, so it cannot be grafted onto an existing token without `SESSION_SIGNING_SECRET`. A very long
+`exp` (years) was considered and rejected: it is the same risk with a misleading bound, and it is not what
+the CEO asked for. A per-device session table stays rejected for the reason §3 gives. *(Revised
+2026-09-26 — see §9.)*
+
+**Revocation is now the only thing that ends a remember-me session**, so every lever had to be real:
+
+- **Sign-out is server-side.** It used to be client-only (Auth.js dropped the cookie; the token lived on
+  until `exp`). `POST /auth/logout` — authenticated, `204`, exempt from the `mustChangePassword` wall —
+  bumps `sessionEpoch`, conditional on the epoch the caller authenticated with, so a repeat or a
+  concurrent duplicate changes nothing (a repeat with the revoked token is a `401`). Because the epoch is
+  per user, **signing out ends that user's sessions on every device**. That is the epoch model's inherent
+  granularity, accepted here rather than building the session table §3 declined. It ends **web
+  sessions only**: MCP connections and personal tokens are bound to a separate counter,
+  `mcpCredentialEpoch`, which sign-out does not touch — every other lever below bumps both
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24).
+- **Password change** bumps the epoch as before; the re-minted token **keeps the calling session's
+  remember-me choice**, read by the guard from the verified token (never from the request body), so
+  changing a password never silently shortens a session.
+- **Admin reset** (`temporary-password` always; `email` only with `revokeSessions`) and the recovery CLI
+  bump the epoch as before.
+- **Deactivation and offboarding now bump the epoch.** §3 always listed deactivation, but the code only
+  relied on the guard refusing an inactive or soft-deleted row — so a reactivation or a restore revived
+  every earlier token. With a 12h token that window was short; with a remember-me token it is permanent.
+  `UsersService.update` (on an active→inactive transition) and `UsersService.remove` now bump it.
+- **Rotating `SESSION_SIGNING_SECRET`** ends every session on the instance, remember-me included — the
+  operator's instance-wide lever (see §4 and the backups runbook).
+
+**Directory sync — resolved 2026-09-23 (issue #1308, CEO decision).** The directory sync
+([[0091-on-prem-ad-ldap-directory-source]]) soft-offboards with `isActive = false` and **re-activates
+automatically** when the person reappears. It was barred (by a jest invariant) from writing
+`sessionEpoch`, so a remember-me token held by an onboarded directory person revived on reappearance. The
+sync **now bumps `sessionEpoch` on the active→offboarded transition**, matching the manual deactivation
+path. Reactivation does not bump it — the person signs in again — and neither does offboarding an
+already-inactive person or a repeated run over one already offboarded. The bump is not gated on
+`AUTH_MODE`; outside local mode it is inert. The jest invariant still forbids `sessionEpoch` on every
+other reconcile write.
+
+**Web enforcement (`apps/web`).** How the web holds up its half:
+
+- **Ending a dead session.** A credentials sign-in records `expiresAt` on the Auth.js JWT (`token.expiresAt`,
+  the field the OIDC refresh cycle already uses). Once it has passed, the `jwt` callback returns `null`;
+  Auth.js then drops the cookie and every `auth()` — `proxy.ts`, the `(app)` layout, `/login` — reads "no
+  session", so the visitor is sent to `/login?callbackUrl=…` before anything renders. A remember-me session
+  records no expiry and is never ended by time. The change-password flow passes the re-minted token's
+  `expiresAt` through `useSession().update(...)`. The same rule ends an **OIDC** session whose access token
+  has expired and cannot be renewed (no refresh token, or the refresh failed) — see
+  [[0039-authjs-v5-frontend-oidc]] §10.
+- **Cookie lifetime.** In local mode `session.maxAge` is **400 days**, the ceiling browsers put on a cookie,
+  so the cookie outlives a remember-me session. Under the JWT strategy Auth.js re-issues the cookie with a
+  fresh `maxAge` on every session read, so an active user's cookie never lapses (`updateAge` applies only
+  to database sessions). The 12h of a default session is enforced by the `jwt` callback, not the cookie. An
+  OIDC deploy (an issuer is configured; the installer refuses one in local mode) keeps Auth.js's 30-day
+  default, unchanged.
+- **No bounce loop on a rejected token.** A token the API rejects while the cookie still reads as valid —
+  revoked from another device, a cookie issued before #1307, a clock disagreement — still reaches the
+  global 401 handler. It signs out and lands on `/login?expired=1`, and `/login` never bounces a visitor
+  carrying that marker back into the app, so a lingering or re-set cookie cannot restart the loop. The
+  handler also carries the page the user was on as `callbackUrl` (through the #495 open-redirect guard,
+  never an auth route), so signing in again lands back there, as it does after a proxy redirect.
+- **Where sign-out revokes.** The user menu's **Sign out** calls `POST /auth/logout` with the session's
+  Bearer, then drops the cookie. The call is bounded by a short timeout and any failure (a `401` included)
+  falls through to the local sign-out, so the API can never keep a user signed in. The global 401 handler
+  deliberately does **not** revoke: it acts on a token the API already rejected, and revoking there would
+  let one spurious 401 end the user's sessions on every device. Auth.js `events.signOut` was not used for
+  the same reason — it fires for both paths.
+- **The checkbox.** Unchecked by default on the local form only; its warning is shown while it is checked.
+  The form posts it as the string `"true"`/`"false"`, which `authorize` converts to the contract's
+  boolean.
+
+**Risk acceptance (CEO, 2026-09-23, #1307).** A remember-me token that leaks — a stolen or shared device, a
+copied cookie, a sniffed request on a plain-HTTP `lan` deployment ([[0087-plain-http-lan-deployment-axis]])
+— stays valid until the user signs out, changes their password, or an admin resets, deactivates or
+offboards them. There is no time bound behind it. The CEO accepted this explicitly for the target segment,
+with these mitigations: it is opt-in on every sign-in, never the default; the login form warns next to the
+checkbox to use it only on a trusted, personal device; it exists in local mode only; and every revocation
+lever above ends it immediately.
+
+**Upgrade-safety.** No schema change. Tokens already issued all carry `exp` and keep working until it
+passes. A client that never sends `rememberMe` gets the 12h session. `expiresAt` is an additive response
+field. Rolling the API back leaves any remember-me token without `exp`, which the older verifier rejects —
+fail-closed, one re-login. On the web, a session cookie issued before the upgrade carries no `expiresAt`,
+so it is not ended by time: it keeps working until its token's own `exp` (at most 12h later), when the API
+401s and the marked `/login` landing ends it once, without a loop. Nobody is signed out by the deploy.
+
+### 9. Per-device sessions — amendment (issue #1420, 2026-09-26)
+
+**The gap.** With only the epoch, a user could not see where they were signed in, and "sign out" ended every
+device at once — the epoch model's inherent granularity that §8 accepted. The account hub (#1404) needed a
+per-device list and a way to end one session, so a lost laptop can be signed out without signing out the
+phone in the user's hand.
+
+**CEO decisions (2026-09-26).**
+
+1. **Existing sessions on upgrade: "siguen vivas".** No forced re-login. Tokens issued before the upgrade
+   carry no session id; they keep working until they expire or an epoch bump ends them. They are not listed
+   individually.
+2. **Data per session: "navegador + IP + fechas".** Browser and OS (parsed from the User-Agent, raw value
+   stored truncated, no new dependency), the client IP as the API already resolves it behind the trusted
+   proxy, created and last-seen times (throttled writes), the remember-me flag, and `current` for the
+   caller's own session. Rows go away when the session is closed or expires. Visible to the user
+   themselves; an admin ends another user's sessions through the existing offboarding / deactivation /
+   reset levers.
+
+**Decision.** A new `UserSession` table ([[user-session]]) **on top of** the epoch, not instead of it:
+
+- **Sign-in** (`POST /auth/login`) picks a session id, signs the token with it as a new, optional, signed
+  `sid` claim, and records the row (user agent, IP, epoch, remember-me, the token's expiry). If the row
+  cannot be written, no token is handed out. In the same step the user's least recently active rows
+  beyond **50** are deleted — a bound on a table every sign-in grows (the evicted devices sign in again).
+- **The guard**, for a token **with** a `sid`, additionally requires its row to exist for that user and
+  epoch and not to have expired — one primary-key read per request, deliberately **uncached** so ending a
+  session is immediate on every replica. `lastSeenAt` is refreshed at most once every 5 minutes per session
+  by a conditional write, best-effort. A token **without** a `sid` (issued before the upgrade) keeps
+  exactly the epoch-only check. A present `sid` must be a uuid or the token is rejected.
+- **`GET /auth/sessions`** lists the caller's live sessions — rows minted at the user's *current* epoch
+  and not expired — with `current` flagged and `currentIsLegacy` when the caller's own token has no `sid`
+  (the UI shows one synthetic "signed in before the update" entry; other pre-upgrade devices cannot be
+  detected and are documented, not listed). Empty outside local mode.
+- **`DELETE /auth/sessions/:id`** ends one of the caller's sessions: the row is deleted, the token dies on
+  its next request, and `SESSION_ENDED` (`{ sessionId, current }`) is recorded in [[user-history]] in the
+  same transaction. Ending the current session signs this device out. Anything else — another user's
+  session, an unknown, malformed, stale or already-ended id — is one indistinguishable `404`.
+- **"Sign out everywhere" is unchanged in meaning.** `POST /auth/logout` still bumps `sessionEpoch` and now
+  also deletes every session row, in one transaction. Password change keeps the calling device's row (same
+  `sid`, moved to the new epoch — only if the row is still at the caller's epoch) and deletes the others;
+  password reset deletes them all.
+- **Password change is conditional on the caller's epoch.** Its write only applies while `sessionEpoch`
+  is still the one the request authenticated with. If a concurrent lever bumped it first (an admin reset,
+  a deactivation, a sign-out everywhere) the change is refused with `401 { code: "SESSION_REVOKED" }` and
+  nothing is written — so it can never overwrite an admin's temporary password or revive a revoked
+  session. (The race predates #1420; the session row made it worth closing.)
+- **Every other epoch bump** (admin reset, deactivation, offboarding, the directory sync, the recovery CLI)
+  needs no change: the row's `epoch` snapshot no longer matches, so it drops out of the list at once and the
+  hourly `UserSessionSweeper` purges it, together with expired rows and remember-me rows unused for
+  **400 days** (the web cookie's own ceiling, §8). Session rows are protocol state and
+  hard-deleted (the `PasswordResetToken` / OAuth token precedent); the audit record is the history row.
+- **Not sessions:** personal MCP tokens, OAuth grants and service-account tokens are not listed or ended
+  here, and signing out still leaves MCP connections alive ([[0097-ai-assistant-mcp-and-headless-api]]
+  decision 8).
+- **No admin endpoint.** An admin ends a user's sessions with the levers that already exist; a per-session
+  admin view was not built.
+
+**Client IP and user agent at sign-in.** The web signs in server-side — the Auth.js Credentials provider
+calls `POST /auth/login` from the web container — so the API sees the web container's address and Node's
+user agent unless the web forwards the browser's `User-Agent` and the `X-Forwarded-For` it received from
+the reverse proxy on that one call. With `TRUST_PROXY=1` Express then resolves `req.ip` to the address the
+proxy reported (a client-forged hop is left of it and ignored), which also turns the login rate limit into
+the per-client limit it was meant to be. That forwarding is the web unit's half of this amendment; without
+it the rows record the web container.
+
+*As built (web, #1420):* `authorize(credentials, request)` reads the sign-in request Auth.js received and
+`apps/web/lib/auth/login-client-headers.ts` forwards exactly two headers on the `POST /auth/login` call:
+`User-Agent`, and `X-Forwarded-For` **verbatim** — never appended to, never synthesized from `X-Real-IP`,
+never reduced to one entry, and not sent at all when absent or empty. One nuance: when a request reaches
+the Next.js server with no `X-Forwarded-For` (the web reached directly, which only happens in development),
+Next.js itself fills it with the TCP peer's address, so what is forwarded is still that real peer. Behind
+Caddy the header is always Caddy's. The account hub's security panel lists the sessions and ends one; ending
+the current one signs this browser out locally (the secret session locked first) **without** calling
+`POST /auth/logout`, which would end the other devices too.
+
+**Consequences.** One indexed read per authenticated local request with a `sid`, plus at most one write per
+session every 5 minutes. A new mutable table with a sweeper, which §3 had declined — accepted now that the
+account hub needs it. The user agent and IP are self-reported or proxy-derived: informational, never an
+identity. An in-flight AI run keeps the principal snapshot it started with (delegated identity checks the
+epoch, not the session row), so ending one session does not interrupt a run already under way; "sign out
+everywhere" does.
+
+**Ending one session is not full containment.** It ends that device's web session only. For a lost or
+stolen device the complete answer is **changing the password**: that bumps both `sessionEpoch` and
+`mcpCredentialEpoch`, so it also ends every other session and every OAuth connection and personal MCP
+token (ADR-0097 decision 8). The Manual says so next to the session list.
+
+**Upgrade-safety.** An additive migration: a new, empty `user_sessions` table (FK to `users`, cascade), one
+appended enum value (`SESSION_ENDED`) and the `recent_activity` view re-created with one extra summary
+branch. No existing row is touched and nobody is signed out. Rolling the API back leaves `sid` as a claim
+the older verifier ignores, so new tokens keep working under the epoch-only check.
+
+**Rollback caveat.** Ending one session only deletes its row. After a rollback to an API older than #1420
+the guard no longer reads the table, so a token whose session was ended individually is accepted again
+until its `exp` — never, for a remember-me token. After such a rollback, the users concerned should
+**sign out everywhere** (or an admin resets or deactivates them): an epoch bump ends every token on any
+version.
 
 ## Consequences
 

@@ -79,6 +79,12 @@ the accepted baseline.
   Express's ~100 kB JSON body limit bounds size. **Residual risk is at the downstream sink** — a frontend
   that trusts `metadata` (renders it, uses it in URLs, etc.) could turn it dangerous. Re-examine in the
   Phase-3 frontend review; relates to [[SEC-003|SEC-003]] (untrusted content → web sink).
+- **Update (2026-09-23, #1321):** `Asset.specs` writes now carry a **structural** bound (depth 32, 256
+  keys per object, 10 000 array items, 10 000-char strings — `ASSET_SPECS_MAX_*`), closing
+  [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard|SEC-072]] /
+  [[SEC-032-asset-specs-deep-nesting-recursion-dos|SEC-032]]. The shape stays unvalidated (this debt
+  stands); `AssetModel.specs` and `Article.metadata` are unbounded. The JSON body limit is now 8 MB by
+  default (#1132), not ~100 kB.
 
 ## DEF-005 — Assignment actor FKs are client-supplied · ✅ partially resolved (2026-05-25)
 

@@ -9,6 +9,7 @@ jest.mock('../../../generated/prisma/client', () => ({
 }));
 
 import { hash as argon2Hash } from '@node-rs/argon2';
+import { SESSION_TOKEN_TTL_SECONDS } from '@lazyit/shared';
 import { LoginService } from './login.service';
 import { LocalCredentialService } from './local-credential.service';
 
@@ -64,7 +65,17 @@ describe('LoginService', () => {
   let credentials: LocalCredentialService;
   let findFirst: jest.Mock;
   let update: jest.Mock;
-  let prisma: { user: { findFirst: jest.Mock; update: jest.Mock } };
+  let sessionCreate: jest.Mock;
+  let sessionDeleteMany: jest.Mock;
+  let prisma: {
+    user: { findFirst: jest.Mock; update: jest.Mock };
+    userSession: {
+      create: jest.Mock;
+      deleteMany: jest.Mock;
+      findMany: jest.Mock;
+    };
+    $transaction: jest.Mock;
+  };
   let service: LoginService;
 
   beforeAll(() => {
@@ -76,7 +87,23 @@ describe('LoginService', () => {
     credentials = new LocalCredentialService();
     findFirst = jest.fn();
     update = jest.fn().mockResolvedValue({});
-    prisma = { user: { findFirst, update } };
+    sessionCreate = jest.fn(({ data }: { data: { id: string } }) =>
+      Promise.resolve({ id: data.id }),
+    );
+    sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    prisma = {
+      user: { findFirst, update },
+      userSession: {
+        create: sessionCreate,
+        deleteMany: sessionDeleteMany,
+        // The per-user cap's overflow query: nothing over the cap here.
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: jest.fn(),
+    };
+    prisma.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+      Promise.resolve(fn(prisma)),
+    );
     service = new LoginService(prisma as never, credentials);
   });
 
@@ -97,10 +124,172 @@ describe('LoginService', () => {
     expect(res.user as Record<string, unknown>).not.toHaveProperty(
       'passwordHash',
     );
-    // The token verifies and carries the current epoch.
+    // The token verifies and carries the current epoch and its session row's id (#1420).
+    const sid = (sessionCreate.mock.calls[0] as [{ data: { id: string } }])[0]
+      .data.id;
     await expect(credentials.verifySession(res.token)).resolves.toEqual({
       sub: VALID_ID,
       epoch: 0,
+      rememberMe: false,
+      sid,
+    });
+  });
+
+  describe('per-device session (#1420, ADR-0086 §9)', () => {
+    it('opens a session row with the user agent, IP, epoch and the token expiry', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(
+        makeUser({ passwordHash: hash, sessionEpoch: 4 }),
+      );
+      const meta = {
+        userAgent: 'Mozilla/5.0 Firefox/128.0',
+        ip: '203.0.113.7',
+      };
+
+      const res = await service.login('alice', 's3cret-pw', false, meta);
+
+      expect(sessionCreate).toHaveBeenCalledTimes(1);
+      const { data } = (
+        sessionCreate.mock.calls[0] as [{ data: Record<string, unknown> }]
+      )[0];
+      expect(data).toMatchObject({
+        userId: VALID_ID,
+        epoch: 4,
+        rememberMe: false,
+        userAgent: meta.userAgent,
+        ip: meta.ip,
+        expiresAt: new Date(res.expiresAt! * 1000),
+      });
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        { sid: data.id },
+      );
+    });
+
+    it('a remember-me session row has no expiry', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      await service.login('alice', 's3cret-pw', true);
+      expect(
+        (sessionCreate.mock.calls[0] as [{ data: Record<string, unknown> }])[0]
+          .data,
+      ).toMatchObject({ rememberMe: true, expiresAt: null });
+    });
+
+    it('a failed login opens no session', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      await expect(service.login('alice', 'wrong')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(sessionCreate).not.toHaveBeenCalled();
+    });
+
+    it('no token is handed out when the session row cannot be written', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      sessionCreate.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.login('alice', 's3cret-pw')).rejects.toThrow(
+        'db down',
+      );
+    });
+  });
+
+  describe('session lifetime (ADR-0086 §8, #1307)', () => {
+    const decodePayload = (token: string): Record<string, unknown> =>
+      JSON.parse(
+        Buffer.from(token.split('.')[1], 'base64url').toString(),
+      ) as Record<string, unknown>;
+
+    it('by default mints a 12h token and returns its exp as expiresAt', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      const before = Math.floor(Date.now() / 1000);
+
+      const res = await service.login('alice@example.com', 's3cret-pw');
+
+      const payload = decodePayload(res.token);
+      expect(typeof payload.exp).toBe('number');
+      expect(res.expiresAt).toBe(payload.exp);
+      expect(res.expiresAt).toBeGreaterThanOrEqual(
+        before + SESSION_TOKEN_TTL_SECONDS,
+      );
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        { rememberMe: false },
+      );
+    });
+
+    it('rememberMe mints a token with no time-based expiry and expiresAt null', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+
+      const res = await service.login('alice@example.com', 's3cret-pw', true);
+
+      expect(res.expiresAt).toBeNull();
+      expect(decodePayload(res.token)).not.toHaveProperty('exp');
+      await expect(credentials.verifySession(res.token)).resolves.toMatchObject(
+        {
+          sub: VALID_ID,
+          epoch: 0,
+          rememberMe: true,
+        },
+      );
+    });
+
+    it('rememberMe changes nothing about a failed login (same generic 401)', async () => {
+      const hash = await credentials.hash('s3cret-pw');
+      findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
+      await expect(
+        service.login('alice@example.com', 'wrong', true),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('logout (server-side revocation, ADR-0086 §8)', () => {
+    const originalMode = process.env.AUTH_MODE;
+    let updateMany: jest.Mock;
+
+    beforeEach(() => {
+      updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      (prisma.user as Record<string, jest.Mock>).updateMany = updateMany;
+    });
+
+    afterEach(() => {
+      process.env.AUTH_MODE = originalMode;
+    });
+
+    it('bumps sessionEpoch, conditional on the epoch the caller authenticated with', async () => {
+      process.env.AUTH_MODE = 'local';
+      await service.logout(makeUser({ sessionEpoch: 5 }) as never);
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { id: VALID_ID, sessionEpoch: 5 },
+        data: { sessionEpoch: { increment: 1 } },
+      });
+    });
+
+    it('is sign-out EVERYWHERE: it also ends every per-device session row (#1420)', async () => {
+      process.env.AUTH_MODE = 'local';
+      await service.logout(makeUser({ sessionEpoch: 5 }) as never);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(sessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: VALID_ID },
+      });
+    });
+
+    it('never touches mcpCredentialEpoch: MCP connections survive a web logout (ADR-0097 d8 amended)', async () => {
+      process.env.AUTH_MODE = 'local';
+      await service.logout(makeUser({ sessionEpoch: 5 }) as never);
+      for (const [arg] of updateMany.mock.calls as Array<
+        [{ data: Record<string, unknown> }]
+      >) {
+        expect(arg.data).not.toHaveProperty('mcpCredentialEpoch');
+      }
+    });
+
+    it('is a no-op outside local mode (no lazyit-minted session to revoke)', async () => {
+      process.env.AUTH_MODE = 'oidc';
+      await service.logout(makeUser() as never);
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(sessionDeleteMany).not.toHaveBeenCalled();
     });
   });
 

@@ -51,10 +51,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
-import {
-  useAssetTagNextPreview,
-  useAssetTagScheme,
-} from "@/lib/api/hooks/use-asset-tag-scheme";
+import { useAssetTagSchemeSummary } from "@/lib/api/hooks/use-asset-tag-scheme";
+import { autoTagHintFrom } from "./auto-tag-hint";
 import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
@@ -240,28 +238,19 @@ export function AssetForm({
       : "",
   );
 
-  // Asset-tag scheme hint (ADR-0063, #363 · #1180): on CREATE, when the org enabled an auto-tag scheme,
-  // tell the operator which tag leaving this blank would assign. The field stays optional and an explicit
-  // value still wins (the scheme only fills the gap server-side). Never shown on edit, and absent when
-  // the scheme is OFF (today's behaviour) or when the caller lacks `settings:manage` (the scheme read is
-  // admin-gated, so `tagScheme` is simply undefined for everyone else — the form must not depend on it).
-  const { data: tagScheme } = useAssetTagScheme();
+  // Asset-tag scheme hint (ADR-0063, #363 · #1180 · #1315): on CREATE, when the org enabled an auto-tag
+  // scheme, tell the operator which tag leaving this blank would assign. The field stays optional and an
+  // explicit value still wins (the scheme only fills the gap server-side). Never shown on edit, and
+  // absent when the scheme is OFF. It reads the member-safe summary (`asset:write`), so members see it
+  // too; the tag is a SERVER read, because the allocator skips forward past numbers whose tag already
+  // exists (ADR-0068 §1) and that walk needs the live estate — rendering the raw counter locally is the
+  // #1180 lie. Read-only: previewing does not reserve the number, so the tag the create finally gets can
+  // differ if someone else creates first. A failed read just hides the hint.
+  const { data: tagSummary } = useAssetTagSchemeSummary({ enabled: !isEdit });
+  const autoTagHint = autoTagHintFrom(tagSummary, isEdit);
   // Distinct existing company values for the free-text autocomplete datalist (ADR-0076). A plain
   // suggestion list — the operator can still type a brand-new value.
   const { data: companies } = useAssetCompanies();
-  // The tag that would actually be assigned — a SERVER read, because the allocator skips forward past
-  // numbers whose tag already exists (ADR-0068 §1) and that walk needs the live estate. Rendering
-  // `nextNumber` locally is the #1180 lie: with LZ-1000 already taken it said LZ-1000 while the server
-  // assigned LZ-1001. Idle unless we're creating under an enabled scheme. Read-only — previewing does
-  // not reserve the number, so the tag the create finally gets can differ if someone else creates first.
-  const autoTagEnabled = !isEdit && Boolean(tagScheme?.enabled);
-  const { data: nextTagPreview } = useAssetTagNextPreview({
-    prefix: tagScheme?.prefix ?? undefined,
-    suffix: tagScheme?.suffix ?? undefined,
-    width: tagScheme?.width ?? undefined,
-    enabled: autoTagEnabled,
-  });
-  const autoTagHint = autoTagEnabled ? nextTagPreview?.tag : undefined;
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;

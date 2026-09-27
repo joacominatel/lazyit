@@ -477,6 +477,48 @@ describe('AssetTagSchemeService', () => {
     );
   });
 
+  // --- member-safe summary (#1315) ----------------------------------------
+
+  it('getSummary: the STORED pattern and the skip-existing next tag, with no counter internals or timestamps', async () => {
+    const at = new Date('2026-09-01T00:00:00.000Z');
+    wireCounter(
+      ['LAP-01000'],
+      schemeRow({ prefix: 'LAP-', width: 5, createdAt: at, updatedAt: at }),
+    );
+
+    const summary = await service.getSummary();
+
+    expect(summary).toEqual({
+      enabled: true,
+      prefix: 'LAP-',
+      suffix: null,
+      width: 5,
+      nextTag: 'LAP-01001',
+      nextTagNumber: 1001,
+      exhausted: false,
+    });
+    // Read-only: nothing is consumed.
+    expect(counter).toBe(1000);
+    expect(assetTagScheme.update).not.toHaveBeenCalled();
+    expect(assetTagScheme.updateMany).not.toHaveBeenCalled();
+    expect(assetTagScheme.upsert).not.toHaveBeenCalled();
+  });
+
+  it('getSummary of a never-configured scheme is the OFF default', async () => {
+    assetTagScheme.findFirst.mockResolvedValue(null);
+    asset.findMany.mockResolvedValue([]);
+
+    await expect(service.getSummary()).resolves.toEqual({
+      enabled: false,
+      prefix: null,
+      suffix: null,
+      width: null,
+      nextTag: '1',
+      nextTagNumber: 1,
+      exhausted: false,
+    });
+  });
+
   // --- seed suggestion (ADR-0068 §2) --------------------------------------
 
   it('seedSuggestion returns max(existing matching) + 1 and the matched count', async () => {

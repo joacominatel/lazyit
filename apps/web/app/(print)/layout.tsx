@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
 import { SessionTokenSync } from "@/components/session-token-sync";
 
 /**
@@ -19,7 +20,8 @@ export default async function PrintLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  if (!session) {
+  // A real session, not just a truthy value (#1399, GHSA-8fpg-xm3f-6cx3).
+  if (!hasSession(session)) {
     redirect("/login");
   }
 

@@ -61,10 +61,36 @@ consultando `GET /infra/graph/nodes`; no reemplaces el mapa por la lista paginad
 
 ## Nuevos ajustes obligatorios tras una descarga
 
-Una versión que añade una función puede introducir un **nuevo valor de entorno obligatorio**. El arranque
-guiado solo escribe valores nuevos en una generación desde cero — nunca edita un archivo de entorno
-existente — así que tras descargar una versión que lo necesite, añádelo a mano y recrea el servicio
-afectado. Dos ejemplos que ya han llegado:
+Una versión que añade una función puede introducir un **nuevo valor de entorno**. Algunos los puede
+añadir el script de arranque por ti (abajo); cualquier otro lo añades a mano y luego recreas el servicio
+afectado.
+
+### Claves que el script de arranque añade por ti
+
+Si actualizas con `git pull` seguido de `./infra/start.sh`, el script detecta tu instalación existente
+y, antes de levantar el stack, **añade cualquier clave que falte y sea segura de generar** — hoy la
+clave de la contraseña del correo (`SMTP_SECRET_KEY`) y la clave de almacenamiento de la clave del
+proveedor de IA (`AI_SECRET_KEY`). Cada una solo protege un secreto que lazyit se niega a guardar
+mientras la clave falta, así que una nueva no puede dejarte sin acceso a nada. Funciona tanto si inicias
+sesión con cuentas integradas como con un proveedor de identidad.
+
+- Primero **hace una copia** de tu archivo de entorno, en `infra/env/.env.prod.bak-<fecha y hora>`. Esa
+  copia contiene tus secretos: mantenla privada y bórrala cuando estés conforme.
+- **Solo añade al final**, bajo un comentario con fecha. Tus líneas existentes nunca cambian y una clave
+  que ya tienes nunca se reemplaza.
+- Muestra los **nombres** de las claves que añadió, nunca sus valores. Volver a ejecutarlo no añade nada.
+- `./infra/start.sh --dry-run` muestra lo que añadiría sin escribir nada.
+
+Después de que añada una clave, respalda fuera del servidor el archivo de entorno actualizado. Las claves
+que protegen datos que ya tienes — la clave de secretos de flujos de trabajo, la clave maestra del
+proveedor de identidad, los secretos de inicio de sesión, las contraseñas de las bases de datos —
+**nunca** se generan por ti: si falta una, el script la nombra y la añades a mano. El script de
+actualización (`./infra/update.sh`) tampoco edita el archivo; se detiene ante una clave que falta y te
+dice cuál.
+
+### Claves que añades a mano
+
+Dos ejemplos que ya han llegado:
 
 - La **URL del intermediario de trabajos en segundo plano** (`REDIS_URL`), obligatoria desde que llegaron
   los trabajadores en segundo plano. Si falta, la importación de documentos en segundo plano falla.
@@ -106,6 +132,20 @@ Las imágenes incluidas (base de datos, proveedor de identidad, búsqueda, inter
 fijadas a versiones concretas para despliegues reproducibles. Solo cambian con una subida deliberada.
 Antes de subir en particular el proveedor de identidad, respalda su base de datos **y** conserva la clave
 maestra correspondiente, ya que sus datos están ligados a esa clave.
+
+El **motor de búsqueda** es la excepción que no necesita preparación. Sus datos solo se abren con la
+versión exacta del motor que los escribió, así que cada actualización del motor de búsqueda arranca con
+un volumen de datos **nuevo** y lazyit reconstruye el índice de búsqueda a partir de tu base de datos
+automáticamente al arrancar. No hay nada que ejecutar: espera que los resultados de búsqueda estén
+**incompletos durante unos minutos** tras esa actualización, y luego completos. Todo lo demás — el
+inicio de sesión, los registros, la comprobación de salud que espera el script de actualización — no se
+ve afectado. El volumen de búsqueda anterior se conserva (una vuelta atrás a la versión anterior lo
+usa) y el script de arranque imprime el comando exacto para eliminarlo cuando ya no lo necesites, por
+ejemplo:
+
+```
+docker volume rm lazyit-prod_meili_data
+```
 
 ## Relacionado
 

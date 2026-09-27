@@ -29,6 +29,8 @@ import {
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
 import { notifyError } from "@/lib/api/notify-error";
+import { categoryIdForPayload } from "./asset-model-category-payload";
+import { clearableTextForPayload } from "./asset-model-text-payload";
 import {
   type SpecsFieldError,
   type SpecsFieldRow,
@@ -224,13 +226,14 @@ function AssetModelForm({
       };
     }
 
-    const sku = values.sku.trim();
-    const description = values.description.trim();
-
     const payload: Record<string, unknown> = { name, manufacturer };
-    if (sku.length > 0) payload.sku = sku;
-    if (description.length > 0) payload.description = description;
-    if (values.categoryId.length > 0) payload.categoryId = values.categoryId;
+    // Emptying SKU / description on edit sends `null` to clear it; never an empty string (#1441).
+    const sku = clearableTextForPayload(values.sku, model?.sku);
+    if (sku !== undefined) payload.sku = sku;
+    const description = clearableTextForPayload(values.description, model?.description);
+    if (description !== undefined) payload.description = description;
+    const categoryId = categoryIdForPayload(values.categoryId, model?.categoryId);
+    if (categoryId !== undefined) payload.categoryId = categoryId;
     if (specs !== undefined) payload.specs = specs;
     return { ok: true, payload };
   }
@@ -347,6 +350,7 @@ function AssetModelForm({
               placeholder={t("taxonomies.models.form.categoryPlaceholder")}
               searchPlaceholder={t("taxonomies.models.form.searchCategory")}
               emptyText={t("taxonomies.models.form.noCategories")}
+              noneLabel={t("taxonomies.models.form.noCategory")}
             />
           </Field>
 

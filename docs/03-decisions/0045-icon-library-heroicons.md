@@ -3,7 +3,7 @@ title: "ADR-0045: Standardize on Heroicons (drop lucide-react) + a two-weight co
 tags: [adr, web, frontend, icons, ui]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-09-25
 deciders: [Joaquín Minatel]
 ---
 
@@ -98,7 +98,48 @@ collapses the app to one coherent icon language.
 - **No logic changed** — only the icon source/weight. Component public APIs (props, `data-slot`s,
   `sr-only` labels) are untouched.
 
+## Amendment: Hugeicons for the AI assistant (2026-09-25)
+
+**Decided by the CEO** (#1406): *"Solo para los del asistente"* — the AI assistant is drawn with
+**Hugeicons**; Heroicons stays the system icon library everywhere else. This is a scoped exception to
+"Heroicons is the single icon family", not a supersession.
+
+- **Why.** The assistant ([[0097-ai-assistant-mcp-and-headless-api]]) is a new, distinct capability, and
+  the CEO wants it to read as one. A different icon voice on its surfaces marks it apart from the
+  inventory, access and knowledge chrome, alongside the pointer-following glow on its entry points
+  (#1405). It is a product signal, not a judgement on Heroicons.
+- **Scope — the assistant's own chrome, nothing else:** the navbar launcher, the chat panel's title and
+  header actions (expand/restore, close, history, back, new chat), the composer actions (send, stop,
+  remove context) and the chat-settings trigger, the Settings hub **AI** card, and the assistant's mark
+  on the setup wizard / provider editor header and its **Turn on** button. Generic status and control
+  icons *inside* assistant surfaces — approval-card warnings, tool-activity states, input-card controls,
+  spinners, the other Settings → AI cards — stay Heroicons: they mean the same thing they mean everywhere
+  else in the app.
+- **Rule: nowhere else.** Every Hugeicons glyph is exported from **one module,
+  `apps/web/components/ai/ai-icons.tsx`**; its export list *is* the scope. An ESLint
+  `no-restricted-imports` guard (`lazyit/hugeicons-only-for-the-ai-assistant`, pinned by
+  `eslint.config.test.ts`) fails any other file that imports `@hugeicons/*`. Widening the scope is a new
+  amendment, not a lint exemption.
+- **Packages and licence.** `@hugeicons/react` (the `HugeiconsIcon` renderer, ~1 kB) and
+  `@hugeicons/core-free-icons` — the **free** set, **MIT**-licensed (checked in both packages'
+  `LICENSE.md`, 2026-09-25). The Pro packs (`@hugeicons-pro/*`) carry a per-seat licence and are **not**
+  used. The icons are plain SVG path data bundled at build time — no font, no runtime CDN, nothing
+  fetched from Hugeicons, so an air-gapped self-hosted instance renders them unchanged. Versions are
+  pinned exactly.
+- **Bundle.** Each glyph is imported from its own subpath (`@hugeicons/core-free-icons/<Name>`), never
+  the package barrel, so the client bundle carries only the ~11 glyphs `ai-icons.tsx` lists (a few
+  hundred bytes of path data each) plus the renderer. The 80 MB package lives in `node_modules` only.
+- **Style.** Stroke icons at `strokeWidth` 1.5 and `currentColor`, sized with the same Tailwind classes
+  as Heroicons (`size-4` / `size-5`), so they sit on the same grid and inherit the same tokens in light
+  and dark. The two-weight Heroicons convention above is unchanged.
+
+**Consequences.** A second icon dependency returns — the cost this ADR originally removed — in exchange
+for a deliberate, bounded visual distinction. The guard keeps it from spreading by reflex; the cost is
+that an assistant surface needing a new glyph adds it to `ai-icons.tsx` (and to the list above) rather
+than importing it in place.
+
 ## References
 
 - [[0011-tailwind-styling]] (Tailwind + shadcn/ui styling) · [[0010-nextjs-frontend]] ·
-  [[0020-frontend-data-layer]].
+  [[0020-frontend-data-layer]] · [[0097-ai-assistant-mcp-and-headless-api]] (the assistant the
+  2026-09-25 amendment scopes Hugeicons to).

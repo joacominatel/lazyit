@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AssetsService } from './assets.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
@@ -96,7 +97,7 @@ const EXPECTED_INCLUDE = {
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
-    include: { user: true },
+    include: { user: { select: PUBLIC_USER_SELECT } },
   },
 };
 
@@ -691,6 +692,33 @@ describe('AssetsService', () => {
     });
   });
 
+  it('findOne reads each owner through the public column allowlist — never a credential (SEC-085)', async () => {
+    asset.findFirst.mockResolvedValue(rawRow());
+
+    await service.findOne('a1');
+
+    const args = (asset.findFirst.mock.calls as unknown[][])[0][0] as {
+      include: {
+        assignments: { include: { user: unknown } };
+      };
+    };
+    const userArg = args.include.assignments.include.user;
+    // A whole-row `user: true` carried passwordHash + the session/MCP epochs to every asset:read holder.
+    expect(userArg).not.toBe(true);
+    const select = (userArg as { select: Record<string, unknown> }).select;
+    for (const col of [
+      'passwordHash',
+      'passwordUpdatedAt',
+      'sessionEpoch',
+      'mcpCredentialEpoch',
+      'mustChangePassword',
+      'notificationEmailOptOutTypes',
+    ]) {
+      expect(select).not.toHaveProperty(col);
+    }
+    expect(select).toMatchObject({ id: true, firstName: true, email: true });
+  });
+
   it('findOne maps assignments -> activeAssignments and inlines model/category/location', async () => {
     asset.findFirst.mockResolvedValue(rawRow());
 
@@ -999,6 +1027,40 @@ describe('AssetsService', () => {
       company: 'Acme Inc.',
       deletedAt: null,
     });
+  });
+
+  it('findPage filters by exact tag and serial lists (#1387): one IN per field, ANDed', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assetTags: ['LT-1', 'LT-2'], serials: ['SN-9'] },
+      { limit: 200, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({
+      assetTag: { in: ['LT-1', 'LT-2'] },
+      serial: { in: ['SN-9'] },
+      deletedAt: null,
+    });
+  });
+
+  it('findPage ignores empty exact-value lists', async () => {
+    asset.findMany.mockResolvedValue([]);
+    asset.count.mockResolvedValue(0);
+
+    await service.findPage(
+      { assetTags: [], serials: [] },
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    const findManyArgs = (
+      asset.findMany.mock.calls as Array<[{ where: Record<string, unknown> }]>
+    )[0][0];
+    expect(findManyArgs.where).toEqual({ deletedAt: null });
   });
 
   it('listCompanies returns the distinct, non-null company values', async () => {
@@ -1481,6 +1543,17 @@ describe('AssetsService', () => {
         locationId: true,
         modelId: true,
         specs: true,
+        // The plain fields, so a plain edit can name what changed (#1382).
+        name: true,
+        serial: true,
+        assetTag: true,
+        notes: true,
+        company: true,
+        purchaseDate: true,
+        warrantyEnd: true,
+        purchaseCost: true,
+        usefulLifeMonths: true,
+        salvageValue: true,
       },
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -1632,15 +1705,87 @@ describe('AssetsService', () => {
     expect(types).toEqual(['STATUS_CHANGED', 'LOCATION_CHANGED']);
   });
 
-  it('emits no history when an update changes none of the tracked fields', async () => {
-    // notes is not a tracked dimension; the before/after of status/location/model/specs match.
-    asset.findFirst.mockResolvedValue(beforeRow());
-    tx.update.mockResolvedValue(beforeRow({ notes: 'touch' }));
+  // --- update: plain-field edits (#1382, ADR-0033 amendment 2026-09-25) ---
+  it('a plain-field edit writes ONE UPDATED row naming the changed fields — names only, no values', async () => {
+    asset.findFirst.mockResolvedValue(
+      beforeRow({ name: 'Laptop', notes: null, purchaseCost: 100000 }),
+    );
+    tx.update.mockResolvedValue(
+      beforeRow({ name: 'Laptop 2', notes: 'touch', purchaseCost: 120000 }),
+    );
 
-    await service.update('a1', { notes: 'touch' });
+    await service.update(
+      'a1',
+      { name: 'Laptop 2', notes: 'touch', purchaseCost: 120000 },
+      HUMAN_PRINCIPAL,
+    );
+
+    expect(tx.update).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'UPDATED',
+        payload: { fields: ['name', 'notes', 'purchaseCost'] },
+        actor: { userId: ACTOR_ID },
+      },
+    );
+  });
+
+  it('clearing a plain field to null counts as a change (purchaseCost → unknown)', async () => {
+    asset.findFirst.mockResolvedValue(beforeRow({ purchaseCost: 100000 }));
+    tx.update.mockResolvedValue(beforeRow({ purchaseCost: null }));
+
+    await service.update('a1', { purchaseCost: null });
+
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'UPDATED',
+        payload: { fields: ['purchaseCost'] },
+        actor: {},
+      },
+    );
+  });
+
+  it('a no-op plain edit (same values sent, dates compared by instant) writes no history', async () => {
+    const date = '2026-01-15T00:00:00.000Z';
+    asset.findFirst.mockResolvedValue(
+      beforeRow({ name: 'Laptop', purchaseDate: new Date(date) }),
+    );
+    tx.update.mockResolvedValue(
+      beforeRow({ name: 'Laptop', purchaseDate: new Date(date) }),
+    );
+
+    await service.update('a1', { name: 'Laptop', purchaseDate: date });
 
     expect(tx.update).toHaveBeenCalledTimes(1);
     expect(history.record).not.toHaveBeenCalled();
+  });
+
+  it('a mixed edit writes the discrete row(s) AND one UPDATED row listing only the plain fields', async () => {
+    asset.findFirst.mockResolvedValue(
+      beforeRow({ status: 'OPERATIONAL', serial: 'SN-1', notes: null }),
+    );
+    tx.update.mockResolvedValue(
+      beforeRow({ status: 'RETIRED', serial: 'SN-2', notes: 'retired' }),
+    );
+
+    await service.update('a1', {
+      status: 'RETIRED',
+      serial: 'SN-2',
+      notes: 'retired',
+    });
+
+    const calls = history.record.mock.calls as Array<
+      [unknown, { eventType: string; payload?: unknown }]
+    >;
+    expect(calls.map(([, e]) => [e.eventType, e.payload])).toEqual([
+      ['STATUS_CHANGED', { from: 'OPERATIONAL', to: 'RETIRED' }],
+      ['UPDATED', { fields: ['serial', 'notes'] }],
+    ]);
   });
 
   // --- update: re-import provenance + UPDATED marker (#1061) ---------------
@@ -1671,9 +1816,29 @@ describe('AssetsService', () => {
     );
   });
 
-  it('writes exactly one UPDATED marker when a re-import changes no tracked dimension', async () => {
-    // notes is not a tracked dimension → zero change events → the marker guarantees one audit row so
-    // "updated via re-import" always lands (#1061).
+  it('writes exactly one UPDATED marker when a re-import changes nothing', async () => {
+    // Nothing changed → zero change events → the marker guarantees one audit row so "updated via
+    // re-import" always lands (#1061).
+    asset.findFirst.mockResolvedValue(beforeRow({ notes: 'same' }));
+    tx.update.mockResolvedValue(beforeRow({ notes: 'same' }));
+
+    await service.update('a1', { notes: 'same' }, undefined, {
+      updatedPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+    });
+
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      {
+        assetId: 'a1',
+        eventType: 'UPDATED',
+        payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        actor: {},
+      },
+    );
+  });
+
+  it('a re-import that changes plain fields writes ONE UPDATED row: the fields plus the provenance', async () => {
     asset.findFirst.mockResolvedValue(beforeRow());
     tx.update.mockResolvedValue(beforeRow({ notes: 'touch' }));
 
@@ -1687,7 +1852,12 @@ describe('AssetsService', () => {
       {
         assetId: 'a1',
         eventType: 'UPDATED',
-        payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
+        payload: {
+          fields: ['notes'],
+          source: 'import',
+          sessionId: 's1',
+          rowIndex: 0,
+        },
         actor: {},
       },
     );
@@ -1737,6 +1907,29 @@ describe('AssetsService', () => {
     await service.update('a1', { specs: { ram: '64GB', cpu: 'i7' } });
 
     expect(history.record).not.toHaveBeenCalled();
+  });
+
+  it('updates an asset whose STORED specs predate the write bound without failing (SEC-032 upgrade path)', async () => {
+    // A row written before the shared schema bounded specs can hold any nesting. The write bound does
+    // not re-validate what is stored, so an edit that leaves specs alone must still succeed — and the
+    // before/after diff must neither overflow the stack nor report a change that did not happen.
+    const deepSpecs = () => {
+      let node: unknown = 'leaf';
+      for (let i = 0; i < 100_000; i++) node = { a: node };
+      return { legacy: node };
+    };
+    asset.findFirst.mockResolvedValue(beforeRow({ specs: deepSpecs() }));
+    tx.update.mockResolvedValue(
+      beforeRow({ status: 'IN_STORAGE', specs: deepSpecs() }),
+    );
+
+    await service.update('a1', { status: 'IN_STORAGE' });
+
+    expect(history.record).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(
+      { asset: tx },
+      expect.objectContaining({ eventType: 'STATUS_CHANGED' }),
+    );
   });
 
   // --- remove -------------------------------------------------------------

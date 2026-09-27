@@ -91,7 +91,7 @@ and merges → the user promotes `dev` to `master`.** The step-by-step with real
 
 - When using or upgrading an **external library**, check its **latest official
   documentation** (e.g. Context7 or the web) — don't rely on memory. Versions here are recent
-  (Next 16, Nest 11, Prisma 7, Tailwind 4) and APIs move.
+  (Next 16, Nest 12, Prisma 7, Tailwind 4) and APIs move.
 
 ## 7. Upgrade-safe over production data
 

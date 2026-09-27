@@ -39,6 +39,111 @@ describe("isSafeApplicationUrl (SEC-008)", () => {
   });
 });
 
+// SEC-051 — the host:port carve-out must not let a browser-interpreted scheme through. A value shaped
+// `<scheme>:<digits>/<rest>` reads as `host:port/path` to a regex, but a browser reads it as that
+// scheme: `javascript:1/alert(1)` evaluates `1 / alert(1)` and so CALLS alert.
+describe("isSafeApplicationUrl — host:port carve-out bypass (SEC-051)", () => {
+  test("rejects a dangerous scheme shaped like host:port/path", () => {
+    const bad = [
+      "javascript:1/alert(document.cookie)",
+      "javascript:0//x",
+      "javascript:1",
+      "javascript:65535/alert(1)",
+      "vbscript:1/msgbox(1)",
+      "data:1/text/html,<script>alert(1)</script>",
+      "file:1/etc/passwd",
+      "blob:1/x",
+      "view-source:1/x",
+    ];
+    for (const url of bad) expect(isSafeApplicationUrl(url)).toBe(false);
+  });
+
+  test("rejects the same shape under case, whitespace and control-char obfuscation", () => {
+    const bad = [
+      "JaVaScRiPt:1/alert(1)",
+      "JAVASCRIPT:1/alert(1)",
+      "java\tscript:1/alert(1)",
+      "java\nscript:1/alert(1)",
+      "java\rscript:1/alert(1)",
+      "  javascript:1/alert(1)",
+      "\n\tjavascript:1/alert(1)",
+      String.fromCharCode(1) + "javascript:1/alert(1)",
+      String.fromCharCode(0) + "vbscript:1/msgbox(1)",
+    ];
+    for (const url of bad) expect(isSafeApplicationUrl(url)).toBe(false);
+  });
+
+  test("rejects percent- and character-reference-encoded dangerous schemes", () => {
+    const bad = [
+      "javascript%3Aalert(1)",
+      "javascript%3a1/alert(1)",
+      "%6Aavascript:alert(1)",
+      "java%09script:alert(1)", // encoded TAB inside the scheme
+      "&#106;avascript:alert(1)",
+      "&#x6A;avascript:1/alert(1)",
+      "&#0000106avascript:alert(1)", // no terminating semicolon, zero-padded
+      "javascript&#58;1/alert(1)",
+      "javascript&#x3a;alert(1)",
+      "javascript&colon;alert(1)",
+      "java&Tab;script:alert(1)",
+      "vbscript&#58;msgbox(1)",
+    ];
+    for (const url of bad) expect(isSafeApplicationUrl(url)).toBe(false);
+  });
+
+  test("still allows scheme-less host:port (single-label and dotted) and encoded http(s) urls", () => {
+    const ok = [
+      "jenkins:8080",
+      "jenkins:8080/job/build",
+      "localhost:3000",
+      "vpn.corp.local:443/",
+      "10.0.0.5:3000/console",
+      "javascript.corp.local:8080", // a host that merely starts with a scheme name
+      "vpn.corp.local/path%20with%20spaces",
+      "wiki.corp/page?a=1&b=2",
+      "https://jira.corp/search?q=a%3Ab",
+      "https://jira.corp/#&#58;",
+    ];
+    for (const url of ok) expect(isSafeApplicationUrl(url)).toBe(true);
+  });
+});
+
+describe("Application url schemas — SEC-051 on write, tolerant on read", () => {
+  test("CreateApplicationSchema rejects the carve-out bypass", () => {
+    expect(
+      CreateApplicationSchema.safeParse({
+        name: "Evil",
+        url: "javascript:1/alert(document.cookie)",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("UpdateApplicationSchema rejects the carve-out bypass", () => {
+    expect(
+      UpdateApplicationSchema.safeParse({ url: "vbscript:1/msgbox(1)" })
+        .success,
+    ).toBe(false);
+  });
+
+  test("ApplicationSchema (read) still loads a legacy row holding a now-rejected url", () => {
+    const legacy = {
+      id: "cjld2cjxh0000qzrmn831i7rn",
+      name: "Legacy",
+      description: null,
+      url: "javascript:1/alert(document.cookie)",
+      vendor: null,
+      categoryId: null,
+      isCritical: false,
+      metadata: null,
+      notes: null,
+      createdAt: "2026-07-18T00:00:00.000Z",
+      updatedAt: "2026-07-18T00:00:00.000Z",
+      deletedAt: null,
+    };
+    expect(ApplicationSchema.safeParse(legacy).success).toBe(true);
+  });
+});
+
 describe("CreateApplicationSchema.url scheme guard (SEC-008)", () => {
   test("rejects a javascript: url on create", () => {
     expect(

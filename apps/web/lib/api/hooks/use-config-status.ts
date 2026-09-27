@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SetupAdmin } from "@lazyit/shared";
 import { getConfigStatus, setupConfig } from "../endpoints/config";
+import { useClientOnlyQuery } from "../client-only-query";
 import { userKeys } from "./use-users";
 
 /**
@@ -30,6 +31,18 @@ export function useConfigStatus() {
     queryFn: () => getConfigStatus(),
     staleTime: 30 * 1000,
   });
+}
+
+/**
+ * {@link useConfigStatus} for a component on a route that does NOT prefetch the status — every route
+ * except `/settings/instance` (#1448). The top-bar mode banner warms this query on the client before
+ * a streamed page segment hydrates, so reading it raw there can render a different tree than the
+ * server did (React #418). This reports the server's view (pending, no data) during hydration and
+ * the live result afterwards. On `/settings/instance`, where the server HAS the data, use the plain
+ * hook.
+ */
+export function useClientOnlyConfigStatus() {
+  return useClientOnlyQuery(useConfigStatus());
 }
 
 /**

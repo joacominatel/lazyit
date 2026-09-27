@@ -9,8 +9,9 @@ import createNextIntlPlugin from "next-intl/plugin";
  * X-Frame-Options on the public origin and strips Server. We set the SAME values here so the app is
  * hardened even when requests don't traverse Caddy (local `next dev`/`next start`, a different proxy,
  * or any direct hit) — identical values mean a duplicated header carries one consistent value, never
- * a conflicting pair. We additionally set what Caddy does NOT: Permissions-Policy, a minimal CSP
- * (`frame-ancestors 'none'`), and we drop `x-powered-by` (poweredByHeader: false). DevOps note: the
+ * a conflicting pair. We additionally set what Caddy does NOT: Permissions-Policy, a baseline CSP
+ * (`frame-ancestors 'none'`; pages get the full policy from proxy.ts — #1440), and we drop
+ * `x-powered-by` (poweredByHeader: false). DevOps note: the
  * X-Content-Type-Options / Referrer-Policy / X-Frame-Options overlap with the Caddyfile is intended.
  */
 const SECURITY_HEADERS = [
@@ -25,24 +26,13 @@ const SECURITY_HEADERS = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=()",
   },
-  // Minimal CSP: forbid this app from being framed by ANY origin (modern anti-clickjacking). This is
-  // the one CSP directive safe to ship today — it governs framing only and cannot break script/style
-  // loading. The full content CSP (script-src/style-src) is deliberately deferred: next-themes injects
-  // an inline bootstrap script (needs a nonce/hash) and mermaid/codemirror/react-syntax-highlighter
-  // emit inline styles (need style-src 'unsafe-inline'). Enabling those without testing the KB
-  // (mermaid) and workflow (codemirror) routes would silently break them — a broken CSP is worse than
-  // none. Tracked for a dedicated, tested pass.
-  //
-  // SCAFFOLD (do NOT enable without route testing + a nonce for the next-themes script):
-  //   default-src 'self';
-  //   script-src 'self' 'nonce-<per-request>';
-  //   style-src 'self' 'unsafe-inline';
-  //   img-src 'self' data: blob:;
-  //   font-src 'self';
-  //   connect-src 'self';
-  //   frame-ancestors 'none';
-  //   base-uri 'self';
-  //   form-action 'self';
+  // Baseline CSP, ENFORCED on every response: forbid this app from being framed by ANY origin (modern
+  // anti-clickjacking). The full content policy (script-src with a per-request nonce, img-src,
+  // connect-src, …) comes from `proxy.ts` / `lib/security/csp.ts` on every page (#1440). While that
+  // policy is report-only it travels in its own `Content-Security-Policy-Report-Only` header and this
+  // one keeps enforcing framing. Once it enforces, the proxy's `Content-Security-Policy` (which then
+  // repeats `frame-ancestors 'none'`) REPLACES this value on pages — one header, never two; static
+  // files, /_next assets and /api/auth keep this one.
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
 ];
 
@@ -51,6 +41,19 @@ const nextConfig: NextConfig = {
   // The standalone output traces only the node_modules the app actually uses, keeping the
   // runtime image small. Authorized cross-lane DevOps edit — see ADR-0025.
   output: "standalone",
+
+  // Next's tracer copies only the CJS half of `@swc/helpers` into `.next/standalone`, but since the
+  // next 16.3.1 / @swc/helpers 0.5.23 pairing the server's own require-hook loads the ESM one
+  // (`@swc/helpers/esm/_interop_require_default.js`) at startup — so the image crashed on boot with
+  // MODULE_NOT_FOUND before serving a single request (#1274). The tracer cannot see it because the
+  // hook resolves that path dynamically, so it has to be declared.
+  //
+  // The glob is ROOT-relative on purpose: `outputFileTracingIncludes` resolves against this app
+  // directory, while Bun's isolated store lives at the workspace root. A glob starting at
+  // `node_modules/...` matches nothing here AND still builds green — do not "simplify" it back.
+  outputFileTracingIncludes: {
+    "/*": ["../../node_modules/.bun/next@*/node_modules/@swc/helpers/**/*"],
+  },
 
   // Don't advertise the framework (#501); removes the `x-powered-by` response header.
   poweredByHeader: false,

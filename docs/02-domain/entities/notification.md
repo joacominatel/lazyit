@@ -3,7 +3,7 @@ title: Notification
 tags: [domain, entity, notifications, rbac, frontend]
 status: accepted
 created: 2026-06-09
-updated: 2026-06-14
+updated: 2026-09-24
 ---
 
 # Notification
@@ -41,14 +41,29 @@ Two models (`apps/api/prisma/schema.prisma`, migration `…_add_notifications`):
   2026-06-14, #453: `null` = broadcast to every `notification:read` holder, a uuid = **targeted** to that
   user's own bell even when they hold no `notification:read`; indexed), a small **redacted** `metadata`
   jsonb (names/ids only, never bodies/secrets — INV-6), and a **`dedupeKey`** (`UNIQUE`).
-- **`NotificationRead`** — the per-admin read join `{ notificationId, userId, readAt }`, **unique on
-  `(notificationId, userId)`**, written lazily on first mark-read. Absence of a row = **unread** for that
-  admin. FK to `Notification` is **Restrict** (the retention sweep deletes the joins first, then the
-  event — the only deleter); FK to [[user]] is **Cascade** (losing a user drops only that user's read
-  rows, never the event).
+- **`NotificationRead`** — the per-user read join `{ notificationId, userId, readAt, dismissedAt? }`,
+  **unique on `(notificationId, userId)`**, written lazily on first mark-read or dismiss. Absence of a
+  row = **unread** for that user. **`dismissedAt`** (nullable, [[0056-in-app-notification-bell]]
+  amendment 2026-09-23, #1309) = the user **dismissed** the notification from their own bell; `NULL` =
+  not dismissed (every row that predates the column). FK to `Notification` is **Restrict** (the
+  retention sweep deletes the joins first, then the event — the only deleter); FK to [[user]] is
+  **Cascade** (losing a user drops only that user's read rows, never the event).
 
-"Unread for admin A" = a `Notification` with no `NotificationRead` row for A; **unread count** is one
-anti-join over the small admin cohort.
+"Unread for user A" = a visible `Notification` with no `NotificationRead` row for A; **unread count** is
+one anti-join over the small admin cohort. "In A's bell" = a visible `Notification` with no
+`NotificationRead` row for A that carries a `dismissedAt`.
+
+### Dismiss is per user (#1309)
+
+Dismissing never deletes or mutates the `Notification` — it is append-only and a broadcast is shared by
+every `notification:read` holder. It **upserts the caller's read join**: a missing row is created with
+`readAt` and `dismissedAt`; an existing row keeps its original `readAt` and gets `dismissedAt`. So:
+
+- **dismiss implies read** (the unread count drops);
+- it hides the notification **only from the caller's bell** — another admin still sees a broadcast one
+  admin dismissed;
+- a re-dismiss keeps the first stamp (idempotent); nothing un-dismisses a row in v1;
+- the retention sweep prunes dismissed rows on the same 90-day schedule as any other.
 
 ## Types (closed shared enum — `@lazyit/shared`)
 
@@ -56,7 +71,9 @@ anti-join over the small admin cohort.
 **`secret.vault_setup`** (the targeted login nudge, #453) · **`permission_widened`** + **`infra.agent_offline`**
 (the two sensitive-audit / liveness alerts, #852 — [[0056-in-app-notification-bell]] amendment 2026-06-30) ·
 **`infra.identity_conflict`** (two hosts reporting one machine-id — [[0074-server-reporting-agent]] §3
-amendment, #1141; bell-only, not emailed).
+amendment, #1141; bell-only, not emailed) · **`mcp.client_connected`** (a new external AI agent
+connection used on the recipient's account — [[0097-ai-assistant-mcp-and-headless-api|ADR-0097]],
+targeted, emailed).
 Catalog-as-code: a typo can't mint a type, and `api` (emit) + `web` (render a closed set of icons/copy) agree
 by construction. Adding a type later is an additive shared-package change (and a web exhaustive-map
 re-typecheck — `TYPE_META` is keyed on the enum).
@@ -108,6 +125,15 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   reported hostname + the discriminator (the new node's own label *is* that hostname). This is the ONLY automatic action the collision detection takes: the
   report is still accepted and nothing is auto-merged or auto-split.
 
+- **The first `/mcp` request through a connection** (`McpConnectionNoticeService`,
+  [[ai-assistant/mcp-and-oauth|MCP]] §14; security §6.3) → **`mcp.client_connected`**, a **targeted**
+  security notice to the account's owner (`recipientUserId` = `targetUserId` = the user) when an OAuth
+  grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
+  must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to
+  `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); a grant older than the
+  90-day retention is never announced. Metadata = grant id, kind (`oauth` | `personal`), client name or
+  token label, scopes — never a token. Fire-and-forget: it never delays or fails the MCP request.
+
 ## API (poll) — read-path authZ (the auth contract)
 
 - `GET /notifications` — the caller's feed (newest-first, paged; `Page<Notification>` per [[0030-list-pagination-contract]]),
@@ -115,6 +141,15 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 - `GET /notifications/unread-count` — the badge number (`{ unread }`).
 - `PATCH /notifications/:id/read` — mark one read (idempotent upsert) → `{ marked, unread }`.
 - `PATCH /notifications/read-all` — mark all the caller's unread read → `{ marked, unread }`.
+- `PATCH /notifications/:id/dismiss` — dismiss one from the caller's bell (implies read, idempotent) →
+  `{ dismissed, unread }` (#1309).
+- `PATCH /notifications/dismiss-all?upTo=<ISO datetime>` — dismiss everything visible to the caller and
+  created at or before `upTo` → `{ dismissed, unread }` (#1309). The web sends the newest `createdAt` it
+  rendered, so a notification that arrived after the bell loaded stays, unread. `upTo` is optional (an
+  older client without it dismisses everything visible); a malformed value is a 400.
+
+The feed and its `total` exclude the caller's dismissed rows; the unread count excludes them by
+construction (a dismissed row always has a read join).
 
 **Read-path authZ ([[0056-in-app-notification-bell]] amendment 2026-06-14, #453).** v1 gated all four
 endpoints by `@RequirePermission('notification:read')` (ADMIN-only) — a non-admin was 403'd and could
@@ -128,9 +163,11 @@ scopes** every read to the caller's **visible set**:
   **`notification:read`** (still **ADMIN-only** by default, in `ADMIN_ONLY_READS`, like `logs:read`).
 
 The scope is one Prisma `where` (`recipientUserId = caller OR (recipientUserId IS NULL AND
-notification:read)`) reused by list / unread-count / mark-read / mark-all, so they are **IDOR-safe by
-construction**: mark-read first confirms the id is in the caller's visible set, so a caller can never mark
-or count **another user's targeted** notification, and a non-admin can never touch a broadcast row. The
+notification:read)`) reused by list / unread-count / mark-read / mark-all / dismiss / dismiss-all, so they
+are **IDOR-safe by construction**: mark-read and dismiss first confirm the id is in the caller's visible
+set, so a caller can never mark, dismiss or count **another user's targeted** notification, and a
+non-admin can never touch a broadcast row. An invisible id and a nonexistent id get the same no-op answer
+(`marked: 0` / `dismissed: 0`, never a 404), so existence is not disclosed. The
 `notification:read` permission is resolved inside the service via [[0046-roles-permissions-v2]]'s
 `PermissionResolverService` — no new permission is added. SSE is a Phase-2 drop-in behind these **same**
 endpoints — no contract churn.
@@ -140,12 +177,14 @@ endpoints — no contract churn.
 The topbar bell (`apps/web/components/notification-bell.tsx`, mounted in `app/(app)/layout.tsx`) reuses the
 [[recent-activity]] activity-row visual grammar and deep-links each row to its target (the application /
 consumable / the manual-task inbox / `/secrets` for the vault-setup nudge). Mark-read on click + "mark all
-read". **NOTE (#453):** the targeted-recipient backend is built; the bell still gates the whole affordance
-on `useCan('notification:read')` (so a non-admin recipient does not yet see their targeted nudge in the
-bell) — relaxing that gate + the persistent `/secrets` banner is the **frontend follow-up**.
+read". The bell renders for **every authenticated human** and no longer self-gates on
+`useCan('notification:read')` — the API scopes what each caller sees ([[0056-in-app-notification-bell]]
+amendment, #453; the `/secrets` banner was dropped). Each row carries a per-user dismiss (X) and the header a
+"Clear all" action that removes the rows currently shown, both optimistic, with no confirmation and no
+undo — a CEO decision of 2026-09-23 ([[0056-in-app-notification-bell]] #1309 amendment §D, "Bell UI").
 
 ## Related
 
 [[0056-in-app-notification-bell]] · [[recent-activity]] · [[manual-task]] · [[access-grant]] ·
 [[consumable-movement]] · [[user-keypair]] · [[0061-secret-manager-zero-knowledge]] (INV-10) ·
-[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453
+[[0046-roles-permissions-v2]] · [[0006-soft-delete-and-auditing]] · issue #313 · issue #453 · issue #1309

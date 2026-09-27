@@ -47,8 +47,9 @@ una contraseña robusta y no vacía en el archivo de entorno.
 
 El intermediario de trabajos en segundo plano (Valkey) no es accesible. La causa habitual es que falte
 `REDIS_URL` en el archivo de entorno — común en instancias creadas antes de que existieran los
-trabajadores en segundo plano, porque el arranque guiado solo escribe valores nuevos en una generación
-desde cero, nunca en un archivo existente. Añádelo y recrea la API:
+trabajadores en segundo plano, porque el arranque guiado solo lo escribe en una instalación desde cero —
+en un archivo existente no añade más que unas pocas claves generadas (consulta
+[Actualizaciones](/help/deployment-operations-upgrades)). Añádelo y recrea la API:
 
 ```sh
 grep -q '^REDIS_URL=' infra/env/.env.prod || echo 'REDIS_URL=redis://valkey:6379' >> infra/env/.env.prod

@@ -1324,11 +1324,11 @@ that cannot run it would trade a clear install error for a crash weeks later.
 
 **And whether a host can run the binary at all was checked nowhere — but the number everyone
 expected turned out to be wrong.** The premise this was raised on was "Bun needs glibc ≥ 2.29, so
-CentOS 7 (2.17) cannot run the agent". That is **not true of the artifacts this repo builds**: on Bun
-1.3.14 the compiled x64, x64-baseline and arm64 executables link no versioned symbol newer than
-`GLIBC_2.17`, which is exactly CentOS/RHEL 7's level. Writing `2.29` into the installer would have
-refused hosts that are fine, and it would have gone stale the next time Bun moves its floor — in
-either direction.
+CentOS 7 (2.17) cannot run the agent". That is **not true of the artifacts this repo builds**: on
+Bun 1.3.14 (re-measured on 1.4.2) the compiled x64, x64-baseline and arm64 executables link no
+versioned symbol newer than `GLIBC_2.17`, which is exactly CentOS/RHEL 7's level. Writing `2.29`
+into the installer would have refused hosts that are fine, and it would have gone stale the next
+time Bun moves its floor — in either direction.
 
 So the check is **evidence rather than a version number**: after installing the binary and *before*
 writing a unit or arming a timer, `install.sh` runs `lazyit-agent --help`, which prints and exits
@@ -1648,18 +1648,20 @@ keeps the two halves of the decision together.
 **"One source" is a promise, and it needs one more line of code to be true.** Passing an explicit
 `proxy` option is only half of taking the decision away from the runtime: Bun consults the ambient
 environment whenever the option is *absent*, so a config-file `NO_PROXY` could not stop an inherited
-`HTTPS_PROXY` — and, measured on Bun 1.3.14, an ambient `NO_PROXY` overrides even an explicit `proxy`
-option, so a host-wide bypass list could defeat the config file's proxy in the other direction. The
-agent therefore **blanks the six ambient spellings** once, after resolution and before the first
-request (`disableAmbientProxy`). Nothing is lost — the environment has already won, per key — and
-after it the agent's own resolution is the whole decision, which is what makes `test`'s "bypassed for
-this host (NO_PROXY)" line true rather than hopeful. Blanked rather than deleted, deliberately: on
-Bun 1.3.14 `delete process.env.HTTP_PROXY` leaves the proxy in force and assigning `""` does not.
+`HTTPS_PROXY` — and, measured on Bun 1.3.14 and 1.4.2, an ambient `NO_PROXY` overrides even an
+explicit `proxy` option, so a host-wide bypass list could defeat the config file's proxy in the
+other direction. The agent therefore **blanks the six ambient spellings** once, after resolution and
+before the first request (`disableAmbientProxy`). Nothing is lost — the environment has already won,
+per key — and after it the agent's own resolution is the whole decision, which is what makes
+`test`'s "bypassed for this host (NO_PROXY)" line true rather than hopeful. Blanked rather than
+deleted, deliberately: on Bun 1.3.14 and 1.4.2 `delete process.env.HTTP_PROXY` leaves the proxy in
+force and assigning `""` does not.
 
 **Which spelling wins, checked against the tools it cites.** When a host sets both `HTTPS_PROXY` and
-`https_proxy`, the **lowercase** one wins — measured on curl 8.7.1 and Bun 1.3.14, both of which take
-the lowercase value (and curl ignores a bare `HTTP_PROXY` outright). An operator who copies a working
-pair off a host must get the same answer from the agent as from the tools they copied it from. The
+`https_proxy`, the **lowercase** one wins — measured on curl 8.7.1 and Bun 1.3.14 (re-measured on
+1.4.2), both of which take the lowercase value (and curl ignores a bare `HTTP_PROXY` outright). An
+operator who copies a working pair off a host must get the same answer from the agent as from the
+tools they copied it from. The
 installer's re-install preservation matches **both cases** for the same reason: the agent reads both,
 so a pattern that carried only the UPPERCASE half would silently delete a working proxy on the
 upgrade path — the erasure #1160 fixed on the local veto, one key over.

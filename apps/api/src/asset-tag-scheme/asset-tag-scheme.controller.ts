@@ -17,6 +17,7 @@ import {
   AssetTagNextPreviewQuerySchema,
   AssetTagNextPreviewSchema,
   AssetTagSchemeSchema,
+  AssetTagSchemeSummarySchema,
   AssetTagSeedSuggestionQuerySchema,
   AssetTagSeedSuggestionSchema,
   UpdateAssetTagSchemeSchema,
@@ -24,6 +25,7 @@ import {
   type AssetTagBackfillResult,
   type AssetTagNextPreview,
   type AssetTagScheme,
+  type AssetTagSchemeSummary,
   type AssetTagSeedSuggestion,
 } from '@lazyit/shared';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
@@ -34,6 +36,9 @@ import { AssetTagSchemeService } from './asset-tag-scheme.service';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe) + TS types + OpenAPI schema.
 class AssetTagSchemeDto extends createZodDto(AssetTagSchemeSchema) {}
+class AssetTagSchemeSummaryDto extends createZodDto(
+  AssetTagSchemeSummarySchema,
+) {}
 class UpdateAssetTagSchemeDto extends createZodDto(
   UpdateAssetTagSchemeSchema,
 ) {}
@@ -68,9 +73,10 @@ class AssetTagBackfillResultDto extends createZodDto(
  * surface, but is provided by its own cohesive module (the service is also injected into
  * AssetsService for in-create allocation).
  *
- * Both handlers are gated by `settings:manage` (the instance-config admin permission) and forbidden
+ * Every handler is gated by `settings:manage` (the instance-config admin permission) and forbidden
  * to service principals (a bot must never reconfigure the org-wide tag scheme), matching the
- * /config/permissions posture.
+ * /config/permissions posture — except `GET summary` (#1315), the read-only, minimal view for whoever
+ * may create assets (`asset:write`), so a member can follow the tag pattern.
  */
 @ApiTags('config')
 @Controller('config/asset-tag-scheme')
@@ -90,6 +96,28 @@ export class AssetTagSchemeController {
   @ApiOkResponse({ type: AssetTagSchemeDto })
   get(): Promise<AssetTagScheme> {
     return this.service.getScheme();
+  }
+
+  /**
+   * Authorization WIDENED on purpose (#1315, follow-up of #1394 — "authz: read widened"): `asset:write`,
+   * the permission of `POST /assets`, not `settings:manage`. Read-only, the stored pattern only (no query
+   * to probe others) and minimal fields; still human-only, like the rest of this controller.
+   */
+  @RequirePermission('asset:write')
+  @UseGuards(ServicePrincipalForbiddenGuard)
+  @Get('summary')
+  @ApiOperation({
+    summary:
+      'Read the asset-tag pattern to follow when creating assets (asset:write)',
+    description:
+      'The member-safe view of the scheme: whether automatic tagging is on, the prefix / suffix / ' +
+      'zero-pad width, and the tag the next asset created without a tag would get now (the same ' +
+      'skip-existing preview as `next-tag`, for the STORED pattern only; not a reservation). No counter ' +
+      'internals, no timestamps. READ-ONLY. Configuring the scheme stays settings:manage.',
+  })
+  @ApiOkResponse({ type: AssetTagSchemeSummaryDto })
+  summary(): Promise<AssetTagSchemeSummary> {
+    return this.service.getSummary();
   }
 
   @RequirePermission('settings:manage')

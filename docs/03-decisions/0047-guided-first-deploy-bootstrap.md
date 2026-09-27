@@ -3,7 +3,7 @@ title: "ADR-0047: Guided first-deploy bootstrap script (infra/start.sh)"
 tags: [adr, infra, deployment, secrets, dx]
 status: accepted
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -119,7 +119,8 @@ Add **`infra/start.sh`** — an executable, POSIX `sh` (`set -eu`), guided first
   **missing**, it **aborts** and tells the operator to restore `.env.prod` from their off-host
   backup — it never regenerates a `MASTERKEY` that cannot decrypt the existing Zitadel data.
 - **Never** regenerates `ZITADEL_MASTERKEY` (the unrotatable DR linchpin) or overwrites existing
-  secrets. There is **no** teardown / `down -v` / `volume rm` path anywhere in the script — a
+  secrets. (Amended 2026-09-26: on an existing install it may *append* a missing key from a narrow
+  allowlist of safely generatable keys — see the amendment below.) There is **no** teardown / `down -v` / `volume rm` path anywhere in the script — a
   destructive reset stays a documented **manual** operation ([[docker-prod-like-first-boot]] §Teardown).
 
 **Print-only (do NOT auto-edit compose/Caddyfile)** — by decision, for **BYOI**, **external
@@ -128,6 +129,52 @@ services / don't start `db` / uncomment the Caddyfile `email` + `import hsts`) a
 relevant env values, but never edits `compose.yaml`, `infra/docker-compose.prod.yaml`, or the
 `Caddyfile`. This keeps the script a thin wrapper and the compose/proxy assets the single source of
 truth.
+
+## Amendment — 2026-09-26: an existing install gets missing, safely generatable keys appended
+
+**Decision (CEO, 2026-09-26 — "start.sh la genera sola").** Upgrading with `git pull` +
+`./infra/start.sh` takes the existing-install branch, which used to skip every write and go straight to
+`up`. A key the new release introduced therefore stayed missing, and the operator met it as a bare 409
+(e.g. `SMTP_SECRET_KEY`, [[0079-instance-smtp-outbound-email]]) with only a printed hint. From now on,
+on that branch and before `up`, `start.sh` **appends** to `infra/env/.env.prod` every key that is:
+
+1. defined in the checkout's `infra/env/.env.prod.example` — an active line, or a commented `# KEY=`
+   placeholder for an optional key (either way, this release knows the key);
+2. **missing** from `.env.prod` — no active `KEY=` line (a present line of any value, even empty, is
+   never touched); and
+3. on the explicit allowlist `SAFE_GENERATABLE_KEYS` in `start.sh`.
+
+**The allowlist is the safety gate.** A key qualifies only if a random fresh value can never orphan data
+or identity on a populated install that lacks it. Today: **`SMTP_SECRET_KEY`**
+([[0079-instance-smtp-outbound-email]]) and **`AI_SECRET_KEY`** ([[0097-ai-assistant-mcp-and-headless-api]]), both
+`openssl rand -hex 32`. Each is the at-rest key for a secret the API **refuses to store (409)** while the
+key is unset, so a missing key proves nothing was ever encrypted under it. `AI_SECRET_KEY` ships
+*commented* in the example (so `infra/update.sh` never stops an instance that does not use AI); criterion
+1 accepts the commented placeholder precisely so this optional key can still be supplied — it is new in
+v2.0, a fresh install and `--reconfigure` already write it, and without it the first provider-key save
+409s.
+
+**Never on the allowlist** — keys that protect existing data or identity: `WORKFLOW_SECRET_KEY`
+([[0054-applications-workflow-engine]] — the connector-credential linchpin), `ZITADEL_MASTERKEY`,
+`AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD` / `ZITADEL_DB_PASSWORD` (the databases
+already carry the old ones), `MEILI_MASTER_KEY`. `DIRECTORY_SECRET_KEY` ([[0091-on-prem-ad-ldap-directory-source]])
+has the same shape as the SMTP key but is not in the example today (issue #1271); it joins the
+allowlist in the change that adds it to the example. For every non-allowlisted key the behaviour is
+unchanged: `start.sh` only **names** the missing key and points at the example's comment; the API fails
+loud at boot for a required one, and `infra/update.sh` still stops before touching the stack.
+
+**Write discipline.** A mode-600 backup `infra/env/.env.prod.bak-<UTC timestamp>` is taken first;
+existing lines are never modified or reordered (the new file must begin with the old one byte-for-byte —
+asserted before it goes live); the keys go at the end under one dated `# --- Added by infra/start.sh on
+… ---` comment; the file is written through a mode-600 temp and an atomic `mv`, so it stays 600; only key
+**names** are printed, never values; `--dry-run` names what it would add and writes nothing. A second run
+finds nothing missing and writes nothing. It works for local, BYOI and bundled-Zitadel installs alike —
+unlike `--reconfigure`, which refuses OIDC because it *re-renders* the file; appending re-renders nothing.
+
+**Why not `infra/update.sh` too.** `update.sh`'s contract is "detect, never edit `.env.prod`" (it runs
+the operator's *old* copy of itself, and its fail-loud step is the review point for a new release's
+keys). That stays; its missing-env stop still lists `SMTP_SECRET_KEY` for a v1.11 file, and the runbook
+offers both fixes. Covered by `infra/test/start-adds-missing-keys.sh` (run in CI).
 
 ## Consequences
 

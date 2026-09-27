@@ -3,6 +3,7 @@ import {
   ADMIN_ONLY_READS,
   DEFAULT_ROLE_PERMISSIONS,
   EDITABLE_ROLES,
+  MEMBER_DEFAULT_CAPABILITIES,
   MyPermissionsSchema,
   PERMISSIONS,
   PERMISSION_AUDIT_ACTIONS,
@@ -52,8 +53,9 @@ describe("Permission catalog", () => {
     // Every domain EXCEPT `import` exposes a `:read` (the readable surface of the app). `import`
     // (the guided Migrator, ADR-0069) is deliberately RUN-ONLY: it has a single coarse `import:run`
     // verb and no browse surface — an import session is owner-scoped transient scratch, not a listable
-    // domain — so it intentionally has no `import:read`.
-    const RUN_ONLY_DOMAINS = new Set<string>(["import"]);
+    // domain — so it intentionally has no `import:read`. `ai` (ADR-0097) holds only the two channel
+    // verbs `ai:use` / `ai:connect`: what the AI can read is whatever its principal can already read.
+    const RUN_ONLY_DOMAINS = new Set<string>(["import", "ai"]);
     for (const domain of PERMISSION_DOMAINS) {
       if (RUN_ONLY_DOMAINS.has(domain)) continue;
       expect(PERMISSIONS).toContain(`${domain}:read` as Permission);
@@ -273,12 +275,13 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toHaveLength(PERMISSIONS.length);
   });
 
-  test("MEMBER = all reads + all writes + the self-service capabilities, EXCEPT the admin-only reads", () => {
+  test("MEMBER = all reads + all writes + the self-service and MEMBER-default capabilities, EXCEPT the admin-only reads", () => {
     const adminOnly = new Set<string>(ADMIN_ONLY_READS);
     const expected = [
       ...READ_PERMISSIONS.filter((p) => !adminOnly.has(p)),
       ...WRITE_PERMISSIONS,
       ...SELF_SERVICE_CAPABILITIES,
+      ...MEMBER_DEFAULT_CAPABILITIES,
     ];
     expect(new Set(DEFAULT_ROLE_PERMISSIONS.MEMBER)).toEqual(new Set(expected));
     // No delete, no coarse capability verb leaks into MEMBER (the self-service capabilities are neither).
@@ -458,5 +461,25 @@ describe("PermissionAuditActionSchema (audit direction)", () => {
     expect(PermissionAuditActionSchema.safeParse("grant").success).toBe(true);
     expect(PermissionAuditActionSchema.safeParse("revoke").success).toBe(true);
     expect(PermissionAuditActionSchema.safeParse("toggle").success).toBe(false);
+  });
+});
+
+describe("AI permissions (ADR-0097 decision 1)", () => {
+  test("the `ai` domain is in the catalog with exactly use + connect", () => {
+    expect(PERMISSION_DOMAINS).toContain("ai");
+    const aiPermissions = PERMISSIONS.filter((p) => p.startsWith("ai:"));
+    expect(aiPermissions).toEqual(["ai:use", "ai:connect"]);
+  });
+
+  test("ai:use and ai:connect are the MEMBER-default capabilities", () => {
+    expect([...MEMBER_DEFAULT_CAPABILITIES]).toEqual(["ai:use", "ai:connect"]);
+  });
+
+  test("both are seeded to ADMIN + MEMBER and never to VIEWER", () => {
+    for (const permission of MEMBER_DEFAULT_CAPABILITIES) {
+      expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toContain(permission);
+      expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).toContain(permission);
+      expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(permission);
+    }
   });
 });

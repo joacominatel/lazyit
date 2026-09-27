@@ -5,14 +5,27 @@ import type {
   CreateConsumableMovement,
 } from "@lazyit/shared";
 import { createConsumableMovement } from "../endpoints/consumables";
+import { assetHistoryKeys } from "./use-asset-history";
 import { consumableKeys } from "./use-consumables";
 import { invalidateDashboard } from "./use-dashboard";
 
 /**
- * Record a stock movement (IN / OUT / ADJUSTMENT). Invalidates `consumableKeys.all` so the cached
- * `currentStock` (on the list and detail) and the movement ledger refetch, plus the dashboard whose
- * low-stock tally derives from `currentStock` (issue #499). A 409 (an OUT that would go negative)
- * rejects — callers surface it as a toast.
+ * Whether a movement payload can have appended an event to an asset's history (ADR-0098): a delivery to
+ * an asset writes CONSUMABLE_DELIVERED, and a return writes CONSUMABLE_RETURNED when the delivery it
+ * gives back went to an asset. A return only names the delivery, so any return refreshes asset history —
+ * one cheap refetch of whichever timeline is mounted. Exported for the regression test.
+ */
+export function touchesAssetHistory(data: CreateConsumableMovement): boolean {
+  return data.targetAssetId !== undefined || data.returnOfId !== undefined;
+}
+
+/**
+ * Record a stock movement (IN / OUT / ADJUSTMENT), including a delivery (a targeted OUT) and a return
+ * (an IN with `returnOfId`, ADR-0098). Invalidates `consumableKeys.all` so the cached `currentStock` (on
+ * the list and detail), the movement ledger and every deliveries list (user / asset / location panels,
+ * the offboarding sheet) refetch, plus the dashboard whose low-stock tally derives from `currentStock`
+ * (issue #499), plus asset history when the write can have touched it. A 409 (an OUT that would go
+ * negative, or an over-return) rejects — callers surface it as a toast.
  */
 export function useRecordMovement() {
   const queryClient = useQueryClient();
@@ -24,9 +37,12 @@ export function useRecordMovement() {
       consumableId: string;
       data: CreateConsumableMovement;
     }) => createConsumableMovement(consumableId, data),
-    onSuccess: () => {
+    onSuccess: (_movement, { data }) => {
       queryClient.invalidateQueries({ queryKey: consumableKeys.all });
       invalidateDashboard(queryClient);
+      if (touchesAssetHistory(data)) {
+        queryClient.invalidateQueries({ queryKey: assetHistoryKeys.all });
+      }
     },
   });
 }

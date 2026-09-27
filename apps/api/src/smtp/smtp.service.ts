@@ -61,7 +61,9 @@ export class SmtpService {
    *   - omitted/empty → the stored envelope is LEFT UNCHANGED (so re-saving the read form, which never
    *     receives the password, never wipes it).
    * Encrypting throws {@link SmtpSecretKeyMissingError} (mapped to 409 at the controller) if the master
-   * key is unset — the rest of the config still saves without a password. Returns the redacted settings.
+   * key is unset. That happens BEFORE the upsert, so the WHOLE save is rejected and NOTHING is persisted
+   * — not even the non-password fields. To store the rest, re-save with an empty `password` (or set the
+   * key: a guided install generates it, see infra/start.sh). Returns the redacted settings.
    */
   async updateSettings(input: UpdateSmtpSettings): Promise<SmtpSettings> {
     const base = {

@@ -8,6 +8,7 @@ import {
   LockClosedIcon,
   PencilSquareIcon,
   PlusIcon,
+  SparklesIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import {
@@ -46,6 +47,7 @@ import {
 import { useCan } from "@/lib/hooks/use-permissions";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { permissionLabel } from "../../_lib/permission-labels";
+import { AiAccessDialog } from "./ai-access-dialog";
 import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
 import {
@@ -63,6 +65,7 @@ type DialogState = {
   rotating: ServiceAccount | undefined;
   revoking: ServiceAccount | undefined;
   testing: ServiceAccount | undefined;
+  aiAccess: ServiceAccount | undefined;
 };
 
 type DialogAction =
@@ -71,7 +74,8 @@ type DialogAction =
   | { type: "formOpenChanged"; open: boolean }
   | { type: "rotatingChanged"; account: ServiceAccount | undefined }
   | { type: "revokingChanged"; account: ServiceAccount | undefined }
-  | { type: "testingChanged"; account: ServiceAccount | undefined };
+  | { type: "testingChanged"; account: ServiceAccount | undefined }
+  | { type: "aiAccessChanged"; account: ServiceAccount | undefined };
 
 const INITIAL_DIALOG: DialogState = {
   formOpen: false,
@@ -79,6 +83,7 @@ const INITIAL_DIALOG: DialogState = {
   rotating: undefined,
   revoking: undefined,
   testing: undefined,
+  aiAccess: undefined,
 };
 
 function dialogReducer(state: DialogState, action: DialogAction): DialogState {
@@ -95,6 +100,8 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
       return { ...state, revoking: action.account };
     case "testingChanged":
       return { ...state, testing: action.account };
+    case "aiAccessChanged":
+      return { ...state, aiAccess: action.account };
   }
 }
 
@@ -177,7 +184,7 @@ export function ServiceAccountsManager() {
   // Which dialog / row-action is active — grouped into one machine (see `dialogReducer`). Destructured
   // into consts so each stays narrowable inside the dialog render closures below.
   const [dialog, dispatchDialog] = useReducer(dialogReducer, INITIAL_DIALOG);
-  const { formOpen, editing, rotating, revoking, testing } = dialog;
+  const { formOpen, editing, rotating, revoking, testing, aiAccess } = dialog;
 
   const accounts = data ?? [];
   const hasData = accounts.length > 0;
@@ -324,6 +331,10 @@ export function ServiceAccountsManager() {
                       onTest={() =>
                         dispatchDialog({ type: "testingChanged", account })
                       }
+                      onAiAccess={() =>
+                        dispatchDialog({ type: "aiAccessChanged", account })
+                      }
+                      aiAccessLabel={t("serviceAccounts.rowActions.aiAccess")}
                       editLabel={tc("edit")}
                       testLabel={t("serviceAccounts.rowActions.testIt")}
                       rotateLabel={t("serviceAccounts.rowActions.rotateToken")}
@@ -380,12 +391,24 @@ export function ServiceAccountsManager() {
           }}
         />
       ) : null}
+
+      {aiAccess ? (
+        <AiAccessDialog
+          account={aiAccess}
+          open
+          onOpenChange={(open) => {
+            if (!open)
+              dispatchDialog({ type: "aiAccessChanged", account: undefined });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
 /**
- * Per-row actions for a LIVE service account: Edit, Rotate token, and the destructive Revoke. A
+ * Per-row actions for a LIVE service account: Test it, Edit, Rotate token, AI access (ADR-0097 — the
+ * per-account AI access setting, `settings:manage` like the rest), and the destructive Revoke. A
  * bespoke menu (not the shared `RowActions`) because Rotate is specific to service accounts — but it
  * mirrors the same dropdown shell, icons and destructive separator so it reads identically. The
  * archived view uses {@link RestoreRowAction} instead, so this only renders for non-revoked rows.
@@ -395,8 +418,10 @@ function ServiceAccountRowActions({
   onRotate,
   onRevoke,
   onTest,
+  onAiAccess,
   editLabel,
   testLabel,
+  aiAccessLabel,
   rotateLabel,
   revokeLabel,
   openActionsLabel,
@@ -405,8 +430,10 @@ function ServiceAccountRowActions({
   onRotate: () => void;
   onRevoke: () => void;
   onTest: () => void;
+  onAiAccess: () => void;
   editLabel: string;
   testLabel: string;
+  aiAccessLabel: string;
   rotateLabel: string;
   revokeLabel: string;
   openActionsLabel: string;
@@ -431,6 +458,10 @@ function ServiceAccountRowActions({
         <DropdownMenuItem onSelect={onRotate}>
           <ArrowPathIcon />
           {rotateLabel}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onAiAccess}>
+          <SparklesIcon />
+          {aiAccessLabel}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onSelect={onRevoke}>

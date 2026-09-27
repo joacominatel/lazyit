@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-03
+updated: 2026-09-26
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -47,8 +47,9 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 > ```
 >
 > It is **idempotent and non-destructive** — re-running it on an existing install (an existing
-> `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up; it
-> **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
+> `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up —
+> after appending any missing key from its short allowlist of safely generatable ones (§4, *Keys
+> `start.sh` adds on an existing install*); it **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
 > **BYOI**, **external Postgres**, and **Let's Encrypt/HSTS** it writes the relevant env values and
 > **prints** the one or two manual compose/Caddyfile edits to apply (it does not auto-edit those
 > files — see the BYOI / Caddyfile notes in steps 1 & 2 below). After it finishes, continue at
@@ -125,7 +126,7 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 ```
 
 `--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
-`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, DB creds — never regenerated) and the auth mode + Postgres
+`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
 only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
 env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
@@ -216,10 +217,18 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker
 Caddy obtains a certificate automatically (Let's Encrypt for a public FQDN on :443, or its internal
 CA otherwise). The one-shot `migrate` service applies migrations and seeds before the API starts.
 
-## 2a. Populate search indices (first deploy only)
+## 2a. Search indices populate themselves
 
-After the stack is healthy (all services up, `migrate` exited 0), run the full re-index once to
-populate Meilisearch with existing data ([[0035-search-architecture]]):
+There is **no manual step**. On every boot the API checks Meilisearch and rebuilds any **missing or
+empty** index from the database in the background ([[0035-search-architecture]] amendments 2026-06-11
+and 2026-09-26): it waits for Meilisearch to answer `/health` (up to ~5 minutes), then rebuilds, without
+ever blocking readiness. On a first deploy — or right after a Meilisearch server upgrade, which starts on
+a new, empty data volume — search results are **incomplete for a few minutes** while that runs; the API
+log shows `Search self-heal: rebuilt '<index>' with N document(s).` per index. When every index already
+has documents, the check is a no-op.
+
+To force a deterministic full rebuild at any time (after a restore, a long outage, or to be sure), run
+the standalone reindex:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
@@ -233,10 +242,9 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod 
 > `run --rm migrate bun run reindex:all` runs the standalone reindex (it gets `DATABASE_URL` and
 > `MEILI_*` from `.env.prod` and exits when done).
 
-This is a one-time step on first deploy, or after adding Meilisearch to an existing instance.
-Subsequent deploys do not need it — the API keeps Meili in sync incrementally. The API's
-`SearchService` is fail-soft: if Meilisearch is unreachable, search calls no-op and the app
-continues to function ([[0035-search-architecture]]).
+The API keeps Meili in sync incrementally between boots. The API's `SearchService` is fail-soft: if
+Meilisearch is unreachable, search calls no-op and the app continues to function
+([[0035-search-architecture]]).
 
 > [!tip] Drift now self-heals on a timer (no manual reindex between deploys)
 > A fire-and-forget sync dropped while Meili is momentarily down leaves that index drifted from the
@@ -244,7 +252,7 @@ continues to function ([[0035-search-architecture]]).
 > set (the same zero-downtime swap as `reindex:all`), so such drift repairs itself automatically —
 > default **hourly**, tunable via `SEARCH_RECONCILE_INTERVAL_MS` (milliseconds) in `.env.prod`
 > ([[0035-search-architecture]] amendment 2026-06-14, issue #383). `reindex:all` above stays the
-> first-deploy backfill and the deterministic big-hammer recovery after a long outage; the sweeper
+> deterministic big-hammer recovery after a long outage; the sweeper
 > handles ongoing drift in between. The sweep is `unref`'d (never holds the process open) and
 > fail-soft (a reconcile error never crashes the API).
 
@@ -317,7 +325,8 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 
 > **Upgrade note — `REDIS_URL` is required (ADR-0053).** Deployments created **before** the async-workers
 > release have a `.env.prod` that predates `REDIS_URL`. The guided `start.sh` only writes it on a
-> **fresh** render — it never edits an existing `.env.prod` — so after pulling, add it by hand and
+> **fresh** render — on an existing `.env.prod` it appends nothing but the allowlisted generated keys
+> (see *Keys `start.sh` adds on an existing install* below) — so after pulling, add it by hand and
 > recreate the api container:
 >
 > ```sh
@@ -335,7 +344,9 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > The engine encrypts its connector credentials (`WorkflowSecret`, AES-256-GCM) with this key and
 > **fails loud at boot** if it is enabled while the key is missing or the wrong length. As with
 > `REDIS_URL` above, the guided `start.sh` only writes it on a **fresh** render — a `.env.prod` that
-> predates the engine has no such line — so add it by hand before turning the engine on:
+> predates the engine has no such line, and `start.sh` **never** generates this one for an existing
+> install (a fresh key would orphan any credential already encrypted) — so add it by hand before
+> turning the engine on:
 >
 > ```sh
 > grep -q '^WORKFLOW_SECRET_KEY=' infra/env/.env.prod \
@@ -348,6 +359,68 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
 > in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
 
+> **Upgrade note — `SMTP_SECRET_KEY` on a `.env.prod` that predates it (ADR-0079, issue #1269).**
+> The instance SMTP password is encrypted at rest under this key. It is **optional at boot** — the API
+> starts fine without it and an *unauthenticated* relay keeps working — but saving an SMTP **password**
+> returns a clean **409 and stores nothing at all** (the encrypt runs *before* the upsert, so the whole
+> save is rejected, not partially applied). A guided install generates the key, and **re-running
+> `./infra/start.sh` on an existing install now adds it for you** — local, BYOI and bundled-Zitadel
+> installs alike (ADR-0047 amendment 2026-09-26, see *Keys `start.sh` adds on an existing install*
+> below). `--reconfigure` (local auth only) also adds it. `infra/update.sh` still never edits
+> `.env.prod`: it stops on the missing key, so either run `git pull` + `./infra/start.sh`, or add it by
+> hand:
+>
+> ```sh
+> grep -q '^SMTP_SECRET_KEY=' infra/env/.env.prod \
+>   || echo "SMTP_SECRET_KEY=$(openssl rand -hex 32)" >> infra/env/.env.prod   # 32 bytes -> 64 hex chars
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+>   --env-file infra/env/.env.prod up -d api
+> ```
+>
+> The `grep -q` guard is the point: an **already-present** key must never be replaced — it decrypts the
+> SMTP password already stored, and a fresh one silently orphans it (re-enter the password to recover).
+> Unlike `WORKFLOW_SECRET_KEY` this is **not** a DR linchpin: the worst case is one re-typed password.
+
+> **Upgrade note — the AI assistant keys are optional; nothing to do on update (ADR-0097, issue #1322).**
+> This release adds two **optional** env keys, `AI_SECRET_KEY` and `AI_WORKER_CONCURRENCY`. Both ship
+> **commented** in `.env.prod.example` — a deliberate difference from `SMTP_SECRET_KEY` — so
+> `infra/update.sh` does **not** stop on them and an instance that never enables AI needs no change at
+> all. Without `AI_SECRET_KEY`, saving an AI provider API key is a clean 409. Re-running
+> `./infra/start.sh` on the existing install adds it for you (as does `--reconfigure`); by hand, use the
+> same `grep -q` guard as above (`AI_SECRET_KEY=$(openssl rand -hex 32)`) and recreate the api container.
+> `AI_WORKER_CONCURRENCY` stays unset unless you want to change its default of **4** — nothing writes it.
+
+> **Keys `start.sh` adds on an existing install (ADR-0047 amendment 2026-09-26).** When
+> `./infra/start.sh` finds an existing install (the `git pull` + `start.sh` upgrade path), it no longer
+> only brings the stack up: it first **appends** to `infra/env/.env.prod` every key that (1) this
+> checkout's `.env.prod.example` defines, (2) your file has no active line for, and (3) is on an explicit
+> allowlist of keys that are safe to generate at random for a populated install. Today the allowlist is
+> **`SMTP_SECRET_KEY`** and **`AI_SECRET_KEY`** (`openssl rand -hex 32` each). Both are at-rest keys for a
+> secret the API refuses to store while the key is unset, so a missing key proves nothing was ever
+> encrypted under it — a fresh one orphans nothing.
+>
+> - A **backup** is written first: `infra/env/.env.prod.bak-<UTC timestamp>` (mode 600, gitignored). It
+>   holds your secrets — keep it private, delete it once satisfied.
+> - Existing lines are **never modified or reordered**; the keys go at the end under a dated
+>   `# --- Added by infra/start.sh on … ---` comment. The file stays mode 600. Only the key **names** are
+>   printed, never their values. A key that is already present — whatever its value or encoding — is
+>   left alone. A second run writes nothing.
+> - Keys that protect existing data or identity are **never** generated this way: `WORKFLOW_SECRET_KEY`,
+>   `ZITADEL_MASTERKEY`, `AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD` /
+>   `ZITADEL_DB_PASSWORD`, `MEILI_MASTER_KEY`. If one of those (or any other key the example defines) is
+>   missing, `start.sh` only **names** it and tells you to add it by hand from the example's comment.
+> - `--dry-run` names what it would add and writes nothing.
+>
+> After it adds a key, back up the updated `.env.prod` off-host ([[backups]]).
+>
+> **Upgrading v1.11 → v2.0 with `git pull` + `./infra/start.sh`:** the v1.11 `.env.prod` has neither
+> key; `start.sh` appends `SMTP_SECRET_KEY` and `AI_SECRET_KEY`, backs up the old file, and brings v2.0
+> up with every existing secret untouched. With `infra/update.sh` the run stops at the missing-env step
+> on `SMTP_SECRET_KEY` (the one that ships active in the example) before touching the stack — add it by
+> hand as above, or take the `start.sh` path.
+> Caddy now also routes the external-agent paths to the API and streams SSE uncompressed (§7); the
+> update applies that with no action.
+
 > **Upgrade note — attachments storage: fix a pre-existing root-owned volume (#1019).** The api
 > image now creates `/app/attachments` owned by `node` before the runtime `USER node` switch, so
 > Docker seeds the `*_attachments_data` named volume with the right ownership on first mount. A
@@ -358,6 +431,31 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > ```sh
 > docker run --rm -v lazyit-prod_attachments_data:/v alpine chown -R 1000:1000 /v
 > ```
+
+> **Upgrade note — Meilisearch server v1.12.3 → v1.53.2: search rebuilds itself on a new volume (#1216).**
+> Nothing to do. A Meilisearch database only opens on the exact engine version that wrote it, so the
+> upgraded server runs on a **new** data volume, `lazyit-prod_meili_data_v1_53_2`, which Compose creates
+> on the normal `up`. On boot the API rebuilds every search index from the database in the background:
+> **search results are incomplete for a few minutes** after the upgrade, then complete — nothing else
+> is affected (`/health/ready` does not wait for search, so neither `start.sh` nor the `update.sh`
+> health gate does). `MEILI_MASTER_KEY` and `.env.prod` are unchanged. Both paths work unattended:
+>
+> - `git pull` + `./infra/start.sh` — detected as an existing install (your `.env.prod`), secrets
+>   preserved, `up -d --build`; at the end it prints a note that the previous volume can be removed.
+> - `./infra/update.sh vX.Y.Z` — backup, build, `up -d`, health gate as usual. The *update.sh* that runs
+>   is the one you already had, so the old-volume note appears from the next update on.
+>
+> The previous volume, **`lazyit-prod_meili_data`**, is left untouched — it is what a rollback to an
+> earlier tag mounts again (with its old index intact; the hourly reconcile sweeper then catches up any
+> writes made on the new version). Once you no longer need to roll back, reclaim its space (a few MB to a
+> few hundred MB) with:
+>
+> ```sh
+> docker volume rm lazyit-prod_meili_data
+> ```
+>
+> Dev machines: the same applies to `lazyit_meili_data` (`docker volume rm lazyit_meili_data`, or
+> `bun run dev:fresh`, which removes both — and everything else in the dev stack).
 
 ## 5. Backups & disaster recovery
 
@@ -397,6 +495,138 @@ service is constrained.
 > `backup` sidecar only dumps the two Postgres DBs (see [[backups]]).
 
 Build/boot problems → [[docker-build-troubleshooting]].
+
+## 7. AI assistant and external agents (MCP) — optional
+
+The AI assistant — the in-app chat, headless prompts from a Service Account, and the MCP server that
+lets Claude Code, Cursor and similar agents act as a user — is **off until an admin enables it** in
+Settings → AI ([[0097-ai-assistant-mcp-and-headless-api]]). An operator who never enables it has
+nothing to do: no required env key, no new container, no new port.
+
+### 7a. What the stack already provides
+
+- **Routes.** Caddy sends these **unprefixed** paths to the API, without the `/api` strip — MCP clients
+  and OAuth discovery address the bare origin:
+
+  | Path | Purpose | Answers |
+  | --- | --- | --- |
+  | `/mcp` | the MCP endpoint | 404 while MCP is off |
+  | `/.well-known/oauth-protected-resource[/mcp]` | where to authorize (RFC 9728) | 404 while MCP is off, and always on `lan` |
+  | `/.well-known/oauth-authorization-server` | the authorization server's metadata (RFC 8414) | 404 while MCP is off, and always on `lan` |
+  | `/oauth/token`, `/oauth/register`, `/oauth/revoke` | OAuth protocol endpoints | 404 while MCP is off, and always on `lan` |
+  | `/.well-known/openid-configuration*`, `/authorize`, `/token`, `/register` | what MCP clients probe when the metadata above is missing | always a JSON 404 — lazyit is OAuth-only, so a client gets a clean "no authorization server" instead of the sign-in page's HTML |
+
+  `/oauth/authorize` is the consent page and belongs to the web app. Everything the chat uses stays under
+  `/api/*`.
+- **Streaming.** The chat follows a run over Server-Sent Events. Caddy passes streams **unbuffered and
+  uncompressed** ([[deployment]] explains the `encode` carve-out). If you run **another reverse
+  proxy or load balancer in front of Caddy**, it must not buffer or compress `text/event-stream` either
+  (nginx: `proxy_buffering off;` on the lazyit location) — otherwise the chat shows each reply only once
+  it is complete.
+- **Env** (`infra/env/.env.prod`, both optional):
+  - `AI_SECRET_KEY` — encrypts the AI provider's API key at rest. `start.sh` writes it on a fresh install,
+    on `--reconfigure`, and when re-run on an existing install that lacks it; to add it by hand, see the
+    upgrade note in §4. Back it up with `.env.prod`
+    ([[backups]]).
+  - `AI_WORKER_CONCURRENCY` — how many AI runs execute at once inside the `api` container (default 4).
+    Runs mostly wait on the provider; raise it only with memory and CPU headroom (§6).
+
+Check the routes after an update (expect `404` until an admin enables MCP; on `lan` the OAuth rows stay
+`404` for good):
+
+```sh
+curl -so /dev/null -w "mcp:      %{http_code}\n" -X POST https://lazyit.example.com/mcp
+curl -so /dev/null -w "metadata: %{http_code}\n" https://lazyit.example.com/.well-known/oauth-authorization-server
+```
+
+> [!note] A local LLM on the Docker host (Ollama) — operator option, not shipped
+> An OpenAI-compatible provider running **on the lazyit host itself** is not reachable as `localhost`
+> from inside the `api` container. To reach it, add `extra_hosts: ["host.docker.internal:host-gateway"]`
+> to the `api` service in a compose override of your own, point the provider's base URL at
+> `http://host.docker.internal:<port>`, and allow that private host in Settings → AI (the egress guard
+> denies private addresses unless an admin allows that one host). lazyit does not ship this in
+> `compose.yaml`; loopback and cloud metadata addresses stay denied regardless.
+
+### 7b. Which clients work in which network mode
+
+The MCP specification requires HTTPS for OAuth, so the network mode (§1a) decides how an agent connects:
+
+| Client | `lan` (plain HTTP) | `local` (localhost + internal CA) | `real` (FQDN; Let's Encrypt or internal CA) |
+| --- | --- | --- | --- |
+| Claude Code (CLI / IDE) | personal token | OAuth, from the lazyit host only; trust the CA (7c) | OAuth; with an internal CA, trust it (7c) |
+| Cursor, VS Code (desktop) | personal token | OAuth, from the lazyit host only; trust the CA | OAuth; with an internal CA, trust it |
+| claude.ai, Claude Desktop connectors | not possible | not possible | only if the instance is **publicly reachable** with a Let's Encrypt certificate |
+| ChatGPT developer mode | not possible | not possible | only if the instance is **publicly reachable** |
+
+- **`lan` — personal tokens.** Each user creates a **personal MCP token** (`lzit_pat_…`, mandatory
+  expiry, revocable) in their account's AI page and configures the agent with a static
+  `Authorization: Bearer` header. There is no OAuth on plain HTTP: the OAuth metadata and endpoints
+  answer 404. The token travels unencrypted over the LAN — the same trade the login session already makes
+  in `lan` mode ([[0087-plain-http-lan-deployment-axis]]).
+- **HTTPS (`local`, `real`) — OAuth.** The agent discovers the authorization server from the instance,
+  the user signs in and approves the connection in the browser, and it appears under their connected
+  apps. Personal tokens are not offered on HTTPS instances.
+- **Cloud-hosted clients** (claude.ai, Claude Desktop connectors, ChatGPT) connect **from the vendor's
+  cloud**, not from the user's machine. They need a public DNS name, a globally routable address and a
+  publicly trusted certificate — a LAN-only instance can never serve them. Exposing lazyit to the
+  internet is an organizational decision; if you make it, use a real domain with Let's Encrypt and HSTS
+  (§1).
+
+### 7c. Internal CA — trust it on each agent's machine
+
+With an internal CA (`local`, or `real` without Let's Encrypt), every machine that runs an agent must
+trust Caddy's root, or the agent refuses the TLS connection before OAuth starts.
+
+1. **Export the root** on the lazyit host (it changes after a `caddy_data` volume reset — export again
+   then):
+
+   ```sh
+   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+     --env-file infra/env/.env.prod cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-local-root.crt
+   ```
+
+2. **Copy `caddy-local-root.crt` to the agent's machine** — it is a public certificate, not a secret.
+3. **Claude Code** trusts the operating system's store by default (the native installer; npm installs
+   need Node 22.15 or later), so adding the root to the OS trust store is enough — on the lazyit host
+   itself, `./infra/trust-local-ca.sh` does that. To trust it for Claude Code only, point
+   `NODE_EXTRA_CA_CERTS` at the file before launching `claude`, or set it in the `env` block of
+   `~/.claude/settings.json` so background sessions get it too:
+
+   ```sh
+   export NODE_EXTRA_CA_CERTS=/path/to/caddy-local-root.crt
+   ```
+
+   Other Node-based agents honor `NODE_EXTRA_CA_CERTS` the same way; desktop editors (Cursor, VS Code)
+   use the OS trust store.
+
+> [!note] Verified end to end
+> [[ai-mcp-client-matrix]] records which cells of this table were run end to end (2026-09-25: personal
+> tokens on `lan`, OAuth over an internal CA, Claude Code honoring `NODE_EXTRA_CA_CERTS`) and holds the
+> operator checklists for the rest — claude.ai on a public instance, Cursor, the Claude Code sign-in.
+
+## 8. Content-Security-Policy and your own reverse proxy
+
+The web app sends its own CSP on every page (#1440, [[content-security-policy]]): a per-request
+**nonce** for scripts, `img-src 'self' data: blob:`, `connect-src 'self'`, and the rest of the policy
+documented there. The bundled Caddy adds **no** CSP — nothing to configure for a standard deploy.
+
+- **Status.** The content policy ships as `Content-Security-Policy-Report-Only`: the browser logs what
+  it would block (`[Report Only]` in the developer console) and blocks nothing. Framing is enforced
+  separately (`Content-Security-Policy: frame-ancestors 'none'`, on every response). A console
+  message on your instance is worth reporting — it is what the switch to enforcing is waiting on.
+- **Check it.** `curl -sI https://<your-domain>/login | grep -i content-security` shows both headers;
+  the nonce changes on every request.
+- **Your own proxy (a load balancer, an ingress, a corporate gateway) in front of Caddy or instead of
+  it must not add a second `Content-Security-Policy`.** Browsers enforce every policy they receive,
+  and a static policy cannot know the per-request nonce, so it would block every page's scripts. If
+  policy requires a CSP at the edge, pass the app's headers through unchanged (and do not strip
+  `Content-Security-Policy-Report-Only`).
+- **Embedding external images (widening `img-src`): don't.** Refusing remote images is the point —
+  a remote image in rendered content is a tracking pixel that leaks each reader's IP (SEC-084). The
+  Markdown sanitizer drops external images anyway, so a wider `img-src` adds risk and no feature.
+  Upload the image as an attachment instead; attachments are served by lazyit itself.
+- **A split-origin build** (a custom image whose `NEXT_PUBLIC_API_URL` is an absolute URL rather than
+  the default `/api`) is covered: the policy adds that URL's origin to `connect-src` automatically.
 
 Related: [[deployment]] · [[docker-prod-like-first-boot]] · [[backups]] · [[prisma-migrations]] ·
 [[0015-deployment-model]] · [[0026-reverse-proxy-tls]] · [[0028-secrets-and-config]] ·

@@ -35,6 +35,10 @@ Constraints discovered in the repo:
 - Next.js 16.3 completes route generation under Bun 1.3.14 but Bun can crash with `SIGILL` during
   process teardown. The web production build therefore needs the real Node executable while Bun
   remains the pinned package manager and workspace tooling runtime.
+  *Update (2026-09-26, #1402):* measured on the Bun 1.4.2 bump, `bun --bun next build` completed
+  cleanly 3/3 while the same build on 1.3.14 crashed 3/3 (`SIGILL`, exit 132). The Node web build
+  stage is **kept**: it is not a workaround to remove but the scoped-Bun posture of
+  [[0009-bun-first-vs-app-stack]] — Next.js runs on Node, Bun installs and runs tooling.
 
 ## Considered options
 
@@ -43,7 +47,7 @@ Constraints discovered in the repo:
 - **Node for both build and runtime** — workable, but loses Bun's faster, repo-pinned install and
   the `bun test`/tooling parity used elsewhere. Build would drift from how developers build locally.
 - **Multi-stage: Bun tooling → application build → Node runtime** *(chosen)* — use the repo-pinned
-  `oven/bun:1.3.14` for install and workspace tooling. API compilation remains on that stage; the web
+  `oven/bun:1.4.2` for install and workspace tooling. API compilation remains on that stage; the web
   runs the Next.js CLI in a `node:26-trixie-slim` stage. Copy only built artifacts + production deps
   into a minimal `node:26-alpine` runtime. This preserves the scoped Bun decision without executing
   Next.js under Bun's Node compatibility runtime.
@@ -53,7 +57,7 @@ Constraints discovered in the repo:
 - **Per-app multi-stage Dockerfiles** in `infra/docker/` (`api.Dockerfile`, `web.Dockerfile`,
   `migrate.Dockerfile`), built with **context = repo root** and `-f infra/docker/<x>.Dockerfile .`
   (workspaces need the whole monorepo). Dockerfiles **read** app code via `COPY`; they never modify it.
-- **Tooling stage:** `oven/bun:1.3.14` (Debian/glibc). Installs with
+- **Tooling stage:** `oven/bun:1.4.2` (Debian/glibc). Installs with
   `bun install --frozen-lockfile`, builds `@lazyit/shared`, and runs `prisma generate` / `nest build`
   for the API.
 - **Web build stage:** `node:26-trixie-slim` (Debian/glibc), matching the tooling stage's OS family.
@@ -64,7 +68,7 @@ Constraints discovered in the repo:
 - **Web runtime:** `node:26-alpine`, runs the Next.js **standalone** server (`output: 'standalone'`).
   This needs a one-line change in `apps/web/next.config.ts` (application lane) — made as an
   **authorized cross-lane exception**, committed separately.
-- **Migrations + seed:** a **one-shot job** on `oven/bun:1.3.14` running
+- **Migrations + seed:** a **one-shot job** on `oven/bun:1.4.2` running
   `prisma migrate deploy && prisma db seed`. It runs after Postgres is healthy and before the API
   starts (`depends_on: condition: service_completed_successfully`). Bun is required for the seed;
   Debian (glibc) is required so the Prisma **schema engine** (used by `migrate deploy`) finds its

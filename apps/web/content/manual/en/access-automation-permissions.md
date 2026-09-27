@@ -16,7 +16,7 @@ runs them**, **who completes manual tasks**, and **who holds the credentials**. 
 | **`workflow:manage`** | Configure the engine — create, edit, delete and enable/disable workflows and connections. |
 | **`workflow:run`** | Manually retry or replay a run. |
 | **`workflow:task`** | Complete a manual task (plus you must be an allowed assignee). |
-| **`workflow:secrets`** | Add, replace or remove the credentials a connection uses. |
+| **`workflow:secrets`** | Add, replace or remove the credentials a connection uses; change a connection's default header values, or the address of a connection that has a credential or default headers. |
 
 ## Safe default: administrator-only
 

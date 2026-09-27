@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-09-26
 ---
 
 # Security summary
@@ -53,11 +53,92 @@ Snapshot of the security review. Updated each sweep. Method:
    [[INVARIANTS]] INV-DIR-1/2 directory-person invariants and filed
    [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] (the global structural
    bound on `AssetSpecsSchema` + the `jsonDeepEqual` depth guard, extending SEC-032 and now
-   import-reachable). The #555 fast-follow made `secret:*` / `import:run` **SA-ungrantable**
+   import-reachable; **closed 2026-09-23** with SEC-032 by #1321 — a structural write bound on
+   `specs` in the shared schema plus an iterative `jsonDeepEqual`). The #555 fast-follow made `secret:*` / `import:run` **SA-ungrantable**
    (added to `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS`), **reserved the engine service-account
    name**, and **generalised the parity test** so the ungrantable set stays enforced.
 
-Frontend (`apps/web`) and dependency auditing remain **out of scope**.
+8. **2026-09-24 — AI assistant pre-merge review (epic #1315).** Two findings, both found while checking
+   the AI tool PRs against the current `dev` code:
+   [[SEC-073-sa-ungrantable-permissions-not-stripped-at-principal-load\|SEC-073]] (**Medium**): a
+   service account granted `user:manage`/`settings:manage` before the SEC-011 fix still holds that
+   permission, because the principal loader filters grants by catalog only and `UsersController` has no
+   Layer-2 guard. Such an account can still mint an ADMIN over HTTP, and headless via `user_create` once
+   #1343 lands. **Closed 2026-09-24**: the principal loader now strips the SA-ungrantable set, so a
+   legacy grant is inert on every route and channel.
+   [[SEC-074-kb-loadowned-403-vs-404-existence-leak\|SEC-074]] (**Low**): KB write paths return 403 to a
+   non-author for a folder-hidden PUBLISHED article, which confirms it exists (INV-9). The KB AI write
+   tools (#1342) will expose the same response. **Closed 2026-09-24**: `loadOwned` and `restore` run the
+   folder ACL before the authorship 403, so a folder-hidden article is a 404 on every write path.
+
+9. **2026-09-24 — Workflow-engine route gaps from the AI authoring review (epic #1315, PR #1354).**
+   Four findings on the workflow routes, found while reviewing the AI authoring tools. The AI tools
+   already guard them; the HTTP routes do not. Verified against `origin/dev` 62aa1e53.
+   [[SEC-075-connection-default-headers-credential-unprotected\|SEC-075]] (**Medium**): connection
+   `defaultHeaders` can hold a pasted token. `GET /workflow-connections[/:id]` (`workflow:read`, which
+   service accounts can be granted) returns the values, and a `workflow:manage`-only principal can
+   re-point the host so the header goes to it, because CSEC-1 only covers `secretId`.
+   [[SEC-076-connection-url-userinfo-credential\|SEC-076]] (**Low**): `publicHttpsUrl` accepts
+   `https://user:pass@host`, which Node sends as `Authorization: Basic`, a credential kept in plain config.
+   [[SEC-077-workflow-enable-version-race\|SEC-077]] (**Low**): enable and version authoring take no
+   expected version, so a version authored after a review goes live unseen.
+   [[SEC-078-dry-run-offboarded-sample-grantee\|SEC-078]] (**Low**): the dry-run renders an offboarded
+   sample grantee's details (nested include without a soft-delete filter, the SEC-040 class).
+   SEC-074 was not affected by this change (closed separately). **All four ✅ closed the same day** (epic
+   #1315): header values and URL userinfo redacted on read and gated under `workflow:secrets`,
+   userinfo refused on write (legacy rows keep running, flagged), `expectedVersion` / `baseVersion` 409 preconditions, and
+   the dry-run refuses offboarded or revoked samples.
+
+10. **2026-09-24 — Auth.js dependency advisories (#1399).** `bun audit` flagged `next-auth@5.0.0-beta.31`
+   for four advisories (GHSA-8fpg, GHSA-7rqj, GHSA-xmf8, GHSA-x445). Only GHSA-8fpg applies:
+   [[SEC-079-next-auth-advisories-config-error-fail-open\|SEC-079]] (**Low**). A server config error made
+   the web's `!session` guards fail open. This affected only the UI shell, because the API still
+   authorizes on its own Bearer. **✅ Closed the same day**: upgraded to beta.32, and every server-side
+   guard now requires `session.user` through `hasSession()`.
+
+11. **2026-09-25 — AI assistant, MCP and OAuth integrated review (epic #1315, W4-2).** Gates G1–G4
+   re-run over the integrated feature on `origin/dev` 8012f468, plus a sweep of `apps/api/src/{ai,oauth,mcp}`
+   and the web surfaces that render model or untrusted content → [[sweep-2026-09-25-ai-assistant]]. G1 and
+   G4 pass; G2 and G3 pass with findings. Four new findings:
+   [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools\|SEC-080]] (**Medium**): the chat's
+   untrusted-source marker is keyed on `entityRefs`, which real read tools never return. A write
+   proposed in the same turn after reading a KB article, a search hit or an asset note therefore shows
+   no banner and is auto-approved. The documents say this case is closed.
+   [[SEC-081-sa-mutation-cap-counts-batch-as-one\|SEC-081]] (**Low**): the per-SA AI mutation cap
+   counts calls, so a 200-row batch counts as one change.
+   [[SEC-082-oauth-consent-admin-step-up-no-backoff\|SEC-082]] (**Low**): the `lazyit.admin` consent
+   step-up has only a 10-per-minute window, no per-account backoff, and no audit of failures.
+   [[SEC-083-mcp-query-token-scan-unbounded-before-gates\|SEC-083]] (**Low**): the `/mcp` query-token
+   revocation runs one DB lookup per value, unbounded, before the MCP-off 404 and the IP limiter.
+   All four ✅ closed the same day (#1315): SEC-080 and SEC-081 in #1433, SEC-082 and SEC-083 in #1431.
+
+12. **2026-09-25 — Mermaid 12 upgrade follow-up (#1429, born closed).**
+   [[SEC-084-mermaid-html-labels-remote-image-load\|SEC-084]] (**Low**): `flowchart.htmlLabels: false`
+   is deprecated and no longer stops flowchart node labels rendering as HTML, so a KB author's `<img>`
+   in a node label loaded a remote image for every reader (a tracking pixel; strict mode still stripped
+   script). **✅ Closed the same day**: the root `htmlLabels: false`, listed in `secure` so a diagram's
+   directive or front matter cannot re-enable it.
+
+13. **2026-09-26 — AI invariants join [[INVARIANTS]] (epic #1315, W4-4).** Not a sweep: INV-AI-1…17
+   (with INV-MCP-1…7 mapped onto them) became binding invariants with their enforcement points and tests,
+   re-verified against `dev` at 23038bae after the SEC-080…083 fixes, #1428, #1432/#1439 and #1435. All
+   seventeen hold; no new finding. One test gap is recorded, not filed: the `ai_action_log` append-only
+   trigger (INV-AI-10) is pinned only by application-level tests, since the Jest suite runs without
+   Postgres.
+
+14. **2026-09-26 — User serialization leak (born closed).**
+   [[SEC-085-user-credential-columns-serialized\|SEC-085]] (**High**): `serializeUsers` spread the whole
+   `User` row, and the asset owner include was `user: true`, so the argon2id `passwordHash`, `sessionEpoch`,
+   `mcpCredentialEpoch` and the other internal columns reached every `user:read` holder (`/users`,
+   `/users/:id`), every caller of `/users/me`, and every `asset:read` holder, VIEWER included
+   (`/assets/:id`, `/assets/:id/assignments`). Affects every release from v1.3.0 through v1.11.0 (current
+   `master`). **✅ Closed the same day**: the wire shape is built from the `PUBLIC_USER_SELECT` allowlist,
+   which is pinned to `UserSchema`. A client-level Prisma `omit` is an escalated follow-up.
+
+Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
+one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
+covered only the AI web surfaces (chat renderer, approval cards,
+consent page, `/account/ai`).
 
 ## Counts by severity (open)
 
@@ -65,10 +146,10 @@ Frontend (`apps/web`) and dependency auditing remain **out of scope**.
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 3 |
-| Low | 12 |
+| Medium | 0 |
+| Low | 11 |
 | Info | 0 |
-| **Total open** | **15** |
+| **Total open** | **11** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -77,15 +158,11 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 | ID | Sev | Module | Title |
 | --- | --- | --- | --- |
-| [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] | 🟠 Medium | users | Last-admin lockout via `PATCH {isActive:false}` (skips `assertNotLastAdmin`) |
-| [[SEC-051-application-url-scheme-guard-port-carveout-bypass\|SEC-051]] | 🟠 Medium | applications | URL `host:port` carve-out accepts `javascript:1/…` → re-opens the SEC-008 XSS class |
-| [[SEC-072-asset-specs-schema-global-bound-and-deep-equal-guard\|SEC-072]] | 🟠 Medium | assets/import | `AssetSpecsSchema` has no global structural bound + `jsonDeepEqual` has no depth guard — extends SEC-032, now import-reachable |
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
 | [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] | 🟡 Low | users | `isActive` not reverted on a Zitadel write-back 503 (bounded INV-5 divergence) |
 | [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
-| [[SEC-032-asset-specs-deep-nesting-recursion-dos\|SEC-032]] | 🟡 Low | assets | Deeply-nested `specs` jsonb → unbounded recursion in `jsonDeepEqual` (stack-overflow 500) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
 | [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] | 🟡 Low | applications | App/consumable create/update attach to a soft-deleted `categoryId` (no `assertCategoryUsable`) |
@@ -95,14 +172,52 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 ## Top findings
 
+0. **SEC-085 ✅ Closed.** Born closed (fixed 2026-09-26): User responses and embedded asset owners go
+   through the `PUBLIC_USER_SELECT` allowlist, so credential columns and epochs never leave the API. No
+   data change. Released instances (v1.3.0–v1.11.0) exposed hashes until they upgrade, so local-mode
+   operators should consider password resets.
+0. **SEC-080 / SEC-081 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315). The untrusted-source
+   marker is now derived from the `<untrusted_content>` wrapping of any read or answered form, using
+   the result's refs or a synthetic `toolResult` ref. A write proposed after reading other-authored text
+   in the same turn therefore shows the banner and is never auto-approved. The per-SA mutation cap now
+   counts a batch's rows through the descriptor's `mutationWeight`, and a call that would pass the cap is
+   refused whole. No data change.
+0. **SEC-082 / SEC-083 ✅ Closed.** Moved to `closed/` (fixed 2026-09-25, #1315): the consent's
+   `lazyit.admin` password goes through the shared `PasswordStepUpVerifier`, so the chat approvals and
+   the consent share one per-account backoff, and each refused attempt is audited
+   `CONSENT_STEP_UP_FAILED`. The `/mcp` query-token scan is charged to the per-IP limiter first and reads
+   at most 4 well-formed values in one query. No data change.
+0. **SEC-084 ✅ Closed.** Born closed (fixed 2026-09-25, after #1429): mermaid is initialised with the
+   root `htmlLabels: false`, and `htmlLabels` is a `secure` key, so every diagram label is SVG text and
+   a KB author can no longer load a remote image in a reader's browser. No data change; HTML tags in
+   existing labels now show as literal text.
+0. **SEC-079 ✅ Closed.** Born closed (fixed 2026-09-24, #1399): `next-auth` upgraded to beta.32, and the
+   web session guards now require `session.user` rather than a truthy `auth()` result. No data change.
+0. **SEC-075 / SEC-076 / SEC-077 / SEC-078 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24, #1315):
+   connection `defaultHeaders` values and legacy URL userinfo are redacted on every read and a
+   `[redacted]` PATCH value keeps the stored one; changing a header value or re-pointing a connection
+   that carries headers needs `workflow:secrets` (CSEC-1); userinfo is refused on write while legacy
+   rows keep running and are flagged `legacyUserinfo` for a UI warning; enable / version authoring take optional `expectedVersion` /
+   `baseVersion` checked under a row lock (409); the dry-run refuses an offboarded grantee or a
+   revoked grant. Stored rows are untouched.
+0. **SEC-074 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24): the KB write paths (`loadOwned`, and
+   the soft-delete `restore`) check the folder ACL before the authorship 403, so a published article in
+   a folder the caller cannot read is a 404, the same as a missing id (INV-9). No data change.
+0. **SEC-073 ✅ Closed.** Moved to `closed/` (fixed 2026-09-24): `resolveServiceAccountPermissions`
+   strips the SA-ungrantable set when the principal is built, so a `user:manage` / `settings:manage`
+   grant written before SEC-011 is inert over HTTP, MCP and headless AI. Legacy rows are kept (no
+   migration) and removed on the next admin save of the grant set.
 1. **SEC-020 ✅ Closed.** Moved to `closed/` (fixed: JIT email-link now checks `email_verified`).
-2. **SEC-051 (Medium) — SEC-008 XSS class re-opened.** The `^\d+(\/.*)?$` host:port carve-out in
-   `isSafeApplicationUrl` accepts `javascript:1/alert(document.cookie)` (the `1/…` is valid JS division),
-   evading the SEC-008 fix on both create and update. The predicate is exported for frontend reuse →
-   escalates to High once a renderer exists.
+2. **SEC-051 ✅ Closed.** Moved to `closed/` (fixed 2026-09-23, #1320): the `host:port` carve-out in
+   `isSafeApplicationUrl` no longer reads a browser-interpreted scheme (`javascript`, `vbscript`,
+   `data`, `file`, …) as a host, and the check also runs on the character-reference / percent-decoded
+   value. Re-closes the SEC-008 class on create and update.
 3. **SEC-011 ✅ Closed.** Moved to `closed/` (SA coarse-permission escalation fixed).
 4. **SEC-031 ✅ Closed.** Moved to `closed/` (assignment release TOCTOU fixed).
-5. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
+   last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
+   of offboarding them).
+6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
@@ -110,7 +225,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    (`ConsumableCategory` registered) and its consumable half by guarding the explicit
    `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
    archived-view slice).
-5. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
+7. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.
 

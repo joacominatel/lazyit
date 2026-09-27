@@ -3,7 +3,7 @@
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { Callout } from "@/components/callout";
-import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
+import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 
 /**
  * BYOI graceful-degradation banner on the Users page (ADR-0043 §5d / §7b). When the instance runs a
@@ -13,7 +13,7 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
  */
 export function ByoiBanner() {
   const t = useTranslations("users.list.byoi");
-  const { data: status } = useConfigStatus();
+  const { data: status } = useClientOnlyConfigStatus();
 
   if (status?.integrationMode !== "generic-oidc") {
     return null;

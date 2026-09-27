@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Hanken_Grotesk } from "next/font/google";
 import localFont from "next/font/local";
+import { headers } from "next/headers";
 import { getLocale, getMessages } from "next-intl/server";
 import { auth } from "@/auth";
+import { hasSession } from "@/lib/auth/has-session";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -55,7 +57,15 @@ export default async function RootLayout({
   // Bearer token isn't in the client store until SessionTokenSync's post-mount effect — leaving a
   // first-paint window where queries fired without an Authorization header and got spurious 401s
   // (issue #498, ADR-0039). Public routes get `null` and behave exactly as before.
-  const [locale, messages, session] = await Promise.all([getLocale(), getMessages(), auth()]);
+  const [locale, messages, session, requestHeaders] = await Promise.all([
+    getLocale(),
+    getMessages(),
+    auth(),
+    headers(),
+  ]);
+  // The per-request CSP nonce `proxy.ts` minted (#1440). Next stamps it on its own scripts by itself;
+  // next-themes' inline theme script needs it handed over explicitly.
+  const nonce = requestHeaders.get("x-nonce") ?? undefined;
 
   // A single server-render "now", forwarded to the intl provider so next-intl's `useNow()` returns
   // the same instant on the server and on the first client render — otherwise each pass calls its own
@@ -72,7 +82,14 @@ export default async function RootLayout({
       className={`${hankenGrotesk.variable} ${commitMono.variable} ${redaction.variable}`}
     >
       <body className="min-h-svh antialiased">
-        <Providers locale={locale} messages={messages} now={now} session={session}>
+        {/* Seed only a real session: a truthy error object would read as `authenticated` (#1399). */}
+        <Providers
+          locale={locale}
+          messages={messages}
+          now={now}
+          session={hasSession(session) ? session : null}
+          nonce={nonce}
+        >
           {children}
         </Providers>
       </body>

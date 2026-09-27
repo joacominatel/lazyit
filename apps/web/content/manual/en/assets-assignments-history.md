@@ -87,12 +87,29 @@ Recorded events include:
 - **Status** changes — for example Operational → In maintenance.
 - **Location** and **Model** changes.
 - **Specs** changes — edits to custom fields.
+- **Updated** — edits to the asset's other details (name, serial, tag, notes, company, dates, cost); the
+  entry lists which fields were edited — for example *Changed: Name, Notes* — never their old or new
+  values, and marks an edit that came from a re-import *via re-import*. Entries recorded before this
+  list existed read *Details updated*. The edit also shows in
+  [Reports](/help/notifications-activity-activity-reports).
 - **Assigned** and **Released** — ownership changes, naming the owner involved.
 - **Acknowledged** — an owner confirmed receipt of the asset checked out to them.
+- **Consumable delivered** and **Consumable returned** — supplies fitted to or left in the asset (a
+  toner in a printer, a spare disk in a server), with the quantity and a link to the consumable; and
+  units of a returnable item given back. See
+  [Stock movements](/help/consumables-stock-movements).
 
 Each entry records **what changed, when, and by whom** (or "System" when lazyit acted on its own).
 Together with soft delete everywhere, this gives you the audit trail of an asset's whole life without
 any extra bookkeeping.
+
+## Consumables delivered to the asset
+
+An asset's page has a **Consumables delivered** section: every consumable delivered
+to this asset, newest first, with the quantity and when. A returnable item shows what is still
+**outstanding** and offers **Return…**; **Deliver consumable** records a new delivery to the asset
+without leaving the page. Both need permission to record stock movements. The section is hidden if you
+cannot view consumables. See [Stock movements](/help/consumables-stock-movements).
 
 ## What's next
 

@@ -3,7 +3,7 @@ title: Docker Build & Boot Troubleshooting
 tags: [runbook, docker, troubleshooting]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-09
+updated: 2026-09-07
 ---
 
 # Runbook — Docker build & boot troubleshooting
@@ -55,11 +55,14 @@ stops emitting standalone, confirm `output: 'standalone'` is still set.
 `NEXT_PUBLIC_API_URL` is baked at **build** time (default `/api`, a build ARG). To point the web
 app elsewhere, rebuild with `--build-arg NEXT_PUBLIC_API_URL=…` — it cannot be changed at runtime.
 
-The workspace install and `@lazyit/shared` build use the pinned Bun 1.3.14 tooling stage, but the
+The workspace install and `@lazyit/shared` build use the pinned Bun 1.4.2 tooling stage, but the
 Dockerfile copies that workspace into a `node:26-trixie-slim` stage and invokes the Next.js CLI with
 `node`. Do not replace that command with `bun run --filter @lazyit/web build`: with Next.js 16.3,
-Bun can finish route generation and then crash during process teardown with `SIGILL` / exit 132.
-The failure is in the build runtime, not in route generation or the standalone output.
+Bun 1.3.14 could finish route generation and then crash during process teardown with `SIGILL` /
+exit 132. The failure was in the build runtime, not in route generation or the standalone output.
+It no longer reproduces on Bun 1.4.2 (3/3 clean builds), but the web build stays on Node by design
+([[0025-containerization-strategy]]); if you see exit 132 from a web build, check that it is not
+running the Next.js CLI under Bun.
 
 ## API exits immediately: `DATABASE_URL is not set`
 
@@ -133,6 +136,46 @@ For a real domain on a public host, Caddy uses Let's Encrypt (publicly trusted) 
 On the high ports (8080/8443), Caddy's automatic HTTP→HTTPS redirect targets the standard `:443`
 (it doesn't know the external host port). Just open **https://localhost:8443** directly. On a real
 host using 80/443 this is a non-issue.
+
+## `error: lockfile had changes, but lockfile is frozen`
+
+All three build stages (`api`, `web`, `migrate`) install with `--frozen-lockfile`, so the build
+fails when `bun.lock` does not already describe the exact resolution the manifests ask for. The
+retry loop cannot help: this is deterministic, so all three attempts print the same error.
+
+```
+error: lockfile had changes, but lockfile is frozen
+note: try re-running without --frozen-lockfile and commit the updated lockfile
+```
+
+Two causes, and they need different answers:
+
+1. **A manifest changed without the lockfile.** Someone edited a `package.json` and did not commit
+   the regenerated `bun.lock`. Fix it in the repository: run `bun install` with the pinned Bun
+   (`1.4.2`) and commit `bun.lock` in the same change.
+2. **A manifest uses a dist-tag or an open range.** `"latest"` and `"*"` are not semver ranges, so
+   Bun re-resolves them against the registry on every install. The moment upstream publishes, a
+   lockfile that nobody touched is out of date and every build breaks — including an operator's
+   in-place upgrade. Pin a real range instead ([[code-conventions]] § Dependency ranges).
+
+Diagnose without guessing — regenerate into a throwaway copy and diff:
+
+```sh
+git archive HEAD | tar -x -C /tmp/lockcheck
+(cd /tmp/lockcheck && bun install --lockfile-only)
+diff bun.lock /tmp/lockcheck/bun.lock
+```
+
+The diff names the packages that moved. Reproduce the failure the way the image does, from a tree
+holding only the manifests and the lockfile, with the Bun version the Dockerfiles pin:
+
+```sh
+bun install --frozen-lockfile
+bun install --frozen-lockfile --linker hoisted --filter "@lazyit/api"   # migrate stage
+```
+
+Never work around it by dropping `--frozen-lockfile` from a Dockerfile. That trades a loud build
+failure for images whose dependency tree differs from the one CI tested.
 
 ## `bun install` fails with tarball/extraction error mid-build
 

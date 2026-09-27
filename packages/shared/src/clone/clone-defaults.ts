@@ -121,6 +121,7 @@ export function cloneConsumableDefaults(source: Consumable): Partial<{
   minStock: number | undefined;
   unit: string;
   notes: string | undefined;
+  returnable: boolean | undefined;
 }> {
   return {
     name: withCopySuffix(source.name),
@@ -129,6 +130,8 @@ export function cloneConsumableDefaults(source: Consumable): Partial<{
     minStock: orUndefined(source.minStock),
     unit: source.unit,
     notes: orUndefined(source.notes),
+    // Returnable is a property of the item, so the clone carries it (ADR-0098). Absent on an older read.
+    returnable: orUndefined(source.returnable),
     // Unique field — cleared.
     sku: undefined,
   };

@@ -35,6 +35,18 @@ la credencial. lazyit únicamente te indica si una credencial está *configurada
 custodia de credenciales puede separarse de la construcción de flujos (consulta
 [Permisos](/help/access-automation-permissions)).
 
+Guarda los tokens en la credencial, nunca en la dirección ni en una cabecera por defecto:
+
+- Una URL que lleva usuario o contraseña (`https://usuario:clave@host`) se **rechaza al guardar** la
+  conexión. Una conexión guardada así antes de esta regla **sigue funcionando**, pero muestra la
+  dirección como `https://[redacted]@host` y el formulario de la conexión avisa de que la URL lleva
+  credenciales. Muévelas: quita el usuario y la contraseña de la dirección (es obligatorio para
+  guardar) y añádelos como credencial de la conexión.
+- Las **cabeceras por defecto** (configuradas por la API) se tratan como una credencial: lazyit
+  muestra sus nombres pero cada valor como `[redacted]`, y al guardar la conexión se conservan los
+  valores almacenados. Cambiar el valor de una cabecera, o la dirección de una conexión que las tiene,
+  requiere `workflow:secrets`.
+
 ## 2. Añade pasos
 
 Elige **Nuevo flujo**, dale un nombre, escoge su **disparador** (Acceso concedido o Acceso revocado)
@@ -59,8 +71,12 @@ cada uno. Un valor puede ser un literal fijo, un único **token** del contexto d
 varios tokens y texto **compuestos** juntos. Los tokens se insertan desde un selector agrupado por
 origen:
 
-- **Evento disparador**, **Beneficiario** (correo, nombre, apellido, id), **Aplicación**,
-  **Concesión** y las salidas de pasos anteriores.
+- **Evento disparador**, **Beneficiario** (correo, nombre, apellido, id, legajo, nombre de usuario,
+  y el nombre y correo de su responsable), **Aplicación**, **Concesión** y las salidas de pasos
+  anteriores. Un token queda vacío cuando lazyit no tiene el dato: el legajo y el nombre de usuario
+  cuando nunca se cargaron, los dos tokens del responsable cuando la persona no tiene responsable o
+  su responsable fue desvinculado, y el correo del responsable cuando el responsable es solo un
+  nombre en texto libre.
 
 Mapeas eligiendo un campo de contexto, componiéndolo, o — mediante **Avanzado** — editando
 directamente el JSON del mapeo. Los tokens se escriben así: `{{ grantee.email }}`. El mapeo es **solo
@@ -94,6 +110,10 @@ en lugar de una línea recta ciega.
 Un flujo solo se dispara cuando está **Activado**. Actívalo desde la lista de flujos (o en el
 constructor) cuando estés listo. Antes de activarlo, valídalo con una **simulación** y con **Probar
 conexión** — consulta [Pruebas y observabilidad](/help/access-automation-testing-observability).
+
+Activar desde la lista de flujos va ligado a la versión que estás viendo: si alguien guardó una
+versión más nueva de los pasos entretanto, el interruptor se rechaza con un conflicto. Recarga la
+página, revisa la nueva versión y vuelve a activarlo.
 
 ## Política de desaprovisionamiento con varias concesiones
 

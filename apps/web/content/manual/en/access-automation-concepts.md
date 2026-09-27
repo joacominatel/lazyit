@@ -54,8 +54,9 @@ leads to a retry, not a duplicate account.
 Access Automation is **application-access provisioning** — nothing more. It is not an HR or
 onboarding system, not an identity-governance or access-review subsystem, and not a general workflow
 builder for arbitrary business logic. The data a workflow can send outward is limited to the
-grantee's basic details (email, first and last name, id), the application, and the grant context.
-There are no role, team, or manager fields to map — by design.
+grantee's identity details (email, first and last name, id, employee number, username, and their
+manager's name and email), the application, the grant context, and the results of earlier steps.
+There are no role or team fields to map — by design.
 
 ## Where to go next
 

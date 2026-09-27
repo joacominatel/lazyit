@@ -11,37 +11,47 @@
  * Scope: JSON values only (the shape `specs` can hold). `null`/`undefined` are treated as the same
  * "empty" so an absent vs explicitly-null spec doesn't read as a change. Not a general deep-equal
  * (no Date/Map/Set/cycles) — `jsonb` round-trips as plain JSON, so those never occur here.
+ *
+ * ITERATIVE, NOT RECURSIVE (SEC-032 / SEC-072). This runs on specs already in the database, which may
+ * predate the write bound in `@lazyit/shared` and nest arbitrarily deep; a recursive walk would overflow
+ * the call stack on such a row and turn every later update of it into a 500. An explicit stack keeps
+ * the result exact at any depth, so a legacy row neither fails nor reports a change that did not happen.
  */
 export function jsonDeepEqual(a: unknown, b: unknown): boolean {
-  // Treat null and undefined as equivalent "no specs".
-  if (a == null && b == null) return true;
-  if (a == null || b == null) return false;
+  const pending: [unknown, unknown][] = [[a, b]];
+  while (pending.length > 0) {
+    const [x, y] = pending.pop()!;
+    // Treat null and undefined as equivalent "no specs".
+    if (x == null && y == null) continue;
+    if (x == null || y == null) return false;
 
-  if (a === b) return true;
+    if (x === y) continue;
 
-  const aIsArray = Array.isArray(a);
-  const bIsArray = Array.isArray(b);
-  if (aIsArray !== bIsArray) return false;
+    const xIsArray = Array.isArray(x);
+    const yIsArray = Array.isArray(y);
+    if (xIsArray !== yIsArray) return false;
 
-  if (aIsArray && bIsArray) {
-    if (a.length !== b.length) return false;
-    return a.every((item, i) => jsonDeepEqual(item, b[i]));
+    if (xIsArray && yIsArray) {
+      if (x.length !== y.length) return false;
+      for (let i = 0; i < x.length; i++) pending.push([x[i], y[i]]);
+      continue;
+    }
+
+    if (typeof x === 'object' && typeof y === 'object') {
+      const xObj = x as Record<string, unknown>;
+      const yObj = y as Record<string, unknown>;
+      const xKeys = Object.keys(xObj);
+      if (xKeys.length !== Object.keys(yObj).length) return false;
+      // Order-insensitive over object keys: every key in `x` must exist in `y` with an equal value.
+      for (const key of xKeys) {
+        if (!Object.prototype.hasOwnProperty.call(yObj, key)) return false;
+        pending.push([xObj[key], yObj[key]]);
+      }
+      continue;
+    }
+
+    // Two distinct primitives (already failed === above).
+    return false;
   }
-
-  if (typeof a === 'object' && typeof b === 'object') {
-    const aObj = a as Record<string, unknown>;
-    const bObj = b as Record<string, unknown>;
-    const aKeys = Object.keys(aObj);
-    const bKeys = Object.keys(bObj);
-    if (aKeys.length !== bKeys.length) return false;
-    // Order-insensitive over object keys: every key in `a` must exist in `b` with an equal value.
-    return aKeys.every(
-      (key) =>
-        Object.prototype.hasOwnProperty.call(bObj, key) &&
-        jsonDeepEqual(aObj[key], bObj[key]),
-    );
-  }
-
-  // Two distinct primitives (already failed === above).
-  return false;
+  return true;
 }

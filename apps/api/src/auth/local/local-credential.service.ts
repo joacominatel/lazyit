@@ -31,12 +31,61 @@ export interface SessionSubject {
   sessionEpoch: number;
 }
 
+/**
+ * The payload claim that marks a "keep me signed in" token (ADR-0086 §8, #1307). Such a token is minted
+ * WITHOUT `exp`, and the verifier accepts a missing `exp` ONLY when this claim is exactly `true` — a token
+ * without the marker must still carry a valid, future `exp`. Signed like every other claim, so it cannot
+ * be added to an existing token without the signing secret.
+ */
+export const REMEMBER_ME_CLAIM = 'rememberMe';
+
+/**
+ * The payload claim naming the per-device session row (`UserSession.id`) a token belongs to (issue #1420,
+ * ADR-0086 §9). Optional: a token minted before per-device sessions existed has none, and the guard keeps
+ * the epoch-only check for it. When present it must be a uuid, and the guard refuses the token once that
+ * row is gone. Signed like every other claim.
+ */
+export const SESSION_ID_CLAIM = 'sid';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Options for {@link LocalCredentialService.mintSession}. */
+export interface MintSessionOptions {
+  /** Mint a token with no time-based expiry (ends only through a `sessionEpoch` bump). Default false. */
+  rememberMe?: boolean;
+  /** The per-device session row this token belongs to (issue #1420); carried as the `sid` claim. */
+  sessionId?: string;
+}
+
+/** A freshly minted session token and when it stops being accepted by time. */
+export interface MintedSession {
+  token: string;
+  /** The token's `exp` in seconds since the Unix epoch, or null when it has no time-based expiry. */
+  expiresAt: number | null;
+}
+
 /** The verified claims carried by a local session token. NOTHING authorization-bearing (no role). */
 export interface SessionClaims {
   /** The User.id the token was minted for. */
   sub: string;
   /** The `sessionEpoch` snapshot at mint time — compared to the live row's epoch to detect revocation. */
   epoch: number;
+  /** Whether this is a "keep me signed in" token (no time-based expiry). */
+  rememberMe: boolean;
+  /** The per-device session row id (`sid`), or null for a token minted before per-device sessions (#1420). */
+  sid: string | null;
+}
+
+/**
+ * What the guard records about the local session that authenticated the current request (set on
+ * `request.localSession` by JwtAuthGuard.handleLocal). Lets a route that re-mints a token — change-password —
+ * preserve the session's "keep me signed in" choice instead of silently downgrading it.
+ */
+export interface LocalSessionContext {
+  rememberMe: boolean;
+  /** The verified token's session row id, or null for a pre-#1420 token (the session list's `current`). */
+  sessionId: string | null;
 }
 
 /** The outcome of {@link LocalCredentialService.verify}. */
@@ -165,6 +214,9 @@ export class LocalCredentialService {
    * authorization-bearing (role is always resolved DB-first every request, INV-1). Short TTL; the epoch
    * is the real revocation lever.
    *
+   * With `rememberMe` ("keep me signed in", ADR-0086 §8) the payload carries {@link REMEMBER_ME_CLAIM}
+   * instead of `exp`: the token never expires by time and ends only when `sessionEpoch` is bumped.
+   *
    * Hand-rolled on `node:crypto` (createHmac) rather than a JWT library — this mirrors the Service-Account
    * token precedent (ADR-0048: node:crypto HMAC + timingSafeEqual, no external crypto framework) and keeps
    * the alg-pin fully unit-testable. The format is a standard `base64url(header).base64url(payload).sig`.
@@ -172,21 +224,30 @@ export class LocalCredentialService {
   // async by CONTRACT (uniform with hash/verify, awaited by callers, throws surface as rejections); the
   // HMAC itself is synchronous, hence no `await`.
   // eslint-disable-next-line @typescript-eslint/require-await
-  async mintSession(subject: SessionSubject): Promise<string> {
+  async mintSession(
+    subject: SessionSubject,
+    options: MintSessionOptions = {},
+  ): Promise<MintedSession> {
     const secret = this.signingSecret();
     const now = Math.floor(Date.now() / 1000);
+    const expiresAt = options.rememberMe
+      ? null
+      : now + SESSION_TOKEN_TTL_SECONDS;
     const header = encodeSegment({ alg: SESSION_TOKEN_ALG, typ: 'JWT' });
     const payload = encodeSegment({
       sub: subject.id,
       epoch: subject.sessionEpoch,
       iat: now,
-      exp: now + SESSION_TOKEN_TTL_SECONDS,
+      ...(options.sessionId ? { [SESSION_ID_CLAIM]: options.sessionId } : {}),
+      ...(expiresAt === null
+        ? { [REMEMBER_ME_CLAIM]: true }
+        : { exp: expiresAt }),
     });
     const signingInput = `${header}.${payload}`;
     const signature = createHmac('sha256', secret)
       .update(signingInput)
       .digest('base64url');
-    return `${signingInput}.${signature}`;
+    return { token: `${signingInput}.${signature}`, expiresAt };
   }
 
   /**
@@ -196,7 +257,10 @@ export class LocalCredentialService {
    *      `alg:none` downgrade and RS256/alg-confusion forgery (mirrors the OIDC path's RS256 pin).
    *   2. CONSTANT-TIME signature check: recompute the HMAC over `header.payload` and `timingSafeEqual` it
    *      against the presented signature (no early-exit byte-compare leak — the SA-token discipline).
-   *   3. Enforce `exp` (expiry) and require a valid string `sub` + integer `epoch`.
+   *   3. Enforce `exp` (expiry) and require a valid string `sub` + integer `epoch`; a present `sid`
+   *      (issue #1420) must be a uuid. A token may omit `exp`
+   *      ONLY when it carries {@link REMEMBER_ME_CLAIM} set to exactly `true` (ADR-0086 §8); a marker-less
+   *      token without a valid future `exp` is rejected, and a present `exp` is always enforced.
    * NEVER trusts a role/permission from the token (there is none in it).
    */
   // async by CONTRACT (see mintSession); HMAC verification is synchronous, so no `await`.
@@ -238,12 +302,18 @@ export class LocalCredentialService {
     if (!payload || typeof payload !== 'object') {
       throw new Error('session token has a malformed payload');
     }
-    const { sub, epoch, exp } = payload as {
-      sub?: unknown;
-      epoch?: unknown;
-      exp?: unknown;
-    };
-    if (typeof exp !== 'number' || exp <= Math.floor(Date.now() / 1000)) {
+    const claims = payload as Record<string, unknown>;
+    const { sub, epoch, exp } = claims;
+    const rememberMe = claims[REMEMBER_ME_CLAIM] === true;
+    if (!('exp' in claims)) {
+      // No `exp` is legitimate ONLY for a signed "keep me signed in" token; anything else fails closed.
+      if (!rememberMe) {
+        throw new Error('session token is missing an expiry');
+      }
+    } else if (
+      typeof exp !== 'number' ||
+      exp <= Math.floor(Date.now() / 1000)
+    ) {
       throw new Error('session token is expired');
     }
     if (typeof sub !== 'string' || sub.length === 0) {
@@ -252,7 +322,17 @@ export class LocalCredentialService {
     if (typeof epoch !== 'number' || !Number.isInteger(epoch)) {
       throw new Error('session token is missing a valid epoch claim');
     }
-    return { sub, epoch };
+    // `sid` is optional (a pre-#1420 token has none), but a present one must be a uuid — never let a
+    // malformed value reach the uuid column.
+    let sid: string | null = null;
+    if (SESSION_ID_CLAIM in claims) {
+      const raw = claims[SESSION_ID_CLAIM];
+      if (typeof raw !== 'string' || !UUID_REGEX.test(raw)) {
+        throw new Error('session token has a malformed session id');
+      }
+      sid = raw;
+    }
+    return { sub, epoch, rememberMe, sid };
   }
 
   /**

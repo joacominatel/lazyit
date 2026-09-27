@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-20
+updated: 2026-09-26
 ---
 
 # User
@@ -21,6 +21,16 @@ the reverse.
 - **owns** N [[asset]]s via [[asset-assignment]] (with history).
 - **holds** N [[access-grant]]s to [[application]]s.
 - **raises** N [[access-request]]s.
+- **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetUserId` is this
+  user. A delivery of a *returnable* consumable stays outstanding until it is returned.
+  - List them with `GET /consumables/deliveries?targetUserId=` (`outstandingOnly`, `from`/`to`, paged).
+    This also needs `user:read`, so a VIEWER gets 403, the same directory-relational rule as
+    `GET /users/:id/assignments`.
+  - **Offboarding does not move stock or close deliveries.** The offboarding sheet and the Return Act
+    list the leaver's deliveries so the team can ask for returnables back, and each return is recorded
+    as it happens.
+  - The FK is `Restrict`; a soft delete (offboarding) is unaffected
+    ([[0098-consumable-delivery-targets]]).
 - **has** an append-only [[user-history]] — its own lifecycle log (create / update / role change /
   manager change / offboard / restore / password-reset), the User counterpart of [[asset-history]]
   (DEBT-2, #185 — [[0050-user-history-and-activity-user-entity]]). A User is also the **actor** on
@@ -35,11 +45,12 @@ the reverse.
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
-  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit,
-  `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
+  **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit (name, email,
+  legajo, username), `DEACTIVATED` / `REACTIVATED` on a real `isActive` flip (issue #1375), `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
-  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when an IdP reset link is
-  requested (OIDC mode), `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password
+  change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is sent to the
+  subject (by the IdP in OIDC mode, or by lazyit's SMTP on the local `email` delivery),
+  `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password instead
   (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5), and — self-service in local mode ([[0086-local-authentication-mode]] §F4) — `PASSWORD_CHANGED` when the user changes their own password and
   `PASSWORD_RESET_COMPLETED` when they reset it via a forgot-password email token. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
   structured logs remain, but the queryable trail now lives in the DB and surfaces in the
@@ -59,7 +70,27 @@ the reverse.
   and `POST /auth/reset-password` (consumes the token, sets the new password, bumps the epoch, invalidates
   sibling tokens). A `mustChangePassword=true` user is **walled off** from every non-exempt route with a
   `403 { code: 'PASSWORD_CHANGE_REQUIRED' }` until they change it (exempt: change-password, `GET /users/me`,
-  public routes).
+  `POST /auth/logout`, public routes).
+  **Session lifetime (local mode, [[0086-local-authentication-mode]] §8):** a default sign-in lasts 12h; a
+  "keep me signed in" sign-in (`rememberMe`) has **no time-based expiry**. Login and change-password report
+  the token's `expiresAt` (`null` for no expiry). Either kind ends when `sessionEpoch` is bumped — sign-out
+  (`POST /auth/logout`, which ends the user's sessions on every device), password change or reset, admin
+  reset, **deactivation** (an active→inactive update), **offboarding**, and the AD/LDAP sync's **soft
+  offboard** of an active person (#1308) — so reactivating or restoring a user, by hand or by the sync,
+  never revives an old session. The guard also refuses an inactive, soft-deleted or `directoryOnly`
+  row on every request.
+  **Per-device sessions (local mode, [[0086-local-authentication-mode]] §9, #1420):** every sign-in also
+  records a [[user-session]] row (browser, IP, dates, remember-me), and its token carries the row id.
+  `GET /auth/sessions` lists the caller's own live sessions (`current` flagged) and
+  `DELETE /auth/sessions/:id` ends one device without touching the others. `POST /auth/logout` stays
+  "sign out everywhere": it bumps `sessionEpoch` **and** deletes every session row. Tokens issued before
+  the upgrade have no row and keep the epoch-only check.
+  **MCP credentials have their own counter.** `mcpCredentialEpoch` (`int`, default 0) is what every
+  [[oauth-grant]] (OAuth connection or personal MCP token) snapshots. Every lever above bumps it together
+  with `sessionEpoch` — password change or reset, admin reset (and the admin *revoke sessions* option),
+  the recovery CLI, deactivation, offboarding, the sync's soft offboard — **except sign-out**:
+  `POST /auth/logout` ends web sessions only and leaves the user's MCP connections alive
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24).
 - **Authorization (Roles & Permissions v2):** the three roles stay **fixed** —
   `enum Role { ADMIN MEMBER VIEWER }` is unchanged ([[0040-rbac-roles]]) — but what each role *grants*
   is now a configurable set of **fine-grained permissions** ([[0046-roles-permissions-v2]]). A privilege
@@ -85,6 +116,13 @@ the reverse.
 
 - **ID:** `uuid()` — sensitive / externally-exposed entity ([[0005-id-strategy]]).
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt`.
+- **Wire shape is an allowlist ([[SEC-085-user-credential-columns-serialized\|SEC-085]]):** a User leaves the API
+  only through `PUBLIC_USER_SELECT` (`apps/api/src/users/public-user.ts`) — the `UserSchema` columns plus
+  the resolved `manager` descriptor. Every `/users` response goes through `serializeUsers`, and a relation
+  that embeds a User uses `include: { user: { select: PUBLIC_USER_SELECT } }`, never `user: true`.
+  `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`, `mustChangePassword`,
+  `notificationEmailOptOutTypes`, the raw manager columns and the AD reconcile keys never reach a client.
+  A new column stays server-side until it is added to both `UserSchema` and the allowlist.
 
 ## Fields
 
@@ -113,7 +151,9 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
-| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Cleared if the person reappears in a later sync ([[0091-on-prem-ad-ldap-directory-source]]). |
+| `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
+| `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
+| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -135,7 +175,10 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > `isActive = false` means the person is **offboarded/disabled but retained** (past
 > assignments and access grants still reference them) — this is the offboarding rule above. `deletedAt` means the
 > record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
-> deleted. Creation always starts active; deactivation is a `PATCH`.
+> deleted. Creation always starts active; deactivation is a `PATCH`. An inactive account cannot
+> authenticate, so deactivation strips administrator powers like a demotion does: deactivating the
+> **last active ADMIN** is refused (409), and the last-admin guard counts only live, active ADMINs
+> ([[0040-rbac-roles]], SEC-021).
 
 > [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
 >
@@ -192,20 +235,25 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
 > a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
 > `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
-> DISAPPEARED past a grace threshold → soft offboard. **Hard invariants:** the sync never changes `role`,
-> never sets `passwordHash`/`externalId`, never flips `directoryOnly`→false, never grants a login, never
-> hard-deletes. `provisionAccount`/`provisionLocalAccount` stay the ONLY login-granting paths.
+> DISAPPEARED past a grace threshold → soft offboard (bumping `sessionEpoch` when the person was active,
+> #1308). **Hard invariants:** the sync never changes `role`, never sets `passwordHash`/`externalId`,
+> never flips `directoryOnly`→false, never grants a login, never hard-deletes, and writes `sessionEpoch`
+> only as that offboard's revoking increment. `provisionAccount`/`provisionLocalAccount` stay the ONLY
+> login-granting paths.
 
 ## Endpoints
 
 `apps/api/src/users/` (`UsersModule`): `GET /users` (excludes soft-deleted; accepts `?directoryOnly`
 and `?role` filters — `?role=ADMIN|MEMBER|VIEWER` scopes the list to one role, validated by
 `RoleSchema` → 400 on an unknown value; backs the Settings → Roles "View N members" deep-link, issue
-#693), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
+#693; `?isActive=true|false` scopes it to enabled or deactivated accounts — anything else → 400,
+absent = both, issue #1375), `GET /users/role-counts` (per-role LIVE counts `{ ADMIN, MEMBER, VIEWER }` from one Prisma
 `groupBy` over the active directory — the Settings → Roles card counts; declared before `:id` so the
 literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 (the current authenticated caller, **including their role** — declared before `:id` so the literal
 `me` isn't parsed as a uuid; the OIDC token doesn't carry the lazyit role, so the web reads it here),
+`PATCH /users/me` (the caller edits **their own first and last name** — see the self-service note below),
+`GET` / `PUT /account/preferences` (the caller's language and theme — see the preferences note below),
 `GET /users/:id`, `POST /users`, `POST /users/:id/clone` (clone-with-chosen-actions —
 [[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
 `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
@@ -218,7 +266,8 @@ reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in 
 `user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
 nested reads below) are gated `@RequirePermission('user:read')` — ADMIN + MEMBER (a VIEWER gets 403;
 this is the pre-tightening). `GET /users/me` stays OPEN (the self-read the web gates its UI off; the
-OIDC token doesn't carry the lazyit role). Bodies validated against the
+OIDC token doesn't carry the lazyit role), and so does `PATCH /users/me` (a self-write of the caller's
+own name only). Bodies validated against the
 shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). Also
 `GET /users/:id/assignments?activeOnly=` lists the assets assigned to the user ([[asset-assignment]])
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
@@ -236,6 +285,38 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > additive**: the single-user reads (`GET /users/:id`, `/me`, create/update) return the bare
 > `UserSchema` and DON'T carry them, so existing consumers are unaffected. The page envelope itself is
 > unchanged (ADR-0030 `Page<T>` — the counts ride on each row).
+
+> [!note] Self-service name edit — `PATCH /users/me` (issue #1421)
+> Any signed-in **human** — VIEWER included — may change **their own `firstName` and `lastName`, and
+> nothing else** (CEO decision). The body is `UpdateOwnProfileSchema` in `@lazyit/shared`: a strict
+> object with those two optional keys (at least one), same bounds as the admin edit; **any other key is
+> a 400**. Email, role, legajo, username, manager and activation stay on the ADMIN-only
+> `PATCH /users/:id` (`user:manage`). The subject is always the caller (the id comes from the
+> principal, never the body), so there is no cross-user write and no permission gate.
+> - **Directory-owned people are refused** with **409 `{ code: 'PROFILE_MANAGED_BY_DIRECTORY' }`**:
+>   when `directorySource` is set the AD/LDAP sync owns the name and would overwrite the edit on the next
+>   run ([[0091-on-prem-ad-ldap-directory-source]]). `UserSchema` now carries the optional
+>   `directorySource` so the web can disable the form instead of offering a request that always fails.
+>   (A `directoryOnly` person has no login and cannot reach the route; it is refused the same way.)
+> - **Service accounts are refused** (403 — fail-closed on an unannotated route, INV-SA-2, plus a
+>   handler backstop with `code: 'SERVICE_ACCOUNT_NOT_ALLOWED'`); a bot has no person record.
+> - It runs through the **same update path as the admin edit**: the name is mirrored to the bundled
+>   Zitadel with the 503-and-revert rule (INV-5), the search index is refreshed, and one
+>   **`UPDATED { fields: ['name'] }`** [[user-history]] row is written with the **caller as actor**.
+>   Resending the stored name is not a change and writes nothing. Under BYOI the name is local only
+>   (lazyit never writes to a foreign IdP), and a later sign-in does **not** overwrite it — the JIT
+>   path only refreshes a name that still looks like a seed placeholder ([[0038-jit-user-provisioning]]).
+
+> [!note] Per-user language and theme — `/account/preferences` (issue #1422)
+> The CEO chose **"the browser's value wins"**. `GET /account/preferences` returns `{ locale, theme }`
+> (`UserPreferencesSchema`); `PUT /account/preferences` takes either key (`UpdateUserPreferencesSchema`:
+> strict, at least one key; omitted = unchanged, `null` = back to never chosen). `GET /users/me` also
+> carries `locale` and `theme`. Self-only (the id is the principal's), any signed-in human, no
+> permission; service accounts get 403. **Precedence on the web:** the browser's own value (the
+> `NEXT_LOCALE` cookie, next-themes' `localStorage`) wins; the stored value is applied **only** in a
+> browser with no preference of its own; changing either in the UI also saves it here, so it follows the
+> user to other devices ([[0051-i18n-next-intl]] amendment). **No [[user-history]] row** — a display
+> preference is not a change to the person record (the same call as the email opt-outs, #879).
 
 > [!note] RBAC safety guards (ADR-0040, Round 3)
 > Changing a `role` is governed by two service-level guards. The API **refuses to remove the last
@@ -259,11 +340,23 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > ZITADEL's SMTP**. It is refused for an **inactive** user (**422**), returns **204**, and surfaces an
 > honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
 > IdP link ([[INVARIANTS]] INV-4) — never a misleading success. In **`AUTH_MODE=local`** mode
-> ([[0086-local-authentication-mode]] §5) the same endpoint instead mints a **one-time local temp-password**,
-> hashes it (argon2id), sets `mustChangePassword`, **bumps `sessionEpoch`** (revoking the subject's existing
-> sessions), audits `PASSWORD_RESET_BY_ADMIN` and returns **200** with `{ temporaryPassword }` (shown once —
-> no IdP, no SMTP). It is refused for an inactive user or a **directory-only** person (**422**). Directory-only
-> rows never receive a credential via any path.
+> ([[0086-local-authentication-mode]] §5, amended by #1268) the admin instead chooses the **delivery** on an
+> optional body `{ delivery, revokeSessions? }` — the body is optional so a pre-#1268 caller keeps today's
+> behavior:
+> - `temporary-password` (also the no-body default) mints a **one-time local temp-password**, hashes it
+>   (argon2id), sets `mustChangePassword`, **always bumps `sessionEpoch`** (the stored hash was just
+>   replaced, so a surviving session holds a dead credential), audits `PASSWORD_RESET_BY_ADMIN` and returns
+>   **200** with `{ temporaryPassword }` (shown once).
+> - `email` mints a single-use ≤1h `PasswordResetToken` and sends the link over the **instance SMTP**
+>   ([[0079-instance-smtp-outbound-email]]), audits `PASSWORD_RESET_SENT`, and bumps `sessionEpoch` **only**
+>   when `revokeSessions` is set (sending a link changes no credential). Unlike the enumeration-safe public
+>   forgot flow this path reports honestly: **409** (`reason: smtp-not-configured | origin-unknown`) when the
+>   link cannot be built or sent, **503** when the relay refuses.
+>
+> Both are refused for an inactive user or a **directory-only** person (**422**); directory-only rows never
+> receive a credential via any path. An explicit `delivery` under OIDC/BYOI is a **400** — the choice is
+> local-mode only. `GET /users/password-reset-capabilities` (`user:manage`) publishes which deliveries are
+> actually available, deliberately kept off the `@Public` `GET /config/status`.
 
 > [!note] Create accepts an optional temporary password ([[0064-admin-user-provisioning-credentials]], #411)
 > `POST /users` accepts an **optional** `password` on `CreateUserSchema` — a **temporary** credential for

@@ -15,6 +15,15 @@ import { useArticleCategories } from "@/lib/api/hooks/use-article-categories";
 import { useArticleBySlug } from "@/lib/api/hooks/use-articles";
 import { useWikiLinkResolver } from "@/lib/api/hooks/use-wiki-link-resolver";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { cn } from "@/lib/utils";
+import {
+  READING_CONTAINER,
+  READING_RAIL,
+  READING_RAIL_STICKY,
+  READING_ROW,
+  TOC_RAIL_ONLY,
+  TOC_STACKED_ONLY,
+} from "@/lib/utils/kb-reading-layout";
 import { articleFolderTrail } from "@/lib/utils/kb-reading";
 import { buildKbCreateHref } from "@/lib/utils/kb-wiki-link-prefill";
 import { ArticleConnectionsRail } from "./article-connections-rail";
@@ -25,9 +34,9 @@ import { ArticleToc, ArticleTocDetails, useTocHeadings } from "./article-toc";
 import { ArticleWikiLinkPreviewProvider } from "./article-wiki-link-preview";
 
 /**
- * The calm KB reading view (#1106 Phase 2). A comfortable single reading column with a right rail on
- * `xl+` — no left folder tree yet (that's Phase 3). Won as much by DELETION as addition: the old
- * metadata-dense PageHeader, the four always-on stacked panels and the excerpt blockquote are gone.
+ * The calm KB reading view (#1106 Phase 2). A comfortable single reading column with a right rail once
+ * three columns actually fit. Won as much by DELETION as addition: the old metadata-dense PageHeader,
+ * the four always-on stacked panels and the excerpt blockquote are gone.
  *
  * What renders:
  *  - a FULL folder-path breadcrumb (Knowledge Base › … › home folder › title);
@@ -36,8 +45,21 @@ import { ArticleWikiLinkPreviewProvider } from "./article-wiki-link-preview";
  *  - the excerpt as a quiet muted lede (no blockquote);
  *  - the Phase-1 markdown, with a hover Quick View on resolved `[[wiki-links]]`;
  *  - a prev/next sibling footer;
- *  - a sticky "On this page" TOC + a "Connections" rail (xl rail; TOC collapses to a `<details>` and
- *    Connections stacks below the prose under xl). Each rail section shows only when it has content.
+ *  - a sticky "On this page" TOC + a "Connections" rail (rail from `RAIL_MIN_VIEWPORT`; below that
+ *    the TOC collapses to a `<details>` above the prose and Connections stacks below it). Each rail
+ *    section shows only when it has content.
+ *
+ * WIDTH BUDGET (#1292). Chrome outside this view costs a fixed 568px at `md`+ with the folder tree
+ * showing: the app sidebar (`w-60`), the main padding (`md:p-6`, 48px) and the KB folder rail
+ * (`lg:w-64` + `gap-6`, 280px). The three-column split costs another 328px (`gap-x-10` + `w-72`).
+ * Splitting at `xl` (1280px) therefore left ~544px of prose at 1440px — the `max-w-3xl` cap never
+ * engaged — while `max-w-6xl` capped the block ~200px short of the space available at 1920px.
+ *
+ * So the split is gated on the width where it actually fits rather than on a stock breakpoint:
+ * READING_MEASURE (872px) + 328px + 568px = 1768px, rounded to 1800px. Below it the rail stacks and
+ * the prose takes the full column up to READING_MEASURE; above it the block caps at exactly
+ * READING_MEASURE + 328px, so prose, gap and rail tile the container with nothing dead between them.
+ * The measure is continuous across the breakpoint — 872px on either side of 1800px.
  */
 export function ArticleDetailView({ slug }: { slug: string }) {
   const t = useTranslations("kb");
@@ -76,7 +98,7 @@ export function ArticleDetailView({ slug }: { slug: string }) {
 
   if (isLoading) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <DetailSkeleton panels={1} />
       </div>
     );
@@ -84,7 +106,7 @@ export function ArticleDetailView({ slug }: { slug: string }) {
 
   if (isError || !article) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-4xl">
         <ErrorState
           title={t("detail.notFoundTitle")}
           description={t("detail.notFoundDescription")}
@@ -96,12 +118,13 @@ export function ArticleDetailView({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
+    <div className={cn("mx-auto w-full", READING_CONTAINER)}>
       <Breadcrumb items={breadcrumbItems} />
 
-      <div className="mt-4 flex flex-col gap-x-10 gap-y-8 xl:flex-row xl:items-start">
-        {/* Reading column — a comfortable measure. */}
-        <div className="min-w-0 flex-1 space-y-6 xl:max-w-3xl">
+      <div className={cn("mt-4 flex flex-col gap-x-10 gap-y-8", READING_ROW)}>
+        {/* Reading column — takes the whole container below the rail breakpoint, and exactly
+            READING_MEASURE above it (the container is sized so nothing is left over). */}
+        <div className="min-w-0 flex-1 space-y-6">
           <ArticleLedgerHeader
             article={article}
             canWrite={canWrite}
@@ -110,11 +133,11 @@ export function ArticleDetailView({ slug }: { slug: string }) {
 
           <ArticleCoversRow articleId={article.id} />
 
-          {/* Below xl: the TOC collapses to a disclosure above the prose. */}
+          {/* Below the rail breakpoint: the TOC collapses to a disclosure above the prose. */}
           <ArticleTocDetails
             headings={headings}
             activeId={activeId}
-            className="xl:hidden"
+            className={TOC_STACKED_ONLY}
           />
 
           {article.excerpt ? (
@@ -143,14 +166,15 @@ export function ArticleDetailView({ slug }: { slug: string }) {
           />
         </div>
 
-        {/* Right rail — sticky TOC + Connections on xl; below xl it stacks under the prose (the xl-only
-            TOC is hidden there, so only Connections shows, and it lands below the article). */}
-        <aside className="xl:w-72 xl:shrink-0">
-          <div className="space-y-6 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto xl:pb-4">
+        {/* Right rail — sticky TOC + Connections once three columns fit; below that it stacks under
+            the prose (the rail-only TOC is hidden there, so only Connections shows, and it lands
+            below the article — the disclosure above the prose carries the TOC instead). */}
+        <aside className={READING_RAIL}>
+          <div className={cn("space-y-6", READING_RAIL_STICKY)}>
             <ArticleToc
               headings={headings}
               activeId={activeId}
-              className="hidden xl:block"
+              className={TOC_RAIL_ONLY}
             />
             <ArticleConnectionsRail
               articleId={article.id}

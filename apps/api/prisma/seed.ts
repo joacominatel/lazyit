@@ -17,7 +17,8 @@
  *
  * It also seeds the RolePermission matrix (Roles & Permissions v2 — ADR-0046): each fixed Role mapped
  * to its `domain:action` permissions, taken 1:1 from `DEFAULT_ROLE_PERMISSIONS` in `@lazyit/shared`
- * (the single source of truth the golden test also asserts against). Idempotent upsert per row.
+ * (the single source of truth the golden test also asserts against). Seed-once per (role, permission)
+ * pair via the AppliedRolePermissionDefault ledger (#1314), so an admin's revocation is never undone.
  *
  * Run from apps/api: `bunx prisma db seed`.
  */
@@ -25,6 +26,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { DEFAULT_ROLE_PERMISSIONS } from '@lazyit/shared';
 import { PrismaClient, Role } from '../generated/prisma/client';
 import { seedCategoriesOnce } from '../src/prisma/seed-categories';
+import { applyDefaultRolePermissionsOnce } from '../src/prisma/seed-role-permissions';
 import { LocalCredentialService } from '../src/auth/local/local-credential.service';
 
 const connectionString = process.env.DATABASE_URL;
@@ -223,24 +225,18 @@ async function main() {
       : 'Consumable categories already present — skipped (seed-once).',
   );
 
-  // RolePermission matrix (ADR-0046). Seed each Role → permission pair from the shared single source
-  // of truth (DEFAULT_ROLE_PERMISSIONS). Idempotent: the composite PK (role, permission) makes a
-  // re-run a no-op upsert. This is purely additive groundwork — nothing in the API reads these rows
-  // yet (the @RequirePermission guard is a later wave); the seed exists so the table is populated and
-  // the golden test can assert it. NOTE: this does NOT delete permissions removed from the catalog;
-  // pruning stale rows is a config-endpoint concern (a later wave), not a seed concern.
-  let permissionRowCount = 0;
-  for (const [role, permissions] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    for (const permission of permissions) {
-      await prisma.rolePermission.upsert({
-        where: { role_permission: { role: role as Role, permission } },
-        create: { role: role as Role, permission },
-        update: {},
-      });
-      permissionRowCount += 1;
-    }
-  }
-  console.log(`Seeded ${permissionRowCount} role-permission rows.`);
+  // RolePermission matrix (ADR-0046) — seed-once per (role, permission) pair (#1314). A default pair
+  // from DEFAULT_ROLE_PERMISSIONS is granted only if the AppliedRolePermissionDefault ledger has never
+  // recorded it, so an admin revocation survives every deploy and a new catalog permission receives
+  // its defaults exactly once. Never deletes a grant.
+  const { applied, settled } = await prisma.$transaction((tx) =>
+    applyDefaultRolePermissionsOnce(tx, DEFAULT_ROLE_PERMISSIONS),
+  );
+  console.log(
+    applied > 0
+      ? `Applied ${applied} new default role-permission grants (${settled} already settled).`
+      : `Default role-permission grants already settled (${settled}) — skipped (seed-once).`,
+  );
 }
 
 main()

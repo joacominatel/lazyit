@@ -107,11 +107,31 @@ export class WorkflowsService {
     return { ...header, latestVersion: versions[0] ?? null };
   }
 
-  /** Patch the header (name / description / enabled / deprovisionPolicy / executor). 404 if missing. */
+  /**
+   * Patch the header (name / description / enabled / deprovisionPolicy / executor). 404 if missing.
+   *
+   * SEC-077: an optional `expectedVersion` is the latest version number the caller reviewed (0 = none).
+   * When present, the write runs in a transaction that locks the workflow row, re-reads the latest
+   * version and refuses with 409 if it differs — so enabling never makes live a version authored after
+   * the review. {@link authorVersion} takes the same row lock, so the two serialize. Omitted = today's
+   * unconditioned write.
+   */
   async update(id: string, dto: UpdateApplicationWorkflow) {
     await this.assertWorkflowLive(id);
     await this.assertEngineExecutor(dto.executedAsServiceAccountId);
-    return this.prisma.applicationWorkflow.update({
+    const { expectedVersion } = dto;
+    if (expectedVersion === undefined) {
+      return this.prisma.applicationWorkflow.update(this.headerUpdate(id, dto));
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockWorkflowAndAssertLatest(tx, id, expectedVersion);
+      return tx.applicationWorkflow.update(this.headerUpdate(id, dto));
+    });
+  }
+
+  /** The header columns a patch writes (`expectedVersion` is a precondition, never a column). */
+  private headerUpdate(id: string, dto: UpdateApplicationWorkflow) {
+    return {
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
@@ -126,7 +146,32 @@ export class WorkflowsService {
           ? { executedAsServiceAccountId: dto.executedAsServiceAccountId }
           : {}),
       },
+    };
+  }
+
+  /**
+   * Lock the workflow row (`SELECT … FOR UPDATE`) for the rest of the transaction and, when `expected`
+   * is given, 409 unless it is still the latest version number (0 = none authored). Every version
+   * allocation takes the same lock, so no version can land between this check and the caller's write.
+   */
+  private async lockWorkflowAndAssertLatest(
+    tx: Prisma.TransactionClient,
+    id: string,
+    expected: number | undefined,
+  ): Promise<number> {
+    await tx.$queryRaw`SELECT "id" FROM "application_workflows" WHERE "id" = ${id} FOR UPDATE`;
+    const last = await tx.workflowVersion.findFirst({
+      where: { workflowId: id },
+      orderBy: { version: 'desc' },
+      select: { version: true },
     });
+    const latest = last?.version ?? 0;
+    if (expected !== undefined && expected !== latest) {
+      throw new ConflictException(
+        `The workflow changed since it was reviewed: version ${latest} is now the latest, not ${expected}. Reload and review it again.`,
+      );
+    }
+    return latest;
   }
 
   /** Soft-delete a workflow (frees the (app, trigger) slot for reuse; ADR-0041). 404 if missing. */
@@ -143,7 +188,9 @@ export class WorkflowsService {
   /**
    * Author a new immutable version (the step graph). Validates the graph beyond the shared zod schema
    * (reachability + connection references), then allocates the next monotonic version number inside a
-   * tx (the (workflowId, version) unique backstops a race). Attributed to the author (human XOR SA).
+   * tx that locks the workflow row (the (workflowId, version) unique backstops a race). An optional
+   * `baseVersion` refuses with 409 when it is no longer the latest (SEC-077). Attributed to the author
+   * (human XOR SA).
    */
   async authorVersion(
     id: string,
@@ -158,12 +205,10 @@ export class WorkflowsService {
 
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
-      const last = await tx.workflowVersion.findFirst({
-        where: { workflowId: id },
-        orderBy: { version: 'desc' },
-        select: { version: true },
-      });
-      const version = (last?.version ?? 0) + 1;
+      // SEC-077: the row lock serializes authoring with a version-checked enable; an optional
+      // `baseVersion` (the version this graph was edited from) 409s if another version landed since.
+      const version =
+        (await this.lockWorkflowAndAssertLatest(tx, id, dto.baseVersion)) + 1;
       return tx.workflowVersion.create({
         data: {
           workflowId: id,

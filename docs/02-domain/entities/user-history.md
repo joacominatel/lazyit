@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-06-04
+updated: 2026-09-26
 ---
 
 # UserHistory
@@ -34,6 +34,12 @@ auditing requires ([[problem-space]]), and feeds the [[recent-activity]] view's 
   when a service account performed the action ([[0048-service-accounts]]). A DB **CHECK** enforces
   *at most one* of (`performedById`, `serviceAccountId`) per row — honest attribution, never a fake
   human. `ActorService.resolveActor(principal)` picks the right column.
+- `aiInvocationId` — optional plain string (no FK, no index): the [[ai-tool-invocation]] that caused
+  the event, stamped from the AI invocation context when an AI tool performed the write
+  ([[0097-ai-assistant-mcp-and-headless-api]] decision 11). `null` for every other write and every row
+  that existed before the column. The actor columns still name the real principal — the AI acts *as* it;
+  this column only adds provenance. The permanent record of the AI action is [[ai-action-log]], which
+  carries the same id after the invocation row is retention-pruned.
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]).
 
 Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[recent-activity]] view).
@@ -42,10 +48,14 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 
 `CREATED` · `UPDATED` · `ROLE_CHANGED` (payload `{ from, to }`) · `MANAGER_CHANGED` (payload `{ from, to }`,
 [[0058-user-manager-and-clone-actions]]) · `DELETED` · `RESTORED` · `PASSWORD_RESET_SENT` ·
-`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED`. The
+`PASSWORD_RESET_BY_ADMIN` · `PASSWORD_CHANGED` · `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED` ·
+`DEACTIVATED` · `REACTIVATED` (no payload — an `isActive` flip, issue #1375) · `SESSION_ENDED` (payload
+`{ sessionId, current }` — the user ended one of their local sessions from the device list, issue #1420,
+[[user-session]]; actor == subject). The
 `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
-records an IdP reset **link** request (OIDC mode); `PASSWORD_RESET_BY_ADMIN` records an admin minting a **local
-temp-password** (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5); `PASSWORD_CHANGED`,
+records a reset **link** being sent to the subject — by the IdP in OIDC mode, or by lazyit's own SMTP when an
+admin picks the `email` delivery in local mode ([[0086-local-authentication-mode]] §5, amended by #1268);
+`PASSWORD_RESET_BY_ADMIN` records the other local delivery, an admin minting a **temp-password**; `PASSWORD_CHANGED`,
 `PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED` record the **self-service** local flows (the user changed
 their own password, a forgot-password reset link was **issued** for them, or they reset it via that email token —
 [[0086-local-authentication-mode]] §F4), actor == subject. `PASSWORD_RESET_REQUESTED` is written **only** for a
@@ -59,12 +69,20 @@ all from the [[user]] service:
 
 - `create` → `CREATED` — emitted only on the **success path** (after the IdP mirror can no longer fail
   and trigger the compensating hard-delete; the `Restrict` FK would otherwise block that rollback).
-- `update` → `UPDATED` on a name/email edit (payload `{ fields }`) and/or `ROLE_CHANGED` on a role
-  change (payload `{ from, to }`) — both only **after** any IdP mirror commits (a reverted update never logs).
+- `update` → `UPDATED` on a name / email / legajo / username edit (payload `{ fields }`, field names only),
+  `DEACTIVATED` / `REACTIVATED` when `isActive` actually flips (a resend of the stored value logs nothing),
+  `ROLE_CHANGED` on a role change (payload `{ from, to }`) and `MANAGER_CHANGED` on a manager change — each
+  that fired, all only **after** any IdP mirror commits (a reverted update never logs). The web UI, the API
+  and an AI tool call (`user_update` dispatches to the same `PATCH /users/:id`) share this one emitter, so an
+  AI-made change carries its `aiInvocationId`. Until issue #1375 an activation flip and a legajo/username
+  edit wrote **no** row, so they never reached Reports; changes made before that release stay absent (no
+  backfill — there is no trustworthy source).
 - `requestPasswordReset` → in OIDC mode, `PASSWORD_RESET_SENT` **after** the IdP call succeeds (422/501/503
-  never logs). In local mode (`AUTH_MODE=local`), `PASSWORD_RESET_BY_ADMIN` after the credential is reset —
-  the admin mints a temp-password, `sessionEpoch` is bumped (existing sessions revoked) and the temp password
-  is returned once ([[0086-local-authentication-mode]] §5).
+  never logs). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
+  the choice: `email` → `PASSWORD_RESET_SENT` after the mail is actually accepted by the relay (a 409/503
+  never logs), with `sessionEpoch` bumped only if the admin opted in; `temporary-password` →
+  `PASSWORD_RESET_BY_ADMIN` after the credential is reset, `sessionEpoch` **always** bumped (the stored hash
+  was just replaced) and the plaintext returned once ([[0086-local-authentication-mode]] §5).
 - Self-service local flows (`PasswordLifecycleService`, [[0086-local-authentication-mode]] §F4) → `PASSWORD_CHANGED`
   on `POST /auth/change-password` and `PASSWORD_RESET_COMPLETED` on `POST /auth/reset-password` (via a
   forgot-password email token) — each after the credential write, actor == subject, `sessionEpoch` bumped.
@@ -72,6 +90,9 @@ all from the [[user]] service:
   for a real, login-capable subject. The audit is written in the **detached** issuance path (fire-and-forget), so
   it never affects the response latency and never fires for an unknown/inactive/directory-only identifier — keeping
   the flow enumeration- and timing-uniform (issue #1006), actor == subject.
+- Per-device sessions (`UserSessionsService`, [[0086-local-authentication-mode]] §9, #1420) → `SESSION_ENDED`
+  on `DELETE /auth/sessions/:id`, in the same transaction as the row delete, actor == subject. "Sign out
+  everywhere" (`POST /auth/logout`) writes no row, as before.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
 

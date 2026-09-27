@@ -24,7 +24,8 @@ aplicación. Una restauración que funcione necesita **más que eso**:
 - **Tu archivo de entorno / secretos** — los secretos del despliegue (contraseña de la base de datos,
   claves de cifrado del servicio de inicio de sesión y de las credenciales de conectores de
   workflow, el secreto de la app). Algunas de estas claves **no se pueden regenerar**: restaura una
-  base de datos sin la clave correspondiente y esos datos quedan ilegibles.
+  base de datos sin la clave correspondiente y esos datos quedan ilegibles. (Perder `AI_SECRET_KEY`,
+  que cifra la clave del proveedor de IA, solo obliga a volver a escribir esa clave del proveedor.)
 
 Trata el archivo de secretos como **irremplazable**: guarda una copia cifrada **fuera del host**, y
 nunca dejes que el servidor en ejecución sea su única copia. Prueba una restauración antes de confiar
@@ -69,6 +70,15 @@ Cuando una credencial o una cuenta pudo quedar expuesta, trabaja en este orden.
    a un usuario le quita el acceso; si ejecutas tu propio proveedor, deshabilítalo también allí.
 2. **Revoca su acceso a aplicaciones y su membresía en bóvedas.** Quitar a una persona de una bóveda
    detiene su acceso a los secretos a través de lazyit de ahí en adelante.
+3. **Sus conexiones de IA terminan con la cuenta.** Darla de baja, desactivarla o restablecer la
+   contraseña termina todas las apps de IA y los tokens MCP personales que la persona conectó; cerrarle
+   la sesión, no. Mirá [Qué termina una conexión](/help/ai-assistant-connected-apps#qué-termina-una-conexión).
+
+### Se conectó a tu cuenta una app de IA que no reconocés
+
+lazyit te avisa la primera vez que una app de IA o un token personal nuevo se usa en tu cuenta. Si no
+fuiste vos, [revocala](/help/ai-assistant-connected-apps#revocar) enseguida y cambiá tu contraseña (eso
+también termina todas las demás conexiones), y avisale a un administrador.
 
 ### Un secreto compartido pudo filtrarse
 
@@ -96,5 +106,9 @@ controlado.
   su token si pudo quedar expuesto.
 - **Da de baja sin demora.** Como la propiedad y el acceso en lazyit siguen al usuario vivo, quitar a
   una persona elimina limpiamente su alcance.
+- **Tratá la IA como un flujo de datos.** Antes de activar el asistente, revisá tu contrato con el
+  proveedor de IA (retención, entrenamiento, región). Revisá **Apps conectadas** cada tanto, usá tokens
+  MCP personales de vida corta y dales a las cuentas de servicio el **acceso a IA** más acotado. Mirá
+  [Asistente de IA — visión general](/help/ai-assistant-overview).
 - **Mantén tu proveedor de identidad parcheado y protegido** — es la puerta de entrada, y lazyit
   confía en él.

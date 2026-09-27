@@ -28,8 +28,11 @@ but locked.
   there you can adjust individual capabilities. If your set matches no preset, lazyit labels it
   **Custom**.
 - **Capability toggles** — plain-language switches grouped by area (Inventory, Access, Knowledge,
-  Manage, Automation). Each toggle maps to one or more underlying permissions; flip it to grant or
-  remove that capability for the role.
+  Manage, Automation, AI). Each toggle maps to one or more underlying permissions; flip it to grant or
+  remove that capability for the role. The **AI** area holds **Use the AI assistant** (`ai:use`) and
+  **Connect external AI agents (MCP)** (`ai:connect`); neither is admin-level, because the assistant and
+  agents only ever act with the role's own permissions — see
+  [AI assistant — overview](/help/ai-assistant-overview#who-can-use-it).
 - **Fine-tune (advanced)** — an optional disclosure where each switch is a single raw permission
   (`area:action`), for exact control. Changing one here flips the role to a **Custom** set and updates
   the capability toggles above to match.
@@ -58,6 +61,20 @@ Saving replaces the chosen role's permission set as a whole. The change:
 - applies **per area, not per record**. If a role can read assets, it can read **all** assets. lazyit
   does not have general per-record permissions. The two deliberate exceptions are Knowledge Base
   folders and Secret Manager vaults, where access is scoped to a folder or a vault.
+
+## Your changes survive updates
+
+What you save here stays in place when lazyit is updated. A permission you removed from Member or Viewer
+is not given back by a later update.
+
+When an update adds a **new** permission, each role receives that permission's shipped default **once**,
+on the first update that includes it. After that it behaves like any other permission: if you remove it,
+it stays removed through every later update.
+
+> [!IMPORTANT]
+> Before this behavior shipped, an update could silently give back a default permission you had removed.
+> After the update that introduces it, open this screen once and check that Member and Viewer hold only
+> what you intend. From then on, your changes are kept.
 
 ## Permissions stay inside lazyit
 

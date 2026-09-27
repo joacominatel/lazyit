@@ -49,8 +49,9 @@ export const SERVICE_ACCOUNT_TOKEN_PREFIX = "lzit_sa_" as const;
  * consistency refuses it at the edge (the #555 SA-ungrantable hardening).
  *
  * Code-enforced here as the source of truth so no non-human principal can ever be granted them — Layer 1
- * of the SEC-011 fix. Layer 2 (ServicePrincipalForbiddenGuard / HumanOnlyGuard) is the runtime backstop
- * that neutralises any pre-existing grant.
+ * of the SEC-011 fix. The API's principal loader strips these same literals when it builds a service
+ * principal, so a grant persisted before the refinement is inert on every route (SEC-073); Layer 2
+ * (ServicePrincipalForbiddenGuard / HumanOnlyGuard) stays as defense in depth.
  *
  * Deliberately NOT here: `accessGrant:grant` and the `:delete` family are legitimate for automation bots
  * (a CI bot revoking app access, a cleanup bot) and do not enable self-escalation. Widening the set is a

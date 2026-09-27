@@ -36,8 +36,11 @@ El editor de SMTP tiene estos campos:
   servidor usa un certificado autofirmado en el que confías.
 
 > La contraseña se guarda **cifrada en reposo**. Guardar una contraseña requiere que la clave del
-> servidor `SMTP_SECRET_KEY` esté configurada; si no lo está, lazyit guarda el resto de los ajustes y te
-> avisa de que primero configures la clave. Consulta la configuración de entorno de tu despliegue.
+> servidor `SMTP_SECRET_KEY` esté configurada. Si no lo está, **se rechaza el guardado completo**: no se
+> almacena nada, ni siquiera los demás campos, y lazyit te avisa de que primero configures la clave. Una
+> instalación guiada crea esa clave por ti; en un despliegue más antiguo, tu administrador debe añadirla a
+> la configuración de entorno del servidor y reiniciar la API. Mientras tanto, puedes guardar el resto de
+> los ajustes dejando **Contraseña** en blanco (un servidor sin autenticación funciona con normalidad).
 
 ## Enviar un correo de prueba
 

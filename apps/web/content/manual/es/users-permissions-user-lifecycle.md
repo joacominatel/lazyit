@@ -8,7 +8,7 @@ order: 5
 # Ciclo de vida del usuario
 
 Esta página cubre toda la vida de una persona en lazyit: crearla, darle un rol y un punto de partida,
-clonar a un colega existente, enviar un restablecimiento de contraseña, darla de baja y restaurarla.
+clonar a un colega existente, restablecer una contraseña, darla de baja y restaurarla.
 Todo esto vive en la sección de **Usuarios** y requiere la capacidad **Gestionar usuarios**
 (administrador por defecto).
 
@@ -21,15 +21,22 @@ Elige **Nuevo usuario** y completa la identidad de la persona:
 - **Rol** — por defecto es solo lectura; defínelo aquí o cámbialo más tarde. Ver
   [Roles](/help/users-permissions-roles).
 - **Número de empleado** y **Nombre de usuario** (ambos opcionales) — datos de directorio, únicos entre
-  los usuarios activos. El nombre de usuario es un identificador, **no** una credencial de inicio de
-  sesión.
+  los usuarios activos. Cuando lazyit gestiona las contraseñas por su cuenta, el nombre de usuario **sí**
+  es un identificador de inicio de sesión: la persona puede entrar con su nombre de usuario o con su
+  correo. Detrás de un proveedor de identidad es solo un identificador de directorio, nunca una
+  credencial.
 - **Responsable** (opcional) — un usuario de lazyit existente **o** un nombre de texto libre, no ambos.
 
-**Credencial de inicio de sesión.** Cuando lazyit gestiona las credenciales (el proveedor de identidad
-incluido), defines una **contraseña temporal** para que la persona pueda iniciar sesión; ella elige la
-suya en el primer inicio. lazyit nunca guarda esta contraseña — se define en el proveedor de identidad
-y se reemplaza cuando el usuario inicia sesión, y se muestra una sola vez para la entrega. Si usas tu
-propio proveedor de identidad, este paso no aparece — gestiona la credencial en tu proveedor.
+**Credencial de inicio de sesión.** Cuando lazyit puede definir la credencial — el proveedor de identidad
+incluido, o una instancia en la que lazyit gestiona las contraseñas por su cuenta — defines una
+**contraseña temporal** para que la persona pueda iniciar sesión; deberá elegir la suya en el primer
+inicio, y se muestra una sola vez para la entrega. Dónde acaba esa contraseña depende de quién gestiona
+las contraseñas: con el proveedor de identidad incluido se define en el proveedor y lazyit no guarda
+nada, mientras que en una instancia que gestiona lazyit se guarda solo como **hash** — nunca la
+contraseña que escribiste, así que nadie, ni siquiera un administrador, puede volver a leerla. En
+cualquiera de los dos casos, perder la entrega no es un callejón sin salida: restablece la contraseña
+(más abajo) en lugar de intentar consultarla. Si usas tu propio proveedor de identidad, este paso no
+aparece — gestiona la credencial en tu proveedor.
 
 **Punto de partida (opcional).** Puedes asignar un activo y conceder acceso a una aplicación desde el
 mismo formulario de creación, para que la persona empiece con lo que necesita.
@@ -47,14 +54,46 @@ enumera lo que se omitió (y por qué). Un activo o una aplicación seleccionado
 desde entonces se omiten en lugar de copiarse, para que la clonación nunca reviva un activo retirado ni
 una aplicación dada de baja.
 
-## Enviar un restablecimiento de contraseña
+## Restablecer una contraseña
 
-En la página de detalle de un usuario, **Enviar restablecimiento de contraseña** pide a tu proveedor de
-identidad que envíe por correo a la persona un enlace de restablecimiento. lazyit nunca ve ni define la
-contraseña — solo dispara al proveedor, y la entrega depende de que el correo del proveedor esté
-configurado. La acción no está disponible para un usuario inactivo (reactívalo primero) ni para una
-cuenta sin vínculo con el proveedor de identidad (en ese caso el restablecimiento se gestiona por
-completo en tu proveedor).
+En la página de detalle de un usuario, **Restablecer contraseña** inicia el restablecimiento de la
+contraseña de esa persona. Lo que hace depende de quién gestiona las contraseñas en tu instancia, y la
+acción se adapta sola — nunca tienes que recordar en qué modo estás.
+
+**Cuando un proveedor de identidad gestiona las contraseñas.** lazyit pide a tu proveedor que envíe por
+correo a la persona un enlace de restablecimiento. lazyit nunca ve ni define la contraseña — solo
+dispara al proveedor, y la entrega depende de que el correo del proveedor esté configurado. La acción no
+está disponible para un usuario inactivo (reactívalo primero) ni para una cuenta sin vínculo con el
+proveedor de identidad (en ese caso el restablecimiento se gestiona por completo en tu proveedor).
+
+**Cuando lazyit gestiona las contraseñas.** Eliges cómo le llega el restablecimiento a la persona:
+
+- **Enviar un enlace de restablecimiento por correo** — la persona recibe en su dirección un enlace de
+  un solo uso y elige su propia contraseña; lazyit nunca la ve. La confirmación te indica exactamente a
+  qué dirección se envió el enlace y cuánto tiempo sigue siendo válido. Esta opción necesita
+  [correo saliente (SMTP)](/help/configuration-smtp-email) y una URL pública para tu instancia; si falta
+  alguna de las dos, la opción aparece deshabilitada y lazyit te dice cuál corregir, en lugar de fingir
+  que el correo salió. Bajo esta opción hay una casilla **Cerrar la sesión de este usuario en todas
+  partes**, **desactivada por defecto** — un enlace no cambia la contraseña actual, así que las sesiones
+  abiertas de la persona siguen siendo legítimamente suyas. Actívala cuando creas que la cuenta está
+  comprometida.
+- **Generar una contraseña temporal** — lazyit crea una contraseña de un solo uso y te la muestra **una
+  sola vez**, para que la entregues tú. Es la salida cuando la persona no puede acceder a su correo, así
+  que sigue disponible incluso cuando el correo funciona. Reemplaza su contraseña de inmediato y, por
+  tanto, **siempre** cierra su sesión en todas partes; deberá elegir una contraseña nueva en su próximo
+  inicio de sesión.
+
+> [!IMPORTANT]
+> Una contraseña temporal se muestra **una sola vez**. Cópiala antes de cerrar el diálogo — no se vuelve
+> a mostrar ni se puede consultar más tarde. Si la pierdes, basta con repetir el restablecimiento.
+
+La acción no está disponible para un usuario inactivo (reactívalo primero) ni para una persona de
+directorio que todavía no tiene cuenta de inicio de sesión — en ese caso dale de alta con una contraseña
+temporal, que le entrega la primera.
+
+Si un restablecimiento falla — el correo no está configurado, el mensaje no se pudo enviar, la cuenta no
+es elegible — lazyit lo dice con claridad y mantiene el diálogo abierto, para que puedas leer el motivo
+y elegir la otra opción.
 
 ## Dar de baja a un usuario
 
@@ -70,6 +109,10 @@ los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego,
 Todo ocurre junto: si algún paso falla, la baja completa se revierte, de modo que una persona nunca queda
 a medio dar de baja (archivada pero conservando acceso).
 
+**Se cierra su sesión en todas partes.** En una instancia con **cuentas locales**, dar de baja termina las
+sesiones de la persona en todos sus dispositivos a la vez — también aquella en la que marcó **Mantener la
+sesión iniciada**. Desactivarla (desmarcar **Activo** al editarla) hace lo mismo.
+
 **Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
 confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos
 secretos a mano**. Quitar su membresía detiene cualquier lectura *nueva*, pero como ya pudo leer esas
@@ -82,6 +125,27 @@ Secretos.)
 de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas de firma) para firmar en
 papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
 constancia de su salida.
+
+**Los consumibles que recibió.** La hoja de baja también lista los
+[consumibles entregados](/help/consumables-stock-movements) a la persona, en dos grupos:
+
+- **Consumibles a devolver** — ítems retornables que siguen pendientes (unos auriculares en préstamo,
+  un cargador de repuesto), con cuántas unidades siguen afuera. Es lo que hay que pedirle que devuelva.
+- **Consumibles entregados** — ítems entregados para siempre (tóner, cables), listados como registro.
+
+La baja **no mueve stock** ni cierra ninguna entrega: registra cada devolución desde la página de la
+persona a medida que el ítem vuelve. Por defecto, todo lo listado se imprime en el acta de baja.
+Desmarca una fila para dejarla fuera, o desactiva **Listar consumibles** en *Acta impresa* para dejar
+fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
+que la hoja puede listar, indica cuántos más hay en lugar de omitirlos en silencio.
+
+## Consumibles en la página de una persona
+
+La página de una persona tiene una sección **Consumibles entregados** con lo que se le entregó, del más
+reciente al más antiguo. **Solo pendientes** muestra solo los ítems retornables que siguen afuera, y un
+filtro de fechas la acota según cuándo se entregaron. Con permiso para registrar movimientos de stock
+puedes **Entregar consumible** a esa persona o registrar una devolución con **Devolver…** desde aquí. Quienes no
+pueden ver a otros usuarios no ven esta sección.
 
 ## Encontrar usuarios por rol
 
@@ -124,6 +188,9 @@ iniciar sesión.
 
 Los usuarios dados de baja quedan archivados, no eliminados. Para recuperar uno, muestra los usuarios
 archivados en la lista de Usuarios y elige **Restaurar**. Restaurar es solo para administradores.
+
+Restaurar a alguien — o reactivar a quien desactivaste — nunca recupera una sesión anterior: en una
+instancia con **cuentas locales**, la persona debe volver a iniciar sesión.
 
 > Dar de baja (y cualquier desactivación) libera los recursos que tenía una persona pero conserva todo
 > el historial —quién tuvo qué activo y cuándo, y qué acceso tenía— porque lazyit está construido para

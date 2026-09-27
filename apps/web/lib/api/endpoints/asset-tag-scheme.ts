@@ -4,6 +4,7 @@ import type {
   AssetTagBackfillResult,
   AssetTagNextPreview,
   AssetTagScheme,
+  AssetTagSchemeSummary,
   AssetTagSeedSuggestion,
   UpdateAssetTagScheme,
 } from "@lazyit/shared";
@@ -27,13 +28,24 @@ const BASE = "/config/asset-tag-scheme";
  * `nextNumber`.
  *
  * Gated `settings:manage` server-side, like every other route on this controller (403 otherwise).
- * That is deliberate for the settings editor, and it is why the asset-form's auto-tag hint only
- * appears for an admin: for anyone else this query 403s, `data` stays undefined, and the form falls
- * back to its labelled example. Callers must therefore treat the scheme as OPTIONAL context, never as
- * a precondition for creating an asset — the server allocates the tag either way.
+ * That is deliberate for the settings editor. The asset-form's auto-tag hint does NOT read this: it
+ * reads {@link getAssetTagSchemeSummary} (`asset:write`), so members see the next tag too (#1315).
  */
 export function getAssetTagScheme(signal?: AbortSignal): Promise<AssetTagScheme> {
   return apiFetch<AssetTagScheme>(BASE, { signal });
+}
+
+/**
+ * Read the member-safe view of the scheme (`GET /config/asset-tag-scheme/summary`, #1315). Gated
+ * `asset:write` — whoever may create assets — rather than `settings:manage`: whether auto-tagging is
+ * on, the affixes / width, and `nextTag`, the tag an asset created without one would get now (the same
+ * skip-existing preview as `next-tag`, for the STORED pattern; not a reservation; null when exhausted).
+ * This is what the asset CREATE form reads; the admin-only routes above and below stay the editor's.
+ */
+export function getAssetTagSchemeSummary(
+  signal?: AbortSignal,
+): Promise<AssetTagSchemeSummary> {
+  return apiFetch<AssetTagSchemeSummary>(`${BASE}/summary`, { signal });
 }
 
 /**

@@ -114,3 +114,7 @@ render layer reuses it. The `host:port` carve-out means a contrived `javascript:
 payload) would pass — harmless, no script executes. Same latent-XSS theme as
 [[SEC-003-markdown-sanitizer-bypass-asymmetric|SEC-003]] (open/escalated); together they are the
 "untrusted string → web sink" policy the frontend phase should formalize.
+
+> **Correction (2026-09-23).** The `host:port` residual above was wrong: `javascript:<digits>/<payload>`
+> does execute (`1/alert(1)` is a division that calls `alert`). Filed and fixed as
+> [[SEC-051-application-url-scheme-guard-port-carveout-bypass|SEC-051]].

@@ -3,7 +3,7 @@ title: "ADR-0011: Tailwind CSS + shadcn/ui for styling"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-09-26
 deciders: [Joaquín Minatel]
 ---
 
@@ -68,10 +68,15 @@ Concrete setup (shadcn CLI `v4.8.0`, which is now **preset-driven** rather than 
   that wiring the body falls back to the system font.
 - **Dark mode** via `next-themes` — system default + manual toggle, persisted to
   `localStorage`.
+  *Amended 2026-09-26 (#1422):* the choice is also saved **per user** on the server
+  (`User.theme`, `light | dark | system`, via `PUT /account/preferences`). `localStorage` stays the
+  source of truth in each browser; the stored value only seeds a browser that has none. See
+  [[0051-i18n-next-intl]] → *Per-user preference* for the shared rule.
 
 ### Icons — Heroicons only (with one boundary)
 
-> **Superseded by [[0045-icon-library-heroicons]] (2026-06-01).** The "Option A" boundary below
+> **Superseded by [[0045-icon-library-heroicons]] (2026-06-01)** — which, since 2026-09-25, also scopes
+> Hugeicons to the AI assistant's own chrome. The "Option A" boundary below
 > (keep `lucide-react` inside `components/ui/*`) was dropped: the primitives were re-mapped to
 > Heroicons, `lucide-react` was removed entirely, and a two-weight convention (`24/outline`
 > default, `16/solid` for dense/inline/badge) was adopted. The paragraphs below are retained as
