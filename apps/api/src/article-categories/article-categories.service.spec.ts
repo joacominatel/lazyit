@@ -65,8 +65,12 @@ describe('ArticleCategoriesService', () => {
   let search: { remove: jest.Mock; upsert: jest.Mock };
   // FolderAccessService (ADR-0060 §4) — mocked. Drives the #1106 Phase-4 per-folder `articleCount`
   // authz null-out. Defaults to 'ALL' (ADMIN-equivalent, every count shown); the folder-hidden test
-  // overrides visibleFolderIds with an explicit Set.
-  let folderAccess: { visibleFolderIds: jest.Mock };
+  // overrides visibleFolderIds with an explicit Set. It also resolves the #1299 `hasAccessRules` flag
+  // (restrictedFolderIds) — the evaluator owns the one public-vs-restricted definition.
+  let folderAccess: {
+    visibleFolderIds: jest.Mock;
+    restrictedFolderIds: jest.Mock;
+  };
 
   beforeEach(async () => {
     articleCategory = {
@@ -104,7 +108,12 @@ describe('ArticleCategoriesService', () => {
 
     permissions = { hasAll: jest.fn().mockResolvedValue(false) };
     search = { remove: jest.fn(), upsert: jest.fn() };
-    folderAccess = { visibleFolderIds: jest.fn().mockResolvedValue('ALL') };
+    folderAccess = {
+      visibleFolderIds: jest.fn().mockResolvedValue('ALL'),
+      // The #1299 derived `hasAccessRules` flag. Defaults to "nothing is restricted" so the pre-#1299
+      // read tests assert `false`; the flag tests override it with an explicit Set.
+      restrictedFolderIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -210,8 +219,13 @@ describe('ArticleCategoriesService', () => {
     // Prisma's nested `_count.articles` is flattened to `articleCount`; the hidden folder's count is
     // dropped to null so it never reveals how many articles sit in a folder the list itself hides.
     expect(result).toEqual([
-      { id: 'c1', name: 'Public', articleCount: 3 },
-      { id: 'c2', name: 'Restricted', articleCount: null },
+      { id: 'c1', name: 'Public', articleCount: 3, hasAccessRules: false },
+      {
+        id: 'c2',
+        name: 'Restricted',
+        articleCount: null,
+        hasAccessRules: false,
+      },
     ]);
     // The nested count is filtered to LIVE (deletedAt: null) + PUBLISHED-or-own-DRAFT — exactly the
     // article list's visibility, so the number equals the rows the caller would find via the list.
@@ -226,13 +240,118 @@ describe('ArticleCategoriesService', () => {
     });
   });
 
+  describe('the derived hasAccessRules flag (#1299, ADR-0060 §3 carve-out)', () => {
+    it('findAll marks a restricted folder true and a public one false, WITHOUT leaking accessRules to a non-`settings:manage` caller', async () => {
+      // A VIEWER: no `settings:manage` (the default mock), so the rules themselves stay gated (#554).
+      permissions.hasAll.mockResolvedValue(false);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findMany.mockResolvedValue([
+        { id: 'c1', name: 'Public', _count: { articles: 1 } },
+        { id: 'c2', name: 'Runbooks', _count: { articles: 2 } },
+      ]);
+
+      const result = await service.findAll(VIEWER_PRINCIPAL);
+
+      expect(result).toEqual([
+        { id: 'c1', name: 'Public', articleCount: 1, hasAccessRules: false },
+        { id: 'c2', name: 'Runbooks', articleCount: 2, hasAccessRules: true },
+      ]);
+      // The whole point of the carve-out: the VIEWER learns THAT c2 is restricted and nothing else —
+      // no rule kinds, no user list, no role, no counts. `accessRules` is not even selected.
+      const call = (
+        articleCategory.findMany.mock.calls as Array<
+          [{ select: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(call.select).not.toHaveProperty('accessRules');
+      for (const row of result) {
+        expect(row).not.toHaveProperty('accessRules');
+      }
+    });
+
+    it('findAll shares ONE folder-tree load between the access check and the flag', async () => {
+      articleCategory.findMany.mockResolvedValue([]);
+
+      await service.findAll(VIEWER_PRINCIPAL);
+
+      // Both lookups receive the SAME request-scoped cache object, so the tree is read once (#599).
+      const treeArg = (
+        folderAccess.visibleFolderIds.mock.calls as Array<[unknown, unknown]>
+      )[0][1];
+      const flagArg = (
+        folderAccess.restrictedFolderIds.mock.calls as Array<[unknown]>
+      )[0][0];
+      expect(treeArg).toBeDefined();
+      expect(flagArg).toBe(treeArg);
+    });
+
+    it('findOne carries the flag for a restricted folder, still without accessRules for a non-admin', async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c2',
+        name: 'Runbooks',
+      });
+
+      const result = await service.findOne('c2', VIEWER_PRINCIPAL);
+
+      expect(result).toEqual({
+        id: 'c2',
+        name: 'Runbooks',
+        hasAccessRules: true,
+      });
+      expect(result).not.toHaveProperty('accessRules');
+    });
+
+    it('findOne reports a folder with no rule as not restricted', async () => {
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', name: 'Public' });
+
+      await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual({
+        id: 'c1',
+        name: 'Public',
+        hasAccessRules: false,
+      });
+    });
+
+    it('an internal (no-principal) findOne skips the flag and pays no folder-tree load', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', name: 'Public' });
+
+      // The mutation guards call findOne(id) with no principal and discard the row — they must not
+      // pay for a flag nobody reads.
+      await expect(service.findOne('c1')).resolves.toEqual({
+        id: 'c1',
+        name: 'Public',
+      });
+      expect(folderAccess.restrictedFolderIds).not.toHaveBeenCalled();
+    });
+
+    it('a settings:manage caller gets BOTH the rules and the flag (the gate is unchanged)', async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c2',
+        accessRules: [{ kind: 'role', role: 'ADMIN' }],
+      });
+
+      const result = await service.findOne('c2', ADMIN_PRINCIPAL);
+
+      expect(result).toEqual({
+        id: 'c2',
+        accessRules: [{ kind: 'role', role: 'ADMIN' }],
+        hasAccessRules: true,
+      });
+    });
+  });
+
   it('returns a category by id when it exists; OMITS accessRules for a non-admin (#554)', async () => {
     const found = { id: 'c1', name: 'Networking', deletedAt: null };
     articleCategory.findFirst.mockResolvedValue(found);
 
-    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual(
-      found,
-    );
+    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual({
+      ...found,
+      hasAccessRules: false,
+    });
     const call = (
       articleCategory.findFirst.mock.calls as Array<
         [{ where: unknown; select: Record<string, unknown> }]

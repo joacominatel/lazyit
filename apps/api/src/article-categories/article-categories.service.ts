@@ -14,7 +14,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
 import { SearchService } from '../search/search.service';
-import { FolderAccessService, folderVisible } from './folder-access.service';
+import {
+  FolderAccessService,
+  folderVisible,
+  type FolderTreeCache,
+} from './folder-access.service';
 
 /** Shape returned by a successful cascade delete. */
 export interface CascadeDeleteResult {
@@ -31,6 +35,10 @@ export interface CascadeDeleteResult {
  * `category:read` caller (which is default-open and includes VIEWER), only to a `settings:manage`
  * holder — the same gate that WRITES it (INV-9 / #554). The default read uses this explicit select so
  * `accessRules` is never even fetched; the rule-editor read path re-includes it on top.
+ *
+ * The derived `hasAccessRules` flag (#1299) does NOT change that: it resolves through
+ * `FolderAccessService`, which already loads the tree's rules for the §4 evaluation, so the raw jsonb
+ * still never rides along on this query's result.
  */
 const CATEGORY_PUBLIC_SELECT = {
   id: true,
@@ -64,7 +72,9 @@ export class ArticleCategoriesService {
     private readonly search: SearchService,
     // Folder-access evaluator (ADR-0060 §4). The list endpoint uses it so the per-folder `articleCount`
     // (#1106 Phase 4) is null for a folder the caller cannot read — the count must never reveal more
-    // than the article list would show that viewer. Provided by this same module (no new dependency).
+    // than the article list would show that viewer, and (#1299) so the derived `hasAccessRules` flag
+    // reuses the evaluator's OWN public-vs-restricted resolution rather than a second definition of it.
+    // Provided by this same module (no new dependency).
     private readonly folderAccess: FolderAccessService,
   ) {}
 
@@ -82,12 +92,25 @@ export class ArticleCategoriesService {
    * cannot READ, so it never reveals a count of articles inside a folder the list itself hides from
    * them. The nested relation count is filtered explicitly (`deletedAt: null`) because the soft-delete
    * read extension only scopes TOP-LEVEL queries, not nested `_count` relation filters.
+   *
+   * Each row also carries the derived `hasAccessRules` flag (#1299, ADR-0060 §3 carve-out): whether the
+   * folder CARRIES a restriction — never who it lets in, nor what the rule is. It is readable by ANY
+   * `category:read` caller (VIEWER included) so the web can warn that moving an article into or out of
+   * a restricted folder changes its audience (§9); the rules themselves stay `settings:manage`-gated.
    */
   async findAll(principal?: Principal) {
     const withRules = await this.canSeeAccessRules(principal);
+    // One request-scoped folder-tree load shared by both folder-access lookups below (#599): the tree
+    // is read once and answers both questions, so `hasAccessRules` costs a non-admin NO extra query.
+    // An ADMIN short-circuits `visibleFolderIds` to 'ALL' without loading the tree, so for them the
+    // flag adds exactly one folder scan — the same scan every non-admin read already pays.
+    const tree: FolderTreeCache = {};
     // Which folders may this caller read (ADR-0060 §4)? ADMIN → 'ALL' (every count shown); a non-admin
     // gets the explicit visible set; a no-principal internal caller fails closed to public folders.
-    const visible = await this.folderAccess.visibleFolderIds(principal);
+    const visible = await this.folderAccess.visibleFolderIds(principal, tree);
+    // Which folders CARRY a restriction (§3) — a property of the folder, not of the caller. Exposed to
+    // every `category:read` reader as the derived `hasAccessRules` flag (#1299).
+    const restricted = await this.folderAccess.restrictedFolderIds(tree);
     const rows = await this.prisma.articleCategory.findMany({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
       select: {
@@ -105,6 +128,7 @@ export class ArticleCategoriesService {
     return rows.map(({ _count, ...row }) => ({
       ...row,
       articleCount: folderVisible(visible, row.id) ? _count.articles : null,
+      hasAccessRules: restricted.has(row.id),
     }));
   }
 
@@ -139,6 +163,9 @@ export class ArticleCategoriesService {
    * only for a `settings:manage` caller (the rule-editor), omitted otherwise (INV-9 / #554) — same gate
    * as {@link findAll}. Mutation methods call this for the 404 guard with no principal and discard the
    * (public-shaped) return.
+   *
+   * A read made by a real caller also carries the derived `hasAccessRules` flag (#1299), same meaning
+   * as in {@link findAll}. It is skipped for the no-principal internal callers, which discard the row.
    */
   async findOne(id: string, principal?: Principal) {
     const withRules = await this.canSeeAccessRules(principal);
@@ -152,7 +179,14 @@ export class ArticleCategoriesService {
     if (!category) {
       throw new NotFoundException(`ArticleCategory ${id} not found`);
     }
-    return category;
+    // The derived `hasAccessRules` flag (#1299) — same shape as the list, so a folder read answers the
+    // same question whichever endpoint asked it. Only for a real HTTP caller: the internal mutation
+    // callers below pass NO principal and discard this row, and they must not pay a folder-tree load.
+    if (principal === undefined) {
+      return category;
+    }
+    const restricted = await this.folderAccess.restrictedFolderIds();
+    return { ...category, hasAccessRules: restricted.has(category.id) };
   }
 
   /**

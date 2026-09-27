@@ -107,6 +107,15 @@ Prisma `_count` of that folder's **live** articles scoped to the caller's visibi
 rules + own drafts), so it never reveals a count a viewer couldn't reach; it is **not a stored column**
 (no migration) and the UI **hides the number when absent** (older API / a folder the caller can't read).
 
+Both read shapes also carry a **derived `hasAccessRules` boolean** (`.optional()`, #1299 —
+[[0060-kb-folder-access-control]] §3 amendment): whether the folder carries an access restriction,
+computed at read time from `accessRules`, **never stored** (no column, no migration). It is readable
+by **any** `category:read` caller (VIEWER included) while `accessRules` itself stays
+`settings:manage`-gated (#554) — one bit, never the rule kinds, the user list, the role, or a count.
+It is a fact about the **folder**, not about the reader (`true` is not "you cannot see this"), and it
+exists so the web can warn that moving an article into or out of a restricted folder changes who may
+read it. An **absent** value means *unknown* (an older API), never *public*.
+
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
 [[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·
 [[0060-kb-folder-access-control]] · [[0019-asset-assignment-integrity]] ·
