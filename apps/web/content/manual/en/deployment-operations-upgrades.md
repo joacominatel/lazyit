@@ -66,7 +66,8 @@ script can add for you (below); every other one you add by hand, then recreate t
 
 If you upgrade with `git pull` followed by `./infra/start.sh`, the script sees your existing install and,
 before bringing the stack up, **adds any missing key that is safe to generate** — today the email
-password key (`SMTP_SECRET_KEY`) and the AI provider key's storage key (`AI_SECRET_KEY`). Each only
+password key (`SMTP_SECRET_KEY`), the AI provider key's storage key (`AI_SECRET_KEY`) and the directory
+bind password key (`DIRECTORY_SECRET_KEY`). Each only
 protects a secret lazyit refuses to save while the key is missing, so a new one can't lock you out of
 anything. It works whether you sign in with built-in accounts or an identity provider.
 
