@@ -37,6 +37,9 @@ S_SESSION="2222222222222222222222222222222222222222222222222222222222222222"  # 
 S_SMTP="SMTPsentinelRAWkey32charsLong!!!"
 # Same reasoning for the AI provider key's at-rest key (ADR-0097, issue #1322).
 S_AI="AIsentinelRAWkey32charsLongxxxxx"
+# And for the LDAP bind password's at-rest key (ADR-0091, issue #1271) — here the third encoding the API
+# accepts, base64 of 32 bytes (44 chars, not 64): a presence check must not reject it, nor replace it.
+S_DIR="RElSc2VudGluZWxCQVNFNjRrZXkzMmJ5dGVzTG9uZyE="
 
 # A pre-existing local-auth install pinned to localhost (the "before").
 cat >"$ENVF" <<EOF
@@ -49,6 +52,7 @@ WORKFLOW_SECRET_KEY=${S_WORKFLOW}
 SESSION_SIGNING_SECRET=${S_SESSION}
 SMTP_SECRET_KEY=${S_SMTP}
 AI_SECRET_KEY=${S_AI}
+DIRECTORY_SECRET_KEY=${S_DIR}
 LAZYIT_SITE_ADDRESS=localhost
 LAZYIT_HTTP_PORT=8080
 LAZYIT_HTTPS_PORT=8443
@@ -77,6 +81,7 @@ assert_kv WORKFLOW_SECRET_KEY    "$S_WORKFLOW"
 assert_kv SESSION_SIGNING_SECRET "$S_SESSION"
 assert_kv SMTP_SECRET_KEY        "$S_SMTP"
 assert_kv AI_SECRET_KEY          "$S_AI"
+assert_kv DIRECTORY_SECRET_KEY   "$S_DIR"
 assert_kv AUTH_MODE              "local"
 
 # ---------------------------------------------------------------------------
@@ -115,6 +120,14 @@ case "$_minted_ai" in
   *) echo "FAIL: no AI_SECRET_KEY was added to a legacy .env.prod (got '${_minted_ai:-<missing>}')"; fail=1 ;;
 esac
 [ "$_minted_ai" != "$_minted" ] || { echo "FAIL: AI_SECRET_KEY reuses SMTP_SECRET_KEY's value"; fail=1; }
+# DIRECTORY_SECRET_KEY (ADR-0091, issue #1271) is absent too, so it is minted the same way, on its own axis.
+_minted_dir=$(grep -E '^DIRECTORY_SECRET_KEY=' "$ENVF2" | head -n1 | cut -d= -f2- || true)
+case "$_minted_dir" in
+  [0-9a-f]*) [ "${#_minted_dir}" -eq 64 ] || { echo "FAIL: minted DIRECTORY_SECRET_KEY is ${#_minted_dir} chars, not 64"; fail=1; } ;;
+  *) echo "FAIL: no DIRECTORY_SECRET_KEY was added to a legacy .env.prod (got '${_minted_dir:-<missing>}')"; fail=1 ;;
+esac
+[ "$_minted_dir" != "$_minted" ] && [ "$_minted_dir" != "$_minted_ai" ] \
+  || { echo "FAIL: DIRECTORY_SECRET_KEY reuses another at-rest key's value"; fail=1; }
 # The other secrets must survive the same render untouched.
 _w2=$(grep -E '^WORKFLOW_SECRET_KEY=' "$ENVF2" | head -n1 | cut -d= -f2- || true)
 [ "$_w2" = "$S_WORKFLOW" ] || { echo "FAIL: WORKFLOW_SECRET_KEY changed while adding SMTP_SECRET_KEY"; fail=1; }
@@ -128,7 +141,7 @@ _w2=$(grep -E '^WORKFLOW_SECRET_KEY=' "$ENVF2" | head -n1 | cut -d= -f2- || true
 # ---------------------------------------------------------------------------
 ENVF3="$WORK/.env.prod.fresh"
 LAZYIT_ENV_FILE="$ENVF3" LAZYIT_SKIP_DOCKER=1 LAZYIT_SKIP_BRINGUP=1 \
-  sh infra/start.sh --yes >/dev/null 2>&1 \
+  sh infra/start.sh --yes >"$WORK/fresh.log" 2>&1 \
   || { echo "FAIL: start.sh --yes (fresh render) exited non-zero"; exit 1; }
 _fresh_ai=$(grep -E '^AI_SECRET_KEY=' "$ENVF3" | head -n1 | cut -d= -f2- || true)
 case "$_fresh_ai" in
@@ -144,6 +157,26 @@ if grep -qE '^AI_WORKER_CONCURRENCY=' "$ENVF3"; then echo "FAIL: AI_WORKER_CONCU
 if grep -qE '^(AI_SECRET_KEY|AI_WORKER_CONCURRENCY)=' infra/env/.env.prod.example; then
   echo "FAIL: .env.prod.example carries an ACTIVE AI key — infra/update.sh would stop every existing instance"; fail=1
 fi
+# DIRECTORY_SECRET_KEY (ADR-0091, issue #1271) — the same contract as AI_SECRET_KEY: a fresh guided install
+# writes it ACTIVE (64 hex), exactly once, on its own axis, never printed; the example keeps it commented.
+_fresh_dir=$(grep -E '^DIRECTORY_SECRET_KEY=' "$ENVF3" | head -n1 | cut -d= -f2- || true)
+case "$_fresh_dir" in
+  [0-9a-f]*) [ "${#_fresh_dir}" -eq 64 ] || { echo "FAIL: fresh DIRECTORY_SECRET_KEY is ${#_fresh_dir} chars, not 64"; fail=1; } ;;
+  *) echo "FAIL: a fresh render has no active DIRECTORY_SECRET_KEY (got '${_fresh_dir:-<missing>}')"; fail=1 ;;
+esac
+[ "$(grep -cE '^DIRECTORY_SECRET_KEY=' "$ENVF3")" -eq 1 ] || { echo "FAIL: a fresh render has more than one DIRECTORY_SECRET_KEY line"; fail=1; }
+for _k in SMTP_SECRET_KEY AI_SECRET_KEY WORKFLOW_SECRET_KEY SESSION_SIGNING_SECRET; do
+  [ "$(grep -E "^$_k=" "$ENVF3" | head -n1 | cut -d= -f2-)" != "$_fresh_dir" ] \
+    || { echo "FAIL: DIRECTORY_SECRET_KEY reuses $_k's value"; fail=1; }
+done
+if [ -n "$_fresh_dir" ] && grep -qF "$_fresh_dir" "$WORK/fresh.log"; then
+  echo "FAIL: the generated DIRECTORY_SECRET_KEY value was printed by start.sh"; fail=1
+fi
+if grep -qE '^DIRECTORY_SECRET_KEY=' infra/env/.env.prod.example; then
+  echo "FAIL: .env.prod.example carries an ACTIVE DIRECTORY_SECRET_KEY — infra/update.sh would stop every existing instance"; fail=1
+fi
+grep -qE '^#[[:space:]]*DIRECTORY_SECRET_KEY=' infra/env/.env.prod.example \
+  || { echo "FAIL: .env.prod.example has no commented DIRECTORY_SECRET_KEY placeholder (the render loop and the #1459 append both key off it)"; fail=1; }
 
 [ "$fail" -eq 0 ] || { echo "reconfigure-preserves-secrets: FAILED"; exit 1; }
-echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (SMTP_SECRET_KEY and AI_SECRET_KEY added when absent; AI_SECRET_KEY written on a fresh render)"
+echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (SMTP_SECRET_KEY, AI_SECRET_KEY and DIRECTORY_SECRET_KEY added when absent; AI_SECRET_KEY and DIRECTORY_SECRET_KEY written on a fresh render)"
