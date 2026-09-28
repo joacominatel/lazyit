@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-09-28
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -288,8 +288,12 @@ Instance** before and after.
 > `prisma migrate deploy`, which applies every pending migration **in sequence** ([[prisma-migrations]]), so
 > you never step through intermediate versions by hand. The **only** stop is a **major** in the range — apply
 > its *⚠️ Upgrade actions* before jumping past it. The guided **`infra/update.sh`**
-> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → `verify-tag` →
-> build → migrate → health-gate sequence and blocks one-click across a major.
+> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → release-tag check
+> (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must
+> not be bad) → build → migrate → health-gate sequence and blocks one-click across a major. **On v2.0.0 or
+> earlier, update to v2.0.1 by hand** (`git fetch --tags && git checkout v2.0.1 && ./infra/start.sh`,
+> after a backup): the `update.sh` you already have — the one that runs — stops at its old signature check
+> on every automated release tag (#1458); the fixed one works from v2.0.1 on ([[releasing]]).
 
 > [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
 > Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is

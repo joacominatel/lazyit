@@ -3,7 +3,7 @@ title: "ADR-0084: Update awareness & guided update — check, weekly email, upda
 tags: [adr, updates, versioning, deployment, infra, notifications, settings]
 status: accepted
 created: 2026-07-01
-updated: 2026-08-04
+updated: 2026-09-28
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,9 +14,9 @@ deciders: [Joaquín Minatel]
 accepted — issue #904. CEO decision (2026-07-01): **guided updater v1** ("Guiado v1, one-click
 después") — a host-side `infra/update.sh` plus an in-app enqueue button; the true one-click trigger
 is *designed* here (§6) as a deferred, slot-in-compatible phase. Depends on
-[[0083-versioning-and-releases]] (#903): tags exist, are SSH-signed, MAJOR means "not
-one-click-safe", and the running version is baked in via `git describe` → build-arg →
-`GET /instance/version`. Sibling of [[0047-guided-first-deploy-bootstrap]] (the `start.sh` pattern
+[[0083-versioning-and-releases]] (#903): tags exist (annotated, on `master`; only the hand-cut ones
+are signed — see its *Tag trust*), MAJOR means "not one-click-safe", and the running version is baked
+in via `git describe` → build-arg → `GET /instance/version`. Sibling of [[0047-guided-first-deploy-bootstrap]] (the `start.sh` pattern
 this extends) and [[backups]] (the DR story this must never weaken).
 
 ## Context
@@ -99,8 +99,10 @@ operator before they run it. Mailcow's `update.sh` is the named reference patter
    ([[backups]]). **A failed or unverifiable dump aborts the update.** The dump path and size are
    printed — visible proof, not a promise. This runs regardless of whether the operator ever
    configured the backup sidecar; the updater is its own safety net.
-4. **`git fetch --tags && git verify-tag <tag> && git checkout <tag>`** — only SSH-signed tags
-   ([[0083-versioning-and-releases]]) are applied; verification failure stops the update.
+4. **Tag trust, then checkout** *(amended 2026-09-28, #1458 — see the amendment below)* — fetch
+   `master` and the tag from `origin` (HTTPS or SSH only), apply the tag only if it is an annotated
+   `vX.Y.Z` tag whose commit is on the freshly fetched `origin/master`, verify its signature when it has
+   one, and check out the verified commit. Any refusal stops the update with the checkout restored.
 5. **Missing-env detection, FAIL LOUD** — diff the target tag's `.env.prod.example` keys against the
    live `.env.prod`; on a gap, stop and print the *exact line to add* (the `REDIS_URL` /
    `WORKFLOW_SECRET_KEY` upgrade notes, automated). The script **never writes `.env.prod`** — a
@@ -314,3 +316,43 @@ is being read against both the sentence it scopes and ADR-0094, which reached th
 on the agent axis independently. Nothing currently depends on this scoping — ADR-0094 §1 quotes the
 line, reads it at face value, and stays inside it either way. It is recorded so the next proposal in
 this area finds the answer instead of re-deriving it.
+
+## Amendment — tag trust replaces mandatory signature verification (issue #1458, 2026-09-28)
+
+§3 step 4 originally ran `git verify-tag <tag>` and stopped on failure. The tags `release.yml` cuts are
+annotated but **unsigned** ([[0083-versioning-and-releases]] — CI never holds the release owner's key),
+so from v1.1.0 every guided update stopped there: safely, after the backup and before touching the
+running stack, but always. And even the hand-cut, SSH-signed `v1.0.0` fails `git verify-tag` on a host
+without `gpg.ssh.allowedSignersFile`, which is every host that has not configured one.
+
+**The rule now** (the full statement and rationale are ADR-0083's *Tag trust*): `update.sh` applies a
+target tag only if
+
+1. it is named `vX.Y.Z`;
+2. every fetch URL of `origin` is an authenticated transport — HTTPS with certificate verification, or
+   SSH (a local path is accepted too; it has no network leg). `http://`, `git://`, other schemes and
+   remote helpers are refused, as is HTTPS with `http.sslVerify=false` or `GIT_SSL_NO_VERIFY`;
+3. `master` and the tag are fetched from `origin` in the same run. The tag must exist on `origin`; a
+   local tag of the same name that differs from `origin`'s stops the update and is never overwritten;
+4. it is an annotated tag whose embedded name matches;
+5. its commit is an ancestor of, or equal to, the freshly fetched `origin/master`.
+
+A signature is verified when present and never required. **A bad signature is always a hard stop; a
+missing verifier never is.** SSH with an allowed-signers file → `git verify-tag` must pass (an unlisted
+signer stops it too). SSH without one → `ssh-keygen -Y check-novalidate` checks the signature against
+the tag's content; bad stops, valid is accepted with the signer unchecked. OpenPGP/X.509 →
+`git verify-tag` must pass unless the key is not in the keyring or `gpg`/`gpgsm` is absent (warning).
+Everything else in §3 — backup first, `fail_hard` restoring the checkout, the re-exec from a temporary
+copy — is unchanged; a failed fetch now also goes through `fail_hard`, so the `UpdateRun` is stamped
+`failed` rather than left at `building`. Tested offline by `infra/test/update-tag-trust.sh` in CI.
+
+**The fix only applies from the release that contains it.** Step 0 re-executes a temporary copy of the
+`update.sh` in the **current** checkout, so an update always runs the updater of the version being
+*left*, never the target's. An instance on v2.0.0 or earlier therefore still stops at step 4 when it
+runs `./infra/update.sh v2.0.1`. That one update is done by hand, after a backup ([[backups]]):
+
+```sh
+git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+```
+
+From v2.0.1 on, `./infra/update.sh vX.Y.Z` (and the in-app Update button's command) works again.

@@ -112,7 +112,11 @@ Run that command on the server (over SSH). The script is careful and non-destruc
 
 1. **Backs up both databases** (the app database and the identity database) and verifies each backup is
    restorable. **If the backup fails, the update aborts** — there is no override.
-2. **Verifies the release's signature** and checks out that version.
+2. **Checks that the version is a real lazyit release** and checks it out. It fetches the release from
+   your repository's `origin` over HTTPS or SSH and accepts it only if it is a published release tag
+   (`vX.Y.Z`) on the main release line. If the release carries a signature, a bad signature stops the
+   update; most releases are not signed, and that is expected. A plain `http://` or `git://` remote is
+   refused — switch it to HTTPS or SSH first.
 3. **Checks for new required settings.** If the new version needs an environment variable you don't have
    yet, it **stops and tells you exactly what to add** — it never edits your secrets file for you.
 4. **Builds the new version while the current one keeps serving**, then swaps to it (a brief, ~1-minute
@@ -120,6 +124,18 @@ Run that command on the server (over SSH). The script is careful and non-destruc
 
 While an update is running, the card shows the real stage (backing up, migrating, building, restarting,
 verifying) — not a fake progress bar — and quietly reconnects when the app comes back.
+
+> **Updating from v2.0.0 or earlier: do the update to v2.0.1 by hand.** Up to v2.0.0 the update script
+> stopped at its release check on every release (after the backup, without changing anything). The fix
+> is in v2.0.1, but the script that runs is always the one from the version you are updating *from*. So
+> for this one update, back up first (see
+> [Backups & restore](/help/deployment-operations-backups-restore)), then run on the server:
+>
+> ```sh
+> git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+> ```
+>
+> From v2.0.1 on, `./infra/update.sh vX.Y.Z` works as described above.
 
 ### Cancelling a requested update
 
