@@ -82,7 +82,10 @@ export class DirectoryConnectionService {
    * Upsert the single config row (`PUT`). Fields are set wholesale. The BIND PASSWORD is write-only: a
    * non-empty value is encrypted (AES-256-GCM under DIRECTORY_SECRET_KEY) and stored; omitted/empty leaves
    * the stored envelope. Encrypting throws {@link DirectorySecretKeyMissingError} (mapped to 409 at the
-   * controller) if the master key is unset — the rest of the config still saves. Returns the redacted config.
+   * controller) if the master key is unset. That happens BEFORE the upsert, so the WHOLE save is rejected and
+   * NOTHING is persisted — not even the non-password fields. To store the rest, re-save with an empty
+   * `bindPassword` (or set the key: a guided install generates it, see infra/start.sh). Returns the redacted
+   * config.
    */
   async updateSettings(
     input: UpdateDirectoryConnection,

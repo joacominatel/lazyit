@@ -125,6 +125,10 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
   `AI_WORKER_CONCURRENCY` (concurrent AI runs, default 4). Both ship **commented** in the example so the
   guided update never stops an instance that does not use AI; `infra/start.sh` generates `AI_SECRET_KEY`
   on a fresh install and on `--reconfigure`. No new container: AI runs execute in the `api` container.
+  One more **optional** key of the same shape for directory sync ([[0091-on-prem-ad-ldap-directory-source]]):
+  `DIRECTORY_SECRET_KEY` (the AES-256-GCM key for the LDAP bind password at rest; without it only saving
+  a bind password 409s). It also ships **commented**, and `infra/start.sh` generates it on a fresh
+  install, on `--reconfigure`, and when re-run on an existing install that lacks it.
   → [[0028-secrets-and-config]].
 - **Exposure:** only Caddy publishes ports; Postgres, Meilisearch, Valkey, the API and web stay on the
   internal network. The dev DB, Meilisearch and Valkey bind loopback only.
@@ -132,8 +136,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is a
   third unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD` and `ZITADEL_MASTERKEY`): losing it
   makes every stored connector credential undecryptable, so back it up off-host with the *matching*
-  DB dump. `SMTP_SECRET_KEY` and `AI_SECRET_KEY` are low-DR (losing one costs a re-typed password or
-  API key) but ride the same `.env.prod` copy. → [[backups]].
+  DB dump. `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` are low-DR (losing one costs a
+  re-typed password or API key) but ride the same `.env.prod` copy. → [[backups]].
 
 ## Deployment levels
 
