@@ -146,20 +146,26 @@ on that branch and before `up`, `start.sh` **appends** to `infra/env/.env.prod` 
 
 **The allowlist is the safety gate.** A key qualifies only if a random fresh value can never orphan data
 or identity on a populated install that lacks it. Today: **`SMTP_SECRET_KEY`**
-([[0079-instance-smtp-outbound-email]]) and **`AI_SECRET_KEY`** ([[0097-ai-assistant-mcp-and-headless-api]]), both
+([[0079-instance-smtp-outbound-email]]), **`AI_SECRET_KEY`** ([[0097-ai-assistant-mcp-and-headless-api]]) and
+**`DIRECTORY_SECRET_KEY`** ([[0091-on-prem-ad-ldap-directory-source]], added by issue #1271), all
 `openssl rand -hex 32`. Each is the at-rest key for a secret the API **refuses to store (409)** while the
 key is unset, so a missing key proves nothing was ever encrypted under it. `AI_SECRET_KEY` ships
 *commented* in the example (so `infra/update.sh` never stops an instance that does not use AI); criterion
 1 accepts the commented placeholder precisely so this optional key can still be supplied — it is new in
 v2.0, a fresh install and `--reconfigure` already write it, and without it the first provider-key save
-409s.
+409s. `DIRECTORY_SECRET_KEY` follows the same shape for the same reason (directory sync is optional and off
+by default): commented in the example, written active by a fresh install, `--reconfigure` and this append.
+
+The allowlist also relies on *where* the API reads these keys: only from its process env, which compose
+fills from `.env.prod` through `env_file` — the api service's `environment:` block names none of them, and
+the operator's shell env never reaches the container. An operator who set one in their own compose overlay
+instead still wins after the append (an overlay's `environment:` outranks `env_file`, and an overlay's
+`env_file` merges after `.env.prod`), so appending can never swap the key the API decrypts with.
 
 **Never on the allowlist** — keys that protect existing data or identity: `WORKFLOW_SECRET_KEY`
 ([[0054-applications-workflow-engine]] — the connector-credential linchpin), `ZITADEL_MASTERKEY`,
 `AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD` / `ZITADEL_DB_PASSWORD` (the databases
-already carry the old ones), `MEILI_MASTER_KEY`. `DIRECTORY_SECRET_KEY` ([[0091-on-prem-ad-ldap-directory-source]])
-has the same shape as the SMTP key but is not in the example today (issue #1271); it joins the
-allowlist in the change that adds it to the example. For every non-allowlisted key the behaviour is
+already carry the old ones), `MEILI_MASTER_KEY`. For every non-allowlisted key the behaviour is
 unchanged: `start.sh` only **names** the missing key and points at the example's comment; the API fails
 loud at boot for a required one, and `infra/update.sh` still stops before touching the stack.
 
