@@ -11,10 +11,12 @@ name: Release
 #             docs hidden). A major release carries the promotion PR's "## ⚠️ Upgrade actions"
 #             section verbatim. Idempotent: a HEAD that already carries a v* tag is left alone.
 #
-# Signing note (ADR-0083 §Signed tags): v1.0.0 is seeded BY HAND, SSH-signed, by the release owner —
+# Signing note (ADR-0083 §Tag trust): v1.0.0 is seeded BY HAND, SSH-signed, by the release owner —
 # this workflow never creates it. Subsequent automated tags are ANNOTATED but unsigned: CI cannot
 # hold the owner's SSH key, and per the ADR the mandatory control is MFA + branch protection on the
-# GitHub identity (the signer IS that identity). An operator can still `git verify-tag v1.0.0`.
+# GitHub identity (the signer IS that identity). infra/update.sh therefore trusts a tag because it is
+# an annotated vX.Y.Z tag on origin/master fetched over HTTPS/SSH, not because it is signed (#1458) —
+# keep the tags this job cuts annotated (`git tag -a`) and on master, or the updater refuses them.
 
 on:
   pull_request:
