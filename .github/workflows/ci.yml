@@ -175,6 +175,15 @@ jobs:
           sh infra/test/reconfigure-preserves-secrets.sh
           sh infra/test/start-adds-missing-keys.sh
 
+      # infra/update.sh release-tag trust (ADR-0083 §Tag trust, #1458), offline against real git repos
+      # (a bare repo on disk stands in for origin) through the script's LAZYIT_UPDATE_LIB_ONLY seam — no
+      # Docker, no database. Unsigned annotated tags on origin/master are accepted; lightweight, off-master,
+      # non-vX.Y.Z, unpublished and re-labelled tags and insecure origins are refused; SSH and OpenPGP
+      # signatures are checked when present (a bad one is refused). Needs git, ssh-keygen and gpg, all
+      # preinstalled on the ubuntu-latest runner.
+      - name: Test update.sh release-tag trust
+        run: sh infra/test/update-tag-trust.sh
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
