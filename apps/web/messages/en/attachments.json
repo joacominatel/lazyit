@@ -29,6 +29,7 @@
     "deleteConfirmTitle": "Delete document?",
     "deleteConfirmDescription": "\"{name}\" will be removed from this asset. This cannot be undone from here.",
     "deleteCancel": "Cancel",
-    "deleteConfirm": "Delete"
+    "deleteConfirm": "Delete",
+    "deleteConfirmDescriptionPurchase": "\"{name}\" will be removed from this purchase and from the assets that show it. This cannot be undone from here."
   }
 }

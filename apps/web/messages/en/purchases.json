@@ -207,7 +207,8 @@
     "receive": "Receive",
     "receiveUnits": "Receive units",
     "cancelRemaining": "Cancel remaining units",
-    "linkExisting": "Link existing assets"
+    "linkExisting": "Link existing assets",
+    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep."
   },
   "activity": {
     "fields": {

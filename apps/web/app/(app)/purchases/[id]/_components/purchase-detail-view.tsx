@@ -3,6 +3,7 @@
 import {
   ChevronDownIcon,
   EllipsisVerticalIcon,
+  ExclamationTriangleIcon,
   InboxArrowDownIcon,
   PencilSquareIcon,
   PlusIcon,
@@ -15,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/breadcrumb";
+import { Callout } from "@/components/callout";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
@@ -62,6 +64,7 @@ import { formatMoney } from "@/lib/utils/money";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
+import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
 import {
   MoneyTotals,
   PurchaseStatusBadge,
@@ -92,8 +95,8 @@ function LineReceipt({ line }: { line: PurchaseOrderLine }) {
 /**
  * One purchase (ADR-0099, UX proposal §3.a "Purchase detail"): identity, status and receipt progress;
  * the lines with "x of y received" (over-received is a warning, never an error); totals per currency
- * label; the status actions; and the activity log. Receiving units, linking existing assets and the
- * purchase's documents (#1475) take their places between the lines and the activity.
+ * label; the status actions; receiving units, linking existing assets and cancelling the remaining units
+ * per line (#1475); the purchase's documents; and the activity log.
  */
 export function PurchaseDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases");
@@ -453,7 +456,18 @@ export function PurchaseDetailView({ id }: { id: string }) {
         )}
       </DetailPanel>
 
-      {/* #1475: the purchase's documents and its linked assets go here, between the lines and the log. */}
+      <DocumentsPanel
+        parent="purchaseOrder"
+        parentId={purchase.id}
+        canWrite={canWrite}
+        notice={
+          // ADR-0099 §12: purchase documents are financial evidence, and the attachments volume is not in
+          // the backup yet (docs/05-runbooks/backups.md, item #7). Say so where the files are uploaded.
+          <Callout tone="warning" icon={<ExclamationTriangleIcon />} className="mb-3">
+            <p className="text-sm">{t("detail.documentsBackupNotice")}</p>
+          </Callout>
+        }
+      />
 
       <DetailPanel title={t("detail.activitySection")}>
         <PurchaseActivity purchaseId={purchase.id} lines={purchase.lines} />
