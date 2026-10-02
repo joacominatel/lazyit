@@ -103,7 +103,9 @@ crear casi duplicados:
   con lo que escribiste, luego una en la que alguna palabra empieza así, luego una que lo contiene — e
   incluso una con un error de tipeo cercano.
 - **Con el teclado**, **↓** abre la lista, **↑**/**↓** se mueven por ella, **Enter** o **Tab** toman la
-  empresa resaltada y **Esc** cierra la lista y conserva lo que escribiste.
+  empresa resaltada y **Esc** cierra la lista y conserva lo que escribiste. Cuando la mejor coincidencia
+  completa lo que estás escribiendo, queda resaltada sola, así **Enter** o **Tab** terminan la palabra;
+  **Ctrl+Enter** (**⌘+Enter** en Mac) conserva tu texto exactamente como lo escribiste.
 
 Siempre puedes escribir un valor nuevo — nunca se te obliga a elegir una sugerencia. Si lo que
 escribiste es solo otra forma de escribir una empresa que ya está en uso (otras mayúsculas o acentos,
@@ -150,7 +152,10 @@ Usa como máximo **dos decimales**, y no incluyas signos de moneda ni el signo m
 adivina: si un importe no se puede leer en el formato de tu idioma — `1,234.56` con lazyit en español,
 o un tercer decimal que muy probablemente es un separador de miles mal escrito — lo indica debajo del
 campo al salir de él, y el formulario no se guarda hasta que lo corrijas. Una vez leído, el importe se
-reescribe en la forma estándar (`1234,5` pasa a `1.234,50`), para que veas cómo se entendió.
+reescribe en la forma estándar (`1234,5` pasa a `1.234,50`), para que veas cómo se entendió. Hay una
+forma que se lee distinto según el idioma — un solo separador seguido de exactamente tres dígitos, como
+`1.150` en español o `1,150` en inglés. lazyit la lee como miles y lo indica debajo del campo, por
+ejemplo *Leído como 1150*.
 
 Los importes **se muestran como se ingresaron**, con los separadores de tu idioma: un importe entero no
 lleva decimales (`1.500` en español, `1,500` en inglés) y uno con centavos muestra dos (`1.234,56` /

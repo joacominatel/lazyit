@@ -154,9 +154,13 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
 - **Input follows the viewer's UI locale** (#1470): `1.234,56` or `1234,56` in es, `1,234.56` or
   `1234.56` in en — thousands grouping in threes, the locale's decimal separator, at most two
   decimals. Anything else is **refused inline, never guessed**: the other locale's separators, a minus
-  sign, letters or currency signs, and a third decimal. The third decimal is refused rather than
-  rounded because it is almost always a mistyped grouping separator (`1,234` typed in es), and rounding
-  it would store a thousandth of the intended amount without a word.
+  sign, letters or currency signs, and a third decimal. **CTO decision, 2026-10-02 — provisional,
+  pending CEO confirmation (#1470):** the third decimal is refused rather than rounded because it is
+  almost always a mistyped grouping separator (`1,234` typed in es), and rounding it would store a
+  thousandth of the intended amount without a word.
+- The one accepted shape the two locales read differently — a single separator followed by exactly three
+  digits (`1.150` in es, `1,150` in en) — is read as a thousands group, and the field **echoes the
+  reading** under the input once it is left ("Read as 1150"). No other entry is echoed.
 - This governs purchase amounts and the asset's purchase cost and salvage value, which carry the label.
 - Totals are grouped by label (trimmed, case-insensitive) and never summed across labels.
 - **CTO decision, 2026-10-02 — provisional, pending CEO confirmation (#1469):** the "as entered" rule

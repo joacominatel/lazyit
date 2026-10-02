@@ -96,7 +96,9 @@ near-duplicates:
 - **As you type**, the closest matches come first: a company that starts with what you typed, then one
   where a word starts with it, then one that contains it — and even a close misspelling.
 - **With the keyboard**, **↓** opens the list, **↑**/**↓** move through it, **Enter** or **Tab** takes the
-  highlighted company, and **Esc** closes the list and keeps what you typed.
+  highlighted company, and **Esc** closes the list and keeps what you typed. When the best match
+  completes what you are typing, it is highlighted for you, so **Enter** or **Tab** finishes the word;
+  **Ctrl+Enter** (**⌘+Enter** on a Mac) keeps your text exactly as typed instead.
 
 You can always type a brand-new value — a suggestion is never forced. If what you typed is just another
 spelling of a company already in use (different capitals or accents, punctuation, or a legal suffix
@@ -141,7 +143,9 @@ Use at most **two decimals**, and leave out currency signs and minus signs. lazy
 amount can't be read in your language's format — `1,234.56` while lazyit is in Spanish, or a third
 decimal that is most likely a mistyped thousands separator — it says so below the field when you leave
 it, and the form isn't saved until you fix it. Once read, the amount is rewritten in the standard form
-(`1234,5` becomes `1.234,50`), so you can see it was understood.
+(`1234,5` becomes `1.234,50`), so you can see it was understood. One shape reads differently between
+languages — a single separator followed by exactly three digits, such as `1.150` in Spanish or `1,150`
+in English. lazyit reads it as thousands and says so under the field, for example *Read as 1150*.
 
 Amounts are **shown as entered**, with your language's separators: a whole amount has no decimals
 (`1,500` in English, `1.500` in Spanish) and an amount with cents shows two (`1,234.56` / `1.234,56`).
