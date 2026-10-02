@@ -88,10 +88,23 @@ legal entity). It is **only for grouping, filtering and reporting**: it is **not
 Company does not hide anything — anyone who can see assets sees *all* assets regardless of their
 company; setting it simply lets you narrow the list to one company when you want to.
 
-It is a free-text field with **autocomplete**: as you type, lazyit suggests companies you've already
-used on other assets, so you reuse the same spelling instead of creating near-duplicates — but you
-can always type a brand-new value. There is no separate "companies" screen to manage: a company
-exists simply because at least one asset uses it.
+It is a free-text field with **suggestions**, so you reuse the same spelling instead of creating
+near-duplicates:
+
+- **When you click into it**, lazyit lists the companies *you* used most recently (remembered in this
+  browser), then the other companies already in use.
+- **As you type**, the closest matches come first: a company that starts with what you typed, then one
+  where a word starts with it, then one that contains it — and even a close misspelling.
+- **With the keyboard**, **↓** opens the list, **↑**/**↓** move through it, **Enter** or **Tab** takes the
+  highlighted company, and **Esc** closes the list and keeps what you typed.
+
+You can always type a brand-new value — a suggestion is never forced. If what you typed is just another
+spelling of a company already in use (different capitals or accents, punctuation, or a legal suffix
+such as "S.A." or "Inc."), a hint below the field says so and offers a button to use the existing
+spelling. It is only a hint: ignore it and your value is saved exactly as typed.
+
+There is no separate "companies" screen to manage: a company exists simply because at least one asset
+uses it.
 
 On the asset detail page the company is shown when set, and links to the list filtered by that
 company. You can filter and add a **Company** column to the list (see below).
@@ -114,6 +127,24 @@ over). Assets with no purchase cost show no book value at all.
 
 Amounts are plain numbers — lazyit is single-organization and doesn't attach a currency, so enter and
 read them in whatever currency your team uses.
+
+### Entering amounts
+
+Type an amount the way numbers are written in the language you use lazyit in:
+
+| Language | Accepted | Not accepted |
+| --- | --- | --- |
+| English | `1,234.56` · `1234.56` · `1500` | `1.234,56` |
+| Spanish | `1.234,56` · `1234,56` · `1500` | `1,234.56` |
+
+Use at most **two decimals**, and leave out currency signs and minus signs. lazyit never guesses: if an
+amount can't be read in your language's format — `1,234.56` while lazyit is in Spanish, or a third
+decimal that is most likely a mistyped thousands separator — it says so below the field when you leave
+it, and the form isn't saved until you fix it. Once read, the amount is rewritten in the standard form
+(`1234,5` becomes `1.234,50`), so you can see it was understood.
+
+Amounts are **shown as entered**, with your language's separators: a whole amount has no decimals
+(`1,500` in English, `1.500` in Spanish) and an amount with cents shows two (`1,234.56` / `1.234,56`).
 
 ## Custom fields
 

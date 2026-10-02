@@ -71,7 +71,9 @@ cualquiera de estos:
 - **Asientos comprados** — cuántos asientos pagos incluye la licencia. Déjalo en blanco para no
   fijar un límite.
 - **Costo por asiento** — el precio de un solo asiento, por período de facturación. Ingrésalo en
-  unidades normales (p. ej. `12.99`); lazyit guarda el importe con precisión.
+  unidades normales, con el formato de números de tu idioma (`12,99` en español, `12.99` en inglés —
+  ver [escribir importes](/help/assets-asset-basics#escribir-importes)); lazyit guarda el importe con
+  precisión.
 - **Fecha de renovación** — cuándo se renueva la licencia por próxima vez.
 
 Los **asientos en uso** se calculan solos: es la cantidad de *personas distintas* que tienen

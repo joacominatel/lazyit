@@ -22,8 +22,9 @@ to create assets). It opens a short form.
 - **Quantity** (required) — how many units to create, from 1 up to the per-request maximum.
 - **Status** — the state every unit starts in (for example *Operational* or *In storage*).
 - **Location**, **Company**, **Purchase date**, **Purchase cost**, **Notes** — optional shared
-  details applied to **every** unit. The purchase cost is entered per unit, in major units, exactly
-  like the asset form.
+  details applied to **every** unit. The purchase cost is entered per unit, in major units and in your
+  language's number format, and the company suggests values already in use — both exactly like the
+  asset form (see [Asset basics](/help/assets-asset-basics)).
 - **Serial numbers** — optional. Paste one serial per line, in order, and each unit gets the matching
   serial. Leave it blank to create serial-less units, or paste **exactly** as many lines as the
   quantity — a mismatched count is rejected before anything is created.
