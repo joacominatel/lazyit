@@ -206,7 +206,8 @@
     "activitySection": "Activity",
     "receive": "Receive",
     "receiveUnits": "Receive units",
-    "cancelRemaining": "Cancel remaining units"
+    "cancelRemaining": "Cancel remaining units",
+    "linkExisting": "Link existing assets"
   },
   "activity": {
     "fields": {
@@ -343,5 +344,85 @@
     "submit": "Cancel units",
     "cancelledToast": "{count, plural, one {# unit} other {# units}} cancelled",
     "error": "Couldn't cancel the units"
+  },
+  "link": {
+    "title": "Link {count, plural, one {an asset} other {# assets}} to a purchase",
+    "pickAssetsDescription": "Choose the assets you already have that came from {purchase} · {line}.",
+    "pickLineDescription": "Choose the purchase and the line {count, plural, one {this asset was} other {these # assets were}} bought on.",
+    "diffDescription": "{purchase} · {line}. Values from the purchase reach the assets only where you tick them.",
+    "searchAssets": "Search name, asset tag or serial…",
+    "modelChip": "Model: {model}",
+    "removeModelChip": "Show every model",
+    "noAssets": "No assets match.",
+    "selectedCount": "{count} selected · {pending} pending on the line",
+    "purchase": "Purchase",
+    "purchasePlaceholder": "Choose a purchase",
+    "purchaseSearch": "Search reference, invoice or supplier…",
+    "noPurchases": "No purchases found",
+    "noAssetLines": "This purchase has no asset lines.",
+    "line": "Line",
+    "sameModel": "Same model",
+    "previewError": "Couldn't compare the assets with the purchase.",
+    "after": "After linking, the line will have {received} of {expected} received.",
+    "overWarning": "The line expects {expected}; linking makes {after}. That is allowed — the line will show as over-received.",
+    "raise": "Raise the line to {quantity}",
+    "raisedToast": "Line raised to {quantity}",
+    "raiseError": "Couldn't change the line quantity",
+    "alreadyHere": "{count, plural, one {# asset is} other {# assets are}} already on this line and left out.",
+    "missing": "{count, plural, one {# asset was} other {# assets were}} not found and left out.",
+    "elsewhereTitle": "Already on another purchase",
+    "elsewhereHelp": "These are never moved silently. Tick the ones that belong to this line instead.",
+    "moveHere": "Move {asset} here",
+    "openCurrent": "Open its purchase",
+    "applyTitle": "Apply values from the purchase?",
+    "applyEvery": "Apply every purchase value",
+    "columns": {
+      "field": "Field",
+      "purchase": "From the purchase",
+      "assets": "Your assets",
+      "apply": "Apply",
+      "asset": "Asset"
+    },
+    "fields": {
+      "purchaseCost": "Purchase cost",
+      "purchaseDate": "Purchase date",
+      "warrantyEnd": "Warranty end",
+      "company": "Company",
+      "modelId": "Model"
+    },
+    "counts": {
+      "empty": "{count} empty",
+      "differs": "{count} different",
+      "same": "{count} the same"
+    },
+    "fill": "Fill {count}",
+    "replace": "Replace {count}",
+    "nothingOffered": "Not on the purchase",
+    "nothingToApply": "Same",
+    "alwaysLinked": "The supplier, the purchase and its documents are always linked — nothing to apply. Cost and currency move together.",
+    "showEach": "Show each asset",
+    "hideEach": "Hide each asset",
+    "cellLabel": "Apply {field} to {asset}",
+    "fromInvoice": "(invoice)",
+    "fromOrder": "(order)",
+    "warrantyMonths": "({months} months)",
+    "noCurrency": "No currency",
+    "aModel": "a model",
+    "nothingToLink": "Nothing to link — every asset is already on this line or on another purchase.",
+    "summary": "{linked, plural, one {# asset} other {# assets}} linked · {filled, plural, =0 {nothing filled} one {# value filled} other {# values filled}} · {replaced, plural, =0 {nothing replaced} one {# value replaced} other {# values replaced}}",
+    "submit": "Link {count, plural, one {# asset} other {# assets}}",
+    "linkedToast": "{count, plural, one {# asset} other {# assets}} linked",
+    "linkError": "Couldn't link the assets",
+    "linkedSummary": "{count, plural, one {# asset} other {# assets}} linked.",
+    "noneLinked": "No asset was linked — see why below.",
+    "failedTitle": "Assets that weren't linked",
+    "openPurchase": "Open purchase",
+    "done": "Done",
+    "reasons": {
+      "notFound": "Not found, or archived",
+      "alreadyLinked": "Already on this line",
+      "linkedElsewhere": "On another purchase — tick “Move here” to move it",
+      "notLinked": "Not linked to this line"
+    }
   }
 }

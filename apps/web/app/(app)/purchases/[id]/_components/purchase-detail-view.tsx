@@ -60,6 +60,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
 import { formatMoney } from "@/lib/utils/money";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
+import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import {
   MoneyTotals,
@@ -117,6 +118,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
+  const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -415,9 +417,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                 {canReceive && line.kind === "ASSET" ? (
-                                  <DropdownMenuItem onSelect={() => setReceiving(line)}>
-                                    {t("detail.receiveUnits")}
-                                  </DropdownMenuItem>
+                                  <>
+                                    <DropdownMenuItem onSelect={() => setReceiving(line)}>
+                                      {t("detail.receiveUnits")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => setLinking(line)}>
+                                      {t("detail.linkExisting")}
+                                    </DropdownMenuItem>
+                                  </>
                                 ) : null}
                                 <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
                                   {t("detail.editLine")}
@@ -457,6 +464,10 @@ export function PurchaseDetailView({ id }: { id: string }) {
           line={{ purchase, line: receiving }}
           onClose={() => setReceiving(null)}
         />
+      ) : null}
+
+      {linking ? (
+        <LinkAssetsDialog line={{ purchase, line: linking }} onClose={() => setLinking(null)} />
       ) : null}
 
       {cancelling ? (

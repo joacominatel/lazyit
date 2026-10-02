@@ -100,7 +100,8 @@
       "owner": "Owner: {value}",
       "owners": "Owners: {value}",
       "warranty": "Warranty: {value}"
-    }
+    },
+    "linkToPurchase": "Link to purchase"
   },
   "empty": {
     "title": "Nothing tracked yet",

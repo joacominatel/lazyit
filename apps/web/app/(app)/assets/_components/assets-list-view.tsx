@@ -6,6 +6,7 @@ import {
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   FunnelIcon,
+  LinkIcon,
   PlusIcon,
   QrCodeIcon,
   ServerStackIcon,
@@ -116,6 +117,7 @@ import {
 import { downloadAssetsExport } from "./assets-csv";
 import { AssetRowActions } from "./asset-row-actions";
 import { ReceiveStockButton } from "./receive-stock-dialog";
+import { LinkAssetsDialog, type LinkAssetRef } from "@/components/purchases/link-assets-dialog";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
@@ -207,6 +209,7 @@ export function AssetsListView() {
   const mounted = useMounted();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  const canWritePurchases = useCan("purchaseOrder:write");
   // Same coarse gate the Migrator wizard route uses (`import:run`, ADR-0069) — only surface the
   // shortcut to those who can actually run a bulk import; the wizard enforces it again server-side.
   const canImport = useCan("import:run");
@@ -327,10 +330,13 @@ export function AssetsListView() {
   const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Multi-select over the currently visible rows — the API batch endpoints all require asset:delete
-  // (bulk delete/restore/status are lifecycle ops), so gate the selection column on canDelete.
+  // (bulk delete/restore/status are lifecycle ops). Linking the selection to a purchase (ADR-0099, #1475)
+  // needs asset:write + purchaseOrder:write instead; either makes the rows selectable.
   const visibleIds = useMemo(() => rows.map((asset) => asset.id), [rows]);
   const selection = useRowSelection(visibleIds);
-  const selectable = canDelete;
+  const canLinkPurchases = canWrite && canWritePurchases && !archived;
+  const selectable = canDelete || canLinkPurchases;
+  const [linking, setLinking] = useState<LinkAssetRef[] | null>(null);
 
   // Which of the assets ON THIS PAGE back a topology node — the small "On topology" glyph per row
   // (issue #765), made exact in #1152. It resolves the visible ids as a bounded batch (`?assetIds=`)
@@ -1217,48 +1223,81 @@ export function AssetsListView() {
               </Button>
             ) : (
               <>
-                <Select
-                  onValueChange={(value) =>
-                    runBatch(
-                      () =>
-                        batchStatus.mutateAsync({
-                          ids: selection.selectedIds,
-                          status: value as AssetStatus,
-                        }),
-                      { entityKey: "asset", verb: "updated" },
-                      t("batchStatusError"),
-                    )
-                  }
-                >
-                  <SelectTrigger size="sm" className="w-40">
-                    <SelectValue placeholder={t("setStatusPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AssetStatusSchema.options.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    runBatch(
-                      () => batchDelete.mutateAsync(selection.selectedIds),
-                      { entityKey: "asset", verb: "deleted" },
-                      t("batchDeleteError"),
-                    )
-                  }
-                  disabled={batchDelete.isPending}
-                >
-                  <TrashIcon />
-                  {tc("delete")}
-                </Button>
+                {canLinkPurchases ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setLinking(
+                        rows
+                          .filter((asset) => selection.isSelected(asset.id))
+                          .map((asset) => ({
+                            id: asset.id,
+                            name: asset.name,
+                            assetTag: asset.assetTag,
+                            modelId: asset.modelId,
+                          })),
+                      )
+                    }
+                  >
+                    <LinkIcon />
+                    {t("linkToPurchase")}
+                  </Button>
+                ) : null}
+                {canDelete ? (
+                  <>
+                    <Select
+                      onValueChange={(value) =>
+                        runBatch(
+                          () =>
+                            batchStatus.mutateAsync({
+                              ids: selection.selectedIds,
+                              status: value as AssetStatus,
+                            }),
+                          { entityKey: "asset", verb: "updated" },
+                          t("batchStatusError"),
+                        )
+                      }
+                    >
+                      <SelectTrigger size="sm" className="w-40">
+                        <SelectValue placeholder={t("setStatusPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {AssetStatusSchema.options.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {statusLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        runBatch(
+                          () => batchDelete.mutateAsync(selection.selectedIds),
+                          { entityKey: "asset", verb: "deleted" },
+                          t("batchDeleteError"),
+                        )
+                      }
+                      disabled={batchDelete.isPending}
+                    >
+                      <TrashIcon />
+                      {tc("delete")}
+                    </Button>
+                  </>
+                ) : null}
               </>
             )}
           </BatchActionBar>
+
+          {linking ? (
+            <LinkAssetsDialog
+              assets={linking}
+              onClose={() => setLinking(null)}
+              onLinked={selection.clear}
+            />
+          ) : null}
 
           <Pagination
             total={total}

@@ -206,7 +206,8 @@
     "activitySection": "Actividad",
     "receive": "Recibir",
     "receiveUnits": "Recibir unidades",
-    "cancelRemaining": "Cancelar unidades restantes"
+    "cancelRemaining": "Cancelar unidades restantes",
+    "linkExisting": "Vincular activos existentes"
   },
   "activity": {
     "fields": {
@@ -343,5 +344,85 @@
     "submit": "Cancelar unidades",
     "cancelledToast": "{count, plural, one {# unidad cancelada} other {# unidades canceladas}}",
     "error": "No se pudieron cancelar las unidades"
+  },
+  "link": {
+    "title": "Vincular {count, plural, one {un activo} other {# activos}} a una compra",
+    "pickAssetsDescription": "Elegí los activos que ya tenés y que vinieron de {purchase} · {line}.",
+    "pickLineDescription": "Elegí la compra y la línea en que {count, plural, one {se compró este activo} other {se compraron estos # activos}}.",
+    "diffDescription": "{purchase} · {line}. Los valores de la compra llegan a los activos solo donde los marques.",
+    "searchAssets": "Buscar nombre, etiqueta o número de serie…",
+    "modelChip": "Modelo: {model}",
+    "removeModelChip": "Mostrar todos los modelos",
+    "noAssets": "Ningún activo coincide.",
+    "selectedCount": "{count} seleccionados · {pending} pendientes en la línea",
+    "purchase": "Compra",
+    "purchasePlaceholder": "Elegí una compra",
+    "purchaseSearch": "Buscar referencia, factura o proveedor…",
+    "noPurchases": "No se encontraron compras",
+    "noAssetLines": "Esta compra no tiene líneas de activos.",
+    "line": "Línea",
+    "sameModel": "Mismo modelo",
+    "previewError": "No se pudieron comparar los activos con la compra.",
+    "after": "Después de vincular, la línea tendrá {received} de {expected} recibidas.",
+    "overWarning": "La línea espera {expected}; al vincular quedan {after}. Está permitido: la línea se mostrará como recibida de más.",
+    "raise": "Subir la línea a {quantity}",
+    "raisedToast": "Línea subida a {quantity}",
+    "raiseError": "No se pudo cambiar la cantidad de la línea",
+    "alreadyHere": "{count, plural, one {# activo ya está} other {# activos ya están}} en esta línea y se omiten.",
+    "missing": "{count, plural, one {No se encontró # activo y se omite} other {No se encontraron # activos y se omiten}}.",
+    "elsewhereTitle": "Ya están en otra compra",
+    "elsewhereHelp": "Nunca se mueven sin avisar. Marcá los que en realidad pertenecen a esta línea.",
+    "moveHere": "Mover {asset} acá",
+    "openCurrent": "Abrir su compra",
+    "applyTitle": "¿Aplicar valores de la compra?",
+    "applyEvery": "Aplicar todos los valores de la compra",
+    "columns": {
+      "field": "Campo",
+      "purchase": "De la compra",
+      "assets": "Tus activos",
+      "apply": "Aplicar",
+      "asset": "Activo"
+    },
+    "fields": {
+      "purchaseCost": "Costo de compra",
+      "purchaseDate": "Fecha de compra",
+      "warrantyEnd": "Fin de garantía",
+      "company": "Empresa",
+      "modelId": "Modelo"
+    },
+    "counts": {
+      "empty": "{count} vacíos",
+      "differs": "{count} distintos",
+      "same": "{count} iguales"
+    },
+    "fill": "Completar {count}",
+    "replace": "Reemplazar {count}",
+    "nothingOffered": "No está en la compra",
+    "nothingToApply": "Igual",
+    "alwaysLinked": "El proveedor, la compra y sus documentos siempre quedan vinculados: no hay nada que aplicar. El costo y la moneda van juntos.",
+    "showEach": "Ver cada activo",
+    "hideEach": "Ocultar cada activo",
+    "cellLabel": "Aplicar {field} a {asset}",
+    "fromInvoice": "(factura)",
+    "fromOrder": "(pedido)",
+    "warrantyMonths": "({months} meses)",
+    "noCurrency": "Sin moneda",
+    "aModel": "un modelo",
+    "nothingToLink": "Nada para vincular: todos los activos ya están en esta línea o en otra compra.",
+    "summary": "{linked, plural, one {# activo vinculado} other {# activos vinculados}} · {filled, plural, =0 {nada completado} one {# valor completado} other {# valores completados}} · {replaced, plural, =0 {nada reemplazado} one {# valor reemplazado} other {# valores reemplazados}}",
+    "submit": "Vincular {count, plural, one {# activo} other {# activos}}",
+    "linkedToast": "{count, plural, one {# activo vinculado} other {# activos vinculados}}",
+    "linkError": "No se pudieron vincular los activos",
+    "linkedSummary": "{count, plural, one {# activo vinculado} other {# activos vinculados}}.",
+    "noneLinked": "No se vinculó ningún activo; abajo está el motivo.",
+    "failedTitle": "Activos que no se vincularon",
+    "openPurchase": "Abrir compra",
+    "done": "Listo",
+    "reasons": {
+      "notFound": "No se encontró, o está archivado",
+      "alreadyLinked": "Ya está en esta línea",
+      "linkedElsewhere": "Está en otra compra: marcá “Mover acá” para moverlo",
+      "notLinked": "No está vinculado a esta línea"
+    }
   }
 }
