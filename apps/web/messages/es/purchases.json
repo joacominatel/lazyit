@@ -448,7 +448,9 @@
       "linkedElsewhere": "Está en otra compra: marca «Mover aquí» para moverlo",
       "notLinked": "No está vinculado a esta línea"
     },
-    "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula."
+    "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula.",
+    "notLinkedChip": "Sin compra vinculada",
+    "removeNotLinkedChip": "Mostrar también activos con compra"
   },
   "provenance": {
     "title": "Compra",
@@ -510,5 +512,17 @@
     "submit": "Recibir {count, plural, one {# unidad} other {# unidades}}",
     "receivedToast": "{count, plural, one {# unidad recibida} other {# unidades recibidas}} en {name}",
     "error": "No se pudo recibir en stock"
+  },
+  "lineAssets": {
+    "show": "Ver activos",
+    "hide": "Ocultar activos",
+    "none": "Ningún activo vigente está vinculado a esta línea.",
+    "loadError": "No se pudieron cargar los activos de esta línea.",
+    "showingSome": "Se muestran los primeros {shown} de {total}.",
+    "unlink": "Desvincular",
+    "unlinkTitle": "¿Desvincular de esta línea?",
+    "unlinkDescription": "¿Desvincular {asset} de “{line}”? El activo conserva sus valores de compra; la línea cuenta una unidad menos.",
+    "unlinkedToast": "{asset} desvinculado",
+    "unlinkError": "No se pudo desvincular el activo"
   }
 }

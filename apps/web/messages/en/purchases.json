@@ -448,7 +448,9 @@
       "linkedElsewhere": "On another purchase — tick “Move here” to move it",
       "notLinked": "Not linked to this line"
     },
-    "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link."
+    "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link.",
+    "notLinkedChip": "Not linked to a purchase",
+    "removeNotLinkedChip": "Also show assets on a purchase"
   },
   "provenance": {
     "title": "Purchase",
@@ -510,5 +512,17 @@
     "submit": "Receive {count, plural, one {# unit} other {# units}}",
     "receivedToast": "{count, plural, one {# unit} other {# units}} received into {name}",
     "error": "Couldn't receive into stock"
+  },
+  "lineAssets": {
+    "show": "Show assets",
+    "hide": "Hide assets",
+    "none": "No live asset is linked to this line.",
+    "loadError": "Couldn't load the assets of this line.",
+    "showingSome": "Showing the first {shown} of {total}.",
+    "unlink": "Unlink",
+    "unlinkTitle": "Unlink from this line?",
+    "unlinkDescription": "Unlink {asset} from “{line}”? The asset keeps its purchase values; the line counts one unit less.",
+    "unlinkedToast": "{asset} unlinked",
+    "unlinkError": "Couldn't unlink the asset"
   }
 }
