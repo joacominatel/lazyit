@@ -36,7 +36,7 @@ import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
-import { useCan } from "@/lib/hooks/use-permissions";
+import { useCan, useMyPermissions } from "@/lib/hooks/use-permissions";
 import { canExtract, extractionErrorKey, unavailableHint } from "@/lib/purchases/extraction";
 import {
   buildReview,
@@ -103,10 +103,15 @@ export function ExtractionReviewView({
   const titleOf = usePurchaseTitle();
   const canWrite = useCan("purchaseOrder:write");
   const isAdmin = useCan("settings:manage");
+  const { isLoading: permissionsLoading } = useMyPermissions();
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(purchaseId);
   const { data: attachments, isLoading: attachmentsLoading } = useAttachments("purchaseOrder", purchaseId);
   const attachment = attachments?.find((item) => item.id === attachmentId);
-  const { data: status, isLoading: statusLoading } = useExtractionStatus({ enabled: canWrite });
+  const {
+    data: status,
+    isLoading: statusLoading,
+    isError: statusFailed,
+  } = useExtractionStatus({ enabled: canWrite });
   const extract = useExtractPurchaseDocument();
   const [draft, setDraft] = useState<PurchaseExtractionDraft | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
@@ -129,12 +134,15 @@ export function ExtractionReviewView({
 
   // *New purchase from a document* asks for the read with `?read=1`; it runs once, and the flag leaves the
   // URL straight away so a reload shows the explicit button instead of sending the document again.
+  // It waits until the permissions, the document and the status are all known, so it never decides early.
+  const decided =
+    !permissionsLoading && !attachmentsLoading && (!canWrite || status !== undefined || statusFailed);
   useEffect(() => {
-    if (!autoRead || started.current || statusLoading || attachmentsLoading) return;
+    if (!autoRead || started.current || !decided) return;
     started.current = true;
     router.replace(pathname);
     if (eligible) extract.mutate({ id: purchaseId, attachmentId }, { onSuccess: setDraft });
-  }, [autoRead, statusLoading, attachmentsLoading, eligible, router, pathname, extract, purchaseId, attachmentId]);
+  }, [autoRead, decided, eligible, router, pathname, extract, purchaseId, attachmentId]);
 
   const title = purchase ? titleOf(purchase) : "";
   const breadcrumb = useMemo(
@@ -279,6 +287,16 @@ function ReviewForm({
   const [lineErrors, setLineErrors] = useState<Record<number, LineErrors>>({});
   const [supplierError, setSupplierError] = useState<string>();
   const flagIndex = useRef(0);
+  // Values the document read exactly as the purchase has them, unflagged, are not changes: left out. Decided
+  // once, from the draft as read, so a row never vanishes while someone types in it.
+  const [unchanged] = useState<ReadonlySet<ReviewHeaderField>>(
+    () =>
+      new Set(
+        review.header
+          .filter((item) => proposalAction(item.field, item.current, item.proposed) === "same" && item.warnings.length === 0)
+          .map((item) => item.field),
+      ),
+  );
   const pane = useRef<HTMLDivElement>(null);
   const supplier = review.supplier;
   const { resolution, sameNamed } = useSupplierResolution(supplier.text, null, supplier.chosenId);
@@ -485,6 +503,7 @@ function ReviewForm({
         </div>
 
         {review.header.map((item) => {
+          if (unchanged.has(item.field)) return null;
           const label = tForm(HEADER_LABEL[item.field]);
           const isDate = item.field === "orderDate" || item.field === "invoiceDate";
           const currentText = isDate && item.current ? date(`${item.current}T00:00:00.000Z`) : item.current;
