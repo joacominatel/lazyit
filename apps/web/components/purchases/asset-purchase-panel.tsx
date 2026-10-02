@@ -252,6 +252,12 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
                 <li key={attachment.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
                   <div className="flex min-w-0 items-center gap-2">
                     <DocumentIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    {attachment.label ? (
+                      // The document type label (#1476) — untrusted text, rendered as text.
+                      <Badge variant="outline" className="max-w-32 shrink-0 truncate">
+                        {attachment.label}
+                      </Badge>
+                    ) : null}
                     <span className="truncate text-sm">{attachment.originalName}</span>
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">{date(attachment.createdAt)}</span>
                   </div>

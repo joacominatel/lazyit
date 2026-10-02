@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Attachment } from "@lazyit/shared";
+import type { Attachment, UpdateAttachment } from "@lazyit/shared";
 import {
   type AttachmentParent,
   deleteAttachment,
   listAttachments,
+  updateAttachmentLabel,
   uploadAttachment,
 } from "../endpoints/attachments";
+import { invalidateSuggestions } from "../query-keys";
 import { purchaseOrderKeys } from "./use-purchase-orders";
 
 /**
@@ -48,15 +50,43 @@ function useInvalidateParent(parent: AttachmentParent, parentId: string) {
   };
 }
 
-/** Upload a file onto a parent; invalidates the parent's list so the new row appears. */
+/**
+ * Upload a file onto a parent; invalidates the parent's list so the new row appears. Pass the file, or the
+ * file with its document type label (asset and purchase documents, #1476).
+ */
 export function useUploadAttachment(
   parent: AttachmentParent,
   parentId: string,
 ) {
   const invalidate = useInvalidateParent(parent, parentId);
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => uploadAttachment(parent, parentId, file),
-    onSuccess: invalidate,
+    mutationFn: (input: File | { file: File; label?: string }) =>
+      input instanceof File
+        ? uploadAttachment(parent, parentId, input)
+        : uploadAttachment(parent, parentId, input.file, input.label),
+    onSuccess: (_attachment, input) => {
+      invalidate();
+      // A new label is a value smart entry should now suggest.
+      if (!(input instanceof File) && input.label) void invalidateSuggestions(qc);
+    },
+  });
+}
+
+/** Set or clear a document's type label (#1476); refreshes the list, the purchase reads and the suggestions. */
+export function useUpdateAttachmentLabel(
+  parent: Extract<AttachmentParent, "asset" | "purchaseOrder">,
+  parentId: string,
+) {
+  const invalidate = useInvalidateParent(parent, parentId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attachmentId, data }: { attachmentId: string; data: UpdateAttachment }) =>
+      updateAttachmentLabel(parent, parentId, attachmentId, data),
+    onSuccess: () => {
+      invalidate();
+      void invalidateSuggestions(qc);
+    },
   });
 }
 
