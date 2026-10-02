@@ -52,7 +52,11 @@ function setup(held: readonly Permission[] = ['purchaseOrder:write']) {
       }),
     },
     purchaseOrderEvent: { create: jest.fn().mockResolvedValue({}) },
-    asset: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn() },
+    asset: {
+      count: jest.fn().mockResolvedValue(0),
+      groupBy: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn((cb: (client: unknown) => unknown) => cb(tx)),
   };
   const history = { record: jest.fn() };
@@ -144,13 +148,18 @@ describe('bulk receive against a purchase line (#1473)', () => {
 
   it('allows over-receipt and flags it (derived from the live count after the loop)', async () => {
     const { service, prisma } = setup();
-    prisma.asset.count.mockResolvedValue(3); // quantity 2, three live units now
+    // quantity 2, three live units now
+    prisma.asset.groupBy.mockResolvedValue([
+      { purchaseOrderLineId: LINE, _count: { _all: 3 } },
+    ]);
     const result = await service.receiveBatch(base, member);
     expect(result.created).toHaveLength(2);
     expect(result.overReceived).toBe(true);
-    expect(prisma.asset.count).toHaveBeenCalledWith({
-      where: { purchaseOrderLineId: LINE, deletedAt: null },
-    });
+    expect(prisma.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { purchaseOrderLineId: { in: [LINE] }, deletedAt: null },
+      }),
+    );
   });
 
   it('403 without purchaseOrder:write, before any write', async () => {

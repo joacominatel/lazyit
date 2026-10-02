@@ -2,7 +2,13 @@
 // no real client loads. The fake delegates below stand in for the database.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: { join: (values: unknown[]) => values },
+  Prisma: {
+    join: (values: unknown[]) => values,
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+  },
 }));
 
 import {
@@ -624,7 +630,9 @@ describe('PurchaseOrdersService', () => {
 
     it('refuses to remove a line with linked assets (409)', async () => {
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
-      prisma.asset.count.mockResolvedValue(2);
+      prisma.asset.groupBy.mockResolvedValue([
+        { purchaseOrderLineId: LINE, _count: { _all: 2 } },
+      ]);
       await expect(service.removeLine(PO, LINE, human)).rejects.toBeInstanceOf(
         ConflictException,
       );
@@ -694,14 +702,18 @@ describe('PurchaseOrdersService', () => {
 
     it('refuses to change the kind of a line with linked assets (409)', async () => {
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
-      prisma.asset.count.mockResolvedValue(3);
+      prisma.asset.groupBy.mockResolvedValue([
+        { purchaseOrderLineId: LINE, _count: { _all: 3 } },
+      ]);
 
       await expect(
         service.updateLine(PO, LINE, { kind: 'OTHER' }, human),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(prisma.asset.count).toHaveBeenCalledWith({
-        where: { purchaseOrderLineId: LINE, deletedAt: null },
-      });
+      expect(prisma.asset.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { purchaseOrderLineId: { in: [LINE] }, deletedAt: null },
+        }),
+      );
       expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
     });
 
@@ -712,7 +724,7 @@ describe('PurchaseOrdersService', () => {
       );
       prisma.$queryRaw.mockResolvedValue([]);
       await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
-      expect(lockedBefore(prisma, prisma.asset.count)).toBe(true);
+      expect(lockedBefore(prisma, prisma.asset.groupBy)).toBe(true);
       expect(lockedBefore(prisma, prisma.purchaseOrderLine.update)).toBe(true);
     });
 
@@ -795,18 +807,6 @@ describe('PurchaseOrdersService', () => {
       ]);
     });
 
-    it('cancels a given quantity on top of what was already cancelled; the reason is optional', async () => {
-      stored(1, 0); // 3 pending
-      await service.cancelRemaining(PO, LINE, { quantity: 2 }, human);
-      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
-        where: { id: LINE },
-        data: { cancelledQuantity: 3 },
-      });
-      expect(events(prisma)[0]).toMatchObject({
-        payload: { quantity: 2, reason: null },
-      });
-    });
-
     it('locks purchase then line — KEY SHARE on the purchase before the line FOR UPDATE (no deadlock with a removal)', async () => {
       stored(0, 3);
       await service.cancelRemaining(PO, LINE, {}, human);
@@ -826,6 +826,18 @@ describe('PurchaseOrdersService', () => {
       expect(lastLock).toBeLessThan(
         prisma.purchaseOrderLine.update.mock.invocationCallOrder[0],
       );
+    });
+
+    it('cancels a given quantity on top of what was already cancelled; the reason is optional', async () => {
+      stored(1, 0); // 3 pending
+      await service.cancelRemaining(PO, LINE, { quantity: 2 }, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { cancelledQuantity: 3 },
+      });
+      expect(events(prisma)[0]).toMatchObject({
+        payload: { quantity: 2, reason: null },
+      });
     });
 
     it('400 beyond the pending count, 409 with nothing pending — no write either way', async () => {
@@ -1066,7 +1078,8 @@ describe('PurchaseOrdersService', () => {
         { limit: 50, offset: 0, deleted: 'active' },
       );
       const query = rawQuery(prisma, 0);
-      expect(query.sql).toContain('"consumable_movements"');
+      // The shared received-count fragment is a bound SQL value of the query.
+      expect(JSON.stringify(query.values)).toContain('consumable_movements');
       expect(query.values).toContainEqual(['ASSET', 'CONSUMABLE']);
       const where = (
         prisma.purchaseOrder.findMany.mock.calls[0] as [{ where: Row }]
@@ -1081,19 +1094,20 @@ describe('PurchaseOrdersService', () => {
         purchaseRow({ reference: 'OC-1' }),
       );
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(consumableLine());
-      prisma.consumableMovement.aggregate.mockResolvedValue({
-        _sum: { quantity: 3 },
-      });
+      prisma.consumableMovement.groupBy.mockResolvedValue([
+        { purchaseOrderLineId: LINE, _sum: { quantity: 3 } },
+      ]);
       prisma.$queryRaw.mockResolvedValue([]);
 
       await expect(
         service.updateLine(PO, LINE, { kind: 'ASSET' }, human),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(prisma.consumableMovement.aggregate).toHaveBeenCalledWith({
-        where: { purchaseOrderLineId: LINE, type: 'IN' },
+      expect(prisma.consumableMovement.groupBy).toHaveBeenCalledWith({
+        by: ['purchaseOrderLineId'],
+        where: { purchaseOrderLineId: { in: [LINE] }, type: 'IN' },
         _sum: { quantity: true },
       });
-      expect(lockedBefore(prisma, prisma.consumableMovement.aggregate)).toBe(
+      expect(lockedBefore(prisma, prisma.consumableMovement.groupBy)).toBe(
         true,
       );
 

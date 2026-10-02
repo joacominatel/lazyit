@@ -38,7 +38,11 @@ import {
   type LineInput,
 } from './purchase-order-derived';
 import { recordPurchaseOrderEvent } from './purchase-order-events';
-import { countReceived, receivedByLine } from './purchase-order-line-receipt';
+import {
+  countReceived,
+  receivedByLine,
+  receivedUnitsSql,
+} from './purchase-order-line-receipt';
 
 /** Optional filters for listing purchases. */
 export interface PurchaseOrderFilters {
@@ -275,12 +279,7 @@ export class PurchaseOrdersService {
       }[]
     >`
       SELECT l."purchaseOrderId", l."kind", l."quantity", l."cancelledQuantity",
-             (CASE WHEN l."kind" = 'CONSUMABLE'
-                   THEN (SELECT COALESCE(SUM(m."quantity"), 0) FROM "consumable_movements" m
-                          WHERE m."purchaseOrderLineId" = l."id" AND m."type" = 'IN'::"ConsumableMovementType")
-                   ELSE (SELECT COUNT(*) FROM "assets" a
-                          WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL)
-              END)::int AS "received"
+             ${receivedUnitsSql()}::int AS "received"
         FROM "purchase_order_lines" l
        WHERE l."deletedAt" IS NULL
          AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})`;
@@ -668,8 +667,8 @@ export class PurchaseOrdersService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
       await this.assertLineLive(tx, purchaseOrderId, lineId);
       await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
       // Re-read under the lock: the cancelled count may have moved since the check above.

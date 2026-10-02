@@ -40,6 +40,7 @@ import {
   countReceived,
   isOverReceived,
   receivedByLine,
+  receivedUnitsSql,
 } from './purchase-order-line-receipt';
 
 type Tx = Prisma.TransactionClient;
@@ -729,14 +730,7 @@ export class PurchaseReceivingService {
          AND po."status" NOT IN ('DRAFT', 'CANCELLED')
          AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})
          ${supplier}
-         AND l."quantity" - l."cancelledQuantity" - (
-               CASE WHEN l."kind" = 'CONSUMABLE'
-                    THEN (SELECT COALESCE(SUM(m."quantity"), 0) FROM "consumable_movements" m
-                           WHERE m."purchaseOrderLineId" = l."id" AND m."type" = 'IN'::"ConsumableMovementType")
-                    ELSE (SELECT COUNT(*) FROM "assets" a
-                           WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL)
-               END
-             ) > 0`;
+         AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0`;
     const [ids, [{ total }]] = await Promise.all([
       this.prisma.$queryRaw<{ id: string }[]>`
         SELECT l."id" ${pending}

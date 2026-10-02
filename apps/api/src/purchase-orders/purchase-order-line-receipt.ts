@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 
 type Client = PrismaService | Prisma.TransactionClient;
 
@@ -104,16 +104,21 @@ export async function countReceived(
   client: Client,
   line: LineRef,
 ): Promise<number> {
-  if (line.kind === 'CONSUMABLE') {
-    const sum = await client.consumableMovement.aggregate({
-      where: { purchaseOrderLineId: line.id, type: 'IN' },
-      _sum: { quantity: true },
-    });
-    return sum._sum.quantity ?? 0;
-  }
-  return client.asset.count({
-    where: { purchaseOrderLineId: line.id, deletedAt: null },
-  });
+  return (await receivedByLine(client, [line])).get(line.id) ?? 0;
+}
+
+/**
+ * The same received count as SQL, for the raw queries that derive receipt in the database (the `receipt`
+ * filter and the pending-units list). The line MUST be aliased `l`. Built per call (not at module load) so a
+ * module importing this file never needs the client's SQL helpers until it runs a query.
+ */
+export function receivedUnitsSql(): Prisma.Sql {
+  return Prisma.sql`(CASE WHEN l."kind" = 'CONSUMABLE'
+         THEN (SELECT COALESCE(SUM(m."quantity"), 0) FROM "consumable_movements" m
+                WHERE m."purchaseOrderLineId" = l."id" AND m."type" = 'IN'::"ConsumableMovementType")
+         ELSE (SELECT COUNT(*) FROM "assets" a
+                WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL)
+    END)`;
 }
 
 /** Whether a line now holds more units than it still expects (quantity − cancelled). */

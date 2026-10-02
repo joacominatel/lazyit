@@ -207,6 +207,11 @@ function setup() {
   return { ...db, service, history, assets, consumables };
 }
 
+/** The grouped count of live assets linked to the line, as `receivedByLine` reads it. */
+const linked = (count: number) => [
+  { purchaseOrderLineId: LINE, _count: { _all: count } },
+];
+
 /** The `data` of every row written through a mock, in order. */
 const written = (mock: jest.Mock): Row[] =>
   (mock.mock.calls as [{ data: Row }][]).map(([args]) => args.data);
@@ -226,7 +231,7 @@ describe('link preview — current vs purchase value per field (ux-proposal §3.
         purchaseOrderLine: { purchaseOrderId: OTHER_PO },
       }),
     ]);
-    reads.asset.count.mockResolvedValue(3);
+    reads.asset.groupBy.mockResolvedValue(linked(3));
 
     const preview = await service.linkPreview(PO, LINE, [A1, A2, A3]);
 
@@ -498,7 +503,7 @@ describe('link assets', () => {
   it('over-receipt is allowed and flagged', async () => {
     const { service, reads, tx } = setup();
     reads.asset.findMany.mockResolvedValue([assetRow(A1)]);
-    reads.asset.count.mockResolvedValue(5); // quantity 4
+    reads.asset.groupBy.mockResolvedValue(linked(5)); // quantity 4
     const result = await service.linkAssets(
       PO,
       LINE,
@@ -585,7 +590,7 @@ describe('receive from a line', () => {
   it('prefills from the purchase and receives the pending units against the line', async () => {
     const { service, assets, reads } = setup();
     assets.receiveBatch.mockResolvedValue(ok);
-    reads.asset.count.mockResolvedValue(1); // 3 of 4 pending
+    reads.asset.groupBy.mockResolvedValue(linked(1)); // 3 of 4 pending
     reads.location.findFirst.mockResolvedValue({ id: LOCATION });
 
     await service.receiveFromLine(PO, LINE, {}, member);
@@ -676,7 +681,7 @@ describe('receive from a line', () => {
 
   it('nothing pending and no quantity is a 400; an explicit quantity over-receives and is flagged', async () => {
     const { service, assets, reads } = setup();
-    reads.asset.count.mockResolvedValue(4);
+    reads.asset.groupBy.mockResolvedValue(linked(4));
     await expect(service.receiveFromLine(PO, LINE, {}, member)).rejects.toThrow(
       /Nothing is pending/,
     );
@@ -751,7 +756,9 @@ describe('pending units', () => {
       '"',
     );
     expect(sql).toContain(`NOT IN ('DRAFT', 'CANCELLED')`);
-    expect(sql).toContain('l."quantity" - l."cancelledQuantity" - (');
+    expect(sql).toContain('l."quantity" - l."cancelledQuantity" - ');
+    // The received count is the shared fragment: live linked assets, or a CONSUMABLE line's IN units.
+    expect(sql).toContain('"consumable_movements"');
     expect(sql).toContain('a."deletedAt" IS NULL');
     expect(sql).toContain('po."deletedAt" IS NULL');
     expect(sql).toContain('po."supplierId" = ');
@@ -786,7 +793,7 @@ describe("an asset's provenance", () => {
       ...lineRow(),
       purchaseOrder: { ...purchaseRow(), supplier },
     });
-    reads.asset.count.mockResolvedValue(2);
+    reads.asset.groupBy.mockResolvedValue(linked(2));
     reads.attachment.findMany.mockResolvedValue([{ id: 'clatt1' }]);
 
     const result = await service.findAssetProvenance(A1);
@@ -929,9 +936,6 @@ describe('receive into stock — a CONSUMABLE line (#1476)', () => {
 
   it('over-receipt is allowed and flagged: 8 already in + 4 on a line of 10', async () => {
     const { service, tx, reads } = stockSetup();
-    tx.consumableMovement.aggregate.mockResolvedValue({
-      _sum: { quantity: 12 },
-    });
     reads.consumableMovement.groupBy.mockResolvedValue([
       { purchaseOrderLineId: LINE, _sum: { quantity: 12 } },
     ]);
