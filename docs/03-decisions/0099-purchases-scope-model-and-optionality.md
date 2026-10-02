@@ -481,6 +481,9 @@ reopens a CEO decision.
   they feed smart entry.
 - **"Identifiable" holds after creation.** A header update that clears the supplier and the reference of
   a purchase with no live line, and removing the last line of a purchase with neither, are refused (400).
+  Both lock the purchase row first (`SELECT … FOR UPDATE`, the [[0098-consumable-delivery-targets]]
+  pattern), so two concurrent removals, or a removal racing such an update, serialize and cannot together
+  leave a purchase that identifies nothing.
 - **Derived receipt, exactly.** Per countable line: pending = quantity − received − cancelled (≥ 0);
   `OVER` when received > quantity − cancelled; `RECEIVED` when nothing is pending (a fully cancelled line
   included); otherwise `NONE` or `PARTIAL`. A purchase is `RECEIVED` (or `OVER`) when nothing is pending
@@ -499,6 +502,15 @@ reopens a CEO decision.
   endpoint (six contract changes, and the bare-string list the web already consumes would break). The
   route carries no single permission, so service accounts are refused it (fail-closed); suggestions are a
   typing aid for people.
+- **The bare `purchaseOrderLineId` is served under `asset:read`.** The asset read carries the line id
+  (read-only) to every caller who can read the asset, VIEWER included, without `purchaseOrder:read`. D-A
+  hides *provenance* — supplier, reference, dates, price, documents — and an opaque cuid reveals none of
+  it: following it to `/purchase-orders/**` needs `purchaseOrder:read`. What it does reveal is that the
+  asset is linked to *some* purchase line, and that two assets share one. Keeping it on the asset avoids a
+  per-caller asset shape (no field-level authorization exists, §8) and lets the web decide whether to
+  offer the *Purchase* panel. If that fact itself must be hidden from viewers, the asset read has to drop
+  the field for callers without `purchaseOrder:read` — a CEO call, flagged here; the D-A provenance read
+  itself is gated in #1473.
 - **Kind is fixed once units are linked.** Changing the kind of a line with live linked assets is a 409:
   the received units would silently stop counting.
 - **Supplier FK `Restrict`, delivery location `SetNull`.** A supplier with purchases can never be
