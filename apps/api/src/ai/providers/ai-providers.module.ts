@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { CHAT_MODEL_PORT } from '../core/ports/chat-model.port';
+import { STRUCTURED_EXTRACTION_PORT } from '../core/ports/structured-extraction.port';
 import { AiSettingsModule } from '../settings/ai-settings.module';
 import { AiModelListService } from './ai-model-list.service';
 import { AiSdkChatModel } from './aisdk-chat-model';
@@ -15,6 +16,8 @@ import { AiSdkChatModel } from './aisdk-chat-model';
  *
  * Exports:
  * - `CHAT_MODEL_PORT` — one model step per call, for the runtime and the connection tester;
+ * - `STRUCTURED_EXTRACTION_PORT` — one structured-output read of one file, no tools (purchase document
+ *   extraction, #1477), implemented by the same class over the same connection and egress path;
  * - `AiModelListService` — model suggestions for a draft connection.
  */
 @Module({
@@ -22,8 +25,9 @@ import { AiSdkChatModel } from './aisdk-chat-model';
   providers: [
     AiSdkChatModel,
     { provide: CHAT_MODEL_PORT, useExisting: AiSdkChatModel },
+    { provide: STRUCTURED_EXTRACTION_PORT, useExisting: AiSdkChatModel },
     AiModelListService,
   ],
-  exports: [CHAT_MODEL_PORT, AiModelListService],
+  exports: [CHAT_MODEL_PORT, STRUCTURED_EXTRACTION_PORT, AiModelListService],
 })
 export class AiProvidersModule {}
