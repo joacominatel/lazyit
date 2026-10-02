@@ -20,10 +20,13 @@ and edit, suppliers, activity log), the asset's currency label, the smart-entry 
 Application *Publisher* label. **Phase 1 backend flows built** (#1473, 2026-10-02): receiving from a line,
 linking and unlinking assets with the apply-values diff, cancelling remaining units, purchase documents,
 the asset's provenance read, the pending-units list and the gated CSV columns. Their screens — receiving,
-linking, documents, the *Pending units* tab and the asset's *Purchase* panel — are still to build (#1475);
-what the builds settled is in [[#Decisions while building (Phase 1 core, #1472)]],
-[[#Decisions while building (Phase 1 web, #1474)]] and
-[[#Decisions while building (Phase 1 flows, #1473)]].
+linking, documents, the *Pending units* tab and the asset's *Purchase* panel — are still to build (#1475).
+**Phase 1b backend: consumable lines and the document type label built** (#1476, 2026-10-02): `CONSUMABLE`
+lines received into stock through the consumables ledger, and the optional label on asset and purchase
+documents; their screens are a separate frontend unit. What the builds settled is in
+[[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
+[[#Decisions while building (Phase 1 flows, #1473)]] and
+[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -636,9 +639,72 @@ a CEO decision.
 - **Documents and the activity log.** Uploading or removing a purchase document appends `DOCUMENT_ADDED` /
   `DOCUMENT_REMOVED` in the same transaction as the attachment row. The optional document type label (§10)
   is **not built yet**: it needs a nullable column on `attachments` and a suggestion source — a backend
-  follow-up outside #1473's scope.
+  follow-up outside #1473's scope. *Built in #1476 (below).*
 - **AI tools.** Every new handler is unexposed for Phase 3 (#1478); binary upload and download stay
   file-tool exclusions. The asset AI tools gain `purchaseCurrency` next to `purchaseCost`.
+
+## Decisions while building (Phase 1b consumable lines and document labels, #1476)
+
+CTO decisions taken while building the backend of consumable lines and the document type label (2026-10-02),
+under the principles above. None reopens a CEO decision.
+
+- **One movement, through the consumables path.** `POST /purchase-orders/:id/lines/:lineId/receive-stock
+  { quantity, note? }` posts ONE `IN` through `ConsumablesService.createMovement` — the guarded cache
+  update, the int4 ceiling, the actor, the low-stock check and the search re-index stay the ledger's own
+  ([[0034-consumables-design]]). The movement carries a new nullable `purchaseOrderLineId`, set at insert
+  only; a DB CHECK allows it on an `IN` only, and the HTTP movement body can never set it (it is reachable
+  only through an in-process `origin` argument). Rejected: a purchase-side write to `consumable_movements` —
+  a second writer of the ledger, the exact thing ADR-0034 forbids.
+- **The receipt and its event are one transaction, under the link lock.** The `origin` runs a check before
+  the stock moves and a write after the row is inserted, both inside the movement's transaction: the purchase
+  is locked `FOR KEY SHARE` (what a link takes) and the line re-read, then `STOCK_RECEIVED` is appended. A
+  kind change or a line removal locks the purchase `FOR UPDATE`, so it serializes with a receipt and sees it;
+  a line whose kind or consumable changed in between is a `409` with nothing written. Lock order is purchase,
+  then the consumable row — nothing takes them the other way round.
+- **`STOCK_RECEIVED`, not `UNITS_RECEIVED`.** A stock receipt has its own event type
+  (`{ lineId, consumableId, movementId, quantity, overReceived }`). `UNITS_RECEIVED` carries asset ids and a
+  per-unit failure count that a single movement does not have; a reader that knows one shape should never
+  misread the other, and an older reader shows the new type generically (event types are TEXT, §2).
+- **Received for a consumable line = the sum of its `IN` movements, and it never goes down.** Nothing
+  subtracts: the ledger is append-only, and a mistaken receipt is corrected on the stock with an ordinary
+  `OUT` or `ADJUSTMENT` that carries no line — the line keeps counting what was received, as a mistaken
+  return stays on its delivery ([[0098-consumable-delivery-targets]]). Because a receipt, unlike an asset
+  link, cannot be undone, a line that received stock can neither change kind nor be removed (`409`), the
+  asset rule extended. Rejected: an `OUT` linked to the line that subtracts — a second receipt semantics
+  (and a "return to supplier" flow) nobody asked for; it can be added later on the same column.
+- **The movement's reason names no purchase detail.** The reason is the fixed *Received from a purchase*;
+  the caller's note goes to `notes`. The consumable ledger is read under `consumable:read`, which a VIEWER
+  holds, and a purchase's provenance follows `purchaseOrder:read` (D-A), so neither the supplier nor the
+  reference is written into it. This **deviates** from [[purchases/ux-proposal]] §7 ("posts an IN movement
+  with the purchase as reason"). The opaque `purchaseOrderLineId` is served on the movement under
+  `consumable:read`, on the same terms as `Asset.purchaseOrderLineId` (#1472).
+- **The consumable mapping is light.** `consumableId` is accepted on a `CONSUMABLE` line only and stays
+  optional there; it is required when stock is received (a `400` that says how to fix the line), as an asset
+  line's model is (#1473). An archived consumable is refused on write and on receipt (`400`). Changing a line
+  away from `CONSUMABLE` clears it. Its consumable may still change after a receipt ("a different item
+  came"): each movement keeps its own consumable, and the line counts every unit it received.
+- **The quantity is required.** A stock receipt is the count that arrived, typed at the door; defaulting to
+  every pending unit (as the asset receive does) would post stock nobody counted. The web may prefill it.
+- **Purchase receipt counters add units across kinds.** A purchase's `ordered` / `received` / `pending` sum
+  every countable line, whatever unit each consumable uses (units, boxes, metres); the state and the
+  per-line counts are what the UI should lead with.
+- **The document type label** (§10) is a nullable `attachments.label` (≤ 100 characters), set through the
+  multipart `label` field on upload and edited with `PATCH …/attachments/:attachmentId { label | null }` on
+  asset documents (`asset:write`) and purchase documents (`purchaseOrder:write`). The upload validates it
+  inside the service, not a pipe, so a bad label still discards the staged file. Edits are human-only, like
+  every attachment write; on a purchase a change appends `DOCUMENT_UPDATED { attachmentId, originalName,
+  label: { from, to } }`, and `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` carry the label. Article images take
+  none. The text is untrusted ([[0029-untrusted-content-sanitization]]): stored verbatim, rendered as text.
+- **`GET /suggestions/documentLabel`** merges two sources, each under the permission that already lists it:
+  asset documents (`asset:read`) and purchase documents (`purchaseOrder:read`), live documents of live
+  parents only. Raw SQL with a fixed pair of parent tables, because an attachment's parent is a soft
+  reference with no relation to filter through ([[0082-attachments-storage]]).
+- **Upgrade.** Three nullable columns (`purchase_order_lines.consumableId`,
+  `consumable_movements.purchaseOrderLineId`, `attachments.label`), two indexes, two foreign keys and one
+  CHECK, all valid over populated tables because every existing row reads `NULL`. No past movement is
+  attributed to a purchase and no stock moves.
+- **AI tools.** `receiveStock` and the purchase document label edit are unexposed for Phase 3 (#1478); the
+  asset document label edit joins the asset attachments as v1.1.
 
 ## Related
 

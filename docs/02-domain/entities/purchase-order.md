@@ -40,8 +40,8 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   Built (#1473): `POST|GET /purchase-orders/:id/attachments`, `GET …/:attachmentId/content` and `DELETE
   …/:attachmentId`, under `purchaseOrder:read` / `:write`, with the asset documents allowlist and 25 MB cap
   ([[0082-attachments-storage]]). Writes are human-only and log `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`; an
-  archived purchase's documents 404 until it is restored. The optional document type label (ADR-0099 §10)
-  is not built yet.
+  archived purchase's documents 404 until it is restored. Each document may carry an optional free-text
+  **type label** (quote, invoice, delivery note), set at upload or edited later (#1476, [[attachment]]).
 - **delivers to** an optional [[location]] (`deliveryLocationId`), used as the default location when
   receiving units.
 - **produced** N [[asset]]s, indirectly: each asset points at one line (`Asset.purchaseOrderLineId`).

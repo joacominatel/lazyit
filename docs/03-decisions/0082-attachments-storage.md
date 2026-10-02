@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -26,6 +26,9 @@ SEC-003).
 > alongside Phase 1 — the v1.1 deferral below no longer covers it. **Built 2026-10-02 (#1473)**: the parent
 > type, its `SURFACE` entry (the asset documents one) and `PurchaseOrderAttachmentsController`; the GC
 > needed no change (purchase documents are pinned by their own live row, like asset documents).
+> **2026-10-02 (#1476)**: asset and purchase documents gain an optional free-text type label
+> (`attachments.label`, nullable), set at upload and editable with a `PATCH` under the parent's write
+> permission; untrusted text, rendered as text ([[0029-untrusted-content-sanitization]]).
 
 ## Context
 
