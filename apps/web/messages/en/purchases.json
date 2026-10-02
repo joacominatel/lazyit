@@ -585,5 +585,24 @@
     "appliedToast": "{count, plural, one {# seat} other {# seats}} applied to {name}",
     "renewalToast": "Renewal date applied to {name}",
     "error": "Couldn't apply the license"
+  },
+  "fromAssets": {
+    "title": "Create a purchase from {count, plural, one {# asset} other {# assets}}",
+    "description": "For assets bought before you recorded purchases. lazyit makes one line per model and links the assets to it.",
+    "currencyHelp": "Leave it blank to use the currency the assets' costs already share.",
+    "linksOnly": "Only the link changes: no cost, date or other field of the assets is touched. Copy purchase values to them later from the purchase, if you want.",
+    "submit": "Create purchase",
+    "createdToast": "Purchase created with {count, plural, one {# asset} other {# assets}} linked",
+    "error": "Couldn't create the purchase",
+    "nothingLinkable": "None of the selected assets can be linked: each is archived or already on a purchase. Nothing was created.",
+    "partialTitle": "Purchase created",
+    "partialDescription": "{count, plural, one {# asset was} other {# assets were}} linked. These were left out:",
+    "openPurchase": "Open the purchase",
+    "reasons": {
+      "notFound": "Not found, or archived",
+      "linkedElsewhere": "Already on another purchase — move it from that purchase instead",
+      "alreadyLinked": "Already on this purchase",
+      "notLinked": "Not linked"
+    }
   }
 }

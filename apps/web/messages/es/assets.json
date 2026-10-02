@@ -101,7 +101,8 @@
       "owners": "Responsables: {value}",
       "warranty": "Garantía: {value}"
     },
-    "linkToPurchase": "Vincular a una compra"
+    "linkToPurchase": "Vincular a una compra",
+    "createPurchase": "Crear compra"
   },
   "empty": {
     "title": "Aún no hay nada registrado",

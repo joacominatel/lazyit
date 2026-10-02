@@ -585,5 +585,24 @@
     "appliedToast": "{count, plural, one {# asiento aplicado} other {# asientos aplicados}} a {name}",
     "renewalToast": "Fecha de renovación aplicada a {name}",
     "error": "No se pudo aplicar la licencia"
+  },
+  "fromAssets": {
+    "title": "Crear una compra a partir de {count, plural, one {# activo} other {# activos}}",
+    "description": "Para activos comprados antes de que registraras compras. lazyit crea una línea por modelo y le vincula los activos.",
+    "currencyHelp": "Déjala vacía para usar la moneda que ya comparten los costos de los activos.",
+    "linksOnly": "Solo cambia el vínculo: no se toca el costo, la fecha ni ningún otro campo de los activos. Si quieres, copia después valores de la compra a ellos desde la compra.",
+    "submit": "Crear compra",
+    "createdToast": "Compra creada con {count, plural, one {# activo vinculado} other {# activos vinculados}}",
+    "error": "No se pudo crear la compra",
+    "nothingLinkable": "Ninguno de los activos seleccionados se puede vincular: cada uno está archivado o ya está en una compra. No se creó nada.",
+    "partialTitle": "Compra creada",
+    "partialDescription": "{count, plural, one {Se vinculó # activo} other {Se vincularon # activos}}. Estos quedaron afuera:",
+    "openPurchase": "Abrir la compra",
+    "reasons": {
+      "notFound": "No encontrado, o archivado",
+      "linkedElsewhere": "Ya está en otra compra: muévelo desde esa compra",
+      "alreadyLinked": "Ya está en esta compra",
+      "notLinked": "No vinculado"
+    }
   }
 }
