@@ -55,6 +55,14 @@ export function pendingLinesForModel(
   return lines.filter((line) => line.assetModelId === modelId && line.pendingQuantity > 0);
 }
 
+/**
+ * The open lines a receive of ASSETS can take (#1476): `ASSET` lines only. A consumable line is received
+ * into stock, never as assets, so the *From purchase* picker of Receive stock and New asset leaves it out.
+ */
+export function assetReceivableLines(lines: readonly PendingPurchaseLine[]): PendingPurchaseLine[] {
+  return lines.filter((line) => line.kind === "ASSET");
+}
+
 /** The viewer's day as `"YYYY-MM-DD"` (local time — "today" is the day at the warehouse door). */
 export function localToday(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");

@@ -41,8 +41,8 @@ export interface LineDraft {
   /** Client-side identity of the row (React key, error map key). */
   key: string;
   /**
-   * `ASSET` or `OTHER` — the kinds this build writes. A saved line of a kind a newer build added keeps its
-   * raw value here, is shown read-only and is never rewritten.
+   * `ASSET`, `CONSUMABLE` or `OTHER` — the kinds this build writes. A saved line of a kind a newer build
+   * added keeps its raw value here, is shown read-only and is never rewritten.
    */
   kind: string;
   description: string;
@@ -50,6 +50,8 @@ export interface LineDraft {
   modelText: string;
   /** An asset model id or `""`. */
   assetModelId: string;
+  /** On a `CONSUMABLE` line, the consumable it is received into, or `""` (mapped later, at the latest when receiving). */
+  consumableId: string;
   /** Digits; blank = 1. */
   quantity: string;
   /** Money text in the viewer's locale; blank = unknown price. */
@@ -94,6 +96,7 @@ export function emptyLineDraft(key: string): LineDraft {
     manufacturerText: "",
     modelText: "",
     assetModelId: "",
+    consumableId: "",
     quantity: "1",
     unitPrice: "",
     warrantyMonths: "",
@@ -117,6 +120,7 @@ export function isBlankLine(line: LineDraft): boolean {
     line.manufacturerText.trim() === "" &&
     line.modelText.trim() === "" &&
     line.assetModelId === "" &&
+    line.consumableId === "" &&
     (line.quantity.trim() === "" || line.quantity.trim() === "1") &&
     line.unitPrice.trim() === "" &&
     line.warrantyMonths.trim() === ""
@@ -179,7 +183,8 @@ export function lineErrors(line: LineDraft, locale: string): LineErrors {
 
 /**
  * A line → the create payload: only what was filled is sent, so the API applies its defaults (kind,
- * quantity 1). Model fields are dropped on an `OTHER` line — shipping or a service has no maker.
+ * quantity 1). Model fields go on an `ASSET` line only — shipping or a service has no maker — and the
+ * consumable on a `CONSUMABLE` line only (the API refuses it elsewhere).
  */
 export function toCreateLine(
   line: LineDraft,
@@ -199,6 +204,7 @@ export function toCreateLine(
     if (line.assetModelId) out.assetModelId = line.assetModelId;
     if (parsed.warrantyMonths !== null) out.warrantyMonths = parsed.warrantyMonths;
   }
+  if (line.kind === "CONSUMABLE" && line.consumableId) out.consumableId = line.consumableId;
   return { ok: true, line: out };
 }
 
@@ -328,6 +334,7 @@ export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraf
     manufacturerText: line.manufacturerText ?? "",
     modelText: line.modelText ?? "",
     assetModelId: line.assetModelId ?? "",
+    consumableId: line.consumableId ?? "",
     quantity: String(line.quantity),
     unitPrice: line.unitPrice == null ? "" : formatMoney(line.unitPrice, locale),
     warrantyMonths: line.warrantyMonths == null ? "" : String(line.warrantyMonths),
@@ -337,7 +344,9 @@ export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraf
 /**
  * The line dialog → `PATCH .../lines/:lineId`: only what changed, a cleared field as `null`; `null` when
  * nothing changed. The brand, model and warranty are edited only on an `ASSET` line: on any other kind
- * they are hidden and left as stored, never cleared. A line of a kind this build does not know keeps it.
+ * they are hidden and left as stored, never cleared. The consumable is edited only on a `CONSUMABLE` line
+ * (the API clears it when the line changes away from that kind). A line of a kind this build does not
+ * know keeps it.
  */
 export function toUpdateLine(
   draft: LineDraft,
@@ -361,6 +370,10 @@ export function toUpdateLine(
     if (model !== original.modelText) out.modelText = model;
     if (assetModelId !== original.assetModelId) out.assetModelId = assetModelId;
     if (parsed.warrantyMonths !== original.warrantyMonths) out.warrantyMonths = parsed.warrantyMonths;
+  }
+  if (draft.kind === "CONSUMABLE") {
+    const consumableId = draft.consumableId || null;
+    if (consumableId !== (original.consumableId ?? null)) out.consumableId = consumableId;
   }
   return { ok: true, payload: Object.keys(out).length > 0 ? out : null };
 }

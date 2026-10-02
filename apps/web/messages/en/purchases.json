@@ -143,7 +143,12 @@
     "warrantyMonths": "Warranty (months)",
     "warrantyInvalid": "A whole number of months, up to 1200.",
     "lineTotal": "Line total {total}",
-    "remove": "Remove line {index}"
+    "remove": "Remove line {index}",
+    "kindConsumable": "Consumable",
+    "descriptionConsumablePlaceholder": "Toner, cables, batteries…",
+    "consumable": "Consumable (optional)",
+    "consumablePlaceholder": "Map now or when you receive",
+    "consumableHelp": "The stock item the units go into when they arrive."
   },
   "lineDialog": {
     "addTitle": "Add line",
@@ -209,7 +214,9 @@
     "receiveUnits": "Receive units",
     "cancelRemaining": "Cancel remaining units",
     "linkExisting": "Link existing assets",
-    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep."
+    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep.",
+    "receivesInto": "into <link>{name}</link>",
+    "consumableNotMapped": "no consumable yet"
   },
   "activity": {
     "fields": {
@@ -232,7 +239,8 @@
       "unitPrice": "unit price",
       "cancelledQuantity": "cancelled units",
       "warrantyMonths": "warranty",
-      "position": "position"
+      "position": "position",
+      "consumableId": "consumable"
     },
     "kindAsset": "Asset",
     "kindOther": "Other",
@@ -268,7 +276,8 @@
     "assetsMovedAway": "{count, plural, one {# asset} other {# assets}} of “{line}” moved to another purchase",
     "documentAdded": "Added the document “{name}”",
     "documentRemoved": "Removed the document “{name}”",
-    "aDocument": "a file"
+    "aDocument": "a file",
+    "kindConsumable": "Consumable"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",

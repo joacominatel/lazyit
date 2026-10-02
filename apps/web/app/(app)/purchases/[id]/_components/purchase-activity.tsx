@@ -37,6 +37,7 @@ const FIELD_LABELS = new Set([
   "manufacturerText",
   "modelText",
   "assetModelId",
+  "consumableId",
   "quantity",
   "unitPrice",
   "cancelledQuantity",
@@ -93,7 +94,9 @@ export function PurchaseActivity({
     }
     if (DATE_FIELDS.has(change.field) && typeof side === "string") return date(side);
     if (change.field === "kind" && typeof side === "string") {
-      return side === "ASSET" ? t("kindAsset") : side === "OTHER" ? t("kindOther") : side;
+      if (side === "ASSET") return t("kindAsset");
+      if (side === "CONSUMABLE") return t("kindConsumable");
+      return side === "OTHER" ? t("kindOther") : side;
     }
     return String(side);
   }

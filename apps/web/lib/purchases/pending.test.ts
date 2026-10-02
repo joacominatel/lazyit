@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PendingPurchaseLine } from "@lazyit/shared";
-import { groupPendingLines, isOverdue, localToday, pendingLinesForModel, pendingTotals } from "./pending";
+import { assetReceivableLines, groupPendingLines, isOverdue, localToday, pendingLinesForModel, pendingTotals } from "./pending";
 
 const MODEL = "ck00000000000000000model1";
 
@@ -73,5 +73,13 @@ describe("open lines for a chosen model", () => {
     const lines = [line("a", P1, 1, MODEL), line("b", P2, 2, null), line("c", P2, 3, MODEL)];
     expect(pendingLinesForModel(lines, MODEL).map((l) => l.description)).toEqual(["Line a", "Line c"]);
     expect(pendingLinesForModel(lines, "")).toEqual([]);
+  });
+});
+
+describe("assetReceivableLines (#1476)", () => {
+  test("a consumable line is never offered to an asset receive", () => {
+    const asset = line("1", "p1", 2);
+    const consumable = { ...line("2", "p1", 5), kind: "CONSUMABLE" };
+    expect(assetReceivableLines([asset, consumable])).toEqual([asset]);
   });
 });

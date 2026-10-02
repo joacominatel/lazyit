@@ -10,7 +10,7 @@ import { getPurchaseOrder } from "@/lib/api/endpoints/purchase-orders";
 import { purchaseOrderKeys, usePendingLines } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { pendingLinesForModel } from "@/lib/purchases/pending";
+import { assetReceivableLines, pendingLinesForModel } from "@/lib/purchases/pending";
 import { usePurchaseTitle } from "@/app/(app)/purchases/_components/purchase-display";
 
 /** Receiving against a purchase line: the purchase (for its header values) and the line. */
@@ -87,9 +87,9 @@ export function usePendingLineLabel() {
 }
 
 /**
- * The optional "From purchase" picker (UX proposal §3.d, "catching the bypass"): one of the open lines,
- * searched by purchase, supplier or line. Choosing one hands the line to `onPick`; the caller switches to
- * receiving against it.
+ * The optional "From purchase" picker (UX proposal §3.d, "catching the bypass"): one of the open ASSET
+ * lines (a consumable line is received into stock, #1476), searched by purchase, supplier or line.
+ * Choosing one hands the line to `onPick`; the caller switches to receiving against it.
  */
 export function PendingLinePicker({
   id,
@@ -106,7 +106,7 @@ export function PendingLinePicker({
   const labelOf = usePendingLineLabel();
   const items = useMemo(
     () =>
-      lines.map((line) => ({
+      assetReceivableLines(lines).map((line) => ({
         value: line.id,
         label: labelOf(line),
         keywords: [line.purchaseOrder.reference, line.purchaseOrder.supplier?.name].filter(

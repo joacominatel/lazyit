@@ -49,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
+import { useConsumable } from "@/lib/api/hooks/use-consumables";
 import { useLocation } from "@/lib/api/hooks/use-locations";
 import {
   useDeletePurchaseOrder,
@@ -88,6 +89,31 @@ function LineReceipt({ line }: { line: PurchaseOrderLine }) {
         <span className="text-muted-foreground">{t("cancelled", { count: line.cancelledQuantity })}</span>
       ) : null}
       {line.receiptState === "OVER" ? <StatusBadge tone="warning">{t("over")}</StatusBadge> : null}
+    </span>
+  );
+}
+
+/**
+ * The consumable a consumable line receives into (#1476): its name, linked to its page. Read only with
+ * `consumable:read` — otherwise nothing is requested and nothing is shown.
+ */
+function LineConsumable({ consumableId }: { consumableId: string | null | undefined }) {
+  const t = useTranslations("purchases.detail");
+  const canRead = useCan("consumable:read");
+  const { data } = useConsumable(canRead && consumableId ? consumableId : undefined);
+  if (!canRead) return null;
+  if (!consumableId) return <span>{t("consumableNotMapped")}</span>;
+  if (!data) return null;
+  return (
+    <span>
+      {t.rich("receivesInto", {
+        name: data.name,
+        link: (chunks) => (
+          <Link href={`/consumables/${data.id}`} className="hover:underline">
+            {chunks}
+          </Link>
+        ),
+      })}
     </span>
   );
 }
@@ -361,9 +387,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                           <Badge variant="outline" className="shrink-0">
                             {line.kind === "ASSET"
                               ? t("line.kindAsset")
-                              : line.kind === "OTHER"
-                                ? t("line.kindOther")
-                                : line.kind}
+                              : line.kind === "CONSUMABLE"
+                                ? t("line.kindConsumable")
+                                : line.kind === "OTHER"
+                                  ? t("line.kindOther")
+                                  : line.kind}
                           </Badge>
                           <div className="min-w-0 space-y-0.5">
                             <p className="font-medium">{line.description}</p>
@@ -378,6 +406,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                 ]
                                   .filter(Boolean)
                                   .join(" · ")}
+                              </p>
+                            ) : null}
+                            {line.kind === "CONSUMABLE" ? (
+                              <p className="text-xs text-muted-foreground">
+                                <LineConsumable consumableId={line.consumableId} />
                               </p>
                             ) : null}
                           </div>

@@ -129,4 +129,4 @@ export const MONEY_FIELDS = new Set(["unitPrice"]);
 /** Fields whose logged values are ISO dates. */
 export const DATE_FIELDS = new Set(["orderDate", "expectedDate", "invoiceDate"]);
 /** Fields whose logged values are ids — shown by name only ("changed"), never as a raw id. */
-export const ID_FIELDS = new Set(["supplierId", "deliveryLocationId", "assetModelId"]);
+export const ID_FIELDS = new Set(["supplierId", "deliveryLocationId", "assetModelId", "consumableId"]);
