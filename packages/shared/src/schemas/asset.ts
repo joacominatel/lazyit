@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { int4, money, optionalText, requireAtLeastOneKey } from "./primitives";
+import { currencyLabel, nullableCurrencyLabel } from "./purchase-order";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -148,6 +149,13 @@ export const AssetSchema = z.object({
   purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
   salvageValue: money().nullish(),
+  // Optional free-text currency LABEL of purchaseCost / salvageValue (ADR-0099 §5, CEO decision D-C): no ISO
+  // list, no conversion. `null` = "No currency" — every asset that predates Purchases. `.nullish()` per the
+  // new-read-field rule, so a consumer built against the older shape keeps compiling.
+  purchaseCurrency: z.string().nullish(),
+  // The purchase line this asset was bought on (ADR-0099 §2). READ-ONLY: no create/update body accepts it;
+  // linking and unlinking are their own audited actions (#1473). `null` = no purchase.
+  purchaseOrderLineId: z.cuid().nullish(),
   modelId: z.cuid().nullable(),
   locationId: z.cuid().nullable(),
   createdAt: z.iso.datetime(),
@@ -175,6 +183,8 @@ export const CreateAssetSchema = z.strictObject({
   purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
   salvageValue: money().nullish(),
+  // Currency label of the cost (ADR-0099 §5) — optional free text, blank coerced to absent.
+  purchaseCurrency: currencyLabel(),
   modelId: z.cuid().optional(),
   locationId: z.cuid().optional(),
 });
@@ -198,6 +208,8 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       purchaseCost: money().nullable(),
       usefulLifeMonths: int4({ min: 0 }).nullable(),
       salvageValue: money().nullable(),
+      // Currency label of the cost (ADR-0099 §5); `null` clears it back to "No currency".
+      purchaseCurrency: nullableCurrencyLabel(),
       modelId: z.cuid(),
       locationId: z.cuid(),
     })

@@ -33,6 +33,7 @@ export type AiToolDomain =
   | 'users'
   | 'activity'
   | 'infra'
+  | 'purchases'
   | 'platform'
   | 'interaction';
 

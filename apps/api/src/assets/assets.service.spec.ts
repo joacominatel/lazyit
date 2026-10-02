@@ -1556,6 +1556,7 @@ describe('AssetsService', () => {
         purchaseCost: true,
         usefulLifeMonths: true,
         salvageValue: true,
+        purchaseCurrency: true,
       },
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);

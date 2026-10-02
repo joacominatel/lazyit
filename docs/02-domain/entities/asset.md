@@ -28,7 +28,8 @@ concrete instance of a generic [[asset-model]].
   `GET /consumables/deliveries?targetAssetId=` (also needs `asset:read`). The FK is `Restrict`, so an
   asset that received a delivery cannot be hard-deleted; a soft delete is unaffected
   ([[0098-consumable-delivery-targets]]).
-- **was bought on** an optional [[purchase-order-line]] — ⚪ *planned, Purchases Phase 1*
+- **was bought on** an optional [[purchase-order-line]] (`purchaseOrderLineId`) — the column exists since
+  #1472 and is **read-only** in the contract; linking and unlinking arrive in #1473
   ([[0099-purchases-scope-model-and-optionality]]). See the purchases note below.
 
 ## Business rules
@@ -75,16 +76,19 @@ concrete instance of a generic [[asset-model]].
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
 
-> [!note] Purchases — planned, not built ([[0099-purchases-scope-model-and-optionality]], #1465)
-> When the Purchases area ships (Phase 1) — always available, optional at entry, no instance switch —
-> an asset gains:
+> [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
+> Purchases is always available, optional at entry, with no instance switch. The two columns below are
+> **built** (#1472); linking, the confirmation diff and the *Purchase* panel are not yet (#1473). An asset
+> has:
 >
 > - **`purchaseOrderLineId`** — nullable FK → [[purchase-order-line]] (`onDelete: Restrict`; soft delete
 >   never triggers it). `NULL` = "no purchase", which is what every existing asset gets on upgrade. N
 >   assets per line, at most one line per asset. Linking and unlinking write new [[asset-history]] event
 >   types and a [[purchase-order-event]], in the same transaction.
-> - **an optional currency label on the purchase cost** — free text as the user typed it, suggested by
->   smart entry, with no ISO list and no currency semantics (planned name `purchaseCostCurrency`).
+> - **`purchaseCurrency`** — an optional currency label on the purchase cost: free text as the user typed
+>   it (trimmed, ≤ 32), suggested by smart entry (`GET /suggestions/currency`), with no ISO list and no
+>   currency semantics. Writable on create and update (`null` clears it). The design's working name was
+>   `purchaseCostCurrency`; it was built as `purchaseCurrency` (#1472).
 >   `NULL` reads as **"No currency"** — its own state, never defaulted. It qualifies `purchaseCost` and
 >   `salvageValue` alike. Any aggregate of cost groups by label (trimmed, case-insensitive) and never
 >   sums across labels. Amounts display as entered — no forced decimals on whole amounts
@@ -95,7 +99,8 @@ concrete instance of a generic [[asset-model]].
 > empty fields are pre-checked to fill, replacements are never pre-checked, cost and currency move
 > together, and unlinking never clears anything. A divergence from the line is shown, not corrected.
 > The free purchase fields stay editable exactly as today, linked or not, and no asset ever requires a
-> purchase. **Clone never copies `purchaseOrderLineId`.**
+> purchase. **Clone never copies `purchaseOrderLineId`** (the shared `cloneAssetDefaults` never maps it, and
+> the strict create body refuses it); it carries `purchaseCurrency` with the cost.
 >
 > **Provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A): the asset page's
 > *Purchase* panel — supplier, reference, dates and the purchase documents — is shown and served only to
@@ -170,9 +175,11 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
-| `purchaseCost` | `bigint?` | optional acquisition cost in **integer minor units** (hundredths) (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. A Postgres `bigint`, a JSON number on the wire bounded to `[0, Number.MAX_SAFE_INTEGER]` by the shared `money()` ([[0100-money-as-64-bit-minor-units]]). **Planned (Purchases Phase 1):** qualified by an optional free-text currency label ([[0099-purchases-scope-model-and-optionality]]). |
+| `purchaseCost` | `bigint?` | optional acquisition cost in **integer minor units** (hundredths) (#954) — no Prisma `Decimal`. `null` = unknown. A Postgres `bigint`, a JSON number on the wire bounded to `[0, Number.MAX_SAFE_INTEGER]` by the shared `money()` ([[0100-money-as-64-bit-minor-units]]). Qualified by `purchaseCurrency`. |
+| `purchaseCurrency` | `string?` | optional free-text currency label of `purchaseCost` / `salvageValue` (#1472, [[0099-purchases-scope-model-and-optionality]] §5). `null` = "No currency" — every asset that predates Purchases. Trimmed, ≤ 32 on write; a plain-field edit names it in the `UPDATED` history event. |
 | `usefulLifeMonths` | `int?` | optional straight-line depreciation period in months (#954). `null` (or `<= 0`) = don't depreciate (book value = cost). |
 | `salvageValue` | `bigint?` | optional residual value at end of life, minor units (#954). `null` = 0. A Postgres `bigint`, bounded on the wire like `purchaseCost` ([[0100-money-as-64-bit-minor-units]]). |
+| `purchaseOrderLineId` | `cuid?` | optional FK → [[purchase-order-line]], `onDelete: Restrict` (#1472). **Read-only** in the contract: no create or update body accepts it. `null` = no purchase. Indexed for the derived received count. |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
 | `locationId` | `cuid?` | optional FK → [[location]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |

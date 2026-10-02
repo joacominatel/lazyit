@@ -186,9 +186,12 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
 - **Follow-ups (Phase 1, backend lane):** ~~add `money()`; move the three columns and every money field of
   the shared schemas (asset, asset receive, application, the import descriptor, the AI tool inputs) to
   it; convert at the read boundary; cover each read and write path with a test above the old ceiling;
-  update [[code-conventions]] when the code lands.~~ Done 2026-10-02 (#1469). The Purchases money columns
-  ([[purchase-order-line]]`.unitPrice` and the totals) use `money()` and the same boundary when they are
-  built.
+  update [[code-conventions]] when the code lands.~~ Done 2026-10-02 (#1469). ~~The Purchases money
+  columns use `money()` and the same boundary when they are built.~~ Done 2026-10-02 (#1472):
+  [[purchase-order-line]]`.unitPrice` is a Postgres `BIGINT`, converted by
+  `purchaseOrderLineMoneyToWire` / `purchaseOrderLineMoneyToDb` in `apps/api/src/common/money.ts`; the
+  purchase totals are derived in `bigint` and never stored, and a line whose quantity × price exceeds
+  `MONEY_MAX` is refused on write.
 
 ## Related
 

@@ -35,8 +35,8 @@ mint a permission, CI fails on an unknown literal, and the set is greppable and 
 
 - **Domains** are the existing modules: `asset`, `application`, `accessGrant`, `consumable`,
   `article`/KB, `location`, `assetModel`, `category`, `user`, `dashboard`, `search`, `settings`, plus
-  `logs` (the estate-wide activity history for the future Reports/Informes section). A
-  `purchaseOrder` domain is ⚪ **planned** for Purchases Phase 1 — see the note in §4.
+  `logs` (the estate-wide activity history for the future Reports/Informes section), and
+  `purchaseOrder` (Purchases, #1472 — see the note in §4).
 - **Actions** are `read | write | delete` plus the **coarse capability verbs** that map to the old
   ADMIN-only gates: `accessGrant:grant`, `user:manage`, `settings:manage`. Read-only surfaces
   (`dashboard`, `search`, `logs`) expose only `:read`.
@@ -110,9 +110,10 @@ the epoch. Personal MCP tokens and OAuth grants are not sessions (§9.3).
 41 read `GET`s now carry `@RequirePermission('<domain>:read')`. Every `<domain>:read` is seeded to all
 three roles **except** two tighter tiers:
 
-- the two **pre-tightened reads** — `accessGrant:read` and `user:read` (`VIEWER_DENIED_READS`) — seeded
-  to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory**
-  (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+- the **pre-tightened reads** — `accessGrant:read`, `accessRequest:read`, `user:read` and
+  `purchaseOrder:read` (`VIEWER_DENIED_READS`) — seeded
+  to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
+  see purchases and suppliers** (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
 - the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
   (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
   disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide
@@ -123,15 +124,24 @@ three roles **except** two tighter tiers:
   same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
   Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
 
-> [!note] Planned, not built — the `purchaseOrder` domain ([[0099-purchases-scope-model-and-optionality]] §8)
-> Purchases Phase 1 adds `purchaseOrder:read`, `purchaseOrder:write` and `purchaseOrder:delete`, covering
-> purchases, their lines and documents, and suppliers:
+> [!note] The `purchaseOrder` domain ([[0099-purchases-scope-model-and-optionality]] §8) — built (#1472)
+> `purchaseOrder:read`, `purchaseOrder:write` and `purchaseOrder:delete` cover purchases, their lines and
+> documents, and suppliers. They gate `/purchase-orders/**` and `/suppliers/**`; removing a line is an edit
+> (`:write`), archiving and restoring a purchase or a supplier is `:delete`. In the role matrix they are
+> three separate toggles under Inventory (`purchaseOrder.view` / `.edit` / `.delete`), not part of
+> "View inventory", because the read is VIEWER-denied:
 >
 > - `purchaseOrder:read` — seeded to ADMIN + MEMBER and added to **`VIEWER_DENIED_READS`**, so a VIEWER
 >   cannot see purchases or supplier prices by default. An admin can grant it to VIEWER from the role
 >   matrix — for every viewer at once, since permissions are per role.
 > - `purchaseOrder:write` — ADMIN + MEMBER (create, edit, receive, link/unlink, cancel, upload documents).
 > - `purchaseOrder:delete` — ADMIN only (soft delete); restore stays ADMIN-only.
+>
+> The *Inventory operator* preset carries `purchaseOrder:read` and `:write` (it holds every read and every
+> Inventory write). `GET /suggestions/:field` (smart entry) carries **no** route permission on purpose: a
+> field may merge columns guarded by different permissions, so the service reads only the sources the
+> caller holds the read permission for and answers `403` when it holds none; being unannotated, the route is
+> refused to service accounts (fail-closed, §3).
 >
 > All three are grantable to service accounts (fail-closed, §6) and reach existing instances through the
 > seed-once ledger, with no data migration. They do **not** narrow `asset:read`: a viewer still sees an
@@ -141,8 +151,9 @@ three roles **except** two tighter tiers:
 > **An asset's purchase provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A,
 > 2026-10-01). The asset page's *Purchase* panel — supplier, reference, dates and the purchase documents
 > listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
-> not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
-> (cost, currency, dates) included.
+> not only the UI (built with the panel, #1473). Without it, the asset still reads normally under
+> `asset:read`, own purchase fields (cost, currency, dates) included — and so does the bare
+> `purchaseOrderLineId`, an opaque id that reveals no supplier, reference, date or price.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

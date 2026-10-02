@@ -97,7 +97,7 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     });
   });
 
-  it('SOFT_DELETABLE_MODELS lists exactly the 18 mutable domain entities', () => {
+  it('SOFT_DELETABLE_MODELS lists exactly the 21 mutable domain entities', () => {
     expect(SOFT_DELETABLE_MODELS.has('User')).toBe(true);
     expect(SOFT_DELETABLE_MODELS.has('Asset')).toBe(true);
     // ServiceAccount is soft-deletable (revoke = soft delete; ADR-0048).
@@ -132,7 +132,12 @@ describe('withSoftDeleteFilter (soft-delete query filter — ADR-0032)', () => {
     expect(SOFT_DELETABLE_MODELS.has('InfraAutoConfirmRule')).toBe(true);
     // File attachments (ADR-0082): delete = soft delete; the GC sweep adjudicates the blob later.
     expect(SOFT_DELETABLE_MODELS.has('Attachment')).toBe(true);
-    expect(SOFT_DELETABLE_MODELS.size).toBe(18);
+    // Purchases (ADR-0099): suppliers, purchases and their lines soft-delete; the activity log is append-only.
+    expect(SOFT_DELETABLE_MODELS.has('Supplier')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('PurchaseOrder')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('PurchaseOrderLine')).toBe(true);
+    expect(SOFT_DELETABLE_MODELS.has('PurchaseOrderEvent')).toBe(false);
+    expect(SOFT_DELETABLE_MODELS.size).toBe(21);
   });
 
   it('auto-scopes ConsumableCategory reads to live rows (#321)', () => {
