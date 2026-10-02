@@ -63,6 +63,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useReceiveAssets } from "@/lib/api/hooks/use-asset-receive";
+import { useAssetModel } from "@/lib/api/hooks/use-asset-models";
 import { useReceiveFromLine, useUpdatePurchaseOrderLine } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -187,6 +188,10 @@ export function ReceiveStockDialog({
   // The last NON-EMPTY term typed in the model picker, to seed the inline create dialog (#1229).
   const [modelSearch, setModelSearch] = useState("");
   const [result, setResult] = useState<ReceiveOutcome | null>(null);
+  // The model's name for the purchase-mode summary.
+  const { data: chosenModel, isLoading: modelLoading } = useAssetModel(
+    target && values.modelId ? values.modelId : undefined,
+  );
 
   function patch(next: Partial<LineReceiveFormValues>) {
     setValues((prev) => ({ ...prev, ...next }));
@@ -269,7 +274,9 @@ export function ReceiveStockDialog({
       setErrors({ modelId: t("modelRequired") });
       return;
     }
-    const parsed = ReceiveFromLineSchema.safeParse(buildReceiveFromLinePayload(values, locale));
+    const parsed = ReceiveFromLineSchema.safeParse(
+      buildReceiveFromLinePayload(values, locale, { locationId: current.purchase.deliveryLocationId ?? "" }),
+    );
     if (!parsed.success) {
       setErrors(validationErrors(parsed.error.issues));
       return;
@@ -640,6 +647,10 @@ export function ReceiveStockDialog({
     const none = <span className="text-muted-foreground">—</span>;
     const cost = shown.purchaseCost.trim();
     const rows: { label: string; value: React.ReactNode }[] = [
+      {
+        label: t("model"),
+        value: chosenModel ? `${chosenModel.manufacturer} ${chosenModel.name}` : modelLoading ? "…" : none,
+      },
       { label: t("status"), value: statusLabel(shown.status) },
       { label: t("company"), value: shown.company || none },
       {

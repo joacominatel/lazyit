@@ -151,10 +151,15 @@ export function effectiveQuantity(quantity: string, serials: string): number {
  * never omitted (which would bring the purchase value back). The cost carries its currency label, and a
  * cleared cost clears the label with it — cost and currency move together (ADR-0099 §2). A refused amount
  * becomes `NaN`, which the schema rejects; the dialog stops it inline first.
+ *
+ * The one exception is the location: it is omitted while it is still the purchase's delivery location
+ * (`prefill.locationId`), so the API applies the purchase's own value; it is sent only when the operator
+ * changed it under *Change*, and as `null` only when they cleared it.
  */
 export function buildReceiveFromLinePayload(
   values: LineReceiveFormValues,
   locale: string,
+  prefill: Pick<LineReceiveFormValues, "locationId"> = { locationId: "" },
 ): Record<string, unknown> {
   const cost = parseMoneyInput(values.purchaseCost, locale);
   const serials = parseSerials(values.serials);
@@ -167,7 +172,7 @@ export function buildReceiveFromLinePayload(
     ...(serials.length > 0 ? { serials } : {}),
     status: values.status,
     ...(values.modelId ? { modelId: values.modelId } : {}),
-    locationId: values.locationId || null,
+    ...(values.locationId === prefill.locationId ? {} : { locationId: values.locationId || null }),
     company: company || null,
     purchaseDate: values.purchaseDate ? `${values.purchaseDate}T00:00:00.000Z` : null,
     warrantyEnd: values.warrantyEnd ? `${values.warrantyEnd}T00:00:00.000Z` : null,

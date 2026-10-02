@@ -650,7 +650,9 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   `POST /purchase-orders/:id/lines/:lineId/receive`. The serials come first and the quantity follows them
   (the quantity field is read-only while serials are pasted, so a count mismatch cannot be sent); the
   prefilled values read as a summary with *Change*. Every value is sent explicitly, because each one is an
-  override of the purchase's prefill: a field the operator cleared is `null`, never omitted. The purchase
+  override of the purchase's prefill: a field the operator cleared is `null`, never omitted — except the
+  location, which is omitted while it is still the purchase's delivery location (the API applies the
+  purchase's own value) and sent only when changed, `null` only when cleared. The purchase
   date is the invoice date, else the viewer's today. Plain *Receive stock* keeps its own route and its
   "serials must match the quantity" rule; the UX proposal's suggestion to make the quantity follow the
   serials there too is left for later.

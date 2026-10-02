@@ -85,14 +85,16 @@ describe("quantity follows the serials", () => {
 describe("the receive-from-line body", () => {
   const prefill = lineReceivePrefill(PURCHASE, LINE, "2026-04-02", "en").values;
 
+  const fromPurchase = { locationId: LOCATION };
+
   test("sends the prefilled values explicitly, the cost with its label, and the serials with a matching quantity", () => {
-    const body = buildReceiveFromLinePayload({ ...prefill, serials: "PF1\nPF2" }, "en");
+    const body = buildReceiveFromLinePayload({ ...prefill, serials: "PF1\nPF2" }, "en", fromPurchase);
     expect(body).toEqual({
       quantity: 2,
       serials: ["PF1", "PF2"],
       status: "IN_STORAGE",
       modelId: MODEL,
-      locationId: LOCATION,
+      // Still the purchase's delivery location: left to the API, not sent.
       company: "Acme S.A.",
       purchaseDate: "2026-03-10T00:00:00.000Z",
       warrantyEnd: "2029-03-10T00:00:00.000Z",
@@ -106,6 +108,7 @@ describe("the receive-from-line body", () => {
     const body = buildReceiveFromLinePayload(
       { ...prefill, locationId: "", company: "  ", purchaseDate: "", warrantyEnd: "", purchaseCost: "" },
       "en",
+      fromPurchase,
     );
     expect(body).toMatchObject({
       quantity: 3,
@@ -119,6 +122,17 @@ describe("the receive-from-line body", () => {
     });
     expect(body).not.toHaveProperty("serials");
     expect(ReceiveFromLineSchema.safeParse(body).success).toBe(true);
+  });
+
+  test("the location is sent only when the operator changed it, and null only when they cleared it", () => {
+    const OTHER = "clh1other0000000000000000";
+    expect(buildReceiveFromLinePayload(prefill, "en", fromPurchase)).not.toHaveProperty("locationId");
+    expect(buildReceiveFromLinePayload({ ...prefill, locationId: OTHER }, "en", fromPurchase).locationId).toBe(OTHER);
+    expect(buildReceiveFromLinePayload({ ...prefill, locationId: "" }, "en", fromPurchase).locationId).toBeNull();
+    // A purchase with no delivery location and the field left blank: nothing to say.
+    expect(buildReceiveFromLinePayload({ ...prefill, locationId: "" }, "en", { locationId: "" })).not.toHaveProperty(
+      "locationId",
+    );
   });
 
   test("an unreadable amount is refused by the schema, never sent as no cost", () => {
