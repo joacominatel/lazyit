@@ -28,7 +28,7 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
-import { MoneyInput, moneyInputText } from "@/components/money-input";
+import { MoneyField, moneyInputText } from "@/components/money-input";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { UserCombobox } from "@/components/user-combobox";
 import { Button } from "@/components/ui/button";
@@ -771,15 +771,13 @@ export function AssetForm({
         <FieldDescription>{t("purchaseGroup.description")}</FieldDescription>
         <FieldGroup>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field>
-              <FieldLabel htmlFor="purchaseCost">{t("purchaseCost")}</FieldLabel>
-              <MoneyInput
-                id="purchaseCost"
-                value={purchaseCost}
-                onValueChange={setPurchaseCost}
-                placeholder={t("purchaseCostPlaceholder")}
-              />
-            </Field>
+            <MoneyField
+              id="purchaseCost"
+              label={t("purchaseCost")}
+              value={purchaseCost}
+              onValueChange={setPurchaseCost}
+              placeholder={t("purchaseCostPlaceholder")}
+            />
 
             <Field>
               <FieldLabel htmlFor="usefulLifeMonths">
@@ -798,16 +796,14 @@ export function AssetForm({
               <FieldDescription>{t("usefulLifeMonthsHelp")}</FieldDescription>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="salvageValue">{t("salvageValue")}</FieldLabel>
-              <MoneyInput
-                id="salvageValue"
-                value={salvageValue}
-                onValueChange={setSalvageValue}
-                placeholder={t("salvageValuePlaceholder")}
-              />
-              <FieldDescription>{t("salvageValueHelp")}</FieldDescription>
-            </Field>
+            <MoneyField
+              id="salvageValue"
+              label={t("salvageValue")}
+              description={t("salvageValueHelp")}
+              value={salvageValue}
+              onValueChange={setSalvageValue}
+              placeholder={t("salvageValuePlaceholder")}
+            />
           </div>
         </FieldGroup>
       </FieldSet>

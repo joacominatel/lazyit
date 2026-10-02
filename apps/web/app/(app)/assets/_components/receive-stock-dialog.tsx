@@ -22,7 +22,7 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
-import { MoneyInput } from "@/components/money-input";
+import { MoneyField } from "@/components/money-input";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -370,20 +370,14 @@ export function ReceiveStockButton() {
                       />
                     </Field>
 
-                    <Field>
-                      <FieldLabel htmlFor="receive-cost">
-                        {t("purchaseCost")}
-                      </FieldLabel>
-                      <MoneyInput
-                        id="receive-cost"
-                        value={purchaseCost}
-                        onValueChange={setPurchaseCost}
-                        placeholder={t("purchaseCostPlaceholder")}
-                      />
-                      <FieldDescription>
-                        {t("purchaseCostHelp")}
-                      </FieldDescription>
-                    </Field>
+                    <MoneyField
+                      id="receive-cost"
+                      label={t("purchaseCost")}
+                      description={t("purchaseCostHelp")}
+                      value={purchaseCost}
+                      onValueChange={setPurchaseCost}
+                      placeholder={t("purchaseCostPlaceholder")}
+                    />
                   </div>
 
                   <Field>

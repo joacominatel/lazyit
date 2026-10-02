@@ -15,7 +15,7 @@ import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
-import { MoneyInput, moneyInputText } from "@/components/money-input";
+import { MoneyField, moneyInputText } from "@/components/money-input";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -444,18 +444,14 @@ export function ApplicationForm({
               </FieldDescription>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="costPerSeat">
-                {t("form.costPerSeatLabel")}
-              </FieldLabel>
-              <MoneyInput
-                id="costPerSeat"
-                value={costPerSeat}
-                onValueChange={setCostPerSeat}
-                placeholder={t("form.costPerSeatPlaceholder")}
-              />
-              <FieldDescription>{t("form.costPerSeatHelp")}</FieldDescription>
-            </Field>
+            <MoneyField
+              id="costPerSeat"
+              label={t("form.costPerSeatLabel")}
+              description={t("form.costPerSeatHelp")}
+              value={costPerSeat}
+              onValueChange={setCostPerSeat}
+              placeholder={t("form.costPerSeatPlaceholder")}
+            />
 
             <Field>
               <FieldLabel htmlFor="renewalDate">

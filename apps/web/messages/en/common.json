@@ -66,7 +66,8 @@
     "invalid": "Enter an amount like {example}.",
     "negative": "The amount can't be negative.",
     "decimals": "Use at most two decimals, like {example}.",
-    "tooLarge": "That amount is too large."
+    "tooLarge": "That amount is too large.",
+    "readAs": "Read as {amount}."
   },
   "quickView": {
     "trigger": "Quick view: {name}",

@@ -65,6 +65,17 @@ export function parseMoneyInput(text: string, locale?: string): MoneyParseResult
 }
 
 /**
+ * The one accepted shape the two locales read differently — a single separator followed by exactly
+ * three digits (`1.150` in es, `1,150` in en) — is read as a thousands group; for it, this returns the
+ * ungrouped whole amount (`"1150"`) so the field can echo how it was read. `null` for any other entry.
+ */
+export function ambiguousReading(text: string, locale?: string): string | null {
+  const { group } = separators(locale);
+  const match = new RegExp(`^(\\d{1,3})${escapeRegExp(group)}(\\d{3})$`).exec(text.trim());
+  return match ? `${match[1]}${match[2]}` : null;
+}
+
+/**
  * Minor units → the amount as entered (ADR-0100 §5): the viewer's locale grouping, no decimals for a
  * whole amount (`150000 → "1,500"` / `"1.500"`), two for a fractional one (`123456 → "1,234.56"` /
  * `"1.234,56"`). A non-blank currency `label` precedes the amount exactly as typed (`"ARS 1.500"`),

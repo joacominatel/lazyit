@@ -54,7 +54,7 @@ export function parseSerials(raw: string): string[] {
  */
 export function buildReceivePayload(
   values: ReceiveStockFormValues,
-  locale = "en",
+  locale: string,
 ): Record<string, unknown> {
   const cost = parseMoneyInput(values.purchaseCost, locale);
   const serialLines = parseSerials(values.serials);

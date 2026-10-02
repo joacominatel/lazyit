@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatMoney, MONEY_MAX, parseMoneyInput } from "./money";
+import { ambiguousReading, formatMoney, MONEY_MAX, parseMoneyInput } from "./money";
 
 const minor = (text: string, locale: string) => {
   const result = parseMoneyInput(text, locale);
@@ -86,6 +86,23 @@ describe("parseMoneyInput — both locales", () => {
         expect(minor(formatMoney(stored, locale), locale)).toBe(stored);
       }
     }
+  });
+});
+
+describe("ambiguousReading — the shape both locales read differently (#1470)", () => {
+  test("one grouping separator followed by exactly three digits echoes its ungrouped reading", () => {
+    expect(ambiguousReading("1.150", "es")).toBe("1150");
+    expect(ambiguousReading(" 12.150 ", "es")).toBe("12150");
+    expect(ambiguousReading("1,150", "en")).toBe("1150");
+  });
+
+  test("every other entry has nothing to echo", () => {
+    for (const text of ["1150", "1.150,00", "1.150.000", "1.15", "", "abc"]) {
+      expect(ambiguousReading(text, "es")).toBeNull();
+    }
+    // The decimal separator is not a grouping one: "1,150" in es is refused, not echoed.
+    expect(ambiguousReading("1,150", "es")).toBeNull();
+    expect(ambiguousReading("1.150", "en")).toBeNull();
   });
 });
 

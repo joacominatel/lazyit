@@ -54,7 +54,7 @@ describe("buildReceivePayload — the inline-create hand-off (issue #1229)", () 
     const payload = buildReceivePayload({
       ...TYPED,
       modelId: "clh1newmodel00000000000000",
-    });
+    }, "en");
     expect(payload.modelId).toBe("clh1newmodel00000000000000");
   });
 
@@ -62,7 +62,7 @@ describe("buildReceivePayload — the inline-create hand-off (issue #1229)", () 
     const payload = buildReceivePayload({
       ...TYPED,
       modelId: "clh1newmodel00000000000000",
-    });
+    }, "en");
     expect(payload).toMatchObject({
       quantity: 3,
       status: "IN_STORAGE",
@@ -79,14 +79,14 @@ describe("buildReceivePayload — the inline-create hand-off (issue #1229)", () 
     const payload = buildReceivePayload({
       ...TYPED,
       modelId: "clh1newmodel00000000000000",
-    });
+    }, "en");
     expect(ReceiveAssetsSchema.safeParse(payload).success).toBe(true);
   });
 });
 
 describe("buildReceivePayload — blank optional fields", () => {
   test("blank id/date fields are omitted, never sent as an empty string", () => {
-    const payload = buildReceivePayload(BLANK);
+    const payload = buildReceivePayload(BLANK, "en");
     expect("locationId" in payload).toBe(false);
     expect("purchaseDate" in payload).toBe(false);
     expect("company" in payload).toBe(false);
@@ -94,12 +94,12 @@ describe("buildReceivePayload — blank optional fields", () => {
   });
 
   test("serials is omitted when nothing was pasted (not an empty array)", () => {
-    const payload = buildReceivePayload(BLANK);
+    const payload = buildReceivePayload(BLANK, "en");
     expect("serials" in payload).toBe(false);
   });
 
   test("a blank purchase cost becomes null (the schema's 'not set')", () => {
-    expect(buildReceivePayload(BLANK).purchaseCost).toBeNull();
+    expect(buildReceivePayload(BLANK, "en").purchaseCost).toBeNull();
   });
 
   test("the purchase cost is read in the viewer's locale (#1470)", () => {
@@ -117,7 +117,7 @@ describe("buildReceivePayload — blank optional fields", () => {
   });
 
   test("the minimal payload is valid per ReceiveAssetsSchema", () => {
-    expect(ReceiveAssetsSchema.safeParse(buildReceivePayload(BLANK)).success).toBe(
+    expect(ReceiveAssetsSchema.safeParse(buildReceivePayload(BLANK, "en")).success).toBe(
       true,
     );
   });
@@ -127,7 +127,7 @@ describe("buildReceivePayload — blank optional fields", () => {
       ...BLANK,
       company: "   ",
       notes: "\n  ",
-    });
+    }, "en");
     expect("company" in payload).toBe(false);
     expect("notes" in payload).toBe(false);
   });
