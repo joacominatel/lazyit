@@ -309,20 +309,28 @@ describe("DEFAULT_ROLE_PERMISSIONS (the seed source of truth)", () => {
     }
   });
 
-  test("the pre-tightening is EXACTLY accessGrant:read + accessRequest:read + user:read", () => {
-    expect([...VIEWER_DENIED_READS].sort()).toEqual(
-      (["accessGrant:read", "accessRequest:read", "user:read"] as const).slice().sort(),
-    );
-    // VIEWER specifically lacks these three…
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessGrant:read" as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("accessRequest:read" as Permission);
-    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain("user:read" as Permission);
-    // …while ADMIN and MEMBER keep them (behavior-preserving for those two roles).
-    for (const role of ["ADMIN", "MEMBER"] as const) {
-      expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("accessGrant:read" as Permission);
-      expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("accessRequest:read" as Permission);
-      expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain("user:read" as Permission);
+  test("the pre-tightening is EXACTLY accessGrant:read + accessRequest:read + user:read + purchaseOrder:read", () => {
+    const denied = ["accessGrant:read", "accessRequest:read", "user:read", "purchaseOrder:read"] as const;
+    expect([...VIEWER_DENIED_READS].sort()).toEqual(denied.slice().sort());
+    for (const permission of denied) {
+      // VIEWER specifically lacks these…
+      expect(DEFAULT_ROLE_PERMISSIONS.VIEWER).not.toContain(permission as Permission);
+      // …while ADMIN and MEMBER keep them (behavior-preserving for those two roles).
+      for (const role of ["ADMIN", "MEMBER"] as const) {
+        expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(permission as Permission);
+      }
     }
+  });
+
+  test("purchases (ADR-0099 §8): read + write for MEMBER, delete ADMIN-only, nothing for VIEWER", () => {
+    expect(DEFAULT_ROLE_PERMISSIONS.ADMIN).toEqual(
+      expect.arrayContaining(["purchaseOrder:read", "purchaseOrder:write", "purchaseOrder:delete"]),
+    );
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).toEqual(
+      expect.arrayContaining(["purchaseOrder:read", "purchaseOrder:write"]),
+    );
+    expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).not.toContain("purchaseOrder:delete" as Permission);
+    expect(DEFAULT_ROLE_PERMISSIONS.VIEWER.filter((p) => p.startsWith("purchaseOrder:"))).toEqual([]);
   });
 
   test("every OTHER `:read` is granted to ALL THREE roles (default-open)", () => {
