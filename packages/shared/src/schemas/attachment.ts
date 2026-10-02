@@ -116,10 +116,16 @@ export const AttachmentLabelSchema = optionalText(ATTACHMENT_LABEL_MAX_LENGTH);
 
 /**
  * `PATCH /assets/:assetId/attachments/:attachmentId` and `PATCH /purchase-orders/:id/attachments/:attachmentId`:
- * set the document's type label, or clear it with `null`. Only the label is editable; the file never is.
+ * set the document's type label, or clear it with `null` — or with a blank one, as on upload (an emptied
+ * field clears the label). Only the label is editable; the file never is.
  */
 export const UpdateAttachmentSchema = z.strictObject({
-  label: z.string().trim().min(1).max(ATTACHMENT_LABEL_MAX_LENGTH).nullable(),
+  label: z
+    .string()
+    .trim()
+    .max(ATTACHMENT_LABEL_MAX_LENGTH)
+    .transform((value) => (value === "" ? null : value))
+    .nullable(),
 });
 
 export type AttachmentEntityType = z.infer<typeof AttachmentEntityTypeSchema>;

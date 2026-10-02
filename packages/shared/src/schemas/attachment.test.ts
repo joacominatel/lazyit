@@ -98,11 +98,15 @@ describe("document type label (ADR-0099 §10, #1476)", () => {
     expect(AttachmentLabelSchema.safeParse("x".repeat(ATTACHMENT_LABEL_MAX_LENGTH + 1)).success).toBe(false);
   });
 
-  it("on edit: a label or null to clear it; nothing else is editable", () => {
+  it("on edit: a label, or null — or a blank one, as on upload — to clear it; nothing else is editable", () => {
     expect(UpdateAttachmentSchema.parse({ label: " Remito " })).toEqual({ label: "Remito" });
     expect(UpdateAttachmentSchema.parse({ label: null })).toEqual({ label: null });
+    expect(UpdateAttachmentSchema.parse({ label: "" })).toEqual({ label: null });
+    expect(UpdateAttachmentSchema.parse({ label: "   " })).toEqual({ label: null });
+    expect(UpdateAttachmentSchema.safeParse({ label: "x".repeat(ATTACHMENT_LABEL_MAX_LENGTH + 1) }).success).toBe(
+      false,
+    );
     expect(UpdateAttachmentSchema.safeParse({}).success).toBe(false);
-    expect(UpdateAttachmentSchema.safeParse({ label: "" }).success).toBe(false);
     expect(UpdateAttachmentSchema.safeParse({ label: "Invoice", originalName: "x.pdf" }).success).toBe(false);
   });
 });
