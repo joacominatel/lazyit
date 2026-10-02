@@ -424,5 +424,33 @@
       "linkedElsewhere": "On another purchase — tick “Move here” to move it",
       "notLinked": "Not linked to this line"
     }
+  },
+  "provenance": {
+    "title": "Purchase",
+    "link": "Link to purchase",
+    "notLinked": "Not linked to a purchase.",
+    "loadError": "Couldn't load where this asset was bought.",
+    "from": "Bought on",
+    "archived": "Archived",
+    "reference": "Reference",
+    "currency": "Currency",
+    "noCurrency": "No currency",
+    "orderDate": "Order date",
+    "invoiceDate": "Invoice date",
+    "invoiceNumbers": "Invoice numbers",
+    "linePrice": "Price on the purchase",
+    "differs": "Differs from purchase",
+    "differsHelp": "This asset's purchase cost (in Details) differs from the price on its purchase. lazyit never corrects it on its own.",
+    "support": "Supplier support",
+    "documents": "Documents from this purchase",
+    "noDocuments": "The purchase has no documents.",
+    "archivedDocuments": "The purchase is archived, so its documents are not shown.",
+    "downloadAria": "Download {name}",
+    "downloadError": "Couldn't download the file",
+    "unlink": "Unlink from purchase",
+    "unlinkTitle": "Unlink from the purchase?",
+    "unlinkDescription": "Unlink {asset} from {purchase}? Its purchase values stay as they are.",
+    "unlinkedToast": "Unlinked from the purchase",
+    "unlinkError": "Couldn't unlink the asset"
   }
 }

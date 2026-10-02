@@ -424,5 +424,33 @@
       "linkedElsewhere": "Está en otra compra: marcá “Mover acá” para moverlo",
       "notLinked": "No está vinculado a esta línea"
     }
+  },
+  "provenance": {
+    "title": "Compra",
+    "link": "Vincular a una compra",
+    "notLinked": "No está vinculado a ninguna compra.",
+    "loadError": "No se pudo cargar dónde se compró este activo.",
+    "from": "Comprado en",
+    "archived": "Archivada",
+    "reference": "Referencia",
+    "currency": "Moneda",
+    "noCurrency": "Sin moneda",
+    "orderDate": "Fecha de pedido",
+    "invoiceDate": "Fecha de factura",
+    "invoiceNumbers": "Números de factura",
+    "linePrice": "Precio en la compra",
+    "differs": "Distinto de la compra",
+    "differsHelp": "El costo de compra de este activo (en Detalles) es distinto del precio en su compra. lazyit nunca lo corrige por su cuenta.",
+    "support": "Soporte del proveedor",
+    "documents": "Documentos de esta compra",
+    "noDocuments": "La compra no tiene documentos.",
+    "archivedDocuments": "La compra está archivada, por eso no se muestran sus documentos.",
+    "downloadAria": "Descargar {name}",
+    "downloadError": "No se pudo descargar el archivo",
+    "unlink": "Desvincular de la compra",
+    "unlinkTitle": "¿Desvincular de la compra?",
+    "unlinkDescription": "¿Desvincular {asset} de {purchase}? Sus valores de compra se mantienen.",
+    "unlinkedToast": "Desvinculado de la compra",
+    "unlinkError": "No se pudo desvincular el activo"
   }
 }
