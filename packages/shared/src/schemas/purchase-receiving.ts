@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApplicationSchema } from "./application";
 import { AssetSchema, AssetStatusSchema } from "./asset";
 import { AttachmentSchema } from "./attachment";
 import { MAX_BATCH_IDS } from "./batch";
@@ -7,8 +8,11 @@ import { pageSchema } from "./pagination";
 import { int4, money, optionalText } from "./primitives";
 import {
   CURRENCY_LABEL_MAX_LENGTH,
+  PurchaseOrderDetailSchema,
   PurchaseOrderLineSchema,
+  PurchaseOrderStatusSchema,
   PurchaseOrderSupplierRefSchema,
+  currencyLabel,
 } from "./purchase-order";
 import { RECEIVE_ASSETS_MAX_QUANTITY } from "./asset-receive";
 
@@ -258,6 +262,119 @@ export const CancelRemainingUnitsSchema = z.strictObject({
   reason: optionalText(500),
 });
 
+// ── License lines (#1477) ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a license proposal or apply has to say beside the numbers. None of them refuses the apply except
+ * `NO_APPLICATION` and `APPLICATION_ARCHIVED` (the apply answers 400 for those):
+ *   - `NO_APPLICATION`       — the line names no application yet (PATCH the line with `applicationId`);
+ *   - `APPLICATION_ARCHIVED` — its application is archived (restore it, or map the line to another one);
+ *   - `SEATS_UNTRACKED`      — the application tracks no seat count (`seatsPurchased` null = unlimited): adding
+ *                              seats starts counting from them;
+ *   - `NOTHING_PENDING`      — every seat of the line was already applied (more can still be, with a warning);
+ *   - `OVER_APPLIED`         — the line has (or would have) more seats applied than it bought: allowed, like
+ *                              an over-received line (ADR-0099 §4).
+ */
+export const LICENSE_APPLY_WARNINGS = [
+  "NO_APPLICATION",
+  "APPLICATION_ARCHIVED",
+  "SEATS_UNTRACKED",
+  "NOTHING_PENDING",
+  "OVER_APPLIED",
+] as const;
+export const LicenseApplyWarningSchema = z.enum(LICENSE_APPLY_WARNINGS);
+
+/**
+ * The application a `LICENSE` line is for, as the proposal compares it (current values). `seatsUsed` is the
+ * derived count of users holding an active grant (ADR-0088); `null` for an
+ * archived application, which cannot be applied to.
+ */
+export const LicenseApplicationSchema = z.object({
+  id: z.cuid(),
+  name: z.string(),
+  seatsPurchased: int4({ min: 0 }).nullable(),
+  seatsUsed: int4({ min: 0 }).nullable(),
+  renewalDate: z.iso.datetime().nullable(),
+  deletedAt: z.iso.datetime().nullable(),
+});
+
+/**
+ * `GET /purchase-orders/:id/lines/:lineId/license-proposal` — what applying the line would do, before anyone
+ * confirms it (ADR-0099 §2: a license line PROPOSES a seats / renewal update, it never changes seats on its
+ * own; ADR-0088: `seatsPurchased` is one mutable number, so the arithmetic happens once, on confirm).
+ * `seatsToAdd` is the line's pending seats (quantity − cancelled − already applied, floored at 0);
+ * `seatsPurchasedAfter` is the application's count plus them (an untracked count starts at 0), `null` when
+ * the line has no live application. The renewal date is never proposed: the document's term is not on the
+ * line, so the operator types it on confirm.
+ */
+export const LicenseProposalSchema = z.object({
+  line: PurchaseOrderLineSchema,
+  application: LicenseApplicationSchema.nullable(),
+  seatsToAdd: int4({ min: 0 }),
+  seatsPurchasedAfter: int4({ min: 0 }).nullable(),
+  overAppliedAfter: z.boolean(),
+  warnings: z.array(LicenseApplyWarningSchema),
+});
+
+/**
+ * `POST /purchase-orders/:id/lines/:lineId/apply-license` — explicit, user-triggered (never automatic): adds
+ * `seatsToAdd` to the application's `seatsPurchased` and/or sets its `renewalDate`, through the applications
+ * write path, and counts the seats as applied on the line (its received units). At least one of the two.
+ * Applying more seats than the line bought is allowed and flagged (`overApplied`).
+ */
+export const ApplyLicenseSchema = z
+  .strictObject({
+    seatsToAdd: int4({ min: 1, example: 10 }).optional(),
+    renewalDate: z.iso.datetime().optional(),
+  })
+  .refine((body) => body.seatsToAdd !== undefined || body.renewalDate !== undefined, {
+    message: "Give seatsToAdd, renewalDate, or both",
+    path: ["seatsToAdd"],
+  });
+
+/** The apply result: the application as saved, the line afterwards and the over-application flag. */
+export const ApplyLicenseResultSchema = z.object({
+  application: ApplicationSchema,
+  line: PurchaseOrderLineSchema,
+  overApplied: z.boolean(),
+  warnings: z.array(LicenseApplyWarningSchema),
+});
+
+// ── Create a purchase from selected assets (#1477) ────────────────────────────────────────────────────
+
+/**
+ * `POST /purchase-orders/from-assets` — back-link existing assets: create ONE purchase with one `ASSET` line
+ * per group of the selected assets (their model; assets without a model, per name) and link every asset that
+ * can be linked to its group's line. No asset field changes — only the link (ADR-0099 §2: values reach an
+ * asset only through an explicit apply). The header fields are the purchase's, as on a create; `currency`
+ * omitted takes the one label the priced assets share, if they share one.
+ */
+export const CreatePurchaseFromAssetsSchema = z.strictObject({
+  assetIds: assetIds(),
+  supplierId: z.cuid().optional(),
+  reference: optionalText(200),
+  status: PurchaseOrderStatusSchema.optional(),
+  currency: currencyLabel(),
+  orderDate: z.iso.datetime().optional(),
+  expectedDate: z.iso.datetime().optional(),
+  deliveryLocationId: z.cuid().optional(),
+  company: optionalText(200),
+  invoiceNumbers: optionalText(500),
+  invoiceDate: z.iso.datetime().optional(),
+  notes: optionalText(5000),
+});
+
+/**
+ * The from-assets result: the purchase as created (lines and derived counts), the assets linked, and the
+ * ones left out with their reason — `NOT_FOUND` (missing or archived) or `LINKED_ELSEWHERE` (already on a
+ * purchase line; move it from that purchase instead). Partial success, like a link.
+ */
+export const CreatePurchaseFromAssetsResultSchema = z.object({
+  purchaseOrder: PurchaseOrderDetailSchema,
+  linkedAssetIds: z.array(z.cuid()),
+  failed: z.array(linkFailure),
+});
+
 // ── Pending units ─────────────────────────────────────────────────────────────────────────────────────
 
 /** The purchase header a pending line carries. */
@@ -343,3 +460,10 @@ export type CancelRemainingUnits = z.infer<typeof CancelRemainingUnitsSchema>;
 export type PendingPurchaseLine = z.infer<typeof PendingPurchaseLineSchema>;
 export type PendingPurchaseLinePage = z.infer<typeof PendingPurchaseLinePageSchema>;
 export type AssetPurchaseProvenance = z.infer<typeof AssetPurchaseProvenanceSchema>;
+export type LicenseApplyWarning = z.infer<typeof LicenseApplyWarningSchema>;
+export type LicenseApplication = z.infer<typeof LicenseApplicationSchema>;
+export type LicenseProposal = z.infer<typeof LicenseProposalSchema>;
+export type ApplyLicense = z.infer<typeof ApplyLicenseSchema>;
+export type ApplyLicenseResult = z.infer<typeof ApplyLicenseResultSchema>;
+export type CreatePurchaseFromAssets = z.infer<typeof CreatePurchaseFromAssetsSchema>;
+export type CreatePurchaseFromAssetsResult = z.infer<typeof CreatePurchaseFromAssetsResultSchema>;

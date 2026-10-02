@@ -58,13 +58,26 @@ describe('deriveLine (ADR-0099 §3, §4)', () => {
   });
 
   it('an OTHER line (or a kind this build does not know) is never pending and has no state', () => {
-    for (const kind of ['OTHER', 'LICENSE']) {
+    for (const kind of ['OTHER', 'LEASE']) {
       expect(deriveLine(assetLine({ kind }), 0)).toMatchObject({
         countable: false,
         pendingQuantity: 0,
         receiptState: null,
       });
     }
+  });
+
+  it('a LICENSE line counts its applied seats like received units (#1477)', () => {
+    expect(
+      deriveLine(assetLine({ kind: 'LICENSE', quantity: 10 }), 4),
+    ).toMatchObject({
+      countable: true,
+      pendingQuantity: 6,
+      receiptState: 'PARTIAL',
+    });
+    expect(
+      deriveLine(assetLine({ kind: 'LICENSE', quantity: 10 }), 12).receiptState,
+    ).toBe('OVER');
   });
 
   it('line total = quantity × unit price, exactly, even past int4; unknown price → null', () => {

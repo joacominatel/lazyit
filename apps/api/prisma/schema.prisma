@@ -1574,6 +1574,8 @@ model Application {
   accessRequests AccessRequest[]
   // KB links (ADR-0042): knowledge-base articles linked to this application ("the runbook for THIS app").
   articleLinks ArticleLink[]
+  // LICENSE purchase lines for this application (ADR-0099, #1477). SetNull on that side.
+  purchaseOrderLines PurchaseOrderLine[]
 
   // Applications Workflow Engine (ADR-0054, epic #248). An application MAY own workflows that
   // provision/deprovision access in its external system; with none enabled it behaves exactly as
@@ -3243,6 +3245,10 @@ model AiSettings {
   webSearchEnabled                  Boolean   @default(false)
   /// Cap on searches per model call where the provider takes one (Anthropic `max_uses`; zod 1–20).
   webSearchMaxUses                  Int       @default(5)
+  /// Purchase document extraction (ADR-0099 §11, #1477): whether a document attached to a purchase may be
+  /// sent to the provider to draft the purchase (a structured-output call with no tools; nothing is saved
+  /// from it). Off by default and independent of `enabled` — extraction needs both.
+  documentExtractionEnabled         Boolean   @default(false)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
   disclosureAcknowledgedAt          DateTime?
@@ -3777,7 +3783,7 @@ model PurchaseOrderLine {
   purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   // Display order within the purchase (int4).
   position          Int           @default(0)
-  // TEXT validated by zod on write: ASSET | OTHER | CONSUMABLE now, LICENSE in a later phase.
+  // TEXT validated by zod on write: ASSET | OTHER | CONSUMABLE | LICENSE (#1477).
   kind              String        @default("ASSET")
   description       String
   // Brand and model as written on the document, before (or instead of) mapping to an AssetModel.
@@ -3790,6 +3796,13 @@ model PurchaseOrderLine {
   // model mapping (consumables are only soft-deleted; their movements Restrict a hard delete anyway).
   consumableId      String?
   consumable        Consumable?   @relation(fields: [consumableId], references: [id], onDelete: SetNull)
+  // A LICENSE line's application (#1477). SetNull, like the model mapping (applications are only soft-deleted).
+  applicationId     String?
+  application       Application?  @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  // The seats a person explicitly applied to the application from this LICENSE line (#1477) — its received
+  // units. Raised only by the apply route, never computed from the application (ADR-0088: seats are one
+  // mutable number, so lazyit records what it added instead of inferring it).
+  appliedSeats      Int           @default(0)
   quantity          Int           @default(1)
   // Integer minor units in the purchase's currency label (ADR-0100). NULL = unknown.
   unitPrice         BigInt?
@@ -3807,6 +3820,7 @@ model PurchaseOrderLine {
   @@index([purchaseOrderId])
   @@index([assetModelId])
   @@index([consumableId])
+  @@index([applicationId])
   @@map("purchase_order_lines")
 }
 

@@ -12,12 +12,18 @@ import type {
   ChatModelStepResult,
   ChatModelToolOutcome,
 } from '../core/ports/chat-model.port';
+import type {
+  StructuredExtractionPort,
+  StructuredExtractionRequest,
+  StructuredExtractionResult,
+} from '../core/ports/structured-extraction.port';
 import { AiProviderError } from './ai-provider.error';
 import {
   AI_PROVIDER_LAYER_OPTIONS,
   runModelStep,
   type AiProviderLayerOptions,
 } from './model-step';
+import { runStructuredExtraction } from './structured-extraction';
 
 type ToolResultOutput = Extract<
   ToolModelMessage['content'][number],
@@ -51,7 +57,7 @@ function toToolOutput(outcome: ChatModelToolOutcome): ToolResultOutput {
  * undecryptable), every step fails `AI_DISABLED`.
  */
 @Injectable()
-export class AiSdkChatModel implements ChatModelPort {
+export class AiSdkChatModel implements ChatModelPort, StructuredExtractionPort {
   private readonly options: AiProviderLayerOptions;
 
   constructor(
@@ -89,6 +95,30 @@ export class AiSdkChatModel implements ChatModelPort {
       request,
       this.options,
     );
+  }
+
+  /**
+   * One structured-output read of one file (#1477; {@link StructuredExtractionPort}): the same connection
+   * read, the same provider pin and the same guarded transport as a chat step, with no tools.
+   */
+  async extractStructured<T>(
+    request: StructuredExtractionRequest<T>,
+  ): Promise<StructuredExtractionResult<T>> {
+    const config = this.settings
+      ? await this.settings.resolveProviderConfig()
+      : null;
+    if (!config) {
+      throw new AiProviderError('AI_DISABLED');
+    }
+    if (
+      config.provider !== request.model.provider ||
+      config.model !== request.model.modelId
+    ) {
+      // The caller checked the capability against a configuration that has since changed: never send the
+      // document to a provider or model it was not checked for.
+      throw new AiProviderError('CONVERSATION_READ_ONLY');
+    }
+    return runStructuredExtraction(config, request, this.options);
   }
 
   toolResultsMessage(

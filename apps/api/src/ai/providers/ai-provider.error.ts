@@ -1,4 +1,4 @@
-import type { AiRunErrorCode } from '@lazyit/shared';
+import type { AiRunErrorCode, AiUsage } from '@lazyit/shared';
 
 /**
  * The run error codes a model call can fail with (provider-and-runtime.md §6.3 `classifyError`, §11). A
@@ -75,5 +75,21 @@ export class ProviderDownloadRefusedError extends Error {
     super('The provider layer never downloads URLs referenced by a message');
     this.name = 'ProviderDownloadRefusedError';
     Object.setPrototypeOf(this, ProviderDownloadRefusedError.prototype);
+  }
+}
+
+/**
+ * A structured-output call (#1477) whose answer did not fit the schema, or had no answer at all. Not a
+ * provider failure: the provider answered, the tokens were spent — `usage` carries them so the caller can
+ * count them against the budget. Like {@link AiProviderError}, it carries no `cause` and no generated text.
+ */
+export class AiStructuredOutputError extends Error {
+  readonly usage: AiUsage;
+
+  constructor(usage: AiUsage) {
+    super('The model did not answer in the expected shape.');
+    this.name = 'AiStructuredOutputError';
+    this.usage = usage;
+    Object.setPrototypeOf(this, AiStructuredOutputError.prototype);
   }
 }

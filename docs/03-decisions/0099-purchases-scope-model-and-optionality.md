@@ -26,12 +26,15 @@ the document type label built** (#1476, 2026-10-02): `CONSUMABLE` lines received
 consumables ledger, the optional label on asset and purchase documents, and the asset list's purchase
 filters. **Their screens built** (#1476, 2026-10-02): consumable lines and *Receive into stock*, document
 type labels, linked assets per line with unlink, the link picker's *Not linked* filter and camera scanning
-of serials. What the builds settled is in
+of serials. **Phase 2 backend built** (#1477, 2026-10-02): document extraction behind its own AI switch (a
+reviewed draft, never saved), `LICENSE` lines applied to their application on confirmation, and creating a
+purchase from selected assets; their screens are a separate frontend unit. What the builds settled is in
 [[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
 [[#Decisions while building (Phase 1 flows, #1473)]],
-[[#Decisions while building (Phase 1 flows web, #1475)]] and
-[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]] and
-[[#Decisions while building (Phase 1b web, #1476)]].
+[[#Decisions while building (Phase 1 flows web, #1475)]],
+[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]],
+[[#Decisions while building (Phase 1b web, #1476)]] and
+[[#Decisions while building (Phase 2, #1477)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -861,6 +864,137 @@ None reopens a CEO decision.
 - **Consequences.** The per-line list is capped at 50 with no paging; the "next upload" type field is one more
   control in the Documents header (optional, cleared after each upload); the scanner depends on the device's
   camera and browser support, with typing as the fallback.
+
+## Decisions while building (Phase 2, #1477)
+
+CTO decisions taken while building the Phase 2 backend (2026-10-02), under the principles above and §11. None
+reopens a CEO decision. Merging suppliers, the XLSX export and the other Phase 2 helpers in
+[[purchases/ux-proposal]] §7 are not part of this unit.
+
+**Document extraction** (§11; design in [[ai-assistant/provider-and-runtime]] §6.5, threat notes in
+[[ai-assistant/security]] §6.12):
+
+- **A sibling port, not a chat step.** `StructuredExtractionPort.extractStructured` is implemented by the same
+  provider adapter as `ChatModelPort` (same connection read, provider definitions and egress-guarded fetch) but
+  is its own interface: the agent loop never extracts, and an extraction is never a step of a conversation.
+  The call is `generateText` + `Output.object` with the file inline and **no `tools` key** — no lazyit tool
+  is declared (a provider may carry structured output in a synthetic JSON tool of its own, as Anthropic's
+  `jsonTool` mode does; it has no executor); the SDK's URL download is refused and telemetry is off, as on a
+  step. The port re-checks that the configured provider
+  **and model** are the ones the capability was checked for. Rejected: a method on `ChatModelPort` — it would
+  widen the chat contract (and every fake of it) for a call the chat never makes.
+- **The model transcribes; lazyit reads.** The schema the model fills asks for literal text (amounts and
+  quantities as printed) with the page; the server reads amounts into minor units in the document's own
+  format, inferring its decimal separator from every amount it prints, and reads numeric dates in the
+  document's day/month order. A literal that reads two ways with nothing to settle it (`1.150`, `10/03/2026`
+  with no other date) is **blank** and flagged — blanks over guesses — and a value with no printed evidence is
+  dropped — even when the model picked one reading of an ambiguous date. A trailing minus (`1.500,00-`) is a
+  negative, not a label, so it does not read; the Spanish whole-amount mark (`$ 1.500.-`) is not a sign.
+  Thousands grouped by spaces must be real groups of three. Cross-checks are warnings, never corrections:
+  quantity × unit price against the printed line total, and — only when every line has both — the lines
+  against the printed net or gross (with a line incomplete the gap is expected, and the reviewer already
+  sees the blank). Rejected: trusting the model's numbers, which is where a 1,000× separator error would come
+  from.
+- **Gates.** `purchaseOrder:write` + `ai:use` (the AI channel gate, so revoking `ai:use` closes extraction
+  too), **human-only** (a draft nobody reviews has no purpose; no headless flow sends documents out), then the
+  capability: the assistant usable (enabled, configured, its key decrypting, not shim), the
+  `documentExtractionEnabled` switch on, and a provider that reads the document's type. The refusals are
+  typed (`code`): `409` unavailable (`AI_DISABLED`, `EXTRACTION_DISABLED`, `PROVIDER_UNSUPPORTED`), `422` the
+  document, `429` `BUDGET_EXCEEDED` / `EXTRACTION_IN_PROGRESS` / `RATE_LIMITED`, `502` the provider or an
+  unusable answer, `504` the deadline.
+  `GET /purchase-orders/extraction/status` reports the same reasons per caller, plus `NOT_PERMITTED`, so the
+  web can disable the action with its reason.
+- **Which documents, per provider.** PDF, PNG, JPEG, WebP and GIF on Anthropic and OpenAI; the same but GIF on
+  Gemini. The **OpenAI-compatible provider is never offered**: there is no common file API across those
+  servers and most local models cannot read a PDF. Word, spreadsheets, text and CSV purchase documents are
+  never sent. The file name is not sent (it is user-typed text). Size: ≤ 10 MB for any document, and less
+  where the provider takes less for the type — Anthropic images ≤ 10 MB base64-encoded, so 7 864 320 bytes
+  raw (`aiDocumentExtractionMaxBytes`). Every check is made before anything is sent, and the status read
+  reports the effective cap per type (`maxBytesByMediaType`). Also ≤ 20 PDF pages (counted best-effort from
+  the file's page objects) and a 120 s deadline.
+- **Output cap and line ceiling agree.** The output is ≤ min(`maxOutputTokens`, 16 000) tokens. A transcribed
+  line takes about 180 of them (evidence and pages included) and the header, totals and framing about 1 000,
+  so the model is asked for at most `extractionLineLimit` lines — 80 at the 16 000 cap
+  (`PURCHASE_EXTRACTION_MAX_LINES`), fewer under a lower admin cap, never under 10 — and to set `moreLines` when
+  the document has more. The draft then says `LINES_TRUNCATED`, rather than a long invoice running out of
+  tokens mid-answer and reading as nothing.
+- **One budget.** The caller's `dailyTokenLimitPerPrincipal` is checked before the call, and the call's usage
+  is an `ai_usage` row whose `runId` is the extraction id (`ext_…`) — extraction and chat spend the same
+  rolling budget. An answer that does not fit the schema still counts its tokens.
+- **Limiters of its own, the budget shared.** One extraction in flight per person (a second one is `429
+  EXTRACTION_IN_PROGRESS`) and at most 5 started per person per minute (a token bucket, `429 RATE_LIMITED` with
+  `retryAfterSec`; a refused document or a spent budget costs no attempt). Both are the extraction service's
+  own, in memory per API process (one per install, the chat's posture), not `AiRunLimits`' chat buckets:
+  starting a run and reading a document are different actions with different costs, and a shared bucket would
+  let either starve the other. The persisted token budget is the one that is shared. Rejected: sharing the
+  chat's run-creation bucket.
+- **What is recorded.** Nothing on the purchase, its lines, suppliers or models — the draft is returned, never
+  stored. The purchase gets `EXTRACTION_RUN` (who, which document, provider, model, token counts, outcome)
+  whenever the document **may have reached the provider** — on success and on a failure after the request —
+  and not when the call failed before any I/O (the configuration moved since the check: `AI_DISABLED`,
+  `CONVERSATION_READ_ONLY`, or `PROVIDER_AUTH` with no HTTP status — answered as `409 AI_DISABLED`). One log
+  line per run either way. Neither carries a value read from the document.
+- **Suggestions only.** The supplier is matched by tax ID (digits and letters compared), else by a unique
+  normalized name (case, accents, punctuation and legal suffixes such as "S.A." ignored); a line's model by
+  the model an earlier line with the same description was mapped to, else by a unique brand + model text
+  match. An ambiguous match is no match. Nothing is created or linked.
+- **A later document proposes changes in the web.** The API returns the same draft for a document attached to
+  a purchase that already has values; the field-by-field *proposed changes* table ([[purchases/ux-proposal]]
+  §3.b) compares it with the purchase read on the client. Rejected: a server diff endpoint — the purchase and
+  the draft are both already on the client, and the comparison writes nothing.
+
+**`LICENSE` lines** (§2):
+
+- **Received = applied seats.** A `LICENSE` line is countable; its received units are the seats a person
+  applied from it, stored as `PurchaseOrderLine.appliedSeats` (raised only by the apply route, never computed
+  from the application). `seatsPurchased` is one mutable number, not a ledger
+  ([[0088-application-license-seat-tracking]]), so lazyit records what it added instead of inferring it.
+  Applied seats only grow — a mistaken apply is corrected on the application — so, as with stock, a line with
+  applied seats can neither change kind nor be removed (`409`). Its application may still change; the seats
+  applied stay counted on the line. As a consequence, a `LICENSE` line with seats still to apply is listed by
+  the *Pending units* read and counts in the purchase's receipt; the web offers *Apply license* there, never
+  an asset or stock receive (its screens are the Phase 2 frontend unit).
+- **Propose, then apply.** `GET …/license-proposal` (`purchaseOrder:read` + `application:read`) shows the
+  application's current seats, `seatsUsed` and renewal date, the line's pending seats as the default to add,
+  and the count afterwards; it writes nothing. `POST …/apply-license { seatsToAdd?, renewalDate? }`
+  (`purchaseOrder:write` + `application:write`) applies what the person confirmed, through
+  `ApplicationsService.update` — the application's own write path — inside the purchase write's transaction.
+  The renewal date is never proposed: the term is not on the line, so the operator types it.
+- **An untracked count** (`seatsPurchased` null = unlimited / not tracked) starts at the seats added, with
+  the warning `SEATS_UNTRACKED`. **Over-application** is allowed and flagged (`OVER_APPLIED`; the line reads as
+  over-received), as an over-received line is (§4).
+- **Lock order: purchase, line, application.** The purchase `FOR KEY SHARE` (what a link takes, so a kind
+  change or a line removal serializes with an apply), the line `FOR UPDATE` (two applies cannot read the same
+  applied count), the application `FOR UPDATE` (the seat arithmetic reads the committed count). Nothing takes
+  them the other way round.
+- The event is `LICENSE_APPLIED { lineId, applicationId, seatsAdded, seatsPurchased: { from, to },
+  renewalDate: { from, to }, appliedSeats: { from, to }, overApplied }`.
+
+**Create a purchase from selected assets** (§13 Phase 2):
+
+- `POST /purchase-orders/from-assets { assetIds, …header }` (`purchaseOrder:write` + `asset:write`) creates one
+  purchase with one `ASSET` line per group: the assets of one model (mapped to it unless it is archived), or,
+  without a model, of one name. The quantity is the group's assets; the unit price is their cost only when
+  **every** asset of the group has the same one in the purchase's currency label, else unknown; an omitted
+  currency takes the one label every priced asset shares. Rejected: an average or the first asset's cost — a
+  guess presented as a price.
+- **Only the link changes on an asset.** Each linkable asset gets `purchaseOrderLineId` and a
+  `PURCHASE_LINKED` with nothing applied: values reach an asset only through an explicit apply (§2).
+- **One transaction, purchase then assets.** The purchase row is inserted first, then the asset rows are
+  locked `FOR UPDATE` in id order and re-read, as a link does. Partial success: `NOT_FOUND` (missing or
+  archived) and `LINKED_ELSEWHERE` (already on a purchase line — moving it stays the link's explicit `move`)
+  are reported; when none can be linked the request is a `409` and nothing is created. Events: `CREATED`,
+  `CREATED_FROM_ASSETS { lineCount, linkedAssetIds, failed }`, then one `ASSET_LINKED` per line.
+
+**Upgrade and AI tools:**
+
+- **Upgrade.** One defaulted boolean (`ai_settings.documentExtractionEnabled`, `false`), one nullable column
+  (`purchase_order_lines.applicationId`) with its index and `SET NULL` foreign key, and one defaulted integer
+  (`purchase_order_lines.appliedSeats`, `0`). Extraction is **off on every upgraded instance**, so no document
+  leaves the host until an admin turns it on; no line, application or seat count changes.
+- **AI tools.** The new handlers are unexposed until Phase 3 (#1478): applying a license and creating from
+  assets are purchase changes (never auto-approved, §11); extraction and its status are the web's reviewed
+  flow, and the chat's `purchase_order_extract` tool is Phase 3.
 
 ## Related
 

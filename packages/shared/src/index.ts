@@ -84,6 +84,8 @@ export * from "./schemas/primitives";
 export * from "./schemas/purchase-order";
 // Purchases flows (ADR-0099, #1473): receive from a line, link / unlink assets, pending units, provenance.
 export * from "./schemas/purchase-receiving";
+// Purchases Phase 2 (ADR-0099 §11, #1477): document extraction — the human-reviewed draft and its status.
+export * from "./schemas/purchase-extraction";
 export * from "./schemas/recent-activity";
 export * from "./schemas/search";
 // Secret Manager — zero-knowledge vault wire shapes (ADR-0061, #366). PURE zod (base64 string blobs +

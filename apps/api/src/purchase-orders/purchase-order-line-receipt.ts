@@ -38,6 +38,15 @@ export function assertConsumableLine(line: { kind: string }): void {
   }
 }
 
+/** The 400 for a line that cannot be applied to an application: only `LICENSE` lines are (#1477). */
+export function assertLicenseLine(line: { kind: string }): void {
+  if (line.kind !== 'LICENSE') {
+    throw new BadRequestException(
+      `Only LICENSE lines are applied to an application; this line is ${line.kind}`,
+    );
+  }
+}
+
 /**
  * A live `ASSET` line of a live purchase, for a receive that names it by id only (`POST
  * /assets/batch/receive` with `purchaseOrderLineId`). Anything else is a 400: the line is a body field
@@ -55,11 +64,13 @@ export async function loadReceivableLine(client: Client, lineId: string) {
 }
 
 /**
- * Units received per line — derived, never stored (ADR-0099 §3–§4): for a `CONSUMABLE` line the units of the
- * `IN` movements posted from it (#1476), for any other kind the live assets linked to it. The ledger is
- * append-only, so a consumable line's count never goes down: a mistaken receipt is corrected on the stock
- * with an ordinary movement, and the line keeps counting what was received (the ADR-0098 rule for returns).
- * At most one grouped query per source (no N+1); a line with nothing received is absent from the map.
+ * Units received per line — derived from the records, never a counter of its own (ADR-0099 §3–§4): for a
+ * `CONSUMABLE` line the units of the `IN` movements posted from it (#1476), for a `LICENSE` line the seats a
+ * person applied to its application (`appliedSeats`, raised only by the apply route, #1477), for any other
+ * kind the live assets linked to it. The ledger is append-only, so a consumable line's count never goes
+ * down: a mistaken receipt is corrected on the stock with an ordinary movement, and the line keeps counting
+ * what was received (the ADR-0098 rule for returns); applied seats likewise only grow. At most one grouped
+ * query per source (no N+1); a line with nothing received is absent from the map.
  */
 export async function receivedByLine(
   client: Client,
@@ -69,9 +80,23 @@ export async function receivedByLine(
   const stockIds = lines
     .filter((line) => line.kind === 'CONSUMABLE')
     .map((line) => line.id);
-  const assetIds = lines
-    .filter((line) => line.kind !== 'CONSUMABLE')
+  const licenseIds = lines
+    .filter((line) => line.kind === 'LICENSE')
     .map((line) => line.id);
+  const assetIds = lines
+    .filter((line) => line.kind !== 'CONSUMABLE' && line.kind !== 'LICENSE')
+    .map((line) => line.id);
+  if (licenseIds.length > 0) {
+    // Read from the row, not the caller's copy: the count must be the committed one (the apply raises it
+    // under a line lock).
+    const rows = await client.purchaseOrderLine.findMany({
+      where: { id: { in: licenseIds }, appliedSeats: { gt: 0 } },
+      select: { id: true, appliedSeats: true },
+    });
+    for (const row of rows) {
+      received.set(row.id, row.appliedSeats);
+    }
+  }
   if (assetIds.length > 0) {
     const groups = await client.asset.groupBy({
       by: ['purchaseOrderLineId'],
@@ -116,6 +141,7 @@ export function receivedUnitsSql(): Prisma.Sql {
   return Prisma.sql`(CASE WHEN l."kind" = 'CONSUMABLE'
          THEN (SELECT COALESCE(SUM(m."quantity"), 0) FROM "consumable_movements" m
                 WHERE m."purchaseOrderLineId" = l."id" AND m."type" = 'IN'::"ConsumableMovementType")
+         WHEN l."kind" = 'LICENSE' THEN l."appliedSeats"
          ELSE (SELECT COUNT(*) FROM "assets" a
                 WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL)
     END)`;

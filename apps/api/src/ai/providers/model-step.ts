@@ -197,7 +197,7 @@ export function webSearchOf(
 }
 
 /** The SDK's download hook: refuses any request (an empty batch needs nothing). */
-function refuseDownload(
+export function refuseDownload(
   requested: ReadonlyArray<{ url: URL }>,
 ): PromiseLike<never[]> {
   if (requested.length > 0) {

@@ -159,3 +159,63 @@ export const AiProviderOptionsSchema = z.strictObject({
   temperature: z.number().min(0).max(2).optional(),
 });
 export type AiProviderOptions = z.infer<typeof AiProviderOptionsSchema>;
+
+/**
+ * DOCUMENT EXTRACTION (ADR-0099 §11, #1477): the file types a purchase document may be sent to the provider
+ * as, for a structured-output read with no tools. A subset of the purchase documents allowlist — the types a
+ * hosted model reads natively (PDF and the raster images). Word, spreadsheets, text and CSV are never sent.
+ */
+export const AI_DOCUMENT_EXTRACTION_MEDIA_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+export type AiDocumentExtractionMediaType = (typeof AI_DOCUMENT_EXTRACTION_MEDIA_TYPES)[number];
+
+/**
+ * The document types a provider reads for extraction (#1477). Anthropic, OpenAI (Responses API) and Gemini
+ * accept PDF and image file parts on their current models — Gemini's image types exclude GIF. The
+ * OpenAI-compatible provider is never offered: there is no common file API across those servers, and most
+ * local models cannot read a PDF — a request would fail at the provider or, worse, be answered from nothing.
+ * A model of a supported provider that cannot read files still refuses at call time; the extraction then
+ * fails with nothing saved.
+ */
+export function aiDocumentExtractionMediaTypes(
+  provider: AiProviderKind,
+): readonly AiDocumentExtractionMediaType[] {
+  if (provider === "openai-compatible") return [];
+  if (provider === "google") {
+    return AI_DOCUMENT_EXTRACTION_MEDIA_TYPES.filter((type) => type !== "image/gif");
+  }
+  return AI_DOCUMENT_EXTRACTION_MEDIA_TYPES;
+}
+
+/** Whether `provider` reads a document of `mediaType` for extraction (#1477). */
+export function aiDocumentExtractionSupported(
+  provider: AiProviderKind,
+  mediaType: string,
+): boolean {
+  return (aiDocumentExtractionMediaTypes(provider) as readonly string[]).includes(
+    mediaType.trim().toLowerCase(),
+  );
+}
+
+/** Anthropic refuses an inline image over 10 MB once base64-encoded: 3/4 of it raw (#1477). */
+const ANTHROPIC_IMAGE_MAX_RAW_BYTES = Math.floor((10 * 1024 * 1024 * 3) / 4);
+
+/**
+ * The provider's own limit on one document of `mediaType`, in raw bytes, where it is stricter than any
+ * extraction-wide cap; `null` when the provider imposes nothing lower (#1477). Anthropic: images ≤ 10 MB
+ * base64-encoded, so about 7.5 MB raw.
+ */
+export function aiDocumentExtractionMaxBytes(
+  provider: AiProviderKind,
+  mediaType: string,
+): number | null {
+  if (provider === "anthropic" && mediaType.trim().toLowerCase().startsWith("image/")) {
+    return ANTHROPIC_IMAGE_MAX_RAW_BYTES;
+  }
+  return null;
+}

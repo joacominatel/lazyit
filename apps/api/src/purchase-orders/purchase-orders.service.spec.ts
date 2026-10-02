@@ -26,6 +26,7 @@ const PO = 'clpo00000000000000000001';
 const LINE = 'clline000000000000000001';
 const SUPPLIER = 'clsupplier00000000000001';
 const CONSUMABLE = 'clconsumable000000000001';
+const APPLICATION = 'clapp0000000000000000001';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const SA_ID = 'clsa0000000000000000001';
 const ABOVE_INT4 = 3_000_000_000;
@@ -104,6 +105,7 @@ function makePrisma() {
       update: jest.fn(),
       count: jest.fn(),
       aggregate: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     purchaseOrderEvent: {
       create: jest.fn().mockResolvedValue({}),
@@ -118,6 +120,7 @@ function makePrisma() {
     location: { findFirst: jest.fn() },
     assetModel: { findMany: jest.fn().mockResolvedValue([]) },
     consumable: { findMany: jest.fn().mockResolvedValue([]) },
+    application: { findMany: jest.fn().mockResolvedValue([]) },
     consumableMovement: {
       groupBy: jest.fn().mockResolvedValue([]),
       aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: null } }),
@@ -1080,7 +1083,9 @@ describe('PurchaseOrdersService', () => {
       const query = rawQuery(prisma, 0);
       // The shared received-count fragment is a bound SQL value of the query.
       expect(JSON.stringify(query.values)).toContain('consumable_movements');
-      expect(query.values).toContainEqual(['ASSET', 'CONSUMABLE']);
+      expect(query.values).toContainEqual(['ASSET', 'CONSUMABLE', 'LICENSE']);
+      // A LICENSE line counts its applied seats (#1477).
+      expect(JSON.stringify(query.values)).toContain('appliedSeats');
       const where = (
         prisma.purchaseOrder.findMany.mock.calls[0] as [{ where: Row }]
       )[0].where;
@@ -1150,6 +1155,123 @@ describe('PurchaseOrdersService', () => {
         eventType: 'UNITS_CANCELLED',
         payload: { quantity: 6, cancelledQuantity: { from: 0, to: 6 } },
       });
+    });
+  });
+
+  describe('license lines (Phase 2, #1477)', () => {
+    const licenseLine = (over: Row = {}) =>
+      lineRow({
+        kind: 'LICENSE',
+        description: 'Microsoft 365 E3',
+        applicationId: APPLICATION,
+        appliedSeats: 0,
+        quantity: 25,
+        ...over,
+      });
+
+    it('adds a LICENSE line naming a live application; an archived one is refused (400, nothing written)', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.aggregate.mockResolvedValue({
+        _max: { position: null },
+      });
+      prisma.purchaseOrderLine.create.mockResolvedValue(licenseLine());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        licenseLine(),
+      );
+      prisma.application.findMany.mockResolvedValue([{ id: APPLICATION }]);
+      await service.addLine(
+        PO,
+        {
+          kind: 'LICENSE',
+          description: 'Microsoft 365 E3',
+          applicationId: APPLICATION,
+          quantity: 25,
+        },
+        human,
+      );
+      expect(prisma.application.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [APPLICATION] }, deletedAt: null },
+        select: { id: true },
+      });
+      expect(prisma.purchaseOrderLine.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          kind: 'LICENSE',
+          applicationId: APPLICATION,
+        }) as unknown,
+      });
+
+      prisma.purchaseOrderLine.create.mockClear();
+      prisma.application.findMany.mockResolvedValue([]);
+      await expect(
+        service.addLine(
+          PO,
+          {
+            kind: 'LICENSE',
+            description: 'Microsoft 365 E3',
+            applicationId: APPLICATION,
+          },
+          human,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrderLine.create).not.toHaveBeenCalled();
+    });
+
+    it('an application is accepted on a LICENSE line only, against the stored kind', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.application.findMany.mockResolvedValue([{ id: APPLICATION }]);
+      await expect(
+        service.updateLine(PO, LINE, { applicationId: APPLICATION }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+    });
+
+    it('changing a line away from LICENSE clears its application', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(licenseLine());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+      prisma.$queryRaw.mockResolvedValue([]);
+      await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { kind: 'OTHER', applicationId: null },
+      });
+    });
+
+    it('applied seats are its received units: the kind is then fixed and the line cannot be removed (409)', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(
+        licenseLine({ appliedSeats: 10 }),
+      );
+      prisma.purchaseOrderLine.findMany.mockResolvedValue([
+        { id: LINE, appliedSeats: 10 },
+      ]);
+      prisma.$queryRaw.mockResolvedValue([]);
+      await expect(
+        service.updateLine(PO, LINE, { kind: 'OTHER' }, human),
+      ).rejects.toThrow(/applied 10 seat/);
+      await expect(service.removeLine(PO, LINE, human)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+    });
+
+    it('the detail reads applied seats as received (PARTIAL), never from assets', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ lines: [licenseLine({ appliedSeats: 10 })] }),
+      );
+      prisma.purchaseOrderLine.findMany.mockResolvedValue([
+        { id: LINE, appliedSeats: 10 },
+      ]);
+      const detail = await service.findOne(PO);
+      expect(detail.lines[0]).toMatchObject({
+        receivedQuantity: 10,
+        pendingQuantity: 15,
+        receiptState: 'PARTIAL',
+      });
+      expect(prisma.asset.groupBy).not.toHaveBeenCalled();
     });
   });
 });

@@ -91,7 +91,9 @@ as a DERIVED, distinct-user count — never a stored column.**
   currency label and the asset's purchase cost an optional one. `costPerSeat` itself is unchanged and stays currency-less.
 - **PO numbers.** The deferred "PO numbers, vendor SKUs" now belong to Purchases: a purchase carries the
   finance reference, and a `LICENSE` purchase line (Phase 2) links to an application and *proposes* a
-  seats/renewal update — it never changes `seatsPurchased` automatically.
+  seats/renewal update — it never changes `seatsPurchased` automatically. *Built in #1477 (2026-10-02): a
+  person applies it, through the applications write path; the line records the seats it added, and
+  `seatsPurchased` is never recomputed from lines — ADR-0099, decisions while building (Phase 2).*
 - **Label.** The application's `vendor` field is shown as **Publisher** (en) / **Fabricante** (es) from
   Purchases Phase 1, so it is not confused with a purchase supplier. Label only; the column is unchanged.
 

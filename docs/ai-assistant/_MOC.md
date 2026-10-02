@@ -3,7 +3,7 @@ title: "AI Assistant — Map of Content"
 tags: [ai-assistant, moc, index, mcp, oauth, llm]
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 ---
 
 # AI Assistant — Map of Content
@@ -34,7 +34,8 @@ updated: 2026-09-23
 - [[ai-assistant/provider-and-runtime|Provider layer and runtime]] — the `ChatModelPort` over AI SDK 7
   and how to add a provider; lazyit's own agent loop as BullMQ jobs with Postgres as the system of
   record; the approval state machine; the SSE run-event stream; `AiSettings` and its enable/disable
-  lifecycle; budgets, observability and infrastructure impact.
+  lifecycle; budgets, observability and infrastructure impact; the structured-extraction port that reads a
+  purchase document with no tools (§6.5, #1477).
 - [[ai-assistant/tools-and-execution|Tools and execution]] — the one tool catalog (the 44-tool v1 cut and
   the domain inventory); in-process execution through Nest's own pipeline with a delegated identity; the
   descriptor and its classes; the confirmation contract; `AiActionLog` and history provenance; the
@@ -44,7 +45,8 @@ updated: 2026-09-23
   page; the i18n and Manual plan.
 - [[ai-assistant/security|Security and threat model]] — trust boundaries, the STRIDE table per channel,
   prompt injection and the lethal trifecta, the elevated confirmation tier, provider egress and key
-  custody, the invariants, the test plan, and the review gates G1–G4.
+  custody, the invariants, the test plan, and the review gates G1–G4; purchase document extraction
+  (§6.12, #1477).
 
 ## Key referenced decisions
 

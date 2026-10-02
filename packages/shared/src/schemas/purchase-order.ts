@@ -38,11 +38,12 @@ export const DEFAULT_PURCHASE_ORDER_STATUS = "ORDERED";
 
 /**
  * The line kinds this build writes. `ASSET` lines are received as assets; `CONSUMABLE` lines (Phase 1b,
- * #1476) are received into stock as `IN` movements of their consumable; `OTHER` lines (shipping, services,
- * freebies) count in the total and are never pending. `LICENSE` (Phase 2) is appended later; a line of a
- * kind this build does not know reads as not tracked.
+ * #1476) are received into stock as `IN` movements of their consumable; `LICENSE` lines (Phase 2, #1477)
+ * link to an application and count the seats a person explicitly applied to it; `OTHER` lines (shipping,
+ * services, freebies) count in the total and are never pending. A line of a kind this build does not know
+ * reads as not tracked.
  */
-export const PURCHASE_ORDER_LINE_KINDS = ["ASSET", "OTHER", "CONSUMABLE"] as const;
+export const PURCHASE_ORDER_LINE_KINDS = ["ASSET", "OTHER", "CONSUMABLE", "LICENSE"] as const;
 /** WRITE validator for `PurchaseOrderLine.kind`. Reads use a plain string. */
 export const PurchaseOrderLineKindSchema = z.enum(PURCHASE_ORDER_LINE_KINDS);
 /** The kind a line gets when the create omits it. */
@@ -60,6 +61,14 @@ export const DEFAULT_PURCHASE_ORDER_LINE_KIND = "ASSET";
  *   - `STOCK_RECEIVED`   { lineId, consumableId, movementId, quantity, overReceived } — a `CONSUMABLE` line
  *                        received into stock (#1476)
  *   - `DOCUMENT_UPDATED` { attachmentId, originalName, label: { from, to } } — a document's type label (#1476)
+ *   - `LICENSE_APPLIED`  { lineId, applicationId, seatsAdded, seatsPurchased: { from, to } | null,
+ *                        renewalDate: { from, to } | null, appliedSeats: { from, to }, overApplied } — a
+ *                        `LICENSE` line applied to its application by a person (#1477)
+ *   - `EXTRACTION_RUN`   { extractionId, attachmentId, outcome, errorCode, provider, model, inputTokens,
+ *                        outputTokens, lineCount, warningCount } — a document of the purchase was sent to the
+ *                        AI provider to draft it (#1477). Metadata only: never a value read from the document.
+ *   - `CREATED_FROM_ASSETS` { lineCount, linkedAssetIds, failed } — the purchase was created from selected
+ *                        existing assets (#1477); written next to `CREATED`
  */
 export const PURCHASE_ORDER_EVENT_TYPES = [
   "CREATED",
@@ -78,6 +87,9 @@ export const PURCHASE_ORDER_EVENT_TYPES = [
   "DOCUMENT_REMOVED",
   "STOCK_RECEIVED",
   "DOCUMENT_UPDATED",
+  "LICENSE_APPLIED",
+  "EXTRACTION_RUN",
+  "CREATED_FROM_ASSETS",
 ] as const;
 export const PurchaseOrderEventTypeSchema = z.enum(PURCHASE_ORDER_EVENT_TYPES);
 
@@ -140,6 +152,8 @@ export const PurchaseOrderLineSchema = z.object({
   assetModelId: z.cuid().nullable(),
   // The consumable a `CONSUMABLE` line is received into (#1476). Nullish: older rows and builds lack it.
   consumableId: z.cuid().nullish(),
+  // The application a `LICENSE` line is for (#1477). Nullish: older rows and builds lack it.
+  applicationId: z.cuid().nullish(),
   quantity: int4({ min: 0 }),
   unitPrice: money().nullable(),
   cancelledQuantity: int4({ min: 0 }),
@@ -149,8 +163,8 @@ export const PurchaseOrderLineSchema = z.object({
   deletedAt: z.iso.datetime().nullable(),
   // ── Derived, never stored ──
   /**
-   * Units received: live assets linked to an `ASSET` line, or the units of the `IN` movements posted from a
-   * `CONSUMABLE` line.
+   * Units received: live assets linked to an `ASSET` line, the units of the `IN` movements posted from a
+   * `CONSUMABLE` line, or the seats a person applied to the application of a `LICENSE` line (#1477).
    */
   receivedQuantity: int4({ min: 0 }),
   /** quantity − received − cancelled, floored at 0; always 0 on a line that is not countable. */
@@ -232,7 +246,8 @@ const warrantyMonths = () => int4({ min: 0, max: 1200, example: 12 });
  * `POST /purchase-orders/:id/lines`. Only `description` is required: `kind` defaults to `ASSET`,
  * `quantity` to 1, `cancelledQuantity` to 0, and `position` to after the last line. `unitPrice` absent or
  * `null` = unknown; `0` = free. `consumableId` is accepted on a `CONSUMABLE` line only, and stays optional
- * there: a line is mapped to its consumable when stock is received, at the latest.
+ * there: a line is mapped to its consumable when stock is received, at the latest. Likewise `applicationId`
+ * on a `LICENSE` line only (#1477), required by the time the license is applied.
  */
 export const CreatePurchaseOrderLineSchema = z
   .strictObject({
@@ -242,6 +257,7 @@ export const CreatePurchaseOrderLineSchema = z
     modelText: optionalText(200),
     assetModelId: z.cuid().optional(),
     consumableId: z.cuid().optional(),
+    applicationId: z.cuid().optional(),
     quantity: lineQuantity().optional(),
     unitPrice: money().nullish(),
     cancelledQuantity: cancelledQuantity().optional(),
@@ -255,12 +271,16 @@ export const CreatePurchaseOrderLineSchema = z
   .refine((line) => line.consumableId === undefined || line.kind === "CONSUMABLE", {
     error: "consumableId is only accepted on a CONSUMABLE line",
     path: ["consumableId"],
+  })
+  .refine((line) => line.applicationId === undefined || line.kind === "LICENSE", {
+    error: "applicationId is only accepted on a LICENSE line",
+    path: ["applicationId"],
   });
 
 /**
  * Partial line update (an empty body is rejected). Optional fields accept `null` to clear them. The
- * cancelled ≤ quantity rule, and `consumableId` only on a `CONSUMABLE` line, are checked by the API against
- * the stored line, since a PATCH may carry only one of the two.
+ * cancelled ≤ quantity rule, `consumableId` only on a `CONSUMABLE` line and `applicationId` only on a
+ * `LICENSE` line, are checked by the API against the stored line, since a PATCH may carry only one of the two.
  */
 export const UpdatePurchaseOrderLineSchema = requireAtLeastOneKey(
   z
@@ -271,6 +291,7 @@ export const UpdatePurchaseOrderLineSchema = requireAtLeastOneKey(
       modelText: z.string().trim().min(1).max(200).nullable(),
       assetModelId: z.cuid().nullable(),
       consumableId: z.cuid().nullable(),
+      applicationId: z.cuid().nullable(),
       quantity: lineQuantity(),
       unitPrice: money().nullable(),
       cancelledQuantity: cancelledQuantity(),

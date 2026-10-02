@@ -15,11 +15,16 @@ import {
  */
 
 /**
- * The line kinds whose units are counted as received: `ASSET` (live linked assets) and, since Phase 1b
- * (#1476), `CONSUMABLE` (units moved in by its `IN` movements). `OTHER` lines (shipping, services) are never
- * pending, and a kind this build does not know (written by a newer one) is shown but not counted.
+ * The line kinds whose units are counted as received: `ASSET` (live linked assets), since Phase 1b (#1476)
+ * `CONSUMABLE` (units moved in by its `IN` movements), and since Phase 2 (#1477) `LICENSE` (the seats a
+ * person applied to its application). `OTHER` lines (shipping, services) are never pending, and a kind this
+ * build does not know (written by a newer one) is shown but not counted.
  */
-export const COUNTABLE_LINE_KINDS: readonly string[] = ['ASSET', 'CONSUMABLE'];
+export const COUNTABLE_LINE_KINDS: readonly string[] = [
+  'ASSET',
+  'CONSUMABLE',
+  'LICENSE',
+];
 
 /** The stored line values the derivation needs. */
 export interface LineInput {
