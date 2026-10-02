@@ -86,6 +86,7 @@ const ASSET_PLAIN_FIELDS_SELECT = {
   purchaseCost: true,
   usefulLifeMonths: true,
   salvageValue: true,
+  purchaseCurrency: true,
 } as const satisfies Record<
   Exclude<keyof UpdateAsset, 'status' | 'locationId' | 'modelId' | 'specs'>,
   true

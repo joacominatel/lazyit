@@ -99,6 +99,8 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
         purchaseCost: null,
         usefulLifeMonths: null,
         salvageValue: null,
+        purchaseCurrency: null,
+        purchaseOrderLineId: null,
         modelId: null,
         locationId: null,
         createdAt: new Date(),
@@ -244,6 +246,46 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
 
     const read = await http().get(`/assets/${id}`).expect(200);
     expect(read.body).toMatchObject({ currentBookValue: 300_000_000 });
+  });
+
+  it('round-trips the free-text purchase currency label and clears it with null (ADR-0099 §5)', async () => {
+    const created = await http()
+      .post('/assets')
+      .send({
+        name: 'SRV-ARS-05',
+        status: 'OPERATIONAL',
+        purchaseCost: ABOVE_INT4,
+        purchaseCurrency: '  u$s ',
+      })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      purchaseCost: ABOVE_INT4,
+      purchaseCurrency: 'u$s',
+      purchaseOrderLineId: null,
+    });
+    const id = (created.body as { id: string }).id;
+    expect((await http().get(`/assets/${id}`).expect(200)).body).toMatchObject({
+      purchaseCurrency: 'u$s',
+    });
+
+    const cleared = await http()
+      .patch(`/assets/${id}`)
+      .send({ purchaseCurrency: null })
+      .expect(200);
+    expect(cleared.body).toMatchObject({ purchaseCurrency: null });
+  });
+
+  it('refuses purchaseOrderLineId on create and update — it is read-only until linking ships', async () => {
+    const line = 'clh1abc0000xyz0000000line';
+    await http()
+      .post('/assets')
+      .send({
+        name: 'SRV-06',
+        status: 'OPERATIONAL',
+        purchaseOrderLineId: line,
+      })
+      .expect(400);
+    expect(asset.create).not.toHaveBeenCalled();
   });
 
   it('rejects an amount above Number.MAX_SAFE_INTEGER with a 400 before any write', async () => {
