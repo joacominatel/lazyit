@@ -689,7 +689,8 @@ under the principles above. None reopens a CEO decision.
   every countable line, whatever unit each consumable uses (units, boxes, metres); the state and the
   per-line counts are what the UI should lead with.
 - **The document type label** (§10) is a nullable `attachments.label` (≤ 100 characters), set through the
-  multipart `label` field on upload and edited with `PATCH …/attachments/:attachmentId { label | null }` on
+  multipart `label` field on upload and edited with `PATCH …/attachments/:attachmentId { label | null }` (a
+  blank label clears it, as on upload) on
   asset documents (`asset:write`) and purchase documents (`purchaseOrder:write`). The upload validates it
   inside the service, not a pipe, so a bad label still discards the staged file. Edits are human-only, like
   every attachment write; on a purchase a change appends `DOCUMENT_UPDATED { attachmentId, originalName,
@@ -702,10 +703,21 @@ under the principles above. None reopens a CEO decision.
 - **Listing a purchase's assets is a filter on the asset list** (asked by the frontend flows unit, #1483).
   `GET /assets` gains `purchaseOrderLineId`, `purchaseOrderId` and `purchaseLinked` (`true` / `false`),
   AND-combined, list only. Any of them needs `purchaseOrder:read` on top of `asset:read` (`403`, checked in
-  the service like the batch receive's line): the filter itself reveals provenance (D-A). Rejected: `GET
+  the service like the batch receive's line): the filter itself reveals provenance (D-A). In depth, the list
+  query applies only filters minted by the authorizing method (a runtime brand), so the CSV export or any
+  later caller cannot apply unauthorized ones. Rejected: `GET
   /purchase-orders/:id/assets` — a second paged asset projection to keep in step with the list's, its
   sort, its archived slice and its lean select. The provenance read gains the purchase's `createdAt`, the
   date of the title fallback (#1474).
+- **Cancel remaining locks purchase, then line** (review of #1484). It now takes `FOR KEY SHARE` on the
+  purchase before the line's `FOR UPDATE`. Before, it locked the line and only reached the purchase through
+  the foreign key of its `UNITS_CANCELLED` insert — the reverse of a line removal or kind change (purchase
+  `FOR UPDATE`, then the line), which could deadlock. Every purchase write now locks in the same order,
+  purchase first.
+- **Archived references refused on asset writes** (review of #1483). Creating, bulk-receiving (including a
+  receive from a purchase line with an explicit location) or moving an asset to a soft-deleted location or
+  model is a `400`: the row still passes the foreign key. Write-only, and only when the value changes, so an
+  asset already in an archived location stays editable.
 - **Upgrade.** Three nullable columns (`purchase_order_lines.consumableId`,
   `consumable_movements.purchaseOrderLineId`, `attachments.label`), two indexes, two foreign keys and one
   CHECK, all valid over populated tables because every existing row reads `NULL`. No past movement is

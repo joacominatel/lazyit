@@ -179,9 +179,9 @@ three roles **except** two tighter tiers:
 > `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
 > invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
 > `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
-> (`403`), since the filter itself reveals which assets came from which purchase. Both resolve the principal's
-> permissions through `PermissionResolverService.principalHas` — a human by role, a service account by its
-> grants, no principal never.
+> (`403`), since the filter itself reveals which assets came from which purchase. All three resolve the
+> principal's permissions through `PermissionResolverService.principalHas` — a human by role, a service
+> account by its grants, no principal never.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

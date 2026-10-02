@@ -89,7 +89,7 @@ required list (CEO decision D-D).
   discards the staged tmp file.
 - **Edited later** with `PATCH /assets/:id/attachments/:attId` (`asset:write`) or
   `PATCH /purchase-orders/:id/attachments/:attId` (`purchaseOrder:write`), body `{ label: string | null }`
-  (`null` clears it). Only the label is editable — never the file, its name or its type. Human-only, like
+  (`null` or a blank one clears it, as on upload). Only the label is editable — never the file, its name or its type. Human-only, like
   every attachment write; `404` for a document of another parent or of an archived purchase. On a purchase,
   a real change appends `DOCUMENT_UPDATED { attachmentId, originalName, label: { from, to } }` in the same
   transaction; `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` carry the `label` too.
