@@ -7,6 +7,7 @@ import { z } from 'zod';
 import {
   AssetStatusSchema,
   AssetWarrantyFilterSchema,
+  money as moneySchema,
   type AiActionPreview,
   type AiEntityRef,
 } from '@lazyit/shared';
@@ -309,12 +310,9 @@ const assetReference = referenceString(
 const personReference = referenceString(
   'The person: their user id, email, exact full name, or "me" for yourself.',
 );
-const money = z
-  .number()
-  .int()
-  .min(0)
-  .max(2_147_483_647)
-  .describe('In minor units (cents) of the instance currency.');
+const money = moneySchema().describe(
+  'In minor units (cents) of the instance currency.',
+);
 const months = z.number().int().min(0).max(2_147_483_647);
 const dateTime = z.iso
   .datetime()

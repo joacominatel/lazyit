@@ -614,6 +614,37 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       ]);
     });
 
+    it('accepts purchaseCost and salvageValue above int4; the result reads back exactly (ADR-0100)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Server ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const approved = await approve(action);
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { ok: true, mutated: true },
+      });
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const tooBig = await h.tools.propose(
+        'asset_create',
+        {
+          name: 'X',
+          status: 'IN_STORAGE',
+          purchaseCost: Number.MAX_SAFE_INTEGER + 2,
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(tooBig).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+    });
+
     it('an ambiguous or unknown model fails the proposal; nothing is stored', async () => {
       state.models.set('c0000000000000000model3x', {
         ...state.models.get(M.latitude)!,
@@ -1114,6 +1145,41 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
   });
 
   describe('asset_update', () => {
+    it('accepts a purchaseCost above int4 and asset_get reads it back exactly, JSON-safe (ADR-0100)', async () => {
+      const action = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          {
+            field: 'purchaseCost',
+            before: null,
+            after: 3_000_000_000,
+            valueKind: 'number',
+          },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      const [, body] = assetsService.update.mock.calls[0] as [string, Row];
+      expect(body).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+
+      const result = await h.tools.invoke(
+        'asset_get',
+        { asset: A.server },
+        ctx(actor('VIEWER')),
+      );
+      expect(data(result).asset).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
     it('previews before → after with the version as precondition, and executes once', async () => {
       const action = await propose('asset_update', {
         asset: 'SN-LAPTOP-1',
