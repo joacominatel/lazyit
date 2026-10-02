@@ -305,10 +305,10 @@ function AssetPickerStep({
     <>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         <SearchInput value={q} debounceMs={300} onDebouncedChange={setQ} label={t("searchAssets")} placeholder={t("searchAssets")} />
-        {byModel && model ? (
+        {byModel && line.assetModelId ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant="secondary" className="gap-1">
-              {t("modelChip", { model: `${model.manufacturer} ${model.name}` })}
+              {t("modelChip", { model: model ? `${model.manufacturer} ${model.name}` : t("aModel") })}
               <button
                 type="button"
                 className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
