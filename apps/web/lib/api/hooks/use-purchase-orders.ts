@@ -57,6 +57,8 @@ export const purchaseOrderKeys = {
   events: (id: string) => [...purchaseOrderKeys.all, "detail", id, "events"] as const,
   pending: (params: { supplierId?: string; limit?: number; offset?: number }) =>
     [...purchaseOrderKeys.all, "pending", params] as const,
+  /** Every open line, read to the end (the *From purchase* picker). */
+  openLines: () => [...purchaseOrderKeys.all, "pending", "all"] as const,
   linkPreview: (lineId: string, assetIds: readonly string[]) =>
     [...purchaseOrderKeys.all, "link-preview", lineId, assetIds] as const,
   /** An asset's provenance lives under the purchase keys, so any purchase write refreshes it. */

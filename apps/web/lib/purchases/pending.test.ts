@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PendingPurchaseLine } from "@lazyit/shared";
-import { assetReceivableLines, groupPendingLines, isOverdue, localToday, pendingLinesForModel, pendingTotals } from "./pending";
+import { assetReceivableLines, collectPages, groupPendingLines, isOverdue, localToday, pendingLinesForModel, pendingTotals } from "./pending";
 
 const MODEL = "ck00000000000000000model1";
 
@@ -81,5 +81,40 @@ describe("assetReceivableLines (#1476)", () => {
     const asset = line("1", "p1", 2);
     const consumable = { ...line("2", "p1", 5), kind: "CONSUMABLE" };
     expect(assetReceivableLines([asset, consumable])).toEqual([asset]);
+  });
+});
+
+describe("collectPages — the From purchase picker sees every open line (#1476 review)", () => {
+  /** A fake paged API over `n` rows, `limit` per page, recording the offsets asked for. */
+  function pagedApi(n: number, limit: number) {
+    const offsets: number[] = [];
+    const rows = Array.from({ length: n }, (_, i) => i);
+    return {
+      offsets,
+      fetchPage: async (offset: number) => {
+        offsets.push(offset);
+        return { items: rows.slice(offset, offset + limit), total: n };
+      },
+    };
+  }
+
+  test("asset lines past the first page are still read", async () => {
+    const api = pagedApi(450, 200);
+    const result = await collectPages(api.fetchPage);
+    expect(result.items).toHaveLength(450);
+    expect(api.offsets).toEqual([0, 200, 400]);
+  });
+
+  test("one page is enough when it holds everything", async () => {
+    const api = pagedApi(3, 200);
+    expect((await collectPages(api.fetchPage)).items).toEqual([0, 1, 2]);
+    expect(api.offsets).toEqual([0]);
+  });
+
+  test("it stops at the page bound, and on an empty page even if total says more", async () => {
+    const bounded = pagedApi(5_000, 200);
+    expect((await collectPages(bounded.fetchPage, 2)).items).toHaveLength(400);
+    const shrinking = async (offset: number) => ({ items: offset === 0 ? [1] : [], total: 10 });
+    expect((await collectPages(shrinking)).items).toEqual([1]);
   });
 });
