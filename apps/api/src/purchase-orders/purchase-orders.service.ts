@@ -601,10 +601,11 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * Remove a line (soft delete), only while nothing was received on it — no live linked asset, no stock moved
-   * in (ADR-0099 §9) — and never the last thing that identifies the purchase. The purchase row is locked first (`SELECT … FOR UPDATE`, the
-   * ADR-0098 pattern), so two concurrent removals — or a removal racing a header update that clears the
-   * supplier and reference — serialize and the second one sees the first.
+   * Remove a line (soft delete), only while nothing was received on it — no live linked asset, no stock
+   * moved in (ADR-0099 §9) — and never the last thing that identifies the purchase. The purchase row is
+   * locked first (`SELECT … FOR UPDATE`, the ADR-0098 pattern), so two concurrent removals — or a removal
+   * racing a header update that clears the supplier and reference, or a receipt — serialize and the second
+   * one sees the first.
    */
   async removeLine(
     purchaseOrderId: string,

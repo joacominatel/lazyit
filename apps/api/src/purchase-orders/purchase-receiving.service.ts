@@ -660,7 +660,10 @@ export class PurchaseReceivingService {
             purchaseOrderId,
             lineId,
           );
-          if (receivableConsumable(locked) !== consumableId) {
+          if (
+            locked.kind !== 'CONSUMABLE' ||
+            locked.consumableId !== consumableId
+          ) {
             throw new ConflictException(
               'The line changed while receiving; reload it and try again',
             );

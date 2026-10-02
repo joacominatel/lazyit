@@ -983,19 +983,23 @@ describe('receive into stock — a CONSUMABLE line (#1476)', () => {
     expect(tx.consumableMovement.create).not.toHaveBeenCalled();
   });
 
-  it('409 when the line changed under the lock (its consumable or kind) — the movement rolls back unwritten', async () => {
-    const { service, tx, reads } = stockSetup();
-    reads.purchaseOrderLine.findFirst
-      .mockResolvedValueOnce(consumableLine())
-      .mockResolvedValueOnce(
-        consumableLine({ consumableId: 'clconsumable000000000002' }),
-      );
-    await expect(
-      service.receiveStock(PO, LINE, { quantity: 1 }, member),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.consumable.update).not.toHaveBeenCalled();
-    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
-  });
+  it.each([
+    ['its consumable', { consumableId: 'clconsumable000000000002' }],
+    ['its kind', { kind: 'OTHER' }],
+  ])(
+    '409 when the line changed under the lock (%s) — the movement rolls back unwritten',
+    async (_what, changed) => {
+      const { service, tx, reads } = stockSetup();
+      reads.purchaseOrderLine.findFirst
+        .mockResolvedValueOnce(consumableLine())
+        .mockResolvedValueOnce(consumableLine(changed));
+      await expect(
+        service.receiveStock(PO, LINE, { quantity: 1 }, member),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.consumable.update).not.toHaveBeenCalled();
+      expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+    },
+  );
 
   it('the pending-units list includes CONSUMABLE lines, counted from their IN movements', async () => {
     const { service, prisma, reads } = stockSetup();
