@@ -28,6 +28,13 @@ export type PurchaseEventView =
     }
   | { kind: "lineUpdated"; lineId: string | null; changes: FieldChange[]; currency: string | null }
   | { kind: "lineRemoved"; lineId: string | null; description: string | null }
+  // Receiving, linking, cancelling and documents (#1473). Counts read from the logged ids when no count was.
+  | { kind: "unitsReceived"; lineId: string | null; quantity: number | null; failed: number; over: boolean }
+  | { kind: "unitsCancelled"; lineId: string | null; quantity: number | null; reason: string | null }
+  | { kind: "assetsLinked"; lineId: string | null; count: number | null; moved: boolean; over: boolean }
+  | { kind: "assetsUnlinked"; lineId: string | null; count: number | null; movedToPurchaseOrderId: string | null }
+  | { kind: "documentAdded"; name: string | null }
+  | { kind: "documentRemoved"; name: string | null }
   | { kind: "deleted" }
   | { kind: "restored" }
   | { kind: "other"; eventType: string };
@@ -36,6 +43,8 @@ const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim() !== "" ? value : null;
 const num = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+/** The length of a logged id list; `null` when the payload has none. */
+const count = (value: unknown): number | null => (Array.isArray(value) ? value.length : null);
 
 /** `{ field: { from, to } | { changed: true } }` → a list, in the order logged; anything else is skipped. */
 export function parseChanges(value: unknown): FieldChange[] {
@@ -76,6 +85,35 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
       return { kind: "lineUpdated", lineId: str(p.lineId), changes: parseChanges(p.changes), currency };
     case "LINE_REMOVED":
       return { kind: "lineRemoved", lineId: str(p.lineId), description: str(p.description) };
+    case "UNITS_RECEIVED":
+      return {
+        kind: "unitsReceived",
+        lineId: str(p.lineId),
+        quantity: num(p.quantity) ?? count(p.assetIds),
+        failed: num(p.failed) ?? 0,
+        over: p.overReceived === true,
+      };
+    case "UNITS_CANCELLED":
+      return { kind: "unitsCancelled", lineId: str(p.lineId), quantity: num(p.quantity), reason: str(p.reason) };
+    case "ASSET_LINKED":
+      return {
+        kind: "assetsLinked",
+        lineId: str(p.lineId),
+        count: count(p.assetIds),
+        moved: p.moved === true,
+        over: p.overReceived === true,
+      };
+    case "ASSET_UNLINKED":
+      return {
+        kind: "assetsUnlinked",
+        lineId: str(p.lineId),
+        count: count(p.assetIds),
+        movedToPurchaseOrderId: str(p.movedToPurchaseOrderId),
+      };
+    case "DOCUMENT_ADDED":
+      return { kind: "documentAdded", name: str(p.originalName) };
+    case "DOCUMENT_REMOVED":
+      return { kind: "documentRemoved", name: str(p.originalName) };
     case "DELETED":
       return { kind: "deleted" };
     case "RESTORED":

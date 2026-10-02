@@ -256,7 +256,19 @@
     "serviceAccount": "A service account",
     "aUser": "A user",
     "system": "System",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "unitsReceived": "Received {count, plural, one {# unit} other {# units}} on “{line}”",
+    "unitsFailed": "{count, plural, one {# unit} other {# units}} couldn't be created",
+    "overReceived": "over-received",
+    "unitsCancelled": "Cancelled {count, plural, one {# unit} other {# units}} of “{line}”",
+    "reason": "“{reason}”",
+    "assetsLinked": "Linked {count, plural, one {# asset} other {# assets}} to “{line}”",
+    "assetsMoved": "Moved {count, plural, one {# asset} other {# assets}} here, to “{line}”",
+    "assetsUnlinked": "Unlinked {count, plural, one {# asset} other {# assets}} from “{line}”",
+    "assetsMovedAway": "{count, plural, one {# asset} other {# assets}} of “{line}” moved to another purchase",
+    "documentAdded": "Added the document “{name}”",
+    "documentRemoved": "Removed the document “{name}”",
+    "aDocument": "a file"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",

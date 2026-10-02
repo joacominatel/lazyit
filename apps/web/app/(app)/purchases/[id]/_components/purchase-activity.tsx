@@ -53,8 +53,9 @@ const STATUS_KEY: Record<string, string> = {
 
 /**
  * The purchase's append-only activity log (ADR-0099, purchase-order-event entity note), newest first:
- * who did what and when, with a price or quantity change shown before → after. Read tolerantly — an event
- * a later unit adds (receiving, linking, documents) shows generically until this screen learns it.
+ * who did what and when, with a price or quantity change shown before → after; units received, linked,
+ * moved and cancelled; documents added and removed (#1475). Read tolerantly — an event type a later build
+ * adds shows generically until this screen learns it.
  */
 export function PurchaseActivity({
   purchaseId,
@@ -138,6 +139,37 @@ export function PurchaseActivity({
         });
       case "lineRemoved":
         return t("lineRemoved", { line: lineName(view.lineId, view.description) });
+      case "unitsReceived":
+        return [
+          t("unitsReceived", { count: view.quantity ?? 0, line: lineName(view.lineId, null) }),
+          view.failed > 0 ? t("unitsFailed", { count: view.failed }) : null,
+          view.over ? t("overReceived") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      case "unitsCancelled":
+        return [
+          t("unitsCancelled", { count: view.quantity ?? 0, line: lineName(view.lineId, null) }),
+          view.reason ? t("reason", { reason: view.reason }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      case "assetsLinked":
+        return [
+          t(view.moved ? "assetsMoved" : "assetsLinked", { count: view.count ?? 0, line: lineName(view.lineId, null) }),
+          view.over ? t("overReceived") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      case "assetsUnlinked":
+        return t(view.movedToPurchaseOrderId ? "assetsMovedAway" : "assetsUnlinked", {
+          count: view.count ?? 0,
+          line: lineName(view.lineId, null),
+        });
+      case "documentAdded":
+        return t("documentAdded", { name: view.name ?? t("aDocument") });
+      case "documentRemoved":
+        return t("documentRemoved", { name: view.name ?? t("aDocument") });
       case "deleted":
         return t("deleted");
       case "restored":

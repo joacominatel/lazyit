@@ -256,7 +256,19 @@
     "serviceAccount": "Una cuenta de servicio",
     "aUser": "Un usuario",
     "system": "Sistema",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "unitsReceived": "{count, plural, one {Recibió # unidad} other {Recibió # unidades}} de «{line}»",
+    "unitsFailed": "{count, plural, one {# unidad no se pudo crear} other {# unidades no se pudieron crear}}",
+    "overReceived": "recibida de más",
+    "unitsCancelled": "{count, plural, one {Canceló # unidad} other {Canceló # unidades}} de «{line}»",
+    "reason": "«{reason}»",
+    "assetsLinked": "{count, plural, one {Vinculó # activo} other {Vinculó # activos}} a «{line}»",
+    "assetsMoved": "{count, plural, one {Movió # activo} other {Movió # activos}} acá, a «{line}»",
+    "assetsUnlinked": "{count, plural, one {Desvinculó # activo} other {Desvinculó # activos}} de «{line}»",
+    "assetsMovedAway": "{count, plural, one {# activo de «{line}» se movió} other {# activos de «{line}» se movieron}} a otra compra",
+    "documentAdded": "Agregó el documento «{name}»",
+    "documentRemoved": "Quitó el documento «{name}»",
+    "aDocument": "un archivo"
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -337,11 +349,11 @@
   },
   "cancelRemaining": {
     "title": "Cancelar unidades restantes",
-    "description": "Unidades de “{line}” que no van a llegar. {pending, plural, one {Queda # unidad pendiente} other {Quedan # unidades pendientes}}.",
+    "description": "Unidades de «{line}» que no van a llegar. {pending, plural, one {Queda # unidad pendiente} other {Quedan # unidades pendientes}}.",
     "quantity": "Unidades a cancelar",
     "quantityInvalid": "Ingresá un número de 1 a {pending}.",
     "reason": "Motivo",
-    "reasonPlaceholder": "Opcional: por ejemplo “la cuarta nunca llegó”",
+    "reasonPlaceholder": "Opcional: por ejemplo «la cuarta nunca llegó»",
     "reasonHelp": "Queda en el registro de actividad de la compra.",
     "submit": "Cancelar unidades",
     "cancelledToast": "{count, plural, one {# unidad cancelada} other {# unidades canceladas}}",
@@ -423,7 +435,7 @@
     "reasons": {
       "notFound": "No se encontró, o está archivado",
       "alreadyLinked": "Ya está en esta línea",
-      "linkedElsewhere": "Está en otra compra: marcá “Mover acá” para moverlo",
+      "linkedElsewhere": "Está en otra compra: marcá «Mover acá» para moverlo",
       "notLinked": "No está vinculado a esta línea"
     }
   },

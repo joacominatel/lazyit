@@ -53,9 +53,66 @@ describe("describePurchaseEvent — the log reads tolerantly", () => {
   });
 
   test("an event type a newer build appends reads generically", () => {
-    expect(describePurchaseEvent({ eventType: "UNITS_RECEIVED", payload: { quantity: 3 } })).toEqual({
+    // UNITS_RECEIVED was this example until #1475 taught the log the flows' events.
+    expect(describePurchaseEvent({ eventType: "LICENSES_RENEWED", payload: { quantity: 3 } })).toEqual({
       kind: "other",
-      eventType: "UNITS_RECEIVED",
+      eventType: "LICENSES_RENEWED",
+    });
+  });
+});
+
+describe("the flows' events (#1473) read as sentences, tolerant of a thin payload", () => {
+  test("a receive carries its count, failures and the over-received flag", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "UNITS_RECEIVED",
+        payload: { lineId: "l1", quantity: 3, assetIds: ["a", "b", "c"], failed: 1, overReceived: true },
+      }),
+    ).toEqual({ kind: "unitsReceived", lineId: "l1", quantity: 3, failed: 1, over: true });
+  });
+
+  test("a link counts its assets and says when they were moved here", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "ASSET_LINKED",
+        payload: { lineId: "l1", assetIds: ["a", "b"], applied: {}, moved: true, overReceived: false },
+      }),
+    ).toEqual({ kind: "assetsLinked", lineId: "l1", count: 2, moved: true, over: false });
+  });
+
+  test("an unlink by a move names the purchase the assets went to", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "ASSET_UNLINKED",
+        payload: { lineId: "l1", assetIds: ["a"], movedToPurchaseOrderId: "p2", movedToLineId: "l9" },
+      }),
+    ).toEqual({ kind: "assetsUnlinked", lineId: "l1", count: 1, movedToPurchaseOrderId: "p2" });
+  });
+
+  test("cancelled units keep the optional reason; documents keep their file name", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "UNITS_CANCELLED",
+        payload: { lineId: "l1", quantity: 1, cancelledQuantity: { from: 0, to: 1 }, reason: "never came" },
+      }),
+    ).toEqual({ kind: "unitsCancelled", lineId: "l1", quantity: 1, reason: "never came" });
+    expect(describePurchaseEvent({ eventType: "DOCUMENT_ADDED", payload: { originalName: "Factura A.pdf" } })).toEqual({
+      kind: "documentAdded",
+      name: "Factura A.pdf",
+    });
+  });
+
+  test("a payload missing its fields degrades to nulls, never undefined", () => {
+    expect(describePurchaseEvent({ eventType: "UNITS_RECEIVED", payload: null })).toEqual({
+      kind: "unitsReceived",
+      lineId: null,
+      quantity: null,
+      failed: 0,
+      over: false,
+    });
+    expect(describePurchaseEvent({ eventType: "DOCUMENT_REMOVED", payload: {} })).toEqual({
+      kind: "documentRemoved",
+      name: null,
     });
   });
 });
