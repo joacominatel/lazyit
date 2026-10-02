@@ -75,7 +75,7 @@ function invoice(
       supplierTaxId: tx('30-71234567-9'),
       reference: tx('OC-2026-0042'),
       currency: tx('ARS'),
-      orderDate: none,
+      orderDate: { value: '2026-02-28', text: '28/02/2026', page: 1 },
       invoiceNumbers: tx('A 0003-00012345'),
       invoiceDate: { value: '2026-03-10', text: '10/03/2026', page: 1 },
     },
@@ -106,6 +106,7 @@ function invoice(
       tax: lit('1.186.500,00'),
       gross: lit('6.836.500,00'),
     },
+    moreLines: null,
     ...over,
   };
 }
@@ -424,6 +425,131 @@ describe('PurchaseExtractionService (ADR-0099 §11, #1477)', () => {
     });
   });
 
+  describe('per provider', () => {
+    it('Gemini reads no GIF: a 422 before anything is sent; the status lists what it reads', async () => {
+      const gemini = {
+        ...CONFIG,
+        provider: 'google' as const,
+        model: 'gemini-3.8-flash',
+      };
+      const { service, prisma, port } = setup({ config: gemini });
+      prisma.attachment.findFirst.mockResolvedValue({
+        mimeType: 'image/gif',
+        sha256: SHA,
+      });
+      expect(await refusalOf(service.extract(PO, ATT, human))).toMatchObject({
+        status: 422,
+        body: { code: 'UNSUPPORTED_MEDIA_TYPE' },
+      });
+      expect(port.extractStructured).not.toHaveBeenCalled();
+      const status = await service.status(human);
+      expect(status.mediaTypes).not.toContain('image/gif');
+      expect(status.mediaTypes).toContain('application/pdf');
+    });
+
+    it('Anthropic images are capped at about 7.5 MB raw (10 MB base64) before anything is sent', async () => {
+      await writeFile(
+        join(dir, SHA.slice(0, 2), SHA),
+        Buffer.alloc(8 * 1024 * 1024),
+      );
+      const anthropic = setup();
+      anthropic.prisma.attachment.findFirst.mockResolvedValue({
+        mimeType: 'image/png',
+        sha256: SHA,
+      });
+      expect(
+        await refusalOf(anthropic.service.extract(PO, ATT, human)),
+      ).toMatchObject({
+        status: 422,
+        body: { code: 'DOCUMENT_TOO_LARGE', maxBytes: 7_864_320 },
+      });
+      expect(anthropic.port.extractStructured).not.toHaveBeenCalled();
+      expect(
+        (await anthropic.service.status(human)).maxBytesByMediaType,
+      ).toMatchObject({
+        'image/png': 7_864_320,
+        'application/pdf': PURCHASE_EXTRACTION_MAX_BYTES,
+      });
+
+      // The same image goes to OpenAI, whose limit is not lower than the extraction cap.
+      const openai = setup({
+        config: { ...CONFIG, provider: 'openai', model: 'gpt-6-sol' },
+      });
+      openai.prisma.attachment.findFirst.mockResolvedValue({
+        mimeType: 'image/png',
+        sha256: SHA,
+      });
+      await openai.service.extract(PO, ATT, human);
+      expect(openai.port.extractStructured).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('one at a time, a few a minute — per person', () => {
+    it('a second extraction while one is running is a 429; the next one after it goes through', async () => {
+      const { service, port } = setup();
+      let release: () => void = () => undefined;
+      port.extractStructured.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                output: invoice(),
+                usage: { inputTokens: 1, outputTokens: 1 },
+                finishReason: 'stop',
+              });
+          }),
+      );
+      const first = service.extract(PO, ATT, human);
+      // Let the first one reach the model call.
+      for (
+        let i = 0;
+        i < 100 && port.extractStructured.mock.calls.length === 0;
+        i += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(port.extractStructured).toHaveBeenCalledTimes(1);
+      expect(await refusalOf(service.extract(PO, ATT, human))).toMatchObject({
+        status: 429,
+        body: { code: 'EXTRACTION_IN_PROGRESS' },
+      });
+      release();
+      await first;
+      await service.extract(PO, ATT, human);
+      expect(port.extractStructured).toHaveBeenCalledTimes(2);
+    });
+
+    it('past five a minute it is a 429 with a retry hint, nothing sent', async () => {
+      const { service, port } = setup();
+      for (let i = 0; i < 5; i += 1) await service.extract(PO, ATT, human);
+      expect(await refusalOf(service.extract(PO, ATT, human))).toMatchObject({
+        status: 429,
+        body: {
+          code: 'RATE_LIMITED',
+          retryAfterSec: expect.any(Number) as unknown,
+        },
+      });
+      expect(port.extractStructured).toHaveBeenCalledTimes(5);
+    });
+
+    it('a refused document costs no attempt', async () => {
+      const { service, prisma, port } = setup();
+      prisma.attachment.findFirst.mockResolvedValue({
+        mimeType: 'text/csv',
+        sha256: SHA,
+      });
+      for (let i = 0; i < 6; i += 1) {
+        await refusalOf(service.extract(PO, ATT, human));
+      }
+      prisma.attachment.findFirst.mockResolvedValue({
+        mimeType: 'application/pdf',
+        sha256: SHA,
+      });
+      await service.extract(PO, ATT, human);
+      expect(port.extractStructured).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('the daily token budget is enforced before anything is sent (429)', async () => {
     const { service, port, limits } = setup({
       settings: { dailyTokenLimitPerPrincipal: 1000 },
@@ -510,7 +636,9 @@ describe('PurchaseExtractionService (ADR-0099 §11, #1477)', () => {
       });
       expect(laptop.warrantyMonths.value).toBe(12);
       expect(draft.header.invoiceDate.value).toBe('2026-03-10T00:00:00.000Z');
-      expect(draft.header.orderDate).toEqual({ value: null, evidence: null });
+      // `28/02/2026` settles the document's day/month order, so `10/03/2026` reads as 10 March.
+      expect(draft.header.orderDate.value).toBe('2026-02-28T00:00:00.000Z');
+      expect(draft.header.supplierTaxId.value).toBe('30-71234567-9');
       expect(freight.unitPrice).toEqual({ value: null, evidence: null });
       expect(freight.manufacturerText).toEqual({
         value: null,
@@ -541,6 +669,7 @@ describe('PurchaseExtractionService (ADR-0099 §11, #1477)', () => {
 
     it('flags the lines that do not add up to the document total, and never corrects them', async () => {
       const off = invoice();
+      off.lines = [off.lines[0]];
       off.totals = {
         net: lit('5.675.000,00'),
         tax: lit(null, null),
@@ -561,6 +690,70 @@ describe('PurchaseExtractionService (ADR-0099 §11, #1477)', () => {
         },
       });
       expect(draft.lines[0].unitPrice.value).toBe(141_250_000);
+    });
+
+    it('compares no total while a line is incomplete — the gap is expected', async () => {
+      const off = invoice();
+      off.totals = {
+        net: lit('5.675.000,00'),
+        tax: lit(null, null),
+        gross: lit(null, null),
+      };
+      const draft = await setup({ output: off }).service.extract(
+        PO,
+        ATT,
+        human,
+      );
+      expect(draft.totals.incompleteLines).toBe(1);
+      expect(draft.warnings.map((w) => w.code)).not.toContain('TOTAL_MISMATCH');
+    });
+
+    it('a date that reads two ways, with nothing to settle the order, is blank and flagged', async () => {
+      const vague = invoice();
+      vague.header.orderDate = none;
+      const draft = await setup({ output: vague }).service.extract(
+        PO,
+        ATT,
+        human,
+      );
+      expect(draft.header.invoiceDate).toEqual({
+        value: null,
+        evidence: { text: '10/03/2026', page: 1 },
+      });
+      expect(draft.warnings).toContainEqual({
+        code: 'DATE_AMBIGUOUS',
+        path: 'header.invoiceDate',
+      });
+    });
+
+    it('asks for at most the lines that fit the output cap, and flags a cut document', async () => {
+      const long = invoice({ moreLines: true });
+      const { service, port } = setup({ output: long });
+      const draft = await service.extract(PO, ATT, human);
+      expect(port.extractStructured.mock.calls[0][0].prompt).toMatch(
+        /at most 80 item lines/,
+      );
+      expect(draft.warnings).toContainEqual({
+        code: 'LINES_TRUNCATED',
+        path: 'lines',
+        detail: { lines: 2, kept: 2 },
+      });
+
+      // A lower output cap asks for fewer lines, and keeps no more than that.
+      const many = invoice();
+      many.lines = Array.from({ length: 20 }, () => invoice().lines[0]);
+      const low = setup({ output: many, settings: { maxOutputTokens: 4_000 } });
+      const cut = await low.service.extract(PO, ATT, human);
+      expect(low.port.extractStructured.mock.calls[0][0]).toMatchObject({
+        maxOutputTokens: 4_000,
+        prompt: expect.stringMatching(/at most 16 item lines/) as unknown,
+      });
+      expect(cut.lines).toHaveLength(16);
+      expect(cut.warnings).toContainEqual({
+        code: 'LINES_TRUNCATED',
+        path: 'lines',
+        detail: { lines: 20, kept: 16 },
+      });
     });
 
     it('an amount that reads two ways is left blank and flagged when the document settles nothing', async () => {
@@ -704,6 +897,48 @@ describe('PurchaseExtractionService (ADR-0099 §11, #1477)', () => {
         body: { code: 'PROVIDER_RATE_LIMIT', retryAfterSec: 30 },
       });
       expect(prisma.aiUsage.create).not.toHaveBeenCalled();
+    });
+
+    it('records no run when the document never left: the configuration moved before the call', async () => {
+      for (const err of [
+        new AiProviderError('CONVERSATION_READ_ONLY'),
+        new AiProviderError('AI_DISABLED'),
+        new AiProviderError('PROVIDER_AUTH'),
+      ]) {
+        const { service, port, prisma } = setup();
+        port.extractStructured.mockRejectedValue(err);
+        expect(await refusalOf(service.extract(PO, ATT, human))).toMatchObject({
+          status: 409,
+          body: { code: 'AI_DISABLED' },
+        });
+        expect(prisma.purchaseOrderEvent.create).not.toHaveBeenCalled();
+        expect(prisma.aiUsage.create).not.toHaveBeenCalled();
+      }
+    });
+
+    it('an answered refusal (a 401) did reach the provider: the run is recorded', async () => {
+      const { service, port, prisma } = setup();
+      port.extractStructured.mockRejectedValue(
+        new AiProviderError('PROVIDER_AUTH', { status: 401 }),
+      );
+      expect(await refusalOf(service.extract(PO, ATT, human))).toMatchObject({
+        status: 502,
+        body: { code: 'PROVIDER_AUTH' },
+      });
+      expect(eventData(prisma).payload).toMatchObject({
+        outcome: 'FAILED',
+        errorCode: 'PROVIDER_AUTH',
+      });
+    });
+
+    it('speaks of the document, not a conversation, when it is too long for the model', async () => {
+      const { service, port } = setup();
+      port.extractStructured.mockRejectedValue(
+        new AiProviderError('CONTEXT_LIMIT', { status: 400 }),
+      );
+      const refused = await refusalOf(service.extract(PO, ATT, human));
+      expect(refused.body).toMatchObject({ code: 'CONTEXT_LIMIT' });
+      expect(String(refused.body.message)).toMatch(/document is too long/);
     });
 
     it('a call past the timeout is a 504', async () => {

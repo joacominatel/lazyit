@@ -22,8 +22,9 @@ import type { ProviderConfig } from './provider.types';
 
 /**
  * One structured-output call over one file (ADR-0099 §11, #1477): `generateText` with `Output.object`, the
- * file as an inline `file` part, and NO `tools` key at all — the model can only answer with data in the
- * schema's shape. Everything else is the chat step's posture:
+ * file as an inline `file` part, and NO `tools` key — no lazyit tool is declared, so the model can only
+ * answer with data in the schema's shape (a provider's own synthetic JSON tool, if it uses one for structured
+ * output, has no executor). Everything else is the chat step's posture:
  *   - the provider definition builds the model over the egress-guarded fetch (INV-AI-7), with the key checked
  *     before any I/O so the SDK's environment fallback never applies;
  *   - `experimental_download` refuses every URL the SDK would fetch outside the guard;
@@ -53,9 +54,6 @@ export async function runStructuredExtraction<T>(
               type: 'file',
               data: request.file.data,
               mediaType: request.file.mediaType,
-              ...(request.file.filename
-                ? { filename: request.file.filename }
-                : {}),
             },
           ],
         },

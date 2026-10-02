@@ -15,12 +15,20 @@ import { PurchaseOrderLineKindSchema } from "./purchase-order";
  * and its page, so the reviewer sees what was read (docs/purchases/ux-proposal.md §3.b).
  */
 
-/** The largest document sent for extraction. Smaller than the 25 MB attachment cap: the provider limits bind. */
+/**
+ * The largest document sent for extraction, whatever the provider. Smaller than the 25 MB attachment cap: the
+ * provider limits bind. A provider may accept less for some types (`aiDocumentExtractionMaxBytes`, e.g.
+ * Anthropic images); the status read reports the effective cap per type.
+ */
 export const PURCHASE_EXTRACTION_MAX_BYTES = 10 * 1024 * 1024;
 /** The most pages of a PDF sent for extraction (counted best-effort from the file's page objects). */
 export const PURCHASE_EXTRACTION_MAX_PAGES = 20;
-/** The most lines a draft carries; past it the draft is cut and says so (`LINES_TRUNCATED`). */
-export const PURCHASE_EXTRACTION_MAX_LINES = 200;
+/**
+ * The most lines a draft carries. The model is asked for at most this many (fewer under a lower output cap:
+ * about 180 output tokens a line, 1 000 for the rest, within the 16 000-token extraction cap) and to say when
+ * the document has more; the draft is then cut and says so (`LINES_TRUNCATED`).
+ */
+export const PURCHASE_EXTRACTION_MAX_LINES = 80;
 
 /**
  * Why extraction is not available to this caller right now (`GET /purchase-orders/extraction/status`), and
@@ -51,7 +59,13 @@ export const PurchaseExtractionStatusSchema = z.object({
   reason: z.string().nullable(),
   /** The document types the configured provider reads; empty when extraction is unavailable. */
   mediaTypes: z.array(z.string()),
+  /** The overall cap, whatever the type. */
   maxBytes: int4({ min: 0 }),
+  /**
+   * The effective cap per readable type, where the provider takes less than `maxBytes` for it (Anthropic
+   * images: 10 MB once base64-encoded, so about 7.5 MB raw). Optional for an older API.
+   */
+  maxBytesByMediaType: z.record(z.string(), int4({ min: 0 })).optional(),
   maxPages: int4({ min: 0 }),
   disclosure: z.string(),
 });
@@ -59,9 +73,12 @@ export const PurchaseExtractionStatusSchema = z.object({
 /**
  * The `code` of every extract refusal, next to its human `message` (the web matches the code):
  *   409 — an unavailable reason above;
- *   422 — `UNSUPPORTED_MEDIA_TYPE` (the provider does not read this document's type), `DOCUMENT_TOO_LARGE`,
- *         `TOO_MANY_PAGES`, `DOCUMENT_UNAVAILABLE` (the stored file is missing);
- *   429 — `BUDGET_EXCEEDED` (the caller's daily AI token budget is spent);
+ *   422 — `UNSUPPORTED_MEDIA_TYPE` (the provider does not read this document's type), `DOCUMENT_TOO_LARGE`
+ *         (over the cap for this provider and type), `TOO_MANY_PAGES`, `DOCUMENT_UNAVAILABLE` (the stored file
+ *         is missing);
+ *   429 — `BUDGET_EXCEEDED` (the caller's daily AI token budget is spent), `EXTRACTION_IN_PROGRESS` (the
+ *         caller already has one extraction running), `RATE_LIMITED` (too many extractions this minute, with
+ *         `retryAfterSec`);
  *   502 — `EXTRACTION_UNREADABLE` (the model answered nothing usable) or a provider code (`PROVIDER_AUTH`,
  *         `PROVIDER_RATE_LIMIT`, `PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `PROVIDER_REFUSED`,
  *         `EGRESS_DENIED`, `CONTEXT_LIMIT`);
@@ -77,6 +94,8 @@ export const PURCHASE_EXTRACTION_ERROR_CODES = [
   "BUDGET_EXCEEDED",
   "EXTRACTION_UNREADABLE",
   "EXTRACTION_TIMEOUT",
+  "EXTRACTION_IN_PROGRESS",
+  "RATE_LIMITED",
 ] as const;
 
 /** Where a value was read: the verbatim text and its page (1-based; null when the model could not say). */
@@ -172,12 +191,15 @@ export const PurchaseExtractionMatchesSchema = z.object({
  *   - `AMOUNT_UNREADABLE`   — the text is not an amount lazyit can read (negative, letters, malformed); blank;
  *   - `AMOUNT_TOO_PRECISE`  — more than two decimals (amounts are stored in hundredths); blank;
  *   - `QUANTITY_NOT_WHOLE`  — a quantity that is not a whole, positive number of units; blank;
- *   - `DATE_AMBIGUOUS`      — a date that reads as day/month and month/day; kept as read by the model, check it;
+ *   - `DATE_AMBIGUOUS`      — a date that reads as day/month and month/day, and no other date of the document
+ *                             settles the order; left blank, whatever the model read;
  *   - `DATE_UNREADABLE`     — the model's date does not match the printed text; blank;
  *   - `CURRENCY_AMBIGUOUS`  — the document prints only a symbol several currencies share (`$`);
  *   - `LINE_TOTAL_MISMATCH` — quantity × unit price differs from the line total the document prints;
- *   - `TOTAL_MISMATCH`      — the lines add up to something other than the document's net and gross;
- *   - `LINES_TRUNCATED`     — the document had more lines than a draft carries.
+ *   - `TOTAL_MISMATCH`      — every line has a quantity and a price, and they add up to something other than
+ *                             the document's net and gross (with a line incomplete, no comparison is made);
+ *   - `LINES_TRUNCATED`     — the document had more lines than a draft carries (`PURCHASE_EXTRACTION_MAX_LINES`,
+ *                             fewer under a lower output cap); the draft holds the first ones.
  * The list only grows; a web shows an unknown code generically.
  */
 export const PURCHASE_EXTRACTION_WARNING_CODES = [

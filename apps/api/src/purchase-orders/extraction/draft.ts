@@ -59,6 +59,24 @@ export interface DraftContext {
   attachmentId: string;
 }
 
+/** Output tokens one transcribed line takes, evidence and pages included (a measured upper estimate). */
+export const EXTRACTION_TOKENS_PER_LINE = 180;
+/** Output tokens the header, the totals and the JSON framing take. */
+export const EXTRACTION_FIXED_TOKENS = 1_000;
+
+/**
+ * The most lines the model is asked to transcribe under an output cap — so a long document is cut by the
+ * model at a line boundary (and says so) instead of running out of tokens mid-JSON, which reads as nothing.
+ * 16 000 tokens → 80 lines (`PURCHASE_EXTRACTION_MAX_LINES`, the ceiling); a lower admin cap asks for fewer,
+ * never under 10.
+ */
+export function extractionLineLimit(maxOutputTokens: number): number {
+  const fit = Math.floor(
+    (maxOutputTokens - EXTRACTION_FIXED_TOKENS) / EXTRACTION_TOKENS_PER_LINE,
+  );
+  return Math.max(10, Math.min(PURCHASE_EXTRACTION_MAX_LINES, fit));
+}
+
 const AMOUNT_WARNING: Record<AmountFailure, PurchaseExtractionWarningCode> = {
   AMBIGUOUS: 'AMOUNT_AMBIGUOUS',
   TOO_PRECISE: 'AMOUNT_TOO_PRECISE',
@@ -127,10 +145,12 @@ class DraftBuilder {
     if (!evidence) return blank();
     const reading = readDate(evidence.text, field.value, this.dateOrder);
     if (!reading.ok) {
-      this.warn('DATE_UNREADABLE', path);
+      this.warn(
+        reading.reason === 'AMBIGUOUS' ? 'DATE_AMBIGUOUS' : 'DATE_UNREADABLE',
+        path,
+      );
       return { value: null, evidence };
     }
-    if (reading.ambiguous) this.warn('DATE_AMBIGUOUS', path);
     return { value: reading.iso, evidence };
   }
 
@@ -192,6 +212,7 @@ function product(line: PurchaseExtractionLine): bigint | null {
 export function buildDraft(
   output: ExtractionModelOutput,
   context: DraftContext,
+  maxLines: number = PURCHASE_EXTRACTION_MAX_LINES,
 ): Omit<PurchaseExtractionDraft, 'matches'> {
   const { header, totals } = output;
   const decimal = inferDecimalSeparator([
@@ -220,8 +241,9 @@ export function buildDraft(
     invoiceDate: b.date(header.invoiceDate, 'header.invoiceDate'),
   };
 
-  const kept = output.lines.slice(0, PURCHASE_EXTRACTION_MAX_LINES);
-  if (output.lines.length > kept.length) {
+  const kept = output.lines.slice(0, maxLines);
+  // The model was asked for at most `maxLines` and to say when the document has more.
+  if (output.lines.length > kept.length || output.moreLines === true) {
     b.warn('LINES_TRUNCATED', 'lines', {
       lines: output.lines.length,
       kept: kept.length,
@@ -269,8 +291,11 @@ export function buildDraft(
   const printed = [net.value, gross.value].filter(
     (value): value is number => value !== null,
   );
+  // Only a complete sum is compared: with a line missing its quantity or price the gap is expected, and the
+  // reviewer already sees that line blank.
   if (
     linesTotal !== null &&
+    counted === lines.length &&
     printed.length > 0 &&
     !printed.includes(linesTotal)
   ) {

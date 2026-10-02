@@ -14,7 +14,9 @@ import {
   AI_PROVIDER_DESCRIPTORS,
   PURCHASE_EXTRACTION_MAX_BYTES,
   PURCHASE_EXTRACTION_MAX_PAGES,
+  aiDocumentExtractionMaxBytes,
   aiDocumentExtractionMediaTypes,
+  type AiProviderKind,
   type AiUsage,
   type Permission,
   type PurchaseExtractionDraft,
@@ -25,11 +27,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { ActorService } from '../../common/actor.service';
 import { PermissionResolverService } from '../../auth/permission-resolver.service';
-import {
-  isHumanPrincipal,
-  isServicePrincipal,
-  type Principal,
-} from '../../auth/principal';
+import { isHumanPrincipal, type Principal } from '../../auth/principal';
 import { blobPathFor } from '../../attachments/attachment-storage';
 import {
   AI_SETTINGS_READER,
@@ -44,15 +42,15 @@ import {
   AiProviderError,
   AiStructuredOutputError,
 } from '../../ai/providers/ai-provider.error';
-import { AiRunLimits, clampInt4 } from '../../ai/runtime/limits';
+import { AiRunLimits, TokenBucket, clampInt4 } from '../../ai/runtime/limits';
 import { describeError } from '../../ai/runtime/runtime.constants';
 import { recordPurchaseOrderEvent } from '../purchase-order-events';
-import { buildDraft, type DraftContext } from './draft';
+import { buildDraft, extractionLineLimit, type DraftContext } from './draft';
 import {
   EXTRACTION_INSTRUCTIONS,
-  EXTRACTION_PROMPT,
   EXTRACTION_SCHEMA_NAME,
   ExtractionModelOutputSchema,
+  extractionPrompt,
   type ExtractionModelOutput,
 } from './extraction-model';
 import {
@@ -73,6 +71,20 @@ const EXTRACT_PERMISSIONS: readonly Permission[] = [
 ];
 /** Upper bound on the records read for the suggestions (small-team instances hold far fewer). */
 const MATCH_READ_LIMIT = 10_000;
+/**
+ * Extractions a person may START per minute (a token bucket), on top of one in flight at a time. A person
+ * reviews each draft, so a handful a minute is generous; a loop or a stuck double-click is not.
+ */
+export const PURCHASE_EXTRACTIONS_PER_MINUTE = 5;
+
+/** The effective size cap of one document: the extraction cap, or the provider's lower one for its type. */
+function maxBytesFor(provider: AiProviderKind, mediaType: string): number {
+  return Math.min(
+    PURCHASE_EXTRACTION_MAX_BYTES,
+    aiDocumentExtractionMaxBytes(provider, mediaType) ??
+      PURCHASE_EXTRACTION_MAX_BYTES,
+  );
+}
 
 type Capability =
   | {
@@ -108,6 +120,18 @@ const UNAVAILABLE_MESSAGES: Record<
 };
 
 /**
+ * What an extraction says for a provider failure where the chat's wording would mislead (it speaks of a
+ * conversation); the others keep the provider error's own message.
+ */
+const PROVIDER_FAILURE_MESSAGES: Partial<Record<string, string>> = {
+  CONTEXT_LIMIT:
+    'The document is too long for the configured model. Nothing was filled.',
+  PROVIDER_BAD_REQUEST:
+    'The AI provider could not read this document (the configured model may not accept files). Nothing was filled.',
+  CANCELLED: 'The extraction was cancelled. Nothing was filled.',
+};
+
+/**
  * The PDF pages, counted best-effort from the page objects the file declares (`/Type /Page`). A PDF that
  * keeps its objects in compressed streams counts 0 here and is let through: the provider's own page limit
  * still applies, and the byte cap bounds it.
@@ -132,6 +156,16 @@ export function countPdfPages(bytes: Buffer): number {
 @Injectable()
 export class PurchaseExtractionService {
   private readonly logger = new Logger(PurchaseExtractionService.name);
+  /**
+   * The extraction's own limiters, not the chat's (ADR-0099, decisions while building Phase 2): in memory,
+   * per API process (one per install — the chat's posture), keyed by user. The token BUDGET is the one
+   * shared with chat: it is persisted, read from `ai_usage`.
+   */
+  private readonly inFlight = new Set<string>();
+  private readonly rate = new TokenBucket(
+    PURCHASE_EXTRACTIONS_PER_MINUTE,
+    60_000,
+  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -143,7 +177,7 @@ export class PurchaseExtractionService {
     private readonly model: StructuredExtractionPort,
   ) {}
 
-  /** `GET /purchase-orders/extraction/status` — whether the caller can extract now, and which types. */
+  /** `GET /purchase-orders/extraction/status` — whether the caller can extract now, which types, how big. */
   async status(principal?: Principal): Promise<PurchaseExtractionStatus> {
     const base = {
       maxBytes: PURCHASE_EXTRACTION_MAX_BYTES,
@@ -156,14 +190,27 @@ export class PurchaseExtractionService {
       : (await this.permitted(principal))
         ? null
         : 'NOT_PERMITTED';
-    return reason === null && capability.ok
-      ? {
-          available: true,
-          reason: null,
-          mediaTypes: [...capability.mediaTypes],
-          ...base,
-        }
-      : { available: false, reason, mediaTypes: [], ...base };
+    if (reason !== null || !capability.ok) {
+      return {
+        available: false,
+        reason,
+        mediaTypes: [],
+        maxBytesByMediaType: {},
+        ...base,
+      };
+    }
+    return {
+      available: true,
+      reason: null,
+      mediaTypes: [...capability.mediaTypes],
+      maxBytesByMediaType: Object.fromEntries(
+        capability.mediaTypes.map((type) => [
+          type,
+          maxBytesFor(capability.config.provider, type),
+        ]),
+      ),
+      ...base,
+    };
   }
 
   /**
@@ -188,17 +235,57 @@ export class PurchaseExtractionService {
         UNAVAILABLE_MESSAGES[capability.reason],
       );
     }
+    const userId = principal.user.id;
+    // One extraction in flight per person (checked and taken synchronously, so two requests cannot both pass).
+    if (this.inFlight.has(userId)) {
+      throw refusal(
+        HttpStatus.TOO_MANY_REQUESTS,
+        'EXTRACTION_IN_PROGRESS',
+        'An extraction of yours is already running; wait for it to finish',
+      );
+    }
+    this.inFlight.add(userId);
+    try {
+      return await this.run(
+        purchaseOrderId,
+        attachmentId,
+        principal,
+        capability,
+      );
+    } finally {
+      this.inFlight.delete(userId);
+    }
+  }
+
+  private async run(
+    purchaseOrderId: string,
+    attachmentId: string,
+    principal: Principal & { kind: 'human' },
+    capability: Extract<Capability, { ok: true }>,
+  ): Promise<PurchaseExtractionDraft> {
     const document = await this.loadDocument(
       purchaseOrderId,
       attachmentId,
+      capability.config.provider,
       capability.mediaTypes,
     );
-    const owner = { userId: principal.user.id };
-    if (await this.limits.budgetExceeded(owner, capability.dailyTokenLimit)) {
+    const userId = principal.user.id;
+    if (
+      await this.limits.budgetExceeded({ userId }, capability.dailyTokenLimit)
+    ) {
       throw refusal(
         HttpStatus.TOO_MANY_REQUESTS,
         'BUDGET_EXCEEDED',
         'Your daily AI token budget is spent',
+      );
+    }
+    // Taken last, so a refused document or a spent budget costs no attempt.
+    if (!this.rate.take(userId)) {
+      throw refusal(
+        HttpStatus.TOO_MANY_REQUESTS,
+        'RATE_LIMITED',
+        `At most ${PURCHASE_EXTRACTIONS_PER_MINUTE} extractions a minute`,
+        { retryAfterSec: this.rate.retryAfterSec(userId) },
       );
     }
 
@@ -208,6 +295,7 @@ export class PurchaseExtractionService {
       attachmentId,
     };
     const { provider, model } = capability.config;
+    const maxLines = extractionLineLimit(capability.maxOutputTokens);
     const started = Date.now();
     const signal = AbortSignal.timeout(PURCHASE_EXTRACTION_TIMEOUT_MS);
     let output: ExtractionModelOutput;
@@ -216,7 +304,7 @@ export class PurchaseExtractionService {
       const result = await this.model.extractStructured({
         model: { provider, modelId: model },
         instructions: EXTRACTION_INSTRUCTIONS,
-        prompt: EXTRACTION_PROMPT,
+        prompt: extractionPrompt(maxLines),
         file: { data: document.bytes, mediaType: document.mediaType },
         schema: ExtractionModelOutputSchema,
         schemaName: EXTRACTION_SCHEMA_NAME,
@@ -227,19 +315,23 @@ export class PurchaseExtractionService {
       usage = result.usage;
     } catch (err) {
       const failure = this.failureOf(err, signal);
-      await this.record(principal, context, capability.config, {
-        outcome: 'FAILED',
-        errorCode: failure.code,
-        usage: err instanceof AiStructuredOutputError ? err.usage : null,
-      });
+      // Only a call that may have reached the provider is a document that left the instance.
+      if (failure.sent) {
+        await this.record(principal, context, capability.config, {
+          outcome: 'FAILED',
+          errorCode: failure.code,
+          usage: err instanceof AiStructuredOutputError ? err.usage : null,
+        });
+      }
       this.logFinish(context, capability.config, started, {
         outcome: 'FAILED',
         errorCode: failure.code,
+        sent: failure.sent ? 1 : 0,
       });
       throw failure.exception;
     }
 
-    const draft = buildDraft(output, context);
+    const draft = buildDraft(output, context, maxLines);
     const matches = await this.matchesFor(draft);
     await this.record(principal, context, capability.config, {
       outcome: 'SUCCEEDED',
@@ -296,7 +388,6 @@ export class PurchaseExtractionService {
 
   /** A human holding every permission the extract route requires (resolved DB-first, as the guard does). */
   private async permitted(principal?: Principal): Promise<boolean> {
-    if (!principal || isServicePrincipal(principal)) return false;
     if (!isHumanPrincipal(principal)) return false;
     const held = await this.permissions.resolve(principal.user.role);
     return EXTRACT_PERMISSIONS.every((permission) => held.has(permission));
@@ -304,11 +395,13 @@ export class PurchaseExtractionService {
 
   /**
    * The document's bytes: a live attachment of this live purchase (404 otherwise — as the documents
-   * routes answer), of a type the provider reads, within the size and page caps (422).
+   * routes answer), of a type the provider reads, within the size cap for that provider and type and the
+   * page cap (422). All checked here, before anything is sent.
    */
   private async loadDocument(
     purchaseOrderId: string,
     attachmentId: string,
+    provider: AiProviderKind,
     mediaTypes: readonly string[],
   ): Promise<{ bytes: Buffer; mediaType: string }> {
     const purchase = await this.prisma.purchaseOrder.findFirst({
@@ -347,11 +440,13 @@ export class PurchaseExtractionService {
         'The stored file of this document is missing',
       );
     }
-    if (size > PURCHASE_EXTRACTION_MAX_BYTES) {
+    const maxBytes = maxBytesFor(provider, row.mimeType);
+    if (size > maxBytes) {
       throw refusal(
         HttpStatus.UNPROCESSABLE_ENTITY,
         'DOCUMENT_TOO_LARGE',
-        `Documents larger than ${PURCHASE_EXTRACTION_MAX_BYTES / (1024 * 1024)} MB are not sent for extraction`,
+        `The configured AI provider reads ${row.mimeType} documents up to ${(maxBytes / (1024 * 1024)).toFixed(1)} MB`,
+        { maxBytes },
       );
     }
     const bytes = await readFile(path);
@@ -576,14 +671,20 @@ export class PurchaseExtractionService {
     });
   }
 
-  /** A failed model call → its code and the HTTP refusal (no provider body, no document text). */
+  /**
+   * A failed model call → its code, the HTTP refusal (no provider body, no document text) and whether the
+   * document may have reached the provider. It did NOT when the call failed before any I/O: the configuration
+   * moved since the capability check (`AI_DISABLED`, `CONVERSATION_READ_ONLY`) or the key is missing
+   * (`PROVIDER_AUTH` with no HTTP status — an answered 401 carries one). Anything else is counted as sent.
+   */
   private failureOf(
     err: unknown,
     signal: AbortSignal,
-  ): { code: string; exception: HttpException } {
+  ): { code: string; sent: boolean; exception: HttpException } {
     if (err instanceof AiStructuredOutputError) {
       return {
         code: 'EXTRACTION_UNREADABLE',
+        sent: true,
         exception: refusal(
           HttpStatus.BAD_GATEWAY,
           'EXTRACTION_UNREADABLE',
@@ -594,6 +695,7 @@ export class PurchaseExtractionService {
     if (signal.aborted) {
       return {
         code: 'EXTRACTION_TIMEOUT',
+        sent: true,
         exception: refusal(
           HttpStatus.GATEWAY_TIMEOUT,
           'EXTRACTION_TIMEOUT',
@@ -602,10 +704,15 @@ export class PurchaseExtractionService {
       };
     }
     if (err instanceof AiProviderError) {
-      if (err.code === 'AI_DISABLED' || err.code === 'CONVERSATION_READ_ONLY') {
-        // The configuration changed between the capability check and the call.
+      const beforeCall =
+        err.code === 'AI_DISABLED' ||
+        err.code === 'CONVERSATION_READ_ONLY' ||
+        (err.code === 'PROVIDER_AUTH' && err.status === undefined);
+      if (beforeCall) {
+        // The configuration changed between the capability check and the call: nothing was sent.
         return {
           code: 'AI_DISABLED',
+          sent: false,
           exception: refusal(
             HttpStatus.CONFLICT,
             'AI_DISABLED',
@@ -615,10 +722,12 @@ export class PurchaseExtractionService {
       }
       return {
         code: err.code,
+        sent: true,
         exception: refusal(
           HttpStatus.BAD_GATEWAY,
           err.code,
-          err.message,
+          PROVIDER_FAILURE_MESSAGES[err.code] ??
+            `${err.message} Nothing was filled.`,
           err.retryAfterSec !== undefined
             ? { retryAfterSec: err.retryAfterSec }
             : {},
@@ -632,6 +741,7 @@ export class PurchaseExtractionService {
     });
     return {
       code: 'INTERNAL',
+      sent: true,
       exception:
         err instanceof HttpException
           ? err

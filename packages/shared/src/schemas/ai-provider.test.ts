@@ -9,6 +9,7 @@ import {
   AI_WEB_SEARCH_MAX_USES_MIN,
   AiProviderDescriptorSchema,
   AiProviderKindSchema,
+  aiDocumentExtractionMaxBytes,
   aiDocumentExtractionMediaTypes,
   aiDocumentExtractionSupported,
   aiWebSearchSupported,
@@ -93,12 +94,18 @@ describe("Provider-native web search support (#1389)", () => {
 });
 
 describe("Document extraction support (ADR-0099 §11, #1477)", () => {
-  test("the hosted providers read PDFs and raster images; the OpenAI-compatible one reads nothing", () => {
-    for (const kind of ["anthropic", "openai", "google"] as const) {
+  test("Anthropic and OpenAI read PDFs and every raster type; Gemini every one but GIF", () => {
+    for (const kind of ["anthropic", "openai"] as const) {
       expect(aiDocumentExtractionMediaTypes(kind)).toEqual(AI_DOCUMENT_EXTRACTION_MEDIA_TYPES);
-      expect(aiDocumentExtractionSupported(kind, "application/pdf")).toBe(true);
-      expect(aiDocumentExtractionSupported(kind, "IMAGE/PNG ")).toBe(true);
+      expect(aiDocumentExtractionSupported(kind, "IMAGE/GIF ")).toBe(true);
     }
+    expect(aiDocumentExtractionMediaTypes("google")).not.toContain("image/gif");
+    expect(aiDocumentExtractionSupported("google", "image/gif")).toBe(false);
+    expect(aiDocumentExtractionSupported("google", "application/pdf")).toBe(true);
+    expect(aiDocumentExtractionSupported("google", "image/webp")).toBe(true);
+  });
+
+  test("the OpenAI-compatible provider reads nothing", () => {
     expect(aiDocumentExtractionMediaTypes("openai-compatible")).toEqual([]);
     expect(aiDocumentExtractionSupported("openai-compatible", "application/pdf")).toBe(false);
   });
@@ -112,5 +119,12 @@ describe("Document extraction support (ADR-0099 §11, #1477)", () => {
     ]) {
       expect(aiDocumentExtractionSupported("anthropic", type)).toBe(false);
     }
+  });
+
+  test("Anthropic takes images up to 10 MB base64-encoded (about 7.5 MB raw); nothing lower elsewhere", () => {
+    expect(aiDocumentExtractionMaxBytes("anthropic", "image/png")).toBe(7_864_320);
+    expect(aiDocumentExtractionMaxBytes("anthropic", "application/pdf")).toBeNull();
+    expect(aiDocumentExtractionMaxBytes("openai", "image/png")).toBeNull();
+    expect(aiDocumentExtractionMaxBytes("google", "image/png")).toBeNull();
   });
 });

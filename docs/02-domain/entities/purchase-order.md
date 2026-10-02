@@ -120,7 +120,8 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   evidence of each field). It **never saves anything** to the purchase: the person reviews the draft and
   saves through the routes above. Behind the AI *Document extraction* switch, OFF by default
   ([[ai-settings]]); `GET /purchase-orders/extraction/status` says whether it can be offered and why not.
-  Each run writes an `EXTRACTION_RUN` event (metadata only) and spends the caller's AI token budget. The
+  Each run whose document reached the provider writes an `EXTRACTION_RUN` event (metadata only) and spends the
+  caller's AI token budget. The
   full design is in [[ai-assistant/provider-and-runtime]] §6.5.
 
 ## Conventions

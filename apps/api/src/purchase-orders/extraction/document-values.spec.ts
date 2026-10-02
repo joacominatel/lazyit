@@ -55,6 +55,25 @@ describe('readAmount — printed amounts to minor units, never guessed (#1477)',
     expect(readAmount('1.234,567')).toEqual(fails('TOO_PRECISE'));
   });
 
+  it('a trailing minus is a negative amount (credit notes), never a label', () => {
+    expect(readAmount('1.500,00-')).toEqual(fails('UNREADABLE'));
+    expect(readAmount('1.500,00 −')).toEqual(fails('UNREADABLE'));
+    expect(readAmount('USD 1,500.00-')).toEqual(fails('UNREADABLE'));
+  });
+
+  it('the Spanish "whole amount" mark is not a sign: `$ 1.500.-` is 1500', () => {
+    expect(readAmount('$ 1.500.-')).toEqual(minor(150_000));
+    expect(readAmount('1,500.-')).toEqual(minor(150_000));
+    expect(revealedDecimal('$ 1.500.-')).toBe(',');
+  });
+
+  it('thousands grouped by spaces must be real groups of three', () => {
+    expect(readAmount('1 234 567,89')).toEqual(minor(123_456_789));
+    expect(readAmount('12 34')).toEqual(fails('UNREADABLE'));
+    expect(readAmount('1 23,45')).toEqual(fails('UNREADABLE'));
+    expect(readAmount('1234 567')).toEqual(fails('UNREADABLE'));
+  });
+
   it('negative, malformed and oversized amounts do not read', () => {
     expect(readAmount('-1.234,56')).toEqual(fails('UNREADABLE'));
     expect(readAmount('(1,234.56)')).toEqual(fails('UNREADABLE'));
@@ -101,57 +120,52 @@ describe('readQuantity (#1477)', () => {
 });
 
 describe('dates (#1477)', () => {
+  const day = (iso: string) => ({ ok: true, iso: `${iso}T00:00:00.000Z` });
+
   it('an unambiguous numeric date is read from the text, whatever the model said', () => {
-    expect(readDate('25/03/2026', '2026-03-25')).toEqual({
-      ok: true,
-      iso: '2026-03-25T00:00:00.000Z',
-      ambiguous: false,
-    });
-    expect(readDate('2026-03-10', null)).toEqual({
-      ok: true,
-      iso: '2026-03-10T00:00:00.000Z',
-      ambiguous: false,
-    });
-    expect(readDate('25.03.26', '2027-01-01')).toEqual({
-      ok: true,
-      iso: '2026-03-25T00:00:00.000Z',
-      ambiguous: false,
-    });
+    expect(readDate('25/03/2026', '2026-03-25')).toEqual(day('2026-03-25'));
+    expect(readDate('2026-03-10', null)).toEqual(day('2026-03-10'));
+    expect(readDate('25.03.26', '2027-01-01')).toEqual(day('2026-03-25'));
   });
 
-  it('a date that reads both ways keeps the model reading only as ambiguous', () => {
+  it('a date that reads both ways is left blank — blanks over guesses, even when the model picked one', () => {
     expect(readDate('10/03/2026', '2026-03-10')).toEqual({
-      ok: true,
-      iso: '2026-03-10T00:00:00.000Z',
-      ambiguous: true,
+      ok: false,
+      reason: 'AMBIGUOUS',
     });
-    expect(readDate('10/03/2026', '2026-05-01')).toEqual({ ok: false });
+    expect(readDate('10/03/2026', null)).toEqual({
+      ok: false,
+      reason: 'AMBIGUOUS',
+    });
   });
 
   it("the document's order settles an ambiguous date", () => {
     expect(inferDateOrder(['10/03/2026', '25/03/2026'])).toBe('DMY');
     expect(inferDateOrder(['03/25/2026'])).toBe('MDY');
     expect(inferDateOrder(['25/03/2026', '03/25/2026'])).toBeNull();
-    expect(readDate('10/03/2026', '2026-10-03', 'DMY')).toEqual({
-      ok: true,
-      iso: '2026-03-10T00:00:00.000Z',
-      ambiguous: false,
-    });
+    expect(readDate('10/03/2026', '2026-10-03', 'DMY')).toEqual(
+      day('2026-03-10'),
+    );
   });
 
   it('a written date keeps the model reading when its year and day are printed', () => {
-    expect(readDate('10 de marzo de 2026', '2026-03-10')).toEqual({
-      ok: true,
-      iso: '2026-03-10T00:00:00.000Z',
-      ambiguous: false,
+    expect(readDate('10 de marzo de 2026', '2026-03-10')).toEqual(
+      day('2026-03-10'),
+    );
+    expect(readDate('marzo de 2026', '2026-03-10')).toEqual({
+      ok: false,
+      reason: 'UNREADABLE',
     });
-    expect(readDate('marzo de 2026', '2026-03-10')).toEqual({ ok: false });
     expect(readDate('10 de marzo de 2026', 'not a date')).toEqual({
       ok: false,
+      reason: 'UNREADABLE',
     });
   });
 
   it('impossible dates do not read', () => {
-    expect(readDate('31/02/2026', '2026-02-28')).toEqual({ ok: false });
+    expect(readDate('31/02/2026', '2026-02-28')).toEqual({
+      ok: false,
+      reason: 'UNREADABLE',
+    });
   });
 });

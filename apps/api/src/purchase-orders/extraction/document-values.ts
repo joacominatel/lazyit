@@ -26,10 +26,28 @@ export type AmountReading =
   { ok: true; minor: number } | { ok: false; reason: AmountFailure };
 
 /** Characters that only ever group thousands: spaces of every width and apostrophes. */
-const GROUPING_ONLY = /[\s\u00a0\u2007\u202f\u2009'\u2019]/g;
-/** What may surround the number: a currency code or symbol (`USD`, `$`, `u$s`, `€`), never digits. */
+const GROUPING_ONLY = /[\s\u00a0\u2007\u202f\u2009'\u2019]+/;
+/**
+ * What may surround the number: a currency code or symbol (`USD`, `$`, `u$s`, `€`), never digits. A sign is
+ * never part of a label, on either side: `-1.500,00` and `1.500,00-` (a trailing minus, common on invoices
+ * and credit notes) are both negative.
+ */
 const LEADING_LABEL = /^[^\d\-−(]*/;
-const TRAILING_LABEL = /[^\d)]*$/;
+const TRAILING_LABEL = /[^\d)\-−]*$/;
+/** The "whole amount" mark of Spanish-language documents: `$ 1.500.-` is 1500, not a negative. */
+const WHOLE_AMOUNT_MARK = /[.,]-$/;
+
+/**
+ * The integer groups of an amount grouped by spaces or apostrophes (`1 234 567,89`) are checked like
+ * separator grouping: a first group of 1–3 digits, then groups of exactly 3, the decimals only after the
+ * last one. `12 34` is not an amount.
+ */
+function validSpaceGrouping(text: string): boolean {
+  const chunks = text.split(GROUPING_ONLY);
+  const last = chunks.pop() as string;
+  const match = /^(\d{3})(?:[.,]\d+)?$/.exec(last);
+  return match !== null && validGrouping([...chunks, match[1]]);
+}
 
 /**
  * The number part of a printed amount, without its currency label or thousands spaces, or null when what is
@@ -38,16 +56,21 @@ const TRAILING_LABEL = /[^\d)]*$/;
  */
 function numberPart(
   text: string,
-): { negative: boolean; digits: string } | null {
-  const core = text
-    .trim()
-    .replace(LEADING_LABEL, '')
-    .replace(TRAILING_LABEL, '');
-  const negative = /^[-−(]/.test(core) || /\)$/.test(core);
-  const unsigned = core.replace(/^[-−(]/, '').replace(/\)$/, '');
-  const digits = unsigned.replace(GROUPING_ONLY, '');
+): { negative: boolean; digits: string; whole: boolean } | null {
+  let core = text.trim().replace(LEADING_LABEL, '').replace(TRAILING_LABEL, '');
+  const whole = WHOLE_AMOUNT_MARK.test(core);
+  if (whole) core = core.slice(0, -2);
+  const negative = /^[-−(]/.test(core) || /[-−)]$/.test(core);
+  const unsigned = core
+    .replace(/^[-−(]/, '')
+    .replace(/[-−)]$/, '')
+    .trim();
+  if (GROUPING_ONLY.test(unsigned) && !validSpaceGrouping(unsigned)) {
+    return null;
+  }
+  const digits = unsigned.replace(new RegExp(GROUPING_ONLY.source, 'g'), '');
   if (!/^[\d.,]+$/.test(digits) || !/\d/.test(digits)) return null;
-  return { negative, digits };
+  return { negative, digits, whole };
 }
 
 /** Whether `groups` (after the first) are all three digits and the first is 1–3 digits, not a lone 0. */
@@ -103,6 +126,12 @@ export function readAmount(
       ? { ok: false, reason: 'UNREADABLE' }
       : { ok: true, minor };
   }
+  if (part.whole) {
+    // `1.500.-`: a whole amount, so its one kind of separator can only group thousands.
+    return dots > 0 && commas > 0
+      ? { ok: false, reason: 'UNREADABLE' }
+      : groupedReading(digits.split(dots > 0 ? '.' : ','));
+  }
 
   if (dots > 0 && commas > 0) {
     // Both: the LAST one is the decimal separator, it appears once, and the other one groups thousands.
@@ -152,7 +181,8 @@ export function revealedDecimal(text: string): DecimalSeparator | null {
   }
   if (dots === 0 && commas === 0) return null;
   const sep: DecimalSeparator = dots > 0 ? '.' : ',';
-  if (dots + commas > 1) return sep === '.' ? ',' : '.';
+  // Repeated, or on a whole amount (`1.500.-`), the separator groups: the other one is the decimal.
+  if (dots + commas > 1 || part.whole) return sep === '.' ? ',' : '.';
   const fraction = digits.split(sep)[1] ?? '';
   return fraction.length === 1 || fraction.length === 2 ? sep : null;
 }
@@ -267,62 +297,49 @@ export function inferDateOrder(
 }
 
 export type DateReading =
-  { ok: true; iso: string; ambiguous: boolean } | { ok: false };
+  { ok: true; iso: string } | { ok: false; reason: 'AMBIGUOUS' | 'UNREADABLE' };
 
 const MODEL_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
  * The day a printed date means, as an ISO datetime at UTC midnight. A NUMERIC literal is read here, never
  * taken from the model: `YYYY-MM-DD`-style is unambiguous; `10/03/2026` is read in the document's order when
- * one is known, and when it reads two ways the model's reading is kept only if it is one of them, flagged
- * `ambiguous`. A WRITTEN date (`10 de marzo de 2026`) is the model's reading, kept only when its year and day
- * are printed in the text. Anything else does not read.
+ * one is known, and when it still reads two ways it is `AMBIGUOUS` — blanks over guesses, whatever the model
+ * read. A WRITTEN date (`10 de marzo de 2026`) is the model's reading, kept only when its year and day are
+ * printed in the text. Anything else is `UNREADABLE`.
  */
 export function readDate(
   text: string,
   modelValue: string | null,
   order: DateOrder | null = null,
 ): DateReading {
-  const modelDay =
-    modelValue && MODEL_DAY.test(modelValue.trim())
-      ? (() => {
-          const [, y, m, d] = MODEL_DAY.exec(modelValue.trim()) as unknown as [
-            string,
-            string,
-            string,
-            string,
-          ];
-          return isoDay(Number(y), Number(m), Number(d));
-        })()
-      : null;
-  const at = (day: string) => `${day}T00:00:00.000Z`;
+  const at = (day: string): DateReading => ({
+    ok: true,
+    iso: `${day}T00:00:00.000Z`,
+  });
+  const unreadable: DateReading = { ok: false, reason: 'UNREADABLE' };
 
   const numeric = numericDateReadings(text);
   if (numeric) {
-    if (numeric.YMD)
-      return { ok: true, iso: at(numeric.YMD), ambiguous: false };
-    const readings = [numeric.DMY, numeric.MDY].filter(
-      (day): day is string => day !== null,
-    );
-    const distinct = [...new Set(readings)];
-    if (distinct.length === 0) return { ok: false };
-    if (order !== null && numeric[order]) {
-      return { ok: true, iso: at(numeric[order]), ambiguous: false };
-    }
-    if (distinct.length === 1) {
-      return { ok: true, iso: at(distinct[0]), ambiguous: false };
-    }
-    return modelDay !== null && distinct.includes(modelDay)
-      ? { ok: true, iso: at(modelDay), ambiguous: true }
-      : { ok: false };
+    if (numeric.YMD) return at(numeric.YMD);
+    const distinct = [
+      ...new Set([numeric.DMY, numeric.MDY].filter((day) => day !== null)),
+    ];
+    if (distinct.length === 0) return unreadable;
+    if (order !== null && numeric[order]) return at(numeric[order]);
+    return distinct.length === 1
+      ? at(distinct[0])
+      : { ok: false, reason: 'AMBIGUOUS' };
   }
 
-  if (modelDay === null) return { ok: false };
+  const model = MODEL_DAY.exec(modelValue?.trim() ?? '');
+  const modelDay = model
+    ? isoDay(Number(model[1]), Number(model[2]), Number(model[3]))
+    : null;
+  if (modelDay === null) return unreadable;
   const [year, , day] = modelDay.split('-') as [string, string, string];
   const numbers: string[] = text.match(/\d+/g) ?? [];
   const printed =
     numbers.includes(year) && numbers.some((n) => Number(n) === Number(day));
-  return printed
-    ? { ok: true, iso: at(modelDay), ambiguous: false }
-    : { ok: false };
+  return printed ? at(modelDay) : unreadable;
 }
