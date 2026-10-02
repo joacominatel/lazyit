@@ -41,7 +41,7 @@ and the screens follow in Phase 1 under epic #1465. See
 
 - 🟢 [[supplier]] — who the team buys from and pays; not the manufacturer or the software publisher. Only the name required, nothing unique. Separate support/RMA contact.
 - 🟢 [[purchase-order]] — one purchase (*Purchase* in the UI): optional supplier, free-text currency label and non-unique finance reference, user-set status with derived *Received*; soft delete keeps asset links.
-- 🟢 [[purchase-order-line]] — one line (`ASSET` / `OTHER`, later `CONSUMABLE` / `LICENSE`); assets point at it; received is derived and over-receipt is allowed with a warning.
+- 🟢 [[purchase-order-line]] — one line (`ASSET` / `OTHER` / `CONSUMABLE` / `LICENSE`); assets point at it; received is derived (linked assets, stock moved in, seats applied) and over-receipt is allowed with a warning.
 - 🟢 [[purchase-order-event]] — append-only activity log of a purchase, with the human/service-account actor CHECK.
 
 ## Infra topology (visual CMDB)

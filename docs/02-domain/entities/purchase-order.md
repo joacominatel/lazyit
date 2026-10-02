@@ -8,8 +8,8 @@ updated: 2026-10-02
 
 # PurchaseOrder
 
-> 🟢 built — backend (#1472, flows #1473), screens (#1474); the receiving, linking and documents screens
-> pending (#1475) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472, flows #1473, Phase 2 #1477), screens (#1474, #1475); the Phase 2 screens
+> pending (#1477 web) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrder` (`purchase_orders`), contract `packages/shared/src/schemas/purchase-order.ts`,
@@ -102,6 +102,26 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   location FK is `SetNull` (like `Asset.locationId`); soft deletes never fire either.
 - Notes, references and invoice numbers are untrusted text, sanitized when rendered
   ([[0029-untrusted-content-sanitization]]).
+- **Create from selected assets** (#1477) — `POST /purchase-orders/from-assets { assetIds, …header }`
+  (`purchaseOrder:write` + `asset:write`), the back-linking helper of Phase 2. One transaction: the purchase
+  is created, the asset rows are locked `FOR UPDATE` in id order and re-read, and one `ASSET` line is created
+  per group — assets of one model (described *Manufacturer Name*, with that brand and model text, mapped to
+  the model unless it is archived), or, without a model, of one name — with `quantity` = the group's assets.
+  The line's `unitPrice` is the assets' cost only when **every** asset of the group has the same one, in the
+  purchase's currency label; otherwise unknown. `currency` omitted takes the one label every priced asset
+  shares, if any. Every linkable asset is linked to its group's line and **no other asset field changes**
+  (`PURCHASE_LINKED` with nothing applied — values reach an asset only through an explicit apply). Partial
+  success `{ purchaseOrder, linkedAssetIds, failed[] }`: `NOT_FOUND` (missing or archived) and
+  `LINKED_ELSEWHERE` (already on a purchase line) are left out; when none can be linked it is a `409` and
+  nothing is created. Events: `CREATED`, `CREATED_FROM_ASSETS`, then one `ASSET_LINKED` per line.
+- **Fill from a document** (#1477, ADR-0099 §11) — `POST /purchase-orders/:id/attachments/:attachmentId/extract`
+  reads a document **already attached** to the purchase through the configured AI provider and returns a
+  **draft** (header, lines, totals self-check, supplier and model suggestions, warnings, the verbatim
+  evidence of each field). It **never saves anything** to the purchase: the person reviews the draft and
+  saves through the routes above. Behind the AI *Document extraction* switch, OFF by default
+  ([[ai-settings]]); `GET /purchase-orders/extraction/status` says whether it can be offered and why not.
+  Each run writes an `EXTRACTION_RUN` event (metadata only) and spends the caller's AI token budget. The
+  full design is in [[ai-assistant/provider-and-runtime]] §6.5.
 
 ## Conventions
 

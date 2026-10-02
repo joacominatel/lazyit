@@ -3,7 +3,7 @@ title: AiRun
 tags: [domain, entity, ai-assistant]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-10-02
 ---
 
 # AiRun
@@ -57,5 +57,9 @@ Prisma model `AiRun` → table `ai_runs`.
 Prisma model `AiUsage` → table `ai_usage`. One row per model step: principal, provider, model and the
 input / output / cached / reasoning token counts. `bigint` autoincrement, **append-only and kept** — it
 feeds the per-principal daily budget and the usage view. No content, no FKs.
+
+A purchase document extraction (#1477) is a model call outside any run: its row carries the extraction id
+(`ext_…`) in `runId`, the same id as the purchase's `EXTRACTION_RUN` event, so it counts against the same
+rolling budget. `runId` is a plain string, never joined to `ai_runs`.
 
 Related: [[ai-conversation]] · [[ai-tool-invocation]] · [[ai-action-log]] · [[ai-settings]]

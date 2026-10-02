@@ -3,7 +3,7 @@ title: AiSettings
 tags: [domain, entity, ai-assistant, config, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-02
 ---
 
 # AiSettings
@@ -53,6 +53,14 @@ switch. It is **off by default** and an admin enables it through the Settings �
   `webSearchMaxUses` caps searches per model call where the provider takes a cap (Anthropic). Both are
   optional on `PUT /config/ai` (omitted keeps the stored value) and audited. Turning it off makes the
   conversations that had it read-only.
+- **Purchase document extraction** (#1477, [[0099-purchases-scope-model-and-optionality]] §11):
+  `documentExtractionEnabled` (**off by default**) lets a person send a document already attached to a
+  purchase to the configured provider, to draft the purchase for review. Independent of `enabled`, and
+  effective only while the assistant is usable too and the provider reads the document's type (never the
+  OpenAI-compatible provider). It passes no gate of its own; the web shows the shared
+  `AI_DOCUMENT_EXTRACTION_DISCLOSURE` next to it. Optional on `PUT /config/ai` (omitted keeps the stored
+  value) and audited like web search. Extraction spends the caller's `dailyTokenLimitPerPrincipal`
+  (an `ai_usage` row whose `runId` is the extraction id).
 - **Text columns, validated on write.** `provider` and `effort` are text checked by the zod vocabularies
   in `@lazyit/shared` (`ai-provider.ts`), so a newer value degrades to "not configured" on an older build.
 - Mutable config: `createdAt` + `updatedAt`, **no `deletedAt`**.
@@ -81,6 +89,7 @@ Prisma model `AiSettings` → table `ai_settings`.
 | `mcpAllowAnyHttpsClient` | `bool` | default `true` (since 2026-09-24; existing rows keep their value) — accept any HTTPS (non-loopback) client; consent shows the redirect host. |
 | `webSearchEnabled` | `bool` | default `false` — provider-native web search for the chat (#1389). |
 | `webSearchMaxUses` | `int` | default 5 (zod 1–20) — searches per model call where the provider takes a cap; an out-of-range stored value reads as 5. |
+| `documentExtractionEnabled` | `bool` | default `false` — purchase document extraction (#1477). |
 | `disclosureAcknowledgedAt` / `disclosureAcknowledgedById` | `datetime?` / `uuid?` | the egress-disclosure acknowledgement. |
 | `verifiedAt` | `datetime?` | last passing connection test of the current connection fields. |
 | `updatedById` | `uuid?` | FK → [[user]], `onDelete: SetNull`. |

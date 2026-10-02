@@ -8,8 +8,9 @@ updated: 2026-10-02
 
 # PurchaseOrderLine
 
-> 🟢 built — backend (#1472), receiving, linking and cancelling (#1473), consumable lines (#1476); their
-> screens pending (#1475, #1476 web) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472), receiving, linking and cancelling (#1473), consumable lines (#1476), license
+> lines (#1477); their screens pending (#1475, #1476 web, #1477 web) · Area: Purchases ·
+> [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrderLine` (`purchase_order_lines`). Lines are created inline with a purchase or through
@@ -31,26 +32,30 @@ line, the units that came out of it.
 - **produced** N [[asset]]s (`Asset.purchaseOrderLineId`, nullable). At most one line per asset.
 - **maps to** an optional [[consumable]] (`consumableId`, `SetNull`) — a `CONSUMABLE` line only (#1476).
   It is received as `IN` [[consumable-movement]]s that reference the line (`ConsumableMovement.purchaseOrderLineId`).
-  From Phase 2, a `LICENSE` line links to an [[application]].
+- **maps to** an optional [[application]] (`applicationId`, `SetNull`) — a `LICENSE` line only (#1477). Its
+  seats are applied to the application by a person, never automatically.
 
 ## Business rules
 
 - **Entry is light** ([[0099-purchases-scope-model-and-optionality]], governing principle, CEO decision
   D-D): a **description is the only field the user must fill**. The quantity **defaults to 1** and the
   unit price is optional.
-- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b (built, #1476); `LICENSE` in Phase 2. Stored as
+- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b (built, #1476); `LICENSE` in Phase 2 (built,
+  #1477). Stored as
   `TEXT` validated by the shared zod schema on write, not a Prisma enum.
   - `ASSET` — received units become assets.
   - `OTHER` — shipping, services, freebies. Recorded and counted in the total, **never pending**.
   - `CONSUMABLE` — received as an `IN` movement; the movement ledger stays the only way stock changes
     ([[0034-consumables-design]]).
-  - `LICENSE` — *proposes* a seats / renewal update on the application through the confirmation diff;
-    never changes `seatsPurchased` automatically ([[0088-application-license-seat-tracking]]).
+  - `LICENSE` — *proposes* a seats / renewal update on the application; a person confirms it, and the
+    line counts the seats applied. Never changes `seatsPurchased` automatically
+    ([[0088-application-license-seat-tracking]]).
 - **Unit price** is integer minor units in the purchase's currency label, 64-bit
   ([[0100-money-as-64-bit-minor-units]]). `0` is valid (a freebie) and distinct from blank (unknown).
   By convention it is the price that should become each unit's cost, usually without VAT.
 - **Received** is derived: the count of **live** assets linked to an `ASSET` line, or, for a `CONSUMABLE`
-  line, the sum of the quantities of the `IN` movements posted from it (#1476). **Pending** = quantity −
+  line, the sum of the quantities of the `IN` movements posted from it (#1476), or, for a `LICENSE` line, the
+  seats a person applied to its application (`appliedSeats`, #1477). **Pending** = quantity −
   received − cancelled, never below zero. Each line read
   carries `receivedQuantity`, `pendingQuantity`, `receiptState` (`NONE | PARTIAL | RECEIVED | OVER`;
   `null` for an `OTHER` line or a kind this build does not know) and `lineTotal` (quantity × unit price,
@@ -70,8 +75,8 @@ line, the units that came out of it.
   when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
   records the change before and after.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
-- The **kind** of a line that received units — live linked assets, or stock moved in — cannot change
-  (`409`): its received units would silently stop counting.
+- The **kind** of a line that received units — live linked assets, stock moved in, or seats applied —
+  cannot change (`409`): its received units would silently stop counting.
 - **A different model delivered** is received *against the line* with the model overridden and a note;
   the line is not split and keeps what was ordered.
 - **Copy on confirm.** Receiving or linking copies the line's values (cost and currency, purchase date,
@@ -129,7 +134,7 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 - **Over-receipt** is allowed everywhere and reported (`overReceived`, `overReceivedAfter`, the event
   payloads), never refused (ADR-0099 §4).
 - A line can be removed (soft delete) only while nothing was received on it — no linked asset, no stock
-  moved in (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
+  moved in, no seat applied (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
 - `manufacturerText` / `modelText` / `description` feed smart entry (`GET /suggestions/manufacturer`,
   `/lineModel`, `/lineDescription` — the last since #1473), from live lines of live purchases.
@@ -162,6 +167,38 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
   units, with the same derivation. A purchase's receipt counters add units across its countable lines
   whatever each consumable's unit; the state and the per-line counts are what the UI leads with.
 
+## License lines (as built, #1477)
+
+- **Mapping.** `applicationId` is accepted on a `LICENSE` line only (`400` otherwise — at the edge on a
+  create, against the stored kind on a PATCH) and stays **optional** there until the license is applied. The
+  application must be **live** (`400` for a missing or archived one, on create, add and update). Changing a
+  line away from `LICENSE` clears it (logged in `LINE_UPDATED`); seats already applied stay counted on the
+  line if its application changes, as stock does on a consumable line.
+- **The proposal** — `GET /purchase-orders/:id/lines/:lineId/license-proposal` (`purchaseOrder:read` +
+  `application:read`, writes nothing): the line, its application's current `seatsPurchased`, derived
+  `seatsUsed` and `renewalDate` (an archived application is shown with `deletedAt` and `seatsUsed: null`),
+  `seatsToAdd` = the line's pending seats, `seatsPurchasedAfter` (an untracked count starts at 0),
+  `overAppliedAfter`, and warnings: `NO_APPLICATION`, `APPLICATION_ARCHIVED`, `SEATS_UNTRACKED`,
+  `NOTHING_PENDING`, `OVER_APPLIED`. The renewal date is never proposed: the term is not on the line, so the
+  operator types it.
+- **The apply** — `POST /purchase-orders/:id/lines/:lineId/apply-license { seatsToAdd?, renewalDate? }`
+  (`purchaseOrder:write` + `application:write`, at least one of the two). Explicit and user-triggered: it
+  adds `seatsToAdd` to the application's `seatsPurchased` (an untracked `null` count becomes `seatsToAdd`,
+  flagged `SEATS_UNTRACKED`) and/or sets its `renewalDate`, **through `ApplicationsService.update`** — the
+  application's own write path — and raises the line's `appliedSeats` by `seatsToAdd`. One transaction,
+  locks in order: the purchase `FOR KEY SHARE`, the line `FOR UPDATE`, the application `FOR UPDATE`. The
+  purchase gets `LICENSE_APPLIED { lineId, applicationId, seatsAdded, seatsPurchased: { from, to },
+  renewalDate: { from, to }, appliedSeats: { from, to }, overApplied }`. Result `{ application, line,
+  overApplied, warnings }`.
+- **Over-application** (more seats applied than the line bought) is allowed and flagged (`overApplied`,
+  `OVER`), like an over-received line (ADR-0099 §4).
+- **Refusals.** `400` for a line that is not `LICENSE`, has no application, names an archived one, or would
+  push a count past int4; `404` for an archived purchase or line.
+- **Applied seats only grow.** `seatsPurchased` is one mutable number, not a ledger
+  ([[0088-application-license-seat-tracking]]): lazyit never recomputes it from lines. A mistaken apply is
+  corrected on the application itself; the line keeps counting what was applied. So a line with applied
+  seats can neither change kind nor be removed.
+
 ## Conventions
 
 - **ID:** `cuid()` ([[0005-id-strategy]]).
@@ -174,11 +211,13 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 | `id` | `cuid` | |
 | `purchaseOrderId` | `cuid` | FK → [[purchase-order]], `Restrict`. |
 | `position` | `int` | display order (`int4()`), default after the last live line. |
-| `kind` | `text` | `ASSET \| OTHER \| CONSUMABLE` (+ `LICENSE` later), default `ASSET`, validated by zod on write. |
+| `kind` | `text` | `ASSET \| OTHER \| CONSUMABLE \| LICENSE`, default `ASSET`, validated by zod on write. |
 | `description` | `string` | the only required field; as written on the document (≤ 500). |
 | `manufacturerText` / `modelText` | `string?` | brand and model **as written on the document**, before (or instead of) mapping to a model. Added while building (#1472) from [[purchases/technical-analysis]] §5 — the entity design had no place for them. |
 | `assetModelId` | `cuid?` | FK → [[asset-model]], `SetNull`. |
 | `consumableId` | `cuid?` | FK → [[consumable]], `SetNull` (#1476); a `CONSUMABLE` line only. |
+| `applicationId` | `cuid?` | FK → [[application]], `SetNull` (#1477); a `LICENSE` line only. |
+| `appliedSeats` | `int` | default `0` (#1477): the seats a person applied from this `LICENSE` line — its received units. Raised only by the apply route. Not on the wire; read as `receivedQuantity`. |
 | `quantity` | `int` | ≥ 1 (`int4()`), default `1`. |
 | `unitPrice` | `bigint?` | minor units, ≥ 0; `null` = unknown ([[0100-money-as-64-bit-minor-units]]). |
 | `warrantyMonths` | `int?` | warranty end of a received unit = purchase date + this (0–1200). |

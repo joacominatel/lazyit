@@ -8,7 +8,9 @@ updated: 2026-10-02
 
 # PurchaseOrderEvent
 
-> 🟢 built (#1472; receiving, linking and document events #1473; stock receipts and document labels #1476) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built (#1472; receiving, linking and document events #1473; stock receipts and document labels #1476;
+> license applies, extraction runs and creation from assets #1477) · Area: Purchases ·
+> [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — model, writer and read (#1472)
 > Model `PurchaseOrderEvent` (`purchase_order_events`), written through the one shared writer
@@ -67,6 +69,9 @@ default ([[0006-soft-delete-and-auditing]]).
 | `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` | upload / delete a purchase document | `{ attachmentId, originalName, label }` — `label` (the document type label, `null` when none) since #1476 |
 | `STOCK_RECEIVED` | receive a `CONSUMABLE` line into stock (#1476) — one row per receipt, in the movement's transaction | `{ lineId, consumableId, movementId, quantity, overReceived }` |
 | `DOCUMENT_UPDATED` | edit a purchase document's type label (#1476); an unchanged label writes nothing | `{ attachmentId, originalName, label: { from, to } }` |
+| `LICENSE_APPLIED` | apply a `LICENSE` line to its application (#1477), in the same transaction as the application write | `{ lineId, applicationId, seatsAdded, seatsPurchased: { from, to } \| null, renewalDate: { from, to } \| null, appliedSeats: { from, to }, overApplied }` |
+| `EXTRACTION_RUN` | a document of the purchase was sent to the AI provider to draft it (#1477) — success **and** failure, since the document left the instance either way | `{ extractionId, attachmentId, outcome: SUCCEEDED \| FAILED, errorCode, provider, model, inputTokens, outputTokens, lineCount, warningCount }` — **metadata only**: never a value read from the document |
+| `CREATED_FROM_ASSETS` | create a purchase from selected assets (#1477), right after its `CREATED`; each line's links follow as `ASSET_LINKED` | `{ lineCount, linkedAssetIds, failed }` (`failed` is a count) |
 
 Money in a payload is a JSON number of minor units. A receive's units are separate transactions (the
 asset-tag counter, [[0089-bulk-receiving-and-checkout-acknowledgement]]), so `UNITS_RECEIVED` is appended

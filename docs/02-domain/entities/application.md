@@ -22,6 +22,8 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   `onDelete: SetNull` — deleting a category detaches its applications, like
   [[asset-model]] → [[asset-category]]).
 - **granted via** N [[access-grant]]s (to [[user]]s).
+- **licensed by** N `LICENSE` [[purchase-order-line]]s (`PurchaseOrderLine.applicationId`, `SetNull` on that
+  side, #1477).
 
 ## Business rules
 
@@ -43,15 +45,19 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   category never deletes its applications.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
-> [!note] Purchases — planned, not built ([[0099-purchases-scope-model-and-optionality]], #1465)
+> [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
 > - **`vendor` is labelled "Publisher" (en) / "Fabricante" (es)** from Purchases Phase 1. It means
 >   **who makes the software** (Microsoft, Atlassian), not who you buy it from — that is a
 >   [[supplier]], and the old Spanish label "Proveedor" is exactly the word for supplier. **Label only:**
 >   the column, the API field and existing values are unchanged.
 > - **`costPerSeat`** stays currency-less. (Its widening to a 64-bit integer of minor units,
 >   [[0100-money-as-64-bit-minor-units]], is built — #1469.)
-> - From Phase 2, a `LICENSE` [[purchase-order-line]] links to an application and **proposes** a seats /
->   renewal update through a confirmation diff. It never changes `seatsPurchased` automatically.
+> - **Built (#1477):** a `LICENSE` [[purchase-order-line]] links to an application and **proposes** a seats /
+>   renewal update (`GET …/license-proposal`). A person confirms it (`POST …/apply-license`, which needs
+>   `application:write` too): `seatsPurchased` grows by the seats they chose and/or `renewalDate` is set,
+>   through `ApplicationsService.update` — the same path as this entity's own edit. Nothing changes
+>   `seatsPurchased` automatically, and lazyit never recomputes it from purchase lines (ADR-0088: one
+>   mutable number). An untracked (`null`) count starts at the seats added.
 
 > [!note] Prior design discarded — no `type` enum, no approvers
 > An earlier draft of this note gave `Application` a hardcoded `type` enum and per-application
