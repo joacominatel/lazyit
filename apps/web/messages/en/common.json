@@ -51,6 +51,24 @@
     "typeToSearch": "Type to search…",
     "loading": "Searching…"
   },
+  "suggest": {
+    "listLabel": "Suggestions",
+    "recent": "Recent",
+    "mostUsed": "Most used",
+    "others": "Used before",
+    "matches": "Matches",
+    "uses": "{count, plural, one {# use} other {# uses}}",
+    "usesSentence": "Used {count, plural, one {once} other {# times}}.",
+    "nearDuplicate": "Looks like an existing value: “{value}”.",
+    "useExisting": "Use “{value}”"
+  },
+  "money": {
+    "invalid": "Enter an amount like {example}.",
+    "negative": "The amount can't be negative.",
+    "decimals": "Use at most two decimals, like {example}.",
+    "tooLarge": "That amount is too large.",
+    "readAs": "Read as {amount}."
+  },
   "quickView": {
     "trigger": "Quick view: {name}",
     "openRecord": "Open full record",

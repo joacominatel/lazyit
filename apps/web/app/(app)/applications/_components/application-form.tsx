@@ -8,13 +8,14 @@ import {
   CreateApplicationSchema,
   UpdateApplicationSchema,
 } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
+import { MoneyField, moneyInputText } from "@/components/money-input";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -43,7 +44,7 @@ import {
   useUpdateApplication,
 } from "@/lib/api/hooks/use-application-mutations";
 import { notifyError } from "@/lib/api/notify-error";
-import { majorToMinor, minorToMajor } from "@/lib/utils/money";
+import { parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
 const FORM_ID = "application-form";
@@ -127,6 +128,7 @@ export function ApplicationForm({
   const tc = useTranslations("common");
   const isEdit = application != null;
   const router = useRouter();
+  const locale = useLocale();
   const { data: categories } = useApplicationCategories();
   const createApplication = useCreateApplication();
   const updateApplication = useUpdateApplication();
@@ -158,9 +160,7 @@ export function ApplicationForm({
       : "",
   );
   const [costPerSeat, setCostPerSeat] = useState(() =>
-    licenseSource?.costPerSeat != null
-      ? String(minorToMajor(licenseSource.costPerSeat))
-      : "",
+    moneyInputText(licenseSource?.costPerSeat, locale),
   );
   const [renewalDate, setRenewalDate] = useState(() =>
     isoToDateInput(application?.renewalDate),
@@ -168,8 +168,14 @@ export function ApplicationForm({
 
   const onSubmit = form.handleSubmit((values) => {
     // License fields → wire shape. Blank = null (create: "untracked"; PATCH: clear it). Seats is a
-    // plain non-negative int; costPerSeat is major-unit text coerced to minor units (never re-coerced
-    // server-side); renewalDate is an ISO datetime (or null). The server re-validates non-negative.
+    // plain non-negative int; costPerSeat is major-unit text in the viewer's locale parsed to minor
+    // units (#1470, never re-coerced server-side) — a refused amount already shows its reason inline;
+    // renewalDate is an ISO datetime (or null). The server re-validates non-negative.
+    const cost = parseMoneyInput(costPerSeat, locale);
+    if (!cost.ok) {
+      scrollToFirstError(document.getElementById(FORM_ID));
+      return;
+    }
     const seats = seatsPurchased.trim();
     const seatsPurchasedValue =
       seats === "" || !Number.isFinite(Number(seats))
@@ -184,7 +190,7 @@ export function ApplicationForm({
       isCritical: values.isCritical,
       notes: values.notes,
       seatsPurchased: seatsPurchasedValue,
-      costPerSeat: majorToMinor(costPerSeat),
+      costPerSeat: cost.minor,
       renewalDate: dateInputToIso(renewalDate),
     };
 
@@ -438,22 +444,14 @@ export function ApplicationForm({
               </FieldDescription>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="costPerSeat">
-                {t("form.costPerSeatLabel")}
-              </FieldLabel>
-              <Input
-                id="costPerSeat"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={costPerSeat}
-                onChange={(event) => setCostPerSeat(event.target.value)}
-                placeholder={t("form.costPerSeatPlaceholder")}
-              />
-              <FieldDescription>{t("form.costPerSeatHelp")}</FieldDescription>
-            </Field>
+            <MoneyField
+              id="costPerSeat"
+              label={t("form.costPerSeatLabel")}
+              description={t("form.costPerSeatHelp")}
+              value={costPerSeat}
+              onValueChange={setCostPerSeat}
+              placeholder={t("form.costPerSeatPlaceholder")}
+            />
 
             <Field>
               <FieldLabel htmlFor="renewalDate">

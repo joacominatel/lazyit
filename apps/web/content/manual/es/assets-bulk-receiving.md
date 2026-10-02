@@ -25,7 +25,8 @@ para crear activos). Se abre un formulario breve.
 - **Estado** — el estado en el que arranca cada unidad (por ejemplo *Operativo* o *En almacén*).
 - **Ubicación**, **Empresa**, **Fecha de compra**, **Costo de compra**, **Notas** — datos compartidos
   opcionales aplicados a **cada** unidad. El costo de compra se ingresa por unidad, en unidades
-  mayores, igual que en el formulario de activo.
+  mayores y con el formato de números de tu idioma, y la empresa sugiere los valores ya en uso — ambos
+  igual que en el formulario de activo (ver [Conceptos de activos](/help/assets-asset-basics)).
 - **Números de serie** — opcional. Pega un número de serie por línea, en orden, y cada unidad recibe el
   suyo. Déjalo vacío para crear unidades sin número de serie, o pega **exactamente** tantas líneas como
   la cantidad — un conteo que no coincide se rechaza antes de crear nada.

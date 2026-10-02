@@ -19,6 +19,9 @@ the three existing money columns; the Purchases money columns follow in Purchase
 §5 (display) records the CEO's decision that currency is free text (D-C of
 [[0099-purchases-scope-model-and-optionality]]). **Amended again 2026-10-02** (#1469): §3 records how the
 conversion is built, §4 the dependency check, and §5 a provisional CTO decision on `costPerSeat`.
+**Amended 2026-10-02 (#1470)**: §5 (input) — the web reads amounts in the viewer's locale, and an amount
+with more than two decimals is refused on input instead of rounded (a CTO decision, provisional, pending
+CEO confirmation); the frontend follow-up below is built.
 
 ## Context
 
@@ -147,8 +150,17 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
 - **Decimals appear only as the user entered them.** A whole amount is never padded: 1500 shows as
   "1.500" (es) / "1,500" (en), not "1.500,00". An amount with a fraction shows it at the stored scale:
   "1.500,50".
-- Storage is §1's, unchanged: the amount is kept as integer hundredths. An entry with more than two
-  decimals is rounded to hundredths on input, as the web's major-to-minor helper does today.
+- Storage is §1's, unchanged: the amount is kept as integer hundredths.
+- **Input follows the viewer's UI locale** (#1470): `1.234,56` or `1234,56` in es, `1,234.56` or
+  `1234.56` in en — thousands grouping in threes, the locale's decimal separator, at most two
+  decimals. Anything else is **refused inline, never guessed**: the other locale's separators, a minus
+  sign, letters or currency signs, and a third decimal. **CTO decision, 2026-10-02 — provisional,
+  pending CEO confirmation (#1470):** the third decimal is refused rather than rounded because it is
+  almost always a mistyped grouping separator (`1,234` typed in es), and rounding it would store a
+  thousandth of the intended amount without a word.
+- The one accepted shape the two locales read differently — a single separator followed by exactly three
+  digits (`1.150` in es, `1,150` in en) — is read as a thousands group, and the field **echoes the
+  reading** under the input once it is left ("Read as 1150"). No other entry is echoed.
 - This governs purchase amounts and the asset's purchase cost and salvage value, which carry the label.
 - Totals are grouped by label (trimmed, case-insensitive) and never summed across labels.
 - **CTO decision, 2026-10-02 — provisional, pending CEO confirmation (#1469):** the "as entered" rule
@@ -160,15 +172,17 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
 - **Positive:** one money convention again, now wide enough for large-nominal currencies (≈ 90 trillion
   major units per value). Totals stay derived, never stored. The wire shape of every client is unchanged.
 - **Negative / trade-offs:**
+  - An amount genuinely typed with three decimals (as some currencies use) is refused; the operator
+    enters it at two. Accepted: lazyit stores values, it does not model currencies.
   - Every reader of a money column must convert explicitly; a forgotten one throws at serialization.
     Tests on each read path are the guard.
   - A table rewrite with a short exclusive lock on `assets` and `applications` at upgrade time.
   - The usable range stops at `Number.MAX_SAFE_INTEGER`, not at the column's 2^63−1 — deliberately.
-  - A fixed hundredths scale means an amount typed with three decimals (as some currencies use) loses
-    the third on input. Accepted: lazyit stores values, it does not model currencies.
-- **Follow-ups (Phase 1, frontend lane):** move the web money formatter to the §5 display rule (today it
-  forces two decimals) for purchase amounts, the asset cost and salvage value, and — per the §5 CTO
-  decision — `Application.costPerSeat`; bound the major/minor helpers to `MONEY_MAX` (§3).
+- **Follow-ups (Phase 1, frontend lane):** *done in #1470* — `formatMoney` follows the §5 display rule
+  and takes the optional label, for every money amount including `Application.costPerSeat` (§5 CTO
+  decision); `parseMoneyInput` (replacing `majorToMinor`) reads amounts in the viewer's locale, bounded
+  to `MONEY_MAX` (`Number.MAX_SAFE_INTEGER`, §3), on every money input (asset cost and salvage value, bulk
+  receive, application cost per seat). Both live in `apps/web/lib/utils/money.ts`.
 - **Follow-ups (Phase 1, backend lane):** ~~add `money()`; move the three columns and every money field of
   the shared schemas (asset, asset receive, application, the import descriptor, the AI tool inputs) to
   it; convert at the read boundary; cover each read and write path with a test above the old ceiling;

@@ -222,7 +222,8 @@ three stored fields are echoed on create/update.
   field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
   batch create uses them for its duplicate check.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
-  `asset:read`) — powers the form autocomplete datalist and the list filter ([[0076-asset-company-grouping-field]]).
+  `asset:read`) — powers the form's smart-entry company field (suggestions with a near-duplicate hint,
+  #1470) and the list filter ([[0076-asset-company-grouping-field]]).
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
 - `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
   inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full

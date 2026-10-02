@@ -8,6 +8,7 @@ import { useEffect, useRef } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,7 +26,10 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import { useCreateAssetModel } from "@/lib/api/hooks/use-asset-models";
+import {
+  useAssetManufacturers,
+  useCreateAssetModel,
+} from "@/lib/api/hooks/use-asset-models";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
@@ -71,6 +75,8 @@ export function CreateAssetModelDialog({
   const tc = useTranslations("common");
   const { data: categories } = useAssetCategories();
   const create = useCreateAssetModel();
+  const manufacturers = useAssetManufacturers();
+  const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(CreateAssetModelSchema),
@@ -102,6 +108,7 @@ export function CreateAssetModelDialog({
         },
         {
           onSuccess: (model) => {
+            rememberManufacturer(model.manufacturer);
             toast.success(t("created"));
             onCreated?.(model);
             onOpenChange(false);
@@ -170,10 +177,15 @@ export function CreateAssetModelDialog({
                   <FieldLabel htmlFor="new-model-manufacturer" required>
                     {t("manufacturerLabel")}
                   </FieldLabel>
-                  <Input
-                    {...field}
+                  <SuggestInput
                     id="new-model-manufacturer"
+                    name={field.name}
+                    ref={field.ref}
                     value={field.value ?? ""}
+                    onBlur={field.onBlur}
+                    onValueChange={field.onChange}
+                    source={() => manufacturers}
+                    recentKey="assetModel.manufacturer"
                     placeholder={t("manufacturerPlaceholder")}
                     aria-invalid={fieldState.invalid || undefined}
                   />

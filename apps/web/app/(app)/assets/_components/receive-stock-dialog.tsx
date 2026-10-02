@@ -13,7 +13,7 @@ import {
   ReceiveAssetsSchema,
   RECEIVE_ASSETS_MAX_QUANTITY,
 } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +22,8 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
+import { MoneyField } from "@/components/money-input";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -51,6 +53,8 @@ import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
 import { useReceiveAssets } from "@/lib/api/hooks/use-asset-receive";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { parseMoneyInput } from "@/lib/utils/money";
+import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useAssetStatusLabel } from "./asset-status-badge";
 import { buildReceivePayload } from "./receive-stock-payload";
 
@@ -75,15 +79,17 @@ type FieldErrors = Partial<
  * The endpoint is a PARTIAL-SUCCESS one (a per-unit create loop): it returns `{ created, failed }` and
  * a partial (or total) failure is NOT a request error. So the dialog switches to a RESULT view that
  * reports how many landed and lists each failed unit by its 1-based position with the reason — by
- * design, not an error toast. Money is entered in MAJOR units and converted to minor units on submit
- * (#954), never re-coerced downstream.
+ * design, not an error toast. Money is entered in MAJOR units in the viewer's locale and converted to
+ * minor units on submit (#954, #1470), never re-coerced downstream.
  */
 export function ReceiveStockButton() {
   const t = useTranslations("assets.receive");
   const tc = useTranslations("common");
   const statusLabel = useAssetStatusLabel();
   const receive = useReceiveAssets();
+  const locale = useLocale();
   const { data: companies } = useAssetCompanies();
+  const [, rememberCompany] = useRecentValues("asset.company");
   // Creating a model is its own permission — the "+" only renders when the operator actually has it.
   const canCreateModel = useCan("assetModel:write");
 
@@ -137,6 +143,11 @@ export function ReceiveStockButton() {
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    // A refused amount already shows its reason inline on the field (#1470): stop there.
+    if (!parseMoneyInput(purchaseCost, locale).ok) {
+      scrollToFirstError(event.target);
+      return;
+    }
     // The form→wire mapping (blank-field omission, major→minor money, serials split) lives in the
     // pure `buildReceivePayload`; the shared schema stays the single validator: quantity bounds, the
     // serials-count refinement, and the field shapes all live there.
@@ -150,7 +161,7 @@ export function ReceiveStockButton() {
       purchaseCost,
       notes,
       serials,
-    });
+    }, locale);
 
     const parsed = ReceiveAssetsSchema.safeParse(candidate);
     if (!parsed.success) {
@@ -172,6 +183,7 @@ export function ReceiveStockButton() {
     setErrors({});
     receive.mutate(parsed.data, {
       onSuccess: (envelope) => {
+        if (envelope.created.length > 0) rememberCompany(company);
         setResult(envelope);
         if (envelope.failed.length === 0) {
           toast.success(
@@ -336,18 +348,14 @@ export function ReceiveStockButton() {
                       <FieldLabel htmlFor="receive-company">
                         {t("company")}
                       </FieldLabel>
-                      <Input
+                      <SuggestInput
                         id="receive-company"
                         value={company}
-                        onChange={(e) => setCompany(e.target.value)}
-                        list="receive-company-options"
+                        onValueChange={setCompany}
+                        source={() => companies?.map((value) => ({ value }))}
+                        recentKey="asset.company"
                         placeholder={t("companyPlaceholder")}
                       />
-                      <datalist id="receive-company-options">
-                        {(companies ?? []).map((name) => (
-                          <option key={name} value={name} />
-                        ))}
-                      </datalist>
                     </Field>
 
                     <Field>
@@ -362,24 +370,14 @@ export function ReceiveStockButton() {
                       />
                     </Field>
 
-                    <Field>
-                      <FieldLabel htmlFor="receive-cost">
-                        {t("purchaseCost")}
-                      </FieldLabel>
-                      <Input
-                        id="receive-cost"
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        value={purchaseCost}
-                        onChange={(e) => setPurchaseCost(e.target.value)}
-                        placeholder={t("purchaseCostPlaceholder")}
-                      />
-                      <FieldDescription>
-                        {t("purchaseCostHelp")}
-                      </FieldDescription>
-                    </Field>
+                    <MoneyField
+                      id="receive-cost"
+                      label={t("purchaseCost")}
+                      description={t("purchaseCostHelp")}
+                      value={purchaseCost}
+                      onValueChange={setPurchaseCost}
+                      placeholder={t("purchaseCostPlaceholder")}
+                    />
                   </div>
 
                   <Field>

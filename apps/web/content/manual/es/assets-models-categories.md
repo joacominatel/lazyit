@@ -19,6 +19,12 @@ individuales no tengan que repetirlos.
 Un modelo tiene un **nombre** (obligatorio), un **fabricante** (obligatorio), un **SKU** opcional, una
 descripción opcional, una **categoría** opcional y **valores por defecto** opcionales.
 
+El campo **fabricante** sugiere los fabricantes que ya usan tus otros modelos — los más usados primero,
+con cuántos modelos usa cada uno — y avisa cuando lo que escribiste es otra forma de escribir uno
+existente (por ejemplo `DELL` o `Dell Inc.` para `Dell`), para que una marca no termine partida en dos.
+Funciona como el campo [Empresa](/help/assets-asset-basics) del activo, y siempre puedes escribir un
+fabricante nuevo.
+
 - Los **valores por defecto** son pares clave/valor — por ejemplo "viene con 16GB". Cuando creas un
   activo y eliges este modelo, esos valores se copian en los
   [campos personalizados](/help/assets-asset-basics) del nuevo activo como punto de partida. Luego

@@ -63,8 +63,9 @@ lazyit can track the licensing behind an application, so you can see at a glance
 you pay for is actually in use. On the application form, fill in any of:
 
 - **Seats purchased** — how many paid seats the license includes. Leave it blank to not track a limit.
-- **Cost per seat** — the price of a single seat, per billing period. Enter it in normal units
-  (e.g. `12.99`); lazyit stores the amount precisely.
+- **Cost per seat** — the price of a single seat, per billing period. Enter it in normal units, in
+  your language's number format (`12.99` in English, `12,99` in Spanish — see
+  [entering amounts](/help/assets-asset-basics#entering-amounts)); lazyit stores the amount precisely.
 - **Renewal date** — when the license next renews.
 
 **Seats in use** is worked out for you: it's the number of *distinct people* who currently hold

@@ -7,17 +7,19 @@
  * untouched. Nothing here talks to the network or to React.
  *
  * The empty-field rules encoded here are load-bearing: blank optional id/date fields are OMITTED
- * (an empty string fails `cuid()` / `datetime()` in `ReceiveAssetsSchema`), money is converted from
- * the MAJOR units the operator types to the minor units the wire carries (#954), and `serials` is
+ * (an empty string fails `cuid()` / `datetime()` in `ReceiveAssetsSchema`), money is parsed from
+ * the MAJOR units the operator types in their locale to the minor units the wire carries (#954,
+ * #1470), and `serials` is
  * absent — not `[]` — when nothing was pasted. `ReceiveAssetsSchema` remains the single validator.
  */
 
-import { majorToMinor } from "@/lib/utils/money";
+import { parseMoneyInput } from "@/lib/utils/money";
 import type { AssetStatus } from "@lazyit/shared";
 
 /**
  * The dialog's raw local state. Everything is a string because it comes straight from inputs; the
- * serials textarea is one serial per line and `purchaseCost` is major units as typed.
+ * serials textarea is one serial per line and `purchaseCost` is major units as typed, in the
+ * viewer's locale.
  */
 export type ReceiveStockFormValues = {
   modelId: string;
@@ -45,12 +47,16 @@ export function parseSerials(raw: string): string[] {
  * - `modelId` is forwarded verbatim — including an id that arrived from the inline create dialog.
  * - Blank `locationId` / `purchaseDate` are dropped (not `""`, which fails `cuid()` / `datetime()`).
  * - `company` / `notes` are trimmed and dropped when blank.
- * - `purchaseCost` goes through `majorToMinor` (blank → `null`, the schema's "not set").
+ * - `purchaseCost` goes through `parseMoneyInput` in `locale` (blank → `null`, the schema's "not
+ *   set"). A refused amount becomes `NaN`, which the schema rejects — never a silent "not set". The
+ *   dialog refuses it inline before getting here.
  * - `serials` is omitted entirely when the paste is empty.
  */
 export function buildReceivePayload(
   values: ReceiveStockFormValues,
+  locale: string,
 ): Record<string, unknown> {
+  const cost = parseMoneyInput(values.purchaseCost, locale);
   const serialLines = parseSerials(values.serials);
   const company = values.company.trim();
   const notes = values.notes.trim();
@@ -63,7 +69,7 @@ export function buildReceivePayload(
     ...(values.purchaseDate
       ? { purchaseDate: `${values.purchaseDate}T00:00:00.000Z` }
       : {}),
-    purchaseCost: majorToMinor(values.purchaseCost),
+    purchaseCost: cost.ok ? cost.minor : Number.NaN,
     ...(notes ? { notes } : {}),
     ...(serialLines.length > 0 ? { serials: serialLines } : {}),
   };
