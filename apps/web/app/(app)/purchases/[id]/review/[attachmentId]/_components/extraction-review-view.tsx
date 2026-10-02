@@ -259,8 +259,8 @@ export function ExtractionReviewView({
   );
 }
 
-/** The draft as proposed changes, and Save. */
-function ReviewForm({
+/** The draft as proposed changes, and Save. Exported for its render test. */
+export function ReviewForm({
   purchase,
   draft,
   review,
@@ -730,7 +730,10 @@ function TotalsBanner({ totals, currency }: { totals: ReturnType<typeof totalsCh
   const money = (minor: number | null) => (minor === null ? "—" : formatMoney(minor, locale, currency));
   if (totals.state === "unknown") {
     return totals.net === null && totals.gross === null ? null : (
-      <p className="text-sm text-muted-foreground">{t("unknown")}</p>
+      <p className="text-sm text-muted-foreground">
+        {t("unknown")}
+        {totals.incomplete > 0 ? <> {t("incomplete", { count: totals.incomplete })}.</> : null}
+      </p>
     );
   }
   return (
