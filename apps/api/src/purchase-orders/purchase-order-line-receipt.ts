@@ -1,7 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { Prisma } from '../../generated/prisma/client';
-import { isCountableKind } from './purchase-order-derived';
 
 type Client = PrismaService | Prisma.TransactionClient;
 
@@ -17,7 +16,7 @@ interface LineCounts {
  * `OTHER` lines are never pending, and a kind a newer build added is not countable here.
  */
 export function assertAssetLine(line: { kind: string }): void {
-  if (line.kind !== 'ASSET' || !isCountableKind(line.kind)) {
+  if (line.kind !== 'ASSET') {
     throw new BadRequestException(
       `Only ASSET lines take assets; this line is ${line.kind}`,
     );

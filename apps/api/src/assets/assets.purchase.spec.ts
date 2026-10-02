@@ -230,8 +230,13 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
     },
   };
 
+  let lastFindMany: jest.Mock;
+  const selectOf = (findMany: jest.Mock) =>
+    (findMany.mock.calls[0] as [{ select: Row }])[0].select;
+
   async function exportCsv(held: readonly Permission[]) {
     const { service, prisma } = setup(held);
+    lastFindMany = prisma.asset.findMany;
     prisma.asset.findMany
       .mockResolvedValueOnce([linkedRow])
       .mockResolvedValueOnce([]);
@@ -248,6 +253,8 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
 
   it('without purchaseOrder:read: cost and currency only — no supplier, reference or invoice', async () => {
     const [, header, row] = await exportCsv(['asset:read']);
+    // The linked purchase is not even read.
+    expect(selectOf(lastFindMany)).not.toHaveProperty('purchaseOrderLine');
     expect(header.endsWith(',purchaseCost,purchaseCurrency')).toBe(true);
     expect(header).not.toContain('supplier');
     expect(row.endsWith(',1500.50,USD')).toBe(true);
@@ -260,6 +267,7 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
       'asset:read',
       'purchaseOrder:read',
     ]);
+    expect(selectOf(lastFindMany)).toHaveProperty('purchaseOrderLine');
     expect(header.endsWith(',supplier,purchaseReference,invoiceNumbers')).toBe(
       true,
     );

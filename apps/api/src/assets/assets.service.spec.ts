@@ -11,6 +11,7 @@ import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
 import { AssetTagSchemeService } from '../asset-tag-scheme/asset-tag-scheme.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` mostly for types (erased at runtime), but `isUniqueTagCollision` (ADR-0063) does a real
@@ -286,6 +287,10 @@ describe('AssetsService', () => {
         { provide: AssetHistoryService, useValue: history },
         { provide: SearchService, useValue: search },
         { provide: AssetTagSchemeService, useValue: tagScheme },
+        {
+          provide: PermissionResolverService,
+          useValue: { principalHas: jest.fn().mockResolvedValue(false) },
+        },
       ],
     }).compile();
 
@@ -1208,22 +1213,12 @@ describe('AssetsService', () => {
   };
   const CSV_HEADER =
     'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt,purchaseCost,purchaseCurrency';
-  // The export's projection: the lean list select plus the cost columns and the linked purchase (#1473).
+  // The export's projection for a caller WITHOUT purchaseOrder:read: the lean list select plus the cost
+  // columns — the linked purchase is not even read (#1473).
   const EXPECTED_EXPORT_SELECT = {
     ...EXPECTED_LIST_SELECT,
     purchaseCost: true,
     purchaseCurrency: true,
-    purchaseOrderLine: {
-      select: {
-        purchaseOrder: {
-          select: {
-            reference: true,
-            invoiceNumbers: true,
-            supplier: { select: { name: true } },
-          },
-        },
-      },
-    },
   };
 
   it('streamInventoryCsvRows yields the header first, then batches over the lean select and terminates', async () => {

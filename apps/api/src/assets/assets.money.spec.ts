@@ -26,6 +26,7 @@ import { ArticlesService } from '../articles/articles.service';
 import { AiToolDispatcher } from '../ai/core/tool-dispatcher';
 import { bind } from '../ai/core/tool-descriptor';
 import { ActorService } from '../common/actor.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 
@@ -152,6 +153,10 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
         {
           provide: AssetTagSchemeService,
           useValue: { allocateTag: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: PermissionResolverService,
+          useValue: { principalHas: jest.fn().mockResolvedValue(false) },
         },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
