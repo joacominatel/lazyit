@@ -550,6 +550,7 @@
           "accessGrant": "Access grants",
           "accessRequest": "Access requests",
           "consumable": "Consumables",
+          "purchaseOrder": "Purchases",
           "article": "Knowledge Base",
           "location": "Locations",
           "assetModel": "Asset models",
@@ -836,6 +837,9 @@
       "consumable:read": { "label": "View consumables" },
       "consumable:write": { "label": "Add, edit & adjust consumables" },
       "consumable:delete": { "label": "Delete consumables" },
+      "purchaseOrder:read": { "label": "View purchases & suppliers" },
+      "purchaseOrder:write": { "label": "Record & edit purchases" },
+      "purchaseOrder:delete": { "label": "Delete purchases & suppliers" },
       "assetModel:read": { "label": "View asset models" },
       "assetModel:write": { "label": "Add & edit asset models" },
       "assetModel:delete": { "label": "Delete asset models" },
@@ -899,6 +903,18 @@
       "inventory:import": {
         "label": "Run bulk imports",
         "description": "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit."
+      },
+      "purchaseOrder:view": {
+        "label": "View purchases & suppliers",
+        "description": "See purchases, their lines, prices and documents, and the supplier directory."
+      },
+      "purchaseOrder:edit": {
+        "label": "Record & edit purchases",
+        "description": "Create and edit purchases, their lines and suppliers, receive units and link assets to a purchase."
+      },
+      "purchaseOrder:delete": {
+        "label": "Delete purchases & suppliers",
+        "description": "Archive and restore purchases and suppliers. Linked assets keep their link."
       },
       "infra:view": {
         "label": "View the server map",
