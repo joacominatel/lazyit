@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Application
@@ -33,8 +33,8 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 - **`isCritical`** (default `false`) flags an application whose access is especially sensitive
   (production infra, finance). Informational for now; the UI can highlight it.
 - **License / seat tracking** ([[0088-application-license-seat-tracking]], #949) — all optional / `null`
-  = "untracked". `seatsPurchased` = paid seats; `costPerSeat` = price per seat in **integer minor units**
-  (cents), mirroring `Asset.purchaseCost` (#954); `renewalDate` = when the license next renews. **`seatsUsed`
+  = "untracked". `seatsPurchased` = paid seats; `costPerSeat` = price per seat in **64-bit integer minor
+  units** (hundredths), mirroring `Asset.purchaseCost` (#954, [[0100-money-as-64-bit-minor-units]]); `renewalDate` = when the license next renews. **`seatsUsed`
   is DERIVED, never stored:** `COUNT(DISTINCT userId)` over active ([[access-grant]]s with `revokedAt IS
   NULL`) — DISTINCT user because grants are multi-grant (a raw count over-reports the license). The web
   flags **over-allocation** (`seatsUsed > seatsPurchased`) as an advisory warning; lazyit never blocks a
@@ -48,8 +48,8 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 >   **who makes the software** (Microsoft, Atlassian), not who you buy it from — that is a
 >   [[supplier]], and the old Spanish label "Proveedor" is exactly the word for supplier. **Label only:**
 >   the column, the API field and existing values are unchanged.
-> - **`costPerSeat`** widens to a 64-bit integer of minor units ([[0100-money-as-64-bit-minor-units]]);
->   it stays currency-less.
+> - **`costPerSeat`** stays currency-less. (Its widening to a 64-bit integer of minor units,
+>   [[0100-money-as-64-bit-minor-units]], is built — #1469.)
 > - From Phase 2, a `LICENSE` [[purchase-order-line]] links to an application and **proposes** a seats /
 >   renewal update through a confirmation diff. It never changes `seatsPurchased` automatically.
 
@@ -94,7 +94,7 @@ Prisma model `Application` → table `applications`. Validation schemas (`Applic
 | `metadata` | `jsonb?` | free-form extras; any JSON object for now (see debt note). |
 | `notes` | `string?` | optional free text. |
 | `seatsPurchased` | `int?` | license seats paid for; `null` = untracked/unlimited (#949, [[0088-application-license-seat-tracking]]). |
-| `costPerSeat` | `int?` | price **per seat** in integer **minor units** (cents); reuses the #954 money convention. **Planned:** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]). |
+| `costPerSeat` | `bigint?` | price **per seat** in integer **minor units** (hundredths); reuses the #954 money convention. A Postgres `bigint`, a JSON number on the wire bounded to `[0, Number.MAX_SAFE_INTEGER]` by the shared `money()` ([[0100-money-as-64-bit-minor-units]]). |
 | `renewalDate` | `datetime?` | when the license next renews (informational; the proactive nudge #1070 is a follow-up). |
 | `seatsUsed` | `int` (derived) | **not a column** — `COUNT(DISTINCT userId)` over active grants, computed per-request; read-only (create/update reject it). |
 | `createdAt` | `datetime` | `@default(now())`. |
