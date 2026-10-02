@@ -1,5 +1,7 @@
 import { unexposed, type AiToolset } from '../core/tool-descriptor';
 import { PurchaseOrdersController } from '../../purchase-orders/purchase-orders.controller';
+import { AssetPurchaseController } from '../../purchase-orders/asset-purchase.controller';
+import { PurchaseOrderAttachmentsController } from '../../attachments/purchase-order-attachments.controller';
 import { SuppliersController } from '../../purchase-orders/suppliers.controller';
 import { SuggestionsController } from '../../suggestions/suggestions.controller';
 
@@ -27,8 +29,23 @@ export const purchasesToolset: AiToolset = {
         'addLine',
         'updateLine',
         'removeLine',
+        // Receiving, linking and pending units (#1473): purchase changes are never auto-approved (§11), and
+        // generating assets or changing money is excluded from "Approve all" — Phase 3 designs both.
+        'findPendingLines',
+        'cancelRemaining',
+        'receive',
+        'linkPreview',
+        'linkAssets',
+        'unlinkAssets',
       ],
       PHASE_3,
+    ),
+    unexposed(AssetPurchaseController, ['findOne'], PHASE_3),
+    unexposed(PurchaseOrderAttachmentsController, ['list', 'remove'], PHASE_3),
+    unexposed(
+      PurchaseOrderAttachmentsController,
+      ['upload', 'content'],
+      'Binary upload and download: no file tools (synthesis §9.2); extraction reads attached documents in Phase 2.',
     ),
     unexposed(
       SuppliersController,
