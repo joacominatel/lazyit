@@ -135,10 +135,3 @@ export function matchSlashCommand<C>(
   if (argument === null) return { command, argument };
   return command.argument?.accepts(argument) ? { command, argument } : null;
 }
-
-/** Moves the palette's highlighted row with wrap-around; an empty list has no row (-1). */
-export function moveHighlight(current: number, delta: number, count: number): number {
-  if (count <= 0) return -1;
-  if (current < 0) return delta > 0 ? 0 : count - 1;
-  return (((current + delta) % count) + count) % count;
-}

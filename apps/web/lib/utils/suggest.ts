@@ -8,7 +8,7 @@
  * duplicate, and the field decides what to show.
  */
 
-import { moveHighlight } from "@/lib/ai/slash-commands";
+import { moveHighlight } from "./move-highlight";
 
 /** One value the field may suggest, with what is known about its use. */
 export interface SuggestCandidate {

@@ -10,11 +10,11 @@ import { routeContext } from "@/lib/ai/route-context";
 import {
   filterSlashCommands,
   matchSlashCommand,
-  moveHighlight,
   slashQuery,
   type SlashCommand,
 } from "@/lib/ai/slash-commands";
 import { AI_PROMPT_MAX_LENGTH } from "@lazyit/shared";
+import { moveHighlight } from "@/lib/utils/move-highlight";
 import { AiCommandPalette, commandOptionId } from "./ai-command-palette";
 import { AiCloseIcon, AiSendIcon, AiStopIcon } from "./ai-icons";
 import { useEntityTypeLabel } from "./ai-labels";
