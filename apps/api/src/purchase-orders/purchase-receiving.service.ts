@@ -301,6 +301,11 @@ export class PurchaseReceivingService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
+      // Lock order: purchase, then assets. KEY SHARE conflicts with the FOR UPDATE that removing a line (or
+      // changing its kind) takes on the purchase, so a link and a line removal serialize and the removal sees
+      // the linked asset — yet two links on the same purchase, or cross moves between two purchases, do not
+      // block each other (KEY SHARE does not conflict with itself), so no deadlock.
+      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
       const { purchase, line } = await this.purchases.assertLineLive(
         tx,
         purchaseOrderId,
@@ -483,7 +488,8 @@ export class PurchaseReceivingService {
     tx: Tx,
     assetIds: string[],
   ): Promise<Map<string, LinkAssetRow>> {
-    await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" IN (${Prisma.join(assetIds)}) FOR UPDATE`;
+    // A stable lock order (by id), so two requests over overlapping assets cannot deadlock.
+    await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" IN (${Prisma.join(assetIds)}) ORDER BY "id" FOR UPDATE`;
     const rows = await tx.asset.findMany({
       where: { id: { in: assetIds }, deletedAt: null },
       select: LINK_ASSET_SELECT,

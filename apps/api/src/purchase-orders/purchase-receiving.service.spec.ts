@@ -286,8 +286,8 @@ describe('link assets', () => {
         where: { id: { in: [A1, A2, A3, A4] }, deletedAt: null },
       }),
     );
-    // The rows are locked first.
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // The purchase (KEY SHARE), then the asset rows, are locked first.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.asset.update).toHaveBeenCalledTimes(1);
   });
 
@@ -395,6 +395,28 @@ describe('link assets', () => {
     expect(prisma.purchaseOrderEvent.create).not.toHaveBeenCalled();
     expect(prisma.asset.update).not.toHaveBeenCalled();
     expect(result.overReceived).toBe(false);
+  });
+
+  it('locks the purchase (KEY SHARE) before the line check and any asset write, then the assets in id order', async () => {
+    const { service, tx, reads } = setup();
+    reads.asset.findMany.mockResolvedValue([assetRow(A1)]);
+
+    await service.linkAssets(PO, LINE, { assetIds: [A1] }, member);
+
+    const [purchaseLock, assetLock] = tx.$queryRaw.mock.calls as [
+      TemplateStringsArray,
+      ...unknown[],
+    ][];
+    expect(purchaseLock[0].join('?')).toContain(
+      'FROM "purchase_orders" WHERE "id" = ? FOR KEY SHARE',
+    );
+    expect(purchaseLock[1]).toBe(PO);
+    expect(assetLock[0].join('?')).toContain('ORDER BY "id" FOR UPDATE');
+    const lockOrder = tx.$queryRaw.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(
+      reads.purchaseOrder.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(lockOrder).toBeLessThan(tx.asset.update.mock.invocationCallOrder[0]);
   });
 
   it('move: true re-links an asset from another line and logs it on both purchases', async () => {
