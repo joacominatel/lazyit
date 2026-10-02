@@ -59,6 +59,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
 import { formatMoney } from "@/lib/utils/money";
+import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import {
   MoneyTotals,
@@ -115,6 +116,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
 
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
+  const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -420,6 +422,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                 <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
                                   {t("detail.editLine")}
                                 </DropdownMenuItem>
+                                {line.pendingQuantity > 0 ? (
+                                  <DropdownMenuItem onSelect={() => setCancelling(line)}>
+                                    {t("detail.cancelRemaining")}
+                                  </DropdownMenuItem>
+                                ) : null}
                                 {line.receivedQuantity === 0 ? (
                                   <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(line)}>
                                     {t("detail.removeLine")}
@@ -449,6 +456,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
         <ReceiveStockDialog
           line={{ purchase, line: receiving }}
           onClose={() => setReceiving(null)}
+        />
+      ) : null}
+
+      {cancelling ? (
+        <CancelRemainingDialog
+          purchaseId={purchase.id}
+          line={cancelling}
+          onClose={() => setCancelling(null)}
         />
       ) : null}
 

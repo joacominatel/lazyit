@@ -205,7 +205,8 @@
     "lineRemoveError": "No se pudo quitar la línea",
     "activitySection": "Actividad",
     "receive": "Recibir",
-    "receiveUnits": "Recibir unidades"
+    "receiveUnits": "Recibir unidades",
+    "cancelRemaining": "Cancelar unidades restantes"
   },
   "activity": {
     "fields": {
@@ -330,5 +331,17 @@
     "loadError": "No se pudo cargar esa compra",
     "newAssetTitle": "¿Estás registrando algo que compraste?",
     "newAssetHelp": "Recibilo contra su línea de compra: el modelo, el costo, las fechas y la garantía vienen de la compra, y el activo queda vinculado a ella."
+  },
+  "cancelRemaining": {
+    "title": "Cancelar unidades restantes",
+    "description": "Unidades de “{line}” que no van a llegar. {pending, plural, one {Queda # unidad pendiente} other {Quedan # unidades pendientes}}.",
+    "quantity": "Unidades a cancelar",
+    "quantityInvalid": "Ingresá un número de 1 a {pending}.",
+    "reason": "Motivo",
+    "reasonPlaceholder": "Opcional: por ejemplo “la cuarta nunca llegó”",
+    "reasonHelp": "Queda en el registro de actividad de la compra.",
+    "submit": "Cancelar unidades",
+    "cancelledToast": "{count, plural, one {# unidad cancelada} other {# unidades canceladas}}",
+    "error": "No se pudieron cancelar las unidades"
   }
 }

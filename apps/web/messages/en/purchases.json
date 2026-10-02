@@ -205,7 +205,8 @@
     "lineRemoveError": "Couldn't remove the line",
     "activitySection": "Activity",
     "receive": "Receive",
-    "receiveUnits": "Receive units"
+    "receiveUnits": "Receive units",
+    "cancelRemaining": "Cancel remaining units"
   },
   "activity": {
     "fields": {
@@ -330,5 +331,17 @@
     "loadError": "Couldn't load that purchase",
     "newAssetTitle": "Receiving something you bought?",
     "newAssetHelp": "Receive it against its purchase line instead: the model, cost, dates and warranty come from the purchase, and the asset is linked to it."
+  },
+  "cancelRemaining": {
+    "title": "Cancel remaining units",
+    "description": "Units of “{line}” that will not arrive. {pending, plural, one {# unit is} other {# units are}} still pending.",
+    "quantity": "Units to cancel",
+    "quantityInvalid": "Enter a number from 1 to {pending}.",
+    "reason": "Reason",
+    "reasonPlaceholder": "Optional — for example “the fourth never came”",
+    "reasonHelp": "Kept in the purchase's activity log.",
+    "submit": "Cancel units",
+    "cancelledToast": "{count, plural, one {# unit} other {# units}} cancelled",
+    "error": "Couldn't cancel the units"
   }
 }
