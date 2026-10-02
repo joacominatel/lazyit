@@ -209,7 +209,7 @@
     "receiveUnits": "Recibir unidades",
     "cancelRemaining": "Cancelar unidades restantes",
     "linkExisting": "Vincular activos existentes",
-    "documentsBackupNotice": "Los archivos que subas acá todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guardá tu propia copia de cada factura, pedido o remito que necesites conservar."
+    "documentsBackupNotice": "Los archivos que subas aquí todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guarda tu propia copia de cada factura, pedido o remito que necesites conservar."
   },
   "activity": {
     "fields": {
@@ -263,7 +263,7 @@
     "unitsCancelled": "{count, plural, one {Canceló # unidad} other {Canceló # unidades}} de «{line}»",
     "reason": "«{reason}»",
     "assetsLinked": "{count, plural, one {Vinculó # activo} other {Vinculó # activos}} a «{line}»",
-    "assetsMoved": "{count, plural, one {Movió # activo} other {Movió # activos}} acá, a «{line}»",
+    "assetsMoved": "{count, plural, one {Movió # activo} other {Movió # activos}} aquí, a «{line}»",
     "assetsUnlinked": "{count, plural, one {Desvinculó # activo} other {Desvinculó # activos}} de «{line}»",
     "assetsMovedAway": "{count, plural, one {# activo de «{line}» se movió} other {# activos de «{line}» se movieron}} a otra compra",
     "documentAdded": "Agregó el documento «{name}»",
@@ -336,7 +336,7 @@
     }
   },
   "fromPurchase": {
-    "placeholder": "Elegí una línea de compra",
+    "placeholder": "Elige una línea de compra",
     "search": "Buscar compra, proveedor o ítem…",
     "none": "Ninguna compra espera unidades",
     "lineLabel": "{purchase} — {line} ({pending} pendientes)",
@@ -345,13 +345,13 @@
     "receiveAgainst": "Recibir contra ella",
     "loadError": "No se pudo cargar esa compra",
     "newAssetTitle": "¿Estás registrando algo que compraste?",
-    "newAssetHelp": "Recibilo contra su línea de compra: el modelo, el costo, las fechas y la garantía vienen de la compra, y el activo queda vinculado a ella."
+    "newAssetHelp": "Recíbelo contra su línea de compra: el modelo, el costo, las fechas y la garantía vienen de la compra, y el activo queda vinculado a ella."
   },
   "cancelRemaining": {
     "title": "Cancelar unidades restantes",
     "description": "Unidades de «{line}» que no van a llegar. {pending, plural, one {Queda # unidad pendiente} other {Quedan # unidades pendientes}}.",
     "quantity": "Unidades a cancelar",
-    "quantityInvalid": "Ingresá un número de 1 a {pending}.",
+    "quantityInvalid": "Ingresa un número de 1 a {pending}.",
     "reason": "Motivo",
     "reasonPlaceholder": "Opcional: por ejemplo «la cuarta nunca llegó»",
     "reasonHelp": "Queda en el registro de actividad de la compra.",
@@ -361,8 +361,8 @@
   },
   "link": {
     "title": "Vincular {count, plural, one {un activo} other {# activos}} a una compra",
-    "pickAssetsDescription": "Elegí los activos que ya tenés y que vinieron de {purchase} · {line}.",
-    "pickLineDescription": "Elegí la compra y la línea en que {count, plural, one {se compró este activo} other {se compraron estos # activos}}.",
+    "pickAssetsDescription": "Elige los activos que ya tienes y que vinieron de {purchase} · {line}.",
+    "pickLineDescription": "Elige la compra y la línea en que {count, plural, one {se compró este activo} other {se compraron estos # activos}}.",
     "diffDescription": "{purchase} · {line}. Los valores de la compra llegan a los activos solo donde los marques.",
     "searchAssets": "Buscar nombre, etiqueta o número de serie…",
     "modelChip": "Modelo: {model}",
@@ -370,7 +370,7 @@
     "noAssets": "Ningún activo coincide.",
     "selectedCount": "{count} seleccionados · {pending} pendientes en la línea",
     "purchase": "Compra",
-    "purchasePlaceholder": "Elegí una compra",
+    "purchasePlaceholder": "Elige una compra",
     "purchaseSearch": "Buscar referencia, factura o proveedor…",
     "noPurchases": "No se encontraron compras",
     "noAssetLines": "Esta compra no tiene líneas de activos.",
@@ -385,8 +385,8 @@
     "alreadyHere": "{count, plural, one {# activo ya está} other {# activos ya están}} en esta línea y se omiten.",
     "missing": "{count, plural, one {No se encontró # activo y se omite} other {No se encontraron # activos y se omiten}}.",
     "elsewhereTitle": "Ya están en otra compra",
-    "elsewhereHelp": "Nunca se mueven sin avisar. Marcá los que en realidad pertenecen a esta línea.",
-    "moveHere": "Mover {asset} acá",
+    "elsewhereHelp": "Nunca se mueven sin avisar. Marca los que en realidad pertenecen a esta línea.",
+    "moveHere": "Mover {asset} aquí",
     "openCurrent": "Abrir su compra",
     "applyTitle": "¿Aplicar valores de la compra?",
     "applyEvery": "Aplicar todos los valores de la compra",
@@ -435,7 +435,7 @@
     "reasons": {
       "notFound": "No se encontró, o está archivado",
       "alreadyLinked": "Ya está en esta línea",
-      "linkedElsewhere": "Está en otra compra: marcá «Mover acá» para moverlo",
+      "linkedElsewhere": "Está en otra compra: marca «Mover aquí» para moverlo",
       "notLinked": "No está vinculado a esta línea"
     }
   },
@@ -472,7 +472,7 @@
     "loadError": "No se pudieron cargar las unidades pendientes",
     "emptyTitle": "Nada espera unidades",
     "emptyFiltered": "Nada de este proveedor espera unidades",
-    "emptyDescription": "Las líneas de compras pedidas aparecen acá hasta que cada unidad se recibe o se cancela. Los borradores y las compras canceladas no se incluyen.",
+    "emptyDescription": "Las líneas de compras pedidas aparecen aquí hasta que cada unidad se recibe o se cancela. Los borradores y las compras canceladas no se incluyen.",
     "orderedOn": "pedida el {date}",
     "expectedOn": "esperada el {date}",
     "overdue": "Atrasada",
