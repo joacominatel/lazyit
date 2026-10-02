@@ -1758,7 +1758,9 @@ model Consumable {
   updatedAt    DateTime            @updatedAt
   deletedAt    DateTime?
 
-  movements ConsumableMovement[]
+  movements          ConsumableMovement[]
+  // CONSUMABLE purchase lines received into this consumable (ADR-0099, #1476).
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@index([categoryId])
   @@map("consumables")
@@ -1808,6 +1810,13 @@ model ConsumableMovement {
   returnOfId       Int?
   returnOf         ConsumableMovement?    @relation("ConsumableMovementReturn", fields: [returnOfId], references: [id], onDelete: Restrict)
   returns          ConsumableMovement[]   @relation("ConsumableMovementReturn")
+  // ── Purchase receipt (ADR-0099, #1476) ───────────────────────────────────────────────────────────
+  // An IN posted by receiving a CONSUMABLE purchase line carries that line; the line's received count is
+  // the SUM of these quantities. Set at insert, never updated (the ledger stays append-only). Restrict: a
+  // received line is history-bearing (lines are only ever soft-deleted). A DB CHECK (raw SQL) allows it on
+  // an IN only. NULL on every movement that predates it.
+  purchaseOrderLineId String?
+  purchaseOrderLine   PurchaseOrderLine?   @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
   createdAt        DateTime               @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query; the
@@ -1817,6 +1826,7 @@ model ConsumableMovement {
   @@index([targetAssetId])
   @@index([targetLocationId])
   @@index([returnOfId])
+  @@index([purchaseOrderLineId])
   @@map("consumable_movements")
 }
 
@@ -3149,6 +3159,9 @@ model Attachment {
   // Who uploaded it (a human). SetNull: the file outlives its uploader. @db.Uuid to match User.id.
   uploadedById String?              @db.Uuid
   uploadedBy   User?                @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  // Optional free-text document TYPE label (ADR-0099 §10, #1476): quote, invoice, delivery note… on asset
+  // and purchase documents. Untrusted text, stored verbatim (ADR-0029). NULL on every existing row.
+  label        String?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   deletedAt    DateTime?
@@ -3755,7 +3768,8 @@ model PurchaseOrder {
 
 /// One line of a purchase. A description is the only field the user must fill; quantity defaults to 1
 /// and the unit price is optional (NULL = unknown, 0 = free). Received = the count of LIVE assets pointing
-/// at the line (derived, never stored); pending = quantity − received − cancelled, floored at 0.
+/// at the line, or the units of the IN movements posted from it (derived, never stored); pending =
+/// quantity − received − cancelled, floored at 0.
 /// See docs/02-domain/entities/purchase-order-line.md
 model PurchaseOrderLine {
   id                String        @id @default(cuid())
@@ -3763,7 +3777,7 @@ model PurchaseOrderLine {
   purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   // Display order within the purchase (int4).
   position          Int           @default(0)
-  // TEXT validated by zod on write: ASSET | OTHER now, CONSUMABLE / LICENSE in later phases.
+  // TEXT validated by zod on write: ASSET | OTHER | CONSUMABLE now, LICENSE in a later phase.
   kind              String        @default("ASSET")
   description       String
   // Brand and model as written on the document, before (or instead of) mapping to an AssetModel.
@@ -3772,6 +3786,10 @@ model PurchaseOrderLine {
   // Optional mapping to a model; SetNull so a removed model never takes the line with it.
   assetModelId      String?
   assetModel        AssetModel?   @relation(fields: [assetModelId], references: [id], onDelete: SetNull)
+  // A CONSUMABLE line's consumable (#1476): received units become IN movements of it. SetNull, like the
+  // model mapping (consumables are only soft-deleted; their movements Restrict a hard delete anyway).
+  consumableId      String?
+  consumable        Consumable?   @relation(fields: [consumableId], references: [id], onDelete: SetNull)
   quantity          Int           @default(1)
   // Integer minor units in the purchase's currency label (ADR-0100). NULL = unknown.
   unitPrice         BigInt?
@@ -3782,10 +3800,13 @@ model PurchaseOrderLine {
   updatedAt         DateTime      @updatedAt
   deletedAt         DateTime?
 
-  assets Asset[]
+  assets              Asset[]
+  // IN movements posted by receiving a CONSUMABLE line into stock (#1476).
+  consumableMovements ConsumableMovement[]
 
   @@index([purchaseOrderId])
   @@index([assetModelId])
+  @@index([consumableId])
   @@map("purchase_order_lines")
 }
 
