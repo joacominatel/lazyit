@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-18
+updated: 2026-10-01
 ---
 
 # Application
@@ -43,6 +43,16 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   category never deletes its applications.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
+> [!note] Purchases — planned, not built ([[0099-purchases-scope-model-and-optionality]], #1465)
+> - **`vendor` is labelled "Publisher" (en) / "Fabricante" (es)** from Purchases Phase 1. It means
+>   **who makes the software** (Microsoft, Atlassian), not who you buy it from — that is a
+>   [[supplier]], and the old Spanish label "Proveedor" is exactly the word for supplier. **Label only:**
+>   the column, the API field and existing values are unchanged.
+> - **`costPerSeat`** widens to a 64-bit integer of minor units ([[0100-money-as-64-bit-minor-units]]);
+>   it stays currency-less.
+> - From Phase 2, a `LICENSE` [[purchase-order-line]] links to an application and **proposes** a seats /
+>   renewal update through a confirmation diff. It never changes `seatsPurchased` automatically.
+
 > [!note] Prior design discarded — no `type` enum, no approvers
 > An earlier draft of this note gave `Application` a hardcoded `type` enum and per-application
 > **approvers**. Both were dropped ([[0023-access-management-design]]): classification is a
@@ -78,13 +88,13 @@ Prisma model `Application` → table `applications`. Validation schemas (`Applic
 | `name` | `string` | required (≤200). |
 | `description` | `string?` | optional (≤2000). |
 | `url` | `string?` | optional system URL; stored as a free string (not strictly URL-validated; non-http(s) schemes rejected — SEC-008). |
-| `vendor` | `string?` | optional provider (Atlassian, Microsoft, AWS, …). |
+| `vendor` | `string?` | optional publisher — who makes the software (Atlassian, Microsoft, AWS, …). Shown as **Publisher** / **Fabricante** from Purchases Phase 1 (planned; label only). Not a [[supplier]]. |
 | `categoryId` | `cuid?` | optional FK → [[application-category]], `onDelete: SetNull`. |
 | `isCritical` | `boolean` | `@default(false)`. |
 | `metadata` | `jsonb?` | free-form extras; any JSON object for now (see debt note). |
 | `notes` | `string?` | optional free text. |
 | `seatsPurchased` | `int?` | license seats paid for; `null` = untracked/unlimited (#949, [[0088-application-license-seat-tracking]]). |
-| `costPerSeat` | `int?` | price **per seat** in integer **minor units** (cents); reuses the #954 money convention. |
+| `costPerSeat` | `int?` | price **per seat** in integer **minor units** (cents); reuses the #954 money convention. **Planned:** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]). |
 | `renewalDate` | `datetime?` | when the license next renews (informational; the proactive nudge #1070 is a follow-up). |
 | `seatsUsed` | `int` (derived) | **not a column** — `COUNT(DISTINCT userId)` over active grants, computed per-request; read-only (create/update reject it). |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -118,4 +128,5 @@ Related: [[application-category]] · [[access-grant]] · [[access-request]] · [
 [[shared-package]] · [[0023-access-management-design]] · [[0016-auth-strategy-deferred]] ·
 [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·
 [[0018-api-documentation-swagger]] · [[0088-application-license-seat-tracking]] ·
+[[0099-purchases-scope-model-and-optionality]] · [[supplier]] ·
 [[0036-int4-bounded-integers]]
