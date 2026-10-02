@@ -159,10 +159,27 @@ export class ApplicationsService {
     return applicationMoneyToWire(application);
   }
 
-  async update(id: string, data: UpdateApplication) {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+  /**
+   * Update an application. `tx` runs the write inside a caller's transaction — the purchase license apply
+   * (#1477) writes `seatsPurchased` / `renewalDate` here, through this one path, in the same transaction as
+   * its line and event.
+   */
+  async update(
+    id: string,
+    data: UpdateApplication,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    // 404 if missing or already soft-deleted (the read filter hides archived rows).
+    const existing = await client.application.findFirst({
+      where: { id },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Application ${id} not found`);
+    }
     const { metadata, ...rest } = data;
-    const application = await this.prisma.application.update({
+    const application = await client.application.update({
       where: { id },
       data: {
         ...applicationMoneyToDb(rest),
