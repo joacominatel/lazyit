@@ -258,6 +258,9 @@ export function SuggestInput({
           // The listbox inside is the popup the combobox controls; this wrapper adds no role.
           role="presentation"
           className="w-(--radix-popover-trigger-width) min-w-56 p-1"
+          // Keep focus in the input on any click in the list (rows, headings, scrollbar): the list is
+          // driven from there.
+          onMouseDown={(event) => event.preventDefault()}
           onOpenAutoFocus={(event) => event.preventDefault()}
           onCloseAutoFocus={(event) => event.preventDefault()}
           onInteractOutside={(event) => {
@@ -291,8 +294,6 @@ export function SuggestInput({
                         "flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm",
                         index === active && "bg-accent text-accent-foreground",
                       )}
-                      // Keep focus in the input: the list is driven from there.
-                      onMouseDown={(event) => event.preventDefault()}
                       onMouseEnter={() => setHighlight(index)}
                       onClick={() => take(option.value)}
                     >
