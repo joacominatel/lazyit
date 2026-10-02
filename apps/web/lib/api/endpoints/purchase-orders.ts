@@ -1,11 +1,18 @@
 import type {
+  ApplyLicense,
+  ApplyLicenseResult,
   AssetPurchaseProvenance,
   CancelRemainingUnits,
+  CreatePurchaseFromAssets,
+  CreatePurchaseFromAssetsResult,
   CreatePurchaseOrder,
   CreatePurchaseOrderLine,
+  LicenseProposal,
   LinkAssetsResult,
   LinkAssetsToLine,
   PendingPurchaseLinePage,
+  PurchaseExtractionDraft,
+  PurchaseExtractionStatus,
   PurchaseLinkPreview,
   PurchaseOrder,
   PurchaseOrderDetail,
@@ -256,4 +263,54 @@ export function getPendingLines(
  */
 export function getAssetPurchase(assetId: string, signal?: AbortSignal): Promise<AssetPurchaseProvenance> {
   return apiFetch<AssetPurchaseProvenance>(`/assets/${encodeURIComponent(assetId)}/purchase`, { signal });
+}
+
+// ── Phase 2 (#1477): document extraction, license lines, create from assets ─────────────────────────────
+
+/**
+ * Whether *Read this document* can be offered to the caller (`purchaseOrder:read`): available, or the reason
+ * it is not (`AI_DISABLED`, `EXTRACTION_DISABLED`, `PROVIDER_UNSUPPORTED`, `NOT_PERMITTED`), the document types
+ * the configured provider reads and the caps. The web never extracts unless this says `available`.
+ */
+export function getExtractionStatus(signal?: AbortSignal): Promise<PurchaseExtractionStatus> {
+  return apiFetch<PurchaseExtractionStatus>(`${BASE}/extraction/status`, { signal });
+}
+
+/**
+ * Send a document attached to the purchase to the configured AI provider and return the DRAFT
+ * (`purchaseOrder:write` + `ai:use`, people only). Saves nothing to the purchase: the person reviews the draft
+ * and saves through the ordinary routes. Refusals carry a `code` (409 unavailable, 422 the document, 429
+ * budget, 502 the provider, 504 the deadline); the document stays attached on every one.
+ */
+export function extractPurchaseDocument(id: string, attachmentId: string): Promise<PurchaseExtractionDraft> {
+  return apiFetch<PurchaseExtractionDraft>(
+    `${BASE}/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/extract`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * What applying a `LICENSE` line would do (`purchaseOrder:read` + `application:read`): the application's
+ * current seats and renewal, the line's pending seats as the default to add, and the warnings. Writes nothing.
+ */
+export function getLicenseProposal(id: string, lineId: string, signal?: AbortSignal): Promise<LicenseProposal> {
+  return apiFetch<LicenseProposal>(`${linePath(id, lineId)}/license-proposal`, { signal });
+}
+
+/**
+ * Apply a `LICENSE` line to its application — explicit, never automatic (`purchaseOrder:write` +
+ * `application:write`): adds the confirmed seats and/or sets the renewal date through the application's own
+ * write path, and counts the seats as applied on the line. Over-application is allowed and flagged.
+ */
+export function applyLicense(id: string, lineId: string, data: ApplyLicense): Promise<ApplyLicenseResult> {
+  return apiFetch<ApplyLicenseResult>(`${linePath(id, lineId)}/apply-license`, { method: "POST", body: data });
+}
+
+/**
+ * Create one purchase from selected existing assets (`purchaseOrder:write` + `asset:write`): a line per
+ * model (or name), the assets linked, no other asset field changed. Partial success with a reason per asset
+ * left out; a 409 with nothing created when none can be linked.
+ */
+export function createPurchaseFromAssets(data: CreatePurchaseFromAssets): Promise<CreatePurchaseFromAssetsResult> {
+  return apiFetch<CreatePurchaseFromAssetsResult>(`${BASE}/from-assets`, { method: "POST", body: data });
 }
