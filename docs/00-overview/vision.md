@@ -65,7 +65,7 @@ bundled-but-replaceable Zitadel (BYOI) — [[0037-idp-choice-zitadel-byoi]],
   not a generic ticket tool. The `Ticket`/`TicketComment` entities were never built; they
   are removed from the domain.
 - **Procurement / purchasing system** — lazyit does not run purchasing: no approval workflows,
-  budgets, invoices as payables, three-way match, supplier portal, exchange rates or tax engine.
+  budgets, invoices as payables, three-way match, supplier portal or exchange rates.
   The customer's finance system stays the system of record for purchase orders. What lazyit
   **does** do, since [[0099-purchases-scope-model-and-optionality]] (2026-10-01), is **record**
   purchases — supplier, the finance PO number, documents, lines, and which assets came out of

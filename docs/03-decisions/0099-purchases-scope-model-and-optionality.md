@@ -89,19 +89,20 @@ Three facts constrain the answer:
 
 ### 1. Scope and hard limits
 
-lazyit **records purchases**. It does **not** run purchasing. Out of scope, permanently unless a new ADR
-says otherwise:
+lazyit **records purchases**. It does **not** run purchasing. The CEO's hard limits — out of scope
+unless a new ADR says otherwise:
 
 - approval workflows or approval chains;
 - budgets;
 - invoices as payables: payment status, due dates, payment terms, bank details;
 - three-way match (order ↔ delivery note ↔ invoice);
-- a supplier portal, or sending or printing purchase orders to suppliers;
-- exchange rates of any kind, and conversion between currencies;
-- a tax engine (VAT rates, tax collections) or a net/gross toggle;
-- spreading shipping or overhead onto asset cost;
-- creating assets at order time;
-- leases (a different acquisition type; out of v1, revisited with its own ADR).
+- a supplier portal;
+- exchange rates of any kind, and conversion between currencies (§5).
+
+Also out of v1, from the research and the UX defaults accepted with the package
+([[purchases/ux-proposal]] §1 and §8): sending or printing purchase orders to suppliers; a tax engine or
+a net/gross toggle; spreading shipping or overhead onto asset cost; creating assets at order time; and
+leases, which are a different acquisition type and get their own ADR if they come.
 
 The area is named **Purchases** (en) / **Compras** (es), not "Purchase Orders": lazyit does not issue
 orders. It lives in the sidebar under **Inventory**, next to Assets and Consumables, with the tabs
@@ -253,8 +254,8 @@ gated by `purchaseOrder:read` / `:write` ([[0082-attachments-storage]]). A purch
   (with the verbatim source text and page per field, blanks over guesses) that a human reviews and saves
   through the normal write path. A later document *proposes* changes field by field; it never overwrites.
 - A supplier document is **untrusted content** (INV-AI-4): reading it marks the conversation, and
-  **purchase changes are never auto-approved** in the chat. Pages that create assets or change money are
-  excluded from "Approve all".
+  **purchase changes are never auto-approved** in the chat. The UX proposal also excludes pages that
+  create assets or change money from "Approve all" (D11); the Phase 3 design confirms it.
 
 ### 12. Prerequisite: back up the attachments volume
 
