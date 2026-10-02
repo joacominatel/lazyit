@@ -26,7 +26,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { failureViews } from "@/lib/purchases/link-apply";
-import { costDiffersFromPurchase, purchasePanelMode } from "@/lib/purchases/provenance";
+import { costDiffersFromPurchase, provenanceTitleSource, purchasePanelMode } from "@/lib/purchases/provenance";
 import { formatMoney } from "@/lib/utils/money";
 import { usePurchaseTitle } from "@/app/(app)/purchases/_components/purchase-display";
 import { LinkAssetsDialog } from "./link-assets-dialog";
@@ -118,7 +118,7 @@ function Provenance({ asset, canUnlink }: { asset: PanelAsset; canUnlink: boolea
 
   const { purchaseOrder: purchase, line, documents } = data;
   const archived = purchase.deletedAt !== null;
-  const title = titleOf({ ...purchase, createdAt: line.createdAt });
+  const title = titleOf(provenanceTitleSource(purchase, line));
   const supplier = purchase.supplier;
   const differs = costDiffersFromPurchase(asset, line, purchase.currency);
   const support = supplier
