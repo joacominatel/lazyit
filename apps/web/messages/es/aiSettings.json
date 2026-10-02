@@ -404,6 +404,28 @@
     "webSearch": "/help/ai-assistant-setup#búsqueda-web",
     "mcp": "/help/ai-assistant-setup#agentes-de-ia-externos-mcp",
     "allowlist": "/help/ai-assistant-setup#clientes-permitidos",
-    "disclosure": "/help/ai-assistant-overview#qué-sale-de-tu-servidor"
+    "disclosure": "/help/ai-assistant-overview#qué-sale-de-tu-servidor",
+    "documentExtraction": "/help/ai-assistant-setup#extracción-de-documentos"
+  },
+  "documentExtraction": {
+    "title": "Extracción de documentos",
+    "on": "Activada",
+    "off": "Desactivada",
+    "description": "Permite completar una compra desde una factura, un presupuesto o un remito adjunto: el proveedor de IA lee el documento y lazyit muestra un borrador para que una persona lo revise. No se guarda nada hasta que lo confirma.",
+    "switch": {
+      "label": "Permitir leer documentos de compras con IA",
+      "description": "Se aplica al instante. Solo ven la acción quienes pueden editar compras y usar el asistente de IA, y solo para documentos PDF e imágenes."
+    },
+    "savedOn": "Extracción de documentos activada",
+    "savedOff": "Extracción de documentos desactivada",
+    "availability": {
+      "aiOff": "Primero activá el asistente de IA. La extracción de documentos usa su proveedor y necesita los dos interruptores activados.",
+      "providerUnsupported": "El proveedor configurado no puede leer documentos. La extracción de documentos funciona con Anthropic, OpenAI y Google Gemini."
+    },
+    "disclosure": {
+      "title": "Qué sale de lazyit",
+      "egress": "Los documentos de compras se envían al proveedor de IA configurado. Cuando alguien le pide a lazyit leer un documento adjunto a una compra, el archivo completo (una factura, un presupuesto o un remito, con su proveedor, precios e IDs fiscales) va al proveedor, bajo tu contrato con él.",
+      "review": "No se guarda nada de él hasta que una persona revisa el borrador y guarda la compra. Cada lectura cuenta para el presupuesto diario de IA de esa persona y queda registrada en la actividad de la compra."
+    }
   }
 }
