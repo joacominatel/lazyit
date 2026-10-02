@@ -14,7 +14,6 @@ import {
   type CancelRemainingUnits,
   type CreatePurchaseOrderLine,
   type PageQuery,
-  type PurchaseOrderEventType,
   type PurchaseOrderReceiptFilter,
   type PurchaseOrderStatus,
   type UpdatePurchaseOrder,
@@ -22,7 +21,7 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorService, type ActorAttribution } from '../common/actor.service';
+import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
@@ -418,7 +417,7 @@ export class PurchaseOrdersService {
           },
         },
       });
-      await this.recordEvent(tx, created.id, 'CREATED', actor, {
+      await recordPurchaseOrderEvent(tx, created.id, 'CREATED', actor, {
         lineCount: lines.length,
       });
       return this.readDetail(tx, created.id);
@@ -445,14 +444,14 @@ export class PurchaseOrdersService {
       }
       await tx.purchaseOrder.update({ where: { id }, data });
       if (data.status !== undefined && data.status !== before.status) {
-        await this.recordEvent(tx, id, 'STATUS_CHANGED', actor, {
+        await recordPurchaseOrderEvent(tx, id, 'STATUS_CHANGED', actor, {
           from: before.status,
           to: data.status,
         });
       }
       const changes = diff(before, data, HEADER_FIELDS);
       if (Object.keys(changes).length > 0) {
-        await this.recordEvent(tx, id, 'UPDATED', actor, {
+        await recordPurchaseOrderEvent(tx, id, 'UPDATED', actor, {
           fields: Object.keys(changes),
           changes,
         });
@@ -470,7 +469,7 @@ export class PurchaseOrdersService {
         where: { id },
         data: { deletedAt: new Date() },
       });
-      await this.recordEvent(tx, id, 'DELETED', actor);
+      await recordPurchaseOrderEvent(tx, id, 'DELETED', actor);
       return tx.purchaseOrder.findFirstOrThrow({
         where: { id },
         includeSoftDeleted: true,
@@ -495,7 +494,7 @@ export class PurchaseOrdersService {
           where: { id },
           data: { deletedAt: null },
         });
-        await this.recordEvent(tx, id, 'RESTORED', actor);
+        await recordPurchaseOrderEvent(tx, id, 'RESTORED', actor);
       }
       return this.readDetail(tx, id);
     });
@@ -525,7 +524,7 @@ export class PurchaseOrdersService {
       const line = await tx.purchaseOrderLine.create({
         data: { purchaseOrderId, ...this.lineCreateData(data, position) },
       });
-      await this.recordEvent(tx, purchaseOrderId, 'LINE_ADDED', actor, {
+      await recordPurchaseOrderEvent(tx, purchaseOrderId, 'LINE_ADDED', actor, {
         lineId: line.id,
         description: line.description,
         quantity: line.quantity,
@@ -548,10 +547,13 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
+      // A kind change is checked against the linked assets: lock the purchase first so a concurrent link
+      // (which takes KEY SHARE on it) cannot slip a unit in between the check and the write.
       const { line: before } = await this.assertLineLive(
         tx,
         purchaseOrderId,
         lineId,
+        { lock: data.kind !== undefined },
       );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
       const quantity = data.quantity ?? before.quantity;
@@ -578,10 +580,16 @@ export class PurchaseOrdersService {
       });
       const changes = diff(before, data, LINE_FIELDS);
       if (Object.keys(changes).length > 0) {
-        await this.recordEvent(tx, purchaseOrderId, 'LINE_UPDATED', actor, {
-          lineId,
-          changes,
-        });
+        await recordPurchaseOrderEvent(
+          tx,
+          purchaseOrderId,
+          'LINE_UPDATED',
+          actor,
+          {
+            lineId,
+            changes,
+          },
+        );
       }
       return this.readLine(tx, lineId);
     });
@@ -622,10 +630,16 @@ export class PurchaseOrdersService {
         where: { id: lineId },
         data: { deletedAt: now },
       });
-      await this.recordEvent(tx, purchaseOrderId, 'LINE_REMOVED', actor, {
-        lineId,
-        description: line.description,
-      });
+      await recordPurchaseOrderEvent(
+        tx,
+        purchaseOrderId,
+        'LINE_REMOVED',
+        actor,
+        {
+          lineId,
+          description: line.description,
+        },
+      );
       // Nothing is linked (checked above), so the line reads as received 0 — the full line shape.
       return { ...this.lineToWire(line, deriveLine(line, 0)), deletedAt: now };
     });
@@ -667,12 +681,18 @@ export class PurchaseOrdersService {
         where: { id: lineId },
         data: { cancelledQuantity: to },
       });
-      await this.recordEvent(tx, purchaseOrderId, 'UNITS_CANCELLED', actor, {
-        lineId,
-        quantity,
-        cancelledQuantity: { from: line.cancelledQuantity, to },
-        reason: data.reason ?? null,
-      });
+      await recordPurchaseOrderEvent(
+        tx,
+        purchaseOrderId,
+        'UNITS_CANCELLED',
+        actor,
+        {
+          lineId,
+          quantity,
+          cancelledQuantity: { from: line.cancelledQuantity, to },
+          reason: data.reason ?? null,
+        },
+      );
       return this.readLine(tx, lineId);
     });
   }
@@ -800,22 +820,5 @@ export class PurchaseOrdersService {
     if (missing.length > 0) {
       throw new BadRequestException(`AssetModel ${missing[0]} not found`);
     }
-  }
-
-  /** Append one activity-log row in the caller's transaction ({@link recordPurchaseOrderEvent}). */
-  private recordEvent(
-    tx: Tx,
-    purchaseOrderId: string,
-    eventType: PurchaseOrderEventType,
-    actor: ActorAttribution,
-    payload?: Record<string, Prisma.InputJsonValue | null>,
-  ) {
-    return recordPurchaseOrderEvent(
-      tx,
-      purchaseOrderId,
-      eventType,
-      actor,
-      payload,
-    );
   }
 }

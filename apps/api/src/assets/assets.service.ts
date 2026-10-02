@@ -4,7 +4,6 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import type {
   AssetInventoryCsvItem,
@@ -248,6 +247,28 @@ const ASSET_LIST_SELECT = {
   },
 } satisfies Prisma.AssetSelect;
 
+/** The inventory export's projection: the list's, plus the asset's own cost columns (`asset:read`). */
+const EXPORT_SELECT = {
+  ...ASSET_LIST_SELECT,
+  purchaseCost: true,
+  purchaseCurrency: true,
+} as const satisfies Prisma.AssetSelect;
+
+/** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
+const EXPORT_SELECT_WITH_PURCHASE = {
+  ...EXPORT_SELECT,
+  purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
+} as const satisfies Prisma.AssetSelect;
+
+/** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
+type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
+  Partial<
+    Pick<
+      Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
+      'purchaseOrderLine'
+    >
+  >;
+
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
@@ -298,19 +319,15 @@ export class AssetsService {
     private readonly history: AssetHistoryService,
     private readonly search: SearchService,
     private readonly tagScheme: AssetTagSchemeService,
-    // Optional only so hand-built unit fixtures keep compiling; the global AuthModule always provides it,
-    // and every check through it fails closed when it is absent.
-    @Optional() private readonly permissions?: PermissionResolverService,
+    private readonly permissions: PermissionResolverService,
   ) {}
 
-  /** Whether the principal holds `permission`; fail-closed when the resolver is not wired. */
-  private async holds(
+  /** Whether the principal holds `permission` (fail-closed for no principal). */
+  private holds(
     principal: Principal | undefined,
     permission: Parameters<PermissionResolverService['principalHas']>[1],
   ): Promise<boolean> {
-    return (
-      (await this.permissions?.principalHas(principal, permission)) ?? false
-    );
+    return this.permissions.principalHas(principal, permission);
   }
 
   /**
@@ -507,24 +524,24 @@ export class AssetsService {
 
     let skip = 0;
     for (;;) {
-      const rows = await this.prisma.asset.findMany({
+      const batch = {
         where,
         // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
         // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: AssetsService.EXPORT_BATCH_SIZE,
         skip,
-        // The list projection plus the asset's cost columns and the linked purchase's provenance. NEVER
-        // added to ASSET_LIST_SELECT itself: the list is `asset:read` alone. The provenance is only WRITTEN
-        // to the file when `includePurchase` (below and in the shared row function).
-        select: {
-          ...ASSET_LIST_SELECT,
-          purchaseCost: true,
-          purchaseCurrency: true,
-          purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
-        },
         ...escapeHatch,
-      });
+      } satisfies Prisma.AssetFindManyArgs;
+      // The list projection plus the asset's cost columns and — ONLY for a caller holding
+      // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
+      // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
+      const rows: ExportRow[] = includePurchase
+        ? await this.prisma.asset.findMany({
+            ...batch,
+            select: EXPORT_SELECT_WITH_PURCHASE,
+          })
+        : await this.prisma.asset.findMany({ ...batch, select: EXPORT_SELECT });
       if (rows.length === 0) break;
       yield `${rows
         .map((row) =>
@@ -534,17 +551,16 @@ export class AssetsService {
               purchaseCost:
                 row.purchaseCost == null ? null : Number(row.purchaseCost),
               purchaseCurrency: row.purchaseCurrency ?? null,
-              purchase:
-                includePurchase && row.purchaseOrderLine
-                  ? {
-                      supplierName:
-                        row.purchaseOrderLine.purchaseOrder.supplier?.name ??
-                        null,
-                      reference: row.purchaseOrderLine.purchaseOrder.reference,
-                      invoiceNumbers:
-                        row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
-                    }
-                  : null,
+              purchase: row.purchaseOrderLine
+                ? {
+                    supplierName:
+                      row.purchaseOrderLine.purchaseOrder.supplier?.name ??
+                      null,
+                    reference: row.purchaseOrderLine.purchaseOrder.reference,
+                    invoiceNumbers:
+                      row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
+                  }
+                : null,
             },
             { includePurchase },
           ),

@@ -699,6 +699,24 @@ describe('PurchaseOrdersService', () => {
       expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
     });
 
+    it('a kind change locks the purchase before counting linked assets (a concurrent link waits) — #1473', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        lineRow({ kind: 'OTHER' }),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+      await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
+      expect(lockedBefore(prisma, prisma.asset.count)).toBe(true);
+      expect(lockedBefore(prisma, prisma.purchaseOrderLine.update)).toBe(true);
+    });
+
+    it('an update that does not touch the kind takes no lock', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+      await service.updateLine(PO, LINE, { description: 'Laptop 14' }, human);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('a line of another purchase is not found here: 404 on update and removal, scoped by purchaseOrderId', async () => {
       // The line exists, but on another purchase: the purchase-scoped lookup finds nothing.
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(null);
