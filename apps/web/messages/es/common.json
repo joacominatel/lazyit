@@ -117,5 +117,14 @@
     "label": "Más sobre {topic}",
     "learnMore": "Más información en el Manual",
     "newTab": "(se abre en una pestaña nueva)"
+  },
+  "serialScanner": {
+    "starting": "Iniciando la cámara…",
+    "hint": "Apunta la cámara al código de barras del número de serie. Cada código nuevo se agrega en su propia línea.",
+    "added": "Se agregó {code} · {count, plural, one {# escaneado} other {# escaneados}}",
+    "duplicate": "{code} ya está en la lista.",
+    "unsupported": "El escaneo con cámara no está disponible en este dispositivo o navegador. Escribe o pega los números de serie.",
+    "error": "No se pudo iniciar la cámara. Revisa que hayas dado permiso y que estés en HTTPS, o escribe los números de serie.",
+    "done": "Listo"
   }
 }
