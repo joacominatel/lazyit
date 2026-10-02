@@ -51,6 +51,17 @@
     "typeToSearch": "Escribe para buscar…",
     "loading": "Buscando…"
   },
+  "suggest": {
+    "listLabel": "Sugerencias",
+    "recent": "Recientes",
+    "mostUsed": "Más usados",
+    "others": "Usados antes",
+    "matches": "Coincidencias",
+    "uses": "{count, plural, one {# uso} other {# usos}}",
+    "usesSentence": "Usado {count, plural, one {una vez} other {# veces}}.",
+    "nearDuplicate": "Parece un valor existente: “{value}”.",
+    "useExisting": "Usar “{value}”"
+  },
   "quickView": {
     "trigger": "Vista rápida: {name}",
     "openRecord": "Abrir ficha completa",

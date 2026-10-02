@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import {
+  useAssetManufacturers,
   useCreateAssetModel,
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
@@ -166,6 +168,8 @@ function AssetModelForm({
   const create = useCreateAssetModel();
   const update = useUpdateAssetModel();
   const { data: categories } = useAssetCategories();
+  const manufacturers = useAssetManufacturers();
+  const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
   const isPending = create.isPending || update.isPending;
 
   const [values, setValues] = useState<FormState>(() =>
@@ -258,7 +262,8 @@ function AssetModelForm({
       update.mutate(
         { id: model.id, data: built.payload as never },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            rememberManufacturer(saved.manufacturer);
             toast.success(t("taxonomies.models.toast.updated"));
             onClose();
           },
@@ -268,7 +273,8 @@ function AssetModelForm({
       );
     } else {
       create.mutate(built.payload as never, {
-        onSuccess: () => {
+        onSuccess: (saved) => {
+          rememberManufacturer(saved.manufacturer);
           toast.success(t("taxonomies.models.toast.created"));
           onClose();
         },
@@ -314,10 +320,12 @@ function AssetModelForm({
             <FieldLabel htmlFor="model-manufacturer">
               {t("taxonomies.models.form.manufacturerLabel")}
             </FieldLabel>
-            <Input
+            <SuggestInput
               id="model-manufacturer"
               value={values.manufacturer}
-              onChange={(e) => set("manufacturer", e.target.value)}
+              onValueChange={(value) => set("manufacturer", value)}
+              source={() => manufacturers}
+              recentKey="assetModel.manufacturer"
               placeholder={t("taxonomies.models.form.manufacturerPlaceholder")}
               maxLength={200}
               aria-invalid={error ? true : undefined}

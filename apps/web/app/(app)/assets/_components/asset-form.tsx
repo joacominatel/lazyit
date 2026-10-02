@@ -28,6 +28,7 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { UserCombobox } from "@/components/user-combobox";
 import { Button } from "@/components/ui/button";
 import {
@@ -248,9 +249,10 @@ export function AssetForm({
   // differ if someone else creates first. A failed read just hides the hint.
   const { data: tagSummary } = useAssetTagSchemeSummary({ enabled: !isEdit });
   const autoTagHint = autoTagHintFrom(tagSummary, isEdit);
-  // Distinct existing company values for the free-text autocomplete datalist (ADR-0076). A plain
-  // suggestion list — the operator can still type a brand-new value.
+  // Distinct existing company values for the free-text smart-entry field (ADR-0076, #1470) — the
+  // operator can still type a brand-new value. Recent values are this viewer's, kept per browser.
   const { data: companies } = useAssetCompanies();
+  const [, rememberCompany] = useRecentValues("asset.company");
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
@@ -386,6 +388,7 @@ export function AssetForm({
           { id: asset.id, data: payload },
           {
             onSuccess: (updated) => {
+              rememberCompany(values.company);
               toast.success(t("savedToast"));
               router.push(`/assets/${updated.id}`);
             },
@@ -402,6 +405,7 @@ export function AssetForm({
           submitter.dataset.submitIntent === "add-another";
         createAsset.mutate(payload, {
           onSuccess: async (created) => {
+            rememberCompany(values.company);
             toast.success(t("createdToast"));
 
             // Best-effort owner assignment (mirrors /users/new head start, ADR-0064 §1): a failed
@@ -576,26 +580,20 @@ export function AssetForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="company">{t("company")}</FieldLabel>
-                <Input
+                {/* Free text with suggestions over existing values (ADR-0076, #1470): the operator
+                    reuses a value or types a new one — no Company entity/picker. */}
+                <SuggestInput
                   id="company"
                   name={field.name}
                   ref={field.ref}
                   value={field.value ?? ""}
                   onBlur={field.onBlur}
-                  onChange={(event) =>
-                    field.onChange(event.target.value || undefined)
-                  }
-                  // Free-text + autocomplete over existing values (ADR-0076): a native datalist so the
-                  // operator reuses a value or types a new one — no Company entity/picker.
-                  list="asset-company-options"
+                  onValueChange={(value) => field.onChange(value || undefined)}
+                  source={() => companies?.map((value) => ({ value }))}
+                  recentKey="asset.company"
                   placeholder={t("companyPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <datalist id="asset-company-options">
-                  {(companies ?? []).map((company) => (
-                    <option key={company} value={company} />
-                  ))}
-                </datalist>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}

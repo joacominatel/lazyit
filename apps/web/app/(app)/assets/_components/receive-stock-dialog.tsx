@@ -22,6 +22,7 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -84,6 +85,7 @@ export function ReceiveStockButton() {
   const statusLabel = useAssetStatusLabel();
   const receive = useReceiveAssets();
   const { data: companies } = useAssetCompanies();
+  const [, rememberCompany] = useRecentValues("asset.company");
   // Creating a model is its own permission — the "+" only renders when the operator actually has it.
   const canCreateModel = useCan("assetModel:write");
 
@@ -172,6 +174,7 @@ export function ReceiveStockButton() {
     setErrors({});
     receive.mutate(parsed.data, {
       onSuccess: (envelope) => {
+        if (envelope.created.length > 0) rememberCompany(company);
         setResult(envelope);
         if (envelope.failed.length === 0) {
           toast.success(
@@ -336,18 +339,14 @@ export function ReceiveStockButton() {
                       <FieldLabel htmlFor="receive-company">
                         {t("company")}
                       </FieldLabel>
-                      <Input
+                      <SuggestInput
                         id="receive-company"
                         value={company}
-                        onChange={(e) => setCompany(e.target.value)}
-                        list="receive-company-options"
+                        onValueChange={setCompany}
+                        source={() => companies?.map((value) => ({ value }))}
+                        recentKey="asset.company"
                         placeholder={t("companyPlaceholder")}
                       />
-                      <datalist id="receive-company-options">
-                        {(companies ?? []).map((name) => (
-                          <option key={name} value={name} />
-                        ))}
-                      </datalist>
                     </Field>
 
                     <Field>
