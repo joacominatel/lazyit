@@ -590,6 +590,17 @@ a CEO decision.
   so its purchase event is ONE `UNITS_RECEIVED` appended after the loop, and each unit's own `CREATED`
   history carries `{ source: 'purchase', purchaseOrderId, purchaseOrderLineId }`. Rejected: an event per
   unit inside each transaction — twenty identical rows in the activity log for one delivery.
+- **Lock order: purchase, then assets** (review of #1482). A link first takes `FOR KEY SHARE` on the
+  purchase row, then locks the asset rows `FOR UPDATE` in id order. Removing a line, and changing a line's
+  kind, take `FOR UPDATE` on the purchase, which conflicts with KEY SHARE: a link and a removal (or a kind
+  change) serialize, so the removal's "nothing linked" check sees a link that committed first, and a link
+  waiting on the removal then finds the line gone (404). KEY SHARE does not conflict with itself, so
+  concurrent links — including cross moves between two purchases — never block each other on the purchase,
+  and the id-ordered asset locks keep overlapping links from deadlocking. Rejected: `FOR UPDATE` on the
+  purchase for a link — two cross moves would lock the two purchases in opposite orders and deadlock. A
+  receive has the same window, but only until its first unit commits: it takes no purchase lock (each unit
+  is its own transaction), so a line removed in that instant would still receive the units (a soft delete
+  does not fire the FK). Once one unit exists, the removal's own check refuses. Accepted for a manual flow.
 - **A generated unit is born linked.** It records the line on its `CREATED` event, not a separate
   `PURCHASE_LINKED`; `PURCHASE_LINKED` / `PURCHASE_UNLINKED` mark changes to an existing asset. A move
   (`move: true`) writes `PURCHASE_LINKED` with the line it came from, and `ASSET_UNLINKED` on the old
