@@ -24,11 +24,14 @@ the asset's provenance read, the pending-units list and the gated CSV columns. *
 documents, the *Pending units* tab and the asset's *Purchase* panel. **Phase 1b backend: consumable lines and
 the document type label built** (#1476, 2026-10-02): `CONSUMABLE` lines received into stock through the
 consumables ledger, the optional label on asset and purchase documents, and the asset list's purchase
-filters; their screens are a separate frontend unit. What the builds settled is in
+filters. **Their screens built** (#1476, 2026-10-02): consumable lines and *Receive into stock*, document
+type labels, linked assets per line with unlink, the link picker's *Not linked* filter and camera scanning
+of serials. What the builds settled is in
 [[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
 [[#Decisions while building (Phase 1 flows, #1473)]],
 [[#Decisions while building (Phase 1 flows web, #1475)]] and
-[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]].
+[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]] and
+[[#Decisions while building (Phase 1b web, #1476)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -811,12 +814,16 @@ None reopens a CEO decision.
   note is visible to anyone who can see the consumable's movements, Viewers included, and must not carry
   invoice or supplier details.
 - **Consumable lines never reach an asset receive.** The *From purchase* picker of *Receive stock* and *New
-  asset* lists `ASSET` lines only; on *Pending units* a consumable line's *Receive* opens the stock dialog, and
-  its menu has no *Link existing*.
+  asset* lists `ASSET` lines only (and *New asset* shows its callout only when one is open); on *Pending units*
+  a consumable line's *Receive* opens the stock dialog, and its menu has no *Link existing*. Because the
+  pending-lines read cannot filter by kind, the picker reads it page after page to the end (bounded at ten
+  pages of 200), so consumable lines can never push asset lines out of a single page.
 - **The document type label is set before the upload or inline after it.** An optional *Type* field beside
   the upload hint applies to the files of the next upload and then clears, so a later upload never inherits it
   by mistake; a pencil on each row edits it in place, and emptying it clears it (`PATCH { label: null }`). Both
-  use smart entry over `/suggestions/documentLabel` and one recent-values store. The label shows as a badge
+  use smart entry over `/suggestions/documentLabel` and one recent-values store. The typed type is consumed
+  only when at least one file passes the client-side checks, so a refused drop keeps it; closing the editor
+  returns focus to its pencil. The label shows as a badge
   (rendered as text, [[0029-untrusted-content-sanitization]]) on the asset and purchase documents and on the
   asset's *Purchase* panel. Rejected: a staging step per file before upload — a dialog for an optional field.
 - **Linked assets are listed per line, on demand.** *Show assets* under a line's "x of y received" reads `GET
@@ -841,8 +848,12 @@ None reopens a CEO decision.
   both plain and purchase mode. The scanner opens inline under the box, not as a nested dialog — on a phone a
   second modal over the sheet is the heavier choice. It reads QR and the 1D/2D codes on hardware boxes (Code
   128/39/93, EAN, UPC, ITF, Data Matrix) in a wide box, continuously: each new code is appended on its own
-  line with a tick and a vibration where available; the same code still in front of the camera (2 s) is
-  ignored; a code already in the box is reported, never added twice; a read longer than a serial is dropped.
+  line with a tick and a vibration where available; a code held in front of the camera stays silent however
+  long it stays (every sighting refreshes "last seen"), and is reported as a duplicate only after it was out
+  of view for 2 s; a code already in the box is never added twice; a read longer than a serial is dropped.
+  Focus moves to *Done* when the scanner opens and back to *Scan* when it closes. Stopping the camera never
+  throws: `html5-qrcode`'s `stop()` throws synchronously when a start is pending or failed, so every stop
+  goes through one guard (`stopQuietly`).
   Without a camera, permission or HTTPS it says so and the box is typed as before. **In plain mode the quantity
   follows the scanned serials** — only for scans; pasting keeps #1475's "serials must match the quantity" — so
   a scanned delivery never trips that rule. *Receive delivery* across lines (the scanner filling the focused
