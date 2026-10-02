@@ -105,6 +105,9 @@ the assets linked to each line, so an ordered purchase also reads as **Partially
 - **Cancel purchase** (in the *Status* menu) is offered only while nothing has been received. A
   cancelled purchase can be marked as ordered again.
 
+The **Purchases** list opens on the purchases still **waiting for units**; switch the filter to see all
+of them, or filter by status or supplier, and search by reference, invoice number, supplier or item.
+
 ## Receiving units
 
 When the boxes arrive, open the purchase and choose **Receive** on the line (or **Receive units** in the
@@ -233,9 +236,6 @@ handy for a warranty claim — and the purchase's documents, ready to download.
 - If the purchase was **archived**, the panel still says where the asset came from, marked as archived,
   without its documents.
 - An asset that is not linked shows the panel only to someone who can link it, with **Link to purchase**.
-
-The **Purchases** list opens on the purchases still **waiting for units**; switch the filter to see all
-of them, or filter by status or supplier, and search by reference, invoice number, supplier or item.
 
 ## The activity log
 

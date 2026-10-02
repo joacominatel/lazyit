@@ -108,6 +108,10 @@ canceladas.
 - **Cancelar compra** (en el menú *Estado*) solo se ofrece mientras no se haya recibido nada. Una compra
   cancelada se puede volver a marcar como pedida.
 
+La lista de **Compras** se abre en las compras que todavía **esperan unidades**; cambia el filtro para
+verlas todas, o filtra por estado o proveedor, y busca por referencia, número de factura, proveedor o
+ítem.
+
 ## Recibir unidades
 
 Cuando llegan las cajas, abre la compra y elige **Recibir** en la línea (o **Recibir unidades** en el menú
@@ -240,10 +244,6 @@ del proveedor — útil para un reclamo de garantía — y los documentos de la 
 - Si la compra se **archivó**, el panel sigue diciendo de dónde vino el activo, marcada como archivada y
   sin sus documentos.
 - Un activo sin vincular muestra el panel solo a quien puede vincularlo, con **Vincular a una compra**.
-
-La lista de **Compras** se abre en las compras que todavía **esperan unidades**; cambia el filtro para
-verlas todas, o filtra por estado o proveedor, y busca por referencia, número de factura, proveedor o
-ítem.
 
 ## El registro de actividad
 
