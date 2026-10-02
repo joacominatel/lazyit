@@ -3,7 +3,7 @@ title: "Purchases — pre-implementation technical analysis"
 tags: [purchases, research, architecture, data-model]
 status: draft
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Purchase Orders: pre-implementation technical analysis
@@ -16,8 +16,13 @@ updated: 2026-10-01
 > purchase** (not one implicit instance currency) and the asset cost gains an optional currency; money
 > moves to **64-bit** integers (§7 risk 2 and decision 9 are superseded); the reference is **optional**;
 > *Received* is **derived**, not a user-set status; there are no header tax or shipping amounts
-> (shipping is an `OTHER` line); and consumable lines come in Phase **1b**. Entity design: [[supplier]]
-> · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]]. Back to
+> (shipping is an `OTHER` line); and consumable lines come in Phase **1b**. Superseded by the decisions
+> after acceptance (2026-10-01/02): there is **no settings switch** — Purchases is always available and
+> optional at entry (§3.2, §4.1 step 5, §6's settings items and decision 5's option (c) no longer apply;
+> D-B); currency is a **free-text label** with no ISO semantics (D-C); and entry is light (D-D) — **no
+> partial unique indexes** on supplier name or `(supplierId, reference)` (§2's ADR-0041 row, §5), and
+> over-receipt is **allowed with a warning**, not blocked (§7 risk 7, decision 8). Entity design: [[supplier]] ·
+> [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]]. Back to
 > [[purchases/_MOC|the Purchases vault]].
 
 

@@ -3,7 +3,7 @@ title: "Purchases — simulated user interview"
 tags: [purchases, research, user-research]
 status: draft
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Purchase Orders in lazyit — simulated user interview
@@ -12,9 +12,13 @@ updated: 2026-10-01
 > A **simulated** user interview written before the CEO's decisions of 2026-10-01. It is input, not a
 > specification. Where it differs from [[0099-purchases-scope-model-and-optionality|ADR-0099]] or
 > [[purchases/decisions|the decisions note]], those win. Notable differences: no net/gross toggle, no
-> lazyit running number in v1, no manual *Closed* status, and over-receipt is **blocked** (with a
-> one-click "raise the line"), not just warned. Entity design: [[supplier]] · [[purchase-order]] ·
-> [[purchase-order-line]] · [[purchase-order-event]]. Back to [[purchases/_MOC|the Purchases vault]].
+> lazyit running number in v1, and no manual *Closed* status. Superseded by the decisions after
+> acceptance (2026-10-01/02): POs are **not turned on per instance** — there is no switch; Purchases is
+> always available and optional at entry (D-B); currency is a **free-text label**, not a code from a list
+> (D-C); and a supplier is **not required** on a purchase, and nothing is unique (D-D). The persona's
+> "warn me, don't block me" on over-delivery is what ADR-0099 §4 now does. Entity design: [[supplier]] ·
+> [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]]. Back to
+> [[purchases/_MOC|the Purchases vault]].
 
 
 > Simulated user research. One persona answers in character, with a second voice from finance where

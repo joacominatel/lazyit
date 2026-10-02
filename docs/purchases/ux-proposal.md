@@ -3,7 +3,7 @@ title: "Purchases — UX proposal"
 tags: [purchases, research, ux, design]
 status: draft
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Purchases in lazyit: UX proposal
@@ -13,9 +13,23 @@ updated: 2026-10-01
 > package ([[purchases/decisions|the decisions note]]); where it differs from
 > [[0099-purchases-scope-model-and-optionality|ADR-0099]] or [[0100-money-as-64-bit-minor-units|ADR-0100]],
 > those win. Notable differences: D12 is resolved by widening money to 64-bit integers, so the
-> "max 21.474.836,47" error in §3.a and D1's "amounts stay int4" no longer apply. Entity design:
-> [[supplier]] · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]]. Back to
-> [[purchases/_MOC|the Purchases vault]].
+> "max 21.474.836,47" error in §3.a and D1's "amounts stay int4" no longer apply.
+>
+> **Also superseded by the decisions after acceptance (2026-10-01/02):**
+> - **No instance switch** (D-B). Every mention of the Purchases on/off switch — §0, §2.1, §2.2 *Switch
+>   OFF vs ON*, the *Instance settings → Purchases* card, §3.g *A legacy instance turns the feature on*,
+>   §7's Phase 1 "Switch", D10 and Appendix A's switch row — no longer applies: Purchases is always
+>   available and optional at entry. The *Document extraction* switch under AI settings stays.
+> - **Provenance follows `purchaseOrder:read`** (D-A): the asset's *Purchase* panel and the shared
+>   documents are shown only with that permission.
+> - **Currency is a free-text label** (D-C), not a closed ISO 4217 list (§4.4's currency row): smart entry
+>   suggests labels used before, and amounts show without forced decimals.
+> - **Light entry** (D-D): supplier and currency are **not required** (§3.a), a purchase needs only what
+>   identifies it; the reference is **not unique per supplier** (§8.1 item 5, D6) — a repeat is a
+>   suggestion; and over-receipt is **allowed with a warning**, not blocked (§3.d, §8.1 item 6).
+>
+> Entity design: [[supplier]] · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]].
+> Back to [[purchases/_MOC|the Purchases vault]].
 
 
 > Design proposal for an optional "Purchase Orders" capability. Inputs: [[purchases/decisions|CEO inputs]]

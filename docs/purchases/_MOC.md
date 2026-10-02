@@ -3,14 +3,15 @@ title: "Purchases — Map of Content"
 tags: [purchases, moc, index, research]
 status: draft
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Purchases — Map of Content
 
-> Research and decision vault for lazyit's **optional Purchases area** (epic #1465): a record of what
+> Research and decision vault for lazyit's **Purchases area** (epic #1465): a record of what
 > the IT team bought, from which supplier, with which documents, and which assets came out of it — tied
-> to the finance PO number. lazyit **records** purchases; it does not run procurement. Off by default.
+> to the finance PO number. lazyit **records** purchases; it does not run procurement. Always available,
+> optional at entry — no instance switch.
 > **Accepted, not built yet.**
 >
 > **Start here:** the decision record [[0099-purchases-scope-model-and-optionality|ADR-0099]] (scope,
@@ -21,13 +22,14 @@ updated: 2026-10-01
 ## Decisions (binding)
 
 - [[0099-purchases-scope-model-and-optionality|ADR-0099]] — hard limits, the entity model, copy on
-  confirm, derived status, over-receipt under a lock, currency per purchase, the instance switch,
-  `purchaseOrder:*` permissions, AI extraction as a reviewed draft, phasing, the attachments-backup
-  prerequisite, upgrade safety, and the questions still open before Phase 1.
+  confirm, derived status, over-receipt allowed with a warning, the free-text currency label, light
+  entry with no uniqueness constraints, no instance switch, `purchaseOrder:*` permissions (provenance
+  included), AI extraction as a reviewed draft, phasing, the attachments-backup prerequisite, upgrade
+  safety, and the dated decisions taken after acceptance.
 - [[0100-money-as-64-bit-minor-units|ADR-0100]] — money columns to `bigint`, the wire kept as a bounded
   JSON number through a shared `money()` primitive, and the upgrade path.
-- [[purchases/decisions|CEO inputs and decisions]] — the approved package and the CEO's words,
-  verbatim, with where each item is recorded.
+- [[purchases/decisions|CEO inputs and decisions]] — the approved package, the four decisions after
+  acceptance (D-A to D-D), and the CEO's words, verbatim, with where each item is recorded.
 
 ## Research (pre-decision)
 
