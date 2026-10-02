@@ -11,11 +11,12 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Controller, type Resolver, useForm } from "react-hook-form";
+import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateCategoryDialog } from "@/components/create-category-dialog";
 import { MoneyField, moneyInputText } from "@/components/money-input";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -43,6 +44,7 @@ import {
   useCreateApplication,
   useUpdateApplication,
 } from "@/lib/api/hooks/use-application-mutations";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
@@ -147,6 +149,10 @@ export function ApplicationForm({
     ) as Resolver<ApplicationFormValues>,
     defaultValues: toFormValues(application, cloneSource),
   });
+  // Publishers already in use, with counts and last use (ADR-0099 §7).
+  const vendorText = useWatch({ control: form.control, name: "vendor" }) ?? "";
+  const vendors = useSuggestions("vendor", vendorText);
+  const [, rememberVendor] = useRecentValues("application.vendor");
 
   // License / seat tracking (#949) lives OUTSIDE react-hook-form — same rationale as the asset money
   // fields (#954): they're edited in MAJOR units / raw text, but the schema validates minor-unit ints,
@@ -199,6 +205,7 @@ export function ApplicationForm({
         { id: application.id, data: payload },
         {
           onSuccess: (updated) => {
+            rememberVendor(values.vendor);
             toast.success(t("form.savedToast"));
             router.push(`/applications/${updated.id}`);
           },
@@ -213,6 +220,7 @@ export function ApplicationForm({
         : payload;
       createApplication.mutate(createPayload, {
         onSuccess: (created) => {
+          rememberVendor(values.vendor);
           toast.success(t("form.createdToast"));
           router.push(`/applications/${created.id}`);
         },
@@ -260,18 +268,21 @@ export function ApplicationForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="vendor">{t("form.vendorLabel")}</FieldLabel>
-                <Input
+                {/* The publisher (ADR-0099 §2: not a supplier) — free text with smart entry over the
+                    values already in use. */}
+                <SuggestInput
                   id="vendor"
                   name={field.name}
                   ref={field.ref}
                   value={field.value ?? ""}
                   onBlur={field.onBlur}
-                  onChange={(event) =>
-                    field.onChange(event.target.value || undefined)
-                  }
+                  onValueChange={(value) => field.onChange(value || undefined)}
+                  source={() => vendors}
+                  recentKey="application.vendor"
                   placeholder={t("form.vendorPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
+                <FieldDescription>{t("form.vendorHelp")}</FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}

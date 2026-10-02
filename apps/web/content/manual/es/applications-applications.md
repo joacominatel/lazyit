@@ -19,7 +19,8 @@ Una aplicación es simplemente un destino con nombre al que alguien puede tener 
 **nombre** es obligatorio — todo lo demás es opcional y está para ayudar a tu equipo a
 reconocerla y encontrarla:
 
-- **Proveedor** — quién está detrás (Atlassian, Microsoft, AWS…).
+- **Fabricante** — quién hace el software (Atlassian, Microsoft, AWS…). Sugiere los fabricantes ya
+  en uso. No es a quién se lo compras — eso es un [proveedor](/help/purchases-recording-purchases).
 - **Categoría** — un agrupamiento para explorar (ver más abajo).
 - **URL** — dónde vive el sistema. Puede ser una dirección `https://…` normal o un host interno
   sin esquema como `vpn.corp.local`. Por seguridad solo se aceptan hosts sin esquema y enlaces
@@ -55,7 +56,7 @@ y quedan sin categoría. No se pierde nada.
 
 ## Encontrar aplicaciones
 
-El listado de Acceso permite buscar por **nombre o proveedor**, y filtrar por **categoría** y por
+El listado de Acceso permite buscar por **nombre o fabricante**, y filtrar por **categoría** y por
 **criticidad** (solo críticas / no críticas / cualquiera). Cada fila muestra además el número de
 **acceso activo** — cuántas personas tienen actualmente una concesión vigente sobre esa
 aplicación — y, cuando registras el licenciamiento, una celda de **Licencia** (usados / comprados,

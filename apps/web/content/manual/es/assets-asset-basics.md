@@ -98,7 +98,9 @@ Es un campo de texto libre con **sugerencias**, así reutilizas la misma forma d
 crear casi duplicados:
 
 - **Al hacer clic en el campo**, lazyit muestra las empresas que *tú* usaste más recientemente
-  (recordadas en este navegador) y luego las demás empresas en uso.
+  (recordadas en este navegador) y luego las demás empresas en uso — las más usadas primero, con
+  cuántos registros usan cada una y cuándo se usó por última vez. También se sugieren las empresas
+  escritas en [compras](/help/purchases-recording-purchases), si puedes ver las compras.
 - **A medida que escribes**, primero aparecen las coincidencias más cercanas: una empresa que empieza
   con lo que escribiste, luego una en la que alguna palabra empieza así, luego una que lo contiene — e
   incluso una con un error de tipeo cercano.
@@ -122,10 +124,13 @@ filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la 
 ## Costo y amortización
 
 En **Compra y amortización** puedes, de forma opcional, registrar cuánto costó un activo y cuánto se
-espera que dure. Los tres campos son opcionales — déjalos en blanco para el equipo cuyo valor no
+espera que dure. Todos los campos son opcionales — déjalos en blanco para el equipo cuyo valor no
 lleves.
 
 - **Costo de compra** — lo que pagaste por la unidad.
+- **Moneda** — una etiqueta opcional para los importes, como la escribe tu equipo (`ARS`, `USD`,
+  `u$s`…). Sugiere las etiquetas ya en uso. lazyit nunca la convierte ni la interpreta; solo la muestra
+  delante del costo.
 - **Vida útil** — cuánto esperas usarla, **en meses** (por ejemplo `36` para tres años).
 - **Valor residual** — su valor estimado al final de esa vida útil. Por defecto **0** si se deja en
   blanco.
@@ -136,8 +141,10 @@ compra hasta el valor residual a lo largo de la vida útil, y luego se mantiene 
 Si defines un costo pero no una vida útil, el valor contable simplemente se queda en el costo de
 compra (no hay nada que amortizar). Los activos sin costo de compra no muestran ningún valor contable.
 
-Los importes son números simples — lazyit es de una sola organización y no asocia una moneda, así que
-introdúcelos y léelos en la moneda que use tu equipo.
+Un activo con costo pero sin etiqueta de moneda muestra su costo como **Sin moneda** — un estado visible
+propio, nunca una moneda por defecto. Los activos registrados antes de que existieran las etiquetas de
+moneda se ven así hasta que alguien les pone una. El valor contable lleva la misma etiqueta que el
+costo.
 
 ### Escribir importes
 

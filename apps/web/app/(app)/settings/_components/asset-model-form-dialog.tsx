@@ -26,10 +26,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import {
-  useAssetManufacturers,
   useCreateAssetModel,
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { categoryIdForPayload } from "./asset-model-category-payload";
 import { clearableTextForPayload } from "./asset-model-text-payload";
@@ -168,13 +168,14 @@ function AssetModelForm({
   const create = useCreateAssetModel();
   const update = useUpdateAssetModel();
   const { data: categories } = useAssetCategories();
-  const manufacturers = useAssetManufacturers();
   const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
   const isPending = create.isPending || update.isPending;
 
   const [values, setValues] = useState<FormState>(() =>
     toFormState(model, cloneSource),
   );
+  // Manufacturers already in use on models and purchase lines, with counts and last use (ADR-0099 §7).
+  const manufacturers = useSuggestions("manufacturer", values.manufacturer);
   const specsSource =
     model?.specs ??
     (cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined);

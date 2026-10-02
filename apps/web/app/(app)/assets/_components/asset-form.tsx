@@ -55,7 +55,7 @@ import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useAssetTagSchemeSummary } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { autoTagHintFrom } from "./auto-tag-hint";
-import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
@@ -236,6 +236,13 @@ export function AssetForm({
   const [salvageValue, setSalvageValue] = useState(() =>
     moneyInputText(moneySource?.salvageValue, locale),
   );
+  // The cost's optional currency LABEL (ADR-0099 §5): free text, never defaulted — an asset without one
+  // reads "No currency". It travels with the cost (clone copies both).
+  const [purchaseCurrency, setPurchaseCurrency] = useState(
+    () => moneySource?.purchaseCurrency ?? "",
+  );
+  const currencies = useSuggestions("currency", purchaseCurrency);
+  const [, rememberCurrency] = useRecentValues("currency");
 
   // Asset-tag scheme hint (ADR-0063, #363 · #1180 · #1315): on CREATE, when the org enabled an auto-tag
   // scheme, tell the operator which tag leaving this blank would assign. The field stays optional and an
@@ -247,9 +254,8 @@ export function AssetForm({
   // differ if someone else creates first. A failed read just hides the hint.
   const { data: tagSummary } = useAssetTagSchemeSummary({ enabled: !isEdit });
   const autoTagHint = autoTagHintFrom(tagSummary, isEdit);
-  // Distinct existing company values for the free-text smart-entry field (ADR-0076, #1470) — the
-  // operator can still type a brand-new value. Recent values are this viewer's, kept per browser.
-  const { data: companies } = useAssetCompanies();
+  // Recent company values are this viewer's, kept per browser (the suggestions are read below, once the
+  // typed text is known).
   const [, rememberCompany] = useRecentValues("asset.company");
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
@@ -288,6 +294,10 @@ export function AssetForm({
   const { data: assetModels } = useAssetModels();
   // `useWatch` (not `form.watch`) so the React Compiler can subscribe safely.
   const selectedModelId = useWatch({ control: form.control, name: "modelId" });
+  // Company values already in use, with how often and how recently (ADR-0076, ADR-0099 §7) — the
+  // operator can still type a brand-new value.
+  const companyText = useWatch({ control: form.control, name: "company" }) ?? "";
+  const companies = useSuggestions("company", companyText);
   const categoryId =
     assetModels?.find((m) => m.id === selectedModelId)?.categoryId ?? null;
   const specsDictionary =
@@ -382,6 +392,8 @@ export function AssetForm({
         warrantyEnd: values.warrantyEnd,
         notes: values.notes,
         purchaseCost: cost.minor,
+        // Blank = "No currency": absent on create, cleared (null) on edit — see the update below.
+        purchaseCurrency: purchaseCurrency.trim() || undefined,
         usefulLifeMonths: usefulLifeMonthsValue,
         salvageValue: salvage.minor,
         specs,
@@ -389,10 +401,11 @@ export function AssetForm({
 
       if (asset) {
         updateAsset.mutate(
-          { id: asset.id, data: payload },
+          { id: asset.id, data: { ...payload, purchaseCurrency: payload.purchaseCurrency ?? null } },
           {
             onSuccess: (updated) => {
               rememberCompany(values.company);
+              rememberCurrency(purchaseCurrency);
               toast.success(t("savedToast"));
               router.push(`/assets/${updated.id}`);
             },
@@ -410,6 +423,7 @@ export function AssetForm({
         createAsset.mutate(payload, {
           onSuccess: async (created) => {
             rememberCompany(values.company);
+            rememberCurrency(purchaseCurrency);
             toast.success(t("createdToast"));
 
             // Best-effort owner assignment (mirrors /users/new head start, ADR-0064 §1): a failed
@@ -593,7 +607,7 @@ export function AssetForm({
                   value={field.value ?? ""}
                   onBlur={field.onBlur}
                   onValueChange={(value) => field.onChange(value || undefined)}
-                  source={() => companies?.map((value) => ({ value }))}
+                  source={() => companies}
                   recentKey="asset.company"
                   placeholder={t("companyPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
@@ -770,7 +784,7 @@ export function AssetForm({
         <FieldLegend>{t("purchaseGroup.title")}</FieldLegend>
         <FieldDescription>{t("purchaseGroup.description")}</FieldDescription>
         <FieldGroup>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <MoneyField
               id="purchaseCost"
               label={t("purchaseCost")}
@@ -778,6 +792,20 @@ export function AssetForm({
               onValueChange={setPurchaseCost}
               placeholder={t("purchaseCostPlaceholder")}
             />
+
+            <Field>
+              <FieldLabel htmlFor="purchaseCurrency">{t("purchaseCurrency")}</FieldLabel>
+              <SuggestInput
+                id="purchaseCurrency"
+                value={purchaseCurrency}
+                onValueChange={setPurchaseCurrency}
+                source={() => currencies}
+                recentKey="currency"
+                placeholder={t("purchaseCurrencyPlaceholder")}
+                maxLength={32}
+              />
+              <FieldDescription>{t("purchaseCurrencyHelp")}</FieldDescription>
+            </Field>
 
             <Field>
               <FieldLabel htmlFor="usefulLifeMonths">

@@ -92,7 +92,9 @@ It is a free-text field with **suggestions**, so you reuse the same spelling ins
 near-duplicates:
 
 - **When you click into it**, lazyit lists the companies *you* used most recently (remembered in this
-  browser), then the other companies already in use.
+  browser), then the other companies already in use — most used first, with how many records use each
+  and when one was last used. Companies typed on [purchases](/help/purchases-recording-purchases) are
+  suggested too, if you can see purchases.
 - **As you type**, the closest matches come first: a company that starts with what you typed, then one
   where a word starts with it, then one that contains it — and even a close misspelling.
 - **With the keyboard**, **↓** opens the list, **↑**/**↓** move through it, **Enter** or **Tab** takes the
@@ -114,10 +116,13 @@ company. You can filter and add a **Company** column to the list (see below).
 ## Cost & depreciation
 
 Under **Purchase & depreciation** you can optionally record what an asset cost and how long it's
-expected to serve. All three fields are optional — leave them blank for gear whose value you don't
+expected to serve. All the fields are optional — leave them blank for gear whose value you don't
 track.
 
 - **Purchase cost** — what you paid for the unit.
+- **Currency** — an optional label for the amounts, as your team writes it (`ARS`, `USD`, `u$s`…). It
+  suggests the labels already in use. lazyit never converts or interprets it; it only prints it in front
+  of the cost.
 - **Useful life** — how long you expect to use it, **in months** (for example `36` for three years).
 - **Salvage value** — its estimated worth at the end of that life. Defaults to **0** if left blank.
 
@@ -127,8 +132,9 @@ down to the salvage value across the useful life, then holds at the salvage valu
 but no useful life, the book value simply stays at the purchase cost (there's nothing to depreciate
 over). Assets with no purchase cost show no book value at all.
 
-Amounts are plain numbers — lazyit is single-organization and doesn't attach a currency, so enter and
-read them in whatever currency your team uses.
+An asset with a cost but no currency label shows its cost as **No currency** — its own visible state,
+never a default currency. Assets recorded before currency labels existed read this way until someone
+sets one. The book value carries the same label as the cost.
 
 ### Entering amounts
 

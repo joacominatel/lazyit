@@ -27,8 +27,8 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
   [AI assistant](/help/ai-assistant-overview) and connect external AI agents, once an administrator
   turns them on — always with the Member's own permissions.
 - **Viewer** — read-only. By default a Viewer can look at most areas but change nothing. A few
-  sensitive views (the user directory and the access-grant ledger) are also hidden from Viewer by
-  default.
+  sensitive views (the user directory, the access-grant ledger, and purchases and suppliers) are also
+  hidden from Viewer by default.
 
 ## The Roles overview
 
