@@ -198,6 +198,32 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
     expect(result.orphanedRows).toBe(0);
   });
 
+  it('PURCHASE_ORDER documents (#1473): a live one is never orphaned; a deleted one is reclaimed past the grace', async () => {
+    rows.push(
+      {
+        id: ORPHAN_ID,
+        sha256: ORPHAN_SHA,
+        entityType: 'PURCHASE_ORDER',
+        createdAt: OLD,
+        deletedAt: null,
+      },
+      {
+        id: 'cldead000000000000000000',
+        sha256: SHARED_SHA,
+        entityType: 'PURCHASE_ORDER',
+        createdAt: OLD,
+        deletedAt: OLD,
+      },
+    );
+    await writeBlob(ORPHAN_SHA);
+    await writeBlob(SHARED_SHA);
+    const result = await service.sweep(NOW);
+    expect(result.orphanedRows).toBe(0);
+    expect(existsSync(blobPathFor(ORPHAN_SHA, root))).toBe(true);
+    expect(result.blobsUnlinked).toBe(1);
+    expect(existsSync(blobPathFor(SHARED_SHA, root))).toBe(false);
+  });
+
   it('pass 2: a dedup-shared blob survives while ANY live row still references its sha (pin 3)', async () => {
     rows.push(
       {
