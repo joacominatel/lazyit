@@ -694,7 +694,7 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   archived, without its documents.
 - **Documents reuse the asset documents panel**, parameterised by parent, with a warning that the files are
   not in the backup until the attachments backup ships (§12, [[backups]] item 7). No document type label
-  (not built, #1473). *The label is built in #1476 (below); its screens are a later frontend unit.*
+  (not built, #1473). *The label is built in #1476 (below), with its screens (Phase 1b web, below).*
 - **Pending units** is its own tab (`/purchases/pending`): open lines grouped by purchase, oldest order first,
   filtered by supplier, a purchase past its expected date marked *Overdue* (text, not colour alone). The
   proposal's *Overdue only* toggle is not built — the list has no such filter.
@@ -707,7 +707,7 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   "created near the order date" filter, so the link picker filters by the line's model only; the preview still
   marks every asset that sits on another purchase. *All three are closed in #1476 (below): the asset list's
   `purchaseOrderLineId` / `purchaseOrderId` / `purchaseLinked` filters and the provenance `createdAt`; wiring
-  them into the screens is a later frontend unit.*
+  them into the screens is done in Phase 1b web (below).*
 
 ## Decisions while building (Phase 1b consumable lines and document labels, #1476)
 
@@ -790,6 +790,66 @@ under the principles above. None reopens a CEO decision.
   attributed to a purchase and no stock moves.
 - **AI tools.** `receiveStock` and the purchase document label edit are unexposed for Phase 3 (#1478); the
   asset document label edit joins the asset attachments as v1.1.
+
+## Decisions while building (Phase 1b web, #1476)
+
+CTO decisions taken while building the screens of consumable lines, document labels, linked assets and serial
+scanning (2026-10-02), under the principles above — above all D-D, "not a nuisance and not heavy to fill in".
+None reopens a CEO decision.
+
+- **A consumable line is a third kind in the same line editor.** *Consumable* sits beside *Asset* and *Other*;
+  the consumable it is received into is an optional picker (out-of-stock items offered — an empty shelf is why
+  it is bought), shown only with `consumable:read`. Three kinds no longer fit beside the description, so the
+  quantity and price take their own row, shared with the consumable picker. The purchase page names the line's
+  consumable (linked) and counts it as "x of y received" like any countable line.
+- **Receiving into stock is its own small dialog, not a mode of *Receive stock*.** That dialog creates assets;
+  a stock receipt is one count and one note, posted as ONE movement — there is no partial success to show, so
+  it closes with a toast. The quantity is prefilled with the units still pending (the API requires it; the web
+  may prefill it), receiving more shows the usual warning with *Raise the line to n*, and a line with no
+  consumable asks for one and saves it on the line first — the same rule as an asset line without a model.
+  Gated by `purchaseOrder:write` + `consumable:write`, as the route. The note field says, under it, that the
+  note is visible to anyone who can see the consumable's movements, Viewers included, and must not carry
+  invoice or supplier details.
+- **Consumable lines never reach an asset receive.** The *From purchase* picker of *Receive stock* and *New
+  asset* lists `ASSET` lines only; on *Pending units* a consumable line's *Receive* opens the stock dialog, and
+  its menu has no *Link existing*.
+- **The document type label is set before the upload or inline after it.** An optional *Type* field beside
+  the upload hint applies to the files of the next upload and then clears, so a later upload never inherits it
+  by mistake; a pencil on each row edits it in place, and emptying it clears it (`PATCH { label: null }`). Both
+  use smart entry over `/suggestions/documentLabel` and one recent-values store. The label shows as a badge
+  (rendered as text, [[0029-untrusted-content-sanitization]]) on the asset and purchase documents and on the
+  asset's *Purchase* panel. Rejected: a staging step per file before upload — a dialog for an optional field.
+- **Linked assets are listed per line, on demand.** *Show assets* under a line's "x of y received" reads `GET
+  /assets?purchaseOrderLineId=` — the first 50, oldest first — only when opened, so the purchase page loads no
+  asset list by default. Per line rather than `purchaseOrderId=` because the lean list row carries no
+  `purchaseOrderLineId`: a per-purchase list could not say which line to unlink an asset from. Each asset can
+  be unlinked there (`unlink-assets`, `purchaseOrder:write` + `asset:write`), the line side of the asset
+  panel's *Unlink*. A line with more than 50 assets says so; paging it is left for when a line that large
+  appears.
+- **Purchase filters on the asset list are built in one place.** `purchaseAssetFilter` returns nothing without
+  `purchaseOrder:read`, so the web never sends a filter the API would refuse (D-A); the filters are serialized
+  by the list read only, never by the CSV export.
+- **The link picker starts on assets not linked to a purchase** (the UX proposal's chip), removable, beside the
+  model chip; without `purchaseOrder:read` the chip does not exist. The proposal's *created within 90 days of
+  the order date* chip is not built — the list has no such filter.
+- **The asset panel titles the purchase by the purchase's `createdAt`**, closing #1475's fallback to the line's
+  date; a read without it still falls back to the line's.
+- **The activity log reads `STOCK_RECEIVED` and `DOCUMENT_UPDATED`** (set, changed, removed), and the label on
+  `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`; any other new type still reads generically.
+- **Scanning serials reuses the `/assets/scan` camera.** Its `html5-qrcode` start/stop moved into one hook
+  (`useCameraScanner`) shared by the asset lookup and a *Scan* action on the serials box of *Receive stock*, in
+  both plain and purchase mode. The scanner opens inline under the box, not as a nested dialog — on a phone a
+  second modal over the sheet is the heavier choice. It reads QR and the 1D/2D codes on hardware boxes (Code
+  128/39/93, EAN, UPC, ITF, Data Matrix) in a wide box, continuously: each new code is appended on its own
+  line with a tick and a vibration where available; the same code still in front of the camera (2 s) is
+  ignored; a code already in the box is reported, never added twice; a read longer than a serial is dropped.
+  Without a camera, permission or HTTPS it says so and the box is typed as before. **In plain mode the quantity
+  follows the scanned serials** — only for scans; pasting keeps #1475's "serials must match the quantity" — so
+  a scanned delivery never trips that rule. *Receive delivery* across lines (the scanner filling the focused
+  line) is not part of this unit.
+- **Consequences.** The per-line list is capped at 50 with no paging; the "next upload" type field is one more
+  control in the Documents header (optional, cleared after each upload); the scanner depends on the device's
+  camera and browser support, with typing as the fallback.
 
 ## Related
 
