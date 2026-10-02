@@ -342,8 +342,9 @@ screen says why (the provider was busy, the file has too many pages, the daily b
 
 ### Reviewing the draft
 
-The review shows the **document beside the draft** (or **Open in a new tab**, on a small screen). **Nothing
-is saved until you select Save**, and then only what is ticked:
+The review shows the **document beside the draft**: an image right there, a PDF as a card whose **Open in a
+new tab** opens it in your browser's own viewer — put that tab beside the review. **Nothing is saved until
+you select Save**, and then only what is ticked:
 
 - **Hover or focus a value** to see what was read and on which page — `Read "1.412.500,00" · page 1`. That is
   how a misplaced thousands separator is spotted at a glance.

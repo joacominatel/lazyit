@@ -1053,12 +1053,14 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
   admin** (`settings:manage`, who can change Settings → AI) and only for a reason Settings → AI can fix; for
   anyone else, and for `NOT_PERMITTED`, the action is simply absent. *New purchase from a document* is absent
   unless available.
-- **The preview.** The document is fetched with the Bearer token and re-typed to its stored, server-sniffed
-  type before it gets a `blob:` URL; only a PDF (in the browser's viewer, in an `iframe`) or a raster image
-  is shown — never markup — and *Open in a new tab* is always there. **The web Content-Security-Policy says
-  `frame-src 'none'`** ([[content-security-policy]]); it is report-only today, so the PDF frame works and is
-  reported. Before that policy enforces, `frame-src` must allow `blob:` or the PDF preview falls back to the
-  new tab — a security-lane follow-up, not changed here.
+- **The preview: images inline, PDFs in a new tab — never framed** (CTO decision, 2026-10-02). The document
+  is fetched with the Bearer token and re-typed to its stored, server-sniffed type before it gets a `blob:`
+  URL, so the URL never holds markup. A raster image is shown inline beside the review (`img-src` already
+  allows `blob:`). A PDF is a document card whose *Open in a new tab* opens the same `blob:` URL in the
+  browser's own viewer, to put beside the review. The web Content-Security-Policy keeps **`frame-src 'none'`**
+  and `object-src 'none'` ([[content-security-policy]]): lazyit still embeds nothing. Rejected: an `iframe`,
+  `object` or `embed` of the PDF, which would need `frame-src blob:` — a wider policy for a convenience the
+  new tab already gives.
 - **The Settings card.** The switch is saved alone (`documentExtractionEnabled` in the `PUT`); every other card
   omits it, so another card's save never switches it. It is disabled with the reason while the assistant is
   off or the provider reads no documents, and stays usable while on, to turn it off. The disclosure is the
@@ -1086,8 +1088,8 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
   `CREATED_FROM_ASSETS`.**
 
 **Consequences.** An abandoned *New purchase from a document* leaves a draft purchase named after the file. The
-review cannot be reloaded without reading the document again (the draft is never stored). The PDF preview
-depends on the CSP follow-up above before the policy enforces. Line matching by description misses a line the
+review cannot be reloaded without reading the document again (the draft is never stored). A PDF is compared in
+a second tab or window, not inside the review. Line matching by description misses a line the
 document spells differently: it is offered as a new line, ticked, so the person unticks it to avoid a
 duplicate.
 

@@ -355,8 +355,9 @@ diario…).
 
 ### Revisar el borrador
 
-La revisión muestra el **documento junto al borrador** (o **Abrir en una pestaña nueva**, en una pantalla
-chica). **No se guarda nada hasta que eliges Guardar**, y entonces solo lo que está marcado:
+La revisión muestra el **documento junto al borrador**: una imagen ahí mismo, un PDF como una tarjeta cuyo
+**Abrir en una pestaña nueva** lo abre en el visor de tu navegador — pon esa pestaña junto a la revisión. **No
+se guarda nada hasta que eliges Guardar**, y entonces solo lo que está marcado:
 
 - **Pasa el puntero o el foco por un valor** para ver qué se leyó y en qué página — `Leído "1.412.500,00" ·
   página 1`. Así se detecta de un vistazo un separador de miles mal puesto.
