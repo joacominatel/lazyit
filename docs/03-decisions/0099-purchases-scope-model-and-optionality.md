@@ -13,8 +13,10 @@ deciders: [Joaquín Minatel]
 
 **accepted** — 2026-10-01 (epic #1465, issue #1466). Approved by the CEO as one package:
 "dale, aprobado el paquete con la ampliación de montos" (the package is approved, including the money
-widening). **Design only — nothing in this record is built yet.** Phase 1 builds it; until then every
-entity, column and permission named here is *planned*.
+widening). **Phase 1 backend core built** (#1472, 2026-10-02): the four entities, the two asset columns,
+the `purchaseOrder:*` permissions, the purchase and supplier endpoints, the activity log and smart-entry
+suggestions. Receiving, linking, documents, the *Purchase* panel and the screens are still to build;
+what the build settled is in [[#Decisions while building (Phase 1 core, #1472)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -463,6 +465,47 @@ principle, §2, §6, §7 and §10.
 or linking more assets than a line's quantity is **allowed with a warning** and shown as over-received,
 replacing "blocked on write, under a lock" (§4). The per-line count is still computed correctly under
 concurrency, because it is derived from linked assets and never stored.
+
+## Decisions while building (Phase 1 core, #1472)
+
+CTO decisions taken while building the backend core (2026-10-02), under the principles above. None
+reopens a CEO decision.
+
+- **The event type is `TEXT`, like status and kind** (under D-D). `PurchaseOrderEvent.eventType` is a
+  plain text column; the writer emits only the shared `PURCHASE_ORDER_EVENT_TYPES` and readers take any
+  string. A type a later unit appends (`UNITS_RECEIVED`, `ASSET_LINKED`, …) needs no enum migration and
+  reads generically on an older build — the same robustness §2 gives status and kind.
+- **Names as built.** The asset's currency label is `Asset.purchaseCurrency` (the design's working name
+  was `purchaseCostCurrency`). A line also stores `manufacturerText` and `modelText` — brand and model as
+  written on the document, before or instead of mapping to a model ([[purchases/technical-analysis]] §5);
+  they feed smart entry.
+- **"Identifiable" holds after creation.** A header update that clears the supplier and the reference of
+  a purchase with no live line, and removing the last line of a purchase with neither, are refused (400).
+- **Derived receipt, exactly.** Per countable line: pending = quantity − received − cancelled (≥ 0);
+  `OVER` when received > quantity − cancelled; `RECEIVED` when nothing is pending (a fully cancelled line
+  included); otherwise `NONE` or `PARTIAL`. A purchase is `RECEIVED` (or `OVER`) when nothing is pending
+  on any countable line. The list's `receipt` filter derives with the same functions; `PENDING` means at
+  least one pending unit on a purchase that is not `CANCELLED`.
+- **Totals stay exact.** A line whose quantity × unit price exceeds `MONEY_MAX` is refused on write; a
+  purchase total beyond it reads as `null` rather than an inexact number. Grouping by label is one shared
+  function (`groupMoneyTotals`) so every later aggregate uses the same rule.
+- **Smart-entry suggestions are one read, authorized per source.** `GET /suggestions/:field` (fields
+  `supplierName`, `currency`, `company`, `manufacturer`, `lineModel`, `vendor`) returns
+  `{ value, count, lastUsedAt }`, ranked by count then last use. A field may merge columns guarded by
+  different permissions (currency on purchases and on assets; company on assets and purchases; manufacturer
+  on models and purchase lines), so the service reads only the sources the caller may read and refuses the
+  field when it may read none. Values are returned as stored and grouped by exact text — normalizing and
+  near-duplicate hints are the web's job. Rejected: extending `GET /assets/companies` and each sibling
+  endpoint (six contract changes, and the bare-string list the web already consumes would break). The
+  route carries no single permission, so service accounts are refused it (fail-closed); suggestions are a
+  typing aid for people.
+- **Kind is fixed once units are linked.** Changing the kind of a line with live linked assets is a 409:
+  the received units would silently stop counting.
+- **Supplier FK `Restrict`, delivery location `SetNull`.** A supplier with purchases can never be
+  hard-deleted (provenance), a location can (it is only a default for receiving). Soft deletes fire
+  neither.
+- **No AI tools yet.** Every new handler is listed as unexposed in `purchases.tools.ts` (Phase 3, #1478),
+  and the suggestions read as not applicable.
 
 ## Related
 

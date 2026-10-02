@@ -53,10 +53,10 @@ erDiagram
     SecretVault ||--o{ VaultMembership : "scoped to"
     User ||--o{ VaultMembership : "is crypto member via"
     User ||--|| UserKeypair : "has keypair"
-    Supplier ||--o{ PurchaseOrder : "supplies (planned)"
-    PurchaseOrder ||--o{ PurchaseOrderLine : "has (planned)"
-    PurchaseOrder ||--o{ PurchaseOrderEvent : "logged in (planned)"
-    PurchaseOrderLine |o--o{ Asset : "produced (planned)"
+    Supplier ||--o{ PurchaseOrder : "supplies"
+    PurchaseOrder ||--o{ PurchaseOrderLine : "has"
+    PurchaseOrder ||--o{ PurchaseOrderEvent : "logged in"
+    PurchaseOrderLine |o--o{ Asset : "produced"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -85,7 +85,8 @@ The model is organized in loosely-coupled areas:
    secret value (INV-10, [[0061-secret-manager-zero-knowledge]]). **Built (#366).**
 10. **Purchases** — [[supplier]], [[purchase-order]], [[purchase-order-line]], [[purchase-order-event]]:
     an always-available, optional-at-entry record of purchases that assets point back to; asset purchase fields stay
-    authoritative ([[0099-purchases-scope-model-and-optionality]]). **Planned — accepted, not built.**
+    authoritative ([[0099-purchases-scope-model-and-optionality]]). **Backend core built (#1472)**; receiving,
+    linking, documents and the screens follow in Phase 1.
 
 ## Implementation order
 

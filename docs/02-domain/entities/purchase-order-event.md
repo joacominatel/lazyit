@@ -3,16 +3,17 @@ title: PurchaseOrderEvent
 tags: [domain, entity, purchases, audit]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # PurchaseOrderEvent
 
-> ⚪ planned (Purchases Phase 1) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built (#1472) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
-> [!warning] Not built yet
-> This note records the accepted design. No `PurchaseOrderEvent` model exists in the code today; the
-> event vocabulary below is indicative and the Phase 1 backend unit settles it.
+> [!note] Built — model, writer and read (#1472)
+> Model `PurchaseOrderEvent` (`purchase_order_events`), written by `PurchaseOrdersService` in the same
+> transaction as each change, read through `GET /purchase-orders/:id/events` (`Page<T>`, newest first,
+> `purchaseOrder:read`). The DB CHECK `purchase_order_events_one_actor` is in the migration.
 
 ## Purpose
 
@@ -43,19 +44,38 @@ default ([[0006-soft-delete-and-auditing]]).
   only), a price or quantity change records before and after, because "unit price changed from X to Y by
   Nico" is exactly what the research asks the log to answer ([[purchases/user-interview]] §3).
 - Linking or unlinking an asset also writes an [[asset-history]] event on the asset side.
+- **`eventType` is `TEXT`, not an enum** (CTO decision under D-D, recorded in
+  [[0099-purchases-scope-model-and-optionality]]): the writer only emits the values of the shared
+  `PURCHASE_ORDER_EVENT_TYPES`, and the read is a plain string, so a type a newer build appends needs no
+  migration and an older reader shows it generically.
+
+### Vocabulary and payloads (as built)
+
+| Event | Written by | Payload |
+| --- | --- | --- |
+| `CREATED` | create | `{ lineCount }` |
+| `STATUS_CHANGED` | header update that changes `status` | `{ from, to }` |
+| `UPDATED` | header update of any other field | `{ fields, changes: { field: { from, to } } }` — `notes` is recorded as `{ changed: true }` only |
+| `LINE_ADDED` | add a line | `{ lineId, description, quantity, unitPrice }` |
+| `LINE_UPDATED` | update a line | `{ lineId, changes: { field: { from, to } } }` — prices and quantities before and after |
+| `LINE_REMOVED` | remove a line | `{ lineId, description }` |
+| `DELETED` / `RESTORED` | soft delete / restore (restore of a live purchase writes nothing) | — |
+
+Money in a payload is a JSON number of minor units. Later units append `UNITS_RECEIVED`, `UNITS_CANCELLED`,
+`ASSET_LINKED`, `ASSET_UNLINKED`, `DOCUMENT_ADDED` and `DOCUMENT_REMOVED`.
 
 ## Conventions
 
 - **ID:** `autoincrement()` — a log entity ([[0005-id-strategy]]).
 - **Timestamps:** `createdAt` only ([[0006-soft-delete-and-auditing]]).
 
-## Fields (planned)
+## Fields (as built)
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `int` | `autoincrement()`. |
-| `purchaseOrderId` | `cuid` | FK → [[purchase-order]]. |
-| `eventType` | enum / text | indicative: `CREATED`, `UPDATED`, `STATUS_CHANGED`, `LINE_ADDED`, `LINE_UPDATED`, `LINE_REMOVED`, `UNITS_RECEIVED`, `UNITS_CANCELLED`, `ASSET_LINKED`, `ASSET_UNLINKED`, `DOCUMENT_ADDED`, `DOCUMENT_REMOVED`, `DELETED`, `RESTORED`. New values are appended and must degrade gracefully on an older build. |
+| `purchaseOrderId` | `cuid` | FK → [[purchase-order]], `Restrict`. |
+| `eventType` | `text` | see the vocabulary above; validated against the shared list by the writer, read as a plain string. New values are appended and degrade gracefully on an older build. |
 | `payload` | `jsonb?` | context: line id, before/after values, quantities, cancel reason, asset ids. |
 | `performedById` | `uuid?` | FK → [[user]], `SetNull`. |
 | `serviceAccountId` | `cuid?` | FK → [[service-account]], `SetNull`. CHECK: not both set. |

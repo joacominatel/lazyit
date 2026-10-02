@@ -30,18 +30,19 @@ updated: 2026-10-02
 - 🟢 [[asset-history]] — append-only log of asset state changes.
 - 🟢 [[asset-tag-scheme]] — singleton instance-config: opt-in auto-tag scheme (monotonic counter, gaps accepted). [[0063-configurable-asset-tag-scheme]] · [[0068-asset-tag-existing-estate-awareness]]
 
-## Purchases (planned)
+## Purchases
 
 The always-available, optional-at-entry record of what the team bought, from whom, with which documents, and which
 assets came out of it. lazyit records purchases; the finance system stays the system of record — no
-approvals, budgets, payables or exchange rates. **Accepted, not built** (Phase 1 under epic #1465). See
+approvals, budgets, payables or exchange rates. **Backend core built** (#1472); receiving, linking, documents
+and the screens follow in Phase 1 under epic #1465. See
 [[0099-purchases-scope-model-and-optionality]] · [[0100-money-as-64-bit-minor-units]] · research in
 [[purchases/_MOC|the Purchases vault]].
 
-- ⚪ [[supplier]] — who the team buys from and pays; not the manufacturer or the software publisher. Only the name required, nothing unique. Separate support/RMA contact.
-- ⚪ [[purchase-order]] — one purchase (*Purchase* in the UI): optional supplier, free-text currency label and non-unique finance reference, user-set status with derived *Received*; soft delete keeps asset links.
-- ⚪ [[purchase-order-line]] — one line (`ASSET` / `OTHER`, later `CONSUMABLE` / `LICENSE`); assets point at it; received is derived and over-receipt is allowed with a warning.
-- ⚪ [[purchase-order-event]] — append-only activity log of a purchase, with the human/service-account actor CHECK.
+- 🟢 [[supplier]] — who the team buys from and pays; not the manufacturer or the software publisher. Only the name required, nothing unique. Separate support/RMA contact.
+- 🟢 [[purchase-order]] — one purchase (*Purchase* in the UI): optional supplier, free-text currency label and non-unique finance reference, user-set status with derived *Received*; soft delete keeps asset links.
+- 🟢 [[purchase-order-line]] — one line (`ASSET` / `OTHER`, later `CONSUMABLE` / `LICENSE`); assets point at it; received is derived and over-receipt is allowed with a warning.
+- 🟢 [[purchase-order-event]] — append-only activity log of a purchase, with the human/service-account actor CHECK.
 
 ## Infra topology (visual CMDB)
 

@@ -8,12 +8,13 @@ updated: 2026-10-02
 
 # Supplier
 
-> ⚪ planned (Purchases Phase 1) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472); screens pending (Purchases Phase 1) · Area: Purchases ·
+> [[0099-purchases-scope-model-and-optionality]]
 
-> [!warning] Not built yet
-> This note records the accepted design. No `Supplier` model, endpoint or screen exists in the code
-> today; the fields below are the planned shape, and the Phase 1 backend unit settles the final column
-> names.
+> [!note] Built — API and contract (#1472)
+> Model `Supplier` (`suppliers`), contract `packages/shared/src/schemas/supplier.ts`, endpoints
+> `GET/POST /suppliers`, `GET/PATCH/DELETE /suppliers/:id`, `POST /suppliers/:id/restore`
+> (`apps/api/src/purchase-orders/`). The web screens come in a later Phase 1 unit.
 
 ## Purpose
 
@@ -49,7 +50,14 @@ fields stay as they are.
 - **Permissions** follow the purchase domain: `purchaseOrder:read` to see suppliers, `:write` to create
   and edit, `:delete` (ADMIN) to soft-delete ([[authorization]]).
 - Supplier text is untrusted content: stored as written, sanitized when rendered
-  ([[0029-untrusted-content-sanitization]]).
+  ([[0029-untrusted-content-sanitization]]). On write the `website` must be a scheme-less host or
+  http(s) (the `Application.url` rule — `javascript:`/`data:` refused) and the two contact emails must be
+  well-formed; nothing else is validated beyond length.
+- The list (`GET /suppliers`) searches name, tax ID and the sales / support contact names and emails;
+  `deleted=only` (ADMIN) lists archived suppliers. Soft-deleting a supplier leaves its purchases pointing at
+  it — they show it, flagged as archived. The FK from a purchase is `Restrict`, so a supplier with purchases
+  can never be hard-deleted.
+- Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
 - Merging duplicate suppliers is a Phase 2 action.
 
 ## Conventions
@@ -57,15 +65,15 @@ fields stay as they are.
 - **ID:** `cuid()` ([[0005-id-strategy]]).
 - **Timestamps / soft delete:** `createdAt`, `updatedAt`, `deletedAt`.
 
-## Fields (planned)
+## Fields (as built)
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | |
 | `name` | `string` | the only required field; the name the team uses ("Compumundo"). Not unique. |
 | `taxId` | `string?` | optional; the legal tax ID (e.g. a CUIT). Not unique — the strongest near-duplicate hint and the first key document extraction matches on. |
-| `website` | `string?` | |
-| `salesContactName` / `salesContactEmail` / `salesContactPhone` | `string?` | the sales contact. |
+| `website` | `string?` | host or http(s) URL, ≤ 500. |
+| `salesContactName` / `salesContactEmail` / `salesContactPhone` | `string?` | the sales contact; the email is validated on write. |
 | `supportContactName` / `supportContactEmail` / `supportContactPhone` | `string?` | the **support / RMA** contact — separate from sales, and the one shown one click from a linked asset. |
 | `notes` | `string?` | e.g. "RMA via web form, 15 business days". |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | |
