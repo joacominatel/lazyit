@@ -12,13 +12,16 @@ export function SegmentedChoice<T extends string>({
   onValueChange,
   options,
   label,
+  labelledBy,
   id,
 }: {
   value: T;
   onValueChange: (value: T) => void;
   options: readonly { value: T; label: string }[];
-  /** Accessible name of the group. */
-  label: string;
+  /** Accessible name of the group, used when no visible label names it. */
+  label?: string;
+  /** The id of the visible label that names the group (preferred over `label`). */
+  labelledBy?: string;
   id?: string;
 }) {
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -38,7 +41,8 @@ export function SegmentedChoice<T extends string>({
     <div
       id={id}
       role="radiogroup"
-      aria-label={label}
+      aria-labelledby={labelledBy}
+      aria-label={labelledBy ? undefined : label}
       onKeyDown={onKeyDown}
       className="inline-flex h-8 w-fit items-center rounded-md border bg-background p-0.5"
     >

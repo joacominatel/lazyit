@@ -18,10 +18,48 @@ import { useSuppliers } from "@/lib/api/hooks/use-suppliers";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { resolveSupplier, type SupplierResolution } from "@/lib/purchases/supplier";
 
-/** The suppliers whose name contains `name`, for resolving it on save (the exact match is picked there). */
+/**
+ * Every supplier whose name contains `name`, for resolving it on save (the exact match is picked there).
+ * Reads page after page, so a same-named supplier past the first page is never missed.
+ */
 export async function findSuppliersNamed(name: string): Promise<Supplier[]> {
-  const page = await getSuppliers({ q: name.trim(), limit: MAX_PAGE_LIMIT, sort: "name", dir: "asc" });
-  return page.items;
+  const found: Supplier[] = [];
+  for (;;) {
+    const page = await getSuppliers({
+      q: name.trim(),
+      limit: MAX_PAGE_LIMIT,
+      offset: found.length,
+      sort: "name",
+      dir: "asc",
+    });
+    found.push(...page.items);
+    if (page.items.length === 0 || found.length >= page.total) return found;
+  }
+}
+
+/**
+ * How the typed supplier name resolves right now (`null` while the lookup for this text is in flight),
+ * and the suppliers that carry exactly that name. The purchase form reads it to hint at a repeated
+ * reference; the field shows it.
+ */
+export function useSupplierResolution(
+  value: string,
+  current: { id: string; name: string } | null,
+  chosenId: string,
+): { resolution: SupplierResolution | null; sameNamed: Supplier[] } {
+  const name = useDebouncedValue(value.trim(), 300);
+  const isCurrent = current !== null && current.name.trim() === value.trim();
+  const { data } = useSuppliers(
+    { q: name, limit: MAX_PAGE_LIMIT, sort: "name", dir: "asc" },
+    { enabled: name !== "" && !isCurrent },
+  );
+  return useMemo(() => {
+    const sameNamed = (data?.items ?? []).filter((s) => s.name.trim() === value.trim());
+    if (value.trim() === "") return { resolution: { kind: "none" }, sameNamed };
+    if (isCurrent) return { resolution: { kind: "existing", id: current.id }, sameNamed };
+    if (name !== value.trim() || !data) return { resolution: null, sameNamed };
+    return { resolution: resolveSupplier(value, data.items, current, chosenId), sameNamed };
+  }, [value, name, data, current, chosenId, isCurrent]);
 }
 
 /** One line to tell same-named suppliers apart. */
@@ -44,7 +82,8 @@ export function SupplierField({
   onValueChange,
   chosenId,
   onChosenIdChange,
-  current,
+  resolution,
+  sameNamed,
   error,
 }: {
   id: string;
@@ -52,30 +91,14 @@ export function SupplierField({
   onValueChange: (value: string) => void;
   chosenId: string;
   onChosenIdChange: (id: string) => void;
-  /** The purchase's own supplier, kept while the text reads its name. */
-  current: { id: string; name: string } | null;
+  /** From {@link useSupplierResolution}, which the form owns. */
+  resolution: SupplierResolution | null;
+  sameNamed: Supplier[];
   error?: string;
 }) {
   const t = useTranslations("purchases.form");
   const candidates = useSuggestions("supplierName", value);
-  const name = useDebouncedValue(value.trim(), 300);
-  const { data } = useSuppliers(
-    { q: name, limit: MAX_PAGE_LIMIT, sort: "name", dir: "asc" },
-    { enabled: name !== "" },
-  );
-  const resolution: SupplierResolution | null = useMemo(() => {
-    if (value.trim() === "") return { kind: "none" };
-    if (current && current.name.trim() === value.trim()) return { kind: "existing", id: current.id };
-    if (name !== value.trim() || !data) return null;
-    return resolveSupplier(value, data.items, current, chosenId);
-  }, [value, name, data, current, chosenId]);
-
   const choices = resolution?.kind === "ambiguous" ? resolution.choices : null;
-  // Keep the pick visible after it resolves the ambiguity.
-  const sameNamed = useMemo(
-    () => (data?.items ?? []).filter((s) => s.name.trim() === value.trim()),
-    [data, value],
-  );
 
   return (
     <Field data-invalid={error ? true : undefined}>

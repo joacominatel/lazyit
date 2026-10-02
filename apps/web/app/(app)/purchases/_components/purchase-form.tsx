@@ -9,6 +9,7 @@ import {
   UpdatePurchaseOrderSchema,
 } from "@lazyit/shared";
 import { useLocale, useTranslations } from "next-intl";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type KeyboardEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,12 +22,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   useCreatePurchaseOrder,
+  usePurchaseOrders,
   useUpdatePurchaseOrder,
 } from "@/lib/api/hooks/use-purchase-orders";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useCreateSupplier } from "@/lib/api/hooks/use-suppliers";
 import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import {
   emptyHeaderDraft,
   emptyLineDraft,
@@ -38,13 +41,16 @@ import {
   toCreatePurchase,
   toUpdatePurchase,
 } from "@/lib/purchases/payload";
+import { referenceDuplicate } from "@/lib/purchases/reference";
+import { runExclusive } from "@/lib/purchases/submit-guard";
 import { resolveSupplier } from "@/lib/purchases/supplier";
 import { formatMoney, parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import type { SuggestCandidate } from "@/lib/utils/suggest";
 import { LineFields } from "./line-fields";
 import { SegmentedChoice } from "./segmented-choice";
-import { findSuppliersNamed, SupplierField } from "./supplier-field";
+import { usePurchaseTitle } from "./purchase-display";
+import { findSuppliersNamed, SupplierField, useSupplierResolution } from "./supplier-field";
 
 const FORM_ID = "purchase-form";
 
@@ -89,6 +95,9 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   const updatePurchase = useUpdatePurchaseOrder();
   const createSupplier = useCreateSupplier();
   const [saving, setSaving] = useState(false);
+  // A save is several requests; the ref (not the state, which lags a render) keeps it to one at a time.
+  const submitting = useRef(false);
+  const titleOf = usePurchaseTitle();
 
   const [header, setHeader] = useState<PurchaseHeaderDraft>(() =>
     purchase ? headerDraftFrom(purchase) : emptyHeaderDraft(),
@@ -96,9 +105,16 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   const [supplierText, setSupplierText] = useState(purchase?.supplier?.name ?? "");
   const [supplierChoice, setSupplierChoice] = useState("");
   const [supplierError, setSupplierError] = useState<string>();
-  const currentSupplier = purchase?.supplier
-    ? { id: purchase.supplier.id, name: purchase.supplier.name }
-    : null;
+  const savedSupplier = purchase?.supplier;
+  const currentSupplier = useMemo(
+    () => (savedSupplier ? { id: savedSupplier.id, name: savedSupplier.name } : null),
+    [savedSupplier],
+  );
+  const { resolution: supplierResolution, sameNamed } = useSupplierResolution(
+    supplierText,
+    currentSupplier,
+    supplierChoice,
+  );
 
   // The currency label defaults to the last one used (this viewer's, else the instance's) until typed.
   const [recentCurrencies, rememberCurrency] = useRecentValues("currency");
@@ -116,6 +132,17 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   const [moreOpen, setMoreOpen] = useState(
     () => purchase != null && MORE_FIELDS.some((field) => headerDraftFrom(purchase)[field] !== ""),
   );
+  // A purchase of the same supplier already carrying this reference (ADR-0099 §6): a hint, never a refusal.
+  const referenceQuery = useDebouncedValue(header.reference.trim(), 300);
+  const hintSupplierId = supplierResolution?.kind === "existing" ? supplierResolution.id : undefined;
+  const { data: sameReference } = usePurchaseOrders(
+    { q: referenceQuery, supplierId: hintSupplierId, limit: 20 },
+    { enabled: referenceQuery !== "" && hintSupplierId !== undefined },
+  );
+  const duplicateReference =
+    hintSupplierId !== undefined && referenceQuery === header.reference.trim()
+      ? referenceDuplicate(referenceQuery, sameReference?.items ?? [], purchase?.id)
+      : null;
   const [headerErrors, setHeaderErrors] = useState<Partial<Record<keyof PurchaseHeaderDraft, string>>>(
     {},
   );
@@ -182,6 +209,8 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
+      // A held or repeated shortcut must not submit again while a save is running.
+      if (saving || event.repeat || submitting.current) return;
       event.currentTarget.requestSubmit();
     }
   }
@@ -210,6 +239,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   /** The typed supplier name → a supplier id, creating the supplier when the name is new. */
   async function resolveSupplierId(): Promise<string | null | "stop"> {
     if (supplierText.trim() === "") return null;
+    if (currentSupplier && currentSupplier.name.trim() === supplierText.trim()) return currentSupplier.id;
     const resolution = resolveSupplier(
       supplierText,
       await findSuppliersNamed(supplierText),
@@ -245,11 +275,15 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
+    await runExclusive(submitting, () => save(form));
+  }
+
+  async function save(form: HTMLFormElement) {
     setSupplierError(undefined);
     setHeaderErrors({});
     const draft = { ...header, currency };
 
-    if (!isEdit) {
+    if (!purchase) {
       // Validate everything typed before anything is written (a new supplier included).
       const check = toCreatePurchase(
         draft,
@@ -264,6 +298,13 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
         return;
       }
       if (schemaErrors(CreatePurchaseOrderSchema.safeParse(check.payload))) {
+        scrollToFirstError(form);
+        return;
+      }
+    } else {
+      // Validate the header before anything is written — a new supplier included.
+      const preview = toUpdatePurchase(draft, purchase.supplierId, purchase);
+      if (preview && schemaErrors(UpdatePurchaseOrderSchema.safeParse(preview))) {
         scrollToFirstError(form);
         return;
       }
@@ -362,10 +403,30 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
               setSupplierChoice(id);
               setSupplierError(undefined);
             }}
-            current={currentSupplier}
+            resolution={supplierResolution}
+            sameNamed={sameNamed}
             error={supplierError}
           />
-          {textField("reference", t("reference"), t("referencePlaceholder"))}
+          <div className="space-y-1.5">
+            {textField("reference", t("reference"), t("referencePlaceholder"))}
+            {duplicateReference ? (
+              <p className="text-sm text-muted-foreground" role="status">
+                {t.rich("referenceExists", {
+                  link: (chunks) => (
+                    <Link
+                      href={`/purchases/${duplicateReference.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                  name: titleOf(duplicateReference),
+                })}
+              </p>
+            ) : null}
+          </div>
           {dateField("orderDate", t("orderDate"))}
           <Field data-invalid={headerErrors.currency ? true : undefined}>
             <FieldLabel htmlFor="currency">{t("currency")}</FieldLabel>
@@ -386,13 +447,13 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
           </Field>
           {!isEdit ? (
             <Field>
-              <FieldLabel htmlFor="status">{t("status")}</FieldLabel>
+              <FieldLabel id="status-label">{t("status")}</FieldLabel>
               <SegmentedChoice
                 id="status"
                 value={header.status}
                 onValueChange={(status) => patchHeader({ status })}
                 options={statusOptions}
-                label={t("status")}
+                labelledBy="status-label"
               />
             </Field>
           ) : null}
@@ -404,7 +465,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
             variant="ghost"
             size="sm"
             aria-expanded={moreOpen}
-            aria-controls="purchase-more-details"
+            aria-controls={moreOpen ? "purchase-more-details" : undefined}
             onClick={() => setMoreOpen((open) => !open)}
             className="-ml-2"
           >
