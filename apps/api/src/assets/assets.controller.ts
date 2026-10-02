@@ -188,6 +188,25 @@ export class AssetsController {
       'Exact (case-sensitive) serial numbers, comma-separated, at most 200 (#1387). A value cannot contain a comma. Over 200 → 400.',
   })
   @ApiQuery({
+    name: 'purchaseOrderLineId',
+    required: false,
+    description:
+      'The assets linked to this purchase line (#1476). Needs purchaseOrder:read (403 otherwise). Invalid cuid → 400.',
+  })
+  @ApiQuery({
+    name: 'purchaseOrderId',
+    required: false,
+    description:
+      'The assets linked to any line of this purchase (#1476). Needs purchaseOrder:read (403 otherwise). Invalid cuid → 400.',
+  })
+  @ApiQuery({
+    name: 'purchaseLinked',
+    required: false,
+    type: Boolean,
+    description:
+      'true = assets linked to some purchase line; false = assets linked to none (#1476). Needs purchaseOrder:read (403 otherwise).',
+  })
+  @ApiQuery({
     name: 'deleted',
     required: false,
     enum: ['active', 'only'],
@@ -195,7 +214,7 @@ export class AssetsController {
       'Soft-delete slice. active (default) = live assets; only = archived (soft-deleted) assets — ADMIN only (403 otherwise). (ADR-0041)',
   })
   @ApiOkResponse({ type: AssetListPageDto })
-  findAll(
+  async findAll(
     @Query('categoryId') categoryId?: string,
     @Query('modelId') modelId?: string,
     @Query('locationId') locationId?: string,
@@ -214,6 +233,10 @@ export class AssetsController {
     @CurrentUser() user?: User,
     @Query('assetTags') assetTags?: string,
     @Query('serials') serials?: string,
+    @Query('purchaseOrderLineId') purchaseOrderLineId?: string,
+    @Query('purchaseOrderId') purchaseOrderId?: string,
+    @Query('purchaseLinked') purchaseLinked?: string,
+    @CurrentPrincipal() principal?: Principal,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -226,8 +249,8 @@ export class AssetsController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE assets), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    return this.assets.findPage(
-      this.parseAssetFilters({
+    const filters = {
+      ...this.parseAssetFilters({
         categoryId,
         modelId,
         locationId,
@@ -240,8 +263,25 @@ export class AssetsController {
         assetTags,
         serials,
       }),
-      pageQuery,
-    );
+      // List read only (#1476), like assetTags/serials: the CSV export does not take them.
+      purchaseOrderLineId: parseCuidQuery(
+        purchaseOrderLineId,
+        'purchaseOrderLineId',
+      ),
+      purchaseOrderId: parseCuidQuery(purchaseOrderId, 'purchaseOrderId'),
+      purchaseLinked:
+        purchaseLinked === undefined
+          ? undefined
+          : parseBooleanQuery(purchaseLinked),
+    };
+    if (
+      filters.purchaseOrderLineId !== undefined ||
+      filters.purchaseOrderId !== undefined ||
+      filters.purchaseLinked !== undefined
+    ) {
+      await this.assets.assertCanFilterByPurchase(principal);
+    }
+    return this.assets.findPage(filters, pageQuery);
   }
 
   /**

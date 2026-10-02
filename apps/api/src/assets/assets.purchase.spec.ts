@@ -274,3 +274,65 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
     expect(row.endsWith(',1500.50,USD,Compumundo,OC-4512,A-1')).toBe(true);
   });
 });
+
+describe('list filters by purchase (#1476)', () => {
+  const page = { limit: 50, offset: 0, deleted: 'active' } as const;
+
+  function listSetup(held: readonly Permission[]) {
+    const ctx = setup(held);
+    const prisma = ctx.prisma as unknown as {
+      asset: { findMany: jest.Mock; count: jest.Mock };
+      $transaction: jest.Mock;
+    };
+    prisma.asset.findMany.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation((arg: unknown) =>
+      Array.isArray(arg)
+        ? Promise.all(arg as unknown[])
+        : (arg as (c: unknown) => unknown)(ctx.tx),
+    );
+    const where = () =>
+      (prisma.asset.findMany.mock.calls[0] as [{ where: Row }])[0].where;
+    return { ...ctx, where };
+  }
+
+  it('the assets of one line, of one purchase, and linked or not — AND-combined', async () => {
+    const { service, where } = listSetup(['purchaseOrder:read']);
+    await service.findPage(
+      { purchaseOrderLineId: LINE, purchaseOrderId: PO, purchaseLinked: true },
+      page,
+    );
+    expect(where()).toMatchObject({
+      AND: [
+        { purchaseOrderLineId: LINE },
+        { purchaseOrderLine: { purchaseOrderId: PO } },
+        { purchaseOrderLineId: { not: null } },
+      ],
+    });
+  });
+
+  it('purchaseLinked=false: the assets linked to no purchase', async () => {
+    const { service, where } = listSetup(['purchaseOrder:read']);
+    await service.findPage({ purchaseLinked: false }, page);
+    expect(where()).toMatchObject({ AND: [{ purchaseOrderLineId: null }] });
+  });
+
+  it('a list without them adds no purchase clause', async () => {
+    const { service, where } = listSetup([]);
+    await service.findPage({ status: 'IN_STORAGE' }, page);
+    expect(where()).not.toHaveProperty('AND');
+  });
+
+  it('filtering by purchase needs purchaseOrder:read (D-A): 403 without it', async () => {
+    const denied = listSetup(['asset:read']);
+    await expect(
+      denied.service.assertCanFilterByPurchase(member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      denied.service.assertCanFilterByPurchase(undefined),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const allowed = listSetup(['purchaseOrder:read']);
+    await expect(
+      allowed.service.assertCanFilterByPurchase(member),
+    ).resolves.toBeUndefined();
+  });
+});

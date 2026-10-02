@@ -148,6 +148,15 @@ export interface AssetFilters {
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
   serials?: string[];
+  /**
+   * Purchase provenance filters (ADR-0099, #1476) — list read only, and only for a caller holding
+   * `purchaseOrder:read` ({@link AssetsService.assertCanFilterByPurchase}): they reveal which assets came
+   * from which purchase (D-A). The assets linked to one line, to any line of one purchase, and linked to
+   * some purchase (`true`) or to none (`false`). Combined with AND.
+   */
+  purchaseOrderLineId?: string;
+  purchaseOrderId?: string;
+  purchaseLinked?: boolean;
 }
 
 /**
@@ -322,6 +331,19 @@ export class AssetsService {
     private readonly permissions: PermissionResolverService,
   ) {}
 
+  /**
+   * 403 unless the caller may filter the list by purchase (#1476): the purchase filters reveal provenance,
+   * which follows `purchaseOrder:read` (ADR-0099 §8, D-A) — a list read alone is `asset:read`. The list
+   * route asks only when one of them is given.
+   */
+  async assertCanFilterByPurchase(principal?: Principal): Promise<void> {
+    if (!(await this.holds(principal, 'purchaseOrder:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -417,8 +439,24 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    purchaseOrderLineId,
+    purchaseOrderId,
+    purchaseLinked,
   }: AssetFilters): Prisma.AssetWhereInput {
+    // Purchase provenance (#1476), AND-combined so a contradictory pair simply matches nothing.
+    const purchase: Prisma.AssetWhereInput[] = [
+      ...(purchaseOrderLineId ? [{ purchaseOrderLineId }] : []),
+      ...(purchaseOrderId ? [{ purchaseOrderLine: { purchaseOrderId } }] : []),
+      ...(purchaseLinked === undefined
+        ? []
+        : [
+            {
+              purchaseOrderLineId: purchaseLinked ? { not: null } : null,
+            },
+          ]),
+    ];
     return {
+      ...(purchase.length > 0 ? { AND: purchase } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.
