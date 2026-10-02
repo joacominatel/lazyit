@@ -216,7 +216,8 @@
     "linkExisting": "Vincular activos existentes",
     "documentsBackupNotice": "Los archivos que subas aquí todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guarda tu propia copia de cada factura, pedido o remito que necesites conservar.",
     "receivesInto": "a <link>{name}</link>",
-    "consumableNotMapped": "sin consumible todavía"
+    "consumableNotMapped": "sin consumible todavía",
+    "receiveStock": "Recibir en stock"
   },
   "activity": {
     "fields": {
@@ -491,5 +492,23 @@
     "linkExisting": "Vincular activos existentes",
     "cancelRemaining": "Cancelar unidades restantes",
     "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}"
+  },
+  "receiveStock": {
+    "title": "Recibir en stock",
+    "consumable": "Consumible",
+    "consumablePlaceholder": "Elige el artículo de stock",
+    "consumableMissing": "Esta línea todavía no tiene consumible. Elige uno: se guarda en la línea y el stock entra en él.",
+    "consumableRequired": "Elige el consumible al que entran las unidades.",
+    "consumableNoAccess": "Esta línea todavía no tiene consumible y no puedes ver consumibles. Pide a alguien que pueda que lo asigne en la línea.",
+    "consumableSaveError": "No se pudo guardar el consumible en la línea",
+    "into": "En {name} · {stock} {unit} en stock ahora",
+    "quantity": "Cantidad recibida",
+    "quantityHelp": "{pending, plural, =0 {Nada pendiente en esta línea} one {# unidad pendiente} other {# unidades pendientes}}. Escribe lo que llegó de verdad.",
+    "quantityInvalid": "Un número entero, 1 o más.",
+    "note": "Nota (opcional)",
+    "noteHelp": "Visible para cualquiera que pueda ver los movimientos de este consumible, incluidos los Lectores: no pongas datos de la factura ni del proveedor.",
+    "submit": "Recibir {count, plural, one {# unidad} other {# unidades}}",
+    "receivedToast": "{count, plural, one {# unidad recibida} other {# unidades recibidas}} en {name}",
+    "error": "No se pudo recibir en stock"
   }
 }

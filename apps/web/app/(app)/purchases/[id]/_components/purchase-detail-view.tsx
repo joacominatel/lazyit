@@ -64,6 +64,7 @@ import { canCancelPurchase } from "@/lib/purchases/display";
 import { formatMoney } from "@/lib/utils/money";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
+import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
 import {
@@ -122,7 +123,8 @@ function LineConsumable({ consumableId }: { consumableId: string | null | undefi
  * One purchase (ADR-0099, UX proposal §3.a "Purchase detail"): identity, status and receipt progress;
  * the lines with "x of y received" (over-received is a warning, never an error); totals per currency
  * label; the status actions; receiving units, linking existing assets and cancelling the remaining units
- * per line (#1475); the purchase's documents; and the activity log.
+ * per line (#1475); consumable lines received into stock (#1476); the purchase's documents; and the
+ * activity log.
  */
 export function PurchaseDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases");
@@ -136,6 +138,8 @@ export function PurchaseDetailView({ id }: { id: string }) {
   // Receiving creates assets: it needs both purchase and asset write (the API checks both).
   const canWriteAssets = useCan("asset:write");
   const canReceive = canWrite && canWriteAssets;
+  // Receiving a consumable line posts stock: purchase and consumable write (#1476).
+  const canReceiveStock = useCanReceiveStock();
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -146,6 +150,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
 
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
+  const [receivingStock, setReceivingStock] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
@@ -440,6 +445,12 @@ export function PurchaseDetailView({ id }: { id: string }) {
                               {t("detail.receive")}
                             </Button>
                           ) : null}
+                          {canReceiveStock && line.kind === "CONSUMABLE" && line.pendingQuantity > 0 ? (
+                            <Button variant="outline" size="sm" onClick={() => setReceivingStock(line)}>
+                              <InboxArrowDownIcon />
+                              {t("detail.receive")}
+                            </Button>
+                          ) : null}
                           {canWrite ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -461,6 +472,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                       {t("detail.linkExisting")}
                                     </DropdownMenuItem>
                                   </>
+                                ) : null}
+                                {canReceiveStock && line.kind === "CONSUMABLE" ? (
+                                  <DropdownMenuItem onSelect={() => setReceivingStock(line)}>
+                                    {t("detail.receiveStock")}
+                                  </DropdownMenuItem>
                                 ) : null}
                                 <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
                                   {t("detail.editLine")}
@@ -510,6 +526,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
         <ReceiveStockDialog
           line={{ purchase, line: receiving }}
           onClose={() => setReceiving(null)}
+        />
+      ) : null}
+
+      {receivingStock ? (
+        <ReceiveIntoStockDialog
+          purchase={purchase}
+          line={receivingStock}
+          onClose={() => setReceivingStock(null)}
         />
       ) : null}
 

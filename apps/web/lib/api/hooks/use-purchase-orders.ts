@@ -4,6 +4,7 @@ import type {
   CreatePurchaseOrderLine,
   LinkAssetsToLine,
   ReceiveFromLine,
+  ReceiveStockFromLine,
   UpdatePurchaseOrder,
   UpdatePurchaseOrderLine,
 } from "@lazyit/shared";
@@ -28,6 +29,7 @@ import {
   linkAssetsToLine,
   type PurchaseOrderListParams,
   receiveFromLine,
+  receiveStockFromLine,
   removePurchaseOrderLine,
   restorePurchaseOrder,
   unlinkAssetsFromLine,
@@ -36,6 +38,8 @@ import {
 } from "../endpoints/purchase-orders";
 import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
+import { consumableKeys } from "./use-consumables";
+import { invalidateDashboard } from "./use-dashboard";
 import { invalidateSuggestions } from "../query-keys";
 
 /** Activity-log page size. */
@@ -231,6 +235,24 @@ export function useReceiveFromLine() {
     mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: ReceiveFromLine }) =>
       receiveFromLine(id, lineId, data),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Receive a consumable line into stock (#1476): the purchase (counts, log) and the consumable (stock, its
+ * movement ledger, the dashboard's low-stock tally) both change.
+ */
+export function useReceiveStock() {
+  const queryClient = useQueryClient();
+  const invalidatePurchases = useInvalidatePurchases();
+  return useMutation({
+    mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: ReceiveStockFromLine }) =>
+      receiveStockFromLine(id, lineId, data),
+    onSuccess: () => {
+      invalidatePurchases();
+      void queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+      void invalidateDashboard(queryClient);
+    },
   });
 }
 
