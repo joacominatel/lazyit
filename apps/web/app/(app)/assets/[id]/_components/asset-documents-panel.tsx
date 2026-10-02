@@ -16,7 +16,7 @@ import {
   ATTACHMENT_LABEL_MAX_LENGTH,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { type DragEvent, type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type DragEvent, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DetailPanel } from "@/components/detail-panel";
 import {
@@ -46,6 +46,9 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { labelFits, labelPatch, uploadLabel } from "@/lib/utils/document-label";
+
+/** The DOM id of a document row's "edit type" pencil — where focus returns when its editor closes. */
+const pencilId = (attachmentId: string) => `doc-label-edit-${attachmentId}`;
 
 /** The smart-entry store for document type labels — shared by the upload field and the inline edit. */
 const LABEL_RECENT_KEY = "attachment.label";
@@ -115,6 +118,14 @@ export function DocumentsPanel({
   // The optional type label for the next upload, and the row whose label is being edited.
   const [nextLabel, setNextLabel] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Closing a row's label editor gives focus back to that row's pencil (the editor focuses its own input).
+  const refocusPencilRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (editingId === null && refocusPencilRef.current) {
+      document.getElementById(pencilId(refocusPencilRef.current))?.focus();
+      refocusPencilRef.current = null;
+    }
+  }, [editingId]);
   const labelSuggestions = useSuggestions("documentLabel", nextLabel, { enabled: canWrite });
   const [, rememberLabel] = useRecentValues(LABEL_RECENT_KEY);
   const nextLabelFits = labelFits(nextLabel);
@@ -309,7 +320,10 @@ export function DocumentsPanel({
                         parent={parent}
                         parentId={parentId}
                         attachment={attachment}
-                        onDone={() => setEditingId(null)}
+                        onDone={() => {
+                          refocusPencilRef.current = attachment.id;
+                          setEditingId(null);
+                        }}
                       />
                     ) : (
                       <p className="text-xs tabular-nums text-muted-foreground">
@@ -322,6 +336,7 @@ export function DocumentsPanel({
                 <div className="flex shrink-0 items-center gap-1">
                   {canWrite && editingId !== attachment.id ? (
                     <Button
+                      id={pencilId(attachment.id)}
                       variant="ghost"
                       size="icon-sm"
                       aria-label={t("docs.editLabelAria", { name: attachment.originalName })}

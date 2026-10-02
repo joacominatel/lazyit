@@ -33,6 +33,13 @@ export function SerialScanner({
   const existingRef = useRef(existing);
   const lastRef = useRef<LastScan>(null);
   const [added, setAdded] = useState<{ code: string; count: number } | null>(null);
+  // Focus lands on *Done* when the scanner opens, so the keyboard and screen readers are where the session
+  // ends; the caller returns focus to *Scan* when it closes.
+  const doneRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    doneRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     existingRef.current = existing;
@@ -87,7 +94,7 @@ export function SerialScanner({
             t("hint")
           ) : null}
         </p>
-        <Button type="button" variant="outline" size="sm" onClick={onDone}>
+        <Button ref={doneRef} type="button" variant="outline" size="sm" onClick={onDone}>
           {t("done")}
         </Button>
       </div>
