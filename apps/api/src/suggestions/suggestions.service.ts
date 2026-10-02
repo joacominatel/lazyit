@@ -150,7 +150,11 @@ export class SuggestionsService {
             (
               await this.prisma.purchaseOrderLine.groupBy({
                 by: ['manufacturerText'],
-                where: { manufacturerText: { not: null, ...insensitive(q) } },
+                // A line of an archived purchase is archived with it (relation filter, ADR-0032).
+                where: {
+                  manufacturerText: { not: null, ...insensitive(q) },
+                  purchaseOrder: { deletedAt: null },
+                },
                 _count: { _all: true },
                 _max: { updatedAt: true },
                 orderBy: { _count: { manufacturerText: 'desc' } },
@@ -168,7 +172,10 @@ export class SuggestionsService {
             (
               await this.prisma.purchaseOrderLine.groupBy({
                 by: ['modelText'],
-                where: { modelText: { not: null, ...insensitive(q) } },
+                where: {
+                  modelText: { not: null, ...insensitive(q) },
+                  purchaseOrder: { deletedAt: null },
+                },
                 _count: { _all: true },
                 _max: { updatedAt: true },
                 orderBy: { _count: { modelText: 'desc' } },
