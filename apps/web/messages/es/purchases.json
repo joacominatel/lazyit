@@ -642,7 +642,9 @@
       "forbidden": "No tienes permiso para leer este documento.",
       "notFound": "No se encontró la compra o el documento.",
       "generic": "No se pudo leer el documento.",
-      "network": "No se pudo contactar a lazyit. Revisa tu conexión y vuelve a intentarlo."
+      "network": "No se pudo contactar a lazyit. Revisa tu conexión y vuelve a intentarlo.",
+      "inProgress": "Ya tienes un documento en lectura. Espera a que termine y vuelve a intentarlo.",
+      "rateLimited": "Se leyeron demasiados documentos en el último minuto. Vuelve a intentarlo en un momento."
     },
     "off": {
       "aiDisabled": "Leer documentos necesita el asistente de IA, que está desactivado. Un administrador puede configurarlo en Configuración → IA.",
@@ -679,7 +681,7 @@
       "AMOUNT_UNREADABLE": "Este importe no se pudo leer, así que quedó vacío.",
       "AMOUNT_TOO_PRECISE": "Este importe tiene más de dos decimales, así que quedó vacío.",
       "QUANTITY_NOT_WHOLE": "La cantidad no es un número entero de unidades, así que quedó vacía.",
-      "DATE_AMBIGUOUS": "Esta fecha puede ser día/mes o mes/día. Compárala con el documento.",
+      "DATE_AMBIGUOUS": "Esta fecha puede ser día/mes o mes/día, y nada en el documento lo aclara, así que quedó vacía. Escríbela como figura en el documento.",
       "DATE_UNREADABLE": "Esta fecha no se pudo leer, así que quedó vacía.",
       "CURRENCY_AMBIGUOUS": "El documento solo muestra un símbolo que comparten varias monedas. Revisa la moneda.",
       "LINE_TOTAL_MISMATCH": "Cantidad × precio unitario no coincide con el total de la línea que imprime el documento.",

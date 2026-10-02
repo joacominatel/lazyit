@@ -12,8 +12,13 @@ import { updatePurchaseOrder } from "@/lib/api/endpoints/purchase-orders";
 import { useCreatePurchaseOrder, useExtractionStatus } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { fileProblem, referenceFromFileName } from "@/lib/purchases/extraction";
+import { fileProblem, maxBytesFor, referenceFromFileName } from "@/lib/purchases/extraction";
 import { runExclusive } from "@/lib/purchases/submit-guard";
+
+/** Bytes → whole megabytes, rounded down, for the messages. */
+function toMb(bytes: number): number {
+  return Math.floor(bytes / (1024 * 1024));
+}
 
 /**
  * *New purchase from a document* (ADR-0099 §11, Phase 2 #1477) — offered on *New purchase* only while
@@ -36,13 +41,17 @@ export function NewFromDocument() {
   const [busy, setBusy] = useState(false);
 
   if (!status?.available) return null;
-  const maxMb = Math.round(status.maxBytes / (1024 * 1024));
+  const maxMb = toMb(status.maxBytes);
 
   async function start(file: File) {
     if (!status) return;
     const problem = fileProblem(status, file);
     if (problem) {
-      toast.error(problem === "type" ? t("wrongType", { name: file.name }) : t("tooLarge", { name: file.name, max: maxMb }));
+      toast.error(
+        problem === "type"
+          ? t("wrongType", { name: file.name })
+          : t("tooLarge", { name: file.name, max: toMb(maxBytesFor(status, file.type)) }),
+      );
       return;
     }
     setBusy(true);

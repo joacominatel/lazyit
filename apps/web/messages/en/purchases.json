@@ -642,7 +642,9 @@
       "forbidden": "You don't have permission to read this document.",
       "notFound": "The purchase or the document was not found.",
       "generic": "The document couldn't be read.",
-      "network": "Couldn't reach lazyit. Check your connection and try again."
+      "network": "Couldn't reach lazyit. Check your connection and try again.",
+      "inProgress": "You already have a document being read. Wait for it to finish, then try again.",
+      "rateLimited": "Too many documents were read in the last minute. Try again shortly."
     },
     "off": {
       "aiDisabled": "Reading documents needs the AI assistant, which is off. An admin can set it up in Settings → AI.",
@@ -679,7 +681,7 @@
       "AMOUNT_UNREADABLE": "This amount couldn't be read, so it was left blank.",
       "AMOUNT_TOO_PRECISE": "This amount has more than two decimals, so it was left blank.",
       "QUANTITY_NOT_WHOLE": "The quantity isn't a whole number of units, so it was left blank.",
-      "DATE_AMBIGUOUS": "This date could be day/month or month/day. Check it against the document.",
+      "DATE_AMBIGUOUS": "This date could be day/month or month/day, and nothing in the document settles it, so it was left blank. Type it as on the document.",
       "DATE_UNREADABLE": "This date couldn't be read, so it was left blank.",
       "CURRENCY_AMBIGUOUS": "The document only shows a symbol several currencies share. Check the currency.",
       "LINE_TOTAL_MISMATCH": "Quantity × unit price doesn't match the line total the document prints.",

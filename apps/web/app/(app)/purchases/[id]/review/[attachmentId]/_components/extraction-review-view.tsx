@@ -37,7 +37,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, useMyPermissions } from "@/lib/hooks/use-permissions";
-import { canExtract, extractionErrorKey, unavailableHint } from "@/lib/purchases/extraction";
+import { canExtract, extractionErrorKey, maxBytesFor, unavailableHint } from "@/lib/purchases/extraction";
 import {
   buildReview,
   buildReviewPayload,
@@ -236,7 +236,9 @@ export function ExtractionReviewView({
           ) : unavailable ? (
             <Callout tone="info" icon={<ExclamationTriangleIcon />}>
               <p className="text-sm">
-                {t(`off.${unavailable}`, { max: Math.round((status?.maxBytes ?? 0) / (1024 * 1024)) })}
+                {t(`off.${unavailable}`, {
+                  max: Math.floor((status ? maxBytesFor(status, attachment.mimeType) : 0) / (1024 * 1024)),
+                })}
               </p>
             </Callout>
           ) : (

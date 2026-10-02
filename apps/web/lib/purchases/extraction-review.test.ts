@@ -66,7 +66,7 @@ function draft(patch: Partial<PurchaseExtractionDraft> = {}): PurchaseExtraction
       lineModels: [{ id: MODEL, name: "ThinkPad E14 Gen 5", manufacturer: "Lenovo", by: "LINE_MEMORY" }, null],
     },
     warnings: [
-      { code: "DATE_AMBIGUOUS", path: "header.invoiceDate" },
+      { code: "CURRENCY_AMBIGUOUS", path: "header.currency" },
       { code: "TOTAL_MISMATCH", path: "totals", detail: { linesTotal: 565000000, net: 567500000, gross: null } },
     ],
     ...patch,
@@ -146,9 +146,11 @@ describe("buildReview — draft → form", () => {
     expect(header(state, "invoiceDate")).toMatchObject({
       proposed: "2026-03-10",
       evidence: ev("10/03/2026"),
-      warnings: ["DATE_AMBIGUOUS"],
+      warnings: [],
       checked: true,
     });
+    // A flagged value keeps its flag next to the value it was read as.
+    expect(header(state, "currency")).toMatchObject({ proposed: "ARS", warnings: ["CURRENCY_AMBIGUOUS"], checked: true });
   });
 
   test("amounts arrive in minor units and read in the viewer's locale; a quantity not read stays blank, never 1", () => {
@@ -376,7 +378,7 @@ describe("checkCount", () => {
     const state = buildReview(
       draft({
         warnings: [
-          { code: "DATE_AMBIGUOUS", path: "header.invoiceDate" },
+          { code: "DATE_AMBIGUOUS", path: "header.orderDate" },
           { code: "AMOUNT_AMBIGUOUS", path: "lines.1.unitPrice" },
           { code: "TOTAL_MISMATCH", path: "totals" },
         ],

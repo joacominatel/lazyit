@@ -10,27 +10,35 @@
 import type { Attachment, PurchaseExtractionErrorCode, PurchaseExtractionStatus } from "@lazyit/shared";
 import { ApiError } from "@/lib/api/client";
 
-/** Whether `attachment` can be read now: extraction available, a type the provider reads, within the cap. */
+type StatusCaps = Pick<PurchaseExtractionStatus, "mediaTypes" | "maxBytes" | "maxBytesByMediaType">;
+
+/**
+ * The largest file of `mediaType` the provider takes: the overall cap, or less where the provider takes less
+ * for that type (Anthropic images). An older API without the per-type caps reports only the overall one.
+ */
+export function maxBytesFor(status: Pick<StatusCaps, "maxBytes" | "maxBytesByMediaType">, mediaType: string): number {
+  const type = mediaType.trim().toLowerCase();
+  const own = Object.entries(status.maxBytesByMediaType ?? {}).find(([key]) => key.toLowerCase() === type)?.[1];
+  return own === undefined ? status.maxBytes : Math.min(status.maxBytes, own);
+}
+
+/** Whether `attachment` can be read now: extraction available, a type the provider reads, within its cap. */
 export function canExtract(
-  status: Pick<PurchaseExtractionStatus, "available" | "mediaTypes" | "maxBytes"> | undefined,
+  status: (Pick<PurchaseExtractionStatus, "available"> & StatusCaps) | undefined,
   attachment: Pick<Attachment, "mimeType" | "byteSize">,
 ): boolean {
   if (!status?.available) return false;
-  const type = attachment.mimeType.trim().toLowerCase();
-  return status.mediaTypes.some((t) => t.toLowerCase() === type) && attachment.byteSize <= status.maxBytes;
+  return fileProblem(status, { type: attachment.mimeType, size: attachment.byteSize }) === null;
 }
 
 /**
  * Whether a file picked for *New purchase from a document* can be read: the same checks before anything is
- * created. `"type"` / `"size"` say why not; `null` = fine.
+ * created. `"type"` / `"size"` say why not (the size against {@link maxBytesFor} its type); `null` = fine.
  */
-export function fileProblem(
-  status: Pick<PurchaseExtractionStatus, "mediaTypes" | "maxBytes">,
-  file: { type: string; size: number },
-): "type" | "size" | null {
+export function fileProblem(status: StatusCaps, file: { type: string; size: number }): "type" | "size" | null {
   const type = file.type.trim().toLowerCase();
   if (!status.mediaTypes.some((t) => t.toLowerCase() === type)) return "type";
-  return file.size > status.maxBytes ? "size" : null;
+  return file.size > maxBytesFor(status, type) ? "size" : null;
 }
 
 /** The unavailable reasons an admin can act on in Settings → AI → their key under `purchases.extraction.off`. */
@@ -66,6 +74,8 @@ const ERROR_KEYS: Record<PurchaseExtractionErrorCode, string> = {
   BUDGET_EXCEEDED: "budget",
   EXTRACTION_UNREADABLE: "unreadable",
   EXTRACTION_TIMEOUT: "timeout",
+  EXTRACTION_IN_PROGRESS: "inProgress",
+  RATE_LIMITED: "rateLimited",
 };
 
 /** The provider's own failures, passed through on a `502`. */
@@ -83,7 +93,7 @@ const PROVIDER_KEYS: Record<string, string> = {
 const STATUS_KEYS: Record<number, string> = {
   409: "unavailable",
   422: "document",
-  429: "budget",
+  429: "rateLimited",
   502: "provider",
   504: "timeout",
   403: "forbidden",

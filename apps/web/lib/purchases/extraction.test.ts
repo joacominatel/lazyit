@@ -9,6 +9,7 @@ import {
   extractionErrorKey,
   fileProblem,
   isDocumentHolder,
+  maxBytesFor,
   previewKind,
   referenceFromFileName,
   unavailableHint,
@@ -46,6 +47,15 @@ describe("canExtract — the extract route is called only when the status says s
     expect(fileProblem(STATUS, { type: "text/csv", size: 10 })).toBe("type");
     expect(fileProblem(STATUS, { type: "image/png", size: STATUS.maxBytes + 1 })).toBe("size");
   });
+
+  test("a provider's lower cap for a type applies to that type only", () => {
+    const anthropic = { ...STATUS, maxBytesByMediaType: { "image/png": 7_864_320 } };
+    expect(maxBytesFor(anthropic, "IMAGE/PNG")).toBe(7_864_320);
+    expect(maxBytesFor(anthropic, "application/pdf")).toBe(STATUS.maxBytes);
+    expect(canExtract(anthropic, { mimeType: "image/png", byteSize: 8_000_000 })).toBe(false);
+    expect(canExtract(anthropic, { mimeType: "application/pdf", byteSize: 8_000_000 })).toBe(true);
+    expect(fileProblem(anthropic, { type: "image/png", size: 8_000_000 })).toBe("size");
+  });
 });
 
 describe("unavailableHint — only an admin, who can act on it, is told why", () => {
@@ -71,6 +81,8 @@ describe("extractionErrorKey — refusals read as clear messages", () => {
     expect(extractionErrorKey(refusal(409, "EXTRACTION_DISABLED"))).toBe("extractionDisabled");
     expect(extractionErrorKey(refusal(422, "TOO_MANY_PAGES"))).toBe("tooManyPages");
     expect(extractionErrorKey(refusal(429, "BUDGET_EXCEEDED"))).toBe("budget");
+    expect(extractionErrorKey(refusal(429, "EXTRACTION_IN_PROGRESS"))).toBe("inProgress");
+    expect(extractionErrorKey(refusal(429, "RATE_LIMITED"))).toBe("rateLimited");
     expect(extractionErrorKey(refusal(502, "EXTRACTION_UNREADABLE"))).toBe("unreadable");
     expect(extractionErrorKey(refusal(502, "PROVIDER_RATE_LIMIT"))).toBe("providerRateLimit");
     expect(extractionErrorKey(refusal(504, "EXTRACTION_TIMEOUT"))).toBe("timeout");
