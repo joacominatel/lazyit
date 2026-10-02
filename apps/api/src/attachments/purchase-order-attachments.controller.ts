@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Header,
   Param,
+  Patch,
   Post,
   StreamableFile,
   UploadedFile,
@@ -19,7 +21,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { ASSET_ATTACHMENT_MAX_MB, AttachmentSchema } from '@lazyit/shared';
+import {
+  ASSET_ATTACHMENT_MAX_MB,
+  ATTACHMENT_LABEL_MAX_LENGTH,
+  AttachmentSchema,
+  UpdateAttachmentSchema,
+} from '@lazyit/shared';
 import { AttachmentsService } from './attachments.service';
 import {
   attachmentsUploadStorage,
@@ -30,6 +37,7 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 
 class AttachmentDto extends createZodDto(AttachmentSchema) {}
+class UpdateAttachmentDto extends createZodDto(UpdateAttachmentSchema) {}
 
 /**
  * A purchase's documents (ADR-0099 §10, ADR-0082): quote, order, invoice, delivery note — the ASSET
@@ -54,7 +62,15 @@ export class PurchaseOrderAttachmentsController {
     schema: {
       type: 'object',
       required: ['file'],
-      properties: { file: { type: 'string', format: 'binary' } },
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        label: {
+          type: 'string',
+          maxLength: ATTACHMENT_LABEL_MAX_LENGTH,
+          description:
+            'Optional document type label (quote, invoice, delivery note…); blank = none.',
+        },
+      },
     },
   })
   @ApiCreatedResponse({ type: AttachmentDto })
@@ -69,6 +85,7 @@ export class PurchaseOrderAttachmentsController {
   upload(
     @Param('purchaseOrderId') purchaseOrderId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('label') label?: unknown,
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.attachments.upload(
@@ -76,6 +93,7 @@ export class PurchaseOrderAttachmentsController {
       purchaseOrderId,
       file,
       principal,
+      label,
     );
   }
 
@@ -116,6 +134,28 @@ export class PurchaseOrderAttachmentsController {
         content.originalName,
       ),
     });
+  }
+
+  @Patch(':attachmentId')
+  @RequirePermission('purchaseOrder:write')
+  @ApiOperation({
+    summary:
+      "Set or clear a document's type label (null clears it). Only the label is editable. Logged as DOCUMENT_UPDATED. Human callers only.",
+  })
+  @ApiOkResponse({ type: AttachmentDto })
+  updateLabel(
+    @Param('purchaseOrderId') purchaseOrderId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() dto: UpdateAttachmentDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.attachments.updateLabel(
+      'PURCHASE_ORDER',
+      purchaseOrderId,
+      attachmentId,
+      dto.label,
+      principal,
+    );
   }
 
   @Delete(':attachmentId')

@@ -43,7 +43,11 @@ export const purchasesToolset: AiToolset = {
       PHASE_3,
     ),
     unexposed(AssetPurchaseController, ['findOne'], PHASE_3),
-    unexposed(PurchaseOrderAttachmentsController, ['list', 'remove'], PHASE_3),
+    unexposed(
+      PurchaseOrderAttachmentsController,
+      ['list', 'remove', 'updateLabel'],
+      PHASE_3,
+    ),
     unexposed(
       PurchaseOrderAttachmentsController,
       ['upload', 'content'],

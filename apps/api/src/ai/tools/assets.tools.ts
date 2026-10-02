@@ -2594,7 +2594,7 @@ export const assetsToolset: AiToolset = {
     ),
     unexposed(
       AssetAttachmentsController,
-      ['list', 'remove'],
+      ['list', 'remove', 'updateLabel'],
       'Attachments: v1.1 (tools-and-execution.md §7).',
     ),
     unexposed(

@@ -19,6 +19,8 @@ import {
   ASSET_ATTACHMENT_MAX_MB,
   ASSET_ATTACHMENT_MIME_TYPES,
   ATTACHMENT_INLINE_MIME_TYPES,
+  ATTACHMENT_LABEL_MAX_LENGTH,
+  AttachmentLabelSchema,
   type AttachmentEntityType,
 } from '@lazyit/shared';
 import type { User } from '../../generated/prisma/client';
@@ -104,18 +106,28 @@ export class AttachmentsService {
    * Accept one uploaded file for a parent. The bytes are already on disk in `attachments/tmp/`
    * (multer diskStorage — never memory); EVERY exit path discards the tmp file (a successful
    * promote renames it away first, so the discard is a no-op there). Order:
-   * authz → per-file cap → total budget → magic-byte sniff + allowlist → sha256 → atomic promote
+   * label → authz → per-file cap → total budget → magic-byte sniff + allowlist → sha256 → atomic promote
    * (dedup by content) → row insert (blob-first, ADR-0082 §3) → best-effort raster re-encode enqueue.
+   *
+   * `label` is the optional document type label (asset and purchase documents, #1476) — the multipart
+   * text field, validated HERE rather than by a pipe so a bad one still discards the tmp file.
    */
   async upload(
     entityType: AttachmentEntityType,
     entityId: string,
     file: UploadedAttachmentFile | undefined,
     principal?: Principal,
+    label?: unknown,
   ) {
     try {
       if (!file?.path) {
         throw new BadRequestException('A file is required');
+      }
+      const parsedLabel = AttachmentLabelSchema.safeParse(label);
+      if (!parsedLabel.success) {
+        throw new BadRequestException(
+          `label must be text of at most ${ATTACHMENT_LABEL_MAX_LENGTH} characters`,
+        );
       }
       const uploadedById = this.requireHuman(principal);
       await this.assertParentWritable(entityType, entityId, principal);
@@ -154,6 +166,9 @@ export class AttachmentsService {
             mimeType: sniff.mimeType,
             originalName: file.originalname,
             uploadedById,
+            ...(parsedLabel.data !== undefined
+              ? { label: parsedLabel.data }
+              : {}),
           },
         });
         if (entityType === 'PURCHASE_ORDER') {
@@ -162,7 +177,11 @@ export class AttachmentsService {
             entityId,
             'DOCUMENT_ADDED',
             { userId: uploadedById },
-            { attachmentId: created.id, originalName: created.originalName },
+            {
+              attachmentId: created.id,
+              originalName: created.originalName,
+              label: created.label ?? null,
+            },
           );
         }
         return created;
@@ -254,10 +273,52 @@ export class AttachmentsService {
           entityId,
           'DOCUMENT_REMOVED',
           { userId },
-          { attachmentId: row.id, originalName: row.originalName },
+          {
+            attachmentId: row.id,
+            originalName: row.originalName,
+            label: row.label ?? null,
+          },
         );
       }
       return removed;
+    });
+  }
+
+  /**
+   * Set or clear a document's type label (#1476) — behind the parent's WRITE authz, HUMAN-only like every
+   * attachment write. Only the label changes; the file never does. On a purchase, a real change appends
+   * `DOCUMENT_UPDATED { attachmentId, originalName, label: { from, to } }` in the same transaction.
+   */
+  async updateLabel(
+    entityType: AttachmentEntityType,
+    entityId: string,
+    attachmentId: string,
+    label: string | null,
+    principal?: Principal,
+  ) {
+    const userId = this.requireHuman(principal);
+    await this.assertParentWritable(entityType, entityId, principal);
+    const row = await this.findRow(entityType, entityId, attachmentId);
+    if (row.label === label) return row;
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.attachment.update({
+        where: { id: row.id },
+        data: { label },
+      });
+      if (entityType === 'PURCHASE_ORDER') {
+        await recordPurchaseOrderEvent(
+          tx,
+          entityId,
+          'DOCUMENT_UPDATED',
+          { userId },
+          {
+            attachmentId: row.id,
+            originalName: row.originalName,
+            label: { from: row.label, to: label },
+          },
+        );
+      }
+      return updated;
     });
   }
 
