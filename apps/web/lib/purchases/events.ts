@@ -100,7 +100,8 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
         kind: "assetsLinked",
         lineId: str(p.lineId),
         count: count(p.assetIds),
-        moved: p.moved === true,
+        // The API logs the moved assets as a list ({ assetId, from… } each); a boolean reads too.
+        moved: Array.isArray(p.moved) ? p.moved.length > 0 : p.moved === true,
         over: p.overReceived === true,
       };
     case "ASSET_UNLINKED":

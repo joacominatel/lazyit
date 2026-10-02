@@ -75,9 +75,21 @@ describe("the flows' events (#1473) read as sentences, tolerant of a thin payloa
     expect(
       describePurchaseEvent({
         eventType: "ASSET_LINKED",
-        payload: { lineId: "l1", assetIds: ["a", "b"], applied: {}, moved: true, overReceived: false },
+        payload: {
+          lineId: "l1",
+          assetIds: ["a", "b"],
+          applied: {},
+          moved: [{ assetId: "a", lineId: "l0", purchaseOrderId: "p0" }],
+          overReceived: false,
+        },
       }),
     ).toEqual({ kind: "assetsLinked", lineId: "l1", count: 2, moved: true, over: false });
+    expect(
+      describePurchaseEvent({
+        eventType: "ASSET_LINKED",
+        payload: { lineId: "l1", assetIds: ["a"], applied: {}, moved: [], overReceived: false },
+      }),
+    ).toMatchObject({ moved: false });
   });
 
   test("an unlink by a move names the purchase the assets went to", () => {
