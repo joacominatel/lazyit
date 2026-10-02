@@ -1,0 +1,128 @@
+---
+title: "ADR-0100: Money as 64-bit integer minor units"
+tags: [adr, money, data-model, validation, contract, migration]
+status: accepted
+created: 2026-10-01
+updated: 2026-10-01
+deciders: [Joaquín Minatel]
+---
+
+# ADR-0100: Money as 64-bit integer minor units
+
+## Status
+
+**accepted** — 2026-10-01 (epic #1465, issue #1466). Part of the Purchases package the CEO approved
+"con la ampliación de montos" (including the money widening) — see
+[[0099-purchases-scope-model-and-optionality]] and [[purchases/decisions]]. **Design only; built first in
+Purchases Phase 1.** Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
+[[0088-application-license-seat-tracking]] (`costPerSeat` widens with the rest).
+
+## Context
+
+Money is stored as **integer minor units** (hundredths: `formatMoney` divides by 100) in Postgres `int4`
+columns, validated by the shared `int4({ min: 0 })` primitive ([[0036-int4-bounded-integers]], #954).
+Three columns hold money today: `Asset.purchaseCost`, `Asset.salvageValue` and
+`Application.costPerSeat`.
+
+The `int4` ceiling is **2,147,483,647 minor units = 21,474,836.47 major units per stored value**. That is
+enough in USD or EUR, and not enough in currencies with large nominal amounts: in ARS, CLP or COP an
+ordinary server or a year of licences crosses it. Purchases makes this concrete — the research persona
+buys in ARS, a single laptop line already reaches 1,412,500.00, and
+[[0099-purchases-scope-model-and-optionality]] copies a line's unit price onto an asset's
+`purchaseCost`. A purchase money column cannot be wider than the asset column it copies into.
+
+Prisma maps a `BigInt` field to a PostgreSQL `bigint` and to a JavaScript **`bigint`** in the client.
+Prisma's own documentation (ORM v7, *Special fields and types → Working with BigInt*) notes that
+`JSON.stringify` throws `TypeError: Do not know how to serialize a BigInt` on a record that contains one,
+so a `BigInt` column cannot reach the wire without an explicit conversion.
+
+## Considered options
+
+1. **Keep `int4` and derive totals in the app.** No migration. Rejected: the per-value ceiling is the
+   problem, not only totals — one ARS unit price can exceed it.
+2. **`Decimal` / `numeric`.** Rejected: a second money convention (Prisma returns `Decimal` objects,
+   usually serialized as strings), float-shaped input on the wire, and [[0088-application-license-seat-tracking]]
+   explicitly refused a second convention.
+3. **`bigint` in the database, a string on the wire.** Exact to 2^63−1. Rejected: a breaking change to
+   every money field of the contract (web, import, AI tools, MCP clients) to buy a range nobody needs.
+4. **`bigint` in the database, a bounded JSON number on the wire** *(chosen)*. The contract keeps its
+   shape; only the upper bound moves.
+5. **Widen only the new purchase columns.** Rejected: copy-on-confirm would move a purchase price into an
+   asset column that cannot hold it.
+
+## Decision
+
+### 1. Storage
+
+Every money amount is a **64-bit integer of minor units**: Prisma `BigInt` → PostgreSQL `bigint`.
+
+- Existing columns: `Asset.purchaseCost`, `Asset.salvageValue`, `Application.costPerSeat`.
+- Every new money column, starting with the Purchases ones ([[purchase-order-line]]`.unitPrice`).
+- Non-money integers (counts, quantities, months, positions) stay `Int` / `int4()`
+  ([[0036-int4-bounded-integers]] is unchanged for them).
+
+The **scale is unchanged**: one minor unit is one hundredth of the major unit, as today. This record does
+not model per-currency minor-unit exponents (see [[0099-purchases-scope-model-and-optionality]],
+follow-ups).
+
+### 2. Wire contract
+
+- Money stays a **JSON `number`** (an integer), never a string and never a `bigint`. The web, the import,
+  the AI tools and MCP clients keep the shape they have.
+- A shared zod primitive **`money()`** in `packages/shared/src/schemas/primitives.ts` replaces
+  `int4({ min: 0 })` on every money field: `z.number().int()`, bounded to
+  **`[0, Number.MAX_SAFE_INTEGER]`** (9,007,199,254,740,991 minor units ≈ 90 trillion major units) by
+  default, narrowable like `int4()` and never widened past it.
+- `money()` **always carries an `example`** in its OpenAPI metadata. Without one, Swagger UI autofills the
+  schema `maximum` into optional fields — the exact defect [[0036-int4-bounded-integers]] fixed — and
+  since `MAX_SAFE_INTEGER` is now a *valid* value it would be stored instead of rejected.
+- The `bigint` column's own range (2^63−1) is wider than the wire bound, so the zod bound is the binding
+  one: no value written through the API can exceed `Number.MAX_SAFE_INTEGER`, and every legacy value
+  (≤ int4) is far below it.
+
+### 3. Conversion at the API boundary
+
+- **Reads:** the service or mapper that turns a Prisma row into a contract shape converts each money
+  `bigint` with `Number(value)` before the response is serialized. Safe by construction: every stored
+  value is within the wire bound.
+- **Writes:** the validated `number` is passed to Prisma as `BigInt(value)`.
+- **No global `BigInt.prototype.toJSON` patch.** A missed conversion must fail loudly in a test, not
+  serialize silently as a string.
+- **Derived amounts** (book value, line and purchase totals) are computed so that no intermediate value
+  exceeds `Number.MAX_SAFE_INTEGER` — divide before multiplying, or use `bigint` arithmetic — and a write
+  that would make a line total or a purchase total exceed the bound is rejected with a `400`.
+- The web's major/minor helpers (`apps/web/lib/utils/money.ts`) bound their input to the same maximum so
+  a value the server will reject is caught in the form.
+
+### 4. Upgrade path
+
+- One migration widens the three existing columns: `ALTER TABLE "assets" ALTER COLUMN "purchaseCost" TYPE
+  BIGINT` (and `"salvageValue"`; and `"applications"."costPerSeat"`). **Non-destructive**: every `int4`
+  value is a valid `bigint`, `NULL` stays `NULL`, and no row changes meaning. No backfill.
+- The change is **not binary-compatible**, so PostgreSQL **rewrites each table** under an `ACCESS
+  EXCLUSIVE` lock for the duration. At lazyit's scale (thousands of assets, hundreds of applications)
+  that is seconds, during `prisma migrate deploy`, while the operator is already restarting the stack.
+  No index covers these columns.
+- Narrowing back to `int4` is not a supported downgrade once a value above the old ceiling is stored.
+- The contract change is **widening only**: a client that sent values within `int4` still sends valid
+  values; an older client reading a value above `int4` receives a correct JSON number.
+
+## Consequences
+
+- **Positive:** one money convention again, now wide enough for large-nominal currencies (≈ 90 trillion
+  major units per value). Totals stay derived, never stored. The wire shape of every client is unchanged.
+- **Negative / trade-offs:**
+  - Every reader of a money column must convert explicitly; a forgotten one throws at serialization.
+    Tests on each read path are the guard.
+  - A table rewrite with a short exclusive lock on `assets` and `applications` at upgrade time.
+  - The usable range stops at `Number.MAX_SAFE_INTEGER`, not at the column's 2^63−1 — deliberately.
+- **Follow-ups (Phase 1, backend lane):** add `money()`; move the three columns and every money field of
+  the shared schemas (asset, asset receive, application, the import descriptor, the AI tool inputs) to
+  it; convert at the read boundary; cover each read and write path with a test above the old ceiling;
+  update [[code-conventions]] when the code lands.
+
+## Related
+
+[[0099-purchases-scope-model-and-optionality]] · [[0036-int4-bounded-integers]] ·
+[[0088-application-license-seat-tracking]] · [[asset]] · [[application]] · [[purchase-order-line]] ·
+[[shared-package]] · [[code-conventions]] · #954 · #1465 · #1466
