@@ -10,7 +10,9 @@
  *
  * There is deliberately NO global `BigInt.prototype.toJSON` patch: a missed conversion must fail loudly
  * in a test, not serialize silently as a string. Every other module reads these tables through a narrow
- * `select` that never includes a money column, so the two services are the only read paths.
+ * `select` that never includes a money column, or a whole-row read consumed only by the search projectors
+ * (`projectAsset` / `projectApplication`), which copy no money field — so the two services are the only
+ * paths that put money on the wire.
  */
 
 /** The Asset columns that hold money. */

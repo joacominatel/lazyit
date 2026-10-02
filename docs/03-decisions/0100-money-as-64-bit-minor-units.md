@@ -103,10 +103,11 @@ no semantics ([[0099-purchases-scope-model-and-optionality]] §5).
 the keys it names and only when they hold the type it expects, so a partial `select`, an absent key or a
 `null` passes through unchanged.
 
-- **Where it runs.** `AssetsService` and `ApplicationsService` are the only code that reads these columns:
-  every other module reads `assets` and `applications` through a narrow `select` that names no money
-  column (search projections, the inventory CSV, assignments, infra, the import's existence checks). Each
-  method of the two services that returns a row converts it before returning. The AI tools and MCP
+- **Where it runs.** `AssetsService` and `ApplicationsService` are the only code that puts these columns
+  on the wire. Every other module reads `assets` and `applications` through a narrow `select` that names
+  no money column (the inventory CSV, assignments, infra, the import's existence checks), or through a
+  whole-row read consumed only by the search projectors (`projectAsset` / `projectApplication`), which
+  copy no money field. Each method of the two services that returns a row converts it before returning. The AI tools and MCP
   dispatch to the same controller handlers, so they receive the converted row too.
 - **Why not a Prisma extension.** A `result` extension that overrides the three fields would convert at
   runtime, but `PrismaService` is typed as the base client, so the generated types would keep saying
