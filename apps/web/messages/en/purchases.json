@@ -662,7 +662,8 @@
       "label": "Document",
       "openTab": "Open in a new tab",
       "none": "This type of file can't be shown here.",
-      "error": "Couldn't load the document."
+      "error": "Couldn't load the document.",
+      "pdfHelp": "PDFs open in your browser's own viewer, in a new tab — put it beside this one to compare."
     },
     "read": "Read “{text}”",
     "readOnPage": "Read “{text}” · page {page}",

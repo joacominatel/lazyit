@@ -197,7 +197,13 @@ export function ExtractionReviewView({
         pillar="inventory"
       />
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="lg:sticky lg:top-4 lg:h-[calc(100vh-6rem)] lg:self-start">
+        <div
+          className={
+            attachment.mimeType.toLowerCase().startsWith("image/")
+              ? "lg:sticky lg:top-4 lg:h-[calc(100vh-6rem)] lg:self-start"
+              : "lg:sticky lg:top-4 lg:self-start"
+          }
+        >
           <DocumentPreview purchaseId={purchaseId} attachment={attachment} />
         </div>
         <div className="min-w-0">

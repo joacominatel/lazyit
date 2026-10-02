@@ -4,15 +4,17 @@ import { ArrowTopRightOnSquareIcon, DocumentIcon } from "@heroicons/react/24/out
 import type { Attachment } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchAttachmentBlob } from "@/lib/api/endpoints/attachments";
 import { previewKind } from "@/lib/purchases/extraction";
 
 /**
- * The document beside the draft (UX proposal §3.b): the browser's own PDF viewer or the image, from the
- * authenticated download turned into an object URL (a bare `src` cannot carry the token, ADR-0082). The bytes
- * are re-typed to the stored, server-sniffed type before they get a URL, and only a PDF or a raster image is
- * shown — never markup. *Open in a new tab* is always there, for a side-by-side window or a small screen.
+ * The document beside the draft (UX proposal §3.b), from the authenticated download turned into an object URL
+ * (a bare `src` cannot carry the token, ADR-0082). The bytes are re-typed to the stored, server-sniffed type
+ * before they get a URL — never markup. A raster image is shown inline (`img-src` allows `blob:`). A PDF is
+ * NOT framed: the web CSP keeps `frame-src 'none'` (ADR-0099, Phase 2 web), so it is a document card whose
+ * *Open in a new tab* opens it in the browser's own viewer, beside the review.
  */
 export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string; attachment: Attachment }) {
   const t = useTranslations("purchases.extraction.preview");
@@ -41,13 +43,16 @@ export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string
   }, [purchaseId, attachment.id, attachment.mimeType]);
 
   return (
-    <section aria-label={t("label")} className="flex h-full min-h-[60vh] flex-col gap-2">
+    <section
+      aria-label={t("label")}
+      className={preview?.kind === "image" ? "flex h-full min-h-[60vh] flex-col gap-2" : "flex flex-col gap-2"}
+    >
       <div className="flex items-center justify-between gap-2 text-sm">
         <p className="flex min-w-0 items-center gap-2">
           <DocumentIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate font-medium">{attachment.originalName}</span>
         </p>
-        {url ? (
+        {url && preview?.kind === "image" ? (
           <a
             href={url}
             target="_blank"
@@ -59,15 +64,34 @@ export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string
           </a>
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border bg-muted/30">
+      <div
+        className={
+          preview?.kind === "image"
+            ? "flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border bg-muted/30"
+            : "flex items-start justify-center rounded-lg border bg-muted/30"
+        }
+      >
         {!preview ? (
           <p className="p-6 text-sm text-muted-foreground">{t("none")}</p>
         ) : failed ? (
           <p className="p-6 text-sm text-muted-foreground">{t("error")}</p>
+        ) : preview.kind === "pdf" ? (
+          <div className="flex w-full flex-col items-center gap-3 p-8 text-center">
+            <DocumentIcon className="size-10 text-muted-foreground" aria-hidden />
+            <p className="text-sm text-muted-foreground">{t("pdfHelp")}</p>
+            <Button asChild={url !== null} disabled={url === null} size="sm">
+              {url ? (
+                <a href={url} target="_blank" rel="noopener noreferrer">
+                  <ArrowTopRightOnSquareIcon />
+                  {t("openTab")}
+                </a>
+              ) : (
+                <span>{t("openTab")}</span>
+              )}
+            </Button>
+          </div>
         ) : !url ? (
           <Skeleton className="h-full min-h-[60vh] w-full" />
-        ) : preview.kind === "pdf" ? (
-          <iframe src={url} title={attachment.originalName} className="h-full min-h-[60vh] w-full" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element -- a blob: URL of an authenticated download
           <img src={url} alt={attachment.originalName} className="h-auto max-w-full" />

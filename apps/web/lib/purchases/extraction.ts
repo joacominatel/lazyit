@@ -180,8 +180,9 @@ export function isDocumentHolder(
 const PREVIEW_IMAGES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 /**
- * How the review shows a document next to the draft, from its stored (server-sniffed) type: a PDF in the
- * browser's own viewer, an image inline, anything else not at all. The bytes are re-typed to exactly this
+ * How the review shows a document next to the draft, from its stored (server-sniffed) type: a PDF as a card
+ * that opens it in a new tab (never framed — the CSP keeps `frame-src 'none'`), an image inline, anything else
+ * not at all. The bytes are re-typed to exactly this
  * before they get an object URL, so a `blob:` URL of this page's origin can never hold markup.
  */
 export function previewKind(mimeType: string): { kind: "pdf" | "image"; type: string } | null {

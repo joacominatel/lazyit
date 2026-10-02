@@ -12,6 +12,7 @@ mock.module("next/navigation", () => ({
   usePathname: () => "/purchases/p/review/a",
 }));
 const { ReviewForm } = await import("./extraction-review-view");
+const { DocumentPreview } = await import("./document-preview");
 
 /**
  * The extraction review (#1477), rendered to static markup (ADR-0012: no DOM runner): what was read is in
@@ -124,5 +125,33 @@ describe("the extraction review", () => {
 
   test("nothing is saved until Save, and the page says so", () => {
     expect(html).toContain(esc(x.saveNote));
+  });
+});
+
+describe("the document preview", () => {
+  test("a PDF is never framed (the CSP keeps frame-src 'none'): a card that opens it in a new tab", () => {
+    const html = renderToStaticMarkup(
+      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases, common }}>
+        <DocumentPreview
+          purchaseId="ckpurchase000000000000000"
+          attachment={{
+            id: "ckattachment0000000000000",
+            entityType: "PURCHASE_ORDER",
+            entityId: "ckpurchase000000000000000",
+            sha256: "0".repeat(64),
+            byteSize: 1000,
+            mimeType: "application/pdf",
+            originalName: "factura.pdf",
+            uploadedById: null,
+            label: null,
+            createdAt: "2026-03-01T00:00:00.000Z",
+            updatedAt: "2026-03-01T00:00:00.000Z",
+          }}
+        />
+      </NextIntlClientProvider>,
+    );
+    expect(html).not.toMatch(/<(iframe|object|embed)\b/);
+    expect(html).toContain(esc(x.preview.pdfHelp));
+    expect(html).toContain(esc(x.preview.openTab));
   });
 });

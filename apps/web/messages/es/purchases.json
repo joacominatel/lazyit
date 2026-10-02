@@ -662,7 +662,8 @@
       "label": "Documento",
       "openTab": "Abrir en una pestaña nueva",
       "none": "Este tipo de archivo no se puede mostrar aquí.",
-      "error": "No se pudo cargar el documento."
+      "error": "No se pudo cargar el documento.",
+      "pdfHelp": "Los PDF se abren en el visor de tu navegador, en una pestaña nueva: ponla junto a esta para comparar."
     },
     "read": "Leído “{text}”",
     "readOnPage": "Leído “{text}” · página {page}",

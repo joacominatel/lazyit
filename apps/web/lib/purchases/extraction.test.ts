@@ -138,7 +138,7 @@ describe("the holder purchase of New purchase from a document", () => {
 });
 
 describe("previewKind — what the review shows beside the draft", () => {
-  test("a PDF in the browser's viewer, an image inline", () => {
+  test("a PDF as a card that opens in a new tab, an image inline", () => {
     expect(previewKind("application/pdf")).toEqual({ kind: "pdf", type: "application/pdf" });
     expect(previewKind("IMAGE/JPEG")).toEqual({ kind: "image", type: "image/jpeg" });
   });
