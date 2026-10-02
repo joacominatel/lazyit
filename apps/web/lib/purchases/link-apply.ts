@@ -165,9 +165,10 @@ export function linkSummary(
 
 /**
  * The request for the chosen cells. `apply` holds the fields checked on EVERY asset that has something to
- * apply for them, so the common case — the same choice everywhere — is one list and no overrides. An
- * asset that receives more than that gets its full list in `applyByAsset`. A field nobody checked is in
- * neither, so it is never touched. `move` is sent only when an asset linked elsewhere is being moved.
+ * apply for them, so the common case — the same choice everywhere — is one list. Any asset whose own
+ * checked set is not exactly `apply` gets its full list in `applyByAsset`, so what each asset receives is
+ * stated, never inferred. A field nobody checked is in neither, so it is never touched. `move` is sent only
+ * when an asset linked elsewhere is being moved.
  */
 export function buildLinkPayload(
   assets: readonly PurchaseLinkPreviewAsset[],
@@ -180,7 +181,7 @@ export function buildLinkPayload(
   const applyByAsset: Record<string, PurchaseApplyField[]> = {};
   for (const asset of assets) {
     const fields = checkedFields(choices, asset);
-    if (fields.some((field) => !apply.includes(field))) applyByAsset[asset.assetId] = fields;
+    if (fields.join(",") !== apply.join(",")) applyByAsset[asset.assetId] = fields;
   }
   const move = assets.some((asset) => asset.linkState === "OTHER_LINE");
   return {
@@ -221,4 +222,44 @@ export function failureViews(
       failure.reason in REASON_KEY ? REASON_KEY[failure.reason as PurchaseLinkFailureReason] : null;
     return { assetId: failure.assetId, label, reasonKey, error: failure.error };
   });
+}
+
+/**
+ * A fingerprint of what the diff showed: each asset's link state and line, and each field's action. When
+ * assets are moved, the dialog re-reads the preview just before linking and stops if this changed — an
+ * asset may have been linked or edited by someone else meanwhile.
+ */
+export function previewSignature(assets: readonly PurchaseLinkPreviewAsset[]): string {
+  return assets
+    .map((asset) =>
+      [
+        asset.assetId,
+        asset.linkState,
+        asset.linkedLineId ?? "",
+        ...PURCHASE_APPLY_FIELDS.map((field) => actionOf(asset, field)),
+      ].join(":"),
+    )
+    .join("|");
+}
+
+/** What the result step shows, captured when the link returns — the preview is not read again after it. */
+export interface LinkResultSnapshot {
+  linked: number;
+  failures: FailureView[];
+}
+
+/**
+ * After a link: close with a toast when everything went through, else keep a snapshot for the result
+ * step, naming each refused asset from the preview the operator confirmed.
+ */
+export function linkSubmitOutcome(
+  result: { linked: readonly unknown[]; failed: readonly { assetId: string; reason: string; error: string }[] },
+  assets: readonly PurchaseLinkPreviewAsset[],
+): { kind: "done"; linked: number } | { kind: "result"; snapshot: LinkResultSnapshot } {
+  if (result.failed.length === 0) return { kind: "done", linked: result.linked.length };
+  const names = new Map(assets.map((asset) => [asset.assetId, asset]));
+  return {
+    kind: "result",
+    snapshot: { linked: result.linked.length, failures: failureViews(result.failed, names) },
+  };
 }

@@ -7,7 +7,9 @@ import {
   everyValueChoices,
   failureViews,
   fieldGroups,
+  linkSubmitOutcome,
   linkSummary,
+  previewSignature,
   setCell,
   setFieldGroup,
 } from "./link-apply";
@@ -68,11 +70,24 @@ describe("mapping the choices to apply / applyByAsset", () => {
   test("the same choice everywhere is one apply list, no overrides", () => {
     const assets = [
       asset(A, { purchaseCost: "FILL", warrantyEnd: "FILL" }),
+      asset(B, { purchaseCost: "FILL", warrantyEnd: "FILL" }),
+    ];
+    expect(buildLinkPayload(assets, defaultChoices(assets))).toEqual({
+      assetIds: [A, B],
+      apply: ["purchaseCost", "warrantyEnd"],
+    });
+  });
+
+  test("an asset whose checked set is not exactly apply — even a subset — gets its own list", () => {
+    // B's warranty end is already the purchase's: it receives the cost only, and says so.
+    const assets = [
+      asset(A, { purchaseCost: "FILL", warrantyEnd: "FILL" }),
       asset(B, { purchaseCost: "FILL", warrantyEnd: "SAME" }),
     ];
     expect(buildLinkPayload(assets, defaultChoices(assets))).toEqual({
       assetIds: [A, B],
       apply: ["purchaseCost", "warrantyEnd"],
+      applyByAsset: { [B]: ["purchaseCost"] },
     });
   });
 
@@ -114,6 +129,7 @@ describe("mapping the choices to apply / applyByAsset", () => {
     expect(buildLinkPayload(assets, everyValueChoices(assets))).toEqual({
       assetIds: [A, B],
       apply: ["purchaseDate", "purchaseCost"],
+      applyByAsset: { [B]: ["purchaseCost"] },
     });
   });
 
@@ -185,5 +201,37 @@ describe("partial-failure reasons", () => {
     expect(failureViews([{ assetId: B, reason: "SOMETHING_NEW", error: "the API says why" }], names)).toEqual([
       { assetId: B, label: B, reasonKey: null, error: "the API says why" },
     ]);
+  });
+});
+
+describe("the result step and the re-check before a move", () => {
+  test("a link that went through everywhere closes; a partial one keeps a snapshot naming each refusal", () => {
+    const assets = [asset(A, {}), asset(B, {}, "OTHER_LINE")];
+    expect(linkSubmitOutcome({ linked: [{}, {}], failed: [] }, assets)).toEqual({ kind: "done", linked: 2 });
+    expect(
+      linkSubmitOutcome(
+        { linked: [{}], failed: [{ assetId: B, reason: "LINKED_ELSEWHERE", error: "on another line" }] },
+        assets,
+      ),
+    ).toEqual({
+      kind: "result",
+      snapshot: {
+        linked: 1,
+        failures: [{ assetId: B, label: "LZ-b · Laptop b", reasonKey: "linkedElsewhere", error: "on another line" }],
+      },
+    });
+  });
+
+  test("the signature changes when an asset's link or a field's action changes, not otherwise", () => {
+    const before = [asset(A, { purchaseCost: "FILL" }), asset(B, {}, "OTHER_LINE")];
+    expect(previewSignature([asset(A, { purchaseCost: "FILL" }), asset(B, {}, "OTHER_LINE")])).toBe(
+      previewSignature(before),
+    );
+    expect(previewSignature([asset(A, { purchaseCost: "REPLACE" }), asset(B, {}, "OTHER_LINE")])).not.toBe(
+      previewSignature(before),
+    );
+    expect(previewSignature([asset(A, { purchaseCost: "FILL" }), asset(B, {}, "THIS_LINE")])).not.toBe(
+      previewSignature(before),
+    );
   });
 });

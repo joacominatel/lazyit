@@ -437,7 +437,8 @@
       "alreadyLinked": "Already on this line",
       "linkedElsewhere": "On another purchase — tick “Move here” to move it",
       "notLinked": "Not linked to this line"
-    }
+    },
+    "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link."
   },
   "provenance": {
     "title": "Purchase",

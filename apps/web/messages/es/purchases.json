@@ -437,7 +437,8 @@
       "alreadyLinked": "Ya está en esta línea",
       "linkedElsewhere": "Está en otra compra: marca «Mover aquí» para moverlo",
       "notLinked": "No está vinculado a esta línea"
-    }
+    },
+    "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula."
   },
   "provenance": {
     "title": "Compra",

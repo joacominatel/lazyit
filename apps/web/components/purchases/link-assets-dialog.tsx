@@ -7,7 +7,6 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import {
-  type LinkAssetsResult,
   type PurchaseApplyField,
   type PurchaseLinkPreview,
   type PurchaseLinkPreviewAsset,
@@ -53,9 +52,12 @@ import {
   buildLinkPayload,
   defaultChoices,
   everyValueChoices,
-  failureViews,
   fieldGroups,
+  isActionable,
+  type LinkResultSnapshot,
+  linkSubmitOutcome,
   linkSummary,
+  previewSignature,
   setCell,
   setFieldGroup,
 } from "@/lib/purchases/link-apply";
@@ -117,7 +119,10 @@ export function LinkAssetsDialog({
   const [target, setTarget] = useState<LinkLineTarget | null>(fixedLine);
   const [picked, setPicked] = useState<LinkAssetRef[]>(fixedAssets ?? []);
   const [step, setStep] = useState<Step>(fixedAssets === null ? "assets" : fixedLine === null ? "line" : "diff");
-  const [result, setResult] = useState<LinkAssetsResult | null>(null);
+  // The result step renders from what the link returned, captured at submit: the preview is not read
+  // again once the step leaves the diff, and the write refreshes every purchase read anyway.
+  const [snapshot, setSnapshot] = useState<LinkResultSnapshot | null>(null);
+  const [checking, setChecking] = useState(false);
   const assetIds = useMemo(() => picked.map((asset) => asset.id), [picked]);
 
   const preview = useLinkPreview(
@@ -134,20 +139,37 @@ export function LinkAssetsDialog({
     setDiff({ key: choiceKey, choices: defaultChoices(preview.data.assets), every: false, moved: new Set() });
   }
 
-  function submit(data: PurchaseLinkPreview) {
+  async function submit(shown: PurchaseLinkPreview) {
     if (!target || !diff) return;
+    let data = shown;
+    if (diff.moved.size > 0) {
+      // Moving takes assets off another purchase: re-read the comparison first, and stop if it changed —
+      // someone may have linked or edited one of them since it was shown.
+      setChecking(true);
+      const fresh = await preview.refetch();
+      setChecking(false);
+      if (!fresh.data || previewSignature(fresh.data.assets) !== previewSignature(shown.assets)) {
+        toast.warning(t("previewChanged"));
+        if (fresh.data) {
+          setDiff({ key: choiceKey, choices: defaultChoices(fresh.data.assets), every: false, moved: new Set() });
+        }
+        return;
+      }
+      data = fresh.data;
+    }
     const toLink = assetsToLink(data.assets, diff.moved);
     linkAssets.mutate(
       { id: target.purchase.id, lineId: target.line.id, data: buildLinkPayload(toLink, diff.choices) },
       {
-        onSuccess: (outcome) => {
-          if (outcome.linked.length > 0) onLinked?.();
-          if (outcome.failed.length === 0) {
-            toast.success(t("linkedToast", { count: outcome.linked.length }));
+        onSuccess: (result) => {
+          if (result.linked.length > 0) onLinked?.();
+          const outcome = linkSubmitOutcome(result, data.assets);
+          if (outcome.kind === "done") {
+            toast.success(t("linkedToast", { count: outcome.linked }));
             onClose();
             return;
           }
-          setResult(outcome);
+          setSnapshot(outcome.snapshot);
           setStep("result");
         },
         onError: (error) => notifyError(error, t("linkError")),
@@ -225,7 +247,6 @@ export function LinkAssetsDialog({
           ) : (
             <DiffStep
               preview={preview.data}
-              line={target.line}
               choices={diff.choices}
               every={diff.every}
               moved={diff.moved}
@@ -240,24 +261,19 @@ export function LinkAssetsDialog({
               onMoved={(moved) => setDiff({ ...diff, moved })}
               raising={updateLine.isPending}
               onRaise={raiseLine}
-              submitting={linkAssets.isPending}
+              submitting={linkAssets.isPending || checking}
               onBack={
                 fixedLine === null || fixedAssets === null
                   ? () => setStep(fixedAssets === null ? "assets" : "line")
                   : undefined
               }
-              onSubmit={() => submit(preview.data!)}
+              onSubmit={() => void submit(preview.data!)}
             />
           )
         ) : null}
 
-        {step === "result" && result && preview.data && target ? (
-          <LinkResultView
-            result={result}
-            preview={preview.data}
-            purchaseId={target.purchase.id}
-            onDone={onClose}
-          />
+        {step === "result" && snapshot && target ? (
+          <LinkResultView snapshot={snapshot} purchaseId={target.purchase.id} onDone={onClose} />
         ) : null}
       </DialogContent>
     </Dialog>
@@ -484,7 +500,6 @@ const FIELD_ORDER: PurchaseApplyField[] = ["purchaseCost", "purchaseDate", "warr
 
 function DiffStep({
   preview,
-  line,
   choices,
   every,
   moved,
@@ -498,7 +513,6 @@ function DiffStep({
   onSubmit,
 }: {
   preview: PurchaseLinkPreview;
-  line: PurchaseOrderLine;
   choices: ApplyChoices;
   every: boolean;
   moved: Set<string>;
@@ -519,6 +533,8 @@ function DiffStep({
   const toLink = assetsToLink(preview.assets, moved);
   const groups = fieldGroups(toLink, choices);
   const summary = linkSummary(toLink, choices);
+  // The line as the preview read it — fresher than the one the dialog opened with.
+  const line = preview.line;
   const over = overReceipt(line, toLink.length);
   const expected = line.quantity - line.cancelledQuantity;
   const already = preview.assets.filter((asset) => asset.linkState === "THIS_LINE");
@@ -682,8 +698,7 @@ function DiffStep({
                       <tr key={asset.assetId} className="align-top">
                         <td className="px-3 py-2 font-medium">{assetLabel(asset)}</td>
                         {FIELD_ORDER.map((field) => {
-                          const action = asset.fields[field].action;
-                          const actionable = action === "FILL" || action === "REPLACE";
+                          const actionable = isActionable(asset.fields[field].action);
                           const id = `apply-${asset.assetId}-${field}`;
                           return (
                             <td key={field} className="px-3 py-2">
@@ -832,32 +847,28 @@ function useValueFormat(preview: PurchaseLinkPreview) {
 
 /** The link went through for some assets and not others: say how many, and why each one was refused. */
 export function LinkResultView({
-  result,
-  preview,
+  snapshot,
   purchaseId,
   onDone,
 }: {
-  result: Pick<LinkAssetsResult, "failed"> & { linked: readonly unknown[] };
-  preview: Pick<PurchaseLinkPreview, "assets">;
+  snapshot: LinkResultSnapshot;
   purchaseId: string;
   onDone: () => void;
 }) {
   const t = useTranslations("purchases.link");
-  const names = new Map(preview.assets.map((asset) => [asset.assetId, asset]));
-  const failures = failureViews(result.failed, names);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-        {result.linked.length > 0 ? (
+        {snapshot.linked > 0 ? (
           <Callout tone="success" icon={<CheckCircleIcon />}>
-            <p className="text-sm font-medium">{t("linkedSummary", { count: result.linked.length })}</p>
+            <p className="text-sm font-medium">{t("linkedSummary", { count: snapshot.linked })}</p>
           </Callout>
         ) : (
           <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
             <p className="text-sm font-medium">{t("noneLinked")}</p>
           </Callout>
         )}
-        <FailureList failures={failures} title={t("failedTitle")} />
+        <FailureList failures={snapshot.failures} title={t("failedTitle")} />
       </div>
       <DialogFooter>
         <Button variant="outline" asChild>
@@ -874,7 +885,7 @@ export function FailureList({
   failures,
   title,
 }: {
-  failures: ReturnType<typeof failureViews>;
+  failures: LinkResultSnapshot["failures"];
   title: string;
 }) {
   const t = useTranslations("purchases.link.reasons");
