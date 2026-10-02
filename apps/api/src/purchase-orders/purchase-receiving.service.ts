@@ -603,7 +603,8 @@ export class PurchaseReceivingService {
   /**
    * The lines still waiting for units (ux-proposal §3.f): countable lines with pending > 0, on live purchases
    * that are neither `DRAFT` (not ordered yet) nor `CANCELLED`, oldest purchase first. Pending is derived
-   * (quantity − cancelled − live linked assets) in the same query that pages, so the page and its total agree.
+   * (quantity − cancelled − live linked assets) in SQL, and the page and its total share one filter fragment,
+   * so pending is filtered and paged in the database rather than over every line in memory.
    */
   async findPendingLines(filters: { supplierId?: string }, page: PageQuery) {
     const { take, skip } = offsetOf(page);

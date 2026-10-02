@@ -184,10 +184,6 @@ type AssetWithIncludes = Prisma.AssetGetPayload<{
   include: typeof ASSET_RELATIONS;
 }>;
 
-// Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
-// `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
-// active owners) to only the fields the list shows — not the full related rows. Keeps the full graph
-// on findOne. See packages/shared/src/schemas/asset-list.ts and ADR-0030 / the perf analysis (#2).
 /**
  * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
  * `purchaseOrder:read` (ADR-0099 §8). An archived purchase or supplier still names the asset's provenance:
@@ -203,6 +199,10 @@ const EXPORT_PURCHASE_SELECT = {
   },
 } as const satisfies Prisma.PurchaseOrderLineSelect;
 
+// Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
+// `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
+// active owners) to only the fields the list shows — not the full related rows. Keeps the full graph
+// on findOne. See packages/shared/src/schemas/asset-list.ts and ADR-0030 / the perf analysis (#2).
 const ASSET_LIST_SELECT = {
   id: true,
   name: true,
