@@ -50,7 +50,8 @@ después.
   te lo indica. Si varios proveedores tienen exactamente ese nombre, eliges cuál.
 - **Referencia** — el número de orden de compra de finanzas. Es como se llama la compra en todas
   partes. Sin ella, la compra se lee como *Proveedor · fecha*, o *Compra · fecha* cuando tampoco tiene
-  proveedor. Las referencias no se controlan como únicas.
+  proveedor. Las referencias no son únicas: si el proveedor ya tiene una compra con la misma referencia,
+  una pista la enlaza, y igual puedes guardar.
 - **Fecha de pedido** y **Estado** — *Pedida* (por defecto) o *Borrador*.
 - **Moneda** — ver más abajo.
 - **Más detalles** — entrega prevista, dónde se entrega, empresa, números de factura (un solo campo,
@@ -83,8 +84,8 @@ cambia cómo se muestra un número. Dice en qué están los importes, nada más.
 etiqueta que usaste por última vez y sugiere las que ya están en uso.
 
 Por eso los totales se **agrupan por etiqueta y nunca se suman entre etiquetas**: una lista o un total
-muestra un importe por moneda. Las etiquetas se comparan sin importar mayúsculas ni espacios, así que
-`usd` y `USD` son el mismo grupo — pero `USD` y `u$s` son dos. Una compra sin etiqueta muestra sus
+muestra un importe por moneda. Las etiquetas se comparan sin importar mayúsculas ni los espacios al principio o al
+final, así que `usd` y `USD ` son el mismo grupo — pero `USD` y `u$s` son dos. Una compra sin etiqueta muestra sus
 importes como **Sin moneda**, nunca como una moneda por defecto.
 
 Los importes se escriben y se muestran con el formato de números de tu idioma — ver

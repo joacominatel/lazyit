@@ -553,6 +553,14 @@ CEO decision.
   `GET /suggestions/company`, the model forms read manufacturers from `GET /suggestions/manufacturer`,
   and the application form reads publishers from `GET /suggestions/vendor` — each value with its use
   count and last use ([[0076-asset-company-grouping-field]] amended).
+- **The repeated-reference hint (§6) is built** from the list read: once the supplier resolves, the form
+  asks `GET /purchase-orders?q=<reference>&supplierId=<id>` and offers an "open it" link when a purchase
+  of that supplier carries the same reference (trimmed, case-insensitive). It never blocks the save.
+- **Smart entry for the reference, the invoice numbers and the line description is deferred to #1475.**
+  §7 lists them, but `GET /suggestions/:field` has no such fields yet; adding them is a contract change
+  (a backend follow-up in #1475). Until then they are plain inputs.
+- **One save at a time.** A purchase save can be two writes (the inline supplier, then the purchase), so a
+  repeated Ctrl/⌘+Enter or a double click is held off by a ref-based lock, not only the disabled button.
 
 ## Related
 

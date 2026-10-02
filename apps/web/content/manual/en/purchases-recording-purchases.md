@@ -49,7 +49,8 @@ supplier, a reference, or one line**. Everything else is optional and can be fil
   tells you so. If several suppliers share the exact name, you pick which one.
 - **Reference** — the finance purchase-order number. It is what the purchase is called everywhere.
   Without one, the purchase reads as *Supplier · date*, or *Purchase · date* when it has no supplier
-  either. References are not checked for uniqueness.
+  either. References are not unique: if the supplier already has a purchase with the same reference, a
+  hint links to it, and you can still save.
 - **Order date** and **Status** — *Ordered* (the default) or *Draft*.
 - **Currency** — see below.
 - **More details** — expected delivery, where it should be delivered, company, invoice numbers (one
@@ -82,8 +83,8 @@ changes how a number is shown. It states what the amounts are in, nothing more. 
 the label you used last and suggests the ones already in use.
 
 Totals are therefore **grouped by label and never added across labels**: a list or a total shows one
-amount per currency. Labels are compared ignoring capitals and spaces, so `usd` and `USD` are the same
-group — but `USD` and `u$s` are two. A purchase without a label shows its amounts as **No currency**,
+amount per currency. Labels are compared ignoring capitals and surrounding spaces, so `usd` and `USD ` are
+the same group — but `USD` and `u$s` are two. A purchase without a label shows its amounts as **No currency**,
 never as a default currency.
 
 Amounts are typed and shown in your language's number format — see
