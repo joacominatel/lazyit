@@ -131,7 +131,8 @@
       "ai": "IA",
       "purchases": "Compras",
       "suppliers": "Proveedores",
-      "account": "Cuenta"
+      "account": "Cuenta",
+      "pending": "Unidades pendientes"
     },
     "aiAndConnectedApps": "IA y apps conectadas",
     "account": "Cuenta"

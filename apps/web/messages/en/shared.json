@@ -131,7 +131,8 @@
       "ai": "AI",
       "purchases": "Purchases",
       "suppliers": "Suppliers",
-      "account": "Account"
+      "account": "Account",
+      "pending": "Pending units"
     },
     "aiAndConnectedApps": "AI & connected apps",
     "account": "Account"

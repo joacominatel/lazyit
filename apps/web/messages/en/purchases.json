@@ -6,7 +6,8 @@
   "area": {
     "tabsLabel": "Purchases sections",
     "purchases": "Purchases",
-    "suppliers": "Suppliers"
+    "suppliers": "Suppliers",
+    "pending": "Pending units"
   },
   "title": {
     "supplierDate": "{supplier} · {date}",
@@ -453,5 +454,20 @@
     "unlinkDescription": "Unlink {asset} from {purchase}? Its purchase values stay as they are.",
     "unlinkedToast": "Unlinked from the purchase",
     "unlinkError": "Couldn't unlink the asset"
+  },
+  "pending": {
+    "subtitle": "Lines still waiting for units, oldest order first.",
+    "loadError": "Couldn't load the pending units",
+    "emptyTitle": "Nothing is waiting for units",
+    "emptyFiltered": "Nothing from this supplier is waiting for units",
+    "emptyDescription": "Lines of ordered purchases show here until every unit is received or cancelled. Drafts and cancelled purchases are not included.",
+    "orderedOn": "ordered {date}",
+    "expectedOn": "expected {date}",
+    "overdue": "Overdue",
+    "receive": "Receive",
+    "lineActions": "Actions for {line}",
+    "linkExisting": "Link existing assets",
+    "cancelRemaining": "Cancel remaining units",
+    "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending"
   }
 }

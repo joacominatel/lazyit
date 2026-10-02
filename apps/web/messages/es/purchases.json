@@ -6,7 +6,8 @@
   "area": {
     "tabsLabel": "Secciones de compras",
     "purchases": "Compras",
-    "suppliers": "Proveedores"
+    "suppliers": "Proveedores",
+    "pending": "Unidades pendientes"
   },
   "title": {
     "supplierDate": "{supplier} · {date}",
@@ -453,5 +454,20 @@
     "unlinkDescription": "¿Desvincular {asset} de {purchase}? Sus valores de compra se mantienen.",
     "unlinkedToast": "Desvinculado de la compra",
     "unlinkError": "No se pudo desvincular el activo"
+  },
+  "pending": {
+    "subtitle": "Líneas que todavía esperan unidades, el pedido más antiguo primero.",
+    "loadError": "No se pudieron cargar las unidades pendientes",
+    "emptyTitle": "Nada espera unidades",
+    "emptyFiltered": "Nada de este proveedor espera unidades",
+    "emptyDescription": "Las líneas de compras pedidas aparecen acá hasta que cada unidad se recibe o se cancela. Los borradores y las compras canceladas no se incluyen.",
+    "orderedOn": "pedida el {date}",
+    "expectedOn": "esperada el {date}",
+    "overdue": "Atrasada",
+    "receive": "Recibir",
+    "lineActions": "Acciones de {line}",
+    "linkExisting": "Vincular activos existentes",
+    "cancelRemaining": "Cancelar unidades restantes",
+    "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}"
   }
 }
