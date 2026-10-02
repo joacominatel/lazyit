@@ -83,6 +83,7 @@ function LineDialogBody({
   const updateLine = useUpdatePurchaseOrderLine();
   const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
   const [, rememberLineModel] = useRecentValues("purchase.lineModel");
+  const [, rememberLineDescription] = useRecentValues("purchase.lineDescription");
   const [draft, setDraft] = useState<LineDraft>(() =>
     line ? lineDraftFrom(line, locale) : emptyLineDraft("new"),
   );
@@ -92,6 +93,7 @@ function LineDialogBody({
   function saved() {
     rememberManufacturer(draft.manufacturerText);
     rememberLineModel(draft.modelText);
+    rememberLineDescription(draft.description);
     toast.success(line ? t("savedToast") : t("addedToast"));
     onDone();
   }

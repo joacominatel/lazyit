@@ -128,6 +128,12 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   const [, rememberSupplier] = useRecentValues("purchase.supplier");
   const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
   const [, rememberLineModel] = useRecentValues("purchase.lineModel");
+  const [, rememberReference] = useRecentValues("purchase.reference");
+  const [, rememberInvoiceNumbers] = useRecentValues("purchase.invoiceNumbers");
+  const [, rememberLineDescription] = useRecentValues("purchase.lineDescription");
+  // Smart entry for the purchase's own text (ADR-0099 §7, #1473): references and invoice numbers already used.
+  const references = useSuggestions("reference", header.reference);
+  const invoiceNumbers = useSuggestions("invoiceNumbers", header.invoiceNumbers);
 
   const [moreOpen, setMoreOpen] = useState(
     () => purchase != null && MORE_FIELDS.some((field) => headerDraftFrom(purchase)[field] !== ""),
@@ -266,9 +272,12 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     rememberSupplier(supplierText);
     rememberCurrency(currency);
     rememberCompany(header.company);
+    rememberReference(header.reference);
+    rememberInvoiceNumbers(header.invoiceNumbers);
     for (const line of lines) {
       rememberManufacturer(line.manufacturerText);
       rememberLineModel(line.modelText);
+      rememberLineDescription(line.description);
     }
   }
 
@@ -356,10 +365,12 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   ) => (
     <Field data-invalid={headerErrors[field] ? true : undefined}>
       <FieldLabel htmlFor={field}>{label}</FieldLabel>
-      <Input
+      <SuggestInput
         id={field}
         value={header[field]}
-        onChange={(event) => patchHeader({ [field]: event.target.value })}
+        onValueChange={(value) => patchHeader({ [field]: value })}
+        source={() => (field === "reference" ? references : invoiceNumbers)}
+        recentKey={`purchase.${field}`}
         placeholder={placeholder}
         aria-invalid={headerErrors[field] ? true : undefined}
       />

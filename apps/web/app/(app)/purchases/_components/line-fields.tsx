@@ -57,6 +57,8 @@ export function LineFields({
     enabled: line.kind === "ASSET",
   });
   const models = useSuggestions("lineModel", line.modelText, { enabled: line.kind === "ASSET" });
+  // Descriptions already written on purchase lines (ADR-0099 §7, #1473) — the same item, spelled the same.
+  const descriptions = useSuggestions("lineDescription", line.description);
   const total = previewTotal(line, locale);
   const kinds: { value: PurchaseOrderLineKind; label: string }[] = [
     { value: "ASSET", label: t("kindAsset") },
@@ -85,10 +87,12 @@ export function LineFields({
         </Field>
         <Field className="sm:col-span-5" data-invalid={errors?.description ? true : undefined}>
           <FieldLabel htmlFor={id("description")}>{t("description")}</FieldLabel>
-          <Input
+          <SuggestInput
             id={id("description")}
             value={line.description}
-            onChange={(event) => onChange({ description: event.target.value })}
+            onValueChange={(description) => onChange({ description })}
+            source={() => descriptions}
+            recentKey="purchase.lineDescription"
             placeholder={line.kind === "ASSET" ? t("descriptionPlaceholder") : t("descriptionOtherPlaceholder")}
             aria-invalid={errors?.description ? true : undefined}
             // A new row takes focus so the keyboard flow continues (Enter adds the next line).
