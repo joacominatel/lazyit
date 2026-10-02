@@ -52,10 +52,23 @@ describe("CreatePurchaseOrderLineSchema", () => {
     expect(line).toEqual({ description: "Monitor 27" });
   });
 
-  test("kind is ASSET | OTHER | CONSUMABLE on write (CONSUMABLE since Phase 1b, #1476)", () => {
+  test("kind is ASSET | OTHER | CONSUMABLE | LICENSE on write (LICENSE since Phase 2, #1477)", () => {
     expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Shipping", kind: "OTHER" }).success).toBe(true);
     expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE" }).success).toBe(true);
-    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Office", kind: "LICENSE" }).success).toBe(false);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Office", kind: "LICENSE" }).success).toBe(true);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Lease", kind: "LEASE" }).success).toBe(false);
+  });
+
+  test("an application is named on a LICENSE line only, and stays optional there (#1477)", () => {
+    expect(
+      CreatePurchaseOrderLineSchema.safeParse({ description: "M365 E3", kind: "LICENSE", applicationId: ID }).success,
+    ).toBe(true);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "M365 E3", kind: "LICENSE" }).success).toBe(true);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "M365 E3", applicationId: ID }).success).toBe(false);
+    expect(
+      CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE", applicationId: ID }).success,
+    ).toBe(false);
+    expect(UpdatePurchaseOrderLineSchema.parse({ applicationId: null })).toEqual({ applicationId: null });
   });
 
   test("a consumable is named on a CONSUMABLE line only, and stays optional there", () => {

@@ -4,7 +4,9 @@ import { AssetHistoryEventTypeSchema } from "./asset-history";
 import { AttachmentEntityTypeSchema } from "./attachment";
 import { PURCHASE_ORDER_EVENT_TYPES } from "./purchase-order";
 import {
+  ApplyLicenseSchema,
   AssetPurchaseProvenanceSchema,
+  CreatePurchaseFromAssetsSchema,
   CancelRemainingUnitsSchema,
   LinkAssetsToLineSchema,
   PURCHASE_LINK_MAX_ASSETS,
@@ -128,7 +130,7 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("the purchase log gains the receiving, linking and document events", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-8, -2)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-11, -5)).toEqual([
       "UNITS_RECEIVED",
       "UNITS_CANCELLED",
       "ASSET_LINKED",
@@ -139,7 +141,49 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("Phase 1b (#1476) appends the stock receipt and the document label edit", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-2)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-5, -3)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
+  });
+
+  test("Phase 2 (#1477) appends the license apply, the extraction run and the create from assets", () => {
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-3)).toEqual([
+      "LICENSE_APPLIED",
+      "EXTRACTION_RUN",
+      "CREATED_FROM_ASSETS",
+    ]);
+  });
+});
+
+describe("ApplyLicenseSchema (#1477)", () => {
+  test("seats, a renewal date, or both — never neither", () => {
+    expect(ApplyLicenseSchema.safeParse({ seatsToAdd: 10 }).success).toBe(true);
+    expect(ApplyLicenseSchema.safeParse({ renewalDate: "2027-03-01T00:00:00.000Z" }).success).toBe(true);
+    expect(ApplyLicenseSchema.safeParse({ seatsToAdd: 5, renewalDate: "2027-03-01T00:00:00.000Z" }).success).toBe(
+      true,
+    );
+    expect(ApplyLicenseSchema.safeParse({}).success).toBe(false);
+  });
+
+  test("seats are a positive int4; nothing else is accepted", () => {
+    expect(ApplyLicenseSchema.safeParse({ seatsToAdd: 0 }).success).toBe(false);
+    expect(ApplyLicenseSchema.safeParse({ seatsToAdd: 3_000_000_000 }).success).toBe(false);
+    expect(ApplyLicenseSchema.safeParse({ seatsToAdd: 1, seatsPurchased: 9 }).success).toBe(false);
+  });
+});
+
+describe("CreatePurchaseFromAssetsSchema (#1477)", () => {
+  test("only the asset ids are required; they are unique and bounded", () => {
+    expect(CreatePurchaseFromAssetsSchema.parse({ assetIds: [A1, A2] })).toEqual({ assetIds: [A1, A2] });
+    expect(CreatePurchaseFromAssetsSchema.safeParse({ assetIds: [] }).success).toBe(false);
+    expect(CreatePurchaseFromAssetsSchema.safeParse({ assetIds: [A1, A1] }).success).toBe(false);
+  });
+
+  test("the header is the purchase's; a blank currency or reference is absent, lines are not accepted", () => {
+    expect(
+      CreatePurchaseFromAssetsSchema.parse({ assetIds: [A1], reference: " ", currency: "" }),
+    ).toEqual({ assetIds: [A1] });
+    expect(
+      CreatePurchaseFromAssetsSchema.safeParse({ assetIds: [A1], lines: [{ description: "x" }] }).success,
+    ).toBe(false);
   });
 });
 
