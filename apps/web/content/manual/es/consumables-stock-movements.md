@@ -107,6 +107,14 @@ devolver.
 Cuando alguien se va, sus ítems pendientes aparecen en la hoja de baja y en el acta de devolución
 impresa. Consulta [Ciclo de vida del usuario](/help/users-permissions-user-lifecycle).
 
+## Stock recibido de una compra
+
+Si registras [compras](/help/purchases-recording-purchases), una **línea de consumible** se recibe con
+**Recibir en stock** en la compra. Eso registra aquí un movimiento de **Entrada** normal, con el motivo
+*Received from a purchase* y la nota escrita al recibir. El movimiento no nombra al proveedor ni a la
+compra — la lista de movimientos la ve cualquiera que pueda ver consumibles, y las compras no. Una
+recepción se corrige como cualquier otro movimiento: con otro movimiento.
+
 ## El registro es permanente
 
 Los movimientos son **inmutables**: una vez registrado, un movimiento no se edita ni se elimina. Si

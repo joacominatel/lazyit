@@ -39,7 +39,8 @@ belong to a **role**, not a person: granting it to Viewer grants it to **every**
 it still sees an asset's own cost fields, as before, but not the asset's **Purchase** panel (below).
 
 Receiving units and linking or unlinking assets also create or change assets, so they need **Record &
-edit purchases** *and* the permission to create and edit assets.
+edit purchases** *and* the permission to create and edit assets. Receiving a consumable line into stock
+changes stock, so it needs **Record & edit purchases** *and* the permission to edit consumables.
 
 ## Recording a purchase
 
@@ -66,11 +67,14 @@ Each line is one thing you bought. A line needs only a **description** — as wr
 invoice; descriptions you have written before are suggested, so the same item is spelled the same way. Its **quantity** defaults to 1 and the **unit price** is optional (blank means unknown; `0`
 means free). The unit price is usually without VAT.
 
-There are two kinds of line:
+There are three kinds of line:
 
 - **Asset** — hardware you will register as assets. You can note the **brand** and **model as written**
   on the document, map it to an **asset model** if you already have one (not required — you can map it
   later), and record the **warranty** in months.
+- **Consumable** — toner, cables, batteries: units that go into a [consumable's](/help/consumables-consumables-categories)
+  stock rather than becoming assets. You can pick the **consumable** they go into now, or leave it for when
+  they arrive.
 - **Other** — shipping, a service, a freebie. It counts in the total but never waits for delivery.
 
 The keyboard does most of the work: **Enter** in a line adds the next line, and **Ctrl+Enter** (**⌘+Enter**
@@ -97,7 +101,7 @@ Amounts are typed and shown in your language's number format — see
 ## Status and delivery
 
 You set the status yourself: **Draft**, **Ordered** or **Cancelled**. What arrived is worked out from
-the assets linked to each line, so an ordered purchase also reads as **Partially received** or
+the assets linked to each line — and, on a consumable line, from the stock received on it — so an ordered purchase also reads as **Partially received** or
 **Received** on its own, and each line shows **"3 of 4 received"**, with any pending or cancelled units.
 
 - A line can end up with **more** units than it ordered. That is allowed — it is shown as
@@ -124,6 +128,8 @@ the purchase, so usually the only thing to type is the **serial numbers**:
   order date. The **warranty end** is that date plus the line's warranty months.
 - The units are placed where the purchase is **delivered to**, and the purchase's documents show on each
   of them.
+- **Scan** next to the serial numbers reads them with the camera — see
+  [Scanning serial numbers](#scanning-serial-numbers).
 
 If the line has **no model** yet, the form asks for one (you can create it on the spot). The model you
 pick is saved on the line, so the next delivery already has it.
@@ -143,13 +149,43 @@ Receiving (or linking) more units than a line still expects is **allowed**. The 
 line's quantity (recorded in the activity log). You can also go ahead without it: the line then shows
 as **Over-received**.
 
+### Scanning serial numbers
+
+At the warehouse door, with a phone, **Scan** next to the serial numbers opens the camera right in the
+form. Point it at the serial-number barcode on each box — the usual Code 128 and Code 39 barcodes, EAN/UPC
+and QR codes are read — and each new code is added on its own line with a short tick (and a vibration on
+phones that have one). A code already in the list is not added twice; you are told instead. Choose
+**Done** to close the camera; the list stays editable, so you can fix or remove a line by hand.
+
+The camera needs your browser's permission and a secure (HTTPS) connection. Without a camera, or if you
+deny access, the form says so and you type or paste the serials as before.
+
+## Receiving into stock
+
+A **consumable** line is received into its consumable's stock, not as assets. Choose **Receive** on the
+line (or **Receive into stock** in its menu, or **Receive** on *Pending units*):
+
+- **Quantity received** starts at the units still pending. Type what actually arrived — receiving more
+  than pending is allowed, with the same warning and **Raise the line** offer as for assets.
+- If the line has **no consumable** yet, the form asks for one; it is saved on the line, so the next
+  delivery already has it.
+- **Note** is optional. It is stored on the consumable's stock movement, and **anyone who can see that
+  consumable's movements can read it — Viewers included** — so don't put invoice or supplier details there.
+
+Receiving posts one **In** movement on the consumable (its stock goes up, as with any [stock
+movement](/help/consumables-stock-movements)) and the line counts the units as received. A stock receipt
+cannot be undone from the purchase: if you received too much, correct the stock with an ordinary
+movement on the consumable — the line keeps counting what was received. For the same reason, a consumable
+line that has received stock can no longer change its type or be removed.
+
 ## Linking assets you already have
 
 Assets bought before you started recording purchases — or registered by hand — can be linked to their
 purchase line afterwards. There are three ways in:
 
 - On the purchase, **Link existing assets** in a line's menu: search and tick the assets. The list starts
-  filtered to the line's model; remove that chip to see every model.
+  filtered to the line's model and to assets **not linked to a purchase**; remove a chip to widen it (an
+  asset already on another purchase can still be moved here, see below).
 - On an asset that is not linked, **Link to purchase** in its **Purchase** panel.
 - On the **Assets** list, select several rows and choose **Link to purchase** in the selection bar. Then
   pick the purchase and the line — lines of the same model come first.
@@ -189,6 +225,10 @@ result lists each one that was not, with the reason.
 values** — unlinking never clears anything — and both the asset's history and the purchase's activity log
 record it.
 
+You can also unlink from the purchase's side: on a line that has received units, **Show assets** under
+its "x of y received" lists the assets linked to it, each with a link to its page and **Unlink**. The list
+is only loaded when you open it, and shows the first 50 assets of a line.
+
 ## Cancelling remaining units
 
 When the rest of a line will not arrive, choose **Cancel remaining units** in the line's menu. It
@@ -203,7 +243,8 @@ first** — the weekly check, and the screen to open at the warehouse door. Draf
 *Other* lines and lines whose remainder was cancelled are not there. Filter it by supplier.
 
 Each line shows "x of y received" and what is still pending, with **Receive** and, in its menu, **Link
-existing assets** and **Cancel remaining units**. A purchase whose **expected delivery** date has passed is
+existing assets** and **Cancel remaining units**. On a consumable line, **Receive** opens
+[Receive into stock](#receiving-into-stock), and there is nothing to link. A purchase whose **expected delivery** date has passed is
 marked **Overdue**.
 
 ## Documents
@@ -213,6 +254,12 @@ the **Documents** section of its page. Upload with the button or by dragging fil
 same file types and size limit as [asset documents](/help/assets-asset-basics#documents) apply. Anyone who
 can view purchases can download them; uploading and deleting need **Record & edit purchases**. Adding or
 removing a document is recorded in the activity log.
+
+Each document can carry an optional **type** — *Quote*, *Invoice*, *Delivery note*, whatever your team
+writes. Types already used are suggested as you type, and none is required. Fill **Type** before
+uploading to set it on the files of that upload, or use the pencil on a document to set, change or clear
+it later (empty the field to clear it). The type shows next to the file name, here and on every linked
+asset; changing it is recorded in the activity log.
 
 The documents are **shared, not copied**: every asset linked to the purchase lists the same files in its
 **Purchase** panel.
@@ -241,8 +288,8 @@ handy for a warranty claim — and the purchase's documents, ready to download.
 
 Every purchase keeps an append-only **activity** log: who recorded it, who changed the status, who
 added, edited or removed a line — with a price or quantity change shown as *before → after* — who received,
-linked, moved or unlinked units, who cancelled remaining units (with the reason), and who added or removed
-a document. It cannot be edited or deleted.
+linked, moved or unlinked units, who received stock on a consumable line, who cancelled remaining units
+(with the reason), and who added or removed a document or changed its type. It cannot be edited or deleted.
 
 ## Suppliers
 

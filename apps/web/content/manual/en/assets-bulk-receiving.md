@@ -28,6 +28,10 @@ to create assets). It opens a short form.
 - **Serial numbers** — optional. Paste one serial per line, in order, and each unit gets the matching
   serial. Leave it blank to create serial-less units, or paste **exactly** as many lines as the
   quantity — a mismatched count is rejected before anything is created.
+- **Scan** — reads the serial numbers with the camera instead of typing them: each barcode you point it
+  at is added on its own line, a repeated one is not added twice, and the **quantity follows** the scanned
+  serials. It needs camera permission and HTTPS; without them, type or paste as usual. See
+  [Scanning serial numbers](/help/purchases-recording-purchases#scanning-serial-numbers).
 
 Auto asset tags still apply: if your instance uses an [asset-tag scheme](/help/configuration-asset-tag-scheme),
 each unit is tagged automatically as it is created.

@@ -260,6 +260,9 @@ asset's detail page lists them with their name, size and upload date.
 - **Delete** removes a document after a confirmation. Like the rest of lazyit this is reversible at
   the storage layer; the record of who uploaded it is kept.
 - Uploading and deleting need the asset-write permission; anyone who can view the asset can download.
+- **Type** — optional, free text (*Invoice*, *Warranty*, *Delivery note*…), suggested from the types
+  already used. Fill it before uploading, or set, change or clear it later with the pencil on the
+  document. It shows next to the file name.
 
 > **Backups.** Attachments are stored on the server's file volume, which is **not yet covered by the
 > database backup**. Until backup support ships, keep an independent copy of anything irreplaceable.
