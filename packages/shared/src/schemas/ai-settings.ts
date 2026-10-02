@@ -392,7 +392,18 @@ export const AI_SETTINGS_DEFAULTS = {
   /** Provider-native web search (#1389): off until an admin turns it on. */
   webSearchEnabled: false,
   webSearchMaxUses: AI_WEB_SEARCH_MAX_USES_DEFAULT,
+  /** Purchase document extraction (ADR-0099 §11, #1477): off until an admin turns it on. */
+  documentExtractionEnabled: false,
 } as const;
+
+/**
+ * What Settings → AI says next to the *Document extraction* switch (ADR-0099 §11, #1477). Turning it on
+ * sends a purchase's documents — invoices, quotes, delivery notes, with their supplier, prices and tax IDs
+ * — to the configured provider whenever someone asks to fill a purchase from one. The web localizes the
+ * copy; this is its reference text, and the API documents the switch with it.
+ */
+export const AI_DOCUMENT_EXTRACTION_DISCLOSURE =
+  "Purchase documents are sent to the configured AI provider. When someone asks lazyit to read a document attached to a purchase, the whole file (an invoice, a quote or a delivery note, with its supplier, prices and tax IDs) goes to the provider, under your contract with it. Nothing is saved from it until a person reviews the draft and saves the purchase.";
 
 /** The admin's cap on provider searches per model call (#1389). */
 const webSearchMaxUses = int4({ min: AI_WEB_SEARCH_MAX_USES_MIN, max: AI_WEB_SEARCH_MAX_USES_MAX });
@@ -444,6 +455,14 @@ export const AiSettingsSchema = z.object({
   webSearchEnabled: z.boolean().default(AI_SETTINGS_DEFAULTS.webSearchEnabled),
   /** The cap on searches per model call, where the provider takes one (Anthropic `max_uses`). */
   webSearchMaxUses: webSearchMaxUses.default(AI_SETTINGS_DEFAULTS.webSearchMaxUses),
+  /**
+   * Purchase document extraction (ADR-0099 §11, #1477): whether a purchase's attached document may be sent
+   * to the provider to draft the purchase. Off by default and independent of `enabled` — extraction needs
+   * both, and a provider that reads the document's type. This API always sends it; optional so an older
+   * API's answer still parses (absent = off) and so code that builds a settings object before it existed
+   * keeps compiling.
+   */
+  documentExtractionEnabled: z.boolean().optional(),
   /** When an admin acknowledged the egress disclosure; required before the first enable. */
   disclosureAcknowledgedAt: z.iso.datetime().nullable(),
   /** When the current connection fields last passed a connection test. */
@@ -543,6 +562,12 @@ export const UpdateAiSettingsSchema = z
      */
     webSearchEnabled: z.boolean().optional(),
     webSearchMaxUses: webSearchMaxUses.optional(),
+    /**
+     * Purchase document extraction (#1477). Optional like web search: omitted keeps the stored value, so a
+     * caller written before it keeps working. It passes no gate of its own — extraction is offered only
+     * while the assistant is enabled too ({@link AI_DOCUMENT_EXTRACTION_DISCLOSURE} is shown next to it).
+     */
+    documentExtractionEnabled: z.boolean().optional(),
     acknowledgeDisclosure: z.boolean().optional(),
   })
   .refine((value) => !value.allowPrivateNetwork || value.provider === "openai-compatible", {

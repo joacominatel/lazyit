@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AI_DOCUMENT_EXTRACTION_MEDIA_TYPES,
   AI_PROVIDER_DESCRIPTORS,
   AI_PROVIDER_KINDS,
   AI_PROVIDER_OPTIONS_SCHEMAS,
@@ -8,6 +9,8 @@ import {
   AI_WEB_SEARCH_MAX_USES_MIN,
   AiProviderDescriptorSchema,
   AiProviderKindSchema,
+  aiDocumentExtractionMediaTypes,
+  aiDocumentExtractionSupported,
   aiWebSearchSupported,
 } from "./ai-provider";
 
@@ -86,5 +89,28 @@ describe("Provider-native web search support (#1389)", () => {
   test("the admin cap range contains its default", () => {
     expect(AI_WEB_SEARCH_MAX_USES_MIN).toBeLessThanOrEqual(AI_WEB_SEARCH_MAX_USES_DEFAULT);
     expect(AI_WEB_SEARCH_MAX_USES_DEFAULT).toBeLessThanOrEqual(AI_WEB_SEARCH_MAX_USES_MAX);
+  });
+});
+
+describe("Document extraction support (ADR-0099 §11, #1477)", () => {
+  test("the hosted providers read PDFs and raster images; the OpenAI-compatible one reads nothing", () => {
+    for (const kind of ["anthropic", "openai", "google"] as const) {
+      expect(aiDocumentExtractionMediaTypes(kind)).toEqual(AI_DOCUMENT_EXTRACTION_MEDIA_TYPES);
+      expect(aiDocumentExtractionSupported(kind, "application/pdf")).toBe(true);
+      expect(aiDocumentExtractionSupported(kind, "IMAGE/PNG ")).toBe(true);
+    }
+    expect(aiDocumentExtractionMediaTypes("openai-compatible")).toEqual([]);
+    expect(aiDocumentExtractionSupported("openai-compatible", "application/pdf")).toBe(false);
+  });
+
+  test("documents the purchase allowlist accepts but no model reads natively are never sent", () => {
+    for (const type of [
+      "text/plain",
+      "text/csv",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]) {
+      expect(aiDocumentExtractionSupported("anthropic", type)).toBe(false);
+    }
   });
 });
