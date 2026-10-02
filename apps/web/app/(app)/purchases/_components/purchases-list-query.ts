@@ -25,13 +25,27 @@ export const PURCHASE_LIST_OPTIONS = {
   },
 };
 
+/**
+ * Whether the receipt filter is lifted: the archived view lists every archived purchase, and a
+ * *Cancelled* status filter would otherwise meet the default `PENDING`, which excludes cancelled
+ * purchases and so always reads empty.
+ */
+export function receiptFilterLifted(
+  filters: Record<string, string>,
+  opts: { isAdmin: boolean },
+): boolean {
+  return (opts.isAdmin && filters.archived === "only") || filters.status === "CANCELLED";
+}
+
 /** URL state → the `GET /purchase-orders` params. */
 export function derivePurchaseParams(
   state: Pick<DerivedListState, "q" | "sort" | "dir" | "offset" | "limit" | "filters">,
   opts: { isAdmin: boolean },
 ): PurchaseOrderListParams {
   const { q, sort, dir, offset, limit, filters } = state;
-  const receipt = PurchaseOrderReceiptFilterSchema.safeParse(filters.receipt);
+  const receipt = PurchaseOrderReceiptFilterSchema.safeParse(
+    receiptFilterLifted(filters, opts) ? "ALL" : filters.receipt,
+  );
   return {
     q: q || undefined,
     sort,

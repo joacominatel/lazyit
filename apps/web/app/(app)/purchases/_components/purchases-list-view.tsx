@@ -62,6 +62,7 @@ import {
   derivePurchaseParams,
   PURCHASE_FILTER_DEFAULTS as FILTER_DEFAULTS,
   PURCHASE_LIST_OPTIONS,
+  receiptFilterLifted,
 } from "./purchases-list-query";
 import { SupplierCombobox } from "./supplier-combobox";
 
@@ -110,6 +111,8 @@ export function PurchasesListView() {
   } = useListParams(PURCHASE_LIST_OPTIONS);
 
   const archived = isAdmin && filters.archived === "only";
+  // The archived view and a Cancelled filter ignore the receipt filter (see `receiptFilterLifted`).
+  const receiptLifted = receiptFilterLifted(filters, { isAdmin });
   const { data: page, isLoading, isFetching, isError, error, refetch } = usePurchaseOrders(
     derivePurchaseParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
   );
@@ -205,7 +208,7 @@ export function PurchasesListView() {
 
   const chips = [
     ...(q ? [{ key: "q", label: t("list.chips.search", { query: q }), onClear: () => setQ("") }] : []),
-    ...(filters.receipt !== FILTER_DEFAULTS.receipt
+    ...(filters.receipt !== FILTER_DEFAULTS.receipt && !receiptLifted
       ? [
           {
             key: "receipt",
@@ -287,7 +290,11 @@ export function PurchasesListView() {
               placeholder={t("list.searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
-            <Select value={filters.receipt} onValueChange={(value) => setFilter("receipt", value)}>
+            <Select
+              value={receiptLifted ? "ALL" : filters.receipt}
+              onValueChange={(value) => setFilter("receipt", value)}
+              disabled={receiptLifted}
+            >
               <SelectTrigger className="lg:w-52" aria-label={t("list.receiptFilterLabel")}>
                 <SelectValue />
               </SelectTrigger>
