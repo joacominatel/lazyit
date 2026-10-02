@@ -18,6 +18,16 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  CancelRemainingUnitsSchema,
+  LinkAssetsResultSchema,
+  LinkAssetsToLineSchema,
+  PendingPurchaseLinePageSchema,
+  PurchaseLinkPreviewRequestSchema,
+  PurchaseLinkPreviewSchema,
+  ReceiveFromLineResultSchema,
+  ReceiveFromLineSchema,
+  UnlinkAssetsFromLineSchema,
+  UnlinkAssetsResultSchema,
   CreatePurchaseOrderLineSchema,
   CreatePurchaseOrderSchema,
   PurchaseOrderDetailSchema,
@@ -35,6 +45,7 @@ import {
   PurchaseOrdersService,
   PURCHASE_ORDER_SORT_ALLOWLIST,
 } from './purchase-orders.service';
+import { PurchaseReceivingService } from './purchase-receiving.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
@@ -62,6 +73,26 @@ class CreatePurchaseOrderLineDto extends createZodDto(
 class UpdatePurchaseOrderLineDto extends createZodDto(
   UpdatePurchaseOrderLineSchema,
 ) {}
+class PendingPurchaseLinePageDto extends createZodDto(
+  PendingPurchaseLinePageSchema,
+) {}
+class PurchaseLinkPreviewRequestDto extends createZodDto(
+  PurchaseLinkPreviewRequestSchema,
+) {}
+class PurchaseLinkPreviewDto extends createZodDto(PurchaseLinkPreviewSchema) {}
+class LinkAssetsToLineDto extends createZodDto(LinkAssetsToLineSchema) {}
+class LinkAssetsResultDto extends createZodDto(LinkAssetsResultSchema) {}
+class UnlinkAssetsFromLineDto extends createZodDto(
+  UnlinkAssetsFromLineSchema,
+) {}
+class UnlinkAssetsResultDto extends createZodDto(UnlinkAssetsResultSchema) {}
+class ReceiveFromLineDto extends createZodDto(ReceiveFromLineSchema) {}
+class ReceiveFromLineResultDto extends createZodDto(
+  ReceiveFromLineResultSchema,
+) {}
+class CancelRemainingUnitsDto extends createZodDto(
+  CancelRemainingUnitsSchema,
+) {}
 
 /** A single `receipt` filter value, or a 400 listing the allowed ones (ADR-0030). */
 function parseReceiptQuery(
@@ -85,7 +116,10 @@ function parseReceiptQuery(
 @ApiTags('purchase-orders')
 @Controller('purchase-orders')
 export class PurchaseOrdersController {
-  constructor(private readonly purchases: PurchaseOrdersService) {}
+  constructor(
+    private readonly purchases: PurchaseOrdersService,
+    private readonly receiving: PurchaseReceivingService,
+  ) {}
 
   @Get()
   @RequirePermission('purchaseOrder:read')
@@ -165,6 +199,30 @@ export class PurchaseOrdersController {
         receipt: parseReceiptQuery(receipt),
       },
       pageQuery,
+    );
+  }
+
+  // STATIC route declared BEFORE `:id` so `/purchase-orders/pending-lines` never resolves as an id.
+  @Get('pending-lines')
+  @RequirePermission('purchaseOrder:read')
+  @ApiOperation({
+    summary:
+      'Lines still waiting for units (the Pending units tab): countable lines with pending > 0 on live purchases that are neither DRAFT nor CANCELLED, oldest purchase first, each with its purchase header.',
+  })
+  @ApiQuery({ name: 'supplierId', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'offset', required: false, type: Number })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiOkResponse({ type: PendingPurchaseLinePageDto })
+  findPendingLines(
+    @Query('supplierId') supplierId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('page') page?: string,
+  ) {
+    return this.receiving.findPendingLines(
+      { supplierId: parseCuidQuery(supplierId, 'supplierId') },
+      parsePageQuery({ limit, offset, page }),
     );
   }
 
@@ -289,5 +347,84 @@ export class PurchaseOrdersController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.purchases.removeLine(id, lineId, principal);
+  }
+
+  @Post(':id/lines/:lineId/cancel-remaining')
+  @RequirePermission('purchaseOrder:write')
+  @ApiOperation({
+    summary:
+      'Cancel units that will not arrive: adds quantity (default every pending unit) to the cancelled count, with an optional reason in the activity log. 409 when nothing is pending; 400 beyond the pending count.',
+  })
+  @ApiCreatedResponse({ type: PurchaseOrderLineDto })
+  cancelRemaining(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: CancelRemainingUnitsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.purchases.cancelRemaining(id, lineId, dto, principal);
+  }
+
+  @Post(':id/lines/:lineId/receive')
+  @RequirePermission('purchaseOrder:write', 'asset:write')
+  @ApiOperation({
+    summary:
+      'Receive units of an ASSET line as new assets (the bulk-receive loop: each unit its own transaction and tag-counter commit). Prefilled from the purchase; the body only overrides. 400 when neither the line nor the body names a model. Over-receipt is allowed and flagged (overReceived).',
+  })
+  @ApiCreatedResponse({ type: ReceiveFromLineResultDto })
+  receive(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: ReceiveFromLineDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.receiving.receiveFromLine(id, lineId, dto, principal);
+  }
+
+  @Post(':id/lines/:lineId/link-preview')
+  @RequirePermission('purchaseOrder:read', 'asset:read')
+  @ApiOperation({
+    summary:
+      'The confirmation diff of a link (a read with a body): the values the line offers and, per asset, current vs purchase value per field with FILL / REPLACE / SAME / UNAVAILABLE. Writes nothing.',
+  })
+  @ApiCreatedResponse({ type: PurchaseLinkPreviewDto })
+  linkPreview(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: PurchaseLinkPreviewRequestDto,
+  ) {
+    return this.receiving.linkPreview(id, lineId, dto.assetIds);
+  }
+
+  @Post(':id/lines/:lineId/link-assets')
+  @RequirePermission('purchaseOrder:write', 'asset:write')
+  @ApiOperation({
+    summary:
+      'Link existing assets to an ASSET line (partial success: { linked, failed[], overReceived, line }). Purchase values are copied only for the fields listed in apply / applyByAsset. An asset on another line moves only with move: true.',
+  })
+  @ApiCreatedResponse({ type: LinkAssetsResultDto })
+  linkAssets(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: LinkAssetsToLineDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.receiving.linkAssets(id, lineId, dto, principal);
+  }
+
+  @Post(':id/lines/:lineId/unlink-assets')
+  @RequirePermission('purchaseOrder:write', 'asset:write')
+  @ApiOperation({
+    summary:
+      "Unlink assets from a line (one or many, partial success). The assets' purchase values are never cleared.",
+  })
+  @ApiCreatedResponse({ type: UnlinkAssetsResultDto })
+  unlinkAssets(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: UnlinkAssetsFromLineDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.receiving.unlinkAssets(id, lineId, dto.assetIds, principal);
   }
 }
