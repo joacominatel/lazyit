@@ -49,7 +49,7 @@ The preview is tailored to the kind of record:
 - **Person** — email, role, username, file number, manager and how many assets and app accesses they
   currently hold, with their initials avatar.
 - **Model** — manufacturer, SKU and description.
-- **Application** — vendor, web address and description.
+- **Application** — publisher, web address and description.
 - **Location** — type, address, floor and description.
 
 Empty values are simply left out, so the preview never shows a blank label.

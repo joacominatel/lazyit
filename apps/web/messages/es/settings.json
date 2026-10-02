@@ -550,6 +550,7 @@
           "accessGrant": "Concesiones de acceso",
           "accessRequest": "Solicitudes de acceso",
           "consumable": "Consumibles",
+          "purchaseOrder": "Compras",
           "article": "Base de conocimiento",
           "location": "Ubicaciones",
           "assetModel": "Modelos de activo",
@@ -836,6 +837,9 @@
       "consumable:read": { "label": "Ver consumibles" },
       "consumable:write": { "label": "Agregar, editar y ajustar consumibles" },
       "consumable:delete": { "label": "Eliminar consumibles" },
+      "purchaseOrder:read": { "label": "Ver compras y proveedores" },
+      "purchaseOrder:write": { "label": "Registrar y editar compras" },
+      "purchaseOrder:delete": { "label": "Eliminar compras y proveedores" },
       "assetModel:read": { "label": "Ver modelos de activo" },
       "assetModel:write": { "label": "Agregar y editar modelos de activo" },
       "assetModel:delete": { "label": "Eliminar modelos de activo" },
@@ -899,6 +903,18 @@
       "inventory:import": {
         "label": "Ejecutar importaciones masivas",
         "description": "Usa el asistente guiado para importar activos de forma masiva desde un archivo CSV o JSON. También requiere los permisos de edición correspondientes (activos, modelos, categorías, ubicaciones), verificados por fila al confirmar."
+      },
+      "purchaseOrder:view": {
+        "label": "Ver compras y proveedores",
+        "description": "Ver las compras, sus líneas, precios y documentos, y el directorio de proveedores."
+      },
+      "purchaseOrder:edit": {
+        "label": "Registrar y editar compras",
+        "description": "Crear y editar compras, sus líneas y proveedores, recibir unidades y vincular activos a una compra."
+      },
+      "purchaseOrder:delete": {
+        "label": "Eliminar compras y proveedores",
+        "description": "Archivar y restaurar compras y proveedores. Los activos vinculados conservan su vínculo."
       },
       "infra:view": {
         "label": "Ver el mapa de infraestructura",

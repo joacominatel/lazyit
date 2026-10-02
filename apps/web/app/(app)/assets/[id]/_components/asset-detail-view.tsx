@@ -407,9 +407,20 @@ export function AssetDetailView({ id }: { id: string }) {
             {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
           </DetailField>
           <DetailField label={t("purchaseCost")} mono>
-            {asset.purchaseCost != null
-              ? formatMoney(asset.purchaseCost, locale)
-              : "—"}
+            {asset.purchaseCost != null ? (
+              <>
+                {formatMoney(asset.purchaseCost, locale, asset.purchaseCurrency)}
+                {/* No label is its own visible state (ADR-0099 §5), never a default currency. */}
+                {asset.purchaseCurrency?.trim() ? null : (
+                  <span className="font-sans text-muted-foreground">
+                    {" · "}
+                    {t("noCurrency")}
+                  </span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
           </DetailField>
           {/* Current book value (#954): straight-line depreciation as of today, computed by the API.
               `null` exactly when there's no purchase cost — hide the row rather than show a 0. The
@@ -421,7 +432,7 @@ export function AssetDetailView({ id }: { id: string }) {
               }
               mono
             >
-              {formatMoney(asset.currentBookValue, locale)}
+              {formatMoney(asset.currentBookValue, locale, asset.purchaseCurrency)}
             </DetailField>
           ) : null}
         </dl>

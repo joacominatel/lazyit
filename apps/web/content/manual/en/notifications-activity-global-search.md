@@ -28,7 +28,7 @@ Seven kinds of records are indexed:
   is findable. Only published articles are searchable; drafts never appear.
 - **Users** — by name and email.
 - **Locations** — by name and address.
-- **Applications** — by name and vendor.
+- **Applications** — by name and publisher.
 - **Topology nodes** — servers, VMs, containers and the rest of the infrastructure map, by label, IP
   address or linked asset name.
 - **Consumables** — spare parts and stock items, by name, SKU or description. The preview shows how

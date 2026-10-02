@@ -103,7 +103,7 @@
       "type": "Type",
       "address": "Address",
       "floor": "Floor",
-      "vendor": "Vendor",
+      "vendor": "Publisher",
       "url": "URL",
       "kind": "Kind",
       "linkedAsset": "Linked asset",

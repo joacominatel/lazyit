@@ -20,6 +20,13 @@ threaded through create/update/list-filter/import/export and the web form/detail
 on focus, and a non-blocking hint for another spelling of an existing company. Still free text; the
 decision below is otherwise unchanged.
 
+**Amended 2026-10-02 (#1474):** the asset form and the *Receive stock* dialog read their company
+suggestions from `GET /suggestions/company` ([[0099-purchases-scope-model-and-optionality]], *Decisions
+while building*) instead of `GET /assets/companies`: the same values plus the companies typed on
+purchases (for a caller holding `purchaseOrder:read`), each with a use count and last use, so the most
+used spelling ranks first. `GET /assets/companies` stays and still feeds the assets list's company
+filter. Company is still a free-text grouping label; nothing else here changes.
+
 ## Context
 
 Operators asked for a Snipe-IT-style "Company" on an asset — to group, filter and report assets by

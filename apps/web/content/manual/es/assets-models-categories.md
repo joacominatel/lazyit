@@ -19,8 +19,8 @@ individuales no tengan que repetirlos.
 Un modelo tiene un **nombre** (obligatorio), un **fabricante** (obligatorio), un **SKU** opcional, una
 descripción opcional, una **categoría** opcional y **valores por defecto** opcionales.
 
-El campo **fabricante** sugiere los fabricantes que ya usan tus otros modelos — los más usados primero,
-con cuántos modelos usa cada uno — y avisa cuando lo que escribiste es otra forma de escribir uno
+El campo **fabricante** sugiere los fabricantes que ya usan tus otros modelos (y, si puedes ver las
+compras, tus líneas de compra) — los más usados primero, con cuántos registros usa cada uno — y avisa cuando lo que escribiste es otra forma de escribir uno
 existente (por ejemplo `DELL` o `Dell Inc.` para `Dell`), para que una marca no termine partida en dos.
 Funciona como el campo [Empresa](/help/assets-asset-basics) del activo, y siempre puedes escribir un
 fabricante nuevo.
