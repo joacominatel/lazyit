@@ -3,7 +3,7 @@ title: lazyit Documentation
 tags: [moc, root]
 status: draft
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-10-01
 ---
 
 # lazyit — Documentation
@@ -29,6 +29,9 @@ frontmatter, and internal references use `[[wiki-links]]`.
 - **Designing the AI assistant?** The opt-in [[ai-assistant/_MOC|AI Assistant, MCP server and headless
   API]] design vault (accepted, not built yet) — read its synthesis first; decision record
   [[0097-ai-assistant-mcp-and-headless-api]].
+- **Working on Purchases?** The optional [[purchases/_MOC|Purchases]] vault (accepted, not built yet)
+  — decision records [[0099-purchases-scope-model-and-optionality]] and
+  [[0100-money-as-64-bit-minor-units]], the CEO's decisions, and the pre-decision research.
 - **Latest status snapshot:** [[status_jun_2026/README|Status — June 2026]] (the RBAC v2 + Service
   Accounts epic + the CEO's decisions). Prior: [[status_may_2026/README|May 2026]].
 
@@ -45,6 +48,7 @@ frontmatter, and internal references use `[[wiki-links]]`.
 | `06-security` | [[06-security/_MOC\|Security]] | Vulnerability findings, sentinel sweeps, deferred risks |
 | `workflow-engine` | [[workflow-engine/_MOC\|Workflow Engine]] | Design vault for the shipped Applications Workflow Engine — substrate, data model, connectors, security, builder UX |
 | `ai-assistant` | [[ai-assistant/_MOC\|AI Assistant]] | Design vault (accepted) for the AI chat, MCP server with lazyit's own OAuth 2.1, and headless API — providers, runtime, tool catalog, frontend, security |
+| `purchases` | [[purchases/_MOC\|Purchases]] | Decision and research vault (accepted, not built) for the optional Purchases area — CEO decisions, simulated user interview, technical analysis, UX proposal |
 | `99-glossary` | [[99-glossary/_MOC\|Glossary]] | IT terms used across the docs |
 
 ## Doc conventions (this vault)

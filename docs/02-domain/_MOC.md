@@ -3,7 +3,7 @@ title: Domain — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-06-16
+updated: 2026-10-02
 ---
 
 # Domain — Map of Content
@@ -53,6 +53,10 @@ erDiagram
     SecretVault ||--o{ VaultMembership : "scoped to"
     User ||--o{ VaultMembership : "is crypto member via"
     User ||--|| UserKeypair : "has keypair"
+    Supplier ||--o{ PurchaseOrder : "supplies (planned)"
+    PurchaseOrder ||--o{ PurchaseOrderLine : "has (planned)"
+    PurchaseOrder ||--o{ PurchaseOrderEvent : "logged in (planned)"
+    PurchaseOrderLine |o--o{ Asset : "produced (planned)"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -79,6 +83,9 @@ The model is organized in loosely-coupled areas:
 9. **Secret Manager** — [[secret-vault]], [[secret-item]], [[vault-membership]], [[user-keypair]],
    [[secret-audit-log]]: a zero-knowledge vault store beside the KB, the server never decrypting a
    secret value (INV-10, [[0061-secret-manager-zero-knowledge]]). **Built (#366).**
+10. **Purchases** — [[supplier]], [[purchase-order]], [[purchase-order-line]], [[purchase-order-event]]:
+    an always-available, optional-at-entry record of purchases that assets point back to; asset purchase fields stay
+    authoritative ([[0099-purchases-scope-model-and-optionality]]). **Planned — accepted, not built.**
 
 ## Implementation order
 

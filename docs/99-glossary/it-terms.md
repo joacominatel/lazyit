@@ -3,7 +3,7 @@ title: IT Terms
 tags: [glossary]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-10-02
 ---
 
 # IT Terms
@@ -144,3 +144,29 @@ Terms for the guided bulk importer ([[0069-migrator-import|Migrator]]).
 | Term | Meaning in lazyit's context |
 | --- | --- |
 | **Migrator (bulk import)** | The guided, field-mapped **bulk importer** for domain data (phase 1: the Asset slice, from JSON + CSV). Its mapping step binds each source field to a target field, an enum value, or an FK resolved by natural key — or to a fixed value via an existing-record picker / constant. A dry-run validates and detects conflicts before any write; the commit replays a frozen plan additively + audited ([[0069-migrator-import]]). Distinct from the KB-specific **Bulk .zip import** (above), which ingests a `.zip` of markdown into KB folders. |
+
+## Purchases vocabulary
+
+Terms for the optional Purchases area ([[0099-purchases-scope-model-and-optionality|ADR-0099]]) —
+accepted, **not built yet** (Phase 1 under epic #1465). Research: [[purchases/_MOC|Purchases vault]].
+
+| Term | Meaning in lazyit's context |
+| --- | --- |
+| **Purchase** ([[purchase-order]]) | The IT side of one purchase: supplier, the finance PO number, documents, lines, and the assets that came out of it. The model is `PurchaseOrder`; the UI says **Purchase** / *Compra*, because lazyit records orders and never issues them. |
+| **Purchases** (the area) | The area that holds purchases and suppliers, under Inventory in the sidebar. **Always available** (subject to `purchaseOrder:*` permissions) and **optional at entry**: there is no on/off switch, and nobody has to record purchases. |
+| **Procurement** | Running purchasing: approvals, budgets, payables, three-way match, supplier portals. A **non-goal** — the finance system does it ([[vision]]). Recording purchases is in scope; procurement is not. |
+| **PO number / reference** | The finance system's purchase-order number, stored as the purchase's optional `reference`. Not unique: a repeat is suggested, never refused. lazyit generates no numbers of its own in v1. |
+| **Supplier** ([[supplier]]) | **Who you buy from and pay** — a reseller, wholesaler, carrier or CSP. Not who makes the thing. |
+| **Manufacturer** | **Who makes the hardware** (Dell, Lenovo) — [[asset-model]]`.manufacturer`. You often buy it from a different supplier. |
+| **Publisher** | **Who makes the software** (Microsoft, Atlassian) — stored as [[application]]`.vendor` and labelled "Publisher" (en) / "Fabricante" (es) from Purchases Phase 1. |
+| **Vendor** | Avoid the word in new UI and docs: it was ambiguous between supplier and publisher. It survives only as the column name `Application.vendor`, which means *publisher*. |
+| **Purchase line** ([[purchase-order-line]]) | One line of a purchase: kind (`ASSET`, `OTHER`, later `CONSUMABLE`, `LICENSE`), description (the only required field), quantity (default 1), optional unit price. |
+| **Receive (from a line)** | Create assets from a purchase line when the units physically arrive — the "Receive stock" dialog prefilled from the line. Never at order time. |
+| **Link to purchase** | Attach an asset that already exists to a purchase line, singly or in bulk; counts toward the line's received units. |
+| **Copy on confirm** | How purchase values reach an asset: an explicit per-field diff where empty fields are pre-checked to **fill** and differing values are never pre-checked to **replace**. Asset fields stay authoritative. |
+| **Received / Partially received** | Derived purchase states: received units = live linked assets (later also consumable stock moved in); never stored, never set by hand. |
+| **Cancelled quantity** | Units of a line that will never arrive ("cancel remaining units"); they stop counting as pending. |
+| **Over-receipt** | Receiving or linking more units than a line's open quantity. **Allowed with a warning**; the line then shows as *over-received* ("5 of 4"). |
+| **Currency label** | The optional free text a user types to say what a purchase's or an asset cost's amounts are in ("ARS", "USD", "u$s"). No ISO list, no exchange rates, no meaning to lazyit; totals group by label (trimmed, case-insensitive) and never sum across labels. |
+| **No currency** | The state of an amount with no currency label — every asset costed before Purchases. Shown as such, never defaulted, and grouped separately in any total. |
+| **Document extraction** | An optional, separately switched AI step that reads a document attached to a purchase and returns a **draft** a human reviews and saves. It never saves anything itself. |

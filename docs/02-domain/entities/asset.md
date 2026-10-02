@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-02
 ---
 
 # Asset
@@ -28,6 +28,8 @@ concrete instance of a generic [[asset-model]].
   `GET /consumables/deliveries?targetAssetId=` (also needs `asset:read`). The FK is `Restrict`, so an
   asset that received a delivery cannot be hard-deleted; a soft delete is unaffected
   ([[0098-consumable-delivery-targets]]).
+- **was bought on** an optional [[purchase-order-line]] — ⚪ *planned, Purchases Phase 1*
+  ([[0099-purchases-scope-model-and-optionality]]). See the purchases note below.
 
 ## Business rules
 
@@ -72,6 +74,33 @@ concrete instance of a generic [[asset-model]].
   delete everywhere, references are preserved in practice.
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
+
+> [!note] Purchases — planned, not built ([[0099-purchases-scope-model-and-optionality]], #1465)
+> When the Purchases area ships (Phase 1) — always available, optional at entry, no instance switch —
+> an asset gains:
+>
+> - **`purchaseOrderLineId`** — nullable FK → [[purchase-order-line]] (`onDelete: Restrict`; soft delete
+>   never triggers it). `NULL` = "no purchase", which is what every existing asset gets on upgrade. N
+>   assets per line, at most one line per asset. Linking and unlinking write new [[asset-history]] event
+>   types and a [[purchase-order-event]], in the same transaction.
+> - **an optional currency label on the purchase cost** — free text as the user typed it, suggested by
+>   smart entry, with no ISO list and no currency semantics (planned name `purchaseCostCurrency`).
+>   `NULL` reads as **"No currency"** — its own state, never defaulted. It qualifies `purchaseCost` and
+>   `salvageValue` alike. Any aggregate of cost groups by label (trimmed, case-insensitive) and never
+>   sums across labels. Amounts display as entered — no forced decimals on whole amounts
+>   ([[0100-money-as-64-bit-minor-units]] §5).
+>
+> **The asset's purchase fields stay authoritative.** Values from a purchase reach an asset only by
+> **copy on explicit confirmation** — when receiving units from a line or linking existing assets:
+> empty fields are pre-checked to fill, replacements are never pre-checked, cost and currency move
+> together, and unlinking never clears anything. A divergence from the line is shown, not corrected.
+> The free purchase fields stay editable exactly as today, linked or not, and no asset ever requires a
+> purchase. **Clone never copies `purchaseOrderLineId`.**
+>
+> **Provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A): the asset page's
+> *Purchase* panel — supplier, reference, dates and the purchase documents — is shown and served only to
+> a principal holding `purchaseOrder:read`. The asset's own purchase fields (cost, currency, dates) stay
+> visible under `asset:read`, as today.
 
 > [!note] `specs` governance — advisory per-category dictionary (2026-06-30, #851)
 > `Asset.specs` (and [[asset-model]]`.specs`) still accept **any JSON object**
@@ -141,9 +170,9 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
-| `purchaseCost` | `int?` | optional acquisition cost in **integer minor units** (e.g. cents) of the instance's single currency (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. Non-negative, bounded to `int4`. |
+| `purchaseCost` | `int?` | optional acquisition cost in **integer minor units** (e.g. cents) of the instance's single currency (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. Non-negative, bounded to `int4`. **Planned (Purchases Phase 1):** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]) and qualified by an optional free-text currency label ([[0099-purchases-scope-model-and-optionality]]). |
 | `usefulLifeMonths` | `int?` | optional straight-line depreciation period in months (#954). `null` (or `<= 0`) = don't depreciate (book value = cost). |
-| `salvageValue` | `int?` | optional residual value at end of life, minor units (#954). `null` = 0. |
+| `salvageValue` | `int?` | optional residual value at end of life, minor units (#954). `null` = 0. **Planned:** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]). |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
 | `locationId` | `cuid?` | optional FK → [[location]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -243,4 +272,5 @@ Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assign
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]] ·
 [[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]] ·
-[[0093-chassis-routing-and-asset-adoption]]
+[[0093-chassis-routing-and-asset-adoption]] · [[0099-purchases-scope-model-and-optionality]] ·
+[[0100-money-as-64-bit-minor-units]] · [[purchase-order-line]]

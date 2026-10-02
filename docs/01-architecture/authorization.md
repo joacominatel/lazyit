@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -35,7 +35,8 @@ mint a permission, CI fails on an unknown literal, and the set is greppable and 
 
 - **Domains** are the existing modules: `asset`, `application`, `accessGrant`, `consumable`,
   `article`/KB, `location`, `assetModel`, `category`, `user`, `dashboard`, `search`, `settings`, plus
-  `logs` (the estate-wide activity history for the future Reports/Informes section).
+  `logs` (the estate-wide activity history for the future Reports/Informes section). A
+  `purchaseOrder` domain is ⚪ **planned** for Purchases Phase 1 — see the note in §4.
 - **Actions** are `read | write | delete` plus the **coarse capability verbs** that map to the old
   ADMIN-only gates: `accessGrant:grant`, `user:manage`, `settings:manage`. Read-only surfaces
   (`dashboard`, `search`, `logs`) expose only `:read`.
@@ -121,6 +122,27 @@ three roles **except** two tighter tiers:
   closing the v1 gap where the sensitive who-did-what data was reachable on a read every role held. The
   same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
   Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
+
+> [!note] Planned, not built — the `purchaseOrder` domain ([[0099-purchases-scope-model-and-optionality]] §8)
+> Purchases Phase 1 adds `purchaseOrder:read`, `purchaseOrder:write` and `purchaseOrder:delete`, covering
+> purchases, their lines and documents, and suppliers:
+>
+> - `purchaseOrder:read` — seeded to ADMIN + MEMBER and added to **`VIEWER_DENIED_READS`**, so a VIEWER
+>   cannot see purchases or supplier prices by default. An admin can grant it to VIEWER from the role
+>   matrix — for every viewer at once, since permissions are per role.
+> - `purchaseOrder:write` — ADMIN + MEMBER (create, edit, receive, link/unlink, cancel, upload documents).
+> - `purchaseOrder:delete` — ADMIN only (soft delete); restore stays ADMIN-only.
+>
+> All three are grantable to service accounts (fail-closed, §6) and reach existing instances through the
+> seed-once ledger, with no data migration. They do **not** narrow `asset:read`: a viewer still sees an
+> asset's own purchase cost, as today. There is **no instance switch**: Purchases is always available,
+> gated only by these permissions (ADR-0099 §7).
+>
+> **An asset's purchase provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A,
+> 2026-10-01). The asset page's *Purchase* panel — supplier, reference, dates and the purchase documents
+> listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
+> not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
+> (cost, currency, dates) included.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

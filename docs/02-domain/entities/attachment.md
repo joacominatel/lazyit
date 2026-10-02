@@ -3,7 +3,7 @@ title: Attachment
 tags: [domain, entity, attachments, storage]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-10-02
 ---
 
 # Attachment
@@ -32,7 +32,8 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 - **hangs off** one parent via `(entityType, entityId)` — a **soft ref, NO FK** (the KB-chip /
   `InfraNodeSecretRef` house style): the parent (`ASSET` → [[asset]], `ARTICLE` → [[article]]) is
   validated **live at attach time**; a dangling ref degrades gracefully. `CONSUMABLE` is a deferred
-  extension.
+  extension. `PURCHASE_ORDER` → [[purchase-order]] is ⚪ **planned** for Purchases Phase 1 (see the note
+  under Business rules).
 - **uploaded by** an optional [[user]] (`uploadedById`, `onDelete: SetNull`) — the file outlives its
   uploader; a [[service-account]] cannot upload (403, mirroring article authorship).
 
@@ -62,6 +63,16 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
   rows — a version restore can never surface a broken image. The metadata row survives the bytes as
   the audit trail.
 
+> [!note] Purchase documents — planned, not built ([[0099-purchases-scope-model-and-optionality]] §10)
+> Purchases Phase 1 adds the parent type **`PURCHASE_ORDER`** (an enum value appended at the tail),
+> reusing the asset documents allowlist and 25 MB cap, gated by `purchaseOrder:read` / `:write`, with the
+> same 404-not-403 rule. A purchase's documents are **shared, not copied**: the same rows are listed
+> read-only on every asset linked to the purchase — to principals holding `purchaseOrder:read` only
+> (ADR-0099 §8, CEO decision D-A) — and upload and delete happen on the purchase. A purchase document may
+> carry an optional free-text type label (quote, invoice, delivery note), never a closed list. Because they
+> are financial evidence, ADR-0099 §12 makes the **attachments backup a prerequisite** shipping before or
+> alongside Phase 1.
+
 ## Fields
 
 Prisma model `Attachment` → table `attachments`. Wire schema (`AttachmentSchema`) + allowlists/caps
@@ -70,7 +81,7 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/attachment.ts`).
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `entityType` | `enum AttachmentEntityType` | `ASSET` \| `ARTICLE`. |
+| `entityType` | `enum AttachmentEntityType` | `ASSET` \| `ARTICLE` (`PURCHASE_ORDER` planned, Purchases Phase 1). |
 | `entityId` | `string` | soft ref → the parent's id, **no FK**. |
 | `sha256` | `string` | content hash = the on-disk blob key (dedup); indexed. |
 | `byteSize` | `int` | size of the stored blob. |
