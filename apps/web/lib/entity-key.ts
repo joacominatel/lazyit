@@ -21,6 +21,9 @@ export const ENTITY_KEYS = [
   "model",
   "category",
   "serviceAccount",
+  // Purchases (ADR-0099): a purchase and a supplier.
+  "purchase",
+  "supplier",
 ] as const;
 
 export type EntityKey = (typeof ENTITY_KEYS)[number];
