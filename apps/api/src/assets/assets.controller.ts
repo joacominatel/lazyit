@@ -42,7 +42,7 @@ import {
   type AssetStatus,
   type AssetWarrantyFilter,
 } from '@lazyit/shared';
-import { ASSET_SORT_ALLOWLIST } from './assets.service';
+import { ASSET_SORT_ALLOWLIST, type AssetFilters } from './assets.service';
 import { AssetsService } from './assets.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
@@ -249,7 +249,7 @@ export class AssetsController {
     // The list route carries no @Roles (any authenticated user may list ACTIVE assets), so gate the
     // privileged archived slice here: deleted=only is ADMIN-only (403 otherwise). (ADR-0041)
     assertCanListDeleted(pageQuery.deleted, user);
-    const filters = {
+    const filters: AssetFilters = {
       ...this.parseAssetFilters({
         categoryId,
         modelId,
@@ -263,7 +263,10 @@ export class AssetsController {
         assetTags,
         serials,
       }),
-      // List read only (#1476), like assetTags/serials: the CSV export does not take them.
+    };
+    // Purchase filters (#1476), list read only like assetTags/serials: the CSV export does not take them.
+    // Authorized here (403 without purchaseOrder:read); the list query applies no unauthorized ones.
+    const purchase = {
       purchaseOrderLineId: parseCuidQuery(
         purchaseOrderLineId,
         'purchaseOrderLineId',
@@ -274,12 +277,11 @@ export class AssetsController {
           ? undefined
           : parseBooleanQuery(purchaseLinked),
     };
-    if (
-      filters.purchaseOrderLineId !== undefined ||
-      filters.purchaseOrderId !== undefined ||
-      filters.purchaseLinked !== undefined
-    ) {
-      await this.assets.assertCanFilterByPurchase(principal);
+    if (Object.values(purchase).some((value) => value !== undefined)) {
+      filters.purchase = await this.assets.authorizePurchaseFilters(
+        purchase,
+        principal,
+      );
     }
     return this.assets.findPage(filters, pageQuery);
   }

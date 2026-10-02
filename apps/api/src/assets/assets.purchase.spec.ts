@@ -306,10 +306,11 @@ describe('list filters by purchase (#1476)', () => {
 
   it('the assets of one line, of one purchase, and linked or not — AND-combined', async () => {
     const { service, where } = listSetup(['purchaseOrder:read']);
-    await service.findPage(
+    const purchase = await service.authorizePurchaseFilters(
       { purchaseOrderLineId: LINE, purchaseOrderId: PO, purchaseLinked: true },
-      page,
+      member,
     );
+    await service.findPage({ purchase }, page);
     expect(where()).toMatchObject({
       AND: [
         { purchaseOrderLineId: LINE },
@@ -321,7 +322,11 @@ describe('list filters by purchase (#1476)', () => {
 
   it('purchaseLinked=false: the assets linked to no purchase', async () => {
     const { service, where } = listSetup(['purchaseOrder:read']);
-    await service.findPage({ purchaseLinked: false }, page);
+    const purchase = await service.authorizePurchaseFilters(
+      { purchaseLinked: false },
+      member,
+    );
+    await service.findPage({ purchase }, page);
     expect(where()).toMatchObject({ AND: [{ purchaseOrderLineId: null }] });
   });
 
@@ -331,17 +336,33 @@ describe('list filters by purchase (#1476)', () => {
     expect(where()).not.toHaveProperty('AND');
   });
 
-  it('filtering by purchase needs purchaseOrder:read (D-A): 403 without it', async () => {
+  it('authorizing the purchase filters needs purchaseOrder:read (D-A): 403 without it, or without a principal', async () => {
     const denied = listSetup(['asset:read']);
     await expect(
-      denied.service.assertCanFilterByPurchase(member),
+      denied.service.authorizePurchaseFilters({ purchaseOrderId: PO }, member),
     ).rejects.toBeInstanceOf(ForbiddenException);
     await expect(
-      denied.service.assertCanFilterByPurchase(undefined),
+      denied.service.authorizePurchaseFilters({ purchaseOrderId: PO }),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    const allowed = listSetup(['purchaseOrder:read']);
+  });
+
+  it('defense in depth: purchase filters that were not authorized are refused by the list AND the export, before any query', async () => {
+    const { service, prisma } = listSetup(['purchaseOrder:read']);
+    const forged = { purchaseOrderId: PO };
     await expect(
-      allowed.service.assertCanFilterByPurchase(member),
-    ).resolves.toBeUndefined();
+      service.findPage({ purchase: forged }, page),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const stream = service.streamInventoryCsvRows(
+      { purchase: forged },
+      'active',
+      member,
+    );
+    // The provenance stamp and header come first; the query (and the refusal) with the first batch.
+    await expect(
+      (async () => {
+        for await (const chunk of stream) void chunk;
+      })(),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.asset.findMany).not.toHaveBeenCalled();
   });
 });

@@ -149,15 +149,29 @@ export interface AssetFilters {
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
   serials?: string[];
   /**
-   * Purchase provenance filters (ADR-0099, #1476) — list read only, and only for a caller holding
-   * `purchaseOrder:read` ({@link AssetsService.assertCanFilterByPurchase}): they reveal which assets came
-   * from which purchase (D-A). The assets linked to one line, to any line of one purchase, and linked to
-   * some purchase (`true`) or to none (`false`). Combined with AND.
+   * Purchase provenance filters (#1476). Only an object minted by
+   * {@link AssetsService.authorizePurchaseFilters} is accepted: `buildWhere` refuses any other (403).
    */
+  purchase?: PurchaseFilters;
+}
+
+/**
+ * The asset list's purchase provenance filters (ADR-0099, #1476): the assets linked to one line, to any line
+ * of one purchase, and linked to some purchase (`true`) or to none (`false`), AND-combined. They reveal which
+ * assets came from which purchase (D-A), so they need `purchaseOrder:read` on top of `asset:read`.
+ */
+export interface PurchaseFilters {
   purchaseOrderLineId?: string;
   purchaseOrderId?: string;
   purchaseLinked?: boolean;
 }
+
+/**
+ * The purchase filters that passed the permission check — the only ones `buildWhere` applies. A runtime
+ * brand rather than a type: any caller that reaches the list query (the list, the export, a future reader)
+ * cannot apply purchase filters it did not have authorized, whatever it passes.
+ */
+const AUTHORIZED_PURCHASE_FILTERS = new WeakSet<PurchaseFilters>();
 
 /**
  * Server-side sort allowlist for `GET /assets` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
@@ -332,16 +346,22 @@ export class AssetsService {
   ) {}
 
   /**
-   * 403 unless the caller may filter the list by purchase (#1476): the purchase filters reveal provenance,
-   * which follows `purchaseOrder:read` (ADR-0099 §8, D-A) — a list read alone is `asset:read`. The list
-   * route asks only when one of them is given.
+   * Authorize the purchase filters for `principal` (#1476): 403 unless it holds `purchaseOrder:read` — the
+   * filters reveal provenance, which follows it (ADR-0099 §8, D-A), while a list read alone is `asset:read`.
+   * Returns the filters as the one object the list query will apply.
    */
-  async assertCanFilterByPurchase(principal?: Principal): Promise<void> {
+  async authorizePurchaseFilters(
+    filters: PurchaseFilters,
+    principal?: Principal,
+  ): Promise<PurchaseFilters> {
     if (!(await this.holds(principal, 'purchaseOrder:read'))) {
       throw new ForbiddenException(
         'Filtering assets by purchase needs purchaseOrder:read',
       );
     }
+    const authorized = { ...filters };
+    AUTHORIZED_PURCHASE_FILTERS.add(authorized);
+    return authorized;
   }
 
   /** Whether the principal holds `permission` (fail-closed for no principal). */
@@ -439,11 +459,20 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
-    purchaseOrderLineId,
-    purchaseOrderId,
-    purchaseLinked,
+    purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
-    // Purchase provenance (#1476), AND-combined so a contradictory pair simply matches nothing.
+    // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
+    // list route's own check. AND-combined, so a contradictory pair simply matches nothing.
+    if (
+      purchaseFilters !== undefined &&
+      !AUTHORIZED_PURCHASE_FILTERS.has(purchaseFilters)
+    ) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const { purchaseOrderLineId, purchaseOrderId, purchaseLinked } =
+      purchaseFilters ?? {};
     const purchase: Prisma.AssetWhereInput[] = [
       ...(purchaseOrderLineId ? [{ purchaseOrderLineId }] : []),
       ...(purchaseOrderId ? [{ purchaseOrderLine: { purchaseOrderId } }] : []),
