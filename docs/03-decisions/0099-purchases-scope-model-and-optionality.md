@@ -670,10 +670,12 @@ D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
   continuing without it is fine (§4). The UX proposal's three-way choice is reduced to that: "link only some"
   is unticking assets, "pick another line" is going back.
 - **The link request from the choices.** `apply` lists the fields ticked on every asset that has something
-  to apply for them; an asset that receives more gets its full list in `applyByAsset`; a field nobody ticked
-  is in neither, so it is never touched. Fills start ticked, replacements never; *Apply every purchase value*
+  to apply for them; any asset whose own ticked set is not exactly that list gets its full list in
+  `applyByAsset`, so what each asset receives is stated, never inferred; a field nobody ticked is in
+  neither, so it is never touched. Fills start ticked, replacements never; *Apply every purchase value*
   ticks both; *Show each asset* opens the per-asset grid. Assets already on the line are left out; assets on
-  another purchase need a per-asset *Move here*, and `move: true` is sent only when one is ticked.
+  another purchase need a per-asset *Move here*, and `move: true` is sent only when one is ticked; with a
+  move, the comparison is re-read just before linking and the link stops if it changed meanwhile.
 - **Bulk linking makes the Assets list selectable for linkers.** The row checkboxes appeared only with
   `asset:delete` (the lifecycle batch actions); they now also appear with `asset:write` +
   `purchaseOrder:write`, and the status / delete actions stay behind `asset:delete`. The selection is the
