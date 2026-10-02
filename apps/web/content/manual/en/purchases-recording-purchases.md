@@ -40,7 +40,10 @@ it still sees an asset's own cost fields, as before, but not the asset's **Purch
 
 Receiving units and linking or unlinking assets also create or change assets, so they need **Record &
 edit purchases** *and* the permission to create and edit assets. Receiving a consumable line into stock
-changes stock, so it needs **Record & edit purchases** *and* the permission to edit consumables.
+changes stock, so it needs **Record & edit purchases** *and* the permission to edit consumables. Applying a
+license line changes its application, so it needs **Record & edit purchases** *and* the permission to edit
+applications. [Reading a document with AI](#reading-a-document-with-ai) needs **Record & edit purchases**
+*and* the permission to use the AI assistant.
 
 ## Recording a purchase
 
@@ -67,7 +70,7 @@ Each line is one thing you bought. A line needs only a **description** — as wr
 invoice; descriptions you have written before are suggested, so the same item is spelled the same way. Its **quantity** defaults to 1 and the **unit price** is optional (blank means unknown; `0`
 means free). The unit price is usually without VAT.
 
-There are three kinds of line:
+There are four kinds of line:
 
 - **Asset** — hardware you will register as assets. You can note the **brand** and **model as written**
   on the document, map it to an **asset model** if you already have one (not required — you can map it
@@ -75,6 +78,9 @@ There are three kinds of line:
 - **Consumable** — toner, cables, batteries: units that go into a [consumable's](/help/consumables-consumables-categories)
   stock rather than becoming assets. You can pick the **consumable** they go into now, or leave it for when
   they arrive.
+- **License** — seats of software: a subscription renewal, more seats of an application. Its quantity is
+  the **seats** bought, and you can pick the [application](/help/applications-applications) they are for now
+  or when you apply them. See [Applying a license](#applying-a-license).
 - **Other** — shipping, a service, a freebie. It counts in the total but never waits for delivery.
 
 The keyboard does most of the work: **Enter** in a line adds the next line, and **Ctrl+Enter** (**⌘+Enter**
@@ -178,6 +184,31 @@ cannot be undone from the purchase: if you received too much, correct the stock 
 movement on the consumable — the line keeps counting what was received. For the same reason, a consumable
 line that has received stock can no longer change its type or be removed.
 
+## Applying a license
+
+A **license** line never changes its application's seats on its own. When the seats are really yours,
+choose **Apply license** on the line (or on *Pending units*). The form reads the application first and
+shows what applying would do:
+
+- the application's **seats bought** now — and after —, the seats **in use** and its **renewal date**;
+- **Seats to add** starts at the line's seats not applied yet. Change it if fewer arrived, or leave it blank
+  to set only the renewal;
+- **New renewal date** is optional and never filled in for you: the purchase doesn't say how long the
+  license lasts, so type it when this purchase renews it.
+
+Only what you confirm is applied, exactly as if you had edited the application. The line counts the seats
+as **applied** ("10 of 25 seats applied"), just like units received.
+
+- Applying **more seats than the line bought** is allowed, with a warning; the line then shows more seats
+  than bought.
+- An application that **doesn't count seats yet** (no seats bought set — unlimited) starts counting from the
+  seats you add; the form says so first.
+- A line **without an application** asks for one first, and saves it on the line.
+
+Applied seats are not taken back from the purchase: if you applied too many, correct the seats on the
+application. For the same reason, a license line with applied seats can no longer change its type or be
+removed.
+
 ## Linking assets you already have
 
 Assets bought before you started recording purchases — or registered by hand — can be linked to their
@@ -219,6 +250,22 @@ each one that actually belongs to this line.
 If some assets cannot be linked — for example one was archived meanwhile — the others still are, and the
 result lists each one that was not, with the reason.
 
+### Creating a purchase from assets
+
+When the purchase was never recorded at all, select the assets on the **Assets** list and choose **Create
+purchase** in the selection bar. A small form asks for the **supplier**, the **reference** and the
+**currency** — all optional, all suggested as you type. lazyit then creates **one purchase** with **one
+line per model** (assets without a model are grouped by name), each line's quantity being its assets, and
+links every asset to its line.
+
+- **Only the link changes.** No cost, date or other field of the assets is touched. A line's unit price is
+  filled only when **every** asset of the line has the same cost in the purchase's currency; otherwise it is
+  left blank — never an average.
+- Leave **Currency** blank to use the label the assets' costs already share.
+- Assets that are archived, or already on another purchase, are **left out** and listed with the reason;
+  the purchase is created with the others. (Move an asset from its purchase with **Link existing assets**.)
+  If none of the selected assets can be linked, nothing is created.
+
 ### Unlinking
 
 **Unlink from purchase** on the asset's **Purchase** panel removes the link. The asset **keeps its purchase
@@ -244,7 +291,8 @@ first** — the weekly check, and the screen to open at the warehouse door. Draf
 
 Each line shows "x of y received" and what is still pending, with **Receive** and, in its menu, **Link
 existing assets** and **Cancel remaining units**. On a consumable line, **Receive** opens
-[Receive into stock](#receiving-into-stock), and there is nothing to link. A purchase whose **expected delivery** date has passed is
+[Receive into stock](#receiving-into-stock), and there is nothing to link. A license line offers
+[Apply license](#applying-a-license) instead. A purchase whose **expected delivery** date has passed is
 marked **Overdue**.
 
 ## Documents
@@ -268,6 +316,67 @@ The documents are **shared, not copied**: every asset linked to the purchase lis
 > database backup** — the Documents section says so too. Until backup support ships, keep your own copy of
 > any invoice, order or delivery note you need to keep.
 
+## Reading a document with AI
+
+lazyit can read an invoice, a quote or a delivery note and **fill the purchase for you to review**. It is
+**off by default**: an administrator turns on **Document extraction** in
+[Settings → AI](/help/ai-assistant-setup#document-extraction), and it needs the AI assistant on with a
+provider that reads documents (Anthropic, OpenAI or Google Gemini).
+
+**What is sent.** When someone reads a document, the **whole file** — with the supplier, the prices and the
+tax IDs it shows — goes to the AI provider set up in Settings → AI, under your contract with it. No other
+lazyit data goes with it, not even the file name. Each read counts against that person's daily AI
+budget and is recorded in the purchase's activity log (who, which provider and model — never the values
+read).
+
+There are two ways in:
+
+- On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB and 20 pages).
+- On **New purchase**, **New purchase from a document**: pick the file, and lazyit creates a **draft**
+  purchase named after the file, attaches the file and reads it. If you stop there, the draft keeps the
+  document and you can fill it in by hand.
+
+Reading takes up to two minutes. If it fails, nothing was filled and the document stays attached — the
+screen says why (the provider was busy, the file has too many pages, the daily budget is spent…).
+
+### Reviewing the draft
+
+The review shows the **document beside the draft** (or **Open in a new tab**, on a small screen). **Nothing
+is saved until you select Save**, and then only what is ticked:
+
+- **Hover or focus a value** to see what was read and on which page — `Read "1.412.500,00" · page 1`. That is
+  how a misplaced thousands separator is spotted at a glance.
+- **Blanks over guesses.** A value the document doesn't state plainly stays **blank**, marked **Not read** —
+  never filled with a guess. A new line's quantity that was not read must be typed before that line can be
+  added; an unknown price simply stays unknown.
+- **Check** marks what needs your eyes, and the counter at the top jumps from one to the next:
+  - an amount that reads two ways (`1.150` — one thousand one hundred fifty, or one point fifteen?) is left
+    blank; so is one with more than two decimals;
+  - a date that could be day/month or month/day;
+  - a currency shown only as a symbol several currencies share (`$`);
+  - a line whose quantity × unit price is not the line total the document prints.
+- **The totals check** compares the lines, as you correct them, with the net (or total) the document
+  prints: **Match**, or by how much they **differ** — usually a line without a price.
+- **The supplier** is matched to one you have, by tax ID (most reliable) or by name (check it). You can use
+  the match, **create** the supplier as written on the document (with its tax ID), or type another one.
+- **A line's model** is mapped like an earlier purchase line with the same description, or suggested from
+  the brand and model written on the document (check it). You can change it, or leave it for when the
+  units arrive.
+
+### Proposed changes on a purchase that has data
+
+Reading a later document — the invoice after the quote — never overwrites the purchase. Each value is
+compared with what the purchase has, the same rule as [linking assets](#choosing-which-values-to-copy):
+
+- a value the purchase **doesn't have yet** is ticked for you (**Fill**);
+- a value that would **replace** a different one is **never** ticked for you (**Replace**) — tick the ones
+  you want;
+- a value the purchase already has is left out.
+
+A document line with the **same description** as a line of the purchase proposes changes to that line
+(quantity, unit price, warranty); any other line is offered as a **new line**. Changing the currency
+changes it for the whole purchase, and the form says so.
+
 ## The asset's Purchase panel
 
 An asset linked to a purchase shows a **Purchase** panel on its page, right after *Details*: the purchase
@@ -288,8 +397,10 @@ handy for a warranty claim — and the purchase's documents, ready to download.
 
 Every purchase keeps an append-only **activity** log: who recorded it, who changed the status, who
 added, edited or removed a line — with a price or quantity change shown as *before → after* — who received,
-linked, moved or unlinked units, who received stock on a consumable line, who cancelled remaining units
-(with the reason), and who added or removed a document or changed its type. It cannot be edited or deleted.
+linked, moved or unlinked units, who received stock on a consumable line, who applied seats from a license
+line, who cancelled remaining units (with the reason), who added or removed a document or changed its type,
+who read a document with AI (and with which provider — never the values read), and whether the purchase was
+created from selected assets. It cannot be edited or deleted.
 
 ## Suppliers
 

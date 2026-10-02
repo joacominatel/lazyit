@@ -80,6 +80,14 @@ lazyit en sí no hace ninguna solicitud a otros sitios. Con OpenAI, lazyit limit
 en caché de la web que tiene OpenAI, así que ninguna página se descarga en vivo desde su sitio. Mirá
 [Búsqueda web](/help/ai-assistant-setup#búsqueda-web).
 
+### Documentos de compras (extracción de documentos, desactivada por defecto)
+
+Cuando **Extracción de documentos** está activada y alguien elige **Leer este documento** en una compra, el
+**archivo completo** — una factura, un presupuesto o un remito, con su proveedor, precios e IDs fiscales —
+va al proveedor, que lo lee sin herramientas. Ningún otro dato de lazyit va con él, ni siquiera el nombre
+del archivo, y no se guarda nada leído hasta que una persona revisa el borrador. El proveedor autoalojado
+compatible con OpenAI nunca se usa para esto. Mirá [Extracción de documentos](/help/ai-assistant-setup#extracción-de-documentos).
+
 ### A través de agentes externos (MCP)
 
 Un cliente MCP usa su propio modelo. Lo que lee de lazyit va **al proveedor que use ese cliente, bajo

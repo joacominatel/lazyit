@@ -125,6 +125,27 @@ settings in the Claude Console; OpenAI: the organization's or project's tool per
 there while this switch is on, chats that have web search fail — see
 [Troubleshooting](/help/ai-assistant-troubleshooting#web-search-is-disabled-at-the-provider).
 
+## Document extraction
+
+**Allow reading purchase documents with AI** lets people fill a purchase from an invoice, a quote or a
+delivery note attached to it: the provider reads the document and lazyit shows a draft that a person
+reviews — see [Reading a document with AI](/help/purchases-recording-purchases#reading-a-document-with-ai).
+It is **off** by default, also on instances that were updated.
+
+- **What leaves.** The **whole file** of the document someone chooses to read — with the supplier, prices
+  and tax IDs it shows — goes to the configured provider, under your contract with it. Nothing is saved
+  from it until a person reviews the draft and saves the purchase. See
+  [What leaves your server](/help/ai-assistant-overview#purchase-documents-document-extraction-off-by-default).
+- **It needs the assistant on**, and a provider that reads documents: Anthropic, OpenAI or Google Gemini.
+  The OpenAI-compatible provider is never used for it (its servers have no common way to read a file); the
+  switch is then disabled and the card says why. It stays usable while on, so you can always turn it off.
+- **Who sees it.** People who can edit purchases and use the AI assistant. Service accounts never read
+  documents.
+- **What it reads.** PDF and image documents, up to 10 MB and 20 pages. Word, spreadsheets and text files
+  are never sent.
+- **Budget and record.** Each read counts against the person's daily token budget (the same as the chat),
+  and the purchase's activity log records it — never the values read.
+
 ## External AI agents (MCP)
 
 **Allow external AI agents** lets MCP clients such as Claude Code connect to lazyit as the person who
