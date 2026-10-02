@@ -33,6 +33,7 @@ const VIEWER_DENIED_READS_EXPECTED: Permission[] = [
   'accessGrant:read',
   'accessRequest:read', // self-service requests (ADR-0085) — who-asked-for-what is sensitive like accessGrant:read
   'user:read',
+  'purchaseOrder:read', // purchases + supplier prices (ADR-0099 §8) — VIEWER denied by default
 ];
 
 /**

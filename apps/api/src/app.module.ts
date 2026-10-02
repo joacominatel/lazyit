@@ -23,6 +23,8 @@ import { AccessGrantsModule } from './access-grants/access-grants.module';
 import { AccessRequestsModule } from './access-requests/access-requests.module';
 import { ConsumableCategoriesModule } from './consumable-categories/consumable-categories.module';
 import { ConsumablesModule } from './consumables/consumables.module';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { SuggestionsModule } from './suggestions/suggestions.module';
 import { AssetHistoryModule } from './asset-history/asset-history.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AuditModule } from './audit/audit.module';
@@ -93,6 +95,11 @@ import { buildLoggerParams } from './logging/logging.config';
     AccessRequestsModule,
     ConsumableCategoriesModule,
     ConsumablesModule,
+    // Purchases (ADR-0099, #1472): purchase orders, their lines and activity log, and suppliers. Always
+    // available, gated only by the `purchaseOrder:*` permissions — there is no instance switch.
+    PurchaseOrdersModule,
+    // Smart-entry suggestions (ADR-0099 §7): GET /suggestions/:field, authorized per source column.
+    SuggestionsModule,
     // Read-only cross-pillar aggregation for the web dashboard (CTO Round 1). Additive — no schema.
     DashboardModule,
     // Read + filtered CSV export of the three security audit logs (ADR-0081, #871): secret /
