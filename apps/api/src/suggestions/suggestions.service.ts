@@ -184,6 +184,59 @@ export class SuggestionsService {
             ).map((g) => row(g.modelText, g._count._all, g._max.updatedAt)),
         },
       ],
+      reference: [
+        {
+          permission: 'purchaseOrder:read',
+          read: async (q, take) =>
+            (
+              await this.prisma.purchaseOrder.groupBy({
+                by: ['reference'],
+                where: { reference: { not: null, ...insensitive(q) } },
+                _count: { _all: true },
+                _max: { updatedAt: true },
+                orderBy: { _count: { reference: 'desc' } },
+                take,
+              })
+            ).map((g) => row(g.reference, g._count._all, g._max.updatedAt)),
+        },
+      ],
+      invoiceNumbers: [
+        {
+          permission: 'purchaseOrder:read',
+          read: async (q, take) =>
+            (
+              await this.prisma.purchaseOrder.groupBy({
+                by: ['invoiceNumbers'],
+                where: { invoiceNumbers: { not: null, ...insensitive(q) } },
+                _count: { _all: true },
+                _max: { updatedAt: true },
+                orderBy: { _count: { invoiceNumbers: 'desc' } },
+                take,
+              })
+            ).map((g) =>
+              row(g.invoiceNumbers, g._count._all, g._max.updatedAt),
+            ),
+        },
+      ],
+      lineDescription: [
+        {
+          permission: 'purchaseOrder:read',
+          read: async (q, take) =>
+            (
+              await this.prisma.purchaseOrderLine.groupBy({
+                by: ['description'],
+                where: {
+                  ...(q ? { description: insensitive(q) } : {}),
+                  purchaseOrder: { deletedAt: null },
+                },
+                _count: { _all: true },
+                _max: { updatedAt: true },
+                orderBy: { _count: { description: 'desc' } },
+                take,
+              })
+            ).map((g) => row(g.description, g._count._all, g._max.updatedAt)),
+        },
+      ],
       vendor: [
         {
           permission: 'application:read',

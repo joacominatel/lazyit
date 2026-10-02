@@ -113,7 +113,13 @@ describe('GET /suggestions/:field — authorization (ADR-0099 §7)', () => {
     allGroupBys.forEach((fn) => expect(fn).not.toHaveBeenCalled());
   });
 
-  it.each(['supplierName', 'lineModel'])(
+  it.each([
+    'supplierName',
+    'lineModel',
+    'reference',
+    'invoiceNumbers',
+    'lineDescription',
+  ])(
     'refuses a VIEWER on %s — every source needs purchaseOrder:read',
     async (field) => {
       await get(field).set('X-Test-Role', 'VIEWER').expect(403);

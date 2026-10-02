@@ -19,6 +19,13 @@ import { z } from "zod";
  * | `manufacturer` | asset model manufacturer (`assetModel:read`) · purchase line manufacturer (`purchaseOrder:read`) |
  * | `lineModel`    | purchase line model text (`purchaseOrder:read`)                                            |
  * | `vendor`       | application vendor / publisher (`application:read`)                                         |
+ * | `reference`    | purchase reference — the finance PO number (`purchaseOrder:read`) — #1473                  |
+ * | `invoiceNumbers` | purchase invoice numbers (`purchaseOrder:read`) — #1473                                  |
+ * | `lineDescription` | purchase line description (`purchaseOrder:read`) — #1473                                |
+ *
+ * The purchase sources read live rows of live purchases only (a line of an archived purchase is archived
+ * with it). A repeated `reference` is a hint, never a refusal (ADR-0099 §6): the web surfaces "a purchase
+ * with this reference already exists" from it.
  */
 export const SUGGESTION_FIELDS = [
   "supplierName",
@@ -27,6 +34,9 @@ export const SUGGESTION_FIELDS = [
   "manufacturer",
   "lineModel",
   "vendor",
+  "reference",
+  "invoiceNumbers",
+  "lineDescription",
 ] as const;
 export const SuggestionFieldSchema = z.enum(SUGGESTION_FIELDS);
 
