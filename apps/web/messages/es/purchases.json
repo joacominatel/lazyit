@@ -227,7 +227,8 @@
     "receiveStock": "Recibir en stock",
     "applicationNotMapped": "todavía sin aplicación",
     "seatsFor": "para <link>{name}</link>",
-    "applyLicense": "Aplicar licencia"
+    "applyLicense": "Aplicar licencia",
+    "readDocument": "Leer este documento"
   },
   "activity": {
     "fields": {
@@ -603,6 +604,131 @@
       "linkedElsewhere": "Ya está en otra compra: muévelo desde esa compra",
       "alreadyLinked": "Ya está en esta compra",
       "notLinked": "No vinculado"
+    }
+  },
+  "extraction": {
+    "breadcrumb": "Revisar documento",
+    "title": "Revisa el documento",
+    "notFound": "Compra no encontrada",
+    "documentGone": "Este documento ya no está adjunto a la compra.",
+    "backToPurchase": "Volver a la compra",
+    "reading": "Leyendo el documento…",
+    "readingHelp": "Tu proveedor de IA lo está leyendo. Puede tardar hasta dos minutos; mientras tanto no se guarda nada.",
+    "nothingFilled": "No se completó nada. El documento sigue adjunto: carga la compra a mano o vuelve a intentarlo.",
+    "tryAgain": "Volver a intentar",
+    "readTitle": "Leer este documento",
+    "readIntro": "lazyit puede leer este documento y proponer los valores de la compra para que los revises.",
+    "readDisclosure": "El archivo completo va al proveedor de IA configurado en Configuración → IA. No se guarda nada hasta que revisas el borrador y guardas.",
+    "readAction": "Leer el documento",
+    "errors": {
+      "aiDisabled": "El asistente de IA está desactivado, así que no se pueden leer documentos.",
+      "extractionDisabled": "La extracción de documentos está desactivada. Un administrador puede activarla en Configuración → IA.",
+      "providerUnsupported": "El proveedor de IA configurado no puede leer documentos.",
+      "notPermitted": "No puedes leer documentos de compras con IA: hace falta permiso para editar compras y para usar el asistente de IA.",
+      "unsupportedType": "El proveedor de IA no puede leer este tipo de archivo. Se pueden leer archivos PDF e imágenes.",
+      "tooLarge": "Este archivo es demasiado grande para leerlo.",
+      "tooManyPages": "Este documento tiene demasiadas páginas para leerlo.",
+      "documentUnavailable": "El archivo de este documento no está en el servidor.",
+      "budget": "Se agotó tu presupuesto diario de IA. Vuelve a intentarlo mañana.",
+      "unreadable": "El proveedor de IA no pudo interpretar este documento.",
+      "timeout": "La lectura tardó demasiado y se detuvo.",
+      "providerAuth": "El proveedor de IA rechazó la clave configurada en Configuración → IA.",
+      "providerRateLimit": "El proveedor de IA está limitando las solicitudes. Vuelve a intentarlo en un minuto.",
+      "providerRefused": "El proveedor de IA se negó a leer este documento.",
+      "contextLimit": "Este documento es demasiado largo para el modelo configurado.",
+      "provider": "No se pudo contactar al proveedor de IA, o falló.",
+      "unavailable": "Leer documentos no está disponible en este momento.",
+      "document": "Este documento no se puede leer.",
+      "forbidden": "No tienes permiso para leer este documento.",
+      "notFound": "No se encontró la compra o el documento.",
+      "generic": "No se pudo leer el documento.",
+      "network": "No se pudo contactar a lazyit. Revisa tu conexión y vuelve a intentarlo."
+    },
+    "off": {
+      "aiDisabled": "Leer documentos necesita el asistente de IA, que está desactivado. Un administrador puede configurarlo en Configuración → IA.",
+      "extractionDisabled": "La extracción de documentos está desactivada. Un administrador puede activarla en Configuración → IA.",
+      "providerUnsupported": "El proveedor de IA configurado no puede leer documentos. Un administrador puede elegir otro en Configuración → IA.",
+      "notOffered": "Leer documentos con IA no está disponible para ti.",
+      "documentType": "Este documento no se puede leer: solo archivos PDF e imágenes de hasta {max} MB."
+    },
+    "hint": {
+      "aiDisabled": "Los documentos se pueden leer con IA cuando el asistente de IA está activado — <link>Configuración → IA</link>.",
+      "extractionDisabled": "Activa la extracción de documentos para leer estos archivos en la compra — <link>Configuración → IA</link>.",
+      "providerUnsupported": "El proveedor de IA configurado no puede leer documentos — <link>Configuración → IA</link>."
+    },
+    "preview": {
+      "label": "Documento",
+      "openTab": "Abrir en una pestaña nueva",
+      "none": "Este tipo de archivo no se puede mostrar aquí.",
+      "error": "No se pudo cargar el documento."
+    },
+    "read": "Leído “{text}”",
+    "readOnPage": "Leído “{text}” · página {page}",
+    "notRead": "No leído: quedó vacío",
+    "check": "Revisar",
+    "now": "Ahora: {value}",
+    "applyField": "Aplicar {field}",
+    "action": {
+      "fill": "Completar",
+      "replace": "Reemplazar",
+      "same": "Sin cambios",
+      "add": "Línea nueva"
+    },
+    "warnings": {
+      "AMOUNT_AMBIGUOUS": "Este importe se lee de dos maneras (miles o decimales), así que quedó vacío. Escríbelo como figura en el documento.",
+      "AMOUNT_UNREADABLE": "Este importe no se pudo leer, así que quedó vacío.",
+      "AMOUNT_TOO_PRECISE": "Este importe tiene más de dos decimales, así que quedó vacío.",
+      "QUANTITY_NOT_WHOLE": "La cantidad no es un número entero de unidades, así que quedó vacía.",
+      "DATE_AMBIGUOUS": "Esta fecha puede ser día/mes o mes/día. Compárala con el documento.",
+      "DATE_UNREADABLE": "Esta fecha no se pudo leer, así que quedó vacía.",
+      "CURRENCY_AMBIGUOUS": "El documento solo muestra un símbolo que comparten varias monedas. Revisa la moneda.",
+      "LINE_TOTAL_MISMATCH": "Cantidad × precio unitario no coincide con el total de la línea que imprime el documento.",
+      "TOTAL_MISMATCH": "Las líneas no suman el total del documento.",
+      "LINES_TRUNCATED": "El documento tiene más líneas de las que admite una revisión; aquí están solo las primeras. Agrega el resto a mano.",
+      "generic": "Compara este valor con el documento."
+    },
+    "toCheck": "{count, plural, one {# para revisar} other {# para revisar}}",
+    "nothingFlagged": "Nada marcado",
+    "proposedIntro": "Los valores que la compra todavía no tiene están marcados. Los que reemplazarían lo que ya tiene no: marca los que quieras.",
+    "purchaseSection": "Compra",
+    "supplierMatchedTaxId": "Coincide por ID fiscal",
+    "supplierMatchedName": "Coincide por nombre: revísalo",
+    "useSupplier": "Usar {name}",
+    "createSupplier": "Crear “{name}”",
+    "currencyNote": "Una compra tiene una sola moneda: cambiarla la cambia para todas las líneas.",
+    "markOrdered": "Marcar la compra como pedida (es un borrador mientras se lee)",
+    "linesSection": "Líneas ({count})",
+    "noLines": "No se leyó ninguna línea.",
+    "addLine": "Agregar la línea {index}",
+    "quantityNeeded": "Escribe la cantidad para agregar esta línea.",
+    "kindNotRead": "Tipo no leído: quedó como {kind}, revísalo.",
+    "modelMatchedMemory": "Asignado como una línea de una compra anterior",
+    "modelSuggested": "Sugerido por la marca y el modelo: revísalo",
+    "existingLine": "Ya está en la compra: “{line}”",
+    "onPurchase": "Línea existente",
+    "lineUnchanged": "El documento coincide con esta línea.",
+    "totals": {
+      "unknown": "Todavía no se pueden comparar las líneas con el total del documento.",
+      "compare": "Líneas {lines} · documento {which, select, net {neto} other {total}} {printed}",
+      "match": "Coinciden",
+      "mismatch": "Difieren en {amount}",
+      "incomplete": "{count, plural, one {# línea no tiene} other {# líneas no tienen}} cantidad o precio"
+    },
+    "saveNote": "No se guarda nada hasta que eliges Guardar. Los valores marcados Revisar necesitan tu atención.",
+    "discard": "Descartar",
+    "save": "{count, plural, one {Guardar # cambio} other {Guardar # cambios}}",
+    "saveNothing": "Nada para guardar",
+    "savedToast": "{count, plural, one {# cambio guardado} other {# cambios guardados}}",
+    "saveError": "No se pudieron guardar todos los cambios. Lo guardado queda; vuelve a guardar para terminar.",
+    "invalidValue": "Este valor no se puede guardar así.",
+    "newFromDocument": {
+      "title": "¿Tienes la factura o el presupuesto?",
+      "description": "lazyit puede leer un PDF o una imagen (hasta {max} MB) y completar la compra para que la revises. El archivo va a tu proveedor de IA; no se guarda nada hasta que lo revisas.",
+      "action": "Nueva compra desde un documento",
+      "wrongType": "{name} no se puede leer: elige un PDF o una imagen.",
+      "tooLarge": "{name} pesa más de {max} MB.",
+      "uploadError": "La compra se creó, pero no se pudo adjuntar el archivo.",
+      "createError": "No se pudo empezar la compra"
     }
   }
 }

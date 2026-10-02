@@ -2,6 +2,7 @@
 
 import {
   ChevronDownIcon,
+  DocumentMagnifyingGlassIcon,
   EllipsisVerticalIcon,
   ExclamationTriangleIcon,
   InboxArrowDownIcon,
@@ -55,6 +56,7 @@ import { useConsumable } from "@/lib/api/hooks/use-consumables";
 import { useLocation } from "@/lib/api/hooks/use-locations";
 import {
   useDeletePurchaseOrder,
+  useExtractionStatus,
   usePurchaseOrder,
   useRemovePurchaseOrderLine,
   useUpdatePurchaseOrder,
@@ -63,6 +65,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
+import { canExtract, unavailableHint } from "@/lib/purchases/extraction";
 import { lineReceiveAction } from "@/lib/purchases/pending";
 import { formatMoney } from "@/lib/utils/money";
 import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
@@ -178,6 +181,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const canReceiveStock = useCanReceiveStock();
   // Applying a license line changes its application: purchase and application write (#1477).
   const canApplyLicense = useCanApplyLicense();
+  // Reading a document into a reviewed draft (#1477): offered only where the status says so; only an admin,
+  // who can change Settings → AI, is told why it is not.
+  const isAdmin = useCan("settings:manage");
+  const { data: extraction } = useExtractionStatus({ enabled: canWrite });
+  const extractionHint = extraction && !extraction.available ? unavailableHint(extraction.reason, isAdmin) : null;
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -600,11 +608,34 @@ export function PurchaseDetailView({ id }: { id: string }) {
         parentId={purchase.id}
         canWrite={canWrite}
         notice={
-          // ADR-0099 §12: purchase documents are financial evidence, and the attachments volume is not in
-          // the backup yet (docs/05-runbooks/backups.md, item #7). Say so where the files are uploaded.
-          <Callout tone="warning" icon={<ExclamationTriangleIcon />} className="mb-3">
-            <p className="text-sm">{t("detail.documentsBackupNotice")}</p>
-          </Callout>
+          <>
+            {/* ADR-0099 §12: purchase documents are financial evidence, and the attachments volume is not in
+                the backup yet (docs/05-runbooks/backups.md, item #7). Say so where the files are uploaded. */}
+            <Callout tone="warning" icon={<ExclamationTriangleIcon />} className="mb-3">
+              <p className="text-sm">{t("detail.documentsBackupNotice")}</p>
+            </Callout>
+            {extractionHint ? (
+              <p className="mb-3 text-xs text-muted-foreground">
+                {t.rich(`extraction.hint.${extractionHint}`, {
+                  link: (chunks) => (
+                    <Link href="/settings/ai" className="font-medium text-foreground hover:underline">
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+            ) : null}
+          </>
+        }
+        rowAction={(attachment) =>
+          canExtract(extraction, attachment) ? (
+            <Button variant="ghost" size="sm" asChild>
+              <Link href={`/purchases/${purchase.id}/review/${attachment.id}?read=1`}>
+                <DocumentMagnifyingGlassIcon />
+                <span className="sr-only sm:not-sr-only">{t("detail.readDocument")}</span>
+              </Link>
+            </Button>
+          ) : null
         }
       />
 

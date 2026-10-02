@@ -227,7 +227,8 @@
     "receiveStock": "Receive into stock",
     "applicationNotMapped": "no application yet",
     "seatsFor": "for <link>{name}</link>",
-    "applyLicense": "Apply license"
+    "applyLicense": "Apply license",
+    "readDocument": "Read this document"
   },
   "activity": {
     "fields": {
@@ -603,6 +604,131 @@
       "linkedElsewhere": "Already on another purchase — move it from that purchase instead",
       "alreadyLinked": "Already on this purchase",
       "notLinked": "Not linked"
+    }
+  },
+  "extraction": {
+    "breadcrumb": "Review document",
+    "title": "Review the document",
+    "notFound": "Purchase not found",
+    "documentGone": "This document is no longer attached to the purchase.",
+    "backToPurchase": "Back to the purchase",
+    "reading": "Reading the document…",
+    "readingHelp": "Your AI provider is reading it. This can take up to two minutes; nothing is saved meanwhile.",
+    "nothingFilled": "Nothing was filled. The document stays attached — enter the purchase by hand, or try again.",
+    "tryAgain": "Try again",
+    "readTitle": "Read this document",
+    "readIntro": "lazyit can read this document and propose the purchase's values for you to review.",
+    "readDisclosure": "The whole file goes to the AI provider set up in Settings → AI. Nothing is saved until you review the draft and save.",
+    "readAction": "Read the document",
+    "errors": {
+      "aiDisabled": "The AI assistant is off, so documents can't be read.",
+      "extractionDisabled": "Document extraction is off. An admin can turn it on in Settings → AI.",
+      "providerUnsupported": "The configured AI provider can't read documents.",
+      "notPermitted": "You can't read purchase documents with AI: it needs permission to edit purchases and to use the AI assistant.",
+      "unsupportedType": "The AI provider can't read this type of file. PDF and image files can be read.",
+      "tooLarge": "This file is too large to be read.",
+      "tooManyPages": "This document has too many pages to be read.",
+      "documentUnavailable": "The file of this document is missing on the server.",
+      "budget": "Your daily AI budget is spent. Try again tomorrow.",
+      "unreadable": "The AI provider couldn't make sense of this document.",
+      "timeout": "Reading took too long and was stopped.",
+      "providerAuth": "The AI provider refused the key configured in Settings → AI.",
+      "providerRateLimit": "The AI provider is limiting requests right now. Try again in a minute.",
+      "providerRefused": "The AI provider refused to read this document.",
+      "contextLimit": "This document is too long for the configured model.",
+      "provider": "The AI provider couldn't be reached or failed.",
+      "unavailable": "Reading documents isn't available right now.",
+      "document": "This document can't be read.",
+      "forbidden": "You don't have permission to read this document.",
+      "notFound": "The purchase or the document was not found.",
+      "generic": "The document couldn't be read.",
+      "network": "Couldn't reach lazyit. Check your connection and try again."
+    },
+    "off": {
+      "aiDisabled": "Reading documents needs the AI assistant, which is off. An admin can set it up in Settings → AI.",
+      "extractionDisabled": "Document extraction is off. An admin can turn it on in Settings → AI.",
+      "providerUnsupported": "The configured AI provider can't read documents. An admin can choose another one in Settings → AI.",
+      "notOffered": "Reading documents with AI isn't available to you.",
+      "documentType": "This document can't be read: only PDF and image files up to {max} MB are."
+    },
+    "hint": {
+      "aiDisabled": "Documents can be read with AI once the AI assistant is on — <link>Settings → AI</link>.",
+      "extractionDisabled": "Turn on Document extraction to read these files into the purchase — <link>Settings → AI</link>.",
+      "providerUnsupported": "The configured AI provider can't read documents — <link>Settings → AI</link>."
+    },
+    "preview": {
+      "label": "Document",
+      "openTab": "Open in a new tab",
+      "none": "This type of file can't be shown here.",
+      "error": "Couldn't load the document."
+    },
+    "read": "Read “{text}”",
+    "readOnPage": "Read “{text}” · page {page}",
+    "notRead": "Not read — left blank",
+    "check": "Check",
+    "now": "Now: {value}",
+    "applyField": "Apply {field}",
+    "action": {
+      "fill": "Fill",
+      "replace": "Replace",
+      "same": "Unchanged",
+      "add": "New line"
+    },
+    "warnings": {
+      "AMOUNT_AMBIGUOUS": "This amount reads two ways (thousands or decimals), so it was left blank. Type it as on the document.",
+      "AMOUNT_UNREADABLE": "This amount couldn't be read, so it was left blank.",
+      "AMOUNT_TOO_PRECISE": "This amount has more than two decimals, so it was left blank.",
+      "QUANTITY_NOT_WHOLE": "The quantity isn't a whole number of units, so it was left blank.",
+      "DATE_AMBIGUOUS": "This date could be day/month or month/day. Check it against the document.",
+      "DATE_UNREADABLE": "This date couldn't be read, so it was left blank.",
+      "CURRENCY_AMBIGUOUS": "The document only shows a symbol several currencies share. Check the currency.",
+      "LINE_TOTAL_MISMATCH": "Quantity × unit price doesn't match the line total the document prints.",
+      "TOTAL_MISMATCH": "The lines don't add up to the document's total.",
+      "LINES_TRUNCATED": "The document has more lines than one review carries; only the first ones are here. Add the rest by hand.",
+      "generic": "Check this value against the document."
+    },
+    "toCheck": "{count, plural, one {# to check} other {# to check}}",
+    "nothingFlagged": "Nothing flagged",
+    "proposedIntro": "Values the purchase doesn't have yet are ticked. Values that would replace what it has are not — tick the ones you want.",
+    "purchaseSection": "Purchase",
+    "supplierMatchedTaxId": "Matched by tax ID",
+    "supplierMatchedName": "Matched by name — check",
+    "useSupplier": "Use {name}",
+    "createSupplier": "Create “{name}”",
+    "currencyNote": "A purchase has one currency: changing it changes it for every line.",
+    "markOrdered": "Mark the purchase as ordered (it is a draft while being read)",
+    "linesSection": "Lines ({count})",
+    "noLines": "No lines were read.",
+    "addLine": "Add line {index}",
+    "quantityNeeded": "Type the quantity to add this line.",
+    "kindNotRead": "Type not read — set as {kind}, check it.",
+    "modelMatchedMemory": "Mapped like an earlier purchase line",
+    "modelSuggested": "Suggested from the brand and model — check it",
+    "existingLine": "Already on the purchase: “{line}”",
+    "onPurchase": "Existing line",
+    "lineUnchanged": "The document agrees with this line.",
+    "totals": {
+      "unknown": "The lines can't be checked against the document's total yet.",
+      "compare": "Lines {lines} · document {which, select, net {net} other {total}} {printed}",
+      "match": "Match",
+      "mismatch": "Differ by {amount}",
+      "incomplete": "{count, plural, one {# line has} other {# lines have}} no quantity or price"
+    },
+    "saveNote": "Nothing is saved until you select Save. Values marked Check need your eyes.",
+    "discard": "Discard",
+    "save": "{count, plural, one {Save # change} other {Save # changes}}",
+    "saveNothing": "Nothing to save",
+    "savedToast": "{count, plural, one {# change saved} other {# changes saved}}",
+    "saveError": "Couldn't save every change. What was saved stays; save again to finish.",
+    "invalidValue": "This value can't be saved as it is.",
+    "newFromDocument": {
+      "title": "Have the invoice or quote?",
+      "description": "lazyit can read a PDF or image (up to {max} MB) and fill the purchase for you to review. The file goes to your AI provider; nothing is saved until you review it.",
+      "action": "New purchase from a document",
+      "wrongType": "{name} can't be read: choose a PDF or an image.",
+      "tooLarge": "{name} is larger than {max} MB.",
+      "uploadError": "The purchase was created, but the file couldn't be attached.",
+      "createError": "Couldn't start the purchase"
     }
   }
 }

@@ -1,0 +1,139 @@
+import { describe, expect, test } from "bun:test";
+import { PURCHASE_EXTRACTION_ERROR_CODES, type PurchaseExtractionStatus } from "@lazyit/shared";
+import { ApiError } from "@/lib/api/client";
+import en from "@/messages/en/purchases.json";
+import es from "@/messages/es/purchases.json";
+import {
+  canExtract,
+  EXTRACTION_ERROR_KEYS,
+  extractionErrorKey,
+  fileProblem,
+  isDocumentHolder,
+  previewKind,
+  referenceFromFileName,
+  unavailableHint,
+  warningKey,
+} from "./extraction";
+
+const STATUS: PurchaseExtractionStatus = {
+  available: true,
+  reason: null,
+  mediaTypes: ["application/pdf", "image/png", "image/jpeg"],
+  maxBytes: 10 * 1024 * 1024,
+  maxPages: 20,
+  disclosure: "…",
+};
+const pdf = { mimeType: "application/pdf", byteSize: 200_000 };
+
+describe("canExtract — the extract route is called only when the status says so", () => {
+  test("an available status and a type the provider reads", () => {
+    expect(canExtract(STATUS, pdf)).toBe(true);
+    expect(canExtract(STATUS, { mimeType: "IMAGE/PNG", byteSize: 10 })).toBe(true);
+  });
+
+  test("never while the status is unknown or unavailable", () => {
+    expect(canExtract(undefined, pdf)).toBe(false);
+    expect(canExtract({ ...STATUS, available: false, mediaTypes: [] }, pdf)).toBe(false);
+  });
+
+  test("never for a type the provider does not read, or a file past the cap", () => {
+    expect(canExtract(STATUS, { mimeType: "application/vnd.ms-excel", byteSize: 10 })).toBe(false);
+    expect(canExtract(STATUS, { ...pdf, byteSize: STATUS.maxBytes + 1 })).toBe(false);
+  });
+
+  test("a picked file is checked the same way before anything is created", () => {
+    expect(fileProblem(STATUS, { type: "application/pdf", size: 10 })).toBeNull();
+    expect(fileProblem(STATUS, { type: "text/csv", size: 10 })).toBe("type");
+    expect(fileProblem(STATUS, { type: "image/png", size: STATUS.maxBytes + 1 })).toBe("size");
+  });
+});
+
+describe("unavailableHint — only an admin, who can act on it, is told why", () => {
+  test("the reasons Settings → AI can fix", () => {
+    expect(unavailableHint("EXTRACTION_DISABLED", true)).toBe("extractionDisabled");
+    expect(unavailableHint("AI_DISABLED", true)).toBe("aiDisabled");
+    expect(unavailableHint("PROVIDER_UNSUPPORTED", true)).toBe("providerUnsupported");
+  });
+
+  test("hidden for everyone else, for NOT_PERMITTED and for a reason a newer API adds", () => {
+    expect(unavailableHint("EXTRACTION_DISABLED", false)).toBeNull();
+    expect(unavailableHint("NOT_PERMITTED", true)).toBeNull();
+    expect(unavailableHint("QUOTA_SPENT", true)).toBeNull();
+    expect(unavailableHint(null, true)).toBeNull();
+  });
+});
+
+describe("extractionErrorKey — refusals read as clear messages", () => {
+  const refusal = (status: number, code?: string) =>
+    new ApiError(status, "refused", code ? { code, message: "refused" } : { message: "refused" });
+
+  test("each typed code has its own message", () => {
+    expect(extractionErrorKey(refusal(409, "EXTRACTION_DISABLED"))).toBe("extractionDisabled");
+    expect(extractionErrorKey(refusal(422, "TOO_MANY_PAGES"))).toBe("tooManyPages");
+    expect(extractionErrorKey(refusal(429, "BUDGET_EXCEEDED"))).toBe("budget");
+    expect(extractionErrorKey(refusal(502, "EXTRACTION_UNREADABLE"))).toBe("unreadable");
+    expect(extractionErrorKey(refusal(502, "PROVIDER_RATE_LIMIT"))).toBe("providerRateLimit");
+    expect(extractionErrorKey(refusal(504, "EXTRACTION_TIMEOUT"))).toBe("timeout");
+  });
+
+  test("an unknown or missing code falls back to its status", () => {
+    expect(extractionErrorKey(refusal(409, "SOMETHING_NEW"))).toBe("unavailable");
+    expect(extractionErrorKey(refusal(422))).toBe("document");
+    expect(extractionErrorKey(refusal(502))).toBe("provider");
+    expect(extractionErrorKey(refusal(504))).toBe("timeout");
+    expect(extractionErrorKey(refusal(500))).toBe("generic");
+    expect(extractionErrorKey(new TypeError("fetch failed"))).toBe("network");
+  });
+
+  test("every shared code and every fallback has copy in both languages", () => {
+    for (const code of PURCHASE_EXTRACTION_ERROR_CODES) {
+      expect(EXTRACTION_ERROR_KEYS).toContain(extractionErrorKey(refusal(409, code)));
+    }
+    for (const key of EXTRACTION_ERROR_KEYS) {
+      expect(en.extraction.errors).toHaveProperty(key);
+      expect(es.extraction.errors).toHaveProperty(key);
+    }
+  });
+});
+
+describe("warningKey", () => {
+  test("known codes have copy; a code a newer API adds reads generically", () => {
+    expect(warningKey("AMOUNT_AMBIGUOUS")).toBe("AMOUNT_AMBIGUOUS");
+    expect(warningKey("TOTAL_MISMATCH")).toBe("TOTAL_MISMATCH");
+    expect(warningKey("SIGNATURE_MISSING")).toBe("generic");
+    for (const code of ["AMOUNT_AMBIGUOUS", "AMOUNT_TOO_PRECISE", "DATE_AMBIGUOUS", "LINE_TOTAL_MISMATCH", "generic"]) {
+      expect(en.extraction.warnings).toHaveProperty(code);
+      expect(es.extraction.warnings).toHaveProperty(code);
+    }
+  });
+});
+
+describe("the holder purchase of New purchase from a document", () => {
+  test("its reference is the file name without the extension", () => {
+    expect(referenceFromFileName("Factura A 0003-00012345.pdf")).toBe("Factura A 0003-00012345");
+    expect(referenceFromFileName("  scan   001.JPEG ")).toBe("scan 001");
+    expect(referenceFromFileName(".pdf")).toBe(".pdf");
+    expect(referenceFromFileName(`${"x".repeat(300)}.pdf`)).toHaveLength(200);
+  });
+
+  test("is recognised only while nothing else identifies the purchase", () => {
+    const holder = { reference: "Factura A 1", supplierId: null, lines: [] };
+    expect(isDocumentHolder(holder, "Factura A 1.pdf")).toBe(true);
+    expect(isDocumentHolder({ ...holder, supplierId: "cksupplier000000000000000" }, "Factura A 1.pdf")).toBe(false);
+    expect(isDocumentHolder({ ...holder, lines: [{}] }, "Factura A 1.pdf")).toBe(false);
+    expect(isDocumentHolder({ ...holder, reference: "OC 77" }, "Factura A 1.pdf")).toBe(false);
+  });
+});
+
+describe("previewKind — what the review shows beside the draft", () => {
+  test("a PDF in the browser's viewer, an image inline", () => {
+    expect(previewKind("application/pdf")).toEqual({ kind: "pdf", type: "application/pdf" });
+    expect(previewKind("IMAGE/JPEG")).toEqual({ kind: "image", type: "image/jpeg" });
+  });
+
+  test("anything else — markup above all — is never previewed", () => {
+    expect(previewKind("text/html")).toBeNull();
+    expect(previewKind("image/svg+xml")).toBeNull();
+    expect(previewKind("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBeNull();
+  });
+});

@@ -94,7 +94,7 @@ export function LineFields({
     <div className="space-y-3">
       {/* Four kinds do not fit a fixed column beside the description, so the row wraps. */}
       <div className="flex flex-wrap items-start gap-3">
-        <Field className="w-fit" {...mark("kind")}>
+        <Field className="group/field w-fit" {...mark("kind")}>
           <FieldLabel id={id("kind-label")}>{t("kind")}</FieldLabel>
           {isWritableKind(line.kind) ? (
             <SegmentedChoice
@@ -113,7 +113,7 @@ export function LineFields({
           {note("kind")}
         </Field>
         <Field
-          className="min-w-60 flex-1"
+          className="group/field min-w-60 flex-1"
           data-invalid={errors?.description ? true : undefined}
           {...mark("description")}
         >
@@ -145,7 +145,11 @@ export function LineFields({
       {/* Three kinds do not fit beside the description and the amounts, so the amounts get their own row —
           shared with the consumable a consumable line is received into. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-        <Field className="sm:col-span-2" data-invalid={errors?.quantity ? true : undefined} {...mark("quantity")}>
+        <Field
+          className="group/field sm:col-span-2"
+          data-invalid={errors?.quantity ? true : undefined}
+          {...mark("quantity")}
+        >
           <FieldLabel htmlFor={id("quantity")}>{line.kind === "LICENSE" ? t("seats") : t("quantity")}</FieldLabel>
           <Input
             id={id("quantity")}
@@ -158,7 +162,7 @@ export function LineFields({
           {note("quantity")}
           {errors?.quantity ? <FieldError>{t("quantityInvalid")}</FieldError> : null}
         </Field>
-        <div className="sm:col-span-3" {...mark("unitPrice")}>
+        <div className="group/field sm:col-span-3" {...mark("unitPrice")}>
           <MoneyField
             id={id("unitPrice")}
             label={t("unitPrice")}
@@ -196,7 +200,7 @@ export function LineFields({
 
       {line.kind === "ASSET" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-          <Field className="sm:col-span-3" {...mark("manufacturerText")}>
+          <Field className="group/field sm:col-span-3" {...mark("manufacturerText")}>
             <FieldLabel htmlFor={id("manufacturer")}>{t("manufacturer")}</FieldLabel>
             <SuggestInput
               id={id("manufacturer")}
@@ -207,7 +211,7 @@ export function LineFields({
             />
             {note("manufacturerText")}
           </Field>
-          <Field className="sm:col-span-3" {...mark("modelText")}>
+          <Field className="group/field sm:col-span-3" {...mark("modelText")}>
             <FieldLabel htmlFor={id("modelText")}>{t("modelText")}</FieldLabel>
             <SuggestInput
               id={id("modelText")}
@@ -218,7 +222,7 @@ export function LineFields({
             />
             {note("modelText")}
           </Field>
-          <Field className="sm:col-span-4" {...mark("assetModelId")}>
+          <Field className="group/field sm:col-span-4" {...mark("assetModelId")}>
             <FieldLabel htmlFor={id("assetModel")}>{t("assetModel")}</FieldLabel>
             <AssetModelCombobox
               id={id("assetModel")}
@@ -238,7 +242,7 @@ export function LineFields({
             {note("assetModelId")}
           </Field>
           <Field
-            className="sm:col-span-2"
+            className="group/field sm:col-span-2"
             data-invalid={errors?.warrantyMonths ? true : undefined}
             {...mark("warrantyMonths")}
           >
