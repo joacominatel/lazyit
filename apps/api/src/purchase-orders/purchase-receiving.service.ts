@@ -842,6 +842,8 @@ export class PurchaseReceivingService {
         company: po.company,
         invoiceNumbers: po.invoiceNumbers,
         invoiceDate: po.invoiceDate,
+        // When the purchase was recorded: the web's title fallback ("Purchase · date") needs it (#1476).
+        createdAt: po.createdAt,
         deletedAt: po.deletedAt,
         supplier: po.supplier,
       },

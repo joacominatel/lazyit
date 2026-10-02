@@ -797,6 +797,8 @@ describe("an asset's provenance", () => {
       reference: 'OC-4512',
       invoiceNumbers: 'A-0003-12345',
       supplier,
+      // When the purchase was recorded (#1476): the title fallback's date.
+      createdAt: new Date('2026-03-03T00:00:00Z'),
     });
     expect(result.documents).toEqual([{ id: 'clatt1' }]);
     expect(reads.attachment.findMany).toHaveBeenCalledWith({
