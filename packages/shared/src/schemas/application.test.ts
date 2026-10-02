@@ -245,6 +245,17 @@ describe("Application seat/license tracking (#949)", () => {
     ).toBe(false);
   });
 
+  test("costPerSeat is 64-bit minor units (ADR-0100): above int4 accepted, above MAX_SAFE_INTEGER rejected", () => {
+    const create = CreateApplicationSchema.safeParse({ name: "X", costPerSeat: 3_000_000_000 });
+    expect(create.success).toBe(true);
+    expect(create.success && create.data.costPerSeat).toBe(3_000_000_000);
+    expect(UpdateApplicationSchema.safeParse({ costPerSeat: 3_000_000_000 }).success).toBe(true);
+    expect(
+      CreateApplicationSchema.safeParse({ name: "X", costPerSeat: Number.MAX_SAFE_INTEGER + 2 })
+        .success,
+    ).toBe(false);
+  });
+
   test("UpdateApplicationSchema: allows clearing the seat fields to null", () => {
     expect(
       UpdateApplicationSchema.safeParse({

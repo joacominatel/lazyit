@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AssetSchema, AssetStatusSchema } from "./asset";
-import { int4, optionalText } from "./primitives";
+import { int4, money, optionalText } from "./primitives";
 
 /**
  * Bulk receiving (ADR-0089 Part A, issue #1029) — mint N assets from ONE AssetModel in a single action
@@ -41,7 +41,7 @@ export const ReceiveAssetsSchema = z
     company: optionalText(200),
     purchaseDate: z.iso.datetime().optional(),
     // Minor units (#954) — forwarded verbatim to create(); NEVER re-coerced in shared or api.
-    purchaseCost: int4({ min: 0 }).nullish(),
+    purchaseCost: money().nullish(),
     notes: optionalText(2000),
     serials: z.array(z.string().trim().min(1).max(200)).optional(),
   })

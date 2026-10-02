@@ -170,9 +170,9 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
-| `purchaseCost` | `int?` | optional acquisition cost in **integer minor units** (e.g. cents) of the instance's single currency (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. Non-negative, bounded to `int4`. **Planned (Purchases Phase 1):** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]) and qualified by an optional free-text currency label ([[0099-purchases-scope-model-and-optionality]]). |
+| `purchaseCost` | `bigint?` | optional acquisition cost in **integer minor units** (hundredths) (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. A Postgres `bigint`, a JSON number on the wire bounded to `[0, Number.MAX_SAFE_INTEGER]` by the shared `money()` ([[0100-money-as-64-bit-minor-units]]). **Planned (Purchases Phase 1):** qualified by an optional free-text currency label ([[0099-purchases-scope-model-and-optionality]]). |
 | `usefulLifeMonths` | `int?` | optional straight-line depreciation period in months (#954). `null` (or `<= 0`) = don't depreciate (book value = cost). |
-| `salvageValue` | `int?` | optional residual value at end of life, minor units (#954). `null` = 0. **Planned:** widened to a 64-bit integer ([[0100-money-as-64-bit-minor-units]]). |
+| `salvageValue` | `bigint?` | optional residual value at end of life, minor units (#954). `null` = 0. A Postgres `bigint`, bounded on the wire like `purchaseCost` ([[0100-money-as-64-bit-minor-units]]). |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
 | `locationId` | `cuid?` | optional FK → [[location]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -184,7 +184,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 ### Depreciation — `currentBookValue` (#954)
 
 The detail read (`GET /assets/:id`, `AssetWithRelations`) carries a **computed** `currentBookValue`
-(`int | null`, minor units) — it is **never stored**. It is derived per-request from `purchaseCost`,
+(an integer or `null`, minor units) — it is **never stored**. It is derived per-request from `purchaseCost`,
 `usefulLifeMonths`, `salvageValue` and `purchaseDate` by the pure shared util
 `computeAssetBookValue` in `@lazyit/shared` (with a `bun test`). The rule is **straight-line only**
 (no MACRS / declining-balance / tax modeling, no multi-currency — deliberately minimal):

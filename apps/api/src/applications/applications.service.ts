@@ -11,6 +11,7 @@ import { SearchService } from '../search/search.service';
 import { projectApplication } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import { applicationMoneyToDb, applicationMoneyToWire } from '../common/money';
 
 /** Optional filters for listing applications. */
 export interface ApplicationFilters {
@@ -81,7 +82,7 @@ export class ApplicationsService {
       items.map((application) => application.id),
     );
     const withSeats = items.map((application) => ({
-      ...application,
+      ...applicationMoneyToWire(application),
       seatsUsed: seatsUsed.get(application.id) ?? 0,
     }));
     return pageOf(withSeats, total, page);
@@ -137,14 +138,17 @@ export class ApplicationsService {
       throw new NotFoundException(`Application ${id} not found`);
     }
     const seatsUsed = await this.seatsUsedByApplication([application.id]);
-    return { ...application, seatsUsed: seatsUsed.get(application.id) ?? 0 };
+    return {
+      ...applicationMoneyToWire(application),
+      seatsUsed: seatsUsed.get(application.id) ?? 0,
+    };
   }
 
   async create(data: CreateApplication) {
     const { metadata, ...rest } = data;
     const application = await this.prisma.application.create({
       data: {
-        ...rest,
+        ...applicationMoneyToDb(rest),
         ...(metadata !== undefined
           ? { metadata: metadata as Prisma.InputJsonValue }
           : {}),
@@ -152,7 +156,7 @@ export class ApplicationsService {
     });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('applications', projectApplication(application));
-    return application;
+    return applicationMoneyToWire(application);
   }
 
   async update(id: string, data: UpdateApplication) {
@@ -161,14 +165,14 @@ export class ApplicationsService {
     const application = await this.prisma.application.update({
       where: { id },
       data: {
-        ...rest,
+        ...applicationMoneyToDb(rest),
         ...(metadata !== undefined
           ? { metadata: metadata as Prisma.InputJsonValue }
           : {}),
       },
     });
     this.search.upsert('applications', projectApplication(application));
-    return application;
+    return applicationMoneyToWire(application);
   }
 
   /**
@@ -184,7 +188,7 @@ export class ApplicationsService {
     });
     // Drop from the index so soft-deleted applications never surface in search (ADR-0035).
     this.search.remove('applications', id);
-    return application;
+    return applicationMoneyToWire(application);
   }
 
   /**
@@ -201,7 +205,7 @@ export class ApplicationsService {
       throw new NotFoundException(`Application ${id} not found`);
     }
     if (application.deletedAt === null) {
-      return application; // already live — idempotent
+      return applicationMoneyToWire(application); // already live — idempotent
     }
     const restored = await this.prisma.application.update({
       where: { id },
@@ -209,6 +213,6 @@ export class ApplicationsService {
     });
     // Re-index the restored application (ADR-0035).
     this.search.upsert('applications', projectApplication(restored));
-    return restored;
+    return applicationMoneyToWire(restored);
   }
 }

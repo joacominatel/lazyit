@@ -4,6 +4,8 @@ import {
   int4,
   INT4_MAX,
   INT4_MIN,
+  money,
+  MONEY_MAX,
   optionalText,
   requireAtLeastOneKey,
 } from "./primitives";
@@ -48,6 +50,40 @@ describe("int4()", () => {
       unrepresentable: "any",
     }) as unknown as { properties: { n: { example?: number } } };
     expect(json.properties.n.example).toBe(5);
+  });
+});
+
+describe("money()", () => {
+  test("accepts amounts above the old int4 ceiling, up to MONEY_MAX", () => {
+    expect(money().safeParse(3_000_000_000).success).toBe(true);
+    expect(money().safeParse(INT4_MAX + 1).success).toBe(true);
+    expect(money().safeParse(MONEY_MAX).success).toBe(true);
+    expect(money().safeParse(0).success).toBe(true);
+  });
+
+  test("rejects amounts above MONEY_MAX, negatives and fractions", () => {
+    expect(money().safeParse(MONEY_MAX + 1).success).toBe(false);
+    expect(money().safeParse(-1).success).toBe(false);
+    expect(money().safeParse(1.5).success).toBe(false);
+  });
+
+  test("narrows with min/max but never widens past [0, MONEY_MAX]", () => {
+    expect(money({ max: 100 }).safeParse(101).success).toBe(false);
+    expect(money({ min: 10 }).safeParse(9).success).toBe(false);
+    expect(money({ min: -5 }).safeParse(-1).success).toBe(false);
+    expect(money({ max: Number.MAX_VALUE }).safeParse(MONEY_MAX + 2).success).toBe(false);
+  });
+
+  test("always carries an example in the JSON Schema (overrides Swagger autofill)", () => {
+    const json = z.toJSONSchema(z.object({ a: money(), b: money({ example: 7 }) }), {
+      unrepresentable: "any",
+    }) as unknown as {
+      properties: Record<"a" | "b", { example?: number; maximum: number; minimum: number }>;
+    };
+    expect(json.properties.a.example).toBe(150_000);
+    expect(json.properties.a.maximum).toBe(MONEY_MAX);
+    expect(json.properties.a.minimum).toBe(0);
+    expect(json.properties.b.example).toBe(7);
   });
 });
 

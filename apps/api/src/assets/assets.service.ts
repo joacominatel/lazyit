@@ -33,6 +33,7 @@ import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
+import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
 import {
   AssetHistoryService,
   type RecordAssetEvent,
@@ -585,7 +586,7 @@ export class AssetsService {
           // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
           const created = await tx.asset.create({
             data: {
-              ...rest,
+              ...assetMoneyToDb(rest),
               ...(effectiveTag !== undefined ? { assetTag: effectiveTag } : {}),
               ...(resolvedSpecs !== undefined
                 ? { specs: resolvedSpecs as Prisma.InputJsonValue }
@@ -613,7 +614,7 @@ export class AssetsService {
         if (!options?.suppressSearch) {
           this.search.upsert('assets', projectAsset(asset));
         }
-        return asset;
+        return assetMoneyToWire(asset);
       } catch (err) {
         // Only an AUTO-allocated tag may advance-and-retry on a unique collision. An EXPLICIT tag
         // colliding is the caller's own duplicate → propagate the P2002 (the global filter → 409).
@@ -750,7 +751,7 @@ export class AssetsService {
       const row = await tx.asset.update({
         where: { id },
         data: {
-          ...rest,
+          ...assetMoneyToDb(rest),
           ...(specs !== undefined
             ? { specs: specs as Prisma.InputJsonValue }
             : {}),
@@ -799,7 +800,7 @@ export class AssetsService {
     if (!options?.suppressSearch) {
       this.search.upsert('assets', projectAsset(updated));
     }
-    return updated;
+    return assetMoneyToWire(updated);
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
@@ -820,7 +821,7 @@ export class AssetsService {
     });
     // Drop from the index so soft-deleted assets never surface in search (ADR-0035).
     this.search.remove('assets', id);
-    return deleted;
+    return assetMoneyToWire(deleted);
   }
 
   /**
@@ -1031,7 +1032,7 @@ export class AssetsService {
    * `salvageValue` / `purchaseDate` via the shared pure util, never persisted.
    */
   private toExpanded(asset: AssetWithIncludes) {
-    const { assignments, ...rest } = asset;
+    const { assignments, ...rest } = assetMoneyToWire(asset);
     return {
       ...rest,
       activeAssignments: assignments,

@@ -137,3 +137,35 @@ describe("Asset specs read shape stays tolerant", () => {
     expect(AssetSchema.safeParse(row).success).toBe(true);
   });
 });
+
+describe("Asset money fields are 64-bit minor units (ADR-0100)", () => {
+  const ABOVE_INT4 = 3_000_000_000;
+
+  test("create and update accept purchaseCost / salvageValue above the old int4 ceiling", () => {
+    const created = CreateAssetSchema.safeParse({
+      name: "Server",
+      status: "OPERATIONAL",
+      purchaseCost: ABOVE_INT4,
+      salvageValue: ABOVE_INT4,
+    });
+    expect(created.success).toBe(true);
+    expect(created.success && created.data.purchaseCost).toBe(ABOVE_INT4);
+    expect(
+      UpdateAssetSchema.safeParse({ purchaseCost: ABOVE_INT4, salvageValue: ABOVE_INT4 }).success,
+    ).toBe(true);
+  });
+
+  test("rejects an amount above Number.MAX_SAFE_INTEGER", () => {
+    const tooBig = Number.MAX_SAFE_INTEGER + 2;
+    expect(
+      CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL", purchaseCost: tooBig })
+        .success,
+    ).toBe(false);
+    expect(UpdateAssetSchema.safeParse({ salvageValue: tooBig }).success).toBe(false);
+  });
+
+  test("null and absent amounts are unchanged", () => {
+    expect(UpdateAssetSchema.safeParse({ purchaseCost: null, salvageValue: null }).success).toBe(true);
+    expect(CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL" }).success).toBe(true);
+  });
+});

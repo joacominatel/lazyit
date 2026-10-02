@@ -1511,6 +1511,40 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       });
     });
 
+    it('application_create / application_update accept a costPerSeat above int4 (ADR-0100)', async () => {
+      const created = await propose(actor('MEMBER'), 'application_create', {
+        name: 'ERP',
+        costPerSeat: 3_000_000_000,
+      });
+      expect(
+        (await tools.approve(created.id, chat(actor('MEMBER')))).status,
+      ).toBe('SUCCEEDED');
+      expect(applicationsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'ERP', costPerSeat: 3_000_000_000 }),
+      );
+
+      const updated = await propose(actor('MEMBER'), 'application_update', {
+        application: APP,
+        set: { costPerSeat: 3_000_000_001 },
+      });
+      expect(
+        (await tools.approve(updated.id, chat(actor('MEMBER')))).status,
+      ).toBe('SUCCEEDED');
+      expect(applicationsService.update).toHaveBeenCalledWith(APP, {
+        costPerSeat: 3_000_000_001,
+      });
+
+      const tooBig = await tools.propose(
+        'application_update',
+        { application: APP, set: { costPerSeat: Number.MAX_SAFE_INTEGER + 2 } },
+        chat(actor('MEMBER')),
+      );
+      expect(tooBig).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+    });
+
     it('a role without application:write cannot even see a card (DENIED), exactly as the route 403s', async () => {
       const proposal = await tools.propose(
         'application_create',
