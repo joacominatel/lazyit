@@ -29,6 +29,7 @@
     "deleteConfirmTitle": "¿Eliminar documento?",
     "deleteConfirmDescription": "«{name}» se quitará de este activo. Esto no se puede deshacer desde aquí.",
     "deleteCancel": "Cancelar",
-    "deleteConfirm": "Eliminar"
+    "deleteConfirm": "Eliminar",
+    "deleteConfirmDescriptionPurchase": "«{name}» se quitará de esta compra y de los activos que lo muestran. Esto no se puede deshacer desde aquí."
   }
 }

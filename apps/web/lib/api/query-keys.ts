@@ -1,3 +1,6 @@
+import type { QueryClient } from "@tanstack/react-query";
+import type { SuggestionField } from "@lazyit/shared";
+
 /**
  * Builds the standard TanStack query-key factory for a resource. Centralizing
  * the shape means the read hooks and the mutations that invalidate them can't
@@ -99,3 +102,19 @@ export const assetTagSchemeKeys = {
   }) => [...["asset-tag-scheme"], "backfill-preview", params] as const,
 };
 
+/**
+ * Query keys for smart-entry suggestions (ADR-0099 §7). Writes that may add a value invalidate `all`.
+ * They live here, hook-free, rather than next to `useSuggestions`: the asset, model, supplier,
+ * application and purchase hooks import them to refresh suggestions after a write, and a server
+ * component that imports those modules for their keys (the assets page prefetch) must not pull the
+ * client-only debounce hook along with them.
+ */
+export const suggestionKeys = {
+  all: ["suggestions"] as const,
+  list: (field: SuggestionField, q: string) => [...suggestionKeys.all, field, q] as const,
+};
+
+/** Refresh every suggestion list after a write that may have added a value. */
+export function invalidateSuggestions(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: suggestionKeys.all });
+}

@@ -1,25 +1,15 @@
 import type { Suggestion, SuggestionField } from "@lazyit/shared";
-import { keepPreviousData, type QueryClient, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import type { SuggestCandidate } from "@/lib/utils/suggest";
 import { getSuggestions } from "../endpoints/suggestions";
+import { suggestionKeys } from "../query-keys";
 
 /** How many most-used values a field loads before anything is typed (the API maximum). */
 const TOP_LIMIT = 50;
 /** How many matches a typed query loads on top of them. */
 const MATCH_LIMIT = 20;
-
-/** Query keys for smart-entry suggestions. Writes that add a value invalidate `all`. */
-export const suggestionKeys = {
-  all: ["suggestions"] as const,
-  list: (field: SuggestionField, q: string) => [...suggestionKeys.all, field, q] as const,
-};
-
-/** Refresh every suggestion list after a write that may have added a value. */
-export function invalidateSuggestions(queryClient: QueryClient): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: suggestionKeys.all });
-}
 
 /** Each value once, first occurrence wins (the two reads overlap; their counts must not add up). */
 export function uniqueSuggestions(lists: readonly (readonly Suggestion[] | undefined)[]): SuggestCandidate[] {

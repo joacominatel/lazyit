@@ -29,6 +29,7 @@ import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { RelatedArticlesPanel } from "@/components/related-articles-panel";
 import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-deliveries-panel";
+import { AssetPurchasePanel } from "@/components/purchases/asset-purchase-panel";
 import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { AssetDocumentsPanel } from "./asset-documents-panel";
 import { AssetLocationPath } from "./asset-location-path";
@@ -445,6 +446,9 @@ export function AssetDetailView({ id }: { id: string }) {
           </div>
         )}
       </DetailPanel>
+
+      {/* Where it was bought (ADR-0099 D-A): renders — and reads — only with purchaseOrder:read. */}
+      <AssetPurchasePanel asset={asset} />
 
       {agentInventory ? (
         <AgentInventoryPanel inventory={agentInventory} />

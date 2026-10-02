@@ -37,6 +37,11 @@ una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assign
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
 responsable desde el activo.
 
+¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
+espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre
+[Recibir stock](/help/assets-bulk-receiving#recibir-contra-una-compra) para ella, así la unidad se crea ya
+vinculada a su compra, con los valores de la compra. Lo ves solo si puedes ver y editar compras.
+
 ¿Registras un lote de unidades parecidas? Usa **Crear y agregar otro** en lugar de **Crear activo**:
 guarda la actual y mantiene el formulario abierto con el **modelo, la ubicación, la empresa y el
 estado** conservados, borrando solo el nombre, la serie y la etiqueta para que escribas la siguiente
@@ -222,8 +227,11 @@ página que tienes delante. Ajusta primero el estado, la categoría, la ubicaci�
 responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
 garantía*) y exporta solo esa porción. El archivo lleva una fila por activo con su nombre, etiqueta de
 activo, número de serie, estado, categoría, fabricante, modelo, ubicación, empresa, fechas de compra y
-de garantía, responsables actuales, notas y las marcas de tiempo de creación/actualización, y es
-seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
+de garantía, responsables actuales, notas, las marcas de tiempo de creación/actualización, el **costo de
+compra** (como un número simple con punto decimal, para que una hoja de cálculo lo lea) y su etiqueta de
+**moneda** — y, solo si puedes ver [compras](/help/purchases-recording-purchases), el **proveedor**, la
+**referencia de compra** y los **números de factura** del activo, como últimas columnas. Sin ese permiso
+esas tres columnas no aparecen en el archivo. Es seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
 versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
 
 ### Elegir qué columnas mostrar
@@ -234,6 +242,17 @@ para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones 
 mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
 próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
 muestra el conjunto completo.)
+
+## Dónde se compró
+
+Si el activo está vinculado a una [compra](/help/purchases-recording-purchases), su página muestra un panel
+**Compra** justo después de *Detalles*: la compra y su proveedor, la referencia, las fechas y los números
+de factura, el contacto de soporte del proveedor y los documentos de la compra para descargar. Se muestra
+**solo a quienes pueden ver compras**; los demás siguen viendo el costo y las fechas propios del activo en
+*Detalles*, como antes. El panel marca **Distinto de la compra** cuando el costo del activo no es el precio
+de su compra, y ofrece **Desvincular de la compra** a quienes pueden editar compras y activos. Un activo
+sin vincular ofrece ahí **Vincular a una compra**. Ver
+[Compras — El panel Compra del activo](/help/purchases-recording-purchases#el-panel-compra-del-activo).
 
 ## Activos en el mapa de topología
 

@@ -75,7 +75,9 @@
       "consumable_returned": "Consumible devuelto",
       "deactivated": "Desactivado",
       "reactivated": "Reactivado",
-      "session_ended": "Sesión cerrada"
+      "session_ended": "Sesión cerrada",
+      "purchase_linked": "Compra vinculada",
+      "purchase_unlinked": "Compra desvinculada"
     }
   },
   "empty": {},
@@ -129,7 +131,8 @@
       "ai": "IA",
       "purchases": "Compras",
       "suppliers": "Proveedores",
-      "account": "Cuenta"
+      "account": "Cuenta",
+      "pending": "Unidades pendientes"
     },
     "aiAndConnectedApps": "IA y apps conectadas",
     "account": "Cuenta"

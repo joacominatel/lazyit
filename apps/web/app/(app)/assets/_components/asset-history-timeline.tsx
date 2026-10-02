@@ -12,6 +12,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import {
   formatChangedFields,
@@ -35,6 +36,9 @@ const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   // A consumable delivered to / returned from this asset (ADR-0098, #1364).
   CONSUMABLE_DELIVERED: "consumableDelivered",
   CONSUMABLE_RETURNED: "consumableReturned",
+  // Linked to / unlinked from a purchase line (ADR-0099 §2, #1473).
+  PURCHASE_LINKED: "purchaseLinked",
+  PURCHASE_UNLINKED: "purchaseUnlinked",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -83,6 +87,10 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   // is told apart by its label, the same way the text — not the colour — carries every badge's meaning.
   CONSUMABLE_DELIVERED: { kind: "categorical", dot: "bg-pillar-inventory" },
   CONSUMABLE_RETURNED: { kind: "categorical", dot: "bg-pillar-inventory" },
+  // Purchase link / unlink (ADR-0099 §2, #1473) — provenance changed, the asset itself did not; Purchases
+  // wears the inventory pillar (ux-proposal Appendix B), so the same neutral pill and hue.
+  PURCHASE_LINKED: { kind: "categorical", dot: "bg-pillar-inventory" },
+  PURCHASE_UNLINKED: { kind: "categorical", dot: "bg-pillar-inventory" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -152,6 +160,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   const tc = useTranslations("common");
   const tForm = useTranslations("assets.form");
   const { dateTime, relative } = useFormatters();
+  const canReadPurchases = useCan("purchaseOrder:read");
 
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
   // Resolve just the actors + `{userId}` payloads referenced by this asset's history (#961) — a
@@ -205,6 +214,27 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
           <span className="font-medium">{chunks}</span>
         ),
     });
+  }
+
+  /**
+   * The purchase link / unlink line (ADR-0099): a static sentence, with an "Open purchase" link only for a
+   * viewer holding `purchaseOrder:read` (D-A) and only when the payload carries a real id.
+   */
+  function purchaseDetail(
+    payload: Record<string, unknown>,
+    kind: "purchaseLinked" | "purchaseUnlinked",
+  ): ReactNode {
+    const purchaseOrderId = asString(payload.purchaseOrderId);
+    if (!canReadPurchases || !purchaseOrderId) return t(`details.${kind}`);
+    return (
+      <>
+        {t(`details.${kind}`)}
+        {" · "}
+        <Link href={`/purchases/${purchaseOrderId}`} className="font-medium hover:underline">
+          {t("details.openPurchase")}
+        </Link>
+      </>
+    );
   }
 
   /**
@@ -268,6 +298,10 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         return consumableDetail(payload, "consumableDelivered");
       case "CONSUMABLE_RETURNED":
         return consumableDetail(payload, "consumableReturned");
+      case "PURCHASE_LINKED":
+        return purchaseDetail(payload, "purchaseLinked");
+      case "PURCHASE_UNLINKED":
+        return purchaseDetail(payload, "purchaseUnlinked");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

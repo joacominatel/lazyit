@@ -6,10 +6,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * The tabs of the Purchases area (ADR-0099 §1): real links, the current one marked `aria-current`.
- * The *Pending units* tab (#1475) slots in between the two.
  */
 const TABS = [
   { key: "purchases", href: "/purchases" },
+  { key: "pending", href: "/purchases/pending" },
   { key: "suppliers", href: "/purchases/suppliers" },
 ] as const;
 

@@ -3,6 +3,8 @@
 import {
   ChevronDownIcon,
   EllipsisVerticalIcon,
+  ExclamationTriangleIcon,
+  InboxArrowDownIcon,
   PencilSquareIcon,
   PlusIcon,
   TrashIcon,
@@ -14,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/breadcrumb";
+import { Callout } from "@/components/callout";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
@@ -58,6 +61,10 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
 import { formatMoney } from "@/lib/utils/money";
+import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
+import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
+import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
+import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
 import {
   MoneyTotals,
   PurchaseStatusBadge,
@@ -88,8 +95,8 @@ function LineReceipt({ line }: { line: PurchaseOrderLine }) {
 /**
  * One purchase (ADR-0099, UX proposal §3.a "Purchase detail"): identity, status and receipt progress;
  * the lines with "x of y received" (over-received is a warning, never an error); totals per currency
- * label; the status actions; and the activity log. Receiving units, linking existing assets and the
- * purchase's documents (#1475) take their places between the lines and the activity.
+ * label; the status actions; receiving units, linking existing assets and cancelling the remaining units
+ * per line (#1475); the purchase's documents; and the activity log.
  */
 export function PurchaseDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases");
@@ -100,6 +107,9 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const titleOf = usePurchaseTitle();
   const canWrite = useCan("purchaseOrder:write");
   const canDelete = useCan("purchaseOrder:delete");
+  // Receiving creates assets: it needs both purchase and asset write (the API checks both).
+  const canWriteAssets = useCan("asset:write");
+  const canReceive = canWrite && canWriteAssets;
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -109,6 +119,9 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const removeLine = useRemovePurchaseOrderLine();
 
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
+  const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
+  const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
+  const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -387,30 +400,52 @@ export function PurchaseDetailView({ id }: { id: string }) {
                         <LineReceipt line={line} />
                       </TableCell>
                       <TableCell className="text-right align-top">
-                        {/* #1475 adds "Receive" and "Link existing assets" to this menu. */}
-                        {canWrite ? (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={t("detail.lineActions", { line: line.description })}
-                              >
-                                <EllipsisVerticalIcon />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
-                                {t("detail.editLine")}
-                              </DropdownMenuItem>
-                              {line.receivedQuantity === 0 ? (
-                                <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(line)}>
-                                  {t("detail.removeLine")}
+                        <div className="flex items-center justify-end gap-1">
+                          {canReceive && line.kind === "ASSET" && line.pendingQuantity > 0 ? (
+                            <Button variant="outline" size="sm" onClick={() => setReceiving(line)}>
+                              <InboxArrowDownIcon />
+                              {t("detail.receive")}
+                            </Button>
+                          ) : null}
+                          {canWrite ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={t("detail.lineActions", { line: line.description })}
+                                >
+                                  <EllipsisVerticalIcon />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {canReceive && line.kind === "ASSET" ? (
+                                  <>
+                                    <DropdownMenuItem onSelect={() => setReceiving(line)}>
+                                      {t("detail.receiveUnits")}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => setLinking(line)}>
+                                      {t("detail.linkExisting")}
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : null}
+                                <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
+                                  {t("detail.editLine")}
                                 </DropdownMenuItem>
-                              ) : null}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        ) : null}
+                                {line.pendingQuantity > 0 ? (
+                                  <DropdownMenuItem onSelect={() => setCancelling(line)}>
+                                    {t("detail.cancelRemaining")}
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {line.receivedQuantity === 0 ? (
+                                  <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(line)}>
+                                    {t("detail.removeLine")}
+                                  </DropdownMenuItem>
+                                ) : null}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -421,11 +456,41 @@ export function PurchaseDetailView({ id }: { id: string }) {
         )}
       </DetailPanel>
 
-      {/* #1475: the purchase's documents and its linked assets go here, between the lines and the log. */}
+      <DocumentsPanel
+        parent="purchaseOrder"
+        parentId={purchase.id}
+        canWrite={canWrite}
+        notice={
+          // ADR-0099 §12: purchase documents are financial evidence, and the attachments volume is not in
+          // the backup yet (docs/05-runbooks/backups.md, item #7). Say so where the files are uploaded.
+          <Callout tone="warning" icon={<ExclamationTriangleIcon />} className="mb-3">
+            <p className="text-sm">{t("detail.documentsBackupNotice")}</p>
+          </Callout>
+        }
+      />
 
       <DetailPanel title={t("detail.activitySection")}>
         <PurchaseActivity purchaseId={purchase.id} lines={purchase.lines} />
       </DetailPanel>
+
+      {receiving ? (
+        <ReceiveStockDialog
+          line={{ purchase, line: receiving }}
+          onClose={() => setReceiving(null)}
+        />
+      ) : null}
+
+      {linking ? (
+        <LinkAssetsDialog line={{ purchase, line: linking }} onClose={() => setLinking(null)} />
+      ) : null}
+
+      {cancelling ? (
+        <CancelRemainingDialog
+          purchaseId={purchase.id}
+          line={cancelling}
+          onClose={() => setCancelling(null)}
+        />
+      ) : null}
 
       {lineDialog ? (
         <LineDialog

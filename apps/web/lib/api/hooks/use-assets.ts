@@ -12,7 +12,7 @@ import {
   getMyAssets,
 } from "../endpoints/assets";
 import { invalidateDashboard } from "./use-dashboard";
-import { invalidateSuggestions } from "./use-suggestions";
+import { invalidateSuggestions } from "../query-keys";
 
 /**
  * Query keys for the Asset resource. Hand-written (not `createQueryKeys`) for the
