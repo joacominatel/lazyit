@@ -241,7 +241,8 @@
       "cancelledQuantity": "cancelled units",
       "warrantyMonths": "warranty",
       "position": "position",
-      "consumableId": "consumable"
+      "consumableId": "consumable",
+      "applicationId": "application"
     },
     "kindAsset": "Asset",
     "kindOther": "Other",
@@ -284,7 +285,20 @@
     "documentRemovedLabelled": "Removed the document “{name}” ({label})",
     "documentLabelSet": "Set the type of “{name}” to {label}",
     "documentLabelChanged": "Changed the type of “{name}”: {from} → {to}",
-    "documentLabelCleared": "Removed the type of “{name}”"
+    "documentLabelCleared": "Removed the type of “{name}”",
+    "licenseApplied": "Applied {count, plural, one {# seat} other {# seats}} from “{line}”",
+    "licenseRenewed": "Applied the renewal of “{line}”",
+    "seatsChange": "seats {from} → {to}",
+    "seatsStarted": "seats now counted: {to}",
+    "renewalSet": "renews {date}",
+    "overApplied": "more seats than bought",
+    "extractionRun": "Read a document with AI",
+    "extractionFailed": "Couldn't read a document with AI",
+    "extractionLines": "{count, plural, one {# line} other {# lines}} found",
+    "extractionWarnings": "{count, plural, one {# value} other {# values}} to check",
+    "createdFromAssets": "Created from {count, plural, one {# selected asset} other {# selected assets}} ({lines, plural, one {# line} other {# lines}})",
+    "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out",
+    "kindLicense": "License"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
