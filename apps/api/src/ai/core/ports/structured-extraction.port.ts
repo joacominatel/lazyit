@@ -7,16 +7,20 @@ import type { z } from 'zod';
  * extracts, and an extraction is never a chat step. Only the provider layer (`ai/providers/**`) implements it,
  * through the same provider definitions and the same egress-guarded fetch.
  *
- * The call carries NO tools — not even declared ones — so a document cannot make the model act: whatever the
- * file says, the only possible answer is data in the schema's shape (INV-AI-4). The SDK never downloads a URL
- * on its behalf (INV-AI-7): the bytes travel inline.
+ * The call declares NO tools of lazyit's, so a document cannot make the model act: whatever the file says,
+ * the only possible answer is data in the schema's shape (INV-AI-4). A provider may implement structured
+ * output with a synthetic JSON tool of its own (Anthropic's `jsonTool` mode, on models without native
+ * structured output); it has no executor and only carries the answer. The SDK never downloads a URL on the
+ * call's behalf (INV-AI-7): the bytes travel inline.
  */
 
-/** The file the model reads: its bytes (inline, never a URL) and its server-sniffed media type. */
+/**
+ * The file the model reads: its bytes (inline, never a URL) and its server-sniffed media type. No file name:
+ * it is user-typed text and the model does not need it.
+ */
 export interface StructuredExtractionFile {
   data: Uint8Array;
   mediaType: string;
-  filename?: string;
 }
 
 export interface StructuredExtractionRequest<T> {
