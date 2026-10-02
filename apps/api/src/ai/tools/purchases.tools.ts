@@ -39,8 +39,19 @@ export const purchasesToolset: AiToolset = {
         'linkPreview',
         'linkAssets',
         'unlinkAssets',
+        // Phase 2 (#1477): applying a license changes an application's seats — a purchase change, never
+        // auto-approved (§11); creating a purchase from assets links many assets at once (excluded from
+        // "Approve all" like every asset-generating page). Phase 3 designs both, with the proposal read.
+        'licenseProposal',
+        'applyLicense',
+        'createFromAssets',
       ],
       PHASE_3,
+    ),
+    unexposed(
+      PurchaseOrdersController,
+      ['extractionStatus', 'extract'],
+      'Document extraction (#1477) is its own reviewed web flow; the chat tool `purchase_order_extract` that reads an attached document as untrusted content is Phase 3 (#1478, ADR-0099 §11).',
     ),
     unexposed(AssetPurchaseController, ['findOne'], PHASE_3),
     unexposed(

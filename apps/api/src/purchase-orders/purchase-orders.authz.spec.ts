@@ -28,6 +28,9 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import { SuppliersController } from './suppliers.controller';
 import { SuppliersService } from './suppliers.service';
 import { PurchaseReceivingService } from './purchase-receiving.service';
+import { PurchaseLicenseService } from './purchase-license.service';
+import { PurchaseFromAssetsService } from './purchase-from-assets.service';
+import { PurchaseExtractionService } from './extraction/purchase-extraction.service';
 import { AssetPurchaseController } from './asset-purchase.controller';
 import { PurchaseOrderAttachmentsController } from '../attachments/purchase-order-attachments.controller';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -89,6 +92,9 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
     findAssetProvenance: ok,
   };
   const attachments = { list: ok, upload: ok, remove: ok, updateLabel: ok };
+  const licenses = { proposal: ok, apply: ok };
+  const fromAssets = { create: ok };
+  const extraction = { status: ok, extract: ok };
   (purchases as Record<string, jest.Mock>).cancelRemaining = ok;
   const suppliers = {
     findPage: ok,
@@ -126,6 +132,9 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
         { provide: SuppliersService, useValue: suppliers },
         { provide: PurchaseReceivingService, useValue: receiving },
         { provide: AttachmentsService, useValue: attachments },
+        { provide: PurchaseLicenseService, useValue: licenses },
+        { provide: PurchaseFromAssetsService, useValue: fromAssets },
+        { provide: PurchaseExtractionService, useValue: extraction },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
@@ -521,6 +530,155 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       );
       delete process.env.ATTACHMENTS_DIR;
       await rm(dir, { recursive: true, force: true });
+    });
+  });
+
+  describe('Phase 2 (#1477)', () => {
+    beforeEach(() => ok.mockClear());
+
+    it('the extraction status is a purchase read, its own route (never read as an id)', async () => {
+      await http()
+        .get(`/purchase-orders/extraction/status${as('role=VIEWER')}`)
+        .expect(403);
+      await http()
+        .get(`/purchase-orders/extraction/status${as('role=MEMBER')}`)
+        .expect(200);
+      expect(extraction.status).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'human' }),
+      );
+      expect(ok).not.toHaveBeenCalledWith('extraction');
+      // A service account may read it: the service answers NOT_PERMITTED for it.
+      await http()
+        .get(`/purchase-orders/extraction/status${as('sa=purchaseOrder:read')}`)
+        .expect(200);
+    });
+
+    it('extracting needs purchaseOrder:write AND ai:use; it answers 200 (a draft, nothing created)', async () => {
+      const path = `/purchase-orders/${PO}/attachments/${ATT}/extract`;
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=ai:use')}`)
+        .expect(403);
+      expect(extraction.extract).not.toHaveBeenCalled();
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .expect(200);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .expect(200);
+      expect(extraction.extract).toHaveBeenCalledWith(
+        PO,
+        ATT,
+        expect.objectContaining({ kind: 'human' }),
+      );
+    });
+
+    it('the license proposal needs purchaseOrder:read AND application:read', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/license-proposal`;
+      // A VIEWER reads applications but not purchases.
+      await http()
+        .get(`${path}${as('role=VIEWER')}`)
+        .expect(403);
+      await http()
+        .get(`${path}${as('sa=purchaseOrder:read')}`)
+        .expect(403);
+      await http()
+        .get(`${path}${as('sa=purchaseOrder:read,application:read')}`)
+        .expect(200);
+      await http()
+        .get(`${path}${as('role=MEMBER')}`)
+        .expect(200);
+    });
+
+    it('applying a license needs purchaseOrder:write AND application:write; the body is validated at the edge', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/apply-license`;
+      const body = { seatsToAdd: 10 };
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=application:write')}`)
+        .send(body)
+        .expect(403);
+      expect(licenses.apply).not.toHaveBeenCalled();
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write,application:write')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send({})
+        .expect(400);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send({ seatsToAdd: 0 })
+        .expect(400);
+    });
+
+    it('creating a purchase from assets needs purchaseOrder:write AND asset:write', async () => {
+      const path = '/purchase-orders/from-assets';
+      const body = { assetIds: [ASSET] };
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=asset:write')}`)
+        .send(body)
+        .expect(403);
+      expect(fromAssets.create).not.toHaveBeenCalled();
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write,asset:write')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send(body)
+        .expect(201);
+      expect(fromAssets.create).toHaveBeenCalledWith(
+        body,
+        expect.objectContaining({ kind: 'human' }),
+      );
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send({ assetIds: [] })
+        .expect(400);
+    });
+
+    it('a LICENSE line names an application only on that kind (400 at the edge)', async () => {
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          description: 'M365 E3',
+          applicationId: 'clapp0000000000000000001',
+        })
+        .expect(400);
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          kind: 'LICENSE',
+          description: 'M365 E3',
+          applicationId: 'clapp0000000000000000001',
+        })
+        .expect(201);
     });
   });
 });

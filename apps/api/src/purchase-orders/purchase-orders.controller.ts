@@ -4,6 +4,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -18,6 +20,13 @@ import {
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
 import {
+  ApplyLicenseResultSchema,
+  ApplyLicenseSchema,
+  CreatePurchaseFromAssetsResultSchema,
+  CreatePurchaseFromAssetsSchema,
+  LicenseProposalSchema,
+  PurchaseExtractionDraftSchema,
+  PurchaseExtractionStatusSchema,
   CancelRemainingUnitsSchema,
   LinkAssetsResultSchema,
   LinkAssetsToLineSchema,
@@ -48,6 +57,9 @@ import {
   PURCHASE_ORDER_SORT_ALLOWLIST,
 } from './purchase-orders.service';
 import { PurchaseReceivingService } from './purchase-receiving.service';
+import { PurchaseLicenseService } from './purchase-license.service';
+import { PurchaseFromAssetsService } from './purchase-from-assets.service';
+import { PurchaseExtractionService } from './extraction/purchase-extraction.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
@@ -101,6 +113,21 @@ class ReceiveStockFromLineResultDto extends createZodDto(
 class CancelRemainingUnitsDto extends createZodDto(
   CancelRemainingUnitsSchema,
 ) {}
+class PurchaseExtractionStatusDto extends createZodDto(
+  PurchaseExtractionStatusSchema,
+) {}
+class PurchaseExtractionDraftDto extends createZodDto(
+  PurchaseExtractionDraftSchema,
+) {}
+class LicenseProposalDto extends createZodDto(LicenseProposalSchema) {}
+class ApplyLicenseDto extends createZodDto(ApplyLicenseSchema) {}
+class ApplyLicenseResultDto extends createZodDto(ApplyLicenseResultSchema) {}
+class CreatePurchaseFromAssetsDto extends createZodDto(
+  CreatePurchaseFromAssetsSchema,
+) {}
+class CreatePurchaseFromAssetsResultDto extends createZodDto(
+  CreatePurchaseFromAssetsResultSchema,
+) {}
 
 /** A single `receipt` filter value, or a 400 listing the allowed ones (ADR-0030). */
 function parseReceiptQuery(
@@ -127,6 +154,9 @@ export class PurchaseOrdersController {
   constructor(
     private readonly purchases: PurchaseOrdersService,
     private readonly receiving: PurchaseReceivingService,
+    private readonly licenses: PurchaseLicenseService,
+    private readonly fromAssets: PurchaseFromAssetsService,
+    private readonly extraction: PurchaseExtractionService,
   ) {}
 
   @Get()
@@ -232,6 +262,32 @@ export class PurchaseOrdersController {
       { supplierId: parseCuidQuery(supplierId, 'supplierId') },
       parsePageQuery({ limit, offset, page }),
     );
+  }
+
+  // STATIC route declared BEFORE `:id` (see pending-lines).
+  @Get('extraction/status')
+  @RequirePermission('purchaseOrder:read')
+  @ApiOperation({
+    summary:
+      'Whether document extraction can be offered to the caller (ADR-0099 §11): available, or the reason it is not (AI_DISABLED, EXTRACTION_DISABLED, PROVIDER_UNSUPPORTED, NOT_PERMITTED), the document types the provider reads, the caps and the disclosure text.',
+  })
+  @ApiOkResponse({ type: PurchaseExtractionStatusDto })
+  extractionStatus(@CurrentPrincipal() principal?: Principal) {
+    return this.extraction.status(principal);
+  }
+
+  @Post('from-assets')
+  @RequirePermission('purchaseOrder:write', 'asset:write')
+  @ApiOperation({
+    summary:
+      'Create a purchase from selected existing assets: one ASSET line per model (assets without a model, per name), quantity = the assets, unit price from them only when all equal in the purchase currency. Links the assets and changes no other asset field. Partial success ({ purchaseOrder, linkedAssetIds, failed[] }); 409 with nothing created when none can be linked.',
+  })
+  @ApiCreatedResponse({ type: CreatePurchaseFromAssetsResultDto })
+  createFromAssets(
+    @Body() dto: CreatePurchaseFromAssetsDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.fromAssets.create(dto, principal);
   }
 
   @Get(':id')
@@ -403,6 +459,49 @@ export class PurchaseOrdersController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.receiving.receiveStock(id, lineId, dto, principal);
+  }
+
+  @Post(':id/attachments/:attachmentId/extract')
+  @RequirePermission('purchaseOrder:write', 'ai:use')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Read a document attached to the purchase through the configured AI provider and return a DRAFT for review (ADR-0099 §11). Saves nothing to the purchase; records the token usage and an EXTRACTION_RUN event (no content). Human callers only. Refusals carry a code: 409 unavailable, 422 the document, 429 BUDGET_EXCEEDED, 502 the provider, 504 EXTRACTION_TIMEOUT.',
+  })
+  @ApiOkResponse({ type: PurchaseExtractionDraftDto })
+  extract(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.extraction.extract(id, attachmentId, principal);
+  }
+
+  @Get(':id/lines/:lineId/license-proposal')
+  @RequirePermission('purchaseOrder:read', 'application:read')
+  @ApiOperation({
+    summary:
+      "What applying a LICENSE line would do: the application's current seats and renewal, the line's pending seats as the default to add, the count afterwards and the warnings. Writes nothing.",
+  })
+  @ApiOkResponse({ type: LicenseProposalDto })
+  licenseProposal(@Param('id') id: string, @Param('lineId') lineId: string) {
+    return this.licenses.proposal(id, lineId);
+  }
+
+  @Post(':id/lines/:lineId/apply-license')
+  @RequirePermission('purchaseOrder:write', 'application:write')
+  @ApiOperation({
+    summary:
+      "Apply a LICENSE line to its application — explicit, never automatic: adds seatsToAdd to the application's seatsPurchased and/or sets its renewalDate (through the applications write path), and counts the seats as applied on the line. Over-application is allowed and flagged (overApplied). 400 for a line that is not LICENSE, has no application or names an archived one.",
+  })
+  @ApiCreatedResponse({ type: ApplyLicenseResultDto })
+  applyLicense(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: ApplyLicenseDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.licenses.apply(id, lineId, dto, principal);
   }
 
   @Post(':id/lines/:lineId/link-preview')
