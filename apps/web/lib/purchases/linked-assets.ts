@@ -12,12 +12,7 @@ export function purchaseAssetFilter(
   canReadPurchases: boolean,
   filter: PurchaseAssetFilter,
 ): PurchaseAssetFilter | undefined {
-  if (!canReadPurchases) return undefined;
-  const out: PurchaseAssetFilter = {};
-  if (filter.purchaseOrderLineId) out.purchaseOrderLineId = filter.purchaseOrderLineId;
-  if (filter.purchaseOrderId) out.purchaseOrderId = filter.purchaseOrderId;
-  if (filter.purchaseLinked !== undefined) out.purchaseLinked = filter.purchaseLinked;
-  return Object.keys(out).length > 0 ? out : undefined;
+  return canReadPurchases ? filter : undefined;
 }
 
 /** How many of a line's assets the purchase page lists at once. */

@@ -42,6 +42,6 @@ describe("purchase filters on the asset list are sent only with purchaseOrder:re
   });
 
   test("an empty purchase filter sends nothing", () => {
-    expect(purchaseAssetFilter(true, {})).toBeUndefined();
+    expect(purchaseParams({ purchase: purchaseAssetFilter(true, {}) })).toEqual([]);
   });
 });
