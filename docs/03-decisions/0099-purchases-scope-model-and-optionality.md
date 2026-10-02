@@ -309,8 +309,8 @@ invoice, delivery note — suggested by smart entry, never a closed or required 
 
 - **Document extraction** is a **switch under AI settings, OFF by default**, with a disclosure of what is
   sent to the configured provider. It is the only switch Purchases involves (§7), and it governs sending
-  financial documents to an external AI provider, not the Purchases feature. It needs the AI assistant enabled and a provider/model that
-  accepts files ([[0097-ai-assistant-mcp-and-headless-api]]).
+  financial documents to an external AI provider, not the Purchases feature. It needs the AI assistant
+  enabled and a provider/model that accepts files ([[0097-ai-assistant-mcp-and-headless-api]]).
 - Extraction reads **a document already attached to the purchase** — there is no file upload in the chat.
   It is a structured-output call **with no tools**, and it **never saves anything**: it returns a draft
   (with the verbatim source text and page per field, blanks over guesses) that a human reviews and saves
