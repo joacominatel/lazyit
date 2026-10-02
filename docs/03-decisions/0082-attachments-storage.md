@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-10-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -18,6 +18,12 @@ service. Serving is API-only, behind per-parent authz. Backup coverage is **defe
 explicit CEO decision** — a documented, loud gap (see [Deferred](#deferred)). Lands the long-deferred
 KB render-time sanitizer with the first image render ([[0029-untrusted-content-sanitization]] /
 SEC-003).
+
+> [!note] Amended 2026-10-01 by [[0099-purchases-scope-model-and-optionality|ADR-0099]] (#1466)
+> A third parent type, `PURCHASE_ORDER`, is planned for Purchases Phase 1, reusing the asset documents
+> allowlist and cap and gated by `purchaseOrder:read` / `:write`. Purchase documents are financial
+> evidence, so ADR-0099 §12 makes the **attachments backup a prerequisite** that ships before or
+> alongside Phase 1 — the v1.1 deferral below no longer covers it. Not built yet.
 
 ## Context
 

@@ -3,7 +3,7 @@ title: "ADR-0034: Consumables design (cached stock + append-only movements)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-09-24
+updated: 2026-10-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -69,6 +69,12 @@ below 0 raises **409** and the whole transaction rolls back (no movement, no cac
 - **`ADJUSTMENT` can't set 0** (quantity is ≥ 1); reach zero with an `OUT` of the remainder. Minor.
 - **Deferred:** low-stock **alerting / notifications** (today it's only a query filter); supplier /
   unit-cost tracking; barcode/SKU scanning.
+
+> [!note] Amended 2026-10-01 by [[0099-purchases-scope-model-and-optionality|ADR-0099]] (#1466)
+> Supplier and unit-cost tracking arrive through **Purchases**, not on the consumable: a `CONSUMABLE`
+> purchase line (Phase 1b) carries the supplier and unit price, and receiving it posts an ordinary `IN`
+> movement that references the line. The stock model above is unchanged — movements stay the only way
+> stock changes, and `currentStock` is never written directly. Not built yet.
 
 Related: [[consumable]] · [[consumable-category]] · [[consumable-movement]] ·
 [[0008-consumables-vs-assets]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·
