@@ -59,6 +59,21 @@ describe("cloneAssetDefaults", () => {
     expect(out.warrantyEnd).toBe(ISO);
   });
 
+  test("never copies purchaseOrderLineId, and carries the currency label with the cost (ADR-0099 §9)", () => {
+    const linked = {
+      ...source,
+      purchaseCost: 150000,
+      purchaseCurrency: "USD",
+      purchaseOrderLineId: "cklinepurchase00000000001",
+    };
+    const out = cloneAssetDefaults(linked);
+    expect("purchaseOrderLineId" in out).toBe(false);
+    expect(out.purchaseCurrency).toBe("USD");
+    // The clone stays a valid create body: CreateAssetSchema is strict, so a stray line id would 400.
+    expect(CreateAssetSchema.safeParse({ ...out, purchaseOrderLineId: linked.purchaseOrderLineId }).success).toBe(false);
+    expect(CreateAssetSchema.safeParse(out).success).toBe(true);
+  });
+
   test("CLEARS the unique partial-index fields (serial, assetTag)", () => {
     const out = cloneAssetDefaults(source);
     expect(out.serial).toBeUndefined();
