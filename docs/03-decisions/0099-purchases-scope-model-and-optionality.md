@@ -15,8 +15,11 @@ deciders: [Joaquín Minatel]
 "dale, aprobado el paquete con la ampliación de montos" (the package is approved, including the money
 widening). **Phase 1 backend core built** (#1472, 2026-10-02): the four entities, the two asset columns,
 the `purchaseOrder:*` permissions, the purchase and supplier endpoints, the activity log and smart-entry
-suggestions. Receiving, linking, documents, the *Purchase* panel and the screens are still to build;
-what the build settled is in [[#Decisions while building (Phase 1 core, #1472)]].
+suggestions. **Phase 1 screens built** (#1474, 2026-10-02): the Purchases area (list, detail, create
+and edit, suppliers, activity log), the asset's currency label, the smart-entry sources and the
+Application *Publisher* label. Receiving, linking, documents, the *Pending units* tab and the asset's
+*Purchase* panel are still to build (#1475); what the builds settled is in
+[[#Decisions while building (Phase 1 core, #1472)]] and [[#Decisions while building (Phase 1 web, #1474)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -506,6 +509,38 @@ reopens a CEO decision.
   neither.
 - **No AI tools yet.** Every new handler is listed as unexposed in `purchases.tools.ts` (Phase 3, #1478),
   and the suggestions read as not applicable.
+
+## Decisions while building (Phase 1 web, #1474)
+
+CTO decisions taken while building the screens (2026-10-02), under the principles above. None reopens a
+CEO decision.
+
+- **The title fallback (§6).** A purchase is called by its reference; without one, *Supplier · date*;
+  without either — a purchase identified only by its lines — *Purchase · date*. The date is the order
+  date, or the day it was recorded. Rejected: the first line's description, because the list read does
+  not carry lines and the same purchase must read the same everywhere.
+- **The supplier is typed, not picked.** The purchase form's supplier is a smart-entry text field over
+  `GET /suggestions/supplierName`, resolved when saving: the exact trimmed name of one live supplier
+  links it; a name nobody has creates the supplier inline, with no dialog; several suppliers with the
+  same name ask the operator which one (names are not unique, D-D). Another spelling of an existing name
+  gets the usual non-blocking hint. Rejected: an entity picker with a "create supplier" dialog — an extra
+  step for the common case of a new or repeat supplier, against the light-entry principle.
+- **The displayed status.** `DRAFT` and `CANCELLED` show as stored; an `ORDERED` purchase reads as
+  *Partially received*, *Received* or *Over-received* (a warning tone) from its derived receipt. A
+  status a newer build writes shows as its raw text. The status is changed from the purchase page
+  (*Mark as draft / ordered*, *Cancel purchase* only while nothing is received), not from the edit form.
+- **The list opens on purchases waiting for units** (`receipt=PENDING`). Because that view can be empty
+  while purchases exist, the "optional feature" empty state is shown only when the area holds no purchase
+  at all.
+- **The currency label starts at the last one used** — the viewer's own (kept in the browser), else the
+  instance's most recently used — on a new purchase only. The asset's currency label is never prefilled:
+  an asset without one reads *No currency*.
+- **Lines of a saved purchase** are added, edited and removed one at a time on the purchase page, through
+  the line endpoints; the create form sends its lines inline.
+- **Smart-entry sources.** The asset form and the *Receive stock* dialog read companies from
+  `GET /suggestions/company`, the model forms read manufacturers from `GET /suggestions/manufacturer`,
+  and the application form reads publishers from `GET /suggestions/vendor` — each value with its use
+  count and last use ([[0076-asset-company-grouping-field]] amended).
 
 ## Related
 
