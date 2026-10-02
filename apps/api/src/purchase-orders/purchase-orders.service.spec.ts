@@ -776,7 +776,7 @@ describe('PurchaseOrdersService', () => {
         { reason: '4th never came' },
         human,
       );
-      expect(rawQuery(prisma, 0).sql).toContain('FOR UPDATE');
+      expect(rawQuery(prisma, 1).sql).toContain('FOR UPDATE');
       expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
         where: { id: LINE },
         data: { cancelledQuantity: 1 },
@@ -805,6 +805,27 @@ describe('PurchaseOrdersService', () => {
       expect(events(prisma)[0]).toMatchObject({
         payload: { quantity: 2, reason: null },
       });
+    });
+
+    it('locks purchase then line — KEY SHARE on the purchase before the line FOR UPDATE (no deadlock with a removal)', async () => {
+      stored(0, 3);
+      await service.cancelRemaining(PO, LINE, {}, human);
+      const purchase = rawQuery(prisma, 0);
+      const line = rawQuery(prisma, 1);
+      expect(purchase.sql).toContain('"purchase_orders"');
+      expect(purchase.sql).toContain('FOR KEY SHARE');
+      expect(purchase.values).toEqual([PO]);
+      expect(line.sql).toContain('"purchase_order_lines"');
+      expect(line.sql).toContain('FOR UPDATE');
+      expect(line.values).toEqual([LINE]);
+      // Both before the line is read back and written.
+      const lastLock = prisma.$queryRaw.mock.invocationCallOrder[1];
+      expect(lastLock).toBeLessThan(
+        prisma.purchaseOrderLine.findFirstOrThrow.mock.invocationCallOrder[0],
+      );
+      expect(lastLock).toBeLessThan(
+        prisma.purchaseOrderLine.update.mock.invocationCallOrder[0],
+      );
     });
 
     it('400 beyond the pending count, 409 with nothing pending — no write either way', async () => {

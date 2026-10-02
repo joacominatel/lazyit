@@ -654,8 +654,12 @@ export class PurchaseOrdersService {
   /**
    * Cancel units that will not arrive ("cancel remaining units", ADR-0099 §3): adds `quantity` (default every
    * pending unit) to the line's cancelled count and writes `UNITS_CANCELLED` with the optional reason. The
-   * line row is locked first, so two concurrent cancels cannot both take the same pending units. Refuses a
-   * line with nothing pending (409) and a quantity beyond the pending count (400).
+   * line row is locked, so two concurrent cancels cannot both take the same pending units. Lock order is
+   * purchase, then line, like every other purchase write: the purchase is taken `FOR KEY SHARE` first (what
+   * the event insert's foreign key would take anyway, only later). Locking the line first and then reaching
+   * the purchase through that FK deadlocked against a line removal or kind change, which hold the purchase
+   * `FOR UPDATE` and then write the line. Refuses a line with nothing pending (409) and a quantity beyond the
+   * pending count (400).
    */
   async cancelRemaining(
     purchaseOrderId: string,
@@ -664,6 +668,7 @@ export class PurchaseOrdersService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
+      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
     return this.prisma.$transaction(async (tx) => {
       await this.assertLineLive(tx, purchaseOrderId, lineId);
       await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
