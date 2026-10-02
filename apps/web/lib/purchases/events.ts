@@ -18,14 +18,15 @@ export interface FieldChange {
 export type PurchaseEventView =
   | { kind: "created"; lineCount: number | null }
   | { kind: "statusChanged"; from: string | null; to: string | null }
-  | { kind: "updated"; changes: FieldChange[] }
+  | { kind: "updated"; changes: FieldChange[]; currency: string | null }
   | {
       kind: "lineAdded";
       description: string | null;
       quantity: number | null;
       unitPrice: number | null;
+      currency: string | null;
     }
-  | { kind: "lineUpdated"; lineId: string | null; changes: FieldChange[] }
+  | { kind: "lineUpdated"; lineId: string | null; changes: FieldChange[]; currency: string | null }
   | { kind: "lineRemoved"; lineId: string | null; description: string | null }
   | { kind: "deleted" }
   | { kind: "restored" }
@@ -49,24 +50,30 @@ export function parseChanges(value: unknown): FieldChange[] {
   return out;
 }
 
+/**
+ * Logged amounts are printed with the currency label the EVENT recorded, when it recorded one — never with
+ * the purchase's current label, which may have changed since. Without one, the amount prints bare.
+ */
 export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType" | "payload">): PurchaseEventView {
   const p = event.payload ?? {};
+  const currency = str(p.currency);
   switch (event.eventType) {
     case "CREATED":
       return { kind: "created", lineCount: num(p.lineCount) };
     case "STATUS_CHANGED":
       return { kind: "statusChanged", from: str(p.from), to: str(p.to) };
     case "UPDATED":
-      return { kind: "updated", changes: parseChanges(p.changes) };
+      return { kind: "updated", changes: parseChanges(p.changes), currency };
     case "LINE_ADDED":
       return {
         kind: "lineAdded",
         description: str(p.description),
         quantity: num(p.quantity),
         unitPrice: num(p.unitPrice),
+        currency,
       };
     case "LINE_UPDATED":
-      return { kind: "lineUpdated", lineId: str(p.lineId), changes: parseChanges(p.changes) };
+      return { kind: "lineUpdated", lineId: str(p.lineId), changes: parseChanges(p.changes), currency };
     case "LINE_REMOVED":
       return { kind: "lineRemoved", lineId: str(p.lineId), description: str(p.description) };
     case "DELETED":

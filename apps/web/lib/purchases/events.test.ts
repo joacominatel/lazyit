@@ -12,7 +12,17 @@ describe("describePurchaseEvent — the log reads tolerantly", () => {
       kind: "lineUpdated",
       lineId: "l1",
       changes: [{ field: "unitPrice", from: 138000000, to: 141250000, nameOnly: false }],
+      currency: null,
     });
+  });
+
+  test("an amount carries the label the event recorded, not the purchase's current one", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "LINE_ADDED",
+        payload: { description: "NB", quantity: 1, unitPrice: 100, currency: "USD" },
+      }),
+    ).toMatchObject({ kind: "lineAdded", currency: "USD" });
   });
 
   test("notes are logged by name only", () => {
@@ -28,10 +38,12 @@ describe("describePurchaseEvent — the log reads tolerantly", () => {
       description: null,
       quantity: null,
       unitPrice: null,
+      currency: null,
     });
     expect(describePurchaseEvent({ eventType: "UPDATED", payload: { changes: "oops" } })).toEqual({
       kind: "updated",
       changes: [],
+      currency: null,
     });
     expect(describePurchaseEvent({ eventType: "STATUS_CHANGED", payload: { from: 3 } })).toEqual({
       kind: "statusChanged",

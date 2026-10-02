@@ -34,9 +34,14 @@ import { SupplierFormDialog } from "../../_components/supplier-form-dialog";
 /** How many of the supplier's purchases the page lists before linking to the full, filtered list. */
 const PURCHASES_SHOWN = 20;
 
-/** A website as stored (a scheme-less host or http(s), ADR-0099) → a link target. */
-function websiteHref(website: string): string {
-  return /^https?:\/\//i.test(website) ? website : `https://${website}`;
+/**
+ * A stored website → a link target: http(s) as is, a scheme-less host as `https://…`. Anything with
+ * another scheme is not linked (the write schema refuses it; this keeps the read side safe regardless).
+ */
+function websiteHref(website: string): string | null {
+  if (/^https?:\/\//i.test(website)) return website;
+  if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(website)) return null; // a host:port is not a scheme
+  return `https://${website}`;
 }
 
 /** One contact block: name, email (mailto) and phone, or "—". */
@@ -142,9 +147,9 @@ export function SupplierDetailView({ id }: { id: string }) {
             {supplier.taxId ?? "—"}
           </DetailField>
           <DetailField label={t("form.website")}>
-            {supplier.website ? (
+            {supplier.website && websiteHref(supplier.website) ? (
               <a
-                href={websiteHref(supplier.website)}
+                href={websiteHref(supplier.website) ?? undefined}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:underline"
@@ -152,7 +157,7 @@ export function SupplierDetailView({ id }: { id: string }) {
                 {supplier.website}
               </a>
             ) : (
-              "—"
+              (supplier.website ?? "—")
             )}
           </DetailField>
           <DetailField label={t("form.salesContact")}>
@@ -171,10 +176,10 @@ export function SupplierDetailView({ id }: { id: string }) {
           </DetailField>
         </dl>
         {supplier.notes ? (
-          <div className="mt-4 space-y-1">
+          <dl className="mt-4 space-y-1">
             <dt className="text-xs font-medium text-muted-foreground">{t("form.notes")}</dt>
             <dd className="text-sm whitespace-pre-wrap">{supplier.notes}</dd>
-          </div>
+          </dl>
         ) : null}
       </DetailPanel>
 

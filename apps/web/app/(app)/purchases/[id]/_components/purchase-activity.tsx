@@ -58,12 +58,9 @@ const STATUS_KEY: Record<string, string> = {
  */
 export function PurchaseActivity({
   purchaseId,
-  currency,
   lines,
 }: {
   purchaseId: string;
-  /** The purchase's currency label, printed before logged amounts. */
-  currency: string | null;
   /** The live lines, to name the line an event refers to. */
   lines: readonly PurchaseOrderLine[];
 }) {
@@ -87,7 +84,8 @@ export function PurchaseActivity({
     value === null ? "—" : STATUS_KEY[value] ? tStatus(STATUS_KEY[value]) : value;
   const fieldLabel = (field: string) => (FIELD_LABELS.has(field) ? t(`fields.${field}`) : field);
 
-  function valueText(change: FieldChange, side: unknown): string {
+  /** `currency` is the label the event recorded (`null` → the amount prints without one). */
+  function valueText(change: FieldChange, side: unknown, currency: string | null): string {
     if (side === null || side === undefined || side === "") return t("blank");
     if (MONEY_FIELDS.has(change.field) && typeof side === "number") {
       return formatMoney(side, locale, currency);
@@ -99,15 +97,15 @@ export function PurchaseActivity({
     return String(side);
   }
 
-  function changesText(changes: FieldChange[]): string {
+  function changesText(changes: FieldChange[], currency: string | null): string {
     return changes
       .map((change) =>
         change.nameOnly || ID_FIELDS.has(change.field)
           ? fieldLabel(change.field)
           : t("change", {
               field: fieldLabel(change.field),
-              from: valueText(change, change.from),
-              to: valueText(change, change.to),
+              from: valueText(change, change.from, currency),
+              to: valueText(change, change.to, currency),
             }),
       )
       .join(" · ");
@@ -125,17 +123,18 @@ export function PurchaseActivity({
       case "statusChanged":
         return t("statusChanged", { from: statusLabel(view.from), to: statusLabel(view.to) });
       case "updated":
-        return view.changes.length > 0 ? t("updated", { changes: changesText(view.changes) }) : t("updatedGeneric");
+        return view.changes.length > 0 ? t("updated", { changes: changesText(view.changes, view.currency) }) : t("updatedGeneric");
       case "lineAdded":
         return t("lineAdded", {
           line: view.description ?? t("aLine"),
           quantity: view.quantity ?? 1,
-          price: view.unitPrice === null ? t("noPrice") : formatMoney(view.unitPrice, locale, currency),
+          price:
+            view.unitPrice === null ? t("noPrice") : formatMoney(view.unitPrice, locale, view.currency),
         });
       case "lineUpdated":
         return t("lineUpdated", {
           line: lineName(view.lineId, null),
-          changes: view.changes.length > 0 ? changesText(view.changes) : t("blank"),
+          changes: view.changes.length > 0 ? changesText(view.changes, view.currency) : t("blank"),
         });
       case "lineRemoved":
         return t("lineRemoved", { line: lineName(view.lineId, view.description) });

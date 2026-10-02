@@ -302,10 +302,10 @@ export function PurchaseDetailView({ id }: { id: string }) {
           </DetailField>
         </dl>
         {purchase.notes ? (
-          <div className="mt-4 space-y-1">
+          <dl className="mt-4 space-y-1">
             <dt className="text-xs font-medium text-muted-foreground">{t("detail.notes")}</dt>
             <dd className="text-sm whitespace-pre-wrap">{purchase.notes}</dd>
-          </div>
+          </dl>
         ) : null}
       </DetailPanel>
 
@@ -424,7 +424,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
       {/* #1475: the purchase's documents and its linked assets go here, between the lines and the log. */}
 
       <DetailPanel title={t("detail.activitySection")}>
-        <PurchaseActivity purchaseId={purchase.id} currency={purchase.currency} lines={purchase.lines} />
+        <PurchaseActivity purchaseId={purchase.id} lines={purchase.lines} />
       </DetailPanel>
 
       {lineDialog ? (
