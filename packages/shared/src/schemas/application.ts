@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, money, optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Application — something a User can be granted access to: a SaaS product (Jira, GitHub, AWS), an
@@ -110,12 +110,12 @@ export const ApplicationSchema = z.object({
   metadata: ApplicationMetadataSchema.nullable(),
   notes: z.string().nullable(),
   // License / seat tracking (#949). Money in INTEGER minor units (cents) of the org's single currency,
-  // bounded to int4 like every other Int column — mirrors Asset.purchaseCost (#954). All optional/null =
+  // `money()` like Asset.purchaseCost (#954, ADR-0100); `seatsPurchased` is an int4 count. All optional/null =
   // "untracked": `seatsPurchased` null = unlimited/not tracked, `costPerSeat` null = unknown, `renewalDate`
   // null = no known renewal. `.nullish()` (not required-nullable) so existing web object-construction
   // sites (Quick View mappers, fixtures) that build an Application without these keys keep type-checking.
   seatsPurchased: int4({ min: 0 }).nullish(),
-  costPerSeat: int4({ min: 0 }).nullish(),
+  costPerSeat: money().nullish(),
   renewalDate: z.iso.datetime().nullish(),
   // DERIVED, never stored: distinct count of users holding an ACTIVE grant (revokedAt: null) on this app
   // — the correct license "seats used" (grants are multi-grant, so a raw count over-reports). Computed
@@ -140,7 +140,7 @@ export const CreateApplicationSchema = z.strictObject({
   // License / seat tracking (#949) — all optional. Money is INTEGER minor units (mirrors #954). A
   // strictObject rejects the derived `seatsUsed`, so it can never be written from a create body.
   seatsPurchased: int4({ min: 0 }).nullish(),
-  costPerSeat: int4({ min: 0 }).nullish(),
+  costPerSeat: money().nullish(),
   renewalDate: z.iso.datetime().nullish(),
 });
 
@@ -160,7 +160,7 @@ export const UpdateApplicationSchema = requireAtLeastOneKey(
       // back to "untracked" (`{ seatsPurchased: null }`) as well as set it. Derived `seatsUsed` is absent
       // here → a strictObject rejects it (read-only).
       seatsPurchased: int4({ min: 0 }).nullable(),
-      costPerSeat: int4({ min: 0 }).nullable(),
+      costPerSeat: money().nullable(),
       renewalDate: z.iso.datetime().nullable(),
     })
     .partial(),
