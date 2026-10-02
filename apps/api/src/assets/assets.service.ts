@@ -364,6 +364,45 @@ export class AssetsService {
     return authorized;
   }
 
+  /**
+   * 400 unless the location a write names is LIVE. A soft-deleted location still passes the foreign key, so
+   * without this an asset could be created into, received into or moved to an archived location. Write-only:
+   * reads stay tolerant, and an update that leaves the location unchanged is not checked (a legacy row
+   * stays editable).
+   */
+  private async assertLocationLive(
+    client: Prisma.TransactionClient | PrismaService,
+    locationId: string | null | undefined,
+  ): Promise<void> {
+    if (!locationId) return;
+    const location = await client.location.findFirst({
+      where: { id: locationId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        `Location ${locationId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /** 400 unless the model a write names is LIVE — the same rule as {@link assertLocationLive}. */
+  private async assertModelLive(
+    client: Prisma.TransactionClient | PrismaService,
+    modelId: string | null | undefined,
+  ): Promise<void> {
+    if (!modelId) return;
+    const model = await client.assetModel.findFirst({
+      where: { id: modelId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new BadRequestException(
+        `AssetModel ${modelId} not found (missing or archived)`,
+      );
+    }
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -726,9 +765,11 @@ export class AssetsService {
       try {
         const asset = await this.prisma.$transaction(async (tx) => {
           let resolvedSpecs = specs;
+          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
+          await this.assertLocationLive(tx, rest.locationId);
           if (rest.modelId) {
             const model = await tx.assetModel.findFirst({
-              where: { id: rest.modelId },
+              where: { id: rest.modelId, deletedAt: null },
               select: { specs: true },
             });
             if (!model) {
@@ -828,15 +869,16 @@ export class AssetsService {
     const line = data.purchaseOrderLineId
       ? await this.receivableLine(data.purchaseOrderLineId, principal)
       : null;
-    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
-    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    // ONE upfront model and location check: a single friendly 400 instead of N identical per-unit failures,
+    // and the model name feeds each unit's default `name`. Both must be LIVE, as in create().
     const model = await this.prisma.assetModel.findFirst({
-      where: { id: data.modelId },
+      where: { id: data.modelId, deletedAt: null },
       select: { name: true },
     });
     if (!model) {
       throw new BadRequestException(`AssetModel ${data.modelId} not found`);
     }
+    await this.assertLocationLive(this.prisma, data.locationId);
 
     // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
     // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
@@ -972,6 +1014,13 @@ export class AssetsService {
     }
     const { specs, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
+      if (rest.locationId !== before.locationId) {
+        await this.assertLocationLive(tx, rest.locationId);
+      }
+      if (rest.modelId !== before.modelId) {
+        await this.assertModelLive(tx, rest.modelId);
+      }
       const row = await tx.asset.update({
         where: { id },
         data: {
