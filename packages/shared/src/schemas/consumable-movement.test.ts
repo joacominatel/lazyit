@@ -165,6 +165,14 @@ describe("ConsumableMovementSchema — tolerant read", () => {
     expect(ConsumableMovementSchema.safeParse(LEGACY).success).toBe(true);
   });
 
+  test("an IN received from a purchase line reads, with or without the line id (#1476)", () => {
+    expect(
+      ConsumableMovementSchema.safeParse({ ...LEGACY, type: "IN", purchaseOrderLineId: "ckline00000000000000000001" })
+        .success,
+    ).toBe(true);
+    expect(ConsumableMovementSchema.safeParse({ ...LEGACY, purchaseOrderLineId: null }).success).toBe(true);
+  });
+
   test("a delivery row with a resolved target reads", () => {
     expect(
       ConsumableMovementSchema.safeParse({

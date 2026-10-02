@@ -9,6 +9,7 @@ import {
   PURCHASE_LINK_MAX_ASSETS,
   PurchaseLinkPreviewRequestSchema,
   ReceiveFromLineSchema,
+  ReceiveStockFromLineSchema,
   UnlinkAssetsFromLineSchema,
 } from "./purchase-receiving";
 
@@ -65,6 +66,26 @@ describe("ReceiveFromLineSchema — every field is an optional override", () => 
   });
 });
 
+describe("ReceiveStockFromLineSchema (#1476)", () => {
+  test("a quantity of at least one unit is required; the note is optional and trimmed", () => {
+    expect(ReceiveStockFromLineSchema.parse({ quantity: 12 })).toEqual({ quantity: 12 });
+    expect(ReceiveStockFromLineSchema.parse({ quantity: 1, note: "  box 2 of 3 " })).toEqual({
+      quantity: 1,
+      note: "box 2 of 3",
+    });
+    expect(ReceiveStockFromLineSchema.parse({ quantity: 1, note: "  " })).toEqual({ quantity: 1 });
+    expect(ReceiveStockFromLineSchema.safeParse({}).success).toBe(false);
+    expect(ReceiveStockFromLineSchema.safeParse({ quantity: 0 }).success).toBe(false);
+  });
+
+  test("the movement fields are not the caller's: no type, no target, no line id in the body", () => {
+    expect(ReceiveStockFromLineSchema.safeParse({ quantity: 1, type: "OUT" }).success).toBe(false);
+    expect(
+      ReceiveStockFromLineSchema.safeParse({ quantity: 1, purchaseOrderLineId: "ckline00000000000000000001" }).success,
+    ).toBe(false);
+  });
+});
+
 describe("CancelRemainingUnitsSchema", () => {
   test("quantity and reason are optional; a quantity is at least 1", () => {
     expect(CancelRemainingUnitsSchema.parse({})).toEqual({});
@@ -106,7 +127,7 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("the purchase log gains the receiving, linking and document events", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-6)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-8, -2)).toEqual([
       "UNITS_RECEIVED",
       "UNITS_CANCELLED",
       "ASSET_LINKED",
@@ -114,5 +135,9 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
       "DOCUMENT_ADDED",
       "DOCUMENT_REMOVED",
     ]);
+  });
+
+  test("Phase 1b (#1476) appends the stock receipt and the document label edit", () => {
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-2)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
   });
 });

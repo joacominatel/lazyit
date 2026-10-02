@@ -52,9 +52,22 @@ describe("CreatePurchaseOrderLineSchema", () => {
     expect(line).toEqual({ description: "Monitor 27" });
   });
 
-  test("kind is ASSET | OTHER on write", () => {
+  test("kind is ASSET | OTHER | CONSUMABLE on write (CONSUMABLE since Phase 1b, #1476)", () => {
     expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Shipping", kind: "OTHER" }).success).toBe(true);
-    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE" }).success).toBe(false);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE" }).success).toBe(true);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Office", kind: "LICENSE" }).success).toBe(false);
+  });
+
+  test("a consumable is named on a CONSUMABLE line only, and stays optional there", () => {
+    expect(
+      CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE", consumableId: ID }).success,
+    ).toBe(true);
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "CONSUMABLE" }).success).toBe(true);
+    // The default kind is ASSET: a consumable on it is refused, as on an explicit ASSET or OTHER line.
+    expect(CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", consumableId: ID }).success).toBe(false);
+    expect(
+      CreatePurchaseOrderLineSchema.safeParse({ description: "Toner", kind: "OTHER", consumableId: ID }).success,
+    ).toBe(false);
   });
 
   test("a unit price above int4 is accepted (64-bit money, ADR-0100); 0 is valid; negative is not", () => {
@@ -83,6 +96,8 @@ describe("update schemas", () => {
       reference: null,
     });
     expect(UpdatePurchaseOrderLineSchema.parse({ unitPrice: null })).toEqual({ unitPrice: null });
+    expect(UpdatePurchaseOrderLineSchema.parse({ consumableId: null })).toEqual({ consumableId: null });
+    expect(UpdatePurchaseOrderLineSchema.parse({ consumableId: ID })).toEqual({ consumableId: ID });
     expect(UpdatePurchaseOrderLineSchema.safeParse({ description: null }).success).toBe(false);
   });
 });
