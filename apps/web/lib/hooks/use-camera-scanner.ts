@@ -14,6 +14,33 @@ export type CameraScanStatus = "starting" | "scanning" | "error" | "unsupported"
  */
 export type CameraScanMode = "qr" | "barcodes";
 
+/** The part of an `Html5Qrcode` instance a teardown touches. */
+export interface StoppableScanner {
+  stop: () => Promise<unknown>;
+  clear?: () => void;
+}
+
+/**
+ * Stop a scanner without ever throwing. `Html5Qrcode.stop()` throws SYNCHRONOUSLY when it is not scanning —
+ * a start still pending or one that failed (camera refused, no HTTPS) — and a throw in an effect cleanup
+ * reaches the error boundary on unmount. Both the synchronous throw and the rejected promise are swallowed:
+ * a scanner that cannot stop has nothing left to release. With `clear`, the injected viewfinder is removed
+ * once stopped.
+ */
+export function stopQuietly(instance: StoppableScanner, { clear = false }: { clear?: boolean } = {}): Promise<void> {
+  let stopped: Promise<unknown>;
+  try {
+    stopped = Promise.resolve(instance.stop());
+  } catch {
+    return Promise.resolve();
+  }
+  return stopped
+    .then(() => {
+      if (clear) instance.clear?.();
+    })
+    .catch(() => {});
+}
+
 /**
  * The device camera through `html5-qrcode` (#875) — one cross-browser decoder, so it works on mobile Safari
  * and desktop Firefox where the native `BarcodeDetector` is not available. The library is loaded only when
@@ -92,11 +119,11 @@ export function useCameraScanner(
               return { width: edge, height: edge };
             },
           },
-          (decodedText) => onDecodeRef.current(decodedText, () => void instance.stop().catch(() => {})),
+          (decodedText) => onDecodeRef.current(decodedText, () => void stopQuietly(instance)),
           undefined,
         );
         if (cancelled) {
-          await instance.stop().catch(() => {});
+          await stopQuietly(instance);
           return;
         }
         setStatus("scanning");
@@ -110,12 +137,7 @@ export function useCameraScanner(
       cancelled = true;
       const instance = scannerRef.current;
       scannerRef.current = null;
-      if (instance) {
-        instance
-          .stop()
-          .then(() => instance.clear())
-          .catch(() => {});
-      }
+      if (instance) void stopQuietly(instance, { clear: true });
     };
   }, [readerId, mode]);
 
