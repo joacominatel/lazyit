@@ -410,4 +410,3 @@ Adds `orderNumber?` and `supplier?` free-text columns to `Asset` (Snipe-IT style
 - **Live provider tests** of PDF and vision support for each configured model: only the AI SDK documentation was checked.
 - **The parallel user-research track:** out of my scope; decisions 2, 9 and 11 depend on it.
 - **ADR-0063 counter internals:** I relied on ADR-0089's account of them.
-
