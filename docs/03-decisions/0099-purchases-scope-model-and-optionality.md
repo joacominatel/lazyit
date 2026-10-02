@@ -17,9 +17,13 @@ widening). **Phase 1 backend core built** (#1472, 2026-10-02): the four entities
 the `purchaseOrder:*` permissions, the purchase and supplier endpoints, the activity log and smart-entry
 suggestions. **Phase 1 screens built** (#1474, 2026-10-02): the Purchases area (list, detail, create
 and edit, suppliers, activity log), the asset's currency label, the smart-entry sources and the
-Application *Publisher* label. Receiving, linking, documents, the *Pending units* tab and the asset's
-*Purchase* panel are still to build (#1475); what the builds settled is in
-[[#Decisions while building (Phase 1 core, #1472)]] and [[#Decisions while building (Phase 1 web, #1474)]].
+Application *Publisher* label. **Phase 1 backend flows built** (#1473, 2026-10-02): receiving from a line,
+linking and unlinking assets with the apply-values diff, cancelling remaining units, purchase documents,
+the asset's provenance read, the pending-units list and the gated CSV columns. Their screens — receiving,
+linking, documents, the *Pending units* tab and the asset's *Purchase* panel — are still to build (#1475);
+what the builds settled is in [[#Decisions while building (Phase 1 core, #1472)]],
+[[#Decisions while building (Phase 1 web, #1474)]] and
+[[#Decisions while building (Phase 1 flows, #1473)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -558,9 +562,72 @@ CEO decision.
   of that supplier carries the same reference (trimmed, case-insensitive). It never blocks the save.
 - **Smart entry for the reference, the invoice numbers and the line description is deferred to #1475.**
   §7 lists them, but `GET /suggestions/:field` has no such fields yet; adding them is a contract change
-  (a backend follow-up in #1475). Until then they are plain inputs.
+  (a backend follow-up in #1475). Until then they are plain inputs. *The fields now exist (#1473:
+  `reference`, `invoiceNumbers`, `lineDescription`); wiring them into the form stays #1475.*
 - **One save at a time.** A purchase save can be two writes (the inline supplier, then the purchase), so a
   repeated Ctrl/⌘+Enter or a double click is held off by a ref-based lock, not only the disabled button.
+
+## Decisions while building (Phase 1 flows, #1473)
+
+CTO decisions taken while building the backend flows (2026-10-02), under the principles above. None reopens
+a CEO decision.
+
+- **The apply mapping.** A link offers, per field: purchase date ← the invoice date, else the order date;
+  cost ← the line's unit price **with** the purchase's currency label (one field, `purchaseCost`, so cost
+  and currency always move together); warranty end ← that date + the line's warranty months; company ← the
+  purchase's; model ← the line's. Receiving uses the same mapping except the purchase date: the invoice
+  date, else **today** — never the order date ([[purchases/ux-proposal]] §3.d, the persona's rule). One pure
+  function (`purchaseLineValues` in `@lazyit/shared`) computes it for the API and the web.
+- **`apply` lists fields; `applyByAsset` overrides per asset.** A listed field is written where the diff is
+  a *fill* or a *replace*; a field the purchase has no value for is never cleared, and an equal one is not
+  rewritten. The batch list plus a per-asset override is what the dialog needs: fills pre-checked and
+  replacements unchecked differ per asset in a bulk link, and the per-cell grid is the same request.
+  Rejected: a mode per field (`fill` / `replace`) — it cannot express the per-cell choice.
+- **A link is one transaction; a receive is one per unit.** Linking locks the asset rows (`SELECT … FOR
+  UPDATE`), so two concurrent links of the same asset serialize and the second sees it linked; every
+  history event and the purchase's single `ASSET_LINKED` commit with it. Receiving keeps ADR-0089's loop
+  (each unit its own transaction and tag-counter commit, [[0063-configurable-asset-tag-scheme]] untouched),
+  so its purchase event is ONE `UNITS_RECEIVED` appended after the loop, and each unit's own `CREATED`
+  history carries `{ source: 'purchase', purchaseOrderId, purchaseOrderLineId }`. Rejected: an event per
+  unit inside each transaction — twenty identical rows in the activity log for one delivery.
+- **A generated unit is born linked.** It records the line on its `CREATED` event, not a separate
+  `PURCHASE_LINKED`; `PURCHASE_LINKED` / `PURCHASE_UNLINKED` mark changes to an existing asset. A move
+  (`move: true`) writes `PURCHASE_LINKED` with the line it came from, and `ASSET_UNLINKED` on the old
+  purchase.
+- **The partial-success reasons.** A link or unlink reports each refused asset with a reason —
+  `NOT_FOUND` (missing or archived), `ALREADY_LINKED`, `LINKED_ELSEWHERE` (without `move`), `NOT_LINKED` —
+  while the rest go through. An `OTHER` line or an archived purchase refuses the whole request (400 / 404).
+- **Receiving against a line from the generic route.** `POST /assets/batch/receive` takes an optional
+  `purchaseOrderLineId`, `purchaseCurrency` and `warrantyEnd`. The route stays `asset:write`; naming a line
+  also requires `purchaseOrder:write`, checked in the service (403) because a decorator cannot depend on a
+  body field. `POST /purchase-orders/:id/lines/:lineId/receive` requires both permissions up front and
+  prefills everything; its body only overrides, and a line with no model is a 400 that says how to fix it.
+- **Cancelled purchases.** The API accepts `status: CANCELLED` on a purchase with units received, and still
+  lets a cancelled purchase receive and link: lazyit records what happened, and an order cancelled after a
+  partial delivery is real. The web offers *Cancel purchase* only while nothing is received (§3) and warns
+  otherwise. Rejected: a 409 — a refusal the operator can only work around by editing the receipt.
+- **Cancel remaining units** cancels the pending units by default, never more than are pending (400), and
+  is a 409 on a line with nothing pending. The line row is locked so two cancels cannot take the same
+  units. The reason is optional (D-D); the web may still ask for one.
+- **Pending units exclude drafts.** The list holds countable lines with pending > 0 on live purchases that
+  are neither `DRAFT` (not ordered yet, [[purchases/ux-proposal]] §3.f) nor `CANCELLED`, oldest order date
+  first. The purchases list's `receipt=PENDING` filter keeps its #1472 meaning (drafts included).
+- **Provenance and an archived purchase.** `GET /assets/:id/purchase` still answers for an asset whose
+  purchase is archived — soft delete keeps the link (§9) — with `deletedAt` set, but lists its documents
+  only while the purchase is live, as the purchase's own documents route does
+  ([[0082-attachments-storage]]: the parent's 404 hides them).
+- **The CSV columns.** Cost (major units, dot decimal, no grouping, no padding — [[0100-money-as-64-bit-minor-units]]
+  §5) and its currency label are always exported: they are the asset's own fields under `asset:read`. The
+  supplier, purchase reference and invoice numbers columns are **absent**, not blank, for a caller without
+  `purchaseOrder:read`, so an empty cell always means "no value". New columns are appended at the end.
+- **Suggestions for purchase text.** `GET /suggestions/:field` gains `reference`, `invoiceNumbers` and
+  `lineDescription`, from live rows of live purchases, under `purchaseOrder:read` (§7).
+- **Documents and the activity log.** Uploading or removing a purchase document appends `DOCUMENT_ADDED` /
+  `DOCUMENT_REMOVED` in the same transaction as the attachment row. The optional document type label (§10)
+  is **not built yet**: it needs a nullable column on `attachments` and a suggestion source — a backend
+  follow-up outside #1473's scope.
+- **AI tools.** Every new handler is unexposed for Phase 3 (#1478); binary upload and download stay
+  file-tool exclusions. The asset AI tools gain `purchaseCurrency` next to `purchaseCost`.
 
 ## Related
 

@@ -8,14 +8,15 @@ updated: 2026-10-02
 
 # PurchaseOrderLine
 
-> 🟢 built — backend (#1472); receiving and linking pending (#1473) · Area: Purchases ·
-> [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472), receiving, linking and cancelling (#1473); their screens pending (#1475) ·
+> Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrderLine` (`purchase_order_lines`). Lines are created inline with a purchase or through
 > `POST /purchase-orders/:id/lines`, edited with `PATCH /purchase-orders/:id/lines/:lineId` and removed with
-> `DELETE` on the same path — all under `purchaseOrder:write`. Receiving units and linking assets (which is
-> what makes `Asset.purchaseOrderLineId` non-null) come in #1473.
+> `DELETE` on the same path — all under `purchaseOrder:write`. Receiving units and linking assets — what
+> makes `Asset.purchaseOrderLineId` non-null — are built in #1473 (below), contract
+> `packages/shared/src/schemas/purchase-receiving.ts`.
 
 ## Purpose
 
@@ -63,8 +64,10 @@ line, the units that came out of it.
   [[0089-bulk-receiving-and-checkout-acknowledgement]]).
 - **Cancelled quantity** is stored ("cancel remaining units"); the reason goes in the
   [[purchase-order-event]] log. It may not exceed the quantity (`400`, checked against the stored line when a
-  PATCH carries only one of the two). A dedicated "cancel remaining units" action with a reason comes with
-  the receiving flow; today a line update records the change before and after.
+  PATCH carries only one of the two). `POST /purchase-orders/:id/lines/:lineId/cancel-remaining { quantity?,
+  reason? }` (#1473) cancels every pending unit by default, never more than are pending (`400`), is a `409`
+  when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
+  records the change before and after.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
 - The **kind** of a line with live linked assets cannot change (`409`): its received units would silently
   stop counting.
@@ -74,10 +77,61 @@ line, the units that came out of it.
   warranty end from `warrantyMonths`) onto assets only through an explicit per-field confirmation: fills
   pre-checked, replacements never ([[0099-purchases-scope-model-and-optionality]] §2). A later price edit
   only *proposes* updates to linked assets.
+
+## Receiving and linking (as built, #1473)
+
+Only `ASSET` lines take assets (`400` otherwise, for the whole request); an archived purchase or line takes
+nothing new (`404`). An asset links to at most one line.
+
+**The apply mapping** — what the purchase offers an asset (`purchaseLineValues` in `@lazyit/shared`, used
+by the API and available to the web):
+
+| `apply` field | Asset columns written | Value |
+| --- | --- | --- |
+| `purchaseDate` | `purchaseDate` | the purchase's invoice date, else its order date (`purchaseDateSource`: `INVOICE` / `ORDER`) |
+| `purchaseCost` | `purchaseCost` **and** `purchaseCurrency` | the line's unit price with the purchase's currency label — cost and currency move together |
+| `warrantyEnd` | `warrantyEnd` | that purchase date + `warrantyMonths` (calendar months, UTC, clamped to the month's last day) |
+| `company` | `company` | the purchase's company |
+| `modelId` | `modelId` | the line's asset model (writes a `MODEL_CHANGED` history event too) |
+
+A field the purchase has no value for is never applied (never a clear). The diff action per asset and field
+is `FILL` (asset empty), `REPLACE` (different value; cost compares amount **and** label, trimmed and
+case-insensitive), `SAME` or `UNAVAILABLE`.
+
+- **Preview** — `POST /purchase-orders/:id/lines/:lineId/link-preview { assetIds }` (`purchaseOrder:read` +
+  `asset:read`, writes nothing): the offered values, each asset's current vs purchase value per field with
+  its action, its link state (`NONE | THIS_LINE | OTHER_LINE`), the ids that are not live assets
+  (`missing`), and `receivedAfter` / `overReceivedAfter`.
+- **Link** — `POST …/link-assets { assetIds, apply?, applyByAsset?, move? }` (`purchaseOrder:write` +
+  `asset:write`): partial success `{ linked, failed[{ assetId, reason, error }], overReceived, line }`.
+  `apply` lists the fields copied onto every asset; `applyByAsset` replaces that list for the assets it
+  names. Reasons: `NOT_FOUND` (missing or archived), `ALREADY_LINKED`, `LINKED_ELSEWHERE` (an asset on
+  another line moves only with `move: true`). One transaction over locked asset rows: the links, the
+  `PURCHASE_LINKED` (and `MODEL_CHANGED`) [[asset-history]] events, one `ASSET_LINKED` on the purchase and,
+  for a move, `ASSET_UNLINKED` on the purchase it left.
+- **Unlink** — `POST …/unlink-assets { assetIds }` (same permissions), one or many, partial success
+  (`NOT_FOUND`, `NOT_LINKED`). The asset's purchase values are **never cleared**. `PURCHASE_UNLINKED` per
+  asset and one `ASSET_UNLINKED`, in one transaction.
+- **Receive** — `POST …/receive` (`purchaseOrder:write` + `asset:write`) generates assets through the
+  bulk-receive loop ([[0089-bulk-receiving-and-checkout-acknowledgement]]: one transaction and one asset-tag
+  counter commit per unit). Everything is prefilled — model ← the line (a line without one is a `400` unless
+  the body names `modelId`), status ← `IN_STORAGE`, location ← the purchase's delivery location while live,
+  company ← the purchase's, purchase date ← the invoice date else **today**, warranty end ← that date +
+  `warrantyMonths`, cost ← unit price with the purchase's label — and every body field only overrides it
+  (`null` leaves it empty). The quantity defaults to the serials, else to every pending unit (`400` when
+  none is pending and no quantity is given). Result `{ created, failed[], overReceived, line }`; each unit's
+  `CREATED` history names the line and the purchase gets one `UNITS_RECEIVED`.
+- **From the Assets list** — `POST /assets/batch/receive` accepts an optional `purchaseOrderLineId` (plus
+  `purchaseCurrency` and `warrantyEnd`): the units are received against that line with the same checks
+  (`400` for a line that is not a live `ASSET` line; `403` without `purchaseOrder:write`), and the result
+  carries `overReceived`.
+- **Over-receipt** is allowed everywhere and reported (`overReceived`, `overReceivedAfter`, the event
+  payloads), never refused (ADR-0099 §4).
 - A line can be removed (soft delete) only while nothing is linked to it (`409` otherwise), and never when it
   is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
-- `manufacturerText` / `modelText` feed smart entry (`GET /suggestions/manufacturer`, `/lineModel`).
+- `manufacturerText` / `modelText` / `description` feed smart entry (`GET /suggestions/manufacturer`,
+  `/lineModel`, `/lineDescription` — the last since #1473), from live lines of live purchases.
 
 ## Conventions
 

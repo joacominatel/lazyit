@@ -23,7 +23,7 @@ con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-ac
 
 | Source | Maps to | `entityType` | `action`(s) |
 | --- | --- | --- | --- |
-| [[asset-history]] | the event row | `asset` | the lowercased `eventType`: `created` · `updated` · `status_changed` · `assigned` · `released` · `location_changed` · `model_changed` · `specs_changed` · `deleted` · `restored` · `acknowledged` · `agent_linked` · `consumable_delivered` · `consumable_returned` (a consumable delivered to / returned from the asset, [[0098-consumable-delivery-targets]]) |
+| [[asset-history]] | the event row | `asset` | the lowercased `eventType`: `created` · `updated` · `status_changed` · `assigned` · `released` · `location_changed` · `model_changed` · `specs_changed` · `deleted` · `restored` · `acknowledged` · `agent_linked` · `consumable_delivered` · `consumable_returned` (a consumable delivered to / returned from the asset, [[0098-consumable-delivery-targets]]) · `purchase_linked` · `purchase_unlinked` (linked to / unlinked from a purchase line, [[0099-purchases-scope-model-and-optionality]], #1473) |
 | [[asset-assignment]] | open / close | `asset` | `assigned` (`assignedAt`) · `released` (`releasedAt`) |
 | [[access-grant]] | open / close | `application` | `granted` (`grantedAt`) · `revoked` (`revokedAt`) |
 | [[consumable-movement]] | each movement | `consumable` | `stock_in` / `stock_out` / `stock_adjustment` (a delivery's target is not carried into the summary yet — deferred by [[0098-consumable-delivery-targets]]) |

@@ -36,7 +36,10 @@ verbatim, no schema change). Part B is additive metadata on [[asset-assignment]]
 > budgets, payables, three-way match or supplier portal) are in ADR-0099 §1. The rest of the sentence
 > above still stands — ADR-0099 keeps **no goods-receipt ledger** (received is derived from linked
 > assets), no signature capture and no check-out agreements — and generating assets from a purchase
-> line **reuses** this record's Part A loop. Part A and Part B are otherwise unchanged.
+> line **reuses** this record's Part A loop. Part A and Part B are otherwise unchanged. *Built 2026-10-02
+> (#1473):* the receive body gained optional `purchaseCurrency`, `warrantyEnd` and `purchaseOrderLineId`
+> (the units are created linked to that line; it also needs `purchaseOrder:write`), and the result an
+> optional `overReceived`. The loop — one transaction and one tag-counter commit per unit — is untouched.
 
 ## Context
 

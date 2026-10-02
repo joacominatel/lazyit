@@ -8,15 +8,16 @@ updated: 2026-10-02
 
 # PurchaseOrder
 
-> 🟢 built — backend (#1472); screens, receiving, linking and documents pending (Purchases Phase 1) ·
-> Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472, flows #1473), screens (#1474); the receiving, linking and documents screens
+> pending (#1475) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrder` (`purchase_orders`), contract `packages/shared/src/schemas/purchase-order.ts`,
 > endpoints under `/purchase-orders` (`apps/api/src/purchase-orders/`): list, detail, create (lines
 > inline), header update, soft delete, restore, the line endpoints ([[purchase-order-line]]) and the
-> activity log ([[purchase-order-event]]). Receiving, asset linking, documents and the web screens come in
-> later Phase 1 units (#1473 onwards). In the product it is called a **Purchase** (es: *Compra*).
+> activity log ([[purchase-order-event]]). #1473 adds the flows that move units — receive from a line,
+> link / unlink assets, cancel remaining ([[purchase-order-line]]), the pending-units list — and the
+> purchase's documents (below). In the product it is called a **Purchase** (es: *Compra*).
 
 ## Purpose
 
@@ -36,6 +37,11 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
 - **has** N [[purchase-order-event]]s — its append-only activity log.
 - **has** N [[attachment]]s (`entityType = PURCHASE_ORDER`) — quotes, the finance PO, invoices,
   delivery notes. They are **shared** with every linked asset (the same rows, listed read-only there).
+  Built (#1473): `POST|GET /purchase-orders/:id/attachments`, `GET …/:attachmentId/content` and `DELETE
+  …/:attachmentId`, under `purchaseOrder:read` / `:write`, with the asset documents allowlist and 25 MB cap
+  ([[0082-attachments-storage]]). Writes are human-only and log `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`; an
+  archived purchase's documents 404 until it is restored. The optional document type label (ADR-0099 §10)
+  is not built yet.
 - **delivers to** an optional [[location]] (`deliveryLocationId`), used as the default location when
   receiving units.
 - **produced** N [[asset]]s, indirectly: each asset points at one line (`Asset.purchaseOrderLineId`).
@@ -57,6 +63,9 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   on a live purchase of the same supplier is surfaced as a non-blocking suggestion; saving anyway stays
   possible. Without a reference, the purchase displays as *Supplier · date*. No auto-numbering in v1.
 - **Invoice numbers** are **one free-text field**, however many invoices the purchase lists.
+- **Smart entry** for the reference and the invoice numbers reads `GET /suggestions/reference` and
+  `/suggestions/invoiceNumbers` (#1473, `purchaseOrder:read`, live purchases only) — values with their use
+  count and last use; a repeated reference is a hint, never a refusal.
 - **Status.** Stored and set by the user: `DRAFT`, `ORDERED` (the default on create), `CANCELLED` —
   stored as `TEXT` and validated by the shared zod schema on write, not a Prisma enum.
   **Derived** for display: *Partially received* (some units received, some pending) and *Received*
@@ -70,7 +79,12 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   derived state, or `PENDING`: at least one unit pending on a purchase that is not `CANCELLED`. The receipt
   filter is computed with the same functions as the detail, so the list and the shown state agree.
 - **Cancel purchase** is offered only while nothing is received; afterwards the line action *Cancel
-  remaining units* closes it cleanly.
+  remaining units* closes it cleanly. That is the web's rule: the API accepts `CANCELLED` with units
+  received, and a cancelled purchase can still receive and link (lazyit records what happened — ADR-0099,
+  decisions while building #1473).
+- **Pending units** (`GET /purchase-orders/pending-lines`, `purchaseOrder:read`): the countable lines with
+  pending > 0 on live purchases that are neither `DRAFT` nor `CANCELLED`, oldest order date first, each with
+  its purchase header and supplier; paged, filterable by `supplierId`. The *Pending units* tab reads it.
 - **Totals are derived, never stored**: the sum of its lines' quantity × unit price, in the purchase's
   currency label ([[0100-money-as-64-bit-minor-units]]). On the wire `totals` is a list of
   `{ currency, amount, unpricedLines }` built by the shared `groupMoneyTotals` — one entry for a purchase

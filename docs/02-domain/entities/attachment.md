@@ -8,7 +8,7 @@ updated: 2026-10-02
 
 # Attachment
 
-> 🟢 implemented · Area: cross-cutting (Assets + Knowledge Base) · [[0082-attachments-storage]]
+> 🟢 implemented · Area: cross-cutting (Assets + Knowledge Base + Purchases) · [[0082-attachments-storage]]
 
 ## Purpose
 
@@ -32,14 +32,14 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 - **hangs off** one parent via `(entityType, entityId)` — a **soft ref, NO FK** (the KB-chip /
   `InfraNodeSecretRef` house style): the parent (`ASSET` → [[asset]], `ARTICLE` → [[article]]) is
   validated **live at attach time**; a dangling ref degrades gracefully. `CONSUMABLE` is a deferred
-  extension. `PURCHASE_ORDER` → [[purchase-order]] is ⚪ **planned** for Purchases Phase 1 (see the note
-  under Business rules).
+  extension. `PURCHASE_ORDER` → [[purchase-order]] is built (#1473; see the note under Business rules).
 - **uploaded by** an optional [[user]] (`uploadedById`, `onDelete: SetNull`) — the file outlives its
   uploader; a [[service-account]] cannot upload (403, mirroring article authorship).
 
 ## Business rules
 
-- **AuthZ is the PARENT's rule, per request.** Asset docs: `asset:read` / `asset:write`. Article
+- **AuthZ is the PARENT's rule, per request.** Asset docs: `asset:read` / `asset:write`. Purchase docs:
+  `purchaseOrder:read` / `purchaseOrder:write`, on a live purchase. Article
   images: the article's full visibility gate on reads (draft privacy [[0022-draft-visibility-auth-shim]]
   + folder ACL [[0060-kb-folder-access-control]]) and the edit gate on writes (author / ADMIN /
   `article:manage`). **404, never 403**, on no-access — no existence leak.
@@ -63,15 +63,20 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
   rows — a version restore can never surface a broken image. The metadata row survives the bytes as
   the audit trail.
 
-> [!note] Purchase documents — planned, not built ([[0099-purchases-scope-model-and-optionality]] §10)
-> Purchases Phase 1 adds the parent type **`PURCHASE_ORDER`** (an enum value appended at the tail),
-> reusing the asset documents allowlist and 25 MB cap, gated by `purchaseOrder:read` / `:write`, with the
-> same 404-not-403 rule. A purchase's documents are **shared, not copied**: the same rows are listed
-> read-only on every asset linked to the purchase — to principals holding `purchaseOrder:read` only
-> (ADR-0099 §8, CEO decision D-A) — and upload and delete happen on the purchase. A purchase document may
-> carry an optional free-text type label (quote, invoice, delivery note), never a closed list. Because they
-> are financial evidence, ADR-0099 §12 makes the **attachments backup a prerequisite** shipping before or
-> alongside Phase 1.
+> [!note] Purchase documents — built (#1473, [[0099-purchases-scope-model-and-optionality]] §10)
+> The parent type **`PURCHASE_ORDER`** (an enum value appended at the tail) reuses the asset documents
+> allowlist and 25 MB cap — the same `SURFACE` entry — gated by `purchaseOrder:read` / `:write`, with the
+> same 404 for a missing or archived parent. Routes: `POST|GET /purchase-orders/:id/attachments`,
+> `GET …/:attachmentId/content`, `DELETE …/:attachmentId` (`PurchaseOrderAttachmentsController`). Writes are
+> human-only, like asset documents, and also append `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` to the
+> [[purchase-order-event]] log in the same transaction as the row. A purchase's documents are **shared, not
+> copied**: the same rows are listed read-only on every asset linked to the purchase through
+> `GET /assets/:id/purchase` — to principals holding `purchaseOrder:read` only (ADR-0099 §8, CEO decision
+> D-A) — and downloaded through the purchase's content route; upload and delete happen on the purchase. The
+> GC treats them like asset documents: pinned by their own live row, reclaimed after an explicit delete.
+> The optional free-text type label (quote, invoice, delivery note) is **not built yet** (it needs a
+> column). Because they are financial evidence, ADR-0099 §12 makes the **attachments backup a
+> prerequisite** shipping before or alongside Phase 1.
 
 ## Fields
 
@@ -81,7 +86,7 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/attachment.ts`).
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | `@default(cuid())`. |
-| `entityType` | `enum AttachmentEntityType` | `ASSET` \| `ARTICLE` (`PURCHASE_ORDER` planned, Purchases Phase 1). |
+| `entityType` | `enum AttachmentEntityType` | `ASSET` \| `ARTICLE` \| `PURCHASE_ORDER` (#1473). |
 | `entityId` | `string` | soft ref → the parent's id, **no FK**. |
 | `sha256` | `string` | content hash = the on-disk blob key (dedup); indexed. |
 | `byteSize` | `int` | size of the stored blob. |

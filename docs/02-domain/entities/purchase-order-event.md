@@ -8,11 +8,11 @@ updated: 2026-10-02
 
 # PurchaseOrderEvent
 
-> 🟢 built (#1472) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built (#1472; receiving, linking and document events #1473) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — model, writer and read (#1472)
-> Model `PurchaseOrderEvent` (`purchase_order_events`), written by `PurchaseOrdersService` in the same
-> transaction as each change, read through `GET /purchase-orders/:id/events` (`Page<T>`, newest first,
+> Model `PurchaseOrderEvent` (`purchase_order_events`), written through the one shared writer
+> `recordPurchaseOrderEvent` (`purchase-order-events.ts`) in the same transaction as each change, read through `GET /purchase-orders/:id/events` (`Page<T>`, newest first,
 > `purchaseOrder:read`). The DB CHECK `purchase_order_events_one_actor` is in the migration.
 
 ## Purpose
@@ -60,9 +60,15 @@ default ([[0006-soft-delete-and-auditing]]).
 | `LINE_UPDATED` | update a line | `{ lineId, changes: { field: { from, to } } }` — prices and quantities before and after |
 | `LINE_REMOVED` | remove a line | `{ lineId, description }` |
 | `DELETED` / `RESTORED` | soft delete / restore (restore of a live purchase writes nothing) | — |
+| `UNITS_RECEIVED` | a receive against a line (#1473) — ONE row per receive, after the per-unit loop | `{ lineId, quantity, assetIds, failed, overReceived }` |
+| `UNITS_CANCELLED` | cancel remaining units | `{ lineId, quantity, cancelledQuantity: { from, to }, reason }` |
+| `ASSET_LINKED` | link existing assets — one row per request | `{ lineId, assetIds, applied: { assetId: field[] }, moved: [{ assetId, purchaseOrderId, lineId }], overReceived }` |
+| `ASSET_UNLINKED` | unlink; or, on the purchase an asset was **moved** away from | `{ lineId, assetIds }`, plus `{ movedToPurchaseOrderId, movedToLineId }` on a move |
+| `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` | upload / delete a purchase document | `{ attachmentId, originalName }` |
 
-Money in a payload is a JSON number of minor units. Later units append `UNITS_RECEIVED`, `UNITS_CANCELLED`,
-`ASSET_LINKED`, `ASSET_UNLINKED`, `DOCUMENT_ADDED` and `DOCUMENT_REMOVED`.
+Money in a payload is a JSON number of minor units. A receive's units are separate transactions (the
+asset-tag counter, [[0089-bulk-receiving-and-checkout-acknowledgement]]), so `UNITS_RECEIVED` is appended
+after them rather than with each; every unit's own `CREATED` [[asset-history]] event names the line.
 
 ## Conventions
 
