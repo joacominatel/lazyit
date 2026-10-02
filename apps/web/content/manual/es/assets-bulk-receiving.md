@@ -76,6 +76,27 @@ lote.
 Desde el resultado puedes ir directamente a los nuevos activos (el inventario filtrado por ese modelo),
 **recibir más** o cerrar.
 
+## Recibir contra una compra
+
+Si registras [compras](/help/purchases-recording-purchases), las unidades de una entrega se pueden recibir
+**contra su línea de compra**: quedan vinculadas a ella, cuentan como recibidas y toman los valores de la
+compra sin volver a escribirlos. Hay tres caminos:
+
+- **Desde una compra**, arriba de este formulario, lista las líneas que todavía esperan unidades. Elige
+  una y el formulario pasa a esa línea, completado desde la compra.
+- Cuando eliges un **modelo** que una compra abierta está esperando, una pista discreta bajo el modelo te
+  ofrece **recibir contra ella**.
+- En la propia compra, **Recibir** en la línea abre este mismo formulario ya completado.
+
+Contra una línea, los números de serie van primero y la **cantidad los sigue**; los valores de la compra
+se muestran como un resumen que puedes **Cambiar** solo para esta recepción. Los detalles están en
+[Compras — Recibir unidades](/help/purchases-recording-purchases#recibir-unidades). El formulario de
+**Nuevo activo** ofrece el mismo selector *Desde una compra*: elegir una línea abre este formulario para
+ella.
+
+Estas opciones aparecen solo si puedes ver y editar compras, y solo mientras alguna compra espera
+unidades.
+
 ## Cuándo usar la importación en su lugar
 
 Recibir stock es para unidades **nuevas** de un **único** modelo — uno que ya tienes, o uno que creas
