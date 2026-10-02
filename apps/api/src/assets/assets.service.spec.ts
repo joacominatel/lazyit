@@ -1207,7 +1207,24 @@ describe('AssetsService', () => {
     return out;
   };
   const CSV_HEADER =
-    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt';
+    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt,purchaseCost,purchaseCurrency';
+  // The export's projection: the lean list select plus the cost columns and the linked purchase (#1473).
+  const EXPECTED_EXPORT_SELECT = {
+    ...EXPECTED_LIST_SELECT,
+    purchaseCost: true,
+    purchaseCurrency: true,
+    purchaseOrderLine: {
+      select: {
+        purchaseOrder: {
+          select: {
+            reference: true,
+            invoiceNumbers: true,
+            supplier: { select: { name: true } },
+          },
+        },
+      },
+    },
+  };
 
   it('streamInventoryCsvRows yields the header first, then batches over the lean select and terminates', async () => {
     // A FULL batch then a short (empty) one → proves the OFFSET loop terminates without an extra call.
@@ -1231,7 +1248,7 @@ describe('AssetsService', () => {
         [{ where: unknown; orderBy: unknown; take: number; select: unknown }]
       >
     )[0][0];
-    expect(args.select).toEqual(EXPECTED_LIST_SELECT);
+    expect(args.select).toEqual(EXPECTED_EXPORT_SELECT);
     expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     expect(args.take).toBe(AssetsService.EXPORT_BATCH_SIZE);
     expect(args.where).toEqual({ deletedAt: null });
