@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AssetSchema, AssetStatusSchema } from "./asset";
 import { int4, money, optionalText } from "./primitives";
+import { currencyLabel } from "./purchase-order";
 
 /**
  * Bulk receiving (ADR-0089 Part A, issue #1029) — mint N assets from ONE AssetModel in a single action
@@ -31,6 +32,12 @@ export const RECEIVE_ASSETS_MAX_QUANTITY = 200;
  * to unit `i`, otherwise the units are serial-less. `company`/`notes` reuse {@link optionalText} (an
  * empty string coerces to absent). Duplicate serials within the batch (or colliding with a live serial)
  * are NOT pre-validated — the DB unique constraint catches them as a per-unit failure (partial success).
+ *
+ * Purchases (ADR-0099, #1473), all optional and additive: `purchaseCurrency` is the free-text label of
+ * `purchaseCost` (cost and currency move together); `warrantyEnd` applies to every unit; and
+ * `purchaseOrderLineId` receives the units AGAINST a purchase line ("From purchase") — the line must be a
+ * live `ASSET` line of a live purchase (400 otherwise) and the caller must also hold `purchaseOrder:write`
+ * (403 otherwise). Receiving past the line's pending count is allowed and flagged in the result.
  */
 export const ReceiveAssetsSchema = z
   .strictObject({
@@ -42,6 +49,9 @@ export const ReceiveAssetsSchema = z
     purchaseDate: z.iso.datetime().optional(),
     // Minor units (#954) — forwarded verbatim to create(); NEVER re-coerced in shared or api.
     purchaseCost: money().nullish(),
+    purchaseCurrency: currencyLabel(),
+    warrantyEnd: z.iso.datetime().optional(),
+    purchaseOrderLineId: z.cuid().optional(),
     notes: optionalText(2000),
     serials: z.array(z.string().trim().min(1).max(200)).optional(),
   })
@@ -72,6 +82,11 @@ export const ReceiveAssetsResultSchema = z.object({
       error: z.string(),
     }),
   ),
+  /**
+   * Present only when the units were received against a purchase line (#1473): whether the line is now
+   * over-received — more live units than quantity − cancelled. A warning, never a refusal (ADR-0099 §4).
+   */
+  overReceived: z.boolean().optional(),
 });
 
 export type ReceiveAssets = z.infer<typeof ReceiveAssetsSchema>;

@@ -152,6 +152,85 @@ describe('SuggestionsService (ADR-0099 §7)', () => {
     expect(prisma.purchaseOrderLine.groupBy).toHaveBeenCalledTimes(2);
   });
 
+  it('suggests purchase references, invoice numbers and line descriptions (#1473), live purchases only', async () => {
+    prisma.purchaseOrder.groupBy.mockImplementation((args: { by: string[] }) =>
+      Promise.resolve(
+        args.by[0] === 'reference'
+          ? [
+              {
+                reference: 'OC-4512',
+                _count: { _all: 2 },
+                _max: { updatedAt: at('2026-10-01T00:00:00Z') },
+              },
+            ]
+          : [
+              {
+                invoiceNumbers: 'A-0003-12345',
+                _count: { _all: 1 },
+                _max: { updatedAt: at('2026-10-01T00:00:00Z') },
+              },
+            ],
+      ),
+    );
+    prisma.purchaseOrderLine.groupBy.mockResolvedValue([
+      {
+        description: 'Lenovo ThinkPad E14 Gen 5',
+        _count: { _all: 3 },
+        _max: { updatedAt: at('2026-10-02T00:00:00Z') },
+      },
+    ]);
+
+    await expect(
+      service.suggest('reference', { q: 'oc', limit: 10 }, human('MEMBER')),
+    ).resolves.toEqual([
+      { value: 'OC-4512', count: 2, lastUsedAt: '2026-10-01T00:00:00.000Z' },
+    ]);
+    expect(prisma.purchaseOrder.groupBy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        by: ['reference'],
+        where: {
+          reference: { not: null, contains: 'oc', mode: 'insensitive' },
+        },
+      }),
+    );
+    await expect(
+      service.suggest('invoiceNumbers', { limit: 10 }, human('MEMBER')),
+    ).resolves.toEqual([
+      {
+        value: 'A-0003-12345',
+        count: 1,
+        lastUsedAt: '2026-10-01T00:00:00.000Z',
+      },
+    ]);
+    await expect(
+      service.suggest('lineDescription', { limit: 10 }, human('MEMBER')),
+    ).resolves.toEqual([
+      {
+        value: 'Lenovo ThinkPad E14 Gen 5',
+        count: 3,
+        lastUsedAt: '2026-10-02T00:00:00.000Z',
+      },
+    ]);
+    // A line of an archived purchase is archived with it.
+    expect(prisma.purchaseOrderLine.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['description'],
+        where: { purchaseOrder: { deletedAt: null } },
+      }),
+    );
+  });
+
+  it.each(['reference', 'invoiceNumbers', 'lineDescription'] as const)(
+    'refuses %s to a VIEWER (purchaseOrder:read only) without reading anything',
+    async (field) => {
+      await expect(
+        service.suggest(field, { limit: 10 }, human('VIEWER')),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.purchaseOrder.groupBy).not.toHaveBeenCalled();
+      expect(prisma.purchaseOrderLine.groupBy).not.toHaveBeenCalled();
+    },
+  );
+
   it("uses a service account's direct grants, and refuses an anonymous caller", async () => {
     const sa = {
       kind: 'service',

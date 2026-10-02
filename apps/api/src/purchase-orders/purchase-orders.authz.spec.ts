@@ -4,6 +4,7 @@ jest.mock('../../generated/prisma/client', () => ({
   Prisma: { defineExtension: (x: unknown) => x, join: (x: unknown) => x },
 }));
 jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import {
   type CanActivate,
@@ -23,8 +24,15 @@ import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { SuppliersController } from './suppliers.controller';
 import { SuppliersService } from './suppliers.service';
+import { PurchaseReceivingService } from './purchase-receiving.service';
+import { AssetPurchaseController } from './asset-purchase.controller';
+import { PurchaseOrderAttachmentsController } from '../attachments/purchase-order-attachments.controller';
+import { AttachmentsService } from '../attachments/attachments.service';
 
 const PO = 'clpo00000000000000000001';
+const LINE = 'clline000000000000000001';
+const ASSET = 'classet00000000000000001';
+const ATT = 'clatt0000000000000000001';
 
 /**
  * Purchases authorization end to end (ADR-0099 §8): the REAL RolesGuard and PermissionResolverService over
@@ -68,6 +76,16 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
     updateLine: ok,
     removeLine: ok,
   };
+  const receiving = {
+    findPendingLines: ok,
+    linkPreview: ok,
+    linkAssets: ok,
+    unlinkAssets: ok,
+    receiveFromLine: ok,
+    findAssetProvenance: ok,
+  };
+  const attachments = { list: ok, upload: ok, remove: ok };
+  (purchases as Record<string, jest.Mock>).cancelRemaining = ok;
   const suppliers = {
     findPage: ok,
     findOne: ok,
@@ -90,13 +108,20 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       },
     };
     const moduleRef = await Test.createTestingModule({
-      controllers: [PurchaseOrdersController, SuppliersController],
+      controllers: [
+        PurchaseOrdersController,
+        SuppliersController,
+        AssetPurchaseController,
+        PurchaseOrderAttachmentsController,
+      ],
       providers: [
         Reflector,
         PermissionResolverService,
         { provide: PrismaService, useValue: prisma },
         { provide: PurchaseOrdersService, useValue: purchases },
         { provide: SuppliersService, useValue: suppliers },
+        { provide: PurchaseReceivingService, useValue: receiving },
+        { provide: AttachmentsService, useValue: attachments },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
@@ -225,6 +250,148 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       await http()
         .get(`/purchase-orders${as('role=ADMIN')}&status=RECEIVED`)
         .expect(400);
+    });
+  });
+  describe('flows (#1473)', () => {
+    beforeEach(() => ok.mockClear());
+
+    it("an asset's provenance: 403 for a VIEWER (asset:read alone), 200 for a MEMBER", async () => {
+      await http()
+        .get(`/assets/${ASSET}/purchase${as('role=VIEWER')}`)
+        .expect(403);
+      expect(receiving.findAssetProvenance).not.toHaveBeenCalled();
+      await http()
+        .get(`/assets/${ASSET}/purchase${as('role=MEMBER')}`)
+        .expect(200);
+      await http()
+        .get(`/assets/${ASSET}/purchase${as('sa=asset:read')}`)
+        .expect(403);
+      await http()
+        .get(
+          `/assets/${ASSET}/purchase${as('sa=asset:read,purchaseOrder:read')}`,
+        )
+        .expect(200);
+    });
+
+    it('pending-lines is its own route (never read as an id), purchaseOrder:read', async () => {
+      await http()
+        .get(`/purchase-orders/pending-lines${as('role=MEMBER')}`)
+        .expect(200);
+      // Every stub shares one mock: the pending read got its parsed filters, and nothing was handed
+      // "pending-lines" as a purchase id.
+      expect(ok).toHaveBeenCalledWith(
+        { supplierId: undefined },
+        expect.objectContaining({ limit: 50 }),
+      );
+      expect(ok).not.toHaveBeenCalledWith('pending-lines');
+      await http()
+        .get(`/purchase-orders/pending-lines${as('role=VIEWER')}`)
+        .expect(403);
+    });
+
+    it('linking, unlinking and receiving need purchaseOrder:write AND asset:write', async () => {
+      const writes: [string, object][] = [
+        [
+          `/purchase-orders/${PO}/lines/${LINE}/link-assets`,
+          { assetIds: [ASSET] },
+        ],
+        [
+          `/purchase-orders/${PO}/lines/${LINE}/unlink-assets`,
+          { assetIds: [ASSET] },
+        ],
+        [`/purchase-orders/${PO}/lines/${LINE}/receive`, {}],
+      ];
+      for (const [path, body] of writes) {
+        await http()
+          .post(`${path}${as('sa=purchaseOrder:write')}`)
+          .send(body)
+          .expect(403);
+        await http()
+          .post(`${path}${as('sa=asset:write')}`)
+          .send(body)
+          .expect(403);
+        await http()
+          .post(`${path}${as('sa=purchaseOrder:write,asset:write')}`)
+          .send(body)
+          .expect(201);
+        await http()
+          .post(`${path}${as('role=MEMBER')}`)
+          .send(body)
+          .expect(201);
+        await http()
+          .post(`${path}${as('role=VIEWER')}`)
+          .send(body)
+          .expect(403);
+      }
+    });
+
+    it('the link preview is a read: purchaseOrder:read and asset:read', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/link-preview`;
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:read,asset:read')}`)
+        .send({ assetIds: [ASSET] })
+        .expect(201);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:read')}`)
+        .send({ assetIds: [ASSET] })
+        .expect(403);
+    });
+
+    it('cancel remaining is a purchase write; the body is validated at the edge', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/cancel-remaining`;
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send({})
+        .expect(403);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send({ quantity: 1, reason: 'never came' })
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send({ quantity: 0 })
+        .expect(400);
+    });
+
+    it('400 at the edge: an unknown apply field, a duplicate id, serials that do not match quantity', async () => {
+      await http()
+        .post(
+          `/purchase-orders/${PO}/lines/${LINE}/link-assets${as('role=ADMIN')}`,
+        )
+        .send({ assetIds: [ASSET], apply: ['serial'] })
+        .expect(400);
+      await http()
+        .post(
+          `/purchase-orders/${PO}/lines/${LINE}/link-assets${as('role=ADMIN')}`,
+        )
+        .send({ assetIds: [ASSET, ASSET] })
+        .expect(400);
+      await http()
+        .post(`/purchase-orders/${PO}/lines/${LINE}/receive${as('role=ADMIN')}`)
+        .send({ quantity: 3, serials: ['A'] })
+        .expect(400);
+    });
+
+    it('purchase documents: purchaseOrder:read to list and download, purchaseOrder:write to remove', async () => {
+      const base = `/purchase-orders/${PO}/attachments`;
+      await http()
+        .get(`${base}${as('role=VIEWER')}`)
+        .expect(403);
+      await http()
+        .get(`${base}${as('sa=asset:read')}`)
+        .expect(403);
+      await http()
+        .get(`${base}${as('role=MEMBER')}`)
+        .expect(200);
+      await http()
+        .delete(`${base}/${ATT}${as('sa=purchaseOrder:read')}`)
+        .expect(403);
+      await http()
+        .delete(`${base}/${ATT}${as('role=MEMBER')}`)
+        .expect(200);
+      await http()
+        .get(`${base}/${ATT}/content${as('role=VIEWER')}`)
+        .expect(403);
     });
   });
 });

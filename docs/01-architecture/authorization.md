@@ -151,9 +151,27 @@ three roles **except** two tighter tiers:
 > **An asset's purchase provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A,
 > 2026-10-01). The asset page's *Purchase* panel — supplier, reference, dates and the purchase documents
 > listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
-> not only the UI (built with the panel, #1473). Without it, the asset still reads normally under
-> `asset:read`, own purchase fields (cost, currency, dates) included — and so does the bare
-> `purchaseOrderLineId`, an opaque id that reveals no supplier, reference, date or price.
+> not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
+> (cost, currency, dates) included — and so does the bare `purchaseOrderLineId`, an opaque id that reveals
+> no supplier, reference, date or price.
+>
+> **Routes that need two permissions** (#1473). Where a purchase flow also reads or writes assets, the
+> route requires both — AND semantics, so a service account needs both grants:
+>
+> | Route | Requires |
+> | --- | --- |
+> | `GET /assets/:id/purchase` (provenance) | `asset:read` + `purchaseOrder:read` — a VIEWER gets `403` |
+> | `POST /purchase-orders/:id/lines/:lineId/link-preview` | `purchaseOrder:read` + `asset:read` |
+> | `POST …/lines/:lineId/link-assets` · `…/unlink-assets` · `…/receive` | `purchaseOrder:write` + `asset:write` |
+> | `POST …/lines/:lineId/cancel-remaining` · `GET /purchase-orders/pending-lines` | `purchaseOrder:write` · `purchaseOrder:read` |
+> | `/purchase-orders/:id/attachments/**` (documents) | `purchaseOrder:read` to list and download, `:write` to upload and delete (human-only) |
+>
+> Two decisions are made **in the service**, because a decorator cannot see them: `POST
+> /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
+> `purchaseOrder:write` (`403`); and `GET /assets/export` appends the supplier, purchase reference and
+> invoice numbers columns only for a caller holding `purchaseOrder:read`. Both resolve the principal's
+> permissions through `PermissionResolverService.principalHas` — a human by role, a service account by its
+> grants, no principal never.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

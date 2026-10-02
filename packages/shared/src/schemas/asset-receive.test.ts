@@ -88,8 +88,8 @@ describe("ReceiveAssetsSchema", () => {
 
   test("rejects an unknown key (strictObject)", () => {
     expect(
-      ReceiveAssetsSchema.safeParse({ ...base, warrantyEnd: "2027-01-01T00:00:00.000Z" })
-        .success,
+      // `warrantyEnd` became a known key in #1473 (receive against a purchase line); `assetTag` stays unknown.
+      ReceiveAssetsSchema.safeParse({ ...base, assetTag: "LZ-0001" }).success,
     ).toBe(false);
   });
 });

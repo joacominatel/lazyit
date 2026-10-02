@@ -330,7 +330,7 @@ export class AssetsController {
   @ApiProduces('text/csv')
   @ApiOperation({
     summary:
-      'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1).',
+      'Bulk CSV export of the WHOLE filtered asset inventory (issue #872), gated on asset:read. Takes the SAME filters as GET /assets (minus paging/sort) and streams EVERY matching asset newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. `deleted=only` (archived) is ADMIN-only (403 otherwise). The per-unit `specs` jsonb is not included (v1). Purchase cost and currency are always included; the supplier, purchase reference and invoice numbers columns are appended only when the caller holds purchaseOrder:read (ADR-0099 §8).',
   })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'modelId', required: false })
@@ -371,6 +371,7 @@ export class AssetsController {
     @Query('warranty') warranty?: string,
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
+    @CurrentPrincipal() principal?: Principal,
   ): StreamableFile {
     const filters = this.parseAssetFilters({
       categoryId,
@@ -391,9 +392,12 @@ export class AssetsController {
     const filename = `lazyit-assets-${new Date().toISOString().slice(0, 10)}.csv`;
     // Readable.from drains the async generator one chunk at a time → never the whole estate in memory.
     return new StreamableFile(
-      Readable.from(this.assets.streamInventoryCsvRows(filters, slice), {
-        objectMode: false,
-      }),
+      Readable.from(
+        this.assets.streamInventoryCsvRows(filters, slice, principal),
+        {
+          objectMode: false,
+        },
+      ),
       {
         type: 'text/csv; charset=utf-8',
         disposition: `attachment; filename="${filename}"`,
@@ -662,7 +666,7 @@ export class AssetsController {
   @RequirePermission('asset:write')
   @ApiOperation({
     summary:
-      'Bulk receive: mint N assets from one model in a single action; returns { created, failed[] } (partial success by design) (ADMIN or MEMBER)',
+      'Bulk receive: mint N assets from one model in a single action; returns { created, failed[] } (partial success by design) (ADMIN or MEMBER). With purchaseOrderLineId the units are received against that purchase line (also needs purchaseOrder:write; the result then carries overReceived).',
   })
   @ApiCreatedResponse({ type: ReceiveAssetsResultDto })
   receiveBatch(

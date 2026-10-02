@@ -1121,6 +1121,13 @@ enum AssetHistoryEventType {
   // A RETURN against a returnable delivery made to this asset (ADR-0098): an IN movement linked to the
   // delivery via returnOfId. Same payload plus { returnOfId } (the delivery movement id).
   CONSUMABLE_RETURNED
+  // Linked to / unlinked from a purchase line (ADR-0099 §2, #1473). PURCHASE_LINKED payload
+  // { purchaseOrderId, purchaseOrderLineId, applied[] } (+ { fromPurchaseOrderId, fromPurchaseOrderLineId } on a
+  // move); PURCHASE_UNLINKED payload { purchaseOrderId, purchaseOrderLineId }. Written in the SAME transaction as
+  // the link change and its purchase-side PurchaseOrderEvent. A unit generated from a line records the line on
+  // its CREATED event instead.
+  PURCHASE_LINKED
+  PURCHASE_UNLINKED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
@@ -3110,6 +3117,8 @@ model InfraAutoConfirmRule {
 enum AttachmentEntityType {
   ASSET
   ARTICLE
+  // A purchase's documents (ADR-0099 §10, #1473): the ASSET allowlist and cap, behind purchaseOrder:read/write.
+  PURCHASE_ORDER
 }
 
 /// A user-uploaded file on an Asset (documents: warranty PDFs, receipts, damage photos) or an

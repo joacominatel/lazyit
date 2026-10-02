@@ -73,6 +73,7 @@ describe('AssetsService.update — plain edits through the AI path', () => {
       new AssetHistoryService(prisma as never),
       { upsert: jest.fn() } as never,
       {} as never,
+      { principalHas: jest.fn().mockResolvedValue(false) } as never,
     );
   });
 

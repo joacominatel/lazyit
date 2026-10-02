@@ -11,9 +11,9 @@ import {
   offsetOf,
   pageOf,
   type CreatePurchaseOrder,
+  type CancelRemainingUnits,
   type CreatePurchaseOrderLine,
   type PageQuery,
-  type PurchaseOrderEventType,
   type PurchaseOrderReceiptFilter,
   type PurchaseOrderStatus,
   type UpdatePurchaseOrder,
@@ -21,9 +21,8 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorService, type ActorAttribution } from '../common/actor.service';
+import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
-import { currentAiInvocationId } from '../ai/core/invocation-context';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import {
@@ -38,6 +37,7 @@ import {
   purchaseTotals,
   type LineInput,
 } from './purchase-order-derived';
+import { recordPurchaseOrderEvent } from './purchase-order-events';
 
 /** Optional filters for listing purchases. */
 export interface PurchaseOrderFilters {
@@ -359,7 +359,8 @@ export class PurchaseOrdersService {
     };
   }
 
-  private lineToWire(line: LineRow, values: ReturnType<typeof deriveLine>) {
+  /** A line row as the wire carries it: money as numbers, plus its derived receipt values. */
+  lineToWire(line: LineRow, values: ReturnType<typeof deriveLine>) {
     return {
       ...purchaseOrderLineMoneyToWire(line),
       receivedQuantity: values.receivedQuantity,
@@ -416,7 +417,7 @@ export class PurchaseOrdersService {
           },
         },
       });
-      await this.recordEvent(tx, created.id, 'CREATED', actor, {
+      await recordPurchaseOrderEvent(tx, created.id, 'CREATED', actor, {
         lineCount: lines.length,
       });
       return this.readDetail(tx, created.id);
@@ -443,14 +444,14 @@ export class PurchaseOrdersService {
       }
       await tx.purchaseOrder.update({ where: { id }, data });
       if (data.status !== undefined && data.status !== before.status) {
-        await this.recordEvent(tx, id, 'STATUS_CHANGED', actor, {
+        await recordPurchaseOrderEvent(tx, id, 'STATUS_CHANGED', actor, {
           from: before.status,
           to: data.status,
         });
       }
       const changes = diff(before, data, HEADER_FIELDS);
       if (Object.keys(changes).length > 0) {
-        await this.recordEvent(tx, id, 'UPDATED', actor, {
+        await recordPurchaseOrderEvent(tx, id, 'UPDATED', actor, {
           fields: Object.keys(changes),
           changes,
         });
@@ -468,7 +469,7 @@ export class PurchaseOrdersService {
         where: { id },
         data: { deletedAt: new Date() },
       });
-      await this.recordEvent(tx, id, 'DELETED', actor);
+      await recordPurchaseOrderEvent(tx, id, 'DELETED', actor);
       return tx.purchaseOrder.findFirstOrThrow({
         where: { id },
         includeSoftDeleted: true,
@@ -493,7 +494,7 @@ export class PurchaseOrdersService {
           where: { id },
           data: { deletedAt: null },
         });
-        await this.recordEvent(tx, id, 'RESTORED', actor);
+        await recordPurchaseOrderEvent(tx, id, 'RESTORED', actor);
       }
       return this.readDetail(tx, id);
     });
@@ -523,7 +524,7 @@ export class PurchaseOrdersService {
       const line = await tx.purchaseOrderLine.create({
         data: { purchaseOrderId, ...this.lineCreateData(data, position) },
       });
-      await this.recordEvent(tx, purchaseOrderId, 'LINE_ADDED', actor, {
+      await recordPurchaseOrderEvent(tx, purchaseOrderId, 'LINE_ADDED', actor, {
         lineId: line.id,
         description: line.description,
         quantity: line.quantity,
@@ -546,10 +547,13 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
+      // A kind change is checked against the linked assets: lock the purchase first so a concurrent link
+      // (which takes KEY SHARE on it) cannot slip a unit in between the check and the write.
       const { line: before } = await this.assertLineLive(
         tx,
         purchaseOrderId,
         lineId,
+        { lock: data.kind !== undefined },
       );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
       const quantity = data.quantity ?? before.quantity;
@@ -576,10 +580,16 @@ export class PurchaseOrdersService {
       });
       const changes = diff(before, data, LINE_FIELDS);
       if (Object.keys(changes).length > 0) {
-        await this.recordEvent(tx, purchaseOrderId, 'LINE_UPDATED', actor, {
-          lineId,
-          changes,
-        });
+        await recordPurchaseOrderEvent(
+          tx,
+          purchaseOrderId,
+          'LINE_UPDATED',
+          actor,
+          {
+            lineId,
+            changes,
+          },
+        );
       }
       return this.readLine(tx, lineId);
     });
@@ -620,12 +630,70 @@ export class PurchaseOrdersService {
         where: { id: lineId },
         data: { deletedAt: now },
       });
-      await this.recordEvent(tx, purchaseOrderId, 'LINE_REMOVED', actor, {
-        lineId,
-        description: line.description,
-      });
+      await recordPurchaseOrderEvent(
+        tx,
+        purchaseOrderId,
+        'LINE_REMOVED',
+        actor,
+        {
+          lineId,
+          description: line.description,
+        },
+      );
       // Nothing is linked (checked above), so the line reads as received 0 — the full line shape.
       return { ...this.lineToWire(line, deriveLine(line, 0)), deletedAt: now };
+    });
+  }
+
+  /**
+   * Cancel units that will not arrive ("cancel remaining units", ADR-0099 §3): adds `quantity` (default every
+   * pending unit) to the line's cancelled count and writes `UNITS_CANCELLED` with the optional reason. The
+   * line row is locked first, so two concurrent cancels cannot both take the same pending units. Refuses a
+   * line with nothing pending (409) and a quantity beyond the pending count (400).
+   */
+  async cancelRemaining(
+    purchaseOrderId: string,
+    lineId: string,
+    data: CancelRemainingUnits,
+    principal?: Principal,
+  ) {
+    const actor = this.actor.resolveActor(principal);
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertLineLive(tx, purchaseOrderId, lineId);
+      await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
+      // Re-read under the lock: the cancelled count may have moved since the check above.
+      const line = await tx.purchaseOrderLine.findFirstOrThrow({
+        where: { id: lineId },
+      });
+      const received = await this.receivedByLine(tx, [lineId]);
+      const { pendingQuantity } = deriveLine(line, received.get(lineId) ?? 0);
+      if (pendingQuantity === 0) {
+        throw new ConflictException('This line has no pending units to cancel');
+      }
+      const quantity = data.quantity ?? pendingQuantity;
+      if (quantity > pendingQuantity) {
+        throw new BadRequestException(
+          `Only ${pendingQuantity} unit(s) are pending on this line`,
+        );
+      }
+      const to = line.cancelledQuantity + quantity;
+      await tx.purchaseOrderLine.update({
+        where: { id: lineId },
+        data: { cancelledQuantity: to },
+      });
+      await recordPurchaseOrderEvent(
+        tx,
+        purchaseOrderId,
+        'UNITS_CANCELLED',
+        actor,
+        {
+          lineId,
+          quantity,
+          cancelledQuantity: { from: line.cancelledQuantity, to },
+          reason: data.reason ?? null,
+        },
+      );
+      return this.readLine(tx, lineId);
     });
   }
 
@@ -639,8 +707,8 @@ export class PurchaseOrdersService {
     });
   }
 
-  /** One line with its derived values. */
-  private async readLine(tx: Tx, lineId: string) {
+  /** One line with its derived values (also read by the receiving flows after their writes). */
+  async readLine(tx: Tx | PrismaService, lineId: string) {
     const line = await tx.purchaseOrderLine.findFirstOrThrow({
       where: { id: lineId },
     });
@@ -669,9 +737,12 @@ export class PurchaseOrdersService {
     return purchase;
   }
 
-  /** A live line of a live purchase (404 otherwise — a line of another purchase is not found here). */
-  private async assertLineLive(
-    tx: Tx,
+  /**
+   * A live line of a live purchase (404 otherwise — a line of another purchase is not found here). An
+   * archived purchase therefore takes no new link, unit or cancellation (ADR-0099 §9).
+   */
+  async assertLineLive(
+    tx: Tx | PrismaService,
     purchaseOrderId: string,
     lineId: string,
     options: { lock?: boolean } = {},
@@ -749,31 +820,5 @@ export class PurchaseOrdersService {
     if (missing.length > 0) {
       throw new BadRequestException(`AssetModel ${missing[0]} not found`);
     }
-  }
-
-  /**
-   * Append one activity-log row in the caller's transaction. The actor is a human OR a service account,
-   * never both (the DB CHECK backs it); an AI tool call stamps its invocation id, as on asset history.
-   */
-  private recordEvent(
-    tx: Tx,
-    purchaseOrderId: string,
-    eventType: PurchaseOrderEventType,
-    actor: ActorAttribution,
-    payload?: Record<string, Prisma.InputJsonValue | null>,
-  ) {
-    const aiInvocationId = currentAiInvocationId();
-    return tx.purchaseOrderEvent.create({
-      data: {
-        purchaseOrderId,
-        eventType,
-        ...(payload !== undefined ? { payload: payload } : {}),
-        ...(actor.userId != null ? { performedById: actor.userId } : {}),
-        ...(actor.serviceAccountId != null
-          ? { serviceAccountId: actor.serviceAccountId }
-          : {}),
-        ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
-      },
-    });
   }
 }

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,7 +18,7 @@ import type {
 } from '@lazyit/shared';
 import {
   applyAssetModelSpecsDefaults,
-  ASSET_INVENTORY_CSV_HEADER,
+  assetInventoryCsvHeader,
   assetInventoryCsvRow,
   computeAssetBookValue,
   offsetOf,
@@ -44,6 +45,12 @@ import {
   AssetTagSchemeService,
   isUniqueTagCollision,
 } from '../asset-tag-scheme/asset-tag-scheme.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
+import {
+  isOverReceived,
+  loadReceivableLine,
+} from '../purchase-orders/purchase-order-line-receipt';
 
 /**
  * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
@@ -176,6 +183,21 @@ type AssetWithIncludes = Prisma.AssetGetPayload<{
   include: typeof ASSET_RELATIONS;
 }>;
 
+/**
+ * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
+ * `purchaseOrder:read` (ADR-0099 §8). An archived purchase or supplier still names the asset's provenance:
+ * soft delete keeps every link (§9).
+ */
+const EXPORT_PURCHASE_SELECT = {
+  purchaseOrder: {
+    select: {
+      reference: true,
+      invoiceNumbers: true,
+      supplier: { select: { name: true } },
+    },
+  },
+} as const satisfies Prisma.PurchaseOrderLineSelect;
+
 // Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
 // `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
 // active owners) to only the fields the list shows — not the full related rows. Keeps the full graph
@@ -224,6 +246,28 @@ const ASSET_LIST_SELECT = {
     },
   },
 } satisfies Prisma.AssetSelect;
+
+/** The inventory export's projection: the list's, plus the asset's own cost columns (`asset:read`). */
+const EXPORT_SELECT = {
+  ...ASSET_LIST_SELECT,
+  purchaseCost: true,
+  purchaseCurrency: true,
+} as const satisfies Prisma.AssetSelect;
+
+/** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
+const EXPORT_SELECT_WITH_PURCHASE = {
+  ...EXPORT_SELECT,
+  purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
+} as const satisfies Prisma.AssetSelect;
+
+/** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
+type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
+  Partial<
+    Pick<
+      Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
+      'purchaseOrderLine'
+    >
+  >;
 
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
@@ -275,7 +319,16 @@ export class AssetsService {
     private readonly history: AssetHistoryService,
     private readonly search: SearchService,
     private readonly tagScheme: AssetTagSchemeService,
+    private readonly permissions: PermissionResolverService,
   ) {}
+
+  /** Whether the principal holds `permission` (fail-closed for no principal). */
+  private holds(
+    principal: Principal | undefined,
+    permission: Parameters<PermissionResolverService['principalHas']>[1],
+  ): Promise<boolean> {
+    return this.permissions.principalHas(principal, permission);
+  }
 
   /**
    * Rows per round-trip when STREAMING the full filtered inventory export (issue #872). Mirrors the
@@ -449,11 +502,15 @@ export class AssetsService {
   async *streamInventoryCsvRows(
     filters: AssetFilters = {},
     deleted: DeletedFilter = 'active',
+    principal?: Principal,
   ): AsyncGenerator<string> {
+    // Purchase provenance columns (supplier, reference, invoice numbers) only for a caller holding
+    // `purchaseOrder:read` (ADR-0099 §8, CEO decision D-A); cost and currency are the asset's own fields.
+    const includePurchase = await this.holds(principal, 'purchaseOrder:read');
     // Leading provenance stamp (#909): names the build that wrote the file. The migrator strips it on
     // re-import and gates on major compatibility; other tools treat it as a leading `#` comment row.
     yield `${provenanceStampLine()}\n`;
-    yield `${ASSET_INVENTORY_CSV_HEADER}\n`;
+    yield `${assetInventoryCsvHeader({ includePurchase })}\n`;
 
     const where = {
       ...this.buildWhere(filters),
@@ -467,19 +524,47 @@ export class AssetsService {
 
     let skip = 0;
     for (;;) {
-      const rows = await this.prisma.asset.findMany({
+      const batch = {
         where,
         // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
         // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: AssetsService.EXPORT_BATCH_SIZE,
         skip,
-        select: ASSET_LIST_SELECT,
         ...escapeHatch,
-      });
+      } satisfies Prisma.AssetFindManyArgs;
+      // The list projection plus the asset's cost columns and — ONLY for a caller holding
+      // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
+      // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
+      const rows: ExportRow[] = includePurchase
+        ? await this.prisma.asset.findMany({
+            ...batch,
+            select: EXPORT_SELECT_WITH_PURCHASE,
+          })
+        : await this.prisma.asset.findMany({ ...batch, select: EXPORT_SELECT });
       if (rows.length === 0) break;
       yield `${rows
-        .map((row) => assetInventoryCsvRow(this.toInventoryCsvItem(row)))
+        .map((row) =>
+          assetInventoryCsvRow(
+            {
+              ...this.toInventoryCsvItem(row),
+              purchaseCost:
+                row.purchaseCost == null ? null : Number(row.purchaseCost),
+              purchaseCurrency: row.purchaseCurrency ?? null,
+              purchase: row.purchaseOrderLine
+                ? {
+                    supplierName:
+                      row.purchaseOrderLine.purchaseOrder.supplier?.name ??
+                      null,
+                    reference: row.purchaseOrderLine.purchaseOrder.reference,
+                    invoiceNumbers:
+                      row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
+                  }
+                : null,
+            },
+            { includePurchase },
+          ),
+        )
         .join('\n')}\n`;
       skip += rows.length;
       // A short batch means the estate is exhausted — stop without an extra empty round-trip.
@@ -550,6 +635,11 @@ export class AssetsService {
     options?: {
       createdPayload?: Prisma.InputJsonValue;
       suppressSearch?: boolean;
+      /**
+       * Receive the unit against this purchase line (ADR-0099, #1473). Not a body field — `CreateAsset`
+       * never accepts it; only {@link receiveBatch} sets it, after validating the line.
+       */
+      purchaseOrderLineId?: string;
     },
   ) {
     const actor = this.actor.resolveActor(principal);
@@ -588,6 +678,9 @@ export class AssetsService {
           const created = await tx.asset.create({
             data: {
               ...assetMoneyToDb(rest),
+              ...(options?.purchaseOrderLineId !== undefined
+                ? { purchaseOrderLineId: options.purchaseOrderLineId }
+                : {}),
               ...(effectiveTag !== undefined ? { assetTag: effectiveTag } : {}),
               ...(resolvedSpecs !== undefined
                 ? { specs: resolvedSpecs as Prisma.InputJsonValue }
@@ -655,8 +748,19 @@ export class AssetsService {
    *
    * The controller returns this envelope with HTTP 201 (NestJS `@Post` default), including an all-failed
    * batch (`created: []`) — `failed` is the honest partial signal (mirrors the import row-level FAILED).
+   *
+   * Against a purchase line (`purchaseOrderLineId`, ADR-0099 §4, #1473): the caller must also hold
+   * `purchaseOrder:write` (403) and the line must be a live `ASSET` line of a live purchase (400). Each unit
+   * is created already linked to the line, its CREATED history event carrying `{ source: 'purchase',
+   * purchaseOrderId, purchaseOrderLineId }`; the loop and the tag-counter semantics are untouched. After the
+   * loop ONE `UNITS_RECEIVED` row is appended to the purchase's log (not one per unit: the units are separate
+   * transactions, and each unit's own history already records its line). Over-receipt is allowed and
+   * reported as `overReceived` — derived from the live count after the loop, so a concurrent receive shows.
    */
   async receiveBatch(data: ReceiveAssets, principal?: Principal) {
+    const line = data.purchaseOrderLineId
+      ? await this.receivableLine(data.purchaseOrderLineId, principal)
+      : null;
     // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
     // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
     const model = await this.prisma.assetModel.findFirst({
@@ -693,6 +797,12 @@ export class AssetsService {
         ...(data.purchaseCost != null
           ? { purchaseCost: data.purchaseCost }
           : {}),
+        ...(data.purchaseCurrency !== undefined
+          ? { purchaseCurrency: data.purchaseCurrency }
+          : {}),
+        ...(data.warrantyEnd !== undefined
+          ? { warrantyEnd: data.warrantyEnd }
+          : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
         ...(data.serials?.[i] ? { serial: data.serials[i] } : {}),
       };
@@ -700,7 +810,22 @@ export class AssetsService {
         // Each unit = its own tx + its own independent counter commit + its own CREATED history + search
         // upsert. A per-unit failure NEVER aborts the batch (partial success by design); the consumed tag
         // number has already advanced past this gap.
-        created.push(await this.create(unit, principal));
+        created.push(
+          await this.create(
+            unit,
+            principal,
+            line
+              ? {
+                  purchaseOrderLineId: line.id,
+                  createdPayload: {
+                    source: 'purchase',
+                    purchaseOrderId: line.purchaseOrderId,
+                    purchaseOrderLineId: line.id,
+                  },
+                }
+              : undefined,
+          ),
+        );
       } catch (err) {
         failed.push({
           index: i,
@@ -709,7 +834,38 @@ export class AssetsService {
       }
     }
 
-    return { created, failed };
+    if (!line) return { created, failed };
+    const overReceived = await isOverReceived(this.prisma, line);
+    if (created.length > 0) {
+      await recordPurchaseOrderEvent(
+        this.prisma,
+        line.purchaseOrderId,
+        'UNITS_RECEIVED',
+        this.actor.resolveActor(principal),
+        {
+          lineId: line.id,
+          quantity: created.length,
+          assetIds: created.map((asset) => asset.id),
+          failed: failed.length,
+          overReceived,
+        },
+      );
+    }
+    return { created, failed, overReceived };
+  }
+
+  /**
+   * The purchase line a receive names, after the checks the asset route cannot express in its decorator:
+   * `purchaseOrder:write` on top of `asset:write` (linking a unit to a purchase is a purchase write), and a
+   * live `ASSET` line of a live purchase.
+   */
+  private async receivableLine(lineId: string, principal?: Principal) {
+    if (!(await this.holds(principal, 'purchaseOrder:write'))) {
+      throw new ForbiddenException(
+        'Receiving against a purchase line also needs purchaseOrder:write',
+      );
+    }
+    return loadReceivableLine(this.prisma, lineId);
   }
 
   /**

@@ -30,6 +30,7 @@ const SA = {
 
 const ASSET_ID = 'classet000000000000000000';
 const ARTICLE_ID = 'clart00000000000000000000';
+const PURCHASE_ID = 'clpo00000000000000000001';
 
 const PDF_BYTES = Buffer.concat([
   Buffer.from('%PDF-1.7\n'),
@@ -53,6 +54,14 @@ type PrismaMock = {
     groupBy: jest.Mock;
   };
   asset: { findFirst: jest.Mock };
+  purchaseOrder: { findFirst: jest.Mock };
+  purchaseOrderEvent: { create: jest.Mock };
+  $transaction: jest.Mock;
+  /** The client the transaction callback received — writes through it are atomic with the row. */
+  tx: {
+    attachment: PrismaMock['attachment'];
+    purchaseOrderEvent: PrismaMock['purchaseOrderEvent'];
+  };
 };
 
 /** What the budget accounting sees: existing rows, live or soft-deleted-at-some-time. */
@@ -113,7 +122,19 @@ describe('AttachmentsService (ADR-0082)', () => {
         ),
       },
       asset: { findFirst: jest.fn().mockResolvedValue({ id: ASSET_ID }) },
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue({ id: PURCHASE_ID }),
+      },
+      purchaseOrderEvent: { create: jest.fn().mockResolvedValue({}) },
+      $transaction: jest.fn(),
+      tx: undefined as never,
     };
+    // A distinct transaction client sharing the delegates: a write made through `tx` is in the transaction.
+    const purchaseOrderEvent = { create: jest.fn().mockResolvedValue({}) };
+    prisma.tx = { attachment: prisma.attachment, purchaseOrderEvent };
+    prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
+      cb(prisma.tx),
+    );
     articles = {
       findOne: jest.fn().mockResolvedValue({ id: ARTICLE_ID }),
       assertAttachmentWritable: jest.fn().mockResolvedValue(undefined),
@@ -379,6 +400,114 @@ describe('AttachmentsService (ADR-0082)', () => {
           HUMAN,
         ),
       ).rejects.toMatchObject({ status: 403 });
+    });
+  });
+  describe('PURCHASE_ORDER documents (ADR-0099 §10, #1473)', () => {
+    it('upload: the asset allowlist and cap; the row and DOCUMENT_ADDED commit in one transaction', async () => {
+      const file = await stageUpload(PDF_BYTES, 'Factura A 0003.pdf');
+      await service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN);
+
+      expect(prisma.purchaseOrder.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PURCHASE_ID, deletedAt: null },
+        }),
+      );
+      expect(prisma.attachment.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          entityType: 'PURCHASE_ORDER',
+          entityId: PURCHASE_ID,
+          mimeType: 'application/pdf',
+        }) as object,
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          purchaseOrderId: PURCHASE_ID,
+          eventType: 'DOCUMENT_ADDED',
+          performedById: UPLOADER,
+          payload: {
+            attachmentId: 'clatt0000000000000000000',
+            originalName: 'Factura A 0003.pdf',
+          },
+        }) as object,
+      });
+    });
+
+    it('upload: refuses a type outside the document allowlist (HTML disguised as pdf)', async () => {
+      const file = await stageUpload(
+        Buffer.from('<!doctype html><script>x</script>'),
+        'invoice.pdf',
+      );
+      await expect(
+        service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN),
+      ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('upload: a missing or archived purchase is a 404 — no row, no event, tmp cleared', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      const file = await stageUpload(PDF_BYTES, 'order.pdf');
+      await expect(
+        service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(await readdir(join(root, 'tmp'))).toEqual([]);
+    });
+
+    it('list and content are scoped to a live purchase (404 otherwise)', async () => {
+      await service.list('PURCHASE_ORDER', PURCHASE_ID);
+      expect(prisma.attachment.findMany).toHaveBeenCalledWith({
+        where: { entityType: 'PURCHASE_ORDER', entityId: PURCHASE_ID },
+        orderBy: { createdAt: 'desc' },
+      });
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      await expect(
+        service.getContent(
+          'PURCHASE_ORDER',
+          PURCHASE_ID,
+          'clatt0000000000000000000',
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('remove: soft delete and DOCUMENT_REMOVED in one transaction; a service account is refused', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: 'clatt0000000000000000000',
+        originalName: 'order.pdf',
+      });
+      await service.remove(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        'clatt0000000000000000000',
+        HUMAN,
+      );
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: 'clatt0000000000000000000' },
+        data: { deletedAt: expect.any(Date) as Date },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'DOCUMENT_REMOVED',
+          payload: {
+            attachmentId: 'clatt0000000000000000000',
+            originalName: 'order.pdf',
+          },
+        }) as object,
+      });
+      await expect(
+        service.remove(
+          'PURCHASE_ORDER',
+          PURCHASE_ID,
+          'clatt0000000000000000000',
+          SA,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('an ASSET upload writes no purchase event', async () => {
+      const file = await stageUpload(PDF_BYTES, 'warranty.pdf');
+      await service.upload('ASSET', ASSET_ID, file, HUMAN);
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
     });
   });
 });

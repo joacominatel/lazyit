@@ -23,7 +23,9 @@ SEC-003).
 > A third parent type, `PURCHASE_ORDER`, is planned for Purchases Phase 1, reusing the asset documents
 > allowlist and cap and gated by `purchaseOrder:read` / `:write`. Purchase documents are financial
 > evidence, so ADR-0099 §12 makes the **attachments backup a prerequisite** that ships before or
-> alongside Phase 1 — the v1.1 deferral below no longer covers it. Not built yet.
+> alongside Phase 1 — the v1.1 deferral below no longer covers it. **Built 2026-10-02 (#1473)**: the parent
+> type, its `SURFACE` entry (the asset documents one) and `PurchaseOrderAttachmentsController`; the GC
+> needed no change (purchase documents are pinned by their own live row, like asset documents).
 
 ## Context
 

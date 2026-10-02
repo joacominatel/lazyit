@@ -699,6 +699,24 @@ describe('PurchaseOrdersService', () => {
       expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
     });
 
+    it('a kind change locks the purchase before counting linked assets (a concurrent link waits) — #1473', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        lineRow({ kind: 'OTHER' }),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+      await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
+      expect(lockedBefore(prisma, prisma.asset.count)).toBe(true);
+      expect(lockedBefore(prisma, prisma.purchaseOrderLine.update)).toBe(true);
+    });
+
+    it('an update that does not touch the kind takes no lock', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+      await service.updateLine(PO, LINE, { description: 'Laptop 14' }, human);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('a line of another purchase is not found here: 404 on update and removal, scoped by purchaseOrderId', async () => {
       // The line exists, but on another purchase: the purchase-scoped lookup finds nothing.
       prisma.purchaseOrderLine.findFirst.mockResolvedValue(null);
@@ -721,6 +739,86 @@ describe('PurchaseOrdersService', () => {
       }
       expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
       expect(events(prisma)).toEqual([]);
+    });
+  });
+
+  describe('cancel remaining units (#1473)', () => {
+    beforeEach(() => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(
+        lineRow({ quantity: 4 }),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+    });
+
+    function stored(cancelledQuantity: number, received: number) {
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        lineRow({ quantity: 4, cancelledQuantity }),
+      );
+      prisma.asset.groupBy.mockResolvedValue(
+        received > 0
+          ? [{ purchaseOrderLineId: LINE, _count: { _all: received } }]
+          : [],
+      );
+    }
+
+    it('cancels every pending unit by default, under a line lock, and logs UNITS_CANCELLED with the reason', async () => {
+      stored(0, 3);
+      await service.cancelRemaining(
+        PO,
+        LINE,
+        { reason: '4th never came' },
+        human,
+      );
+      expect(rawQuery(prisma, 0).sql).toContain('FOR UPDATE');
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { cancelledQuantity: 1 },
+      });
+      expect(events(prisma)).toEqual([
+        expect.objectContaining({
+          eventType: 'UNITS_CANCELLED',
+          performedById: USER_ID,
+          payload: {
+            lineId: LINE,
+            quantity: 1,
+            cancelledQuantity: { from: 0, to: 1 },
+            reason: '4th never came',
+          },
+        }),
+      ]);
+    });
+
+    it('cancels a given quantity on top of what was already cancelled; the reason is optional', async () => {
+      stored(1, 0); // 3 pending
+      await service.cancelRemaining(PO, LINE, { quantity: 2 }, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { cancelledQuantity: 3 },
+      });
+      expect(events(prisma)[0]).toMatchObject({
+        payload: { quantity: 2, reason: null },
+      });
+    });
+
+    it('400 beyond the pending count, 409 with nothing pending — no write either way', async () => {
+      stored(0, 3);
+      await expect(
+        service.cancelRemaining(PO, LINE, { quantity: 2 }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      stored(0, 4);
+      await expect(
+        service.cancelRemaining(PO, LINE, {}, human),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+      expect(events(prisma)).toEqual([]);
+    });
+
+    it('404 on an archived purchase', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      await expect(
+        service.cancelRemaining(PO, LINE, {}, human),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

@@ -39,6 +39,7 @@ import {
   sha256OfFile,
 } from './attachment-storage';
 import { sniffAttachment } from './magic-bytes';
+import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
 
 /** The multer diskStorage file shape the upload handlers receive (path on the tmp dir, size, name). */
 export interface UploadedAttachmentFile {
@@ -55,13 +56,17 @@ export interface AttachmentContent {
   originalName: string;
 }
 
+/** The asset documents surface — also a purchase's (ADR-0099 §10: same allowlist and cap). */
+const DOCUMENT_SURFACE = {
+  maxBytes: ASSET_ATTACHMENT_MAX_MB * 1024 * 1024,
+  maxMb: ASSET_ATTACHMENT_MAX_MB,
+  mimeTypes: ASSET_ATTACHMENT_MIME_TYPES as readonly string[],
+} as const;
+
 /** Per-surface caps + allowlists (ADR-0082 §3). */
 const SURFACE = {
-  ASSET: {
-    maxBytes: ASSET_ATTACHMENT_MAX_MB * 1024 * 1024,
-    maxMb: ASSET_ATTACHMENT_MAX_MB,
-    mimeTypes: ASSET_ATTACHMENT_MIME_TYPES as readonly string[],
-  },
+  ASSET: DOCUMENT_SURFACE,
+  PURCHASE_ORDER: DOCUMENT_SURFACE,
   ARTICLE: {
     maxBytes: ARTICLE_IMAGE_MAX_MB * 1024 * 1024,
     maxMb: ARTICLE_IMAGE_MAX_MB,
@@ -77,6 +82,9 @@ const SURFACE = {
  *
  * AuthZ is ALWAYS the PARENT's rule, resolved live per call:
  * - ASSET: the route guard enforces `asset:read` / `asset:write`; the parent must be live (404).
+ * - PURCHASE_ORDER (ADR-0099 §10): the route guard enforces `purchaseOrder:read` / `:write`; the purchase
+ *   must be live (404). Adding or removing a document also appends to the purchase's activity log, in the
+ *   same transaction as the row.
  * - ARTICLE: reads go through {@link ArticlesService.findOne} (draft privacy ADR-0022 + folder ACL
  *   ADR-0060, both 404 — never an existence-leaking 403); writes through
  *   {@link ArticlesService.assertAttachmentWritable} (the edit gate).
@@ -136,16 +144,28 @@ export class AttachmentsService {
 
       const sha256 = await sha256OfFile(file.path);
       await promoteBlob(file.path, sha256);
-      const row = await this.prisma.attachment.create({
-        data: {
-          entityType,
-          entityId,
-          sha256,
-          byteSize: file.size,
-          mimeType: sniff.mimeType,
-          originalName: file.originalname,
-          uploadedById,
-        },
+      const row = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.attachment.create({
+          data: {
+            entityType,
+            entityId,
+            sha256,
+            byteSize: file.size,
+            mimeType: sniff.mimeType,
+            originalName: file.originalname,
+            uploadedById,
+          },
+        });
+        if (entityType === 'PURCHASE_ORDER') {
+          await recordPurchaseOrderEvent(
+            tx,
+            entityId,
+            'DOCUMENT_ADDED',
+            { userId: uploadedById },
+            { attachmentId: created.id, originalName: created.originalName },
+          );
+        }
+        return created;
       });
       if (
         (ATTACHMENT_INLINE_MIME_TYPES as readonly string[]).includes(
@@ -220,12 +240,24 @@ export class AttachmentsService {
     attachmentId: string,
     principal?: Principal,
   ) {
-    this.requireHuman(principal);
+    const userId = this.requireHuman(principal);
     await this.assertParentWritable(entityType, entityId, principal);
     const row = await this.findRow(entityType, entityId, attachmentId);
-    return this.prisma.attachment.update({
-      where: { id: row.id },
-      data: { deletedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      const removed = await tx.attachment.update({
+        where: { id: row.id },
+        data: { deletedAt: new Date() },
+      });
+      if (entityType === 'PURCHASE_ORDER') {
+        await recordPurchaseOrderEvent(
+          tx,
+          entityId,
+          'DOCUMENT_REMOVED',
+          { userId },
+          { attachmentId: row.id, originalName: row.originalName },
+        );
+      }
+      return removed;
     });
   }
 
@@ -258,6 +290,10 @@ export class AttachmentsService {
       await this.assertAssetLive(entityId);
       return;
     }
+    if (entityType === 'PURCHASE_ORDER') {
+      await this.assertPurchaseLive(entityId);
+      return;
+    }
     await this.articles.findOne(entityId, user, principal);
   }
 
@@ -275,6 +311,10 @@ export class AttachmentsService {
       await this.assertAssetLive(entityId);
       return;
     }
+    if (entityType === 'PURCHASE_ORDER') {
+      await this.assertPurchaseLive(entityId);
+      return;
+    }
     await this.articles.assertAttachmentWritable(entityId, principal);
   }
 
@@ -286,6 +326,20 @@ export class AttachmentsService {
     });
     if (!asset) {
       throw new NotFoundException(`Asset ${assetId} not found`);
+    }
+  }
+
+  /**
+   * 404 unless the purchase exists and is live: an archived purchase's documents are hidden with it and
+   * come back on restore (ADR-0082 §6 pin 1 — a parent soft delete never purges blobs).
+   */
+  private async assertPurchaseLive(purchaseOrderId: string): Promise<void> {
+    const purchase = await this.prisma.purchaseOrder.findFirst({
+      where: { id: purchaseOrderId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!purchase) {
+      throw new NotFoundException(`Purchase ${purchaseOrderId} not found`);
     }
   }
 

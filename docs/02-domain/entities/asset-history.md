@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-02
 ---
 
 # AssetHistory
@@ -59,7 +59,12 @@ confirm gate — [[0093-chassis-routing-and-asset-adoption]] §4, #1198; payload
 asset: a targeted `OUT` [[consumable-movement]] — [[0098-consumable-delivery-targets]], #1364; payload
 `{ consumableId, consumableName, movementId, quantity, unit }`) · `CONSUMABLE_RETURNED` (a return
 against a returnable delivery made to this asset: an `IN` linked by `returnOfId`; the same payload plus
-`{ returnOfId }`, the delivery movement id).
+`{ returnOfId }`, the delivery movement id) · `PURCHASE_LINKED` (the asset was linked to a
+[[purchase-order-line]] — [[0099-purchases-scope-model-and-optionality]], #1473; payload
+`{ purchaseOrderId, purchaseOrderLineId, applied }`, `applied` naming the purchase values copied in the
+same action, plus `{ fromPurchaseOrderId, fromPurchaseOrderLineId }` on a move) · `PURCHASE_UNLINKED`
+(unlinked from its line; payload `{ purchaseOrderId, purchaseOrderLineId }`; the asset's values are never
+cleared).
 
 ## Emission
 
@@ -89,6 +94,12 @@ against a returnable delivery made to this asset: an `IN` linked by `returnOfId`
   five-minute cadence would bury every human edit the row ever received. What *moved* is audited on the
   node instead ([[infra-node-fact-change]], #1143), one join away. Best-effort: a failed write logs and
   never fails the confirm (on the auto-confirm path it would fail a *report*).
+
+- Purchases receiving service — `PURCHASE_LINKED` / `PURCHASE_UNLINKED` (link, move and unlink), plus
+  `MODEL_CHANGED` `{ from, to }` when a link applies the line's model; written on the link's transaction
+  client with the same transaction's [[purchase-order-event]]. A unit **generated** from a line is born
+  linked: its `CREATED` row carries `{ source: 'purchase', purchaseOrderId, purchaseOrderLineId }` instead
+  (#1473).
 
 ## Endpoint
 

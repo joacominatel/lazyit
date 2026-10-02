@@ -614,6 +614,25 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       ]);
     });
 
+    it('carries the cost currency label with the cost (ADR-0099 §5, #1473)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Laptop ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 141250000,
+        purchaseCurrency: ' ARS ',
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'purchaseCurrency', after: 'ARS', valueKind: 'text' },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 141250000,
+        purchaseCurrency: 'ARS',
+      });
+    });
+
     it('accepts purchaseCost and salvageValue above int4; the result reads back exactly (ADR-0100)', async () => {
       const action = await propose('asset_create', {
         name: 'Server ARS',
@@ -1145,6 +1164,27 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
   });
 
   describe('asset_update', () => {
+    it('sets and clears the cost currency label (#1473)', async () => {
+      const set = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      expect((await approve(set)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[0][1]).toMatchObject({
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      const clear = await propose('asset_update', {
+        asset: A.server,
+        purchaseCurrency: null,
+      });
+      expect((await approve(clear)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[1][1]).toEqual({
+        purchaseCurrency: null,
+      });
+    });
+
     it('accepts a purchaseCost above int4 and asset_get reads it back exactly (ADR-0100)', async () => {
       const action = await propose('asset_update', {
         asset: A.server,

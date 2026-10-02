@@ -49,8 +49,13 @@ export const DEFAULT_PURCHASE_ORDER_LINE_KIND = "ASSET";
 
 /**
  * The event types this build writes to the purchase activity log. Stored as TEXT (CTO decision under
- * D-D, ADR-0099): later units append `UNITS_RECEIVED`, `UNITS_CANCELLED`, `ASSET_LINKED`,
- * `ASSET_UNLINKED`, `DOCUMENT_ADDED`, `DOCUMENT_REMOVED`, and a reader shows an unknown type generically.
+ * D-D, ADR-0099), so a reader shows a type it does not know generically. Payloads (#1473):
+ *   - `UNITS_RECEIVED`   { lineId, quantity, assetIds, failed, overReceived }
+ *   - `UNITS_CANCELLED`  { lineId, quantity, cancelledQuantity: { from, to }, reason }
+ *   - `ASSET_LINKED`     { lineId, assetIds, applied: { [assetId]: field[] }, moved, overReceived }
+ *   - `ASSET_UNLINKED`   { lineId, assetIds } — or { lineId, assetIds, movedToPurchaseOrderId,
+ *                        movedToLineId } on the purchase an asset was moved away from
+ *   - `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`  { attachmentId, originalName }
  */
 export const PURCHASE_ORDER_EVENT_TYPES = [
   "CREATED",
@@ -61,6 +66,12 @@ export const PURCHASE_ORDER_EVENT_TYPES = [
   "LINE_REMOVED",
   "DELETED",
   "RESTORED",
+  "UNITS_RECEIVED",
+  "UNITS_CANCELLED",
+  "ASSET_LINKED",
+  "ASSET_UNLINKED",
+  "DOCUMENT_ADDED",
+  "DOCUMENT_REMOVED",
 ] as const;
 export const PurchaseOrderEventTypeSchema = z.enum(PURCHASE_ORDER_EVENT_TYPES);
 

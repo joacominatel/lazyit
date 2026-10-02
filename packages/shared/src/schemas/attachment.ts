@@ -15,8 +15,13 @@ import { int4 } from "./primitives";
  *   hardened headers (`nosniff`, CSP sandbox, `Cache-Control: private`).
  */
 
-/** Which parent kind an Attachment hangs off. Extendable (CONSUMABLE is deferred — ADR-0082). */
-export const AttachmentEntityTypeSchema = z.enum(["ASSET", "ARTICLE"]);
+/**
+ * Which parent kind an Attachment hangs off. Extendable (CONSUMABLE is deferred — ADR-0082).
+ * `PURCHASE_ORDER` (ADR-0099 §10, #1473): a purchase's documents — quote, order, invoice, delivery note —
+ * under the ASSET allowlist and size cap, gated by `purchaseOrder:read` / `:write`, and listed read-only on
+ * every asset linked to the purchase (to the same permission).
+ */
+export const AttachmentEntityTypeSchema = z.enum(["ASSET", "ARTICLE", "PURCHASE_ORDER"]);
 
 /** Per-file size cap for ASSET documents (ADR-0082 §3). */
 export const ASSET_ATTACHMENT_MAX_MB = 25;
