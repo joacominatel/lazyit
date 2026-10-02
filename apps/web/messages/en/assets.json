@@ -321,7 +321,9 @@
         "deleted": "Deleted",
         "restored": "Restored",
         "consumableDelivered": "Consumable delivered",
-        "consumableReturned": "Consumable returned"
+        "consumableReturned": "Consumable returned",
+        "purchaseLinked": "Purchase linked",
+        "purchaseUnlinked": "Purchase unlinked"
       },
       "details": {
         "created": "Asset created",
@@ -340,7 +342,10 @@
         "consumableReturned": "{quantity} {unit} of <link>{name}</link> returned",
         "consumableDeliveredFallback": "A consumable was delivered to this asset",
         "consumableReturnedFallback": "A consumable was returned from this asset",
-        "consumableUnitFallback": "units"
+        "consumableUnitFallback": "units",
+        "purchaseLinked": "Linked to a purchase",
+        "purchaseUnlinked": "Unlinked from its purchase — its purchase values stay as they were",
+        "openPurchase": "Open purchase"
       }
     }
   },

@@ -75,7 +75,9 @@
       "consumable_returned": "Consumible devuelto",
       "deactivated": "Desactivado",
       "reactivated": "Reactivado",
-      "session_ended": "Sesión cerrada"
+      "session_ended": "Sesión cerrada",
+      "purchase_linked": "Compra vinculada",
+      "purchase_unlinked": "Compra desvinculada"
     }
   },
   "empty": {},

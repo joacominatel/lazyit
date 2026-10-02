@@ -75,7 +75,9 @@
       "consumable_returned": "Consumable returned",
       "deactivated": "Deactivated",
       "reactivated": "Reactivated",
-      "session_ended": "Session ended"
+      "session_ended": "Session ended",
+      "purchase_linked": "Purchase linked",
+      "purchase_unlinked": "Purchase unlinked"
     }
   },
   "empty": {},

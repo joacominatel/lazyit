@@ -321,7 +321,9 @@
         "deleted": "Eliminado",
         "restored": "Restaurado",
         "consumableDelivered": "Consumible entregado",
-        "consumableReturned": "Consumible devuelto"
+        "consumableReturned": "Consumible devuelto",
+        "purchaseLinked": "Compra vinculada",
+        "purchaseUnlinked": "Compra desvinculada"
       },
       "details": {
         "created": "Activo creado",
@@ -340,7 +342,10 @@
         "consumableReturned": "{quantity, plural, one {Se devolvió} other {Se devolvieron}} {quantity} {unit} de <link>{name}</link>",
         "consumableDeliveredFallback": "Se entregó un consumible a este activo",
         "consumableReturnedFallback": "Se devolvió un consumible de este activo",
-        "consumableUnitFallback": "unidades"
+        "consumableUnitFallback": "unidades",
+        "purchaseLinked": "Se vinculó a una compra",
+        "purchaseUnlinked": "Se desvinculó de su compra; sus valores de compra se mantienen",
+        "openPurchase": "Abrir compra"
       }
     }
   },
