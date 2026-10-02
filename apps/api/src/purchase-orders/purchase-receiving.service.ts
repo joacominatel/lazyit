@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
   type PurchaseLinkState,
   type ReceiveAssets,
   type ReceiveFromLine,
+  type ReceiveStockFromLine,
 } from '@lazyit/shared';
 import { Prisma, type Asset } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -28,13 +30,16 @@ import type { Principal } from '../auth/principal';
 import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetsService } from '../assets/assets.service';
+import { ConsumablesService } from '../consumables/consumables.service';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { recordPurchaseOrderEvent } from './purchase-order-events';
 import { COUNTABLE_LINE_KINDS, deriveLine } from './purchase-order-derived';
 import {
   assertAssetLine,
+  assertConsumableLine,
   countReceived,
   isOverReceived,
+  receivedByLine,
 } from './purchase-order-line-receipt';
 
 type Tx = Prisma.TransactionClient;
@@ -202,6 +207,13 @@ function appliedData(
   };
 }
 
+/**
+ * The `reason` of a movement received from a purchase. Deliberately names no supplier or reference: the
+ * consumable ledger is read under `consumable:read` (a VIEWER holds it), and a purchase's provenance follows
+ * `purchaseOrder:read` (ADR-0099 §8, D-A). The link itself is the movement's `purchaseOrderLineId`.
+ */
+export const STOCK_RECEIPT_REASON = 'Received from a purchase';
+
 /** The first day of the current UTC day — "today" as a purchase date. */
 function todayUtc(): string {
   return `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
@@ -221,6 +233,7 @@ export class PurchaseReceivingService {
     private readonly history: AssetHistoryService,
     private readonly assets: AssetsService,
     private readonly purchases: PurchaseOrdersService,
+    private readonly consumables: ConsumablesService,
   ) {}
 
   // ── Link preview ────────────────────────────────────────────────────────────────────────────────────
@@ -267,7 +280,7 @@ export class PurchaseReceivingService {
           fields: diffAsset(row, values),
         };
       });
-    const received = await countReceived(this.prisma, lineId);
+    const received = await countReceived(this.prisma, line);
     const receivedAfter =
       received +
       assets.filter((asset) => asset.linkState !== 'THIS_LINE').length;
@@ -524,7 +537,7 @@ export class PurchaseReceivingService {
         'This line has no asset model. Map the line to a model (PATCH the line with assetModelId), or pass modelId to receive it as a model',
       );
     }
-    const received = await countReceived(this.prisma, lineId);
+    const received = await countReceived(this.prisma, line);
     const { pendingQuantity } = deriveLine(line, received);
     const quantity =
       data.quantity ??
@@ -594,6 +607,93 @@ export class PurchaseReceivingService {
     };
   }
 
+  // ── Receive into stock (a CONSUMABLE line, #1476) ──────────────────────────────────────────────────────
+
+  /**
+   * Receive units of a `CONSUMABLE` line into its consumable's stock: ONE ordinary `IN` movement posted
+   * through the consumables path (ADR-0034 — the guarded cache update, the int4 ceiling, the actor, the search
+   * re-index), carrying the line id. Inside that movement's transaction the purchase is locked `FOR KEY SHARE`
+   * first — the lock a link takes — so a kind change or a line removal (which lock it `FOR UPDATE`) serializes
+   * with the receipt and sees it; and the purchase's `STOCK_RECEIVED` event commits with the movement.
+   * Over-receipt is allowed and flagged (ADR-0099 §4). 400 for a line that is not `CONSUMABLE`, has no
+   * consumable, or names an archived one; 404 for an archived purchase or line.
+   */
+  async receiveStock(
+    purchaseOrderId: string,
+    lineId: string,
+    data: ReceiveStockFromLine,
+    principal?: Principal,
+  ) {
+    const actor = this.actor.resolveActor(principal);
+    const { line } = await this.purchases.assertLineLive(
+      this.prisma,
+      purchaseOrderId,
+      lineId,
+    );
+    const consumableId = receivableConsumable(line);
+    const consumable = await this.prisma.consumable.findFirst({
+      where: { id: consumableId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!consumable) {
+      throw new BadRequestException(
+        `This line's consumable ${consumableId} is archived. Restore it, or map the line to another consumable (PATCH the line with consumableId)`,
+      );
+    }
+    let overReceived = false;
+    const movement = await this.consumables.createMovement(
+      consumableId,
+      {
+        type: 'IN',
+        quantity: data.quantity,
+        reason: STOCK_RECEIPT_REASON,
+        ...(data.note !== undefined ? { notes: data.note } : {}),
+      },
+      principal,
+      {
+        purchaseOrderLineId: lineId,
+        beforeWrite: async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
+          // Re-read under the lock: the line may have been removed, or its kind or consumable changed.
+          const { line: locked } = await this.purchases.assertLineLive(
+            tx,
+            purchaseOrderId,
+            lineId,
+          );
+          if (receivableConsumable(locked) !== consumableId) {
+            throw new ConflictException(
+              'The line changed while receiving; reload it and try again',
+            );
+          }
+        },
+        afterWrite: async (tx, created) => {
+          const current = await tx.purchaseOrderLine.findFirstOrThrow({
+            where: { id: lineId },
+          });
+          overReceived = await isOverReceived(tx, current);
+          await recordPurchaseOrderEvent(
+            tx,
+            purchaseOrderId,
+            'STOCK_RECEIVED',
+            actor,
+            {
+              lineId,
+              consumableId,
+              movementId: created.id,
+              quantity: data.quantity,
+              overReceived,
+            },
+          );
+        },
+      },
+    );
+    return {
+      movement,
+      overReceived,
+      line: await this.purchases.readLine(this.prisma, lineId),
+    };
+  }
+
   /** The purchase's delivery location as a receiving default — only while it is live. */
   private async liveLocation(id: string | null): Promise<string | null> {
     if (!id) return null;
@@ -609,8 +709,9 @@ export class PurchaseReceivingService {
   /**
    * The lines still waiting for units (ux-proposal §3.f): countable lines with pending > 0, on live purchases
    * that are neither `DRAFT` (not ordered yet) nor `CANCELLED`, oldest purchase first. Pending is derived
-   * (quantity − cancelled − live linked assets) in SQL, and the page and its total share one filter fragment,
-   * so pending is filtered and paged in the database rather than over every line in memory.
+   * (quantity − cancelled − received: live linked assets, or the units of a `CONSUMABLE` line's `IN`
+   * movements) in SQL, and the page and its total share one filter fragment, so pending is filtered and paged
+   * in the database rather than over every line in memory.
    */
   async findPendingLines(filters: { supplierId?: string }, page: PageQuery) {
     const { take, skip } = offsetOf(page);
@@ -626,8 +727,12 @@ export class PurchaseReceivingService {
          AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})
          ${supplier}
          AND l."quantity" - l."cancelledQuantity" - (
-               SELECT COUNT(*) FROM "assets" a
-                WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL
+               CASE WHEN l."kind" = 'CONSUMABLE'
+                    THEN (SELECT COALESCE(SUM(m."quantity"), 0) FROM "consumable_movements" m
+                           WHERE m."purchaseOrderLineId" = l."id" AND m."type" = 'IN'::"ConsumableMovementType")
+                    ELSE (SELECT COUNT(*) FROM "assets" a
+                           WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL)
+               END
              ) > 0`;
     const [ids, [{ total }]] = await Promise.all([
       this.prisma.$queryRaw<{ id: string }[]>`
@@ -656,7 +761,7 @@ export class PurchaseReceivingService {
         },
       },
     });
-    const received = await this.receivedByLine(order);
+    const received = await receivedByLine(this.prisma, lines);
     const byId = new Map(lines.map((line) => [line.id, line]));
     const items = order
       .filter((id) => byId.has(id))
@@ -671,22 +776,6 @@ export class PurchaseReceivingService {
         };
       });
     return pageOf(items, total, page);
-  }
-
-  /** Live linked assets per line. */
-  private async receivedByLine(lineIds: string[]) {
-    if (lineIds.length === 0) return new Map<string, number>();
-    const groups = await this.prisma.asset.groupBy({
-      by: ['purchaseOrderLineId'],
-      where: { purchaseOrderLineId: { in: lineIds }, deletedAt: null },
-      _count: { _all: true },
-    });
-    return new Map(
-      groups.map((group) => [
-        group.purchaseOrderLineId as string,
-        group._count._all,
-      ]),
-    );
   }
 
   // ── An asset's provenance ───────────────────────────────────────────────────────────────────────────
@@ -737,7 +826,7 @@ export class PurchaseReceivingService {
             orderBy: { createdAt: 'desc' },
           })
         : [];
-    const received = await countReceived(this.prisma, lineRow.id);
+    const received = await countReceived(this.prisma, lineRow);
     return {
       line: this.purchases.lineToWire(lineRow, deriveLine(lineRow, received)),
       purchaseOrder: {
@@ -756,6 +845,23 @@ export class PurchaseReceivingService {
       documents,
     };
   }
+}
+
+/**
+ * The consumable a `CONSUMABLE` line receives into, or the 400 that says how to fix the line: only a
+ * `CONSUMABLE` line is received into stock, and it must name its consumable by then.
+ */
+function receivableConsumable(line: {
+  kind: string;
+  consumableId: string | null;
+}): string {
+  assertConsumableLine(line);
+  if (!line.consumableId) {
+    throw new BadRequestException(
+      'This line has no consumable. Map the line to a consumable (PATCH the line with consumableId) before receiving stock',
+    );
+  }
+  return line.consumableId;
 }
 
 type Failure = {

@@ -19,6 +19,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 const PO = 'clpo00000000000000000001';
 const LINE = 'clline000000000000000001';
 const SUPPLIER = 'clsupplier00000000000001';
+const CONSUMABLE = 'clconsumable000000000001';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const SA_ID = 'clsa0000000000000000001';
 const ABOVE_INT4 = 3_000_000_000;
@@ -110,6 +111,11 @@ function makePrisma() {
     supplier: { findFirst: jest.fn() },
     location: { findFirst: jest.fn() },
     assetModel: { findMany: jest.fn().mockResolvedValue([]) },
+    consumable: { findMany: jest.fn().mockResolvedValue([]) },
+    consumableMovement: {
+      groupBy: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: null } }),
+    },
     $queryRaw: jest.fn(),
     $transaction: jest.fn(),
   };
@@ -819,6 +825,296 @@ describe('PurchaseOrdersService', () => {
       await expect(
         service.cancelRemaining(PO, LINE, {}, human),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+  describe('consumable lines (Phase 1b, #1476)', () => {
+    const consumableLine = (over: Row = {}) =>
+      lineRow({
+        kind: 'CONSUMABLE',
+        description: 'Toner HP 58A',
+        consumableId: CONSUMABLE,
+        quantity: 10,
+        ...over,
+      });
+
+    it('creates a CONSUMABLE line naming a live consumable', async () => {
+      prisma.consumable.findMany.mockResolvedValue([{ id: CONSUMABLE }]);
+      prisma.purchaseOrder.create.mockResolvedValue({ id: PO });
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ lines: [consumableLine()] }),
+      );
+      await service.create(
+        {
+          lines: [
+            {
+              kind: 'CONSUMABLE',
+              description: 'Toner HP 58A',
+              consumableId: CONSUMABLE,
+              quantity: 10,
+            },
+          ],
+        },
+        human,
+      );
+      expect(prisma.consumable.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [CONSUMABLE] }, deletedAt: null },
+        select: { id: true },
+      });
+      const data = (
+        prisma.purchaseOrder.create.mock.calls[0] as [
+          { data: { lines: { create: Row[] } } },
+        ]
+      )[0].data;
+      expect(data.lines.create[0]).toMatchObject({
+        kind: 'CONSUMABLE',
+        consumableId: CONSUMABLE,
+      });
+    });
+
+    it('refuses an archived (or missing) consumable on create, add and update — 400, nothing written', async () => {
+      prisma.consumable.findMany.mockResolvedValue([]);
+      await expect(
+        service.create(
+          {
+            lines: [
+              {
+                kind: 'CONSUMABLE',
+                description: 'Toner',
+                consumableId: CONSUMABLE,
+              },
+            ],
+          },
+          human,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrder.create).not.toHaveBeenCalled();
+
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      await expect(
+        service.addLine(
+          PO,
+          {
+            kind: 'CONSUMABLE',
+            description: 'Toner',
+            consumableId: CONSUMABLE,
+          },
+          human,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrderLine.create).not.toHaveBeenCalled();
+
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(
+        consumableLine({ consumableId: null }),
+      );
+      await expect(
+        service.updateLine(PO, LINE, { consumableId: CONSUMABLE }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+    });
+
+    it('a consumable is accepted on a CONSUMABLE line only — against the stored kind when the PATCH omits it', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.consumable.findMany.mockResolvedValue([{ id: CONSUMABLE }]);
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      await expect(
+        service.updateLine(PO, LINE, { consumableId: CONSUMABLE }, human),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+
+      // Turning the line into a CONSUMABLE one in the same PATCH is fine.
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        consumableLine(),
+      );
+      await service.updateLine(
+        PO,
+        LINE,
+        { kind: 'CONSUMABLE', consumableId: CONSUMABLE },
+        human,
+      );
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { kind: 'CONSUMABLE', consumableId: CONSUMABLE },
+      });
+    });
+
+    it('changing a line away from CONSUMABLE clears its consumable, and the log says so', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(consumableLine());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+      prisma.$queryRaw.mockResolvedValue([]);
+      await service.updateLine(PO, LINE, { kind: 'ASSET' }, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { kind: 'ASSET', consumableId: null },
+      });
+      expect(events(prisma)[0]).toMatchObject({
+        eventType: 'LINE_UPDATED',
+        payload: {
+          lineId: LINE,
+          changes: {
+            kind: { from: 'CONSUMABLE', to: 'ASSET' },
+            consumableId: { from: CONSUMABLE, to: null },
+          },
+        },
+      });
+    });
+
+    it('derives received from the IN movements of the line (OVER when more came), never from assets', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({
+          lines: [
+            lineRow({ quantity: 2 }),
+            consumableLine({ id: 'clline000000000000000002', quantity: 4 }),
+          ],
+        }),
+      );
+      prisma.asset.groupBy.mockResolvedValue([
+        { purchaseOrderLineId: LINE, _count: { _all: 1 } },
+      ]);
+      prisma.consumableMovement.groupBy.mockResolvedValue([
+        {
+          purchaseOrderLineId: 'clline000000000000000002',
+          _sum: { quantity: 5 },
+        },
+      ]);
+
+      const detail = await service.findOne(PO);
+
+      expect(prisma.consumableMovement.groupBy).toHaveBeenCalledWith({
+        by: ['purchaseOrderLineId'],
+        where: {
+          purchaseOrderLineId: { in: ['clline000000000000000002'] },
+          type: 'IN',
+        },
+        _sum: { quantity: true },
+      });
+      // Assets are counted for the ASSET line only.
+      expect(prisma.asset.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { purchaseOrderLineId: { in: [LINE] }, deletedAt: null },
+        }),
+      );
+      expect(detail.lines[0]).toMatchObject({
+        receivedQuantity: 1,
+        pendingQuantity: 1,
+        receiptState: 'PARTIAL',
+      });
+      expect(detail.lines[1]).toMatchObject({
+        consumableId: CONSUMABLE,
+        receivedQuantity: 5,
+        pendingQuantity: 0,
+        receiptState: 'OVER',
+      });
+      expect(detail.receipt).toEqual({
+        state: 'PARTIAL',
+        ordered: 6,
+        received: 6,
+        cancelled: 0,
+        pending: 1,
+      });
+    });
+
+    it('a CONSUMABLE line with nothing moved in is pending (NONE)', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ lines: [consumableLine()] }),
+      );
+      const detail = await service.findOne(PO);
+      expect(detail.lines[0]).toMatchObject({
+        receivedQuantity: 0,
+        pendingQuantity: 10,
+        receiptState: 'NONE',
+      });
+      expect(detail.receipt?.state).toBe('NONE');
+    });
+
+    it('the receipt filter counts CONSUMABLE lines from their IN movements', async () => {
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          purchaseOrderId: 'clpoPending000000000001',
+          kind: 'CONSUMABLE',
+          quantity: 10,
+          cancelledQuantity: 0,
+          received: 4,
+        },
+      ]);
+      prisma.purchaseOrder.findMany.mockResolvedValue([]);
+      prisma.purchaseOrder.count.mockResolvedValue(0);
+      await service.findPage(
+        { receipt: 'PARTIAL' },
+        { limit: 50, offset: 0, deleted: 'active' },
+      );
+      const query = rawQuery(prisma, 0);
+      expect(query.sql).toContain('"consumable_movements"');
+      expect(query.values).toContainEqual(['ASSET', 'CONSUMABLE']);
+      const where = (
+        prisma.purchaseOrder.findMany.mock.calls[0] as [{ where: Row }]
+      )[0].where;
+      expect(where).toMatchObject({
+        AND: [{ AND: [{ id: { in: ['clpoPending000000000001'] } }] }, {}],
+      });
+    });
+
+    it('the kind is fixed once stock was received (409), under the purchase lock; so is removing the line', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(consumableLine());
+      prisma.consumableMovement.aggregate.mockResolvedValue({
+        _sum: { quantity: 3 },
+      });
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      await expect(
+        service.updateLine(PO, LINE, { kind: 'ASSET' }, human),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.consumableMovement.aggregate).toHaveBeenCalledWith({
+        where: { purchaseOrderLineId: LINE, type: 'IN' },
+        _sum: { quantity: true },
+      });
+      expect(lockedBefore(prisma, prisma.consumableMovement.aggregate)).toBe(
+        true,
+      );
+
+      await expect(service.removeLine(PO, LINE, human)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+    });
+
+    it('a CONSUMABLE line with nothing received can still change kind and be removed', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(consumableLine());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        lineRow({ kind: 'OTHER' }),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+      await service.updateLine(PO, LINE, { kind: 'OTHER' }, human);
+      await service.removeLine(PO, LINE, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('cancel remaining works on a CONSUMABLE line: pending = quantity − units moved in', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(purchaseRow());
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(consumableLine());
+      prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+        consumableLine(),
+      );
+      prisma.$queryRaw.mockResolvedValue([]);
+      prisma.consumableMovement.groupBy.mockResolvedValue([
+        { purchaseOrderLineId: LINE, _sum: { quantity: 4 } },
+      ]);
+      await service.cancelRemaining(PO, LINE, { reason: 'backorder' }, human);
+      expect(prisma.purchaseOrderLine.update).toHaveBeenCalledWith({
+        where: { id: LINE },
+        data: { cancelledQuantity: 6 },
+      });
+      expect(events(prisma)[0]).toMatchObject({
+        eventType: 'UNITS_CANCELLED',
+        payload: { quantity: 6, cancelledQuantity: { from: 0, to: 6 } },
+      });
     });
   });
 });

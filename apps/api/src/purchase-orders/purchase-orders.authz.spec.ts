@@ -82,6 +82,7 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
     linkAssets: ok,
     unlinkAssets: ok,
     receiveFromLine: ok,
+    receiveStock: ok,
     findAssetProvenance: ok,
   };
   const attachments = { list: ok, upload: ok, remove: ok };
@@ -392,6 +393,76 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       await http()
         .get(`${base}/${ATT}/content${as('role=VIEWER')}`)
         .expect(403);
+    });
+  });
+
+  describe('consumable lines (#1476)', () => {
+    beforeEach(() => ok.mockClear());
+
+    it('receiving into stock needs purchaseOrder:write AND consumable:write', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/receive-stock`;
+      const body = { quantity: 5 };
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=consumable:write')}`)
+        .send(body)
+        .expect(403);
+      expect(receiving.receiveStock).not.toHaveBeenCalled();
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write,consumable:write')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send(body)
+        .expect(201);
+      expect(receiving.receiveStock).toHaveBeenCalledWith(
+        PO,
+        LINE,
+        { quantity: 5 },
+        expect.objectContaining({ kind: 'human' }),
+      );
+    });
+
+    it('receive-stock validates its body at the edge: a quantity is required, nothing else is accepted', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/receive-stock`;
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send({})
+        .expect(400);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send({ quantity: 1, type: 'OUT' })
+        .expect(400);
+    });
+
+    it('a line names a consumable only on a CONSUMABLE line (400 at the edge)', async () => {
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          description: 'Toner',
+          consumableId: 'clconsumable000000000001',
+        })
+        .expect(400);
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          kind: 'CONSUMABLE',
+          description: 'Toner',
+          consumableId: 'clconsumable000000000001',
+        })
+        .expect(201);
     });
   });
 });

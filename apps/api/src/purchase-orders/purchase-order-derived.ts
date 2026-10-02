@@ -9,16 +9,17 @@ import {
 /**
  * The DERIVED purchase values (ADR-0099 §3): received / pending per line, the receipt state of a line and
  * of a purchase, and the totals. Nothing here is stored — received is the count of live assets linked to a
- * line, read when it is shown, so concurrent receives can never corrupt a counter (§4). Pure functions:
- * the service feeds them rows and counts.
+ * line (or, for a `CONSUMABLE` line, the units of the `IN` movements posted from it), read when it is shown,
+ * so concurrent receives can never corrupt a counter (§4). Pure functions: the service feeds them rows and
+ * counts.
  */
 
 /**
- * The line kinds whose units are counted as received. `OTHER` lines (shipping, services) are never
+ * The line kinds whose units are counted as received: `ASSET` (live linked assets) and, since Phase 1b
+ * (#1476), `CONSUMABLE` (units moved in by its `IN` movements). `OTHER` lines (shipping, services) are never
  * pending, and a kind this build does not know (written by a newer one) is shown but not counted.
- * Phase 1b adds `CONSUMABLE` here, counted from its `IN` movements.
  */
-export const COUNTABLE_LINE_KINDS: readonly string[] = ['ASSET'];
+export const COUNTABLE_LINE_KINDS: readonly string[] = ['ASSET', 'CONSUMABLE'];
 
 /** The stored line values the derivation needs. */
 export interface LineInput {
@@ -43,7 +44,7 @@ export function isCountableKind(kind: string): boolean {
 }
 
 /**
- * Derive one line from its stored values and its live linked-asset count:
+ * Derive one line from its stored values and its received count (live linked assets, or stock moved in):
  *   - pending  = quantity − received − cancelled, floored at 0;
  *   - `OVER`   when more arrived than is still expected (received > quantity − cancelled) — allowed and
  *     surfaced, never blocked (ADR-0099 §4);
