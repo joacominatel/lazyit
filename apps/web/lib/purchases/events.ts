@@ -33,8 +33,11 @@ export type PurchaseEventView =
   | { kind: "unitsCancelled"; lineId: string | null; quantity: number | null; reason: string | null }
   | { kind: "assetsLinked"; lineId: string | null; count: number | null; moved: boolean; over: boolean }
   | { kind: "assetsUnlinked"; lineId: string | null; count: number | null; movedToPurchaseOrderId: string | null }
-  | { kind: "documentAdded"; name: string | null }
-  | { kind: "documentRemoved"; name: string | null }
+  | { kind: "documentAdded"; name: string | null; label: string | null }
+  | { kind: "documentRemoved"; name: string | null; label: string | null }
+  // Consumable lines and document type labels (#1476).
+  | { kind: "stockReceived"; lineId: string | null; quantity: number | null; over: boolean }
+  | { kind: "documentUpdated"; name: string | null; from: string | null; to: string | null }
   | { kind: "deleted" }
   | { kind: "restored" }
   | { kind: "other"; eventType: string };
@@ -112,9 +115,20 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
         movedToPurchaseOrderId: str(p.movedToPurchaseOrderId),
       };
     case "DOCUMENT_ADDED":
-      return { kind: "documentAdded", name: str(p.originalName) };
+      return { kind: "documentAdded", name: str(p.originalName), label: str(p.label) };
     case "DOCUMENT_REMOVED":
-      return { kind: "documentRemoved", name: str(p.originalName) };
+      return { kind: "documentRemoved", name: str(p.originalName), label: str(p.label) };
+    case "STOCK_RECEIVED":
+      return {
+        kind: "stockReceived",
+        lineId: str(p.lineId),
+        quantity: num(p.quantity),
+        over: p.overReceived === true,
+      };
+    case "DOCUMENT_UPDATED": {
+      const label = p.label !== null && typeof p.label === "object" ? (p.label as Record<string, unknown>) : {};
+      return { kind: "documentUpdated", name: str(p.originalName), from: str(label.from), to: str(label.to) };
+    }
     case "DELETED":
       return { kind: "deleted" };
     case "RESTORED":

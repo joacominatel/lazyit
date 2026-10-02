@@ -278,7 +278,13 @@
     "documentAdded": "Agregó el documento «{name}»",
     "documentRemoved": "Quitó el documento «{name}»",
     "aDocument": "un archivo",
-    "kindConsumable": "Consumible"
+    "kindConsumable": "Consumible",
+    "stockReceived": "Recibió {count, plural, one {# unidad} other {# unidades}} en stock en «{line}»",
+    "documentAddedLabelled": "Agregó el documento «{name}» ({label})",
+    "documentRemovedLabelled": "Quitó el documento «{name}» ({label})",
+    "documentLabelSet": "Puso el tipo de «{name}» en {label}",
+    "documentLabelChanged": "Cambió el tipo de «{name}»: {from} → {to}",
+    "documentLabelCleared": "Quitó el tipo de «{name}»"
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -521,7 +527,7 @@
     "showingSome": "Se muestran los primeros {shown} de {total}.",
     "unlink": "Desvincular",
     "unlinkTitle": "¿Desvincular de esta línea?",
-    "unlinkDescription": "¿Desvincular {asset} de “{line}”? El activo conserva sus valores de compra; la línea cuenta una unidad menos.",
+    "unlinkDescription": "¿Desvincular {asset} de «{line}»? El activo conserva sus valores de compra; la línea cuenta una unidad menos.",
     "unlinkedToast": "{asset} desvinculado",
     "unlinkError": "No se pudo desvincular el activo"
   }

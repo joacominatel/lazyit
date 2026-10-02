@@ -55,7 +55,8 @@ const STATUS_KEY: Record<string, string> = {
 /**
  * The purchase's append-only activity log (ADR-0099, purchase-order-event entity note), newest first:
  * who did what and when, with a price or quantity change shown before → after; units received, linked,
- * moved and cancelled; documents added and removed (#1475). Read tolerantly — an event type a later build
+ * moved and cancelled; documents added and removed (#1475); stock received on a consumable line and a
+ * document's type label changed (#1476). Read tolerantly — an event type a later build
  * adds shows generically until this screen learns it.
  */
 export function PurchaseActivity({
@@ -170,9 +171,26 @@ export function PurchaseActivity({
           line: lineName(view.lineId, null),
         });
       case "documentAdded":
-        return t("documentAdded", { name: view.name ?? t("aDocument") });
+        return view.label
+          ? t("documentAddedLabelled", { name: view.name ?? t("aDocument"), label: view.label })
+          : t("documentAdded", { name: view.name ?? t("aDocument") });
       case "documentRemoved":
-        return t("documentRemoved", { name: view.name ?? t("aDocument") });
+        return view.label
+          ? t("documentRemovedLabelled", { name: view.name ?? t("aDocument"), label: view.label })
+          : t("documentRemoved", { name: view.name ?? t("aDocument") });
+      case "stockReceived":
+        return [
+          t("stockReceived", { count: view.quantity ?? 0, line: lineName(view.lineId, null) }),
+          view.over ? t("overReceived") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      case "documentUpdated": {
+        const name = view.name ?? t("aDocument");
+        if (view.to === null) return t("documentLabelCleared", { name });
+        if (view.from === null) return t("documentLabelSet", { name, label: view.to });
+        return t("documentLabelChanged", { name, from: view.from, to: view.to });
+      }
       case "deleted":
         return t("deleted");
       case "restored":

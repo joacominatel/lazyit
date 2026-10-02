@@ -278,7 +278,13 @@
     "documentAdded": "Added the document “{name}”",
     "documentRemoved": "Removed the document “{name}”",
     "aDocument": "a file",
-    "kindConsumable": "Consumable"
+    "kindConsumable": "Consumable",
+    "stockReceived": "Received {count, plural, one {# unit} other {# units}} into stock on “{line}”",
+    "documentAddedLabelled": "Added the document “{name}” ({label})",
+    "documentRemovedLabelled": "Removed the document “{name}” ({label})",
+    "documentLabelSet": "Set the type of “{name}” to {label}",
+    "documentLabelChanged": "Changed the type of “{name}”: {from} → {to}",
+    "documentLabelCleared": "Removed the type of “{name}”"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
