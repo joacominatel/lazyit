@@ -131,6 +131,29 @@ function events(prisma: FakePrisma): Row[] {
   );
 }
 
+/** The SQL of the n-th raw query, and its bound values (a tagged template call). */
+function rawQuery(
+  prisma: FakePrisma,
+  n: number,
+): { sql: string; values: unknown[] } {
+  const [strings, ...values] = prisma.$queryRaw.mock.calls[n] as [
+    TemplateStringsArray,
+    ...unknown[],
+  ];
+  return { sql: strings.join('?'), values };
+}
+
+/** True when the purchase row was locked before the given write ran. */
+function lockedBefore(prisma: FakePrisma, write: jest.Mock): boolean {
+  const lock = rawQuery(prisma, 0);
+  return (
+    lock.sql.includes('FOR UPDATE') &&
+    lock.values[0] === PO &&
+    prisma.$queryRaw.mock.invocationCallOrder[0] <
+      (write.mock.invocationCallOrder[0] ?? Infinity)
+  );
+}
+
 describe('PurchaseOrdersService', () => {
   let prisma: FakePrisma;
   let service: PurchaseOrdersService;
@@ -464,6 +487,18 @@ describe('PurchaseOrdersService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.purchaseOrder.update).not.toHaveBeenCalled();
     });
+
+    it('locks the purchase row before checking and writing (race-safe identifiability)', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+      prisma.purchaseOrderLine.count.mockResolvedValue(1);
+
+      await service.update(PO, { reference: null }, human);
+
+      expect(lockedBefore(prisma, prisma.purchaseOrderLine.count)).toBe(true);
+      expect(lockedBefore(prisma, prisma.purchaseOrder.update)).toBe(true);
+    });
   });
 
   describe('soft delete and restore', () => {
@@ -614,6 +649,78 @@ describe('PurchaseOrdersService', () => {
         eventType: 'LINE_REMOVED',
         payload: { lineId: LINE, description: 'Laptop' },
       });
+    });
+
+    it('returns the full line shape, stamped with the same deletedAt it wrote', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference: 'OC-1' }),
+      );
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(
+        lineRow({ quantity: 2, unitPrice: BigInt(ABOVE_INT4) }),
+      );
+
+      const removed = await service.removeLine(PO, LINE, human);
+
+      const written = (
+        prisma.purchaseOrderLine.update.mock.calls[0] as [{ data: Row }]
+      )[0].data.deletedAt;
+      expect(removed.deletedAt).toBe(written);
+      expect(removed).toMatchObject({
+        id: LINE,
+        unitPrice: ABOVE_INT4,
+        receivedQuantity: 0,
+        pendingQuantity: 2,
+        receiptState: 'NONE',
+        lineTotal: 2 * ABOVE_INT4,
+      });
+      expect(() => JSON.stringify(removed)).not.toThrow();
+    });
+
+    it('locks the purchase row before the last-line check (race-safe identifiability)', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.purchaseOrderLine.count.mockResolvedValue(1);
+
+      await service.removeLine(PO, LINE, human);
+
+      expect(lockedBefore(prisma, prisma.purchaseOrderLine.count)).toBe(true);
+      expect(lockedBefore(prisma, prisma.purchaseOrderLine.update)).toBe(true);
+    });
+
+    it('refuses to change the kind of a line with linked assets (409)', async () => {
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+      prisma.asset.count.mockResolvedValue(3);
+
+      await expect(
+        service.updateLine(PO, LINE, { kind: 'OTHER' }, human),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.asset.count).toHaveBeenCalledWith({
+        where: { purchaseOrderLineId: LINE, deletedAt: null },
+      });
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+    });
+
+    it('a line of another purchase is not found here: 404 on update and removal, scoped by purchaseOrderId', async () => {
+      // The line exists, but on another purchase: the purchase-scoped lookup finds nothing.
+      prisma.purchaseOrderLine.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.updateLine(PO, LINE, { description: 'x' }, human),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.removeLine(PO, LINE, human)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+
+      for (const [args] of prisma.purchaseOrderLine.findFirst.mock.calls as [
+        { where: Row },
+      ][]) {
+        expect(args.where).toEqual({
+          id: LINE,
+          purchaseOrderId: PO,
+          deletedAt: null,
+        });
+      }
+      expect(prisma.purchaseOrderLine.update).not.toHaveBeenCalled();
+      expect(events(prisma)).toEqual([]);
     });
   });
 });

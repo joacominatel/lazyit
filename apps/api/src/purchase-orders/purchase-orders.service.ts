@@ -26,7 +26,10 @@ import type { Principal } from '../auth/principal';
 import { currentAiInvocationId } from '../ai/core/invocation-context';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
-import { purchaseOrderLineMoneyToWire } from '../common/money';
+import {
+  purchaseOrderLineMoneyToDb,
+  purchaseOrderLineMoneyToWire,
+} from '../common/money';
 import {
   COUNTABLE_LINE_KINDS,
   deriveLine,
@@ -423,12 +426,13 @@ export class PurchaseOrdersService {
   /**
    * Update the header. A status change writes `STATUS_CHANGED { from, to }`; any other change writes one
    * `UPDATED { fields, changes }`. Refuses a change that would leave the purchase with nothing that
-   * identifies it (no supplier, no reference, no line).
+   * identifies it (no supplier, no reference, no line); the purchase row is locked first, so a concurrent
+   * line removal cannot slip between the check and the write.
    */
   async update(id: string, data: UpdatePurchaseOrder, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
-      const before = await this.assertLive(tx, id);
+      const before = await this.assertLive(tx, id, { lock: true });
       await this.assertReferences(tx, data);
       const supplierId =
         data.supplierId !== undefined ? data.supplierId : before.supplierId;
@@ -542,7 +546,11 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
-      const before = await this.assertLineLive(tx, purchaseOrderId, lineId);
+      const { line: before } = await this.assertLineLive(
+        tx,
+        purchaseOrderId,
+        lineId,
+      );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
       const quantity = data.quantity ?? before.quantity;
       const cancelled = data.cancelledQuantity ?? before.cancelledQuantity;
@@ -562,15 +570,9 @@ export class PurchaseOrdersService {
       if (data.kind !== undefined && data.kind !== before.kind) {
         await this.assertNothingLinked(tx, lineId, 'change the kind of');
       }
-      const { unitPrice, ...rest } = data;
       await tx.purchaseOrderLine.update({
         where: { id: lineId },
-        data: {
-          ...rest,
-          ...(unitPrice !== undefined
-            ? { unitPrice: unitPrice === null ? null : BigInt(unitPrice) }
-            : {}),
-        },
+        data: purchaseOrderLineMoneyToDb(data),
       });
       const changes = diff(before, data, LINE_FIELDS);
       if (Object.keys(changes).length > 0) {
@@ -585,7 +587,9 @@ export class PurchaseOrdersService {
 
   /**
    * Remove a line (soft delete), only while no live asset is linked to it (ADR-0099 §9), and never the
-   * last thing that identifies the purchase.
+   * last thing that identifies the purchase. The purchase row is locked first (`SELECT … FOR UPDATE`, the
+   * ADR-0098 pattern), so two concurrent removals — or a removal racing a header update that clears the
+   * supplier and reference — serialize and the second one sees the first.
    */
   async removeLine(
     purchaseOrderId: string,
@@ -594,8 +598,12 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
-      const purchase = await this.assertLive(tx, purchaseOrderId);
-      const line = await this.assertLineLive(tx, purchaseOrderId, lineId);
+      const { purchase, line } = await this.assertLineLive(
+        tx,
+        purchaseOrderId,
+        lineId,
+        { lock: true },
+      );
       await this.assertNothingLinked(tx, lineId, 'remove');
       if (purchase.supplierId === null && purchase.reference === null) {
         const others = await tx.purchaseOrderLine.count({
@@ -607,28 +615,28 @@ export class PurchaseOrdersService {
           );
         }
       }
+      const now = new Date();
       await tx.purchaseOrderLine.update({
         where: { id: lineId },
-        data: { deletedAt: new Date() },
+        data: { deletedAt: now },
       });
       await this.recordEvent(tx, purchaseOrderId, 'LINE_REMOVED', actor, {
         lineId,
         description: line.description,
       });
-      return { ...purchaseOrderLineMoneyToWire(line), deletedAt: new Date() };
+      // Nothing is linked (checked above), so the line reads as received 0 — the full line shape.
+      return { ...this.lineToWire(line, deriveLine(line, 0)), deletedAt: now };
     });
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────
 
   private lineCreateData(line: CreatePurchaseOrderLine, position: number) {
-    const { unitPrice, ...rest } = line;
-    return {
-      ...rest,
-      kind: rest.kind ?? DEFAULT_PURCHASE_ORDER_LINE_KIND,
+    return purchaseOrderLineMoneyToDb({
+      ...line,
+      kind: line.kind ?? DEFAULT_PURCHASE_ORDER_LINE_KIND,
       position,
-      ...(unitPrice != null ? { unitPrice: BigInt(unitPrice) } : {}),
-    };
+    });
   }
 
   /** One line with its derived values. */
@@ -640,8 +648,18 @@ export class PurchaseOrdersService {
     return this.lineToWire(line, deriveLine(line, received.get(lineId) ?? 0));
   }
 
-  /** A live purchase row; 404 otherwise. */
-  private async assertLive(client: Tx | PrismaService, id: string) {
+  /**
+   * A live purchase row; 404 otherwise. With `lock`, the row is locked for the rest of the transaction
+   * first (`SELECT … FOR UPDATE`), so a check made on it holds until the commit.
+   */
+  private async assertLive(
+    client: Tx | PrismaService,
+    id: string,
+    options: { lock?: boolean } = {},
+  ) {
+    if (options.lock) {
+      await client.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${id} FOR UPDATE`;
+    }
     const purchase = await client.purchaseOrder.findFirst({
       where: { id, deletedAt: null },
     });
@@ -651,12 +669,14 @@ export class PurchaseOrdersService {
     return purchase;
   }
 
+  /** A live line of a live purchase (404 otherwise — a line of another purchase is not found here). */
   private async assertLineLive(
     tx: Tx,
     purchaseOrderId: string,
     lineId: string,
+    options: { lock?: boolean } = {},
   ) {
-    await this.assertLive(tx, purchaseOrderId);
+    const purchase = await this.assertLive(tx, purchaseOrderId, options);
     const line = await tx.purchaseOrderLine.findFirst({
       where: { id: lineId, purchaseOrderId, deletedAt: null },
     });
@@ -665,7 +685,7 @@ export class PurchaseOrdersService {
         `Line ${lineId} not found on purchase ${purchaseOrderId}`,
       );
     }
-    return line;
+    return { purchase, line };
   }
 
   private async assertHasLines(tx: Tx, purchaseOrderId: string) {

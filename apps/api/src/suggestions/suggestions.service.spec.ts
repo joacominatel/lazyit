@@ -137,6 +137,21 @@ describe('SuggestionsService (ADR-0099 §7)', () => {
     expect(result.map((s) => s.value)).toEqual(['EUR']);
   });
 
+  it('never suggests line manufacturer or model text from an archived purchase', async () => {
+    prisma.assetModel.groupBy.mockResolvedValue([]);
+    prisma.purchaseOrderLine.groupBy.mockResolvedValue([]);
+
+    await service.suggest('manufacturer', { limit: 10 }, human('MEMBER'));
+    await service.suggest('lineModel', { limit: 10 }, human('MEMBER'));
+
+    for (const [args] of prisma.purchaseOrderLine.groupBy.mock.calls as [
+      { where: Record<string, unknown> },
+    ][]) {
+      expect(args.where.purchaseOrder).toEqual({ deletedAt: null });
+    }
+    expect(prisma.purchaseOrderLine.groupBy).toHaveBeenCalledTimes(2);
+  });
+
   it("uses a service account's direct grants, and refuses an anonymous caller", async () => {
     const sa = {
       kind: 'service',
