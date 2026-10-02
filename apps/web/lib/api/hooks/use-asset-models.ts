@@ -18,7 +18,7 @@ import {
   updateAssetModel,
 } from "../endpoints/asset-models";
 import { createQueryKeys, selectDirectoryItems } from "../query-keys";
-import { invalidateSuggestions } from "./use-suggestions";
+import { invalidateSuggestions } from "../query-keys";
 
 /** Query keys for Asset models. */
 const baseAssetModelKeys = createQueryKeys("asset-models");

@@ -36,7 +36,7 @@ import {
 } from "../endpoints/purchase-orders";
 import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
-import { invalidateSuggestions } from "./use-suggestions";
+import { invalidateSuggestions } from "../query-keys";
 
 /** Activity-log page size. */
 const EVENTS_PAGE_SIZE = 50;
