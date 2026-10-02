@@ -645,8 +645,8 @@ describe('AssetsService', () => {
       const calls = tx.create.mock.calls as CreateCall[];
       expect(calls[0][0].data.serial).toBe('SN-A');
       expect(calls[1][0].data.serial).toBe('SN-B');
-      // purchaseCost is passed straight through — no re-coercion in the service.
-      expect(calls[0][0].data.purchaseCost).toBe(4500);
+      // purchaseCost is passed straight through — no re-coercion, only the bigint the column takes (ADR-0100).
+      expect(calls[0][0].data.purchaseCost).toBe(BigInt(4500));
       expect(calls[0][0].data.locationId).toBe('l1');
     });
 
@@ -782,10 +782,11 @@ describe('AssetsService', () => {
   });
 
   it('findOne echoes cost as currentBookValue when there is nothing to depreciate (#954)', async () => {
-    // purchaseCost set but no usefulLifeMonths → current value = cost (independent of "now").
+    // purchaseCost set but no usefulLifeMonths → current value = cost (independent of "now"). The column
+    // is BigInt, so the client hands back a bigint; the read converts it to a wire number (ADR-0100).
     asset.findFirst.mockResolvedValue(
       rawRow({
-        purchaseCost: 100_000,
+        purchaseCost: BigInt(100_000),
         usefulLifeMonths: null,
         salvageValue: null,
         purchaseDate: null,
@@ -795,6 +796,7 @@ describe('AssetsService', () => {
     const result = await service.findOne('a1');
 
     expect(result.currentBookValue).toBe(100_000);
+    expect(result.purchaseCost).toBe(100_000);
   });
 
   // --- findPage (paginated, lean) -----------------------------------------

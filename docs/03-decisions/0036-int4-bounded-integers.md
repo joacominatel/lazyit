@@ -3,7 +3,7 @@ title: "ADR-0036: Integer fields bounded to the Postgres int4 range in shared sc
 tags: [adr, api, validation]
 status: accepted
 created: 2026-05-26
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -74,7 +74,7 @@ transversal across 5 entities / ~9 endpoints, so a per-field patch was the wrong
 column) become Prisma `BigInt` columns validated by a new shared `money()` primitive, a JSON number
 bounded to `[0, Number.MAX_SAFE_INTEGER]` that keeps this record's lesson: it always carries an OpenAPI
 `example`, so Swagger never autofills the maximum. Every other `Int` column still maps to `int4()`.
-Not built yet — until the Purchases Phase 1 migration lands, money fields still use `int4({ min: 0 })`.
+Built 2026-10-02 (#1469): the three existing money fields use `money()`.
 
 ## References
 

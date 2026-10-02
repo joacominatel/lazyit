@@ -82,7 +82,8 @@ as a DERIVED, distinct-user count — never a stored column.**
 
 - **Width.** `costPerSeat` moves from `int4` to a 64-bit integer of minor units with the other money
   columns ([[0100-money-as-64-bit-minor-units|ADR-0100]]). The representation is still one money
-  convention — integer minor units — only wider; the wire stays a JSON number.
+  convention — integer minor units — only wider; the wire stays a JSON number. Built 2026-10-02
+  (#1469).
 - **Currency.** The "org's single currency" above no longer holds instance-wide:
   [[0099-purchases-scope-model-and-optionality|ADR-0099]] gives each purchase an optional free-text
   currency label and the asset's purchase cost an optional one. `costPerSeat` itself is unchanged and stays currency-less.

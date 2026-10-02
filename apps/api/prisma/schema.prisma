@@ -634,13 +634,14 @@ model Asset {
   company      String?
   purchaseDate DateTime?
   warrantyEnd  DateTime?
-  // Purchase cost + straight-line depreciation (#954). Money is stored as INTEGER minor units (e.g.
-  // cents) of the instance's single currency — NOT a Prisma Decimal, no currency modeling (YAGNI):
-  // the UI just formats the number. `currentBookValue` is COMPUTED (never stored) on the detail read
-  // via `computeAssetBookValue` in @lazyit/shared. Straight-line only (no MACRS/declining-balance).
-  purchaseCost     Int? // minor units (cents); null = unknown
+  // Purchase cost + straight-line depreciation (#954). Money is stored as 64-bit INTEGER minor units
+  // (hundredths) — NOT a Prisma Decimal (ADR-0100). Prisma returns a JS `bigint`: the API converts it to a
+  // JSON number at the read boundary (apps/api/src/common/money.ts) and the wire bound is MONEY_MAX.
+  // `currentBookValue` is COMPUTED (never stored) on the detail read via `computeAssetBookValue` in
+  // @lazyit/shared. Straight-line only (no MACRS/declining-balance).
+  purchaseCost     BigInt? // minor units (hundredths); null = unknown
   usefulLifeMonths Int? // straight-line depreciation period; null = don't depreciate (book value = cost)
-  salvageValue     Int? // minor units; residual value at end of life; null = 0
+  salvageValue     BigInt? // minor units; residual value at end of life; null = 0
   // FKs are SetNull: deleting a Model/Location detaches assets, never deletes them.
   modelId      String?
   model        AssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
@@ -1530,13 +1531,13 @@ model Application {
   metadata    Json?
   notes       String?
   // License / seat tracking (#949, ADR-0088). All nullable = "untracked". `seatsPurchased` = the number
-  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in INTEGER minor
-  // units (cents) of the org's single currency — mirrors Asset.purchaseCost (#954): no float drift.
+  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in 64-bit INTEGER
+  // minor units (hundredths) — mirrors Asset.purchaseCost (#954, ADR-0100): no float drift.
   // `renewalDate` = when the license/subscription next renews (informational for now; proactive renewal
   // reminders are a follow-up, #1070). `seatsUsed` is DERIVED (distinct active-grant users) and NEVER
   // stored — computed per-request in ApplicationsService.
   seatsPurchased Int?
-  costPerSeat    Int?
+  costPerSeat    BigInt?
   renewalDate    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt

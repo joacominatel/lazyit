@@ -13,11 +13,12 @@ deciders: [Joaquín Minatel]
 
 **accepted** — 2026-10-01 (epic #1465, issue #1466). Part of the Purchases package the CEO approved
 "con la ampliación de montos" (including the money widening) — see
-[[0099-purchases-scope-model-and-optionality]] and [[purchases/decisions]]. **Design only; built first in
-Purchases Phase 1.** Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
+[[0099-purchases-scope-model-and-optionality]] and [[purchases/decisions]]. **Built 2026-10-02 (#1469)** for
+the three existing money columns; the Purchases money columns follow in Purchases Phase 1. Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
 [[0088-application-license-seat-tracking]] (`costPerSeat` widens with the rest). **Amended 2026-10-02**:
 §5 (display) records the CEO's decision that currency is free text (D-C of
-[[0099-purchases-scope-model-and-optionality]]).
+[[0099-purchases-scope-model-and-optionality]]). **Amended again 2026-10-02** (#1469): §3 records how the
+conversion is built, §4 the dependency check, and §5 a provisional CTO decision on `costPerSeat`.
 
 ## Context
 
@@ -96,6 +97,28 @@ no semantics ([[0099-purchases-scope-model-and-optionality]] §5).
 - The web's major/minor helpers (`apps/web/lib/utils/money.ts`) bound their input to the same maximum so
   a value the server will reject is caught in the form.
 
+**As built (2026-10-02, #1469).** One mapper pair per entity in `apps/api/src/common/money.ts`:
+`assetMoneyToWire` / `applicationMoneyToWire` convert a row's money columns to numbers, and
+`assetMoneyToDb` / `applicationMoneyToDb` convert a validated body's amounts to `bigint`. Each converts only
+the keys it names and only when they hold the type it expects, so a partial `select`, an absent key or a
+`null` passes through unchanged.
+
+- **Where it runs.** `AssetsService` and `ApplicationsService` are the only code that puts these columns
+  on the wire. Every other module reads `assets` and `applications` through a narrow `select` that names
+  no money column (the inventory CSV, assignments, infra, the import's existence checks), or through a
+  whole-row read consumed only by the search projectors (`projectAsset` / `projectApplication`), which
+  copy no money field. Each method of the two services that returns a row converts it before returning. The AI tools and MCP
+  dispatch to the same controller handlers, so they receive the converted row too.
+- **Why not a Prisma extension.** A `result` extension that overrides the three fields would convert at
+  runtime, but `PrismaService` is typed as the base client, so the generated types would keep saying
+  `bigint` while the value is a `number`: types and runtime would disagree on every read. It would also
+  be as implicit as the `toJSON` patch this section rejects. The explicit mapper keeps the types true and
+  stays visible at each call site.
+- **The guard.** HTTP-level tests boot the real controller and service over a fake client that returns
+  `bigint` exactly as Prisma does for a `BigInt` column: create, read, update, list, delete and restore of
+  an asset and an application with an amount above the old `int4` ceiling, plus the AI dispatch path. A
+  missed conversion makes `JSON.stringify` throw and the test fail.
+
 ### 4. Upgrade path
 
 - One migration widens the three existing columns: `ALTER TABLE "assets" ALTER COLUMN "purchaseCost" TYPE
@@ -104,7 +127,9 @@ no semantics ([[0099-purchases-scope-model-and-optionality]] §5).
 - The change is **not binary-compatible**, so PostgreSQL **rewrites each table** under an `ACCESS
   EXCLUSIVE` lock for the duration. At lazyit's scale (thousands of assets, hundreds of applications)
   that is seconds, during `prisma migrate deploy`, while the operator is already restarting the stack.
-  No index covers these columns.
+  No index covers these columns, and no view, function or trigger depends on them: the
+  `recent_activity` view joins `assets` and `applications` on other columns only (checked against
+  `pg_depend` on Postgres 18, #1469), so nothing has to be dropped and recreated around the change.
 - Narrowing back to `int4` is not a supported downgrade once a value above the old ceiling is stored.
 - The contract change is **widening only**: a client that sent values within `int4` still sends valid
   values; an older client reading a value above `int4` receives a correct JSON number.
@@ -126,6 +151,9 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
   decimals is rounded to hundredths on input, as the web's major-to-minor helper does today.
 - This governs purchase amounts and the asset's purchase cost and salvage value, which carry the label.
 - Totals are grouped by label (trimmed, case-insensitive) and never summed across labels.
+- **CTO decision, 2026-10-02 — provisional, pending CEO confirmation (#1469):** the "as entered" rule
+  applies to **every money amount in the app**, `Application.costPerSeat` included, so lazyit has one
+  display rule for money. `costPerSeat` carries no currency label, so it shows the grouped number alone.
 
 ## Consequences
 
@@ -139,14 +167,17 @@ cargue el usuario"). So nothing about how an amount looks is derived from its cu
   - A fixed hundredths scale means an amount typed with three decimals (as some currencies use) loses
     the third on input. Accepted: lazyit stores values, it does not model currencies.
 - **Follow-ups (Phase 1, frontend lane):** move the web money formatter to the §5 display rule (today it
-  forces two decimals) for purchase amounts and the asset cost.
-- **Follow-ups (Phase 1, backend lane):** add `money()`; move the three columns and every money field of
+  forces two decimals) for purchase amounts, the asset cost and salvage value, and — per the §5 CTO
+  decision — `Application.costPerSeat`; bound the major/minor helpers to `MONEY_MAX` (§3).
+- **Follow-ups (Phase 1, backend lane):** ~~add `money()`; move the three columns and every money field of
   the shared schemas (asset, asset receive, application, the import descriptor, the AI tool inputs) to
   it; convert at the read boundary; cover each read and write path with a test above the old ceiling;
-  update [[code-conventions]] when the code lands.
+  update [[code-conventions]] when the code lands.~~ Done 2026-10-02 (#1469). The Purchases money columns
+  ([[purchase-order-line]]`.unitPrice` and the totals) use `money()` and the same boundary when they are
+  built.
 
 ## Related
 
 [[0099-purchases-scope-model-and-optionality]] · [[0036-int4-bounded-integers]] ·
 [[0088-application-license-seat-tracking]] · [[asset]] · [[application]] · [[purchase-order-line]] ·
-[[shared-package]] · [[code-conventions]] · #954 · #1465 · #1466
+[[shared-package]] · [[code-conventions]] · #954 · #1465 · #1466 · #1469
