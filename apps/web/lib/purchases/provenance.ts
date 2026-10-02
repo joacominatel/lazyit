@@ -52,3 +52,14 @@ export function costDiffersFromPurchase(
     ) === "REPLACE"
   );
 }
+
+/**
+ * The purchase title's source on the asset's panel (ADR-0099 §6): the purchase's own fields, dated by when
+ * the PURCHASE was recorded (`createdAt`, #1476) when it has no order date — the same title it has
+ * everywhere else. A read without `createdAt` (an API older than #1476) falls back to the line's.
+ */
+export function provenanceTitleSource<
+  P extends { reference: string | null; supplier: { name: string } | null; orderDate: string | null; createdAt?: string },
+>(purchase: P, line: { createdAt: string }): P & { createdAt: string } {
+  return { ...purchase, createdAt: purchase.createdAt ?? line.createdAt };
+}

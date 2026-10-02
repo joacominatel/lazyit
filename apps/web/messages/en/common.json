@@ -117,5 +117,14 @@
     "label": "More about {topic}",
     "learnMore": "Learn more in the Manual",
     "newTab": "(opens in a new tab)"
+  },
+  "serialScanner": {
+    "starting": "Starting camera…",
+    "hint": "Point the camera at the serial number barcode. Each new code is added on its own line.",
+    "added": "Added {code} · {count, plural, one {# scanned} other {# scanned}}",
+    "duplicate": "{code} is already in the list.",
+    "unsupported": "Camera scanning isn't available on this device or browser. Type or paste the serials instead.",
+    "error": "Couldn't start the camera. Check that you allowed access and are on HTTPS, or type the serials instead.",
+    "done": "Done"
   }
 }

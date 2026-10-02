@@ -4,6 +4,7 @@ import type {
   CreatePurchaseOrderLine,
   LinkAssetsToLine,
   ReceiveFromLine,
+  ReceiveStockFromLine,
   UpdatePurchaseOrder,
   UpdatePurchaseOrderLine,
 } from "@lazyit/shared";
@@ -28,6 +29,7 @@ import {
   linkAssetsToLine,
   type PurchaseOrderListParams,
   receiveFromLine,
+  receiveStockFromLine,
   removePurchaseOrderLine,
   restorePurchaseOrder,
   unlinkAssetsFromLine,
@@ -36,6 +38,8 @@ import {
 } from "../endpoints/purchase-orders";
 import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
+import { consumableKeys } from "./use-consumables";
+import { invalidateDashboard } from "./use-dashboard";
 import { invalidateSuggestions } from "../query-keys";
 
 /** Activity-log page size. */
@@ -53,6 +57,8 @@ export const purchaseOrderKeys = {
   events: (id: string) => [...purchaseOrderKeys.all, "detail", id, "events"] as const,
   pending: (params: { supplierId?: string; limit?: number; offset?: number }) =>
     [...purchaseOrderKeys.all, "pending", params] as const,
+  /** Every open line, read to the end (the *From purchase* picker). */
+  openLines: () => [...purchaseOrderKeys.all, "pending", "all"] as const,
   linkPreview: (lineId: string, assetIds: readonly string[]) =>
     [...purchaseOrderKeys.all, "link-preview", lineId, assetIds] as const,
   /** An asset's provenance lives under the purchase keys, so any purchase write refreshes it. */
@@ -231,6 +237,24 @@ export function useReceiveFromLine() {
     mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: ReceiveFromLine }) =>
       receiveFromLine(id, lineId, data),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Receive a consumable line into stock (#1476): the purchase (counts, log) and the consumable (stock, its
+ * movement ledger, the dashboard's low-stock tally) both change.
+ */
+export function useReceiveStock() {
+  const queryClient = useQueryClient();
+  const invalidatePurchases = useInvalidatePurchases();
+  return useMutation({
+    mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: ReceiveStockFromLine }) =>
+      receiveStockFromLine(id, lineId, data),
+    onSuccess: () => {
+      invalidatePurchases();
+      void queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+      void invalidateDashboard(queryClient);
+    },
   });
 }
 

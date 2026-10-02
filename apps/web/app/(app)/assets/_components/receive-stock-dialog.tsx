@@ -5,6 +5,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
   InboxArrowDownIcon,
+  QrCodeIcon,
 } from "@heroicons/react/24/outline";
 import {
   type AssetStatus,
@@ -19,7 +20,7 @@ import {
 } from "@lazyit/shared";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
 import { Callout } from "@/components/callout";
@@ -35,6 +36,7 @@ import {
   useLoadLineTarget,
   useOpenLines,
 } from "@/components/purchases/pending-line-picker";
+import { SerialScanner } from "@/components/serial-scanner";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,6 +72,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { localToday } from "@/lib/purchases/pending";
 import { parseMoneyInput } from "@/lib/utils/money";
+import { appendSerial } from "@/lib/utils/scanned-serials";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { usePurchaseTitle } from "../../purchases/_components/purchase-display";
 import { useAssetStatusLabel } from "./asset-status-badge";
@@ -178,6 +181,17 @@ export function ReceiveStockDialog({
   // form simpler than RHF here; the shared schemas are the real validators on submit.
   const [values, setValues] = useState<LineReceiveFormValues>(initial?.values ?? EMPTY_FORM);
   const [editPrefill, setEditPrefill] = useState(false);
+  // The camera scanner under the serials box (#1476), open on demand.
+  const [scanning, setScanning] = useState(false);
+  // Closing the scanner gives focus back to *Scan* (the scanner itself focuses its *Done* on opening).
+  const scanButtonRef = useRef<HTMLButtonElement>(null);
+  const refocusScanRef = useRef(false);
+  useEffect(() => {
+    if (!scanning && refocusScanRef.current) {
+      refocusScanRef.current = false;
+      scanButtonRef.current?.focus();
+    }
+  }, [scanning]);
   const [errors, setErrors] = useState<FieldErrors>({});
   const lineLoader = useLoadLineTarget();
   const switching = lineLoader.loading;
@@ -195,6 +209,19 @@ export function ReceiveStockDialog({
 
   function patch(next: Partial<LineReceiveFormValues>) {
     setValues((prev) => ({ ...prev, ...next }));
+  }
+
+  /**
+   * One scanned serial (#1476), appended on its own line. Against a line the quantity already follows the
+   * serials; in plain mode it is set to their count, so a scanned delivery never trips the "serials must
+   * match the quantity" rule.
+   */
+  function addScannedSerial(code: string) {
+    setValues((prev) => {
+      const serials = appendSerial(prev.serials, code);
+      return target ? { ...prev, serials } : { ...prev, serials, quantity: String(parseSerials(serials).length) };
+    });
+    setErrors((prev) => ({ ...prev, serials: undefined, quantity: undefined }));
   }
 
   function startLine(next: ReceiveLineTarget) {
@@ -412,7 +439,15 @@ export function ReceiveStockDialog({
 
   const serialsField = (
     <Field data-invalid={errors.serials ? true : undefined}>
-      <FieldLabel htmlFor="receive-serials">{t("serials")}</FieldLabel>
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel htmlFor="receive-serials">{t("serials")}</FieldLabel>
+        {scanning ? null : (
+          <Button ref={scanButtonRef} type="button" variant="outline" size="sm" onClick={() => setScanning(true)}>
+            <QrCodeIcon />
+            {t("scan")}
+          </Button>
+        )}
+      </div>
       <Textarea
         id="receive-serials"
         value={values.serials}
@@ -423,6 +458,16 @@ export function ReceiveStockDialog({
         aria-invalid={Boolean(errors.serials) || undefined}
         autoFocus={target !== null}
       />
+      {scanning ? (
+        <SerialScanner
+          existing={parseSerials(values.serials)}
+          onScan={addScannedSerial}
+          onDone={() => {
+            refocusScanRef.current = true;
+            setScanning(false);
+          }}
+        />
+      ) : null}
       <FieldDescription>{target ? tl("serialsHelp") : t("serialsHelp")}</FieldDescription>
       {errors.serials ? <FieldError errors={[{ message: errors.serials }]} /> : null}
     </Field>

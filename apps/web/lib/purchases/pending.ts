@@ -55,6 +55,37 @@ export function pendingLinesForModel(
   return lines.filter((line) => line.assetModelId === modelId && line.pendingQuantity > 0);
 }
 
+/**
+ * The open lines a receive of ASSETS can take (#1476): `ASSET` lines only. A consumable line is received
+ * into stock, never as assets, so the *From purchase* picker of Receive stock and New asset leaves it out.
+ */
+export function assetReceivableLines(lines: readonly PendingPurchaseLine[]): PendingPurchaseLine[] {
+  return lines.filter((line) => line.kind === "ASSET");
+}
+
+/** The most pages {@link collectPages} reads for one list — a safety bound, far above a real backlog. */
+export const MAX_COLLECTED_PAGES = 10;
+
+/**
+ * Read a paged list to its end: page after page while the pages read hold fewer items than `total`, up to
+ * `maxPages`. For the open lines the *From purchase* picker offers (#1476): the API cannot filter lines by
+ * kind, so with only the first page, consumable lines could push asset lines out of the picker.
+ */
+export async function collectPages<T>(
+  fetchPage: (offset: number) => Promise<{ items: T[]; total: number }>,
+  maxPages: number = MAX_COLLECTED_PAGES,
+): Promise<{ items: T[]; total: number }> {
+  const items: T[] = [];
+  let total = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const result = await fetchPage(items.length);
+    total = result.total;
+    items.push(...result.items);
+    if (result.items.length === 0 || items.length >= total) break;
+  }
+  return { items, total };
+}
+
 /** The viewer's day as `"YYYY-MM-DD"` (local time — "today" is the day at the warehouse door). */
 export function localToday(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");

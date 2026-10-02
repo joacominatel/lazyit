@@ -279,6 +279,9 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
   capa de almacenamiento; se conserva el registro de quién lo subió.
 - Subir y eliminar requieren el permiso de escritura de activos; quien pueda ver el activo puede
   descargar.
+- **Tipo** — opcional, texto libre (*Factura*, *Garantía*, *Remito*…), sugerido a partir de los tipos ya
+  usados. Complétalo antes de subir, o ponlo, cámbialo o quítalo después con el lápiz del documento. Se
+  ve junto al nombre del archivo.
 
 > **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
 > **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el

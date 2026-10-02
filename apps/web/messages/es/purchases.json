@@ -143,7 +143,12 @@
     "warrantyMonths": "Garantía (meses)",
     "warrantyInvalid": "Un número entero de meses, hasta 1200.",
     "lineTotal": "Total de la línea {total}",
-    "remove": "Quitar la línea {index}"
+    "remove": "Quitar la línea {index}",
+    "kindConsumable": "Consumible",
+    "descriptionConsumablePlaceholder": "Tóner, cables, pilas…",
+    "consumable": "Consumible (opcional)",
+    "consumablePlaceholder": "Asígnalo ahora o al recibir",
+    "consumableHelp": "El artículo de stock al que entran las unidades cuando llegan."
   },
   "lineDialog": {
     "addTitle": "Agregar línea",
@@ -209,7 +214,10 @@
     "receiveUnits": "Recibir unidades",
     "cancelRemaining": "Cancelar unidades restantes",
     "linkExisting": "Vincular activos existentes",
-    "documentsBackupNotice": "Los archivos que subas aquí todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guarda tu propia copia de cada factura, pedido o remito que necesites conservar."
+    "documentsBackupNotice": "Los archivos que subas aquí todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guarda tu propia copia de cada factura, pedido o remito que necesites conservar.",
+    "receivesInto": "a <link>{name}</link>",
+    "consumableNotMapped": "sin consumible todavía",
+    "receiveStock": "Recibir en stock"
   },
   "activity": {
     "fields": {
@@ -232,7 +240,8 @@
       "unitPrice": "precio unitario",
       "cancelledQuantity": "unidades canceladas",
       "warrantyMonths": "garantía",
-      "position": "posición"
+      "position": "posición",
+      "consumableId": "consumible"
     },
     "kindAsset": "Activo",
     "kindOther": "Otro",
@@ -268,7 +277,14 @@
     "assetsMovedAway": "{count, plural, one {# activo de «{line}» se movió} other {# activos de «{line}» se movieron}} a otra compra",
     "documentAdded": "Agregó el documento «{name}»",
     "documentRemoved": "Quitó el documento «{name}»",
-    "aDocument": "un archivo"
+    "aDocument": "un archivo",
+    "kindConsumable": "Consumible",
+    "stockReceived": "Recibió {count, plural, one {# unidad} other {# unidades}} en stock en «{line}»",
+    "documentAddedLabelled": "Agregó el documento «{name}» ({label})",
+    "documentRemovedLabelled": "Quitó el documento «{name}» ({label})",
+    "documentLabelSet": "Puso el tipo de «{name}» en {label}",
+    "documentLabelChanged": "Cambió el tipo de «{name}»: {from} → {to}",
+    "documentLabelCleared": "Quitó el tipo de «{name}»"
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -438,7 +454,9 @@
       "linkedElsewhere": "Está en otra compra: marca «Mover aquí» para moverlo",
       "notLinked": "No está vinculado a esta línea"
     },
-    "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula."
+    "previewChanged": "Algunos de estos activos cambiaron desde que se mostró la comparación. Revísala de nuevo y luego vincula.",
+    "notLinkedChip": "Sin compra vinculada",
+    "removeNotLinkedChip": "Mostrar también activos con compra"
   },
   "provenance": {
     "title": "Compra",
@@ -482,5 +500,35 @@
     "linkExisting": "Vincular activos existentes",
     "cancelRemaining": "Cancelar unidades restantes",
     "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}"
+  },
+  "receiveStock": {
+    "title": "Recibir en stock",
+    "consumable": "Consumible",
+    "consumablePlaceholder": "Elige el artículo de stock",
+    "consumableMissing": "Esta línea todavía no tiene consumible. Elige uno: se guarda en la línea y el stock entra en él.",
+    "consumableRequired": "Elige el consumible al que entran las unidades.",
+    "consumableNoAccess": "Esta línea todavía no tiene consumible y no puedes ver consumibles. Pide a alguien que pueda que lo asigne en la línea.",
+    "consumableSaveError": "No se pudo guardar el consumible en la línea",
+    "into": "En {name} · {stock} {unit} en stock ahora",
+    "quantity": "Cantidad recibida",
+    "quantityHelp": "{pending, plural, =0 {Nada pendiente en esta línea} one {# unidad pendiente} other {# unidades pendientes}}. Escribe lo que llegó de verdad.",
+    "quantityInvalid": "Un número entero, 1 o más.",
+    "note": "Nota (opcional)",
+    "noteHelp": "Visible para cualquiera que pueda ver los movimientos de este consumible, incluidos los Lectores: no pongas datos de la factura ni del proveedor.",
+    "submit": "Recibir {count, plural, one {# unidad} other {# unidades}}",
+    "receivedToast": "{count, plural, one {# unidad recibida} other {# unidades recibidas}} en {name}",
+    "error": "No se pudo recibir en stock"
+  },
+  "lineAssets": {
+    "show": "Ver activos",
+    "hide": "Ocultar activos",
+    "none": "Ningún activo vigente está vinculado a esta línea.",
+    "loadError": "No se pudieron cargar los activos de esta línea.",
+    "showingSome": "Se muestran los primeros {shown} de {total}.",
+    "unlink": "Desvincular",
+    "unlinkTitle": "¿Desvincular de esta línea?",
+    "unlinkDescription": "¿Desvincular {asset} de «{line}»? El activo conserva sus valores de compra; la línea cuenta una unidad menos.",
+    "unlinkedToast": "{asset} desvinculado",
+    "unlinkError": "No se pudo desvincular el activo"
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { costDiffersFromPurchase, purchasePanelMode } from "./provenance";
+import { purchaseTitle } from "./display";
+import { costDiffersFromPurchase, provenanceTitleSource, purchasePanelMode } from "./provenance";
 
 describe("the Purchase panel follows purchaseOrder:read (ADR-0099 D-A)", () => {
   test("without the permission it is hidden — linked or not, writer or not — so nothing is fetched", () => {
@@ -47,5 +48,30 @@ describe("differs from purchase — cost only", () => {
   test("nothing to compare is not a difference: no cost on the asset, or no price on the line", () => {
     expect(costDiffersFromPurchase({ purchaseCost: null, purchaseCurrency: null }, { unitPrice: 1000 }, "ARS")).toBe(false);
     expect(costDiffersFromPurchase({ purchaseCost: 1000 }, { unitPrice: null }, "ARS")).toBe(false);
+  });
+});
+
+describe("the panel titles the purchase as everywhere else (#1476)", () => {
+  const line = { createdAt: "2026-09-20T15:00:00.000Z" };
+  const purchase = { reference: null, supplier: null, orderDate: null, createdAt: "2026-08-01T12:00:00.000Z" };
+
+  test("without reference, supplier or order date, the date is when the purchase was recorded — not the line", () => {
+    expect(purchaseTitle(provenanceTitleSource(purchase, line))).toEqual({
+      kind: "untitled",
+      date: "2026-08-01T12:00:00.000Z",
+    });
+  });
+
+  test("the order date still wins", () => {
+    expect(purchaseTitle(provenanceTitleSource({ ...purchase, orderDate: "2026-07-15T00:00:00.000Z" }, line))).toEqual({
+      kind: "untitled",
+      date: "2026-07-15T00:00:00.000Z",
+    });
+  });
+
+  test("an older read without the purchase's createdAt falls back to the line's", () => {
+    const { createdAt: _unused, ...older } = purchase;
+    void _unused;
+    expect(provenanceTitleSource(older, line).createdAt).toBe(line.createdAt);
   });
 });
