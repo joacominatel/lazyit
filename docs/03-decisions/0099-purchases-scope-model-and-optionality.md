@@ -699,6 +699,13 @@ under the principles above. None reopens a CEO decision.
   asset documents (`asset:read`) and purchase documents (`purchaseOrder:read`), live documents of live
   parents only. Raw SQL with a fixed pair of parent tables, because an attachment's parent is a soft
   reference with no relation to filter through ([[0082-attachments-storage]]).
+- **Listing a purchase's assets is a filter on the asset list** (asked by the frontend flows unit, #1483).
+  `GET /assets` gains `purchaseOrderLineId`, `purchaseOrderId` and `purchaseLinked` (`true` / `false`),
+  AND-combined, list only. Any of them needs `purchaseOrder:read` on top of `asset:read` (`403`, checked in
+  the service like the batch receive's line): the filter itself reveals provenance (D-A). Rejected: `GET
+  /purchase-orders/:id/assets` — a second paged asset projection to keep in step with the list's, its
+  sort, its archived slice and its lean select. The provenance read gains the purchase's `createdAt`, the
+  date of the title fallback (#1474).
 - **Upgrade.** Three nullable columns (`purchase_order_lines.consumableId`,
   `consumable_movements.purchaseOrderLineId`, `attachments.label`), two indexes, two foreign keys and one
   CHECK, all valid over populated tables because every existing row reads `NULL`. No past movement is

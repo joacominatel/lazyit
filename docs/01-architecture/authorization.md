@@ -174,10 +174,12 @@ three roles **except** two tighter tiers:
 > suggested by `GET /suggestions/documentLabel`, which reads asset documents' labels for `asset:read` and
 > purchase documents' labels for `purchaseOrder:read` (`403` with neither).
 >
-> Two decisions are made **in the service**, because a decorator cannot see them: `POST
+> Three decisions are made **in the service**, because a decorator cannot see them: `POST
 > /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
-> `purchaseOrder:write` (`403`); and `GET /assets/export` appends the supplier, purchase reference and
-> invoice numbers columns only for a caller holding `purchaseOrder:read`. Both resolve the principal's
+> `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
+> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
+> `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
+> (`403`), since the filter itself reveals which assets came from which purchase. Both resolve the principal's
 > permissions through `PermissionResolverService.principalHas` — a human by role, a service account by its
 > grants, no principal never.
 
