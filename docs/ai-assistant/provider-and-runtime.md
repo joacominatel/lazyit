@@ -773,8 +773,10 @@ file** and answer with **data in a fixed shape**, no tools. It is its own port, 
   of `ChatModelPort`, not a method on it: the agent loop never extracts, and the chat fakes stay untouched.
 - **The call** (`providers/structured-extraction.ts`): `generateText` with `output: Output.object({ schema,
   name })` and the file as an inline `file` part (bytes, server-sniffed media type, **no filename** — it is
-  user-supplied text). There is **no `tools` key at all**, so whatever the document says, the model can only
-  answer with data in the schema's shape (INV-AI-4). Everything else is the step's posture: the provider
+  user-supplied text). There is **no `tools` key**: no lazyit tool is declared, so whatever the document says,
+  the model can only answer with data in the schema's shape (INV-AI-4). A provider may carry structured output
+  in a synthetic JSON tool of its own (Anthropic's `jsonTool` mode on models without native structured
+  output); it has no executor and only holds the answer. Everything else is the step's posture: the provider
   definition builds the model over the egress-guarded fetch (INV-AI-7), the key is checked before any I/O,
   `experimental_download` refuses every URL, telemetry is off, the definition's call settings apply (effort,
   OpenAI `store: false`, Anthropic cache hints). An answer that does not fit the schema
@@ -788,25 +790,33 @@ file** and answer with **data in a fixed shape**, no tools. It is its own port, 
 - **lazyit reads the values** (`purchase-orders/extraction/`): amounts from the literal text in the
   document's own number format (`1.234,56` and `1,234.56` → minor units), the decimal separator inferred
   from every amount the document prints; a literal that reads two ways (`1.150`) with nothing to settle it
-  is left **blank** and flagged — never guessed. Numeric dates are read from the text in the document's
-  day/month order; written dates keep the model's reading only when the year and day are printed. A value
-  with no printed evidence is dropped. Cross-checks become warnings, never corrections: quantity × unit price
-  against the printed line total, the lines against the printed net and gross.
-- **Which providers.** `aiDocumentExtractionMediaTypes(provider)` (`@lazyit/shared`): Anthropic, OpenAI
-  (Responses API) and Gemini read PDF, PNG, JPEG, WebP and GIF; the **OpenAI-compatible provider reads
-  nothing** for extraction — there is no common file API across those servers and most local models cannot
+  is left **blank** and flagged — never guessed. A trailing minus is a negative (not read); `$ 1.500.-` (the
+  whole-amount mark) is 1500; space-grouped thousands must be real groups of three. Numeric dates are read
+  from the text in the document's day/month order, and one that still reads two ways is blank
+  (`DATE_AMBIGUOUS`), whatever the model read; written dates keep the model's reading only when the year and
+  day are printed. A value with no printed evidence is dropped. Cross-checks become warnings, never
+  corrections: quantity × unit price against the printed line total, and the lines against the printed net
+  and gross only when every line has both.
+- **Which providers.** `aiDocumentExtractionMediaTypes(provider)` (`@lazyit/shared`): Anthropic and OpenAI
+  (Responses API) read PDF, PNG, JPEG, WebP and GIF, Gemini the same but GIF; the **OpenAI-compatible provider
+  reads nothing** for extraction — there is no common file API across those servers and most local models cannot
   read a PDF. A model of a supported provider that cannot read files fails at the provider, with nothing
   saved.
-- **Limits.** The document ≤ 10 MB and ≤ 20 PDF pages (counted best-effort from the file's page objects), a
-  120 s deadline (`AbortSignal.timeout` → `EXTRACTION_TIMEOUT`), output ≤ min(`maxOutputTokens`, 16 000),
-  ≤ 200 draft lines. The caller's `dailyTokenLimitPerPrincipal` is checked first (`BUDGET_EXCEEDED`, 429)
-  and the call's usage is written to `ai_usage` (`runId` = the extraction id), so extraction and chat share
-  one budget.
+- **Limits.** The document ≤ 10 MB, or less where the provider takes less for its type
+  (`aiDocumentExtractionMaxBytes`: Anthropic images ≤ 10 MB base64-encoded, 7 864 320 bytes raw), and ≤ 20 PDF
+  pages (counted best-effort from the file's page objects) — all checked before anything is sent. A 120 s
+  deadline (`AbortSignal.timeout` → `EXTRACTION_TIMEOUT`). Output ≤ min(`maxOutputTokens`, 16 000); at about
+  180 tokens a line plus 1 000 for the rest, the model is asked for at most `extractionLineLimit` lines (80 at
+  16 000, never under 10) and to set `moreLines` past them (`LINES_TRUNCATED`). One extraction in flight per
+  person and 5 started a minute (the service's own in-memory limiters, not the chat's). The caller's
+  `dailyTokenLimitPerPrincipal` is checked first (`BUDGET_EXCEEDED`, 429) and the call's usage is written to
+  `ai_usage` (`runId` = the extraction id), so extraction and chat share one budget.
 - **Gates and records.** Human callers only, holding `purchaseOrder:write` and `ai:use`; the assistant
   usable, the `documentExtractionEnabled` switch on ([[ai-settings]]), the provider reading the type. One
   `ai.extraction.finish` log line per run (ids, provider, model, latency, token and line counts, outcome —
-  never content) and one `EXTRACTION_RUN` [[purchase-order-event]] (metadata only), on success **and** on
-  failure, since the document left the instance either way.
+  never content) and one `EXTRACTION_RUN` [[purchase-order-event]] (metadata only) whenever the document may
+  have reached the provider — on success and on a failure after the request, not on a failure before any I/O
+  (`AI_DISABLED`, `CONVERSATION_READ_ONLY`, `PROVIDER_AUTH` without an HTTP status).
 
 ## 7. Data model sketch (additive Prisma)
 

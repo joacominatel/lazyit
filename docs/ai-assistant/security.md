@@ -873,8 +873,10 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
   disclosure (`AI_DOCUMENT_EXTRACTION_DISCLOSURE`). It needs the assistant usable too. Operators who use a
   self-hosted OpenAI-compatible model get no extraction at all (that provider is never offered), so turning
   it on always means a hosted provider.
-- **Untrusted content cannot act (INV-AI-4).** The call declares **no tools** — not even disabled ones —
-  so a prompt injection hidden in a supplier's PDF can only change what is transcribed. The answer is
+- **Untrusted content cannot act (INV-AI-4).** The call declares **no lazyit tools** (there is no `tools`
+  key), so a prompt injection hidden in a supplier's PDF can only change what is transcribed. A provider may
+  carry structured output in a synthetic JSON tool of its own (Anthropic's `jsonTool` mode); it has no
+  executor and only holds the answer. The answer is
   data validated against a fixed schema; the server reads every amount and date from the printed text
   itself, and the person reviews every field (with its verbatim evidence) before anything is saved. The
   extraction writes nothing to the purchase, its lines, suppliers or models; it only *suggests* matches.
@@ -882,11 +884,13 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
 - **Who.** Humans only (a service account is refused even with the permissions: extraction is a reviewed,
   interactive step, and no headless flow should send documents out), holding `purchaseOrder:write` and the
   AI channel gate `ai:use`. The route reaches only a document of the named, live purchase.
-- **Bounded consumption (INV-AI-11).** ≤ 10 MB, ≤ 20 PDF pages, a 120 s deadline, a capped output, and the
-  caller's daily token budget — checked before the call and charged after it (`ai_usage`).
-- **Audit and privacy.** Each run appends an `EXTRACTION_RUN` [[purchase-order-event]] (who, which
-  document, provider, model, token counts, outcome) and one log line — never a value read from the document
-  (ADR-0031). The draft itself is not stored anywhere.
+- **Bounded consumption (INV-AI-11).** ≤ 10 MB (less where the provider takes less for the type), ≤ 20 PDF
+  pages, a 120 s deadline, a capped output with a matching line ceiling, one extraction in flight and 5 a
+  minute per person, and the caller's daily token budget — checked before the call and charged after it
+  (`ai_usage`).
+- **Audit and privacy.** Each run whose document may have reached the provider appends an `EXTRACTION_RUN`
+  [[purchase-order-event]] (who, which document, provider, model, token counts, outcome); every run writes one
+  log line — never a value read from the document (ADR-0031). The draft itself is not stored anywhere.
 - **Not here.** No chat upload of files (synthesis §9.2 stands), no extraction tool for the chat or MCP —
   that is Phase 3 (#1478), where reading a document marks the conversation untrusted and purchase changes
   are never auto-approved (ADR-0099 §11).
