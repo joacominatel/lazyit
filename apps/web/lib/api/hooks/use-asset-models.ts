@@ -18,6 +18,7 @@ import {
   updateAssetModel,
 } from "../endpoints/asset-models";
 import { createQueryKeys, selectDirectoryItems } from "../query-keys";
+import { invalidateSuggestions } from "./use-suggestions";
 
 /** Query keys for Asset models. */
 const baseAssetModelKeys = createQueryKeys("asset-models");
@@ -71,8 +72,11 @@ export function useCreateAssetModel() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: CreateAssetModel) => createAssetModel(data),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: assetModelKeys.all }),
+    onSuccess: () => {
+      // A new manufacturer spelling becomes a suggestion.
+      void invalidateSuggestions(queryClient);
+      return queryClient.invalidateQueries({ queryKey: assetModelKeys.all });
+    },
   });
 }
 
@@ -82,8 +86,11 @@ export function useUpdateAssetModel() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateAssetModel }) =>
       updateAssetModel(id, data),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: assetModelKeys.all }),
+    onSuccess: () => {
+      // A new manufacturer spelling becomes a suggestion.
+      void invalidateSuggestions(queryClient);
+      return queryClient.invalidateQueries({ queryKey: assetModelKeys.all });
+    },
   });
 }
 
