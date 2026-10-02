@@ -15,13 +15,21 @@ import { apiFetch, apiFetchBlob } from "../client";
  * through {@link apiFetchBlob} (Bearer → Blob → object URL), never a bare element `src`.
  */
 
-/** Which parent a set of attachments hangs off — selects the REST base path. */
-export type AttachmentParent = "asset" | "article";
+/**
+ * Which parent a set of attachments hangs off — selects the REST base path. `purchaseOrder` is a
+ * purchase's documents (ADR-0099 §10), gated by `purchaseOrder:read` / `:write`.
+ */
+export type AttachmentParent = "asset" | "article" | "purchaseOrder";
+
+const SEGMENT: Record<AttachmentParent, string> = {
+  asset: "assets",
+  article: "articles",
+  purchaseOrder: "purchase-orders",
+};
 
 /** The REST base for a parent's attachment collection (`/assets/:id/attachments`, …). */
 function base(parent: AttachmentParent, parentId: string): string {
-  const segment = parent === "asset" ? "assets" : "articles";
-  return `/${segment}/${encodeURIComponent(parentId)}/attachments`;
+  return `/${SEGMENT[parent]}/${encodeURIComponent(parentId)}/attachments`;
 }
 
 /**

@@ -100,7 +100,8 @@
       "owner": "Owner: {value}",
       "owners": "Owners: {value}",
       "warranty": "Warranty: {value}"
-    }
+    },
+    "linkToPurchase": "Link to purchase"
   },
   "empty": {
     "title": "Nothing tracked yet",
@@ -321,7 +322,9 @@
         "deleted": "Deleted",
         "restored": "Restored",
         "consumableDelivered": "Consumable delivered",
-        "consumableReturned": "Consumable returned"
+        "consumableReturned": "Consumable returned",
+        "purchaseLinked": "Purchase linked",
+        "purchaseUnlinked": "Purchase unlinked"
       },
       "details": {
         "created": "Asset created",
@@ -340,7 +343,10 @@
         "consumableReturned": "{quantity} {unit} of <link>{name}</link> returned",
         "consumableDeliveredFallback": "A consumable was delivered to this asset",
         "consumableReturnedFallback": "A consumable was returned from this asset",
-        "consumableUnitFallback": "units"
+        "consumableUnitFallback": "units",
+        "purchaseLinked": "Linked to a purchase",
+        "purchaseUnlinked": "Unlinked from its purchase — its purchase values stay as they were",
+        "openPurchase": "Open purchase"
       }
     }
   },
@@ -417,6 +423,34 @@
       "viewInventory": "View in inventory",
       "receiveMore": "Receive more",
       "done": "Done"
+    },
+    "line": {
+      "title": "Receive units",
+      "description": "{purchase} · {line} · {pending, plural, =0 {nothing pending} one {# unit pending} other {# units pending}}",
+      "fromPurchase": "From purchase",
+      "fromPurchaseHelp": "Optional — receive against a purchase line that is still waiting for units. Everything is filled in from the purchase.",
+      "modelMissing": "This line has no model yet. Pick or create one — it is saved on the line, and the units follow it.",
+      "modelSaveError": "Couldn't save the model on the line",
+      "quantityHelp": "{pending, plural, =0 {Nothing pending on this line} one {# unit pending} other {# units pending}}. Follows the serials you paste.",
+      "serialsHelp": "One serial per line. The quantity follows the serials; leave it blank to receive units without a serial.",
+      "overWarning": "This line expects {ordered} and would end up with {after}. Receiving more is allowed — the line will show as over-received.",
+      "overResult": "The line now has {received} received of {ordered} expected.",
+      "raise": "Raise the line to {quantity}",
+      "raisedToast": "Line raised to {quantity}",
+      "raiseError": "Couldn't change the line quantity",
+      "fromThePurchase": "From the purchase",
+      "change": "Change",
+      "costEach": "Cost per unit",
+      "costWithCurrency": "Purchase cost (each, {currency})",
+      "warrantyEnd": "Warranty end",
+      "dateFromInvoice": "The purchase's invoice date.",
+      "dateToday": "Today — the purchase has no invoice date yet.",
+      "dateFromInvoiceShort": "invoice date",
+      "dateTodayShort": "today",
+      "locationFromPurchase": "Location: where the purchase is delivered. The purchase's documents show on each unit.",
+      "noLocation": "No delivery location on the purchase. The purchase's documents show on each unit.",
+      "submit": "Receive {count, plural, one {# unit} other {# units}}",
+      "openPurchase": "Back to purchase"
     }
   },
   "label": {

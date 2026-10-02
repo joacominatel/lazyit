@@ -15,7 +15,7 @@ import {
   updateSupplier,
 } from "../endpoints/suppliers";
 import { purchaseOrderKeys } from "./use-purchase-orders";
-import { invalidateSuggestions } from "./use-suggestions";
+import { invalidateSuggestions } from "../query-keys";
 
 /** Query keys for Suppliers. */
 export const supplierKeys = {

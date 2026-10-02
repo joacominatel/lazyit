@@ -7,7 +7,7 @@ import {
   updateApplication,
 } from "../endpoints/applications";
 import { applicationKeys } from "./use-applications";
-import { invalidateSuggestions } from "./use-suggestions";
+import { invalidateSuggestions } from "../query-keys";
 
 /**
  * Application writes — each invalidates `applicationKeys.all` so the list and detail refetch, and the

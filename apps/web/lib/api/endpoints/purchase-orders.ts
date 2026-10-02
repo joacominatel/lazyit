@@ -1,6 +1,12 @@
 import type {
+  AssetPurchaseProvenance,
+  CancelRemainingUnits,
   CreatePurchaseOrder,
   CreatePurchaseOrderLine,
+  LinkAssetsResult,
+  LinkAssetsToLine,
+  PendingPurchaseLinePage,
+  PurchaseLinkPreview,
   PurchaseOrder,
   PurchaseOrderDetail,
   PurchaseOrderEventPage,
@@ -8,6 +14,9 @@ import type {
   PurchaseOrderListPage,
   PurchaseOrderReceiptFilter,
   PurchaseOrderStatus,
+  ReceiveFromLine,
+  ReceiveFromLineResult,
+  UnlinkAssetsResult,
   UpdatePurchaseOrder,
   UpdatePurchaseOrderLine,
 } from "@lazyit/shared";
@@ -125,4 +134,107 @@ export function updatePurchaseOrderLine(
 /** Remove a line — only while no asset is linked to it (409 otherwise). */
 export function removePurchaseOrderLine(id: string, lineId: string): Promise<PurchaseOrderLine> {
   return apiFetch<PurchaseOrderLine>(`${BASE}/${id}/lines/${lineId}`, { method: "DELETE" });
+}
+
+// ── Flows (#1473): receive, link, unlink, cancel remaining, pending units, provenance ──────────────────
+
+/** The line endpoints' base path. */
+function linePath(id: string, lineId: string): string {
+  return `${BASE}/${encodeURIComponent(id)}/lines/${encodeURIComponent(lineId)}`;
+}
+
+/**
+ * Generate assets from an `ASSET` line (`purchaseOrder:write` + `asset:write`). Partial success like bulk
+ * receive: a 201 with `{ created, failed }` even when units fail, plus `overReceived` and the line as it
+ * reads afterwards. Every body field is an override of the purchase's prefill for this receive only.
+ */
+export function receiveFromLine(
+  id: string,
+  lineId: string,
+  data: ReceiveFromLine,
+): Promise<ReceiveFromLineResult> {
+  return apiFetch<ReceiveFromLineResult>(`${linePath(id, lineId)}/receive`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+/**
+ * The per-field diff of linking these assets to a line (`purchaseOrder:read` + `asset:read`). A read with
+ * a body, because the ids may be many.
+ */
+export function getLinkPreview(
+  id: string,
+  lineId: string,
+  assetIds: string[],
+  signal?: AbortSignal,
+): Promise<PurchaseLinkPreview> {
+  return apiFetch<PurchaseLinkPreview>(`${linePath(id, lineId)}/link-preview`, {
+    method: "POST",
+    body: { assetIds },
+    signal,
+  });
+}
+
+/** Link existing assets to a line, copying only the listed values. Partial success with a reason each. */
+export function linkAssetsToLine(
+  id: string,
+  lineId: string,
+  data: LinkAssetsToLine,
+): Promise<LinkAssetsResult> {
+  return apiFetch<LinkAssetsResult>(`${linePath(id, lineId)}/link-assets`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+/** Unlink assets from a line. Their purchase values are never cleared. */
+export function unlinkAssetsFromLine(
+  id: string,
+  lineId: string,
+  assetIds: string[],
+): Promise<UnlinkAssetsResult> {
+  return apiFetch<UnlinkAssetsResult>(`${linePath(id, lineId)}/unlink-assets`, {
+    method: "POST",
+    body: { assetIds },
+  });
+}
+
+/** Cancel units that will not arrive (default: every pending unit); 409 when nothing is pending. */
+export function cancelRemainingUnits(
+  id: string,
+  lineId: string,
+  data: CancelRemainingUnits,
+): Promise<PurchaseOrderLine> {
+  return apiFetch<PurchaseOrderLine>(`${linePath(id, lineId)}/cancel-remaining`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+/**
+ * The *Pending units* list: countable lines with units still pending on live purchases that are neither
+ * draft nor cancelled, oldest purchase first, each with its purchase header.
+ */
+export function getPendingLines(
+  { supplierId, limit, offset }: { supplierId?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<PendingPurchaseLinePage> {
+  const qs = new URLSearchParams();
+  if (supplierId) qs.set("supplierId", supplierId);
+  if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
+  const search = qs.toString();
+  return apiFetch<PendingPurchaseLinePage>(
+    search ? `${BASE}/pending-lines?${search}` : `${BASE}/pending-lines`,
+    { signal },
+  );
+}
+
+/**
+ * An asset's purchase provenance (`asset:read` + `purchaseOrder:read`, ADR-0099 D-A): 403 without the
+ * purchase permission, 404 when the asset is not linked. Callers ask only when both hold.
+ */
+export function getAssetPurchase(assetId: string, signal?: AbortSignal): Promise<AssetPurchaseProvenance> {
+  return apiFetch<AssetPurchaseProvenance>(`/assets/${encodeURIComponent(assetId)}/purchase`, { signal });
 }

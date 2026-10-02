@@ -69,6 +69,26 @@ see in the "created" count is ever rolled back by a later failure in the same ba
 From the result you can jump straight to the new assets (the inventory filtered to that model),
 **receive more**, or close.
 
+## Receiving against a purchase
+
+If you record [purchases](/help/purchases-recording-purchases), the units of a delivery can be received
+**against their purchase line** — they are then linked to it, count as received, and get the purchase's
+values without retyping them. There are three ways in:
+
+- **From purchase**, at the top of this form, lists the lines still waiting for units. Choose one and the
+  form switches to that line, filled in from the purchase.
+- When you choose a **model** that an open purchase is waiting for, a quiet hint under the model offers to
+  **receive against it**.
+- On the purchase itself, **Receive** on the line opens this same form already filled in.
+
+Against a line, the serial numbers come first and the **quantity follows them**; the purchase's values are
+shown as a summary you can **Change** for this receive only. The details are in
+[Purchases — Receiving units](/help/purchases-recording-purchases#receiving-units). The **New asset** form
+offers the same *From purchase* picker: choosing a line opens this form for it.
+
+These options appear only if you can view and edit purchases, and only while some purchase is waiting for
+units.
+
 ## When to use import instead
 
 Receiving stock is for **new** units of a **single** model — one you already have, or one you create

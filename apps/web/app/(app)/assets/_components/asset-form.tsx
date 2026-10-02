@@ -31,6 +31,7 @@ import { LocationCombobox } from "@/components/location-combobox";
 import { MoneyField, moneyInputText } from "@/components/money-input";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { UserCombobox } from "@/components/user-combobox";
+import { NewAssetFromPurchase } from "./new-asset-from-purchase";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -471,6 +472,8 @@ export function AssetForm({
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {/* A plain new asset (not an edit, not a clone) may be something a purchase is waiting for (#1475). */}
+      {!isEdit && !cloneSource ? <NewAssetFromPurchase modelId={selectedModelId ?? ""} /> : null}
       <FieldGroup>
         <Controller
           control={form.control}

@@ -9,7 +9,7 @@ import {
 import type { Attachment } from "@lazyit/shared";
 import { ASSET_ATTACHMENT_MAX_MB, ASSET_ATTACHMENT_MIME_TYPES } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { type DragEvent, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DetailPanel } from "@/components/detail-panel";
 import {
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchAttachmentBlob } from "@/lib/api/endpoints/attachments";
+import { type AttachmentParent, fetchAttachmentBlob } from "@/lib/api/endpoints/attachments";
 import {
   useAttachments,
   useDeleteAttachment,
@@ -62,6 +62,25 @@ export function AssetDocumentsPanel({
   assetId: string;
   canWrite: boolean;
 }) {
+  return <DocumentsPanel parent="asset" parentId={assetId} canWrite={canWrite} />;
+}
+
+/**
+ * The same documents section for any parent sharing the asset allowlist — the asset, and a purchase
+ * (ADR-0099 §10: `purchaseOrder:read` lists and downloads, `purchaseOrder:write` uploads and deletes).
+ * `notice` renders under the header, e.g. the purchase's "not in the backup" warning (§12).
+ */
+export function DocumentsPanel({
+  parent,
+  parentId,
+  canWrite,
+  notice,
+}: {
+  parent: Extract<AttachmentParent, "asset" | "purchaseOrder">;
+  parentId: string;
+  canWrite: boolean;
+  notice?: ReactNode;
+}) {
   const t = useTranslations("attachments");
   const { date } = useFormatters();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -69,9 +88,9 @@ export function AssetDocumentsPanel({
   const [pendingDelete, setPendingDelete] = useState<Attachment | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useAttachments("asset", assetId);
-  const upload = useUploadAttachment("asset", assetId);
-  const remove = useDeleteAttachment("asset", assetId);
+  const { data, isLoading, isError } = useAttachments(parent, parentId);
+  const upload = useUploadAttachment(parent, parentId);
+  const remove = useDeleteAttachment(parent, parentId);
   const items = data ?? [];
 
   function uploadFiles(files: File[]) {
@@ -115,7 +134,7 @@ export function AssetDocumentsPanel({
   async function download(attachment: Attachment) {
     setDownloadingId(attachment.id);
     try {
-      const blob = await fetchAttachmentBlob("asset", assetId, attachment.id);
+      const blob = await fetchAttachmentBlob(parent, parentId, attachment.id);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -192,6 +211,7 @@ export function AssetDocumentsPanel({
           dragging && "outline-2 outline-dashed outline-primary/60 outline-offset-2",
         )}
       >
+        {notice}
         {canWrite ? (
           <p className="mb-3 text-xs text-muted-foreground">
             {t("docs.hint", { max: ASSET_ATTACHMENT_MAX_MB })}
@@ -271,9 +291,12 @@ export function AssetDocumentsPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("docs.deleteConfirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("docs.deleteConfirmDescription", {
-                name: pendingDelete?.originalName ?? "",
-              })}
+              {t(
+                parent === "purchaseOrder"
+                  ? "docs.deleteConfirmDescriptionPurchase"
+                  : "docs.deleteConfirmDescription",
+                { name: pendingDelete?.originalName ?? "" },
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -34,6 +34,12 @@ the classic flow — ownership is otherwise a separate step you take once the as
 [Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
 reason, the asset is still created; you'll just be asked to assign the owner from the asset.
 
+Something a purchase is waiting for? When a [purchase](/help/purchases-recording-purchases) still waits for
+units, the form opens with a **From purchase** picker: choosing a line opens
+[Receive stock](/help/assets-bulk-receiving#receiving-against-a-purchase) for it, so the unit is created
+already linked to its purchase, with the purchase's values. You see it only if you can view and edit
+purchases.
+
 Registering a batch of similar units? Use **Create & add another** instead of **Create asset**: it
 saves the current one and keeps the form open with the **model, location, company and status**
 carried over, clearing just the name, serial and asset tag so you can type the next unit straight
@@ -204,8 +210,11 @@ that matches your **current filters** — the whole result set, not just the pag
 the status, category, location, company, owner or search you care about first (for example *all the
 Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
 row per asset with its name, asset tag, serial, status, category, manufacturer, model, location,
-company, purchase and warranty dates, current owners, notes and the created/updated timestamps, and is
-safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
+company, purchase and warranty dates, current owners, notes, the created/updated timestamps, the
+**purchase cost** (as a plain number with a dot for decimals, so a spreadsheet reads it) and its
+**currency** label — and, only if you can view [purchases](/help/purchases-recording-purchases), the
+asset's **supplier**, **purchase reference** and **invoice numbers**, as the last columns. Without that
+permission those three columns are left out of the file entirely. It is safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
 the *Show archived* view open, the export is that archived slice instead.
 
 ### Choosing which columns to show
@@ -215,6 +224,17 @@ model, category, location, company, status, owners and updated. Untick the ones 
 the table down to what matters for you. The **Name** column and the row actions always stay. Your
 choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
 governs the desktop table; the mobile card view always shows the full set.)
+
+## Where it was bought
+
+If the asset is linked to a [purchase](/help/purchases-recording-purchases), its page shows a **Purchase**
+panel right after *Details*: the purchase and its supplier, the reference, dates and invoice numbers, the
+supplier's support contact, and the purchase's documents to download. It is shown **only to people who
+can view purchases**; everyone else keeps seeing the asset's own cost and dates in *Details*, as before.
+The panel marks **Differs from purchase** when the asset's cost is not the price on its purchase, and
+offers **Unlink from purchase** to those who can edit purchases and assets. An asset that is not linked
+offers **Link to purchase** there instead. See
+[Purchases — The asset's Purchase panel](/help/purchases-recording-purchases#the-assets-purchase-panel).
 
 ## Assets on the topology map
 
