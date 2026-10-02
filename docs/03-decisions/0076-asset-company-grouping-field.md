@@ -3,7 +3,7 @@ title: "ADR-0076: Optional Company grouping field on assets (not a tenancy bound
 tags: [adr, asset, inventory, grouping]
 status: accepted
 created: 2026-06-28
-updated: 2026-06-28
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -13,6 +13,12 @@ deciders: [Joaquín Minatel]
 
 **accepted** — 2026-06-28. Issue #857. Built same-day: a `company String?` column on `Asset`,
 threaded through create/update/list-filter/import/export and the web form/detail/table.
+
+**Amended 2026-10-02 (#1470):** the form's native `<datalist>` is replaced by the smart-entry
+`SuggestInput` (`apps/web/components/suggest-input.tsx`, [[0099-purchases-scope-model-and-optionality]]
+§7): the same `GET /assets/companies` values, ranked as the operator types, the viewer's recent values
+on focus, and a non-blocking hint for another spelling of an existing company. Still free text; the
+decision below is otherwise unchanged.
 
 ## Context
 
