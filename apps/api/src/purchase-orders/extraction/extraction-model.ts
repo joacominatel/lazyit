@@ -64,6 +64,12 @@ export const ExtractionModelOutputSchema = z.object({
     }),
   ),
   totals: z.object({ net: literal, tax: literal, gross: literal }),
+  moreLines: z
+    .boolean()
+    .nullable()
+    .describe(
+      'true when the document has more item lines than the ones transcribed',
+    ),
 });
 
 export type ExtractionModelOutput = z.infer<typeof ExtractionModelOutputSchema>;
@@ -88,6 +94,10 @@ export const EXTRACTION_INSTRUCTIONS = [
   'totals: net is the total before tax, tax the total tax, gross the grand total.',
 ].join('\n');
 
-/** The user turn that accompanies the file. */
-export const EXTRACTION_PROMPT =
-  'Transcribe the purchase data of the attached document.';
+/**
+ * The user turn that accompanies the file. `maxLines` is lazyit's own number (`extractionLineLimit`), never
+ * content: past it the model stops at a line boundary and sets `moreLines`, instead of being cut mid-answer.
+ */
+export function extractionPrompt(maxLines: number): string {
+  return `Transcribe the purchase data of the attached document. Transcribe at most ${maxLines} item lines, the first ones in document order; if the document has more, set moreLines to true.`;
+}
