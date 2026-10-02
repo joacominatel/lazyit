@@ -62,6 +62,12 @@
     "nearDuplicate": "Looks like an existing value: “{value}”.",
     "useExisting": "Use “{value}”"
   },
+  "money": {
+    "invalid": "Enter an amount like {example}.",
+    "negative": "The amount can't be negative.",
+    "decimals": "Use at most two decimals, like {example}.",
+    "tooLarge": "That amount is too large."
+  },
   "quickView": {
     "trigger": "Quick view: {name}",
     "openRecord": "Open full record",

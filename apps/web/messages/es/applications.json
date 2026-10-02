@@ -67,7 +67,7 @@
     "seatsPurchasedPlaceholder": "p. ej. 50",
     "seatsPurchasedHelp": "Cantidad de asientos pagados. Déjalo en blanco para no fijar un límite.",
     "costPerSeatLabel": "Costo por asiento",
-    "costPerSeatPlaceholder": "p. ej. 12.99",
+    "costPerSeatPlaceholder": "p. ej. 12,99",
     "costPerSeatHelp": "Precio de un asiento, por período de facturación.",
     "renewalDateLabel": "Fecha de renovación",
     "renewalDateHelp": "Cuándo se renueva la licencia por próxima vez.",

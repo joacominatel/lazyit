@@ -62,6 +62,12 @@
     "nearDuplicate": "Parece un valor existente: “{value}”.",
     "useExisting": "Usar “{value}”"
   },
+  "money": {
+    "invalid": "Ingresa un monto como {example}.",
+    "negative": "El monto no puede ser negativo.",
+    "decimals": "Usa como máximo dos decimales, como {example}.",
+    "tooLarge": "El monto es demasiado grande."
+  },
   "quickView": {
     "trigger": "Vista rápida: {name}",
     "openRecord": "Abrir ficha completa",

@@ -10,7 +10,7 @@
  *    model was chosen last.
  *
  * They also pin the empty-field contract that made this worth extracting: blank optional ids/dates
- * are OMITTED (an empty string fails `cuid()` / `datetime()`), money goes through `majorToMinor`,
+ * are OMITTED (an empty string fails `cuid()` / `datetime()`), money goes through `parseMoneyInput`,
  * and `serials` is absent rather than `[]` when nothing was pasted. `ReceiveAssetsSchema` is the
  * real validator, so each case is parsed through it.
  */
@@ -100,6 +100,20 @@ describe("buildReceivePayload — blank optional fields", () => {
 
   test("a blank purchase cost becomes null (the schema's 'not set')", () => {
     expect(buildReceivePayload(BLANK).purchaseCost).toBeNull();
+  });
+
+  test("the purchase cost is read in the viewer's locale (#1470)", () => {
+    expect(buildReceivePayload({ ...BLANK, purchaseCost: "1.234,56" }, "es").purchaseCost).toBe(
+      123456,
+    );
+    expect(buildReceivePayload({ ...BLANK, purchaseCost: "1,234.56" }, "en").purchaseCost).toBe(
+      123456,
+    );
+  });
+
+  test("a refused purchase cost fails the schema instead of being dropped (#1470)", () => {
+    const payload = buildReceivePayload({ ...BLANK, purchaseCost: "1,234.56" }, "es");
+    expect(ReceiveAssetsSchema.safeParse(payload).success).toBe(false);
   });
 
   test("the minimal payload is valid per ReceiveAssetsSchema", () => {
