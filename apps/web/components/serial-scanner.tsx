@@ -6,14 +6,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useCameraScanner } from "@/lib/hooks/use-camera-scanner";
-import { scanDecision } from "@/lib/utils/scanned-serials";
+import { type LastScan, scanStep } from "@/lib/utils/scanned-serials";
 
 /**
  * Scan serial numbers with the camera into a serials box (ADR-0099 Phase 1b, UX proposal §6, #1476) — the
  * `/assets/scan` camera (`useCameraScanner`) reading the barcodes on hardware boxes (Code 128 / 39, EAN, UPC,
  * QR…). It scans continuously: each new code goes to `onScan` with a short tick (and a vibration where the
- * phone has one), the same code still in front of the camera is ignored, and a code already in the box is
- * reported, never added twice. *Done* closes it; the box stays editable throughout.
+ * phone has one), a code held in front of the camera stays silent however long it stays there, and a code
+ * already in the box is reported (once it comes back into view), never added twice. *Done* closes it; the box stays editable throughout.
  *
  * Without a camera, without permission or outside HTTPS it says so and the box is typed as before.
  */
@@ -31,7 +31,7 @@ export function SerialScanner({
   // A unique host per mount: html5-qrcode looks the node up by id.
   const readerId = `serial-reader-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const existingRef = useRef(existing);
-  const lastRef = useRef<{ code: string; at: number } | null>(null);
+  const lastRef = useRef<LastScan>(null);
   const [added, setAdded] = useState<{ code: string; count: number } | null>(null);
 
   useEffect(() => {
@@ -41,11 +41,15 @@ export function SerialScanner({
   const status = useCameraScanner(
     readerId,
     (text) => {
-      const now = Date.now();
-      const decision = scanDecision(text, { existing: existingRef.current, last: lastRef.current, now });
+      // Every sighting refreshes "last seen", so a code held in view stays silent (scanStep).
+      const { decision, last } = scanStep(text, {
+        existing: existingRef.current,
+        last: lastRef.current,
+        now: Date.now(),
+      });
+      lastRef.current = last;
       const code = text.trim();
       if (decision === "invalid" || decision === "repeat") return;
-      lastRef.current = { code, at: now };
       if (decision === "duplicate") {
         toast.info(t("duplicate", { code }));
         return;
