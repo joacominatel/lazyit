@@ -199,4 +199,18 @@ describe('Application costPerSeat over HTTP — 64-bit minor units (ADR-0100)', 
       .expect(201);
     expect(restored.body).toMatchObject({ costPerSeat: ABOVE_INT4 });
   });
+
+  it('restoring a live application (the idempotent branch) returns costPerSeat as a number', async () => {
+    const created = await http()
+      .post('/applications')
+      .send({ name: 'Live', costPerSeat: ABOVE_INT4 })
+      .expect(201);
+    const id = (created.body as { id: string }).id;
+
+    const restored = await http()
+      .post(`/applications/${id}/restore`)
+      .expect(201);
+    expect(restored.body).toMatchObject({ costPerSeat: ABOVE_INT4 });
+    expect(application.update).not.toHaveBeenCalled();
+  });
 });

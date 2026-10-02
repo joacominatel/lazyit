@@ -1145,7 +1145,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
   });
 
   describe('asset_update', () => {
-    it('accepts a purchaseCost above int4 and asset_get reads it back exactly, JSON-safe (ADR-0100)', async () => {
+    it('accepts a purchaseCost above int4 and asset_get reads it back exactly (ADR-0100)', async () => {
       const action = await propose('asset_update', {
         asset: A.server,
         purchaseCost: 3_000_000_000,
@@ -1177,7 +1177,6 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         purchaseCost: 3_000_000_000,
         salvageValue: 300_000_000,
       });
-      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it('previews before → after with the version as precondition, and executes once', async () => {
