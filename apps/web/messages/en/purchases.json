@@ -203,7 +203,9 @@
     "removeLineDescription": "“{line}” is removed from the purchase. The activity log keeps a record of it.",
     "lineRemovedToast": "Line removed",
     "lineRemoveError": "Couldn't remove the line",
-    "activitySection": "Activity"
+    "activitySection": "Activity",
+    "receive": "Receive",
+    "receiveUnits": "Receive units"
   },
   "activity": {
     "fields": {
@@ -316,5 +318,17 @@
       "allPurchases": "All {count} purchases",
       "noPurchases": "No purchases from this supplier yet."
     }
+  },
+  "fromPurchase": {
+    "placeholder": "Choose a purchase line",
+    "search": "Search purchase, supplier or item…",
+    "none": "No purchase is waiting for units",
+    "lineLabel": "{purchase} — {line} ({pending} pending)",
+    "suggestionLabel": "Purchases waiting for this model",
+    "suggestion": "{count, plural, one {# unit} other {# units}} of this model {count, plural, one {is} other {are}} pending on {purchase} ({supplier}).",
+    "receiveAgainst": "Receive against it",
+    "loadError": "Couldn't load that purchase",
+    "newAssetTitle": "Receiving something you bought?",
+    "newAssetHelp": "Receive it against its purchase line instead: the model, cost, dates and warranty come from the purchase, and the asset is linked to it."
   }
 }

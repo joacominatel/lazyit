@@ -203,7 +203,9 @@
     "removeLineDescription": "«{line}» se quita de la compra. El registro de actividad lo conserva.",
     "lineRemovedToast": "Línea quitada",
     "lineRemoveError": "No se pudo quitar la línea",
-    "activitySection": "Actividad"
+    "activitySection": "Actividad",
+    "receive": "Recibir",
+    "receiveUnits": "Recibir unidades"
   },
   "activity": {
     "fields": {
@@ -316,5 +318,17 @@
       "allPurchases": "Las {count} compras",
       "noPurchases": "Todavía no hay compras de este proveedor."
     }
+  },
+  "fromPurchase": {
+    "placeholder": "Elegí una línea de compra",
+    "search": "Buscar compra, proveedor o ítem…",
+    "none": "Ninguna compra espera unidades",
+    "lineLabel": "{purchase} — {line} ({pending} pendientes)",
+    "suggestionLabel": "Compras que esperan este modelo",
+    "suggestion": "{count, plural, one {# unidad} other {# unidades}} de este modelo {count, plural, one {está pendiente} other {están pendientes}} en {purchase} ({supplier}).",
+    "receiveAgainst": "Recibir contra ella",
+    "loadError": "No se pudo cargar esa compra",
+    "newAssetTitle": "¿Estás registrando algo que compraste?",
+    "newAssetHelp": "Recibilo contra su línea de compra: el modelo, el costo, las fechas y la garantía vienen de la compra, y el activo queda vinculado a ella."
   }
 }
