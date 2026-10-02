@@ -3,7 +3,7 @@ title: Attachment
 tags: [domain, entity, attachments, storage]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Attachment
@@ -67,7 +67,9 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 > Purchases Phase 1 adds the parent type **`PURCHASE_ORDER`** (an enum value appended at the tail),
 > reusing the asset documents allowlist and 25 MB cap, gated by `purchaseOrder:read` / `:write`, with the
 > same 404-not-403 rule. A purchase's documents are **shared, not copied**: the same rows are listed
-> read-only on every asset linked to the purchase; upload and delete happen on the purchase. Because they
+> read-only on every asset linked to the purchase — to principals holding `purchaseOrder:read` only
+> (ADR-0099 §8, CEO decision D-A) — and upload and delete happen on the purchase. A purchase document may
+> carry an optional free-text type label (quote, invoice, delivery note), never a closed list. Because they
 > are financial evidence, ADR-0099 §12 makes the **attachments backup a prerequisite** shipping before or
 > alongside Phase 1.
 

@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Entities — Map of Content
@@ -32,15 +32,15 @@ updated: 2026-10-01
 
 ## Purchases (planned)
 
-The optional, off-by-default record of what the team bought, from whom, with which documents, and which
+The always-available, optional-at-entry record of what the team bought, from whom, with which documents, and which
 assets came out of it. lazyit records purchases; the finance system stays the system of record — no
 approvals, budgets, payables or exchange rates. **Accepted, not built** (Phase 1 under epic #1465). See
 [[0099-purchases-scope-model-and-optionality]] · [[0100-money-as-64-bit-minor-units]] · research in
 [[purchases/_MOC|the Purchases vault]].
 
-- ⚪ [[supplier]] — who the team buys from and pays; not the manufacturer or the software publisher. Separate support/RMA contact.
-- ⚪ [[purchase-order]] — one purchase (*Purchase* in the UI): supplier, currency, optional finance reference unique per supplier, user-set status with derived *Received*; soft delete keeps asset links.
-- ⚪ [[purchase-order-line]] — one line (`ASSET` / `OTHER`, later `CONSUMABLE` / `LICENSE`); assets point at it; received is derived and over-receipt is blocked under a lock.
+- ⚪ [[supplier]] — who the team buys from and pays; not the manufacturer or the software publisher. Only the name required, nothing unique. Separate support/RMA contact.
+- ⚪ [[purchase-order]] — one purchase (*Purchase* in the UI): optional supplier, free-text currency label and non-unique finance reference, user-set status with derived *Received*; soft delete keeps asset links.
+- ⚪ [[purchase-order-line]] — one line (`ASSET` / `OTHER`, later `CONSUMABLE` / `LICENSE`); assets point at it; received is derived and over-receipt is allowed with a warning.
 - ⚪ [[purchase-order-event]] — append-only activity log of a purchase, with the human/service-account actor CHECK.
 
 ## Infra topology (visual CMDB)

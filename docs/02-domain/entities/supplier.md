@@ -3,7 +3,7 @@ title: Supplier
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Supplier
@@ -13,7 +13,7 @@ updated: 2026-10-01
 > [!warning] Not built yet
 > This note records the accepted design. No `Supplier` model, endpoint or screen exists in the code
 > today; the fields below are the planned shape, and the Phase 1 backend unit settles the final column
-> names and constraints.
+> names.
 
 ## Purpose
 
@@ -39,11 +39,13 @@ fields stay as they are.
 
 - **Soft delete only** ([[0006-soft-delete-and-auditing]]); registered in `SOFT_DELETABLE_MODELS`
   ([[0032-soft-delete-middleware]]). Restore is ADMIN-only.
-- **Duplicates are prevented by suggestion, not by refusal.** Typing a name suggests existing suppliers
-  by a normalized key (case, accents, punctuation and legal suffixes such as *S.A.*, *SRL*, *Inc.*
-  removed); an existing tax ID is flagged immediately. Creating anyway stays possible
-  ([[purchases/ux-proposal]] §4.3). Whether `name` and `taxId` are also unique among live rows is left to
-  the Phase 1 design ([[0099-purchases-scope-model-and-optionality]], follow-ups).
+- **Only the name is required.** Everything else, the tax ID included, is optional — entry stays light
+  ([[0099-purchases-scope-model-and-optionality]], governing principle, CEO decision D-D).
+- **No uniqueness constraints.** Neither `name` nor `taxId` is unique, among live rows or otherwise.
+  Duplicates are reduced by suggestion, never by refusal: typing a name suggests existing suppliers by a
+  normalized key (case, accents, punctuation and legal suffixes such as *S.A.*, *SRL*, *Inc.* removed),
+  and an existing tax ID is flagged immediately ("is this the same supplier?"). Creating anyway stays
+  possible ([[purchases/ux-proposal]] §4.3).
 - **Permissions** follow the purchase domain: `purchaseOrder:read` to see suppliers, `:write` to create
   and edit, `:delete` (ADMIN) to soft-delete ([[authorization]]).
 - Supplier text is untrusted content: stored as written, sanitized when rendered
@@ -60,8 +62,8 @@ fields stay as they are.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `cuid` | |
-| `name` | `string` | required; the name the team uses ("Compumundo"). |
-| `taxId` | `string?` | the legal tax ID (e.g. a CUIT); the strongest near-duplicate key and the first key document extraction matches on. |
+| `name` | `string` | the only required field; the name the team uses ("Compumundo"). Not unique. |
+| `taxId` | `string?` | optional; the legal tax ID (e.g. a CUIT). Not unique — the strongest near-duplicate hint and the first key document extraction matches on. |
 | `website` | `string?` | |
 | `salesContactName` / `salesContactEmail` / `salesContactPhone` | `string?` | the sales contact. |
 | `supportContactName` / `supportContactEmail` / `supportContactPhone` | `string?` | the **support / RMA** contact — separate from sales, and the one shown one click from a linked asset. |

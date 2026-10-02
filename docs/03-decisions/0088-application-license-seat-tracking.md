@@ -3,7 +3,7 @@ title: "ADR-0088: License / seat tracking on Application (seats + cost + renewal
 tags: [adr, application, access, license, money]
 status: accepted
 created: 2026-07-18
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -84,8 +84,8 @@ as a DERIVED, distinct-user count — never a stored column.**
   columns ([[0100-money-as-64-bit-minor-units|ADR-0100]]). The representation is still one money
   convention — integer minor units — only wider; the wire stays a JSON number.
 - **Currency.** The "org's single currency" above no longer holds instance-wide:
-  [[0099-purchases-scope-model-and-optionality|ADR-0099]] gives each purchase a user-chosen currency and
-  the asset's purchase cost an optional one. `costPerSeat` itself is unchanged and stays currency-less.
+  [[0099-purchases-scope-model-and-optionality|ADR-0099]] gives each purchase an optional free-text
+  currency label and the asset's purchase cost an optional one. `costPerSeat` itself is unchanged and stays currency-less.
 - **PO numbers.** The deferred "PO numbers, vendor SKUs" now belong to Purchases: a purchase carries the
   finance reference, and a `LICENSE` purchase line (Phase 2) links to an application and *proposes* a
   seats/renewal update — it never changes `seatsPurchased` automatically.

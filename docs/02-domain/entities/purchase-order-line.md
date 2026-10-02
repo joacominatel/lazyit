@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # PurchaseOrderLine
@@ -31,23 +31,28 @@ line, the units that came out of it.
 
 ## Business rules
 
-- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b; `LICENSE` in Phase 2.
+- **Entry is light** ([[0099-purchases-scope-model-and-optionality]], governing principle, CEO decision
+  D-D): a **description is the only field the user must fill**. The quantity **defaults to 1** and the
+  unit price is optional.
+- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b; `LICENSE` in Phase 2. Stored as
+  `TEXT` validated by the shared zod schema on write, not a Prisma enum.
   - `ASSET` — received units become assets.
   - `OTHER` — shipping, services, freebies. Recorded and counted in the total, **never pending**.
   - `CONSUMABLE` — received as an `IN` movement; the movement ledger stays the only way stock changes
     ([[0034-consumables-design]]).
   - `LICENSE` — *proposes* a seats / renewal update on the application through the confirmation diff;
     never changes `seatsPurchased` automatically ([[0088-application-license-seat-tracking]]).
-- **Unit price** is integer minor units in the purchase's currency, 64-bit
+- **Unit price** is integer minor units in the purchase's currency label, 64-bit
   ([[0100-money-as-64-bit-minor-units]]). `0` is valid (a freebie) and distinct from blank (unknown).
   By convention it is the price that should become each unit's cost, usually without VAT.
 - **Received** is derived: the count of **live** assets linked to the line (from Phase 1b, units moved in
-  for a consumable line). **Pending** = quantity − received − cancelled.
-- **Over-receipt is blocked.** Receiving or linking beyond quantity − cancelled is rejected on write. The
-  check runs inside each unit's create transaction **under a row lock on the line** (`SELECT … FOR
-  UPDATE`), so concurrent receives cannot overshoot; the asset-tag counter still commits on its own
-  ([[0063-configurable-asset-tag-scheme]], [[0089-bulk-receiving-and-checkout-acknowledgement]]). The UI
-  offers "raise the line to *n*".
+  for a consumable line). **Pending** = quantity − received − cancelled, never below zero.
+- **Over-receipt is allowed, with a warning** (ADR-0099 §4 — the CTO's application of D-D). Receiving or
+  linking beyond quantity − cancelled warns and offers "raise the line to *n*", but proceeding is fine;
+  the line then shows as **over-received** ("5 of 4"). No lock is taken: received is a count of linked
+  assets, never stored, so concurrent receives cannot corrupt it. Each unit is still its own transaction
+  with its own asset-tag counter commit ([[0063-configurable-asset-tag-scheme]],
+  [[0089-bulk-receiving-and-checkout-acknowledgement]]).
 - **Cancelled quantity** is stored ("cancel remaining units"); the reason goes in the
   [[purchase-order-event]] log.
 - **A different model delivered** is received *against the line* with the model overridden and a note;
@@ -71,10 +76,10 @@ line, the units that came out of it.
 | `id` | `cuid` | |
 | `purchaseOrderId` | `cuid` | FK → [[purchase-order]], `Restrict`. |
 | `position` | `int` | display order (`int4()`). |
-| `kind` | `ASSET \| OTHER` (+ `CONSUMABLE`, `LICENSE` later) | |
-| `description` | `string` | as written on the document. |
+| `kind` | `text` | `ASSET \| OTHER` (+ `CONSUMABLE`, `LICENSE` later), validated by zod on write. |
+| `description` | `string` | the only required field; as written on the document. |
 | `assetModelId` | `cuid?` | FK → [[asset-model]], `SetNull`. |
-| `quantity` | `int` | ≥ 1 (`int4()`). |
+| `quantity` | `int` | ≥ 1 (`int4()`), default `1`. |
 | `unitPrice` | `bigint?` | minor units, ≥ 0; `null` = unknown ([[0100-money-as-64-bit-minor-units]]). |
 | `warrantyMonths` | `int?` | warranty end of a received unit = purchase date + this. |
 | `cancelledQuantity` | `int` | default `0`. |

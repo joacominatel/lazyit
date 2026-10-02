@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -135,9 +135,14 @@ three roles **except** two tighter tiers:
 >
 > All three are grantable to service accounts (fail-closed, §6) and reach existing instances through the
 > seed-once ledger, with no data migration. They do **not** narrow `asset:read`: a viewer still sees an
-> asset's own purchase cost, as today. Turning the feature on is `settings:manage` (the instance switch,
-> OFF by default). Whether a caller without `purchaseOrder:read` sees a linked asset's purchase provenance
-> and documents is an **open question** recorded in ADR-0099's follow-ups.
+> asset's own purchase cost, as today. There is **no instance switch**: Purchases is always available,
+> gated only by these permissions (ADR-0099 §7).
+>
+> **An asset's purchase provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A,
+> 2026-10-01). The asset page's *Purchase* panel — supplier, reference, dates and the purchase documents
+> listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
+> not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
+> (cost, currency, dates) included.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the
