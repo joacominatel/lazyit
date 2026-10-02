@@ -55,7 +55,9 @@ as a DERIVED, distinct-user count — never a stored column.**
 - **Web surfaces:** the Access list shows a `used / purchased` cell (+ over-alloc warning + next
   renewal); the application detail adds a "License & seats" panel (`used / purchased` + warning, cost
   per seat, renewal date); the form adds the three inputs — cost entered in **major** units and
-  converted to minor via the existing `majorToMinor` (#954), never re-coerced server-side.
+  converted to minor via the existing `majorToMinor` (#954), never re-coerced server-side. *(2026-10-02,
+  #1470: `majorToMinor` is replaced by `parseMoneyInput`, which reads the amount in the viewer's locale
+  — [[0100-money-as-64-bit-minor-units]] §5.)*
 
 ## Consequences
 
