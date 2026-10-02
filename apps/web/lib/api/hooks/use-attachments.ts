@@ -6,6 +6,7 @@ import {
   listAttachments,
   uploadAttachment,
 } from "../endpoints/attachments";
+import { purchaseOrderKeys } from "./use-purchase-orders";
 
 /**
  * React-Query hooks for the Attachment subsystem (ADR-0082). One set of hooks serves both parents
@@ -35,19 +36,27 @@ export function useAttachments(
   });
 }
 
+/**
+ * After an upload or delete: the parent's list, and for a purchase also its reads — the activity log
+ * records the document (ADR-0099) and linked assets list the same rows in their provenance.
+ */
+function useInvalidateParent(parent: AttachmentParent, parentId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: attachmentKeys.list(parent, parentId) });
+    if (parent === "purchaseOrder") void qc.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+  };
+}
+
 /** Upload a file onto a parent; invalidates the parent's list so the new row appears. */
 export function useUploadAttachment(
   parent: AttachmentParent,
   parentId: string,
 ) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateParent(parent, parentId);
   return useMutation({
     mutationFn: (file: File) => uploadAttachment(parent, parentId, file),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: attachmentKeys.list(parent, parentId),
-      });
-    },
+    onSuccess: invalidate,
   });
 }
 
@@ -56,14 +65,10 @@ export function useDeleteAttachment(
   parent: AttachmentParent,
   parentId: string,
 ) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateParent(parent, parentId);
   return useMutation({
     mutationFn: (attachmentId: string): Promise<Attachment> =>
       deleteAttachment(parent, parentId, attachmentId),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: attachmentKeys.list(parent, parentId),
-      });
-    },
+    onSuccess: invalidate,
   });
 }
