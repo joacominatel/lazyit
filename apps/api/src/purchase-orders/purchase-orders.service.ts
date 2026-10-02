@@ -116,6 +116,7 @@ const LINE_FIELDS = [
   'modelText',
   'assetModelId',
   'consumableId',
+  'applicationId',
   'quantity',
   'unitPrice',
   'cancelledQuantity',
@@ -311,7 +312,8 @@ export class PurchaseOrdersService {
     return this.readDetail(this.prisma, id);
   }
 
-  private async readDetail(client: Tx | PrismaService, id: string) {
+  /** The detail read, inside a caller's transaction when given one (it sees that transaction's writes). */
+  async readDetail(client: Tx | PrismaService, id: string) {
     const row = await client.purchaseOrder.findFirst({
       where: { id, deletedAt: null },
       include: PURCHASE_ORDER_INCLUDE,
@@ -392,6 +394,10 @@ export class PurchaseOrdersService {
       await this.assertConsumablesLive(
         tx,
         lines.map((line) => line.consumableId),
+      );
+      await this.assertApplicationsLive(
+        tx,
+        lines.map((line) => line.applicationId),
       );
       const created = await tx.purchaseOrder.create({
         data: {
@@ -501,6 +507,7 @@ export class PurchaseOrdersService {
       await this.assertLive(tx, purchaseOrderId);
       await this.assertModelsLive(tx, [data.assetModelId]);
       await this.assertConsumablesLive(tx, [data.consumableId]);
+      await this.assertApplicationsLive(tx, [data.applicationId]);
       let position = data.position;
       if (position === undefined) {
         const last = await tx.purchaseOrderLine.aggregate({
@@ -528,7 +535,9 @@ export class PurchaseOrdersService {
    * already received units (linked assets, or stock moved in) cannot change — they would silently stop
    * counting. A consumable is named on a `CONSUMABLE` line only, and changing a line away from `CONSUMABLE`
    * clears it. The consumable of a line that already received stock may still change ("a different item
-   * came"): each movement keeps its own consumable, and the line keeps counting every unit it received.
+   * came"): each movement keeps its own consumable, and the line keeps counting every unit it received. An
+   * application is named on a `LICENSE` line only, the same way (#1477); seats already applied stay counted
+   * on the line if its application changes, as stock does.
    */
   async updateLine(
     purchaseOrderId: string,
@@ -554,12 +563,27 @@ export class PurchaseOrdersService {
         );
       }
       await this.assertConsumablesLive(tx, [data.consumableId ?? undefined]);
-      const write: UpdatePurchaseOrderLine =
+      if (data.applicationId && kind !== 'LICENSE') {
+        throw new BadRequestException(
+          'applicationId is only accepted on a LICENSE line',
+        );
+      }
+      await this.assertApplicationsLive(tx, [data.applicationId ?? undefined]);
+      const write: UpdatePurchaseOrderLine = { ...data };
+      if (
         kind !== 'CONSUMABLE' &&
         before.consumableId != null &&
         data.consumableId === undefined
-          ? { ...data, consumableId: null }
-          : data;
+      ) {
+        write.consumableId = null;
+      }
+      if (
+        kind !== 'LICENSE' &&
+        before.applicationId != null &&
+        data.applicationId === undefined
+      ) {
+        write.applicationId = null;
+      }
       const quantity = data.quantity ?? before.quantity;
       const cancelled = data.cancelledQuantity ?? before.cancelledQuantity;
       if (cancelled > quantity) {
@@ -601,10 +625,10 @@ export class PurchaseOrdersService {
 
   /**
    * Remove a line (soft delete), only while nothing was received on it — no live linked asset, no stock
-   * moved in (ADR-0099 §9) — and never the last thing that identifies the purchase. The purchase row is
-   * locked first (`SELECT … FOR UPDATE`, the ADR-0098 pattern), so two concurrent removals — or a removal
-   * racing a header update that clears the supplier and reference, or a receipt — serialize and the second
-   * one sees the first.
+   * moved in, no seat applied (ADR-0099 §9) — and never the last thing that identifies the purchase. The
+   * purchase row is locked first (`SELECT … FOR UPDATE`, the ADR-0098 pattern), so two concurrent
+   * removals — or a removal racing a header update that clears the supplier and reference, or a receipt —
+   * serialize and the second one sees the first.
    */
   async removeLine(
     purchaseOrderId: string,
@@ -795,12 +819,14 @@ export class PurchaseOrdersService {
     throw new ConflictException(
       line.kind === 'CONSUMABLE'
         ? `Cannot ${verb} a line that already received ${received} unit(s) into stock; received stock stays recorded`
-        : `Cannot ${verb} a line with ${received} linked asset(s); unlink them first`,
+        : line.kind === 'LICENSE'
+          ? `Cannot ${verb} a line that already applied ${received} seat(s) to its application; applied seats stay recorded`
+          : `Cannot ${verb} a line with ${received} linked asset(s); unlink them first`,
     );
   }
 
   /** The supplier and delivery location a write names must be live (a soft-deleted one passes the FK). */
-  private async assertReferences(
+  async assertReferences(
     tx: Tx,
     data: { supplierId?: string | null; deliveryLocationId?: string | null },
   ) {
@@ -841,6 +867,25 @@ export class PurchaseOrdersService {
     if (missing.length > 0) {
       throw new BadRequestException(
         `Consumable ${missing[0]} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /**
+   * 400 unless every application named is live (#1477). `Application` is soft-deleted; the explicit
+   * `deletedAt: null` refuses an archived one on write (it can be restored first), as for consumables.
+   */
+  private async assertApplicationsLive(tx: Tx, ids: (string | undefined)[]) {
+    const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+    if (wanted.length === 0) return;
+    const found = await tx.application.findMany({
+      where: { id: { in: wanted }, deletedAt: null },
+      select: { id: true },
+    });
+    const missing = wanted.filter((id) => !found.some((a) => a.id === id));
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Application ${missing[0]} not found (missing or archived)`,
       );
     }
   }
