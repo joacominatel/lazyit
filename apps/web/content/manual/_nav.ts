@@ -101,6 +101,11 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
     ],
   },
   {
+    // Purchases (ADR-0099): recording purchases, their lines and suppliers.
+    category: "purchases",
+    subcategories: ["recording-purchases"],
+  },
+  {
     category: "access-automation",
     subcategories: [
       "concepts",

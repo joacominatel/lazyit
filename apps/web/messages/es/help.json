@@ -34,6 +34,7 @@
     "knowledge-base": "Base de conocimiento",
     "secret-manager": "Gestor de secretos",
     "consumables": "Consumibles",
+    "purchases": "Compras",
     "access-automation": "Automatización de accesos",
     "ai-assistant": "Asistente de IA",
     "notifications-activity": "Notificaciones y actividad",
@@ -90,6 +91,9 @@
       "consumables-categories": "Consumibles y categorías",
       "stock-movements": "Movimientos de stock",
       "low-stock-alerts": "Alertas de stock bajo"
+    },
+    "purchases": {
+      "recording-purchases": "Registrar compras"
     },
     "access-automation": {
       "concepts": "Conceptos",

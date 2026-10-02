@@ -29,8 +29,8 @@ pueden ajustar. El rol es lo que un usuario *tiene*; los permisos son lo que un 
   conectar agentes de IA externos, una vez que un administrador los activa — siempre con los permisos
   del propio Miembro.
 - **Lector** — solo lectura. Por defecto un Lector puede mirar la mayoría de las áreas pero no cambiar
-  nada. Además, algunas vistas sensibles (el directorio de usuarios y el registro de concesiones de
-  acceso) quedan ocultas para el Lector por defecto.
+  nada. Además, algunas vistas sensibles (el directorio de usuarios, el registro de concesiones de
+  acceso y las compras y proveedores) quedan ocultas para el Lector por defecto.
 
 ## La vista general de Roles
 

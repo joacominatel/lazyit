@@ -19,8 +19,8 @@ them.
 A model has a **name** (required), a **manufacturer** (required), an optional **SKU**, an optional
 description, an optional **category**, and optional **default specs**.
 
-The **manufacturer** field suggests the manufacturers your other models already use — most used first,
-with how many models use each — and points out when what you typed is another spelling of an existing
+The **manufacturer** field suggests the manufacturers your other models (and, if you can see purchases,
+your purchase lines) already use — most used first, with how many records use each — and points out when what you typed is another spelling of an existing
 one (for example `DELL` or `Dell Inc.` for `Dell`), so one brand doesn't end up split in two. It works
 like the asset's [Company](/help/assets-asset-basics) field, and you can still type a new manufacturer.
 

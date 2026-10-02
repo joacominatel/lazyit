@@ -30,7 +30,7 @@ Se indexan siete tipos de registros:
   borradores nunca aparecen.
 - **Usuarios** — por nombre y correo.
 - **Ubicaciones** — por nombre y dirección.
-- **Aplicaciones** — por nombre y proveedor.
+- **Aplicaciones** — por nombre y fabricante.
 - **Nodos de topología** — servidores, máquinas virtuales, contenedores y el resto del mapa de
   infraestructura, por etiqueta, dirección IP o nombre del activo vinculado.
 - **Consumibles** — repuestos y artículos de stock, por nombre, SKU o descripción. La vista previa

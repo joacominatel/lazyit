@@ -53,7 +53,7 @@ La vista previa se adapta al tipo de registro:
 - **Persona** — email, rol, usuario, legajo, responsable jerárquico y cuántos activos y accesos a
   aplicaciones tiene actualmente, con su avatar de iniciales.
 - **Modelo** — fabricante, SKU y descripción.
-- **Aplicación** — proveedor, dirección web y descripción.
+- **Aplicación** — fabricante, dirección web y descripción.
 - **Ubicación** — tipo, dirección, piso y descripción.
 
 Los valores vacíos simplemente se omiten, así que la vista previa nunca muestra una etiqueta en
