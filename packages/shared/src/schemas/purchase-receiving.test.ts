@@ -4,6 +4,7 @@ import { AssetHistoryEventTypeSchema } from "./asset-history";
 import { AttachmentEntityTypeSchema } from "./attachment";
 import { PURCHASE_ORDER_EVENT_TYPES } from "./purchase-order";
 import {
+  AssetPurchaseProvenanceSchema,
   CancelRemainingUnitsSchema,
   LinkAssetsToLineSchema,
   PURCHASE_LINK_MAX_ASSETS,
@@ -139,5 +140,26 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
 
   test("Phase 1b (#1476) appends the stock receipt and the document label edit", () => {
     expect(PURCHASE_ORDER_EVENT_TYPES.slice(-2)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
+  });
+});
+
+describe("AssetPurchaseProvenanceSchema", () => {
+  test("the purchase header carries when it was recorded (#1476)", () => {
+    const header = AssetPurchaseProvenanceSchema.shape.purchaseOrder;
+    const base = {
+      id: "ckpurchase000000000000001",
+      reference: null,
+      status: "ORDERED",
+      currency: null,
+      orderDate: null,
+      expectedDate: null,
+      company: null,
+      invoiceNumbers: null,
+      invoiceDate: null,
+      deletedAt: null,
+      supplier: null,
+    };
+    expect(header.safeParse({ ...base, createdAt: "2026-10-02T12:00:00.000Z" }).success).toBe(true);
+    expect(header.safeParse(base).success).toBe(false);
   });
 });

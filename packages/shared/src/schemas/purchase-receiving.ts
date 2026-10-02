@@ -313,6 +313,8 @@ export const AssetPurchaseProvenanceSchema = z.object({
     company: z.string().nullable(),
     invoiceNumbers: z.string().nullable(),
     invoiceDate: z.iso.datetime().nullable(),
+    // When the purchase was recorded (#1476) — the date of the title fallback when there is no order date.
+    createdAt: z.iso.datetime(),
     deletedAt: z.iso.datetime().nullable(),
     supplier: ProvenanceSupplierSchema.nullable(),
   }),
