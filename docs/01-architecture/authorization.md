@@ -168,6 +168,19 @@ three roles **except** two tighter tiers:
 > | `POST …/lines/:lineId/receive-stock` (a `CONSUMABLE` line into stock, #1476) | `purchaseOrder:write` + `consumable:write` |
 > | `POST …/lines/:lineId/cancel-remaining` · `GET /purchase-orders/pending-lines` | `purchaseOrder:write` · `purchaseOrder:read` |
 > | `/purchase-orders/:id/attachments/**` (documents) | `purchaseOrder:read` to list and download, `:write` to upload, edit the type label and delete (human-only) |
+> | `GET …/lines/:lineId/license-proposal` (a `LICENSE` line, #1477) | `purchaseOrder:read` + `application:read` — a VIEWER (who reads applications) gets `403` |
+> | `POST …/lines/:lineId/apply-license` (#1477) | `purchaseOrder:write` + `application:write` — the seats are written through the applications path, so the application's own write permission is required |
+> | `POST /purchase-orders/from-assets` (#1477) | `purchaseOrder:write` + `asset:write` |
+> | `POST /purchase-orders/:id/attachments/:attId/extract` (#1477) | `purchaseOrder:write` + `ai:use` — **human-only** (a service account is refused in the service, `403`) |
+> | `GET /purchase-orders/extraction/status` (#1477) | `purchaseOrder:read`; it answers `NOT_PERMITTED` for a caller who could not extract |
+>
+> **Document extraction is gated like an AI channel** (#1477, ADR-0099 §11). Sending a purchase document to
+> the provider spends the caller's AI budget and moves data off the instance, so on top of
+> `purchaseOrder:write` it requires `ai:use` — the same AND gate the chat and headless channels carry (§9.1):
+> revoking `ai:use` from a role closes extraction too, with no side door. It is human-only because it is a
+> reviewed, interactive step: a draft nobody reviews has no purpose, and no headless flow should send
+> documents out. The capability (assistant usable, the *Document extraction* switch, a provider that reads
+> the type) is checked after the permissions, and refused with a typed `409`.
 >
 > The document type label (#1476) is edited under the parent's write permission — `PATCH
 > /assets/:id/attachments/:attId` needs `asset:write`, the purchase route `purchaseOrder:write` — and

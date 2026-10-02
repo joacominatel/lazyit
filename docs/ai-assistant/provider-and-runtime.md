@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-02
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -758,6 +758,55 @@ Rules [C]:
   are no provider fallback chains.
 - **Retries.** Transient provider errors are retried by the SDK (`maxRetries: 2`). The worker never
   retries a run; the BullMQ job uses `attempts: 1`. **A write is never retried automatically.**
+
+### 6.5 Structured extraction of a purchase document (as built, #1477)
+
+[[0099-purchases-scope-model-and-optionality]] §11 asks for one call shape the chat never makes: read **one
+file** and answer with **data in a fixed shape**, no tools. It is its own port, not a chat step.
+
+- **The port.** `StructuredExtractionPort.extractStructured({ model, instructions, prompt, file: { data,
+  mediaType }, schema, schemaName, maxOutputTokens, abortSignal })` (`core/ports/structured-extraction.port.ts`,
+  token `STRUCTURED_EXTRACTION_PORT`), implemented by `AiSdkChatModel` — the same class, connection read and
+  provider pin as `step`. It reads `resolveProviderConfig()` on every call and refuses
+  (`CONVERSATION_READ_ONLY`) when the configured provider **or model** differs from the one the caller checked
+  the capability for, so a document is never sent to a destination it was not checked for. It is a sibling
+  of `ChatModelPort`, not a method on it: the agent loop never extracts, and the chat fakes stay untouched.
+- **The call** (`providers/structured-extraction.ts`): `generateText` with `output: Output.object({ schema,
+  name })` and the file as an inline `file` part (bytes, server-sniffed media type, **no filename** — it is
+  user-supplied text). There is **no `tools` key at all**, so whatever the document says, the model can only
+  answer with data in the schema's shape (INV-AI-4). Everything else is the step's posture: the provider
+  definition builds the model over the egress-guarded fetch (INV-AI-7), the key is checked before any I/O,
+  `experimental_download` refuses every URL, telemetry is off, the definition's call settings apply (effort,
+  OpenAI `store: false`, Anthropic cache hints). An answer that does not fit the schema
+  (`NoObjectGeneratedError`) throws `AiStructuredOutputError` carrying only its usage; any other failure is
+  classified as a step's is, with no provider body.
+- **The schema the model fills** is transcription only: every property required and nullable, no bounds —
+  the shape every provider's strict structured-output mode accepts (OpenAI's refuses optional properties).
+  Amounts and quantities are **literal text**; dates are a `YYYY-MM-DD` reading plus the printed text; every
+  field carries `text` and `page`. The fixed instructions say the document is untrusted data and must only
+  be transcribed, never followed.
+- **lazyit reads the values** (`purchase-orders/extraction/`): amounts from the literal text in the
+  document's own number format (`1.234,56` and `1,234.56` → minor units), the decimal separator inferred
+  from every amount the document prints; a literal that reads two ways (`1.150`) with nothing to settle it
+  is left **blank** and flagged — never guessed. Numeric dates are read from the text in the document's
+  day/month order; written dates keep the model's reading only when the year and day are printed. A value
+  with no printed evidence is dropped. Cross-checks become warnings, never corrections: quantity × unit price
+  against the printed line total, the lines against the printed net and gross.
+- **Which providers.** `aiDocumentExtractionMediaTypes(provider)` (`@lazyit/shared`): Anthropic, OpenAI
+  (Responses API) and Gemini read PDF, PNG, JPEG, WebP and GIF; the **OpenAI-compatible provider reads
+  nothing** for extraction — there is no common file API across those servers and most local models cannot
+  read a PDF. A model of a supported provider that cannot read files fails at the provider, with nothing
+  saved.
+- **Limits.** The document ≤ 10 MB and ≤ 20 PDF pages (counted best-effort from the file's page objects), a
+  120 s deadline (`AbortSignal.timeout` → `EXTRACTION_TIMEOUT`), output ≤ min(`maxOutputTokens`, 16 000),
+  ≤ 200 draft lines. The caller's `dailyTokenLimitPerPrincipal` is checked first (`BUDGET_EXCEEDED`, 429)
+  and the call's usage is written to `ai_usage` (`runId` = the extraction id), so extraction and chat share
+  one budget.
+- **Gates and records.** Human callers only, holding `purchaseOrder:write` and `ai:use`; the assistant
+  usable, the `documentExtractionEnabled` switch on ([[ai-settings]]), the provider reading the type. One
+  `ai.extraction.finish` log line per run (ids, provider, model, latency, token and line counts, outcome —
+  never content) and one `EXTRACTION_RUN` [[purchase-order-event]] (metadata only), on success **and** on
+  failure, since the document left the instance either way.
 
 ## 7. Data model sketch (additive Prisma)
 
