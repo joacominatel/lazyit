@@ -45,7 +45,7 @@ import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
-import { labelFits, labelPatch, uploadLabel } from "@/lib/utils/document-label";
+import { labelFits, labelPatch, planUpload } from "@/lib/utils/document-label";
 
 /** The DOM id of a document row's "edit type" pencil — where focus returns when its editor closes. */
 const pencilId = (attachmentId: string) => `doc-label-edit-${attachmentId}`;
@@ -136,26 +136,23 @@ export function DocumentsPanel({
       toast.error(t("docs.labelTooLong", { max: ATTACHMENT_LABEL_MAX_LENGTH }));
       return;
     }
-    const label = uploadLabel(nextLabel);
-    if (label) rememberLabel(label);
-    // The label applies to the files of this upload only, so the next one does not inherit it by mistake.
-    setNextLabel("");
-    for (const file of files) {
-      // Client-side guard (the server sniffs + enforces too, ADR-0082 §3) — skip an oversized or
-      // wrong-type file with a clear toast instead of firing a doomed request.
-      if (file.size > ASSET_ATTACHMENT_MAX_MB * 1024 * 1024) {
-        toast.error(
-          t("docs.tooLarge", { name: file.name, max: ASSET_ATTACHMENT_MAX_MB }),
-        );
-        continue;
-      }
-      if (
-        file.type &&
-        !(ASSET_ATTACHMENT_MIME_TYPES as readonly string[]).includes(file.type)
-      ) {
-        toast.error(t("docs.invalidType", { name: file.name }));
-        continue;
-      }
+    // Client-side guard (the server sniffs + enforces too, ADR-0082 §3) — skip an oversized or wrong-type
+    // file with a clear toast instead of firing a doomed request.
+    const { accepted, refused, label, consumeLabel } = planUpload(files, nextLabel);
+    for (const { file, reason } of refused) {
+      toast.error(
+        reason === "tooLarge"
+          ? t("docs.tooLarge", { name: file.name, max: ASSET_ATTACHMENT_MAX_MB })
+          : t("docs.invalidType", { name: file.name }),
+      );
+    }
+    // The label applies to the files of this upload only, so the next one does not inherit it by mistake —
+    // but only once a file actually goes up; a refused drop keeps what was typed.
+    if (consumeLabel) {
+      if (label) rememberLabel(label);
+      setNextLabel("");
+    }
+    for (const file of accepted) {
       upload.mutate({ file, label }, {
         onSuccess: () => toast.success(t("docs.uploaded", { name: file.name })),
         onError: (error) => notifyError(error, t("docs.uploadError")),
