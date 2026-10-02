@@ -343,8 +343,8 @@ proveedor y modelo — nunca los valores leídos).
 
 Hay dos formas de empezar:
 
-- En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB y 20
-  páginas).
+- En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB —
+  algo menos para imágenes con algunos proveedores — y 20 páginas).
 - En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo, y lazyit crea una compra en
   **borrador** con el nombre del archivo, lo adjunta y lo lee. Si lo dejas ahí, el borrador conserva el
   documento y puedes completarlo a mano.
@@ -366,7 +366,7 @@ chica). **No se guarda nada hasta que eliges Guardar**, y entonces solo lo que e
 - **Revisar** marca lo que necesita tu atención, y el contador de arriba salta de uno al siguiente:
   - un importe que se lee de dos maneras (`1.150` — ¿mil ciento cincuenta, o uno coma quince?) queda vacío;
     también uno con más de dos decimales;
-  - una fecha que puede ser día/mes o mes/día;
+  - una fecha que puede ser día/mes o mes/día, sin nada en el documento que lo aclare, queda vacía;
   - una moneda que solo aparece como un símbolo que comparten varias monedas (`$`);
   - una línea cuya cantidad × precio unitario no es el total de línea que imprime el documento.
 - **El control de totales** compara las líneas, a medida que las corriges, con el neto (o el total) que

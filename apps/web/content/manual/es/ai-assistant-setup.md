@@ -147,7 +147,8 @@ Viene **desactivada**, también en las instancias que se actualizaron.
   activado, así que siempre lo podés desactivar.
 - **Quién lo ve.** Las personas que pueden editar compras y usar el asistente de IA. Las cuentas de
   servicio nunca leen documentos.
-- **Qué lee.** Documentos PDF e imágenes, de hasta 10 MB y 20 páginas. Los Word, planillas y archivos de
+- **Qué lee.** Documentos PDF e imágenes, de hasta 10 MB (algo menos para imágenes con Anthropic; Gemini
+  no lee GIF) y 20 páginas. Los Word, planillas y archivos de
   texto nunca se envían.
 - **Presupuesto y registro.** Cada lectura cuenta para el presupuesto diario de tokens de la persona (el
   mismo que el del chat), y el registro de actividad de la compra la registra — nunca los valores leídos.

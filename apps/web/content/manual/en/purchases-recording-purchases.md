@@ -331,7 +331,8 @@ read).
 
 There are two ways in:
 
-- On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB and 20 pages).
+- On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB — a little less
+  for images with some providers — and 20 pages).
 - On **New purchase**, **New purchase from a document**: pick the file, and lazyit creates a **draft**
   purchase named after the file, attaches the file and reads it. If you stop there, the draft keeps the
   document and you can fill it in by hand.
@@ -352,7 +353,7 @@ is saved until you select Save**, and then only what is ticked:
 - **Check** marks what needs your eyes, and the counter at the top jumps from one to the next:
   - an amount that reads two ways (`1.150` — one thousand one hundred fifty, or one point fifteen?) is left
     blank; so is one with more than two decimals;
-  - a date that could be day/month or month/day;
+  - a date that could be day/month or month/day, with nothing in the document to settle it, is left blank;
   - a currency shown only as a symbol several currencies share (`$`);
   - a line whose quantity × unit price is not the line total the document prints.
 - **The totals check** compares the lines, as you correct them, with the net (or total) the document

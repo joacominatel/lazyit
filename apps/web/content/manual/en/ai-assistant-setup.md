@@ -141,7 +141,8 @@ It is **off** by default, also on instances that were updated.
   switch is then disabled and the card says why. It stays usable while on, so you can always turn it off.
 - **Who sees it.** People who can edit purchases and use the AI assistant. Service accounts never read
   documents.
-- **What it reads.** PDF and image documents, up to 10 MB and 20 pages. Word, spreadsheets and text files
+- **What it reads.** PDF and image documents, up to 10 MB (a little less for images with Anthropic; Gemini
+  doesn't read GIF) and 20 pages. Word, spreadsheets and text files
   are never sent.
 - **Budget and record.** Each read counts against the person's daily token budget (the same as the chat),
   and the purchase's activity log records it — never the values read.
