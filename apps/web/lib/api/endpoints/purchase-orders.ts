@@ -16,6 +16,8 @@ import type {
   PurchaseOrderStatus,
   ReceiveFromLine,
   ReceiveFromLineResult,
+  ReceiveStockFromLine,
+  ReceiveStockFromLineResult,
   UnlinkAssetsResult,
   UpdatePurchaseOrder,
   UpdatePurchaseOrderLine,
@@ -154,6 +156,23 @@ export function receiveFromLine(
   data: ReceiveFromLine,
 ): Promise<ReceiveFromLineResult> {
   return apiFetch<ReceiveFromLineResult>(`${linePath(id, lineId)}/receive`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+/**
+ * Receive units of a `CONSUMABLE` line into its consumable's stock (`purchaseOrder:write` +
+ * `consumable:write`, #1476): ONE `IN` movement through the consumables ledger, carrying the line. The
+ * note becomes the movement's notes — readable by anyone who can see that consumable's movements.
+ * Over-receipt is allowed and flagged (`overReceived`).
+ */
+export function receiveStockFromLine(
+  id: string,
+  lineId: string,
+  data: ReceiveStockFromLine,
+): Promise<ReceiveStockFromLineResult> {
+  return apiFetch<ReceiveStockFromLineResult>(`${linePath(id, lineId)}/receive-stock`, {
     method: "POST",
     body: data,
   });

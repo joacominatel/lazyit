@@ -30,6 +30,10 @@ para crear activos). Se abre un formulario breve.
 - **Números de serie** — opcional. Pega un número de serie por línea, en orden, y cada unidad recibe el
   suyo. Déjalo vacío para crear unidades sin número de serie, o pega **exactamente** tantas líneas como
   la cantidad — un conteo que no coincide se rechaza antes de crear nada.
+- **Escanear** — lee los números de serie con la cámara en lugar de escribirlos: cada código de barras al
+  que la apuntas se agrega en su propia línea, uno repetido no se agrega dos veces, y la **cantidad sigue**
+  a los números escaneados. Necesita permiso de cámara y HTTPS; sin ellos, escribe o pega como siempre. Ver
+  [Escanear números de serie](/help/purchases-recording-purchases#escanear-números-de-serie).
 
 Las etiquetas de activo automáticas siguen aplicando: si tu instancia usa un
 [esquema de etiquetas](/help/configuration-asset-tag-scheme), cada unidad se etiqueta automáticamente a

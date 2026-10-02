@@ -2,15 +2,15 @@
 
 import type { PendingPurchaseLine, PurchaseOrderDetail, PurchaseOrderLine } from "@lazyit/shared";
 import { MAX_PAGE_LIMIT } from "@lazyit/shared";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
 import { Combobox } from "@/components/combobox";
-import { getPurchaseOrder } from "@/lib/api/endpoints/purchase-orders";
-import { purchaseOrderKeys, usePendingLines } from "@/lib/api/hooks/use-purchase-orders";
+import { getPendingLines, getPurchaseOrder } from "@/lib/api/endpoints/purchase-orders";
+import { purchaseOrderKeys } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { pendingLinesForModel } from "@/lib/purchases/pending";
+import { assetReceivableLines, collectPages, pendingLinesForModel } from "@/lib/purchases/pending";
 import { usePurchaseTitle } from "@/app/(app)/purchases/_components/purchase-display";
 
 /** Receiving against a purchase line: the purchase (for its header values) and the line. */
@@ -60,11 +60,17 @@ export function useCanReceiveAgainstPurchases(): boolean {
 }
 
 /**
- * The open purchase lines, read once per surface that offers "From purchase" — one request of at most a
- * page, made only for a viewer who may use it (otherwise no request at all).
+ * The open purchase lines, read once per surface that offers "From purchase" — page after page to the end
+ * (the API cannot filter by kind, so consumable lines must not push asset lines out of a single page), made
+ * only for a viewer who may use it (otherwise no request at all).
  */
 export function useOpenLines(enabled: boolean) {
-  return usePendingLines({ limit: MAX_PAGE_LIMIT }, { enabled });
+  return useQuery({
+    queryKey: purchaseOrderKeys.openLines(),
+    queryFn: ({ signal }) =>
+      collectPages((offset) => getPendingLines({ limit: MAX_PAGE_LIMIT, offset }, signal)),
+    enabled,
+  });
 }
 
 /** "OC 4512 · Compumundo — Lenovo E14 (3 pending)": how an open line reads in a picker. */
@@ -87,9 +93,9 @@ export function usePendingLineLabel() {
 }
 
 /**
- * The optional "From purchase" picker (UX proposal §3.d, "catching the bypass"): one of the open lines,
- * searched by purchase, supplier or line. Choosing one hands the line to `onPick`; the caller switches to
- * receiving against it.
+ * The optional "From purchase" picker (UX proposal §3.d, "catching the bypass"): one of the open ASSET
+ * lines (a consumable line is received into stock, #1476), searched by purchase, supplier or line.
+ * Choosing one hands the line to `onPick`; the caller switches to receiving against it.
  */
 export function PendingLinePicker({
   id,
@@ -106,7 +112,7 @@ export function PendingLinePicker({
   const labelOf = usePendingLineLabel();
   const items = useMemo(
     () =>
-      lines.map((line) => ({
+      assetReceivableLines(lines).map((line) => ({
         value: line.id,
         label: labelOf(line),
         keywords: [line.purchaseOrder.reference, line.purchaseOrder.supplier?.name].filter(

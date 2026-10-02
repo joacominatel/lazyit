@@ -12,6 +12,7 @@ import {
   useLoadLineTarget,
   useOpenLines,
 } from "@/components/purchases/pending-line-picker";
+import { assetReceivableLines } from "@/lib/purchases/pending";
 import { ReceiveStockDialog } from "./receive-stock-dialog";
 
 /**
@@ -29,7 +30,8 @@ export function NewAssetFromPurchase({ modelId }: { modelId: string }) {
   const openLines = useOpenLines(allowed);
   const loader = useLoadLineTarget();
   const [target, setTarget] = useState<ReceiveLineTarget | null>(null);
-  const lines = openLines.data?.items ?? [];
+  // A new asset is never received from a consumable line: only asset lines make the callout worth showing.
+  const lines = assetReceivableLines(openLines.data?.items ?? []);
   if (!allowed || lines.length === 0) return null;
 
   async function pick(line: (typeof lines)[number]) {

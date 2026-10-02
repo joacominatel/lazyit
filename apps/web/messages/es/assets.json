@@ -451,7 +451,8 @@
       "noLocation": "La compra no tiene lugar de entrega. Los documentos de la compra se ven en cada unidad.",
       "submit": "Recibir {count, plural, one {# unidad} other {# unidades}}",
       "openPurchase": "Volver a la compra"
-    }
+    },
+    "scan": "Escanear"
   },
   "label": {
     "documentTitle": "Etiqueta de activo — {tag}",

@@ -5,12 +5,14 @@ import type { PurchaseOrderLineKind } from "@lazyit/shared";
 import { Badge } from "@/components/ui/badge";
 import { useLocale, useTranslations } from "next-intl";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
+import { ConsumableCombobox } from "@/components/consumable-combobox";
 import { MoneyField } from "@/components/money-input";
 import { SuggestInput } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { isWritableKind, type LineDraft, type LineErrors } from "@/lib/purchases/payload";
 import { formatMoney, MONEY_MAX, parseMoneyInput } from "@/lib/utils/money";
 import { SegmentedChoice } from "./segmented-choice";
@@ -27,8 +29,9 @@ function previewTotal(line: LineDraft, locale: string): number | null {
 /**
  * The fields of one purchase line (ADR-0099 §2): kind, description (the only thing a line needs),
  * quantity (default 1), unit price in the viewer's locale, and — on an asset line — the brand and model
- * as written on the document, an optional mapping to an asset model and the warranty. Used by the create
- * form's line editor and the edit-line dialog.
+ * as written on the document, an optional mapping to an asset model and the warranty; on a consumable line
+ * (#1476) an optional mapping to the consumable it is received into. Used by the create form's line editor
+ * and the edit-line dialog.
  */
 export function LineFields({
   line,
@@ -59,16 +62,20 @@ export function LineFields({
   const models = useSuggestions("lineModel", line.modelText, { enabled: line.kind === "ASSET" });
   // Descriptions already written on purchase lines (ADR-0099 §7, #1473) — the same item, spelled the same.
   const descriptions = useSuggestions("lineDescription", line.description);
+  // Picking the consumable reads the consumables list; without that permission the line is still a
+  // consumable line, mapped later by someone who can.
+  const canReadConsumables = useCan("consumable:read");
   const total = previewTotal(line, locale);
   const kinds: { value: PurchaseOrderLineKind; label: string }[] = [
     { value: "ASSET", label: t("kindAsset") },
+    { value: "CONSUMABLE", label: t("kindConsumable") },
     { value: "OTHER", label: t("kindOther") },
   ];
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-        <Field className="sm:col-span-2">
+        <Field className="sm:col-span-4">
           <FieldLabel id={id("kind-label")}>{t("kind")}</FieldLabel>
           {isWritableKind(line.kind) ? (
             <SegmentedChoice
@@ -85,7 +92,7 @@ export function LineFields({
             </Badge>
           )}
         </Field>
-        <Field className="sm:col-span-5" data-invalid={errors?.description ? true : undefined}>
+        <Field className="sm:col-span-8" data-invalid={errors?.description ? true : undefined}>
           <FieldLabel htmlFor={id("description")}>{t("description")}</FieldLabel>
           <SuggestInput
             id={id("description")}
@@ -93,13 +100,24 @@ export function LineFields({
             onValueChange={(description) => onChange({ description })}
             source={() => descriptions}
             recentKey="purchase.lineDescription"
-            placeholder={line.kind === "ASSET" ? t("descriptionPlaceholder") : t("descriptionOtherPlaceholder")}
+            placeholder={
+              line.kind === "ASSET"
+                ? t("descriptionPlaceholder")
+                : line.kind === "CONSUMABLE"
+                  ? t("descriptionConsumablePlaceholder")
+                  : t("descriptionOtherPlaceholder")
+            }
             aria-invalid={errors?.description ? true : undefined}
             // A new row takes focus so the keyboard flow continues (Enter adds the next line).
             autoFocus={autoFocus}
           />
           {errors?.description ? <FieldError>{t("descriptionRequired")}</FieldError> : null}
         </Field>
+      </div>
+
+      {/* Three kinds do not fit beside the description and the amounts, so the amounts get their own row —
+          shared with the consumable a consumable line is received into. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
         <Field className="sm:col-span-2" data-invalid={errors?.quantity ? true : undefined}>
           <FieldLabel htmlFor={id("quantity")}>{t("quantity")}</FieldLabel>
           <Input
@@ -120,6 +138,19 @@ export function LineFields({
             onValueChange={(unitPrice) => onChange({ unitPrice })}
           />
         </div>
+        {line.kind === "CONSUMABLE" && canReadConsumables ? (
+          <Field className="sm:col-span-7">
+            <FieldLabel htmlFor={id("consumable")}>{t("consumable")}</FieldLabel>
+            <ConsumableCombobox
+              id={id("consumable")}
+              value={line.consumableId}
+              onValueChange={(consumableId) => onChange({ consumableId })}
+              allowOutOfStock
+              placeholder={t("consumablePlaceholder")}
+            />
+            <FieldDescription>{t("consumableHelp")}</FieldDescription>
+          </Field>
+        ) : null}
       </div>
 
       {line.kind === "ASSET" ? (

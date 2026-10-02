@@ -451,7 +451,8 @@
       "noLocation": "No delivery location on the purchase. The purchase's documents show on each unit.",
       "submit": "Receive {count, plural, one {# unit} other {# units}}",
       "openPurchase": "Back to purchase"
-    }
+    },
+    "scan": "Scan"
   },
   "label": {
     "documentTitle": "Asset label — {tag}",

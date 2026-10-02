@@ -46,6 +46,8 @@ import {
 } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useCan } from "@/lib/hooks/use-permissions";
+import { linkPickerFilters } from "@/lib/purchases/linked-assets";
 import {
   type ApplyChoices,
   assetsToLink,
@@ -87,7 +89,7 @@ type Step = "assets" | "line" | "diff" | "result";
  * proposal §3.e). One dialog, three entry points:
  *
  *   - a purchase line's *Link existing assets* (`line` given): pick the assets — searchable, filtered to
- *     the line's model by a removable chip — then the diff;
+ *     the line's model and to assets on no purchase yet (#1476) by removable chips — then the diff;
  *   - an asset's *Link to purchase*, and the Assets list's batch action (`assets` given): pick the purchase
  *     and the line — lines of the assets' model first — then the diff;
  *   - the diff itself: values grouped by field (fills pre-checked, replacements never), one *Apply every
@@ -299,12 +301,19 @@ function AssetPickerStep({
   const tc = useTranslations("common");
   const [q, setQ] = useState("");
   const [byModel, setByModel] = useState(line.assetModelId !== null);
+  // Assets already on a purchase are the exception when linking, so the list starts without them. The
+  // filter needs purchaseOrder:read (the API refuses it otherwise); without it the chip never shows.
+  const canReadPurchases = useCan("purchaseOrder:read");
+  const [notLinked, setNotLinked] = useState(true);
   const { data: models } = useAssetModels();
-  const { data, isLoading, isFetching } = useAssets({
-    q: q || undefined,
-    modelId: byModel && line.assetModelId ? line.assetModelId : undefined,
-    limit: 50,
-  });
+  const { data, isLoading, isFetching } = useAssets(
+    linkPickerFilters({
+      q,
+      modelId: byModel && line.assetModelId ? line.assetModelId : null,
+      notLinked,
+      canReadPurchases,
+    }),
+  );
   const chosen = new Set(selected.map((asset) => asset.id));
   const model = line.assetModelId ? models?.find((m) => m.id === line.assetModelId) : undefined;
   const items = data?.items ?? [];
@@ -321,19 +330,34 @@ function AssetPickerStep({
     <>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         <SearchInput value={q} debounceMs={300} onDebouncedChange={setQ} label={t("searchAssets")} placeholder={t("searchAssets")} />
-        {byModel && line.assetModelId ? (
+        {(byModel && line.assetModelId) || (notLinked && canReadPurchases) ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge variant="secondary" className="gap-1">
-              {t("modelChip", { model: model ? `${model.manufacturer} ${model.name}` : t("aModel") })}
-              <button
-                type="button"
-                className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t("removeModelChip")}
-                onClick={() => setByModel(false)}
-              >
-                <XMarkIcon className="size-3.5" aria-hidden />
-              </button>
-            </Badge>
+            {byModel && line.assetModelId ? (
+              <Badge variant="secondary" className="gap-1">
+                {t("modelChip", { model: model ? `${model.manufacturer} ${model.name}` : t("aModel") })}
+                <button
+                  type="button"
+                  className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={t("removeModelChip")}
+                  onClick={() => setByModel(false)}
+                >
+                  <XMarkIcon className="size-3.5" aria-hidden />
+                </button>
+              </Badge>
+            ) : null}
+            {notLinked && canReadPurchases ? (
+              <Badge variant="secondary" className="gap-1">
+                {t("notLinkedChip")}
+                <button
+                  type="button"
+                  className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={t("removeNotLinkedChip")}
+                  onClick={() => setNotLinked(false)}
+                >
+                  <XMarkIcon className="size-3.5" aria-hidden />
+                </button>
+              </Badge>
+            ) : null}
           </div>
         ) : null}
         {isLoading ? (

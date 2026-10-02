@@ -217,12 +217,66 @@ describe("toUpdateLine", () => {
   });
 
   test("a kind a newer build wrote is kept as is, never rewritten to ASSET", () => {
-    const consumable = { ...savedLine, kind: "CONSUMABLE" };
-    const draft = lineDraftFrom(consumable, "es");
-    expect(draft.kind).toBe("CONSUMABLE");
-    expect(toUpdateLine({ ...draft, quantity: "5" }, consumable, "es")).toEqual({
+    const license = { ...savedLine, kind: "LICENSE" };
+    const draft = lineDraftFrom(license, "es");
+    expect(draft.kind).toBe("LICENSE");
+    expect(toUpdateLine({ ...draft, quantity: "5" }, license, "es")).toEqual({
       ok: true,
       payload: { quantity: 5 },
     });
+  });
+});
+
+describe("consumable lines (#1476)", () => {
+  const consumableId = "ckconsumable000000000000a";
+
+  test("a consumable line sends its kind and, when picked, its consumable — never model fields", () => {
+    const result = toCreatePurchase(
+      emptyHeaderDraft(),
+      undefined,
+      [line({ kind: "CONSUMABLE", description: "Toner HP 26A", quantity: "10", consumableId, manufacturerText: "HP" })],
+      "en",
+    );
+    expect(result).toEqual({
+      ok: true,
+      payload: {
+        status: "ORDERED",
+        lines: [{ kind: "CONSUMABLE", description: "Toner HP 26A", quantity: 10, consumableId }],
+      },
+    });
+    if (result.ok) expect(CreatePurchaseOrderSchema.safeParse(result.payload).success).toBe(true);
+  });
+
+  test("the consumable is optional on the line: mapped later, at the latest when receiving", () => {
+    const result = toCreatePurchase(emptyHeaderDraft(), undefined, [line({ kind: "CONSUMABLE", description: "Toner" })], "en");
+    expect(result.ok && result.payload.lines).toEqual([{ kind: "CONSUMABLE", description: "Toner" }]);
+  });
+
+  test("a consumable picked and then switched to another kind is not sent", () => {
+    const result = toCreatePurchase(emptyHeaderDraft(), undefined, [line({ kind: "OTHER", description: "Flete", consumableId })], "en");
+    expect(result.ok && result.payload.lines).toEqual([{ kind: "OTHER", description: "Flete" }]);
+  });
+
+  test("a picked consumable alone is typing — the line is not blank", () => {
+    expect(isBlankLine(line({ consumableId }))).toBe(false);
+  });
+
+  test("editing maps, changes or clears the consumable of a consumable line", () => {
+    const saved = { ...savedLine, kind: "CONSUMABLE", consumableId: null };
+    const draft = lineDraftFrom(saved, "es");
+    expect(draft.consumableId).toBe("");
+    expect(toUpdateLine({ ...draft, consumableId }, saved, "es")).toEqual({ ok: true, payload: { consumableId } });
+    const mapped = { ...saved, consumableId };
+    expect(toUpdateLine(lineDraftFrom(mapped, "es"), mapped, "es")).toEqual({ ok: true, payload: null });
+    expect(toUpdateLine({ ...lineDraftFrom(mapped, "es"), consumableId: "" }, mapped, "es")).toEqual({
+      ok: true,
+      payload: { consumableId: null },
+    });
+  });
+
+  test("an older read without consumableId reads as unmapped", () => {
+    const older: PurchaseOrderLine = { ...savedLine, kind: "CONSUMABLE" };
+    delete older.consumableId;
+    expect(lineDraftFrom(older, "es").consumableId).toBe("");
   });
 });

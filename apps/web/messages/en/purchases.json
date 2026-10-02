@@ -143,7 +143,12 @@
     "warrantyMonths": "Warranty (months)",
     "warrantyInvalid": "A whole number of months, up to 1200.",
     "lineTotal": "Line total {total}",
-    "remove": "Remove line {index}"
+    "remove": "Remove line {index}",
+    "kindConsumable": "Consumable",
+    "descriptionConsumablePlaceholder": "Toner, cables, batteries…",
+    "consumable": "Consumable (optional)",
+    "consumablePlaceholder": "Map now or when you receive",
+    "consumableHelp": "The stock item the units go into when they arrive."
   },
   "lineDialog": {
     "addTitle": "Add line",
@@ -209,7 +214,10 @@
     "receiveUnits": "Receive units",
     "cancelRemaining": "Cancel remaining units",
     "linkExisting": "Link existing assets",
-    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep."
+    "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep.",
+    "receivesInto": "into <link>{name}</link>",
+    "consumableNotMapped": "no consumable yet",
+    "receiveStock": "Receive into stock"
   },
   "activity": {
     "fields": {
@@ -232,7 +240,8 @@
       "unitPrice": "unit price",
       "cancelledQuantity": "cancelled units",
       "warrantyMonths": "warranty",
-      "position": "position"
+      "position": "position",
+      "consumableId": "consumable"
     },
     "kindAsset": "Asset",
     "kindOther": "Other",
@@ -268,7 +277,14 @@
     "assetsMovedAway": "{count, plural, one {# asset} other {# assets}} of “{line}” moved to another purchase",
     "documentAdded": "Added the document “{name}”",
     "documentRemoved": "Removed the document “{name}”",
-    "aDocument": "a file"
+    "aDocument": "a file",
+    "kindConsumable": "Consumable",
+    "stockReceived": "Received {count, plural, one {# unit} other {# units}} into stock on “{line}”",
+    "documentAddedLabelled": "Added the document “{name}” ({label})",
+    "documentRemovedLabelled": "Removed the document “{name}” ({label})",
+    "documentLabelSet": "Set the type of “{name}” to {label}",
+    "documentLabelChanged": "Changed the type of “{name}”: {from} → {to}",
+    "documentLabelCleared": "Removed the type of “{name}”"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
@@ -438,7 +454,9 @@
       "linkedElsewhere": "On another purchase — tick “Move here” to move it",
       "notLinked": "Not linked to this line"
     },
-    "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link."
+    "previewChanged": "Some of these assets changed since the comparison was shown. Check it again, then link.",
+    "notLinkedChip": "Not linked to a purchase",
+    "removeNotLinkedChip": "Also show assets on a purchase"
   },
   "provenance": {
     "title": "Purchase",
@@ -482,5 +500,35 @@
     "linkExisting": "Link existing assets",
     "cancelRemaining": "Cancel remaining units",
     "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending"
+  },
+  "receiveStock": {
+    "title": "Receive into stock",
+    "consumable": "Consumable",
+    "consumablePlaceholder": "Pick the stock item",
+    "consumableMissing": "This line has no consumable yet. Pick one — it is saved on the line, and the stock goes into it.",
+    "consumableRequired": "Pick the consumable the units go into.",
+    "consumableNoAccess": "This line has no consumable yet, and you can't view consumables. Ask someone who can to set it on the line.",
+    "consumableSaveError": "Couldn't save the consumable on the line",
+    "into": "Into {name} · {stock} {unit} in stock now",
+    "quantity": "Quantity received",
+    "quantityHelp": "{pending, plural, =0 {Nothing pending on this line} one {# unit pending} other {# units pending}}. Type what actually arrived.",
+    "quantityInvalid": "A whole number, 1 or more.",
+    "note": "Note (optional)",
+    "noteHelp": "Visible to anyone who can see this consumable's movements, Viewers included — don't put invoice or supplier details here.",
+    "submit": "Receive {count, plural, one {# unit} other {# units}}",
+    "receivedToast": "{count, plural, one {# unit} other {# units}} received into {name}",
+    "error": "Couldn't receive into stock"
+  },
+  "lineAssets": {
+    "show": "Show assets",
+    "hide": "Hide assets",
+    "none": "No live asset is linked to this line.",
+    "loadError": "Couldn't load the assets of this line.",
+    "showingSome": "Showing the first {shown} of {total}.",
+    "unlink": "Unlink",
+    "unlinkTitle": "Unlink from this line?",
+    "unlinkDescription": "Unlink {asset} from “{line}”? The asset keeps its purchase values; the line counts one unit less.",
+    "unlinkedToast": "{asset} unlinked",
+    "unlinkError": "Couldn't unlink the asset"
   }
 }

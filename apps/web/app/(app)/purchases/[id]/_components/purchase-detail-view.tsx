@@ -13,7 +13,7 @@ import type { PurchaseOrderLine, PurchaseOrderStatus } from "@lazyit/shared";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { Callout } from "@/components/callout";
@@ -49,6 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
+import { useConsumable } from "@/lib/api/hooks/use-consumables";
 import { useLocation } from "@/lib/api/hooks/use-locations";
 import {
   useDeletePurchaseOrder,
@@ -63,6 +64,7 @@ import { canCancelPurchase } from "@/lib/purchases/display";
 import { formatMoney } from "@/lib/utils/money";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
+import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
 import {
@@ -72,6 +74,7 @@ import {
   ReceiptSummary,
   usePurchaseTitle,
 } from "../../_components/purchase-display";
+import { LineAssets } from "./line-assets";
 import { LineDialog } from "./line-dialog";
 import { PurchaseActivity } from "./purchase-activity";
 
@@ -93,10 +96,36 @@ function LineReceipt({ line }: { line: PurchaseOrderLine }) {
 }
 
 /**
+ * The consumable a consumable line receives into (#1476): its name, linked to its page. Read only with
+ * `consumable:read` — otherwise nothing is requested and nothing is shown.
+ */
+function LineConsumable({ consumableId }: { consumableId: string | null | undefined }) {
+  const t = useTranslations("purchases.detail");
+  const canRead = useCan("consumable:read");
+  const { data } = useConsumable(canRead && consumableId ? consumableId : undefined);
+  if (!canRead) return null;
+  if (!consumableId) return <span>{t("consumableNotMapped")}</span>;
+  if (!data) return null;
+  return (
+    <span>
+      {t.rich("receivesInto", {
+        name: data.name,
+        link: (chunks) => (
+          <Link href={`/consumables/${data.id}`} className="hover:underline">
+            {chunks}
+          </Link>
+        ),
+      })}
+    </span>
+  );
+}
+
+/**
  * One purchase (ADR-0099, UX proposal §3.a "Purchase detail"): identity, status and receipt progress;
  * the lines with "x of y received" (over-received is a warning, never an error); totals per currency
  * label; the status actions; receiving units, linking existing assets and cancelling the remaining units
- * per line (#1475); the purchase's documents; and the activity log.
+ * per line (#1475); consumable lines received into stock (#1476); the purchase's documents; and the
+ * activity log.
  */
 export function PurchaseDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases");
@@ -110,6 +139,8 @@ export function PurchaseDetailView({ id }: { id: string }) {
   // Receiving creates assets: it needs both purchase and asset write (the API checks both).
   const canWriteAssets = useCan("asset:write");
   const canReceive = canWrite && canWriteAssets;
+  // Receiving a consumable line posts stock: purchase and consumable write (#1476).
+  const canReceiveStock = useCanReceiveStock();
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -120,9 +151,12 @@ export function PurchaseDetailView({ id }: { id: string }) {
 
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
+  const [receivingStock, setReceivingStock] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
+  // Lines whose linked assets are open — read only on demand, so the page stays light (#1476).
+  const [openAssets, setOpenAssets] = useState<ReadonlySet<string>>(new Set());
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -354,100 +388,147 @@ export function PurchaseDetailView({ id }: { id: string }) {
                 {purchase.lines.map((line) => {
                   const brand = [line.manufacturerText, line.modelText].filter(Boolean).join(" ");
                   const mapped = line.assetModelId ? modelName.get(line.assetModelId) : undefined;
+                  const hasAssets = line.kind === "ASSET" && line.receivedQuantity > 0;
+                  const assetsOpen = hasAssets && openAssets.has(line.id);
                   return (
-                    <TableRow key={line.id}>
-                      <TableCell className="min-w-56 align-top">
-                        <div className="flex items-start gap-2">
-                          <Badge variant="outline" className="shrink-0">
-                            {line.kind === "ASSET"
-                              ? t("line.kindAsset")
-                              : line.kind === "OTHER"
-                                ? t("line.kindOther")
-                                : line.kind}
-                          </Badge>
-                          <div className="min-w-0 space-y-0.5">
-                            <p className="font-medium">{line.description}</p>
-                            {brand || mapped || line.warrantyMonths != null ? (
-                              <p className="text-xs text-muted-foreground">
-                                {[
-                                  brand || null,
-                                  mapped ? t("detail.mappedTo", { model: mapped }) : null,
-                                  line.warrantyMonths != null
-                                    ? t("detail.warranty", { months: line.warrantyMonths })
-                                    : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </p>
+                    <Fragment key={line.id}>
+                      <TableRow>
+                        <TableCell className="min-w-56 align-top">
+                          <div className="flex items-start gap-2">
+                            <Badge variant="outline" className="shrink-0">
+                              {line.kind === "ASSET"
+                                ? t("line.kindAsset")
+                                : line.kind === "CONSUMABLE"
+                                  ? t("line.kindConsumable")
+                                  : line.kind === "OTHER"
+                                    ? t("line.kindOther")
+                                    : line.kind}
+                            </Badge>
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="font-medium">{line.description}</p>
+                              {brand || mapped || line.warrantyMonths != null ? (
+                                <p className="text-xs text-muted-foreground">
+                                  {[
+                                    brand || null,
+                                    mapped ? t("detail.mappedTo", { model: mapped }) : null,
+                                    line.warrantyMonths != null
+                                      ? t("detail.warranty", { months: line.warrantyMonths })
+                                      : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </p>
+                              ) : null}
+                              {line.kind === "CONSUMABLE" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  <LineConsumable consumableId={line.consumableId} />
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right align-top font-mono tabular-nums">
+                          {line.quantity}
+                        </TableCell>
+                        <TableCell className="text-right align-top font-mono tabular-nums">
+                          {line.unitPrice != null ? (
+                            formatMoney(line.unitPrice, locale, purchase.currency)
+                          ) : (
+                            <span className="text-muted-foreground">{t("detail.noPrice")}</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right align-top font-mono tabular-nums">
+                          {line.lineTotal != null ? formatMoney(line.lineTotal, locale, purchase.currency) : "—"}
+                        </TableCell>
+                        <TableCell className="align-top text-sm">
+                          <LineReceipt line={line} />
+                          {hasAssets ? (
+                            <button
+                              type="button"
+                              className="mt-1 block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                              aria-expanded={assetsOpen}
+                              aria-controls={`line-assets-${line.id}`}
+                              onClick={() =>
+                                setOpenAssets((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(line.id)) next.delete(line.id);
+                                  else next.add(line.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              {assetsOpen ? t("lineAssets.hide") : t("lineAssets.show")}
+                            </button>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-right align-top">
+                          <div className="flex items-center justify-end gap-1">
+                            {canReceive && line.kind === "ASSET" && line.pendingQuantity > 0 ? (
+                              <Button variant="outline" size="sm" onClick={() => setReceiving(line)}>
+                                <InboxArrowDownIcon />
+                                {t("detail.receive")}
+                              </Button>
+                            ) : null}
+                            {canReceiveStock && line.kind === "CONSUMABLE" && line.pendingQuantity > 0 ? (
+                              <Button variant="outline" size="sm" onClick={() => setReceivingStock(line)}>
+                                <InboxArrowDownIcon />
+                                {t("detail.receive")}
+                              </Button>
+                            ) : null}
+                            {canWrite ? (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={t("detail.lineActions", { line: line.description })}
+                                  >
+                                    <EllipsisVerticalIcon />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {canReceive && line.kind === "ASSET" ? (
+                                    <>
+                                      <DropdownMenuItem onSelect={() => setReceiving(line)}>
+                                        {t("detail.receiveUnits")}
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onSelect={() => setLinking(line)}>
+                                        {t("detail.linkExisting")}
+                                      </DropdownMenuItem>
+                                    </>
+                                  ) : null}
+                                  {canReceiveStock && line.kind === "CONSUMABLE" ? (
+                                    <DropdownMenuItem onSelect={() => setReceivingStock(line)}>
+                                      {t("detail.receiveStock")}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
+                                    {t("detail.editLine")}
+                                  </DropdownMenuItem>
+                                  {line.pendingQuantity > 0 ? (
+                                    <DropdownMenuItem onSelect={() => setCancelling(line)}>
+                                      {t("detail.cancelRemaining")}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  {line.receivedQuantity === 0 ? (
+                                    <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(line)}>
+                                      {t("detail.removeLine")}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             ) : null}
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right align-top font-mono tabular-nums">
-                        {line.quantity}
-                      </TableCell>
-                      <TableCell className="text-right align-top font-mono tabular-nums">
-                        {line.unitPrice != null ? (
-                          formatMoney(line.unitPrice, locale, purchase.currency)
-                        ) : (
-                          <span className="text-muted-foreground">{t("detail.noPrice")}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right align-top font-mono tabular-nums">
-                        {line.lineTotal != null ? formatMoney(line.lineTotal, locale, purchase.currency) : "—"}
-                      </TableCell>
-                      <TableCell className="align-top text-sm">
-                        <LineReceipt line={line} />
-                      </TableCell>
-                      <TableCell className="text-right align-top">
-                        <div className="flex items-center justify-end gap-1">
-                          {canReceive && line.kind === "ASSET" && line.pendingQuantity > 0 ? (
-                            <Button variant="outline" size="sm" onClick={() => setReceiving(line)}>
-                              <InboxArrowDownIcon />
-                              {t("detail.receive")}
-                            </Button>
-                          ) : null}
-                          {canWrite ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  aria-label={t("detail.lineActions", { line: line.description })}
-                                >
-                                  <EllipsisVerticalIcon />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {canReceive && line.kind === "ASSET" ? (
-                                  <>
-                                    <DropdownMenuItem onSelect={() => setReceiving(line)}>
-                                      {t("detail.receiveUnits")}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onSelect={() => setLinking(line)}>
-                                      {t("detail.linkExisting")}
-                                    </DropdownMenuItem>
-                                  </>
-                                ) : null}
-                                <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
-                                  {t("detail.editLine")}
-                                </DropdownMenuItem>
-                                {line.pendingQuantity > 0 ? (
-                                  <DropdownMenuItem onSelect={() => setCancelling(line)}>
-                                    {t("detail.cancelRemaining")}
-                                  </DropdownMenuItem>
-                                ) : null}
-                                {line.receivedQuantity === 0 ? (
-                                  <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(line)}>
-                                    {t("detail.removeLine")}
-                                  </DropdownMenuItem>
-                                ) : null}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                        </TableCell>
+                      </TableRow>
+                      {assetsOpen ? (
+                        <TableRow id={`line-assets-${line.id}`} className="hover:bg-transparent">
+                          <TableCell colSpan={6} className="bg-muted/30">
+                            <LineAssets purchaseId={purchase.id} line={line} />
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -477,6 +558,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
         <ReceiveStockDialog
           line={{ purchase, line: receiving }}
           onClose={() => setReceiving(null)}
+        />
+      ) : null}
+
+      {receivingStock ? (
+        <ReceiveIntoStockDialog
+          purchase={purchase}
+          line={receivingStock}
+          onClose={() => setReceivingStock(null)}
         />
       ) : null}
 

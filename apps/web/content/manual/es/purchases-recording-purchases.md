@@ -40,7 +40,9 @@ los lectores. Un lector sin ese permiso sigue viendo los campos de costo propios
 pero no el panel **Compra** del activo (más abajo).
 
 Recibir unidades y vincular o desvincular activos también crea o cambia activos, así que necesitan
-**Registrar y editar compras** *y* el permiso para crear y editar activos.
+**Registrar y editar compras** *y* el permiso para crear y editar activos. Recibir una línea de
+consumible en stock cambia el stock, así que necesita **Registrar y editar compras** *y* el permiso para
+editar consumibles.
 
 ## Registrar una compra
 
@@ -68,11 +70,14 @@ presupuesto o la factura; se sugieren las descripciones que ya escribiste, para 
 escriba siempre igual. Su **cantidad** es 1 por defecto y el **precio unitario** es opcional (en
 blanco significa desconocido; `0` significa sin cargo). El precio unitario suele ir sin IVA.
 
-Hay dos tipos de línea:
+Hay tres tipos de línea:
 
 - **Activo** — hardware que vas a registrar como activos. Puedes anotar la **marca** y el **modelo como
   figura** en el documento, asignarla a un **modelo de activo** si ya lo tienes (no es obligatorio — se
   puede asignar después) y registrar la **garantía** en meses.
+- **Consumible** — tóner, cables, pilas: unidades que entran al stock de un
+  [consumible](/help/consumables-consumables-categories) en lugar de convertirse en activos. Puedes elegir
+  ahora el **consumible** al que entran, o dejarlo para cuando lleguen.
 - **Otro** — flete, un servicio, una bonificación. Cuenta en el total pero nunca espera una entrega.
 
 El teclado hace casi todo: **Enter** en una línea agrega la siguiente, y **Ctrl+Enter** (**⌘+Enter** en
@@ -99,7 +104,7 @@ Los importes se escriben y se muestran con el formato de números de tu idioma �
 ## Estado y entrega
 
 El estado lo fijas tú: **Borrador**, **Pedida** o **Cancelada**. Lo que llegó se calcula a partir de los
-activos vinculados a cada línea, así que una compra pedida también se lee sola como **Recibida
+activos vinculados a cada línea — y, en una línea de consumible, del stock recibido en ella —, así que una compra pedida también se lee sola como **Recibida
 parcialmente** o **Recibida**, y cada línea muestra **"3 de 4 recibidas"**, con las unidades pendientes o
 canceladas.
 
@@ -127,6 +132,8 @@ la compra, así que normalmente lo único que hay que escribir son los **número
 - La **fecha de compra** es la **fecha de factura** de la compra, u **hoy** cuando todavía no tiene —
   nunca la fecha de pedido. El **fin de garantía** es esa fecha más los meses de garantía de la línea.
 - Las unidades quedan donde se **entrega** la compra, y los documentos de la compra se ven en cada una.
+- **Escanear**, junto a los números de serie, los lee con la cámara — ver
+  [Escanear números de serie](#escanear-números-de-serie).
 
 Si la línea **no tiene modelo** todavía, el formulario te pide uno (puedes crearlo ahí mismo). El modelo
 que elijas se guarda en la línea, así la próxima entrega ya lo tiene.
@@ -146,13 +153,46 @@ te avisa antes — "esta línea espera 4 y quedaría con 5" — y ofrece **Subir
 cantidad de la línea (queda en el registro de actividad). También puedes seguir sin hacerlo: la línea se
 muestra entonces como **Recibida de más**.
 
+### Escanear números de serie
+
+En la puerta del depósito, con el teléfono, **Escanear** junto a los números de serie abre la cámara en
+el mismo formulario. Apúntala al código de barras del número de serie de cada caja — se leen los códigos
+de barras habituales Code 128 y Code 39, EAN/UPC y códigos QR — y cada código nuevo se agrega en su propia
+línea con una pequeña señal (y una vibración en los teléfonos que la tienen). Un código que ya está en la
+lista no se agrega dos veces; te lo avisa. Elige **Listo** para cerrar la cámara; la lista sigue siendo
+editable, así que puedes corregir o quitar una línea a mano.
+
+La cámara necesita el permiso del navegador y una conexión segura (HTTPS). Sin cámara, o si niegas el
+acceso, el formulario lo dice y escribes o pegas los números de serie como siempre.
+
+## Recibir en stock
+
+Una línea de **consumible** se recibe en el stock de su consumible, no como activos. Elige **Recibir** en la
+línea (o **Recibir en stock** en su menú, o **Recibir** en *Unidades pendientes*):
+
+- **Cantidad recibida** empieza en las unidades todavía pendientes. Escribe lo que llegó de verdad —
+  recibir más de lo pendiente está permitido, con el mismo aviso y la misma opción de **Subir la línea**
+  que con los activos.
+- Si la línea **no tiene consumible** todavía, el formulario te pide uno; se guarda en la línea, así la
+  próxima entrega ya lo tiene.
+- La **nota** es opcional. Se guarda en el movimiento de stock del consumible, y **cualquiera que pueda ver
+  los movimientos de ese consumible puede leerla — incluidos los Lectores** —, así que no pongas ahí datos
+  de la factura ni del proveedor.
+
+Recibir registra un movimiento de **Entrada** en el consumible (su stock sube, como con cualquier
+[movimiento de stock](/help/consumables-stock-movements)) y la línea cuenta las unidades como recibidas.
+Una recepción de stock no se puede deshacer desde la compra: si recibiste de más, corrige el stock con un
+movimiento normal en el consumible — la línea sigue contando lo que se recibió. Por lo mismo, una línea de
+consumible que ya recibió stock no puede cambiar de tipo ni quitarse.
+
 ## Vincular activos que ya tienes
 
 Los activos comprados antes de que empezaras a registrar compras — o cargados a mano — se pueden vincular
 a su línea de compra después. Hay tres caminos:
 
 - En la compra, **Vincular activos existentes** en el menú de una línea: busca y marca los activos. La
-  lista empieza filtrada por el modelo de la línea; quita esa etiqueta para ver todos los modelos.
+  lista empieza filtrada por el modelo de la línea y por activos **sin compra vinculada**; quita una
+  etiqueta para ampliarla (un activo que ya está en otra compra igual se puede mover aquí, ver más abajo).
 - En un activo sin vincular, **Vincular a una compra** en su panel **Compra**.
 - En la lista de **Activos**, selecciona varias filas y elige **Vincular a una compra** en la barra de
   selección. Luego elige la compra y la línea — las líneas del mismo modelo aparecen primero.
@@ -193,6 +233,10 @@ vinculan igual, y el resultado lista cada uno que no, con el motivo.
 valores de compra** — desvincular nunca borra nada — y tanto el historial del activo como el registro de
 actividad de la compra lo registran.
 
+También puedes desvincular desde la compra: en una línea que ya recibió unidades, **Ver activos** bajo su
+"x de y recibidas" lista los activos vinculados, cada uno con un enlace a su página y **Desvincular**. La
+lista se carga solo cuando la abres, y muestra los primeros 50 activos de una línea.
+
 ## Cancelar las unidades restantes
 
 Cuando el resto de una línea no va a llegar, elige **Cancelar unidades restantes** en el menú de la
@@ -209,7 +253,8 @@ Las compras en borrador y canceladas, las líneas *Otro* y las líneas cuyo rest
 Se puede filtrar por proveedor.
 
 Cada línea muestra "x de y recibidas" y lo que sigue pendiente, con **Recibir** y, en su menú, **Vincular
-activos existentes** y **Cancelar unidades restantes**. Una compra cuya **entrega prevista** ya pasó se
+activos existentes** y **Cancelar unidades restantes**. En una línea de consumible, **Recibir** abre
+[Recibir en stock](#recibir-en-stock), y no hay nada que vincular. Una compra cuya **entrega prevista** ya pasó se
 marca como **Atrasada**.
 
 ## Documentos
@@ -220,6 +265,12 @@ los mismos tipos de archivo y el mismo límite de tamaño que los
 [documentos de activos](/help/assets-asset-basics#documentos). Cualquiera que pueda ver compras puede
 descargarlos; subir y borrar necesita **Registrar y editar compras**. Agregar o quitar un documento queda
 en el registro de actividad.
+
+Cada documento puede llevar un **tipo** opcional — *Presupuesto*, *Factura*, *Remito*, lo que escriba tu
+equipo. Se sugieren los tipos ya usados mientras escribes, y ninguno es obligatorio. Completa **Tipo**
+antes de subir para ponerlo en los archivos de esa subida, o usa el lápiz de un documento para ponerlo,
+cambiarlo o quitarlo después (vacía el campo para quitarlo). El tipo se ve junto al nombre del archivo,
+aquí y en cada activo vinculado; cambiarlo queda en el registro de actividad.
 
 Los documentos se **comparten, no se copian**: cada activo vinculado a la compra lista los mismos
 archivos en su panel **Compra**.
@@ -249,8 +300,9 @@ del proveedor — útil para un reclamo de garantía — y los documentos de la 
 
 Cada compra lleva un registro de **actividad** de solo agregado: quién la registró, quién cambió el
 estado, quién agregó, editó o quitó una línea — con un cambio de precio o cantidad mostrado como
-*antes → después* —, quién recibió, vinculó, movió o desvinculó unidades, quién canceló unidades restantes
-(con el motivo) y quién agregó o quitó un documento. No se puede editar ni borrar.
+*antes → después* —, quién recibió, vinculó, movió o desvinculó unidades, quién recibió stock en una línea
+de consumible, quién canceló unidades restantes (con el motivo) y quién agregó o quitó un documento o
+cambió su tipo. No se puede editar ni borrar.
 
 ## Proveedores
 

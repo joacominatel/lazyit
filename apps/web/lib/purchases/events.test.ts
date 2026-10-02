@@ -111,6 +111,7 @@ describe("the flows' events (#1473) read as sentences, tolerant of a thin payloa
     expect(describePurchaseEvent({ eventType: "DOCUMENT_ADDED", payload: { originalName: "Factura A.pdf" } })).toEqual({
       kind: "documentAdded",
       name: "Factura A.pdf",
+      label: null,
     });
   });
 
@@ -125,6 +126,59 @@ describe("the flows' events (#1473) read as sentences, tolerant of a thin payloa
     expect(describePurchaseEvent({ eventType: "DOCUMENT_REMOVED", payload: {} })).toEqual({
       kind: "documentRemoved",
       name: null,
+      label: null,
+    });
+  });
+});
+
+describe("consumable receipts and document labels (#1476)", () => {
+  test("a stock receipt reads its line, count and over-received flag — never as asset units", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "STOCK_RECEIVED",
+        payload: { lineId: "l2", consumableId: "c1", movementId: "m1", quantity: 12, overReceived: true },
+      }),
+    ).toEqual({ kind: "stockReceived", lineId: "l2", quantity: 12, over: true });
+  });
+
+  test("a thin stock receipt degrades instead of printing undefined", () => {
+    expect(describePurchaseEvent({ eventType: "STOCK_RECEIVED", payload: null })).toEqual({
+      kind: "stockReceived",
+      lineId: null,
+      quantity: null,
+      over: false,
+    });
+  });
+
+  test("a label change keeps before and after; a cleared label reads as null", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "DOCUMENT_UPDATED",
+        payload: { attachmentId: "a1", originalName: "fc-0001.pdf", label: { from: "Quote", to: "Invoice" } },
+      }),
+    ).toEqual({ kind: "documentUpdated", name: "fc-0001.pdf", from: "Quote", to: "Invoice" });
+    expect(
+      describePurchaseEvent({
+        eventType: "DOCUMENT_UPDATED",
+        payload: { originalName: "fc-0001.pdf", label: { from: "Invoice", to: null } },
+      }),
+    ).toEqual({ kind: "documentUpdated", name: "fc-0001.pdf", from: "Invoice", to: null });
+    expect(describePurchaseEvent({ eventType: "DOCUMENT_UPDATED", payload: { label: "oops" } })).toEqual({
+      kind: "documentUpdated",
+      name: null,
+      from: null,
+      to: null,
+    });
+  });
+
+  test("a document added or removed carries its label, and an older event without one reads as none", () => {
+    expect(
+      describePurchaseEvent({ eventType: "DOCUMENT_ADDED", payload: { originalName: "remito.jpg", label: "Delivery note" } }),
+    ).toEqual({ kind: "documentAdded", name: "remito.jpg", label: "Delivery note" });
+    expect(describePurchaseEvent({ eventType: "DOCUMENT_REMOVED", payload: { originalName: "x.pdf" } })).toEqual({
+      kind: "documentRemoved",
+      name: "x.pdf",
+      label: null,
     });
   });
 });
