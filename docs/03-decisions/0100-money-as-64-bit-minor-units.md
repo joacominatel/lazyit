@@ -3,7 +3,7 @@ title: "ADR-0100: Money as 64-bit integer minor units"
 tags: [adr, money, data-model, validation, contract, migration]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,7 +15,9 @@ deciders: [Joaquín Minatel]
 "con la ampliación de montos" (including the money widening) — see
 [[0099-purchases-scope-model-and-optionality]] and [[purchases/decisions]]. **Design only; built first in
 Purchases Phase 1.** Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
-[[0088-application-license-seat-tracking]] (`costPerSeat` widens with the rest).
+[[0088-application-license-seat-tracking]] (`costPerSeat` widens with the rest). **Amended 2026-10-02**:
+§5 (display) records the CEO's decision that currency is free text (D-C of
+[[0099-purchases-scope-model-and-optionality]]).
 
 ## Context
 
@@ -61,9 +63,9 @@ Every money amount is a **64-bit integer of minor units**: Prisma `BigInt` → P
 - Non-money integers (counts, quantities, months, positions) stay `Int` / `int4()`
   ([[0036-int4-bounded-integers]] is unchanged for them).
 
-The **scale is unchanged**: one minor unit is one hundredth of the major unit, as today. This record does
-not model per-currency minor-unit exponents (see [[0099-purchases-scope-model-and-optionality]],
-follow-ups).
+The **scale is unchanged**: one minor unit is one hundredth of the major unit, as today, whatever the
+currency label says. There are no per-currency minor-unit exponents: currency is a free-text label with
+no semantics ([[0099-purchases-scope-model-and-optionality]] §5).
 
 ### 2. Wire contract
 
@@ -107,6 +109,24 @@ follow-ups).
 - The contract change is **widening only**: a client that sent values within `int4` still sends valid
   values; an older client reading a value above `int4` receives a correct JSON number.
 
+### 5. Display (amended 2026-10-02)
+
+Currency is a free-text label the user types, with no meaning to lazyit
+([[0099-purchases-scope-model-and-optionality]] §5, CEO decision D-C: "Las monedas son texto libre del
+usuario, no elige una moneda, no hacemos cotizaciones, guardamos valores nada mas. Depende como los
+cargue el usuario"). So nothing about how an amount looks is derived from its currency:
+
+- An amount is **displayed as entered**: the number with the viewer's locale grouping, and the currency
+  label next to it exactly as typed (nothing when the label is blank). No symbol lookup, no per-currency
+  decimal places.
+- **Decimals appear only as the user entered them.** A whole amount is never padded: 1500 shows as
+  "1.500" (es) / "1,500" (en), not "1.500,00". An amount with a fraction shows it at the stored scale:
+  "1.500,50".
+- Storage is §1's, unchanged: the amount is kept as integer hundredths. An entry with more than two
+  decimals is rounded to hundredths on input, as the web's major-to-minor helper does today.
+- This governs purchase amounts and the asset's purchase cost and salvage value, which carry the label.
+- Totals are grouped by label (trimmed, case-insensitive) and never summed across labels.
+
 ## Consequences
 
 - **Positive:** one money convention again, now wide enough for large-nominal currencies (≈ 90 trillion
@@ -116,6 +136,10 @@ follow-ups).
     Tests on each read path are the guard.
   - A table rewrite with a short exclusive lock on `assets` and `applications` at upgrade time.
   - The usable range stops at `Number.MAX_SAFE_INTEGER`, not at the column's 2^63−1 — deliberately.
+  - A fixed hundredths scale means an amount typed with three decimals (as some currencies use) loses
+    the third on input. Accepted: lazyit stores values, it does not model currencies.
+- **Follow-ups (Phase 1, frontend lane):** move the web money formatter to the §5 display rule (today it
+  forces two decimals) for purchase amounts and the asset cost.
 - **Follow-ups (Phase 1, backend lane):** add `money()`; move the three columns and every money field of
   the shared schemas (asset, asset receive, application, the import descriptor, the AI tool inputs) to
   it; convert at the read boundary; cover each read and write path with a test above the old ceiling;

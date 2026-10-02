@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,7 +14,13 @@ deciders: [Joaquín Minatel]
 **accepted** — 2026-10-01 (epic #1465, issue #1466). Approved by the CEO as one package:
 "dale, aprobado el paquete con la ampliación de montos" (the package is approved, including the money
 widening). **Design only — nothing in this record is built yet.** Phase 1 builds it; until then every
-entity, column, permission and switch named here is *planned*.
+entity, column and permission named here is *planned*.
+
+**Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
+built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
+**free-text label**, and entry is **flexible over strict**. The body below already reads accordingly; the
+questions, the CEO's words and what each decision replaced are in
+[[#Decisions after acceptance]].
 
 This record **reverses one sentence of [[0089-bulk-receiving-and-checkout-acknowledgement]]** (a
 purchase-order entity as a non-goal) and lifts the supplier deferral of
@@ -87,6 +93,13 @@ Three facts constrain the answer:
 
 ## Decision
 
+**Governing principle — entry is light and never in the way** (CEO decision D-D, 2026-10-02). Recording a
+purchase must not be a chore, or operators will not do it. Every rule below follows from that: a purchase
+asks only for what identifies it, a line only for a description; nothing is unique, so a likely
+duplicate is a **non-blocking suggestion** ("is this the same supplier?"), never a refusal; labels are
+free text that smart entry helps type, not closed lists; and robustness the user should not feel —
+status and kind validated as text — stays internal.
+
 ### 1. Scope and hard limits
 
 lazyit **records purchases**. It does **not** run purchasing. The CEO's hard limits — out of scope
@@ -112,15 +125,26 @@ orders. It lives in the sidebar under **Inventory**, next to Assets and Consumab
 
 Four new entities, all planned for Phase 1 (details in the entity notes):
 
-- **[[supplier]]** — who the team buys from and pays. Soft-deletable. Name, optional tax ID (the real
-  near-duplicate key), website, a sales contact, a **separate support/RMA contact**, notes. A supplier
-  is **not** a manufacturer (who makes hardware, [[asset-model]]`.manufacturer`) and **not** a publisher
-  (who makes software, [[application]]`.vendor`); those fields stay as they are.
-- **[[purchase-order]]** — one purchase. Soft-deletable. Required supplier and currency; optional
-  reference (the finance PO number), order date, expected date, delivery location, company, invoice
-  number(s), invoice date, notes; a user-set status.
-- **[[purchase-order-line]]** — one line on a purchase. Soft-deletable. A `kind`, description, quantity,
-  unit price, optional model mapping and warranty months, and a stored **cancelled quantity**.
+- **[[supplier]]** — who the team buys from and pays. Soft-deletable. A name (its only required field),
+  an optional tax ID (the strongest near-duplicate hint), website, a sales contact, a **separate
+  support/RMA contact**, notes. **Neither the name nor the tax ID is unique**: a likely duplicate is
+  suggested while typing, and creating anyway stays possible. A supplier is **not** a manufacturer (who
+  makes hardware, [[asset-model]]`.manufacturer`) and **not** a publisher (who makes software,
+  [[application]]`.vendor`); those fields stay as they are.
+- **[[purchase-order]]** — one purchase. Soft-deletable. **No single field is required**: a purchase can
+  be saved once something identifies it — a supplier, a reference, or one line. Everything else is
+  optional: supplier, reference (the finance PO number), a currency label (§5), order date, expected
+  date, delivery location, company, invoice numbers (**one free-text field**, however many invoices it
+  lists), invoice date, notes; and a user-set status.
+- **[[purchase-order-line]]** — one line on a purchase. Soft-deletable. A **description is the only
+  field the user must fill**; the quantity **defaults to 1** and the unit price is optional (blank =
+  unknown). Also a `kind`, optional model mapping and warranty months, and a stored **cancelled
+  quantity**.
+
+**Status and kind are text, validated by zod.** The purchase `status` and the line `kind` are stored as
+`TEXT` and validated against their allowed values by the shared zod schemas on write, not as Prisma
+enums. That is internal robustness, invisible to the user: a value a newer build adds needs no enum
+migration and reads tolerantly on an older build (§14).
 - **[[purchase-order-event]]** — the purchase's **append-only** activity log (`createdAt` only, never
   updated or deleted, [[0006-soft-delete-and-auditing]]). It carries the actor in exactly one of two
   columns — a human `performedById` or a `serviceAccountId` — enforced by a DB **CHECK** constraint, plus
@@ -159,59 +183,89 @@ corrected silently.
 
 ### 3. Derived values: totals and received status
 
-- **Totals are derived, never stored.** A line total is quantity × unit price; a purchase total is the
-  sum of its lines, **per currency** (a purchase has one currency, so one total).
+- **Totals are derived, never stored.** A line total is quantity × unit price (lines with no price add
+  nothing and the total says so); a purchase total is the sum of its lines, in the purchase's currency
+  label — one purchase, one label, so one total (§5).
 - **Status.** The user sets `DRAFT`, `ORDERED` (the default on create) or `CANCELLED`. **Partially
   received** and **Received** are **derived**: per countable line, received = live linked assets (and
-  from Phase 1b, units moved in by consumable movements); a purchase is *Received* when every countable
-  line is received or cancelled. There is no manual *Closed* and no receipt ledger.
+  from Phase 1b, units moved in by consumable movements); a line is received once received + cancelled
+  reaches its quantity, and a purchase is *Received* when every countable line is. A line that received
+  **more** than its quantity is shown as **over-received** (§4). There is no manual *Closed* and no
+  receipt ledger.
 - **Cancelling.** "Cancel remaining units" stores a cancelled quantity on the line (the reason goes in
   the event log). "Cancel purchase" is offered only while nothing is received.
 
-### 4. Over-receipt is blocked, under a lock
+### 4. Over-receipt is allowed, with a warning
 
-Receiving or linking more units than a line's quantity (minus cancelled) is **rejected on write**. The
-check runs **inside each unit's create transaction, under a row lock on the line** (`SELECT … FOR
-UPDATE`), so two users receiving the same line at once cannot overshoot it. Generating assets from a line
-reuses the bulk-receive loop of [[0089-bulk-receiving-and-checkout-acknowledgement]] — each unit its own
-transaction with its own asset-tag counter commit — so the [[0063-configurable-asset-tag-scheme]]
-invariant holds and partial success stays the correct outcome. The UI offers a one-click "raise the line
-to *n*" that edits the line (logged) and continues.
+Receiving or linking more units than a line's open quantity (quantity − cancelled − received) is
+**allowed with a warning**, and the line is then shown as **over-received** ("5 of 4 received"). The
+warning offers a one-click "raise the line to *n*" that edits the line (logged); continuing without it
+is fine. This is the **CTO's application of the light-entry principle** (D-D, 2026-10-02), not a CEO
+quote; it replaces the "blocked on write, under a lock" rule accepted on 2026-10-01 and matches what the
+research persona asked for: "warn me, don't block me" ([[purchases/user-interview]]).
+
+**The count stays right under concurrency** because it is derived, never stored: received = the count of
+live assets linked to the line, read when it is shown. Two users receiving the same line at once both
+succeed and the count reflects both — there is no counter to race and no lock to take. The warning is
+computed before the write and is advisory, so a concurrent receive can still cross the quantity; the
+over-received state then shows it.
+
+Generating assets from a line reuses the bulk-receive loop of
+[[0089-bulk-receiving-and-checkout-acknowledgement]] — each unit its own transaction with its own
+asset-tag counter commit — so the [[0063-configurable-asset-tag-scheme]] invariant holds and partial
+success stays the correct outcome.
 
 ### 5. Currency
 
-- Each purchase carries a **user-chosen ISO 4217 currency code**, required on the purchase and shared by
-  all its lines. The CEO, verbatim: "Si moneda configurable por usuario en cada ordne [sic] diria yo, sin
-  cotizaciones, no es un ERP, pero si sirve para especificar una moneda" (the user picks the currency on
-  each order; no exchange rates; it is not an ERP; the currency only states what the amounts are in).
-- The asset's purchase cost gains an **optional currency code** (planned column on [[asset]]). Existing
-  assets read as **"No currency"** — its own visible state, never defaulted to a "usual" currency.
-  Copying cost from a purchase sets the currency with it.
+- **Currency is an optional free-text label** the user types on a purchase ("ARS", "USD", "u$s",
+  "pesos" — whatever the team writes), shared by all its lines. Smart entry suggests labels used
+  before. The user does not pick from a list: there is **no ISO 4217 list and no currency semantics** —
+  lazyit derives no symbol, no decimal places and no meaning from the label. It states what the user says
+  the amounts are in, nothing more. The CEO, verbatim, on 2026-10-01: "Si moneda configurable por usuario
+  en cada ordne [sic] diria yo, sin cotizaciones, no es un ERP, pero si sirve para especificar una
+  moneda"; and on 2026-10-02 (D-C): "Las monedas son texto libre del usuario, no elige una moneda, no
+  hacemos cotizaciones, guardamos valores nada mas. Depende como los cargue el usuario".
+- **Amounts are stored and shown as entered.** Storage is ADR-0100's, unchanged: 64-bit integer minor
+  units. Display uses the viewer's locale grouping and shows decimals only as the user entered them — a
+  whole amount is never padded with ",00" ([[0100-money-as-64-bit-minor-units]] §5).
+- The asset's purchase cost gains an **optional currency label** of the same kind (planned column on
+  [[asset]]). Existing assets read as **"No currency"** — its own visible state, never defaulted to a
+  "usual" currency. Copying cost from a purchase copies the label with it.
 - lazyit **never** fetches, stores or applies exchange rates, and **never sums or converts across
-  currencies**. Any aggregate of money groups by currency, with a separate *No currency* group.
+  labels**. Any aggregate of money **groups by label**, compared trimmed and case-insensitively ("usd" and
+  "USD " are one group), with a separate *No currency* group for blank labels.
 - [[application]]`.costPerSeat` is unchanged by this record: it stays currency-less.
 
 ### 6. Reference (the finance PO number)
 
-Optional free text. When set, it is **unique per supplier among live purchases** — a partial unique index
-`WHERE "deletedAt" IS NULL` in raw SQL, the [[0041-soft-delete-reuse-and-restore]] pattern, so a
-soft-deleted purchase frees its number. **No auto-numbering in v1**; without a reference the purchase is
-displayed as *Supplier · date*.
+Optional free text, and **not unique** — no uniqueness constraint on the reference, as on the supplier's
+name and tax ID (§2). A reference already used on a live purchase of the same supplier is surfaced as a
+**non-blocking suggestion** while typing ("a purchase with this reference already exists — open it?");
+saving anyway stays possible. **No auto-numbering in v1**; without a reference the purchase is displayed
+as *Supplier · date*, and the Phase 1 design settles the fallback for a purchase identified only by a
+line.
 
-### 7. Optional: an instance switch, OFF by default
+### 7. Optional at entry, always available — no instance switch
 
-Purchases is an **instance switch, OFF by default**, on a singleton settings row (a missing row reads as
-OFF, as with [[ai-settings]] and [[asset-tag-scheme]]), toggled with `settings:manage`. Every existing
-instance upgrades with the switch OFF and sees no change.
+Purchases has **no instance on/off switch**. The area is always available, subject only to the
+`purchaseOrder:*` permissions (§8); its optionality is **at data entry**. The CEO, verbatim (D-B,
+2026-10-02): "Pero porque desactivado? para mi que funciones por defecto pero que a nivel de carga sea
+opcional."
 
-- **OFF** hides the Purchases area and the purchase pickers. It **deletes nothing**, and assets keep
-  showing their purchase read-only (provenance and purchase documents).
-- No asset ever requires a purchase. The free purchase fields on the asset stay editable in every mode.
-- **Smart entry applies with the switch ON or OFF**: every typed purchase field (supplier, manufacturer,
-  company, reference, invoice number, currency, line description, spec values) suggests recent, most-used
-  and closest-match values, with a near-duplicate hint that never auto-replaces what was typed
-  ([[purchases/ux-proposal]] §4). The CEO asked for it verbatim: "seria comodo que se filtren tambien por
-  el ultimo usado o el ultimo parecido … Sugerir digamos".
+- **Nobody has to use it.** No asset ever requires a purchase, and the free purchase fields on the asset
+  keep working exactly as today — editable whether or not a purchase is linked.
+- An instance that never records a purchase sees an empty Purchases area (for roles holding
+  `purchaseOrder:read`) and the smart-entry upgrade; nothing else changes.
+- This replaces the "instance switch, OFF by default" of the package approved on 2026-10-01. The
+  separate AI **Document extraction** switch (§11) **stays**: it governs sending financial documents to an
+  external AI provider, not the Purchases feature.
+- **Smart entry applies everywhere a purchase field is typed** — on purchases and on the asset's free
+  purchase fields: supplier, manufacturer, company, reference, invoice numbers, currency label, line
+  description, document type, spec values. Each suggests recent, most-used and closest-match values, with
+  a near-duplicate hint that never auto-replaces what was typed ([[purchases/ux-proposal]] §4). It is also
+  where likely duplicates surface — a similar supplier name, a known tax ID, a reference already used —
+  as suggestions, never refusals (D-D). The CEO asked for it verbatim: "seria comodo que se filtren
+  tambien por el ultimo usado o el ultimo parecido … Sugerir digamos".
 
 ### 8. Permissions
 
@@ -227,8 +281,13 @@ A new permission domain, `purchaseOrder`, in the catalog-as-code ([[0046-roles-p
 All three are grantable to service accounts (fail-closed, [[0048-service-accounts]]). The seed-once
 ledger delivers the defaults to existing instances on deploy, with no data migration. Permissions are per
 role, not per person: granting read to VIEWER grants it to every viewer, and the Manual must say so.
-Copied asset costs stay visible to anyone with `asset:read`, as today — hiding them would take away what
-viewers already see.
+
+**An asset's purchase provenance follows `purchaseOrder:read`** (D-A, 2026-10-01). The asset page's
+*Purchase* panel — supplier, reference, dates and the purchase documents — is shown only to a principal
+holding `purchaseOrder:read` and hidden otherwise. The API enforces it, not only the UI: provenance and
+the shared purchase documents are not served on an asset to a principal without the permission. The
+asset's **own** purchase fields (cost, currency, dates) stay visible under `asset:read`, as today —
+hiding them would take away what viewers already see.
 
 ### 9. Delete, cancel and clone
 
@@ -242,12 +301,15 @@ viewers already see.
 
 [[attachment]] gains the parent type `PURCHASE_ORDER`, reusing the asset documents allowlist and size cap,
 gated by `purchaseOrder:read` / `:write` ([[0082-attachments-storage]]). A purchase's documents are
-**shared, not copied**: the same rows are listed read-only on every linked asset.
+**shared, not copied**: the same rows are listed read-only on every linked asset, to principals holding
+`purchaseOrder:read` (§8). A document may carry an **optional free-text type label** (quote, order,
+invoice, delivery note — suggested by smart entry, never a closed or required list).
 
 ### 11. AI: extraction is a human-reviewed draft
 
-- **Document extraction** is a **separate switch under AI settings, OFF by default**, with a disclosure of
-  what is sent to the configured provider. It needs the AI assistant enabled and a provider/model that
+- **Document extraction** is a **switch under AI settings, OFF by default**, with a disclosure of what is
+  sent to the configured provider. It is the only switch Purchases involves (§7), and it governs sending
+  financial documents to an external AI provider, not the Purchases feature. It needs the AI assistant enabled and a provider/model that
   accepts files ([[0097-ai-assistant-mcp-and-headless-api]]).
 - Extraction reads **a document already attached to the purchase** — there is no file upload in the chat.
   It is a structured-output call **with no tools**, and it **never saves anything**: it returns a draft
@@ -268,7 +330,7 @@ Until it does, the purchase's documents panel says plainly that files are not in
 | Phase | Scope |
 | --- | --- |
 | **0 — Decide and document** | This ADR, [[0100-money-as-64-bit-minor-units]], the amendments, the entity notes, the research vault (#1466). |
-| **1 — Manual MVP** | Money widening; the switch; suppliers; purchases with `ASSET` and `OTHER` lines; shared documents; receive from a line (the "Receive stock" dialog in a purchase mode); link existing assets (single and bulk) with the confirmation diff; the asset's *Purchase* panel; the *Open* list with pending counts; cancel remaining / cancel purchase; the event log; `purchaseOrder:*`; locale-aware money input and CSV; smart entry; the Application "Vendor" label renamed **"Publisher"** (en) / **"Fabricante"** (es) — label only, no data change; assets CSV gains cost, currency, supplier, purchase and invoice numbers; Manual pages (en + es). |
+| **1 — Manual MVP** | Money widening; suppliers; purchases with `ASSET` and `OTHER` lines; shared documents; receive from a line (the "Receive stock" dialog in a purchase mode); link existing assets (single and bulk) with the confirmation diff; the asset's *Purchase* panel; the *Open* list with pending counts; cancel remaining / cancel purchase; the event log; `purchaseOrder:*`; locale-aware money input and CSV; smart entry; the Application "Vendor" label renamed **"Publisher"** (en) / **"Fabricante"** (es) — label only, no data change; assets CSV gains cost, currency, supplier, purchase and invoice numbers; Manual pages (en + es). |
 | **1b — At the door** | *Pending units* tab; *Receive delivery* across lines; barcode scanning into serials; `CONSUMABLE` lines; a dashboard *Pending deliveries* tile; global search for purchases; supplier history with yearly totals per currency. |
 | **2 — Extraction** | Fill a purchase from a document; propose changes from a later document; `LICENSE` lines; "create purchase from selected assets" and other back-linking helpers; merge suppliers. |
 | **3 — AI chat** | Purchase tools, page context, the batched question form and the approval rules above. |
@@ -278,50 +340,129 @@ excluded), so the tool-coverage test stays green.
 
 ### 14. Upgrade safety
 
-- **Migrations are additive.** New tables; a nullable `purchaseOrderLineId` and a nullable currency on
-  `assets`; new enum values appended at the tail. The money widening is a type change that keeps every
-  value ([[0100-money-as-64-bit-minor-units]]).
+- **Migrations are additive.** New tables; a nullable `purchaseOrderLineId` and a nullable currency
+  label (text) on `assets`; new enum values (asset-history event types, the attachment parent type)
+  appended at the tail. Purchase status and line kind are text, not enums (§2). No uniqueness index is
+  added. The money widening is a type change that keeps every value
+  ([[0100-money-as-64-bit-minor-units]]).
 - **No backfill and nothing overwritten.** Existing assets get `purchaseOrderLineId = NULL` ("no
   purchase") and currency `NULL` ("No currency"). No migration or background job creates suppliers or
   purchases, links assets, or moves or deletes custom `specs` keys. Back-linking is a manual, reviewable
   action.
-- **Permissions** arrive through the seed-once ledger; **the switch** is a missing row that reads OFF.
-- **Reads stay tolerant**: status and kind values a newer build adds must degrade gracefully on an older
-  one.
+- **Permissions** arrive through the seed-once ledger. There is no settings row to seed: with no switch,
+  an upgraded instance shows a new, empty Purchases area to ADMIN and MEMBER (the roles seeded with
+  `purchaseOrder:read`), and the asset page shows a *Purchase* panel only once an asset is linked. Every
+  existing asset, cost and free purchase field reads and edits exactly as before.
+- **Reads stay tolerant**: status and kind values a newer build adds are validated on write only and must
+  degrade gracefully on an older one; free-text currency labels need no validation beyond length.
 
 ## Consequences
 
 - **Positive:**
   - Answers the top pains with a small surface: one invoice shared by 20 assets, asset → purchase →
     invoice in one click, "3 of 4 received", and the back-linking of an existing estate.
-  - Nothing that reads asset purchase fields today has to change; an instance that never turns the
-    switch on sees only the smart-entry upgrade.
+  - Nothing that reads asset purchase fields today has to change; an instance that never records a
+    purchase sees only an empty Purchases area and the smart-entry upgrade.
+  - Entry stays light: few required fields, no uniqueness refusals, free-text labels.
   - Reuses existing machinery: bulk receive, attachments, the permission catalog, the actor CHECK
     pattern, the AI approval pipeline.
 - **Negative / trade-offs:**
   - A purchase and its assets can drift apart (by design: copies, not live values). The drift is shown,
     never fixed silently.
   - No record of "goods arrived but not yet registered as assets" beyond the derived status.
-  - Over-receipt checking moves into the shared asset-create path, under a lock, and must be tested for
-    concurrency.
-  - Viewers keep seeing asset cost while purchases are hidden from them; there is no field-level
-    authorization.
+  - A line can end up over-received; the warning is advisory, so the data can say "5 of 4". Concurrent
+    receives must still be tested to show the derived count is right.
+  - With no uniqueness constraints, duplicate suppliers and repeated references can exist. Suggestions
+    reduce them; merging suppliers (Phase 2) cleans them up.
+  - Currency labels are not normalised beyond trimming and case: "USD" and "u$s" are two groups in any
+    total. Smart-entry suggestions are the mitigation; lazyit never interprets a label.
+  - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
+  - Viewers keep seeing asset cost while purchases and an asset's purchase provenance are hidden from
+    them; there is no field-level authorization.
   - Purchase documents raise the stakes of the attachments backup gap until §12 ships.
   - A supplier's PDF goes to the configured AI provider when extraction is on; the disclosure and the
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
   - Phase 1 backend and frontend units under epic #1465, starting with [[0100-money-as-64-bit-minor-units]].
   - The attachments backup sidecar (§12).
-  - **Open before Phase 1 — not decided here:**
-    1. Whether a user **without** `purchaseOrder:read` sees a linked asset's purchase provenance
-       (supplier, reference) and purchase documents on the asset page, or only the asset's own fields.
-       This is an authorization question and needs a CEO call.
-    2. Whether the API refuses purchase writes while the switch is OFF, or only the UI hides them.
-    3. How amounts are displayed for currencies whose ISO 4217 minor unit is not two decimals (JPY, CLP,
-       KWD). Storage keeps today's fixed hundredths ([[0100-money-as-64-bit-minor-units]]).
-    4. Field-level constraints left to the Phase 1 design: supplier name and tax-ID uniqueness, how
-       invoice numbers and a document-type label are stored, and whether status and kind are Prisma
-       enums or zod-validated text.
+  - The four questions left open at acceptance are settled below; none remains open before Phase 1.
+
+## Decisions after acceptance
+
+The package was accepted on 2026-10-01 with four questions open. The CEO settled them on 2026-10-01 and
+2026-10-02, before anything was built, and the body above was amended directly. This section is the
+trail: each question as it was asked, the CEO's words verbatim, and what the decision replaced.
+
+### D-A — Purchase provenance follows `purchaseOrder:read` (2026-10-01)
+
+**Asked:** does a principal without `purchaseOrder:read` (a Viewer, by default) see a linked asset's
+purchase provenance and documents? **Recommended:** no — the asset's *Purchase* panel (supplier,
+reference, dates, purchase documents) is shown only with `purchaseOrder:read` and hidden otherwise, while
+the asset's own purchase fields (cost, currency, dates) stay visible under `asset:read` as today.
+
+CEO, verbatim: "dale, seguí con tu recomendación." (go ahead, follow your recommendation).
+
+**Applied in** §8 and §10.
+
+### D-B — No instance switch (2026-10-02)
+
+**Asked:** should the API refuse purchase writes while the instance switch is OFF, or only the UI hide
+them?
+
+CEO, verbatim: "Pero porque desactivado? para mi que funciones por defecto pero que a nivel de carga sea
+opcional." (But why switched off? To me it should work by default, and be optional at data entry.)
+
+**Decision:** the instance on/off switch is removed entirely. Purchases is always available, subject to
+permissions; nobody has to use it, and the asset's free purchase fields keep working exactly as today.
+**Replaces** the "instance switch, OFF by default" of the approved package (decision 8 in
+[[purchases/decisions]]) and makes the original question moot. The AI *Document extraction* switch, OFF
+by default, **stays**: it governs sending financial documents to an external AI provider. **Applied in**
+§7, §11, §13 and §14.
+
+### D-C — Currency is a free-text label (2026-10-02)
+
+**Asked:** how should amounts be displayed for currencies whose minor unit is not two decimals?
+
+CEO, verbatim: "Las monedas son texto libre del usuario, no elige una moneda, no hacemos cotizaciones,
+guardamos valores nada mas. Depende como los cargue el usuario" (Currencies are the user's free text; the
+user does not pick a currency; we do no exchange rates; we only store values. It depends on how the user
+enters them.)
+
+**Decision:** currency is an optional free-text label the user types, suggested by smart entry. No ISO
+4217 list, no currency semantics, no exchange rates, no conversion. Amounts are stored as entered (64-bit
+minor units, [[0100-money-as-64-bit-minor-units]], unchanged) and displayed as entered — locale
+grouping, decimals only as the user entered them, no forced ",00" on whole amounts. Totals group by label
+(trimmed, case-insensitive) and are never summed across labels. The asset's optional cost currency is the
+same kind of label. **Replaces** the "user-chosen ISO 4217 code, required on the purchase" accepted on
+2026-10-01. **Applied in** §2, §3, §5 and ADR-0100 §5.
+
+### D-D — Flexibility over strictness (2026-10-02)
+
+**Asked:** approve strict field rules for Phase 1 — supplier name unique, tax ID unique, and similar.
+
+CEO, verbatim: "Yo lo haria bastane [sic] mas flexible la verdad, la idea de la features es que no sea
+moleste y no sea denso cargar." (Honestly I would make it a lot more flexible; the idea of the feature is
+that it is not a nuisance and not heavy to fill in.)
+
+**Decision:** a governing principle — entry is light and never in the way — and, concretely:
+
+- minimal required fields: a purchase needs only what makes it identifiable (a supplier, a reference, or
+  one line); a line needs only a description, its quantity defaults to 1 and its price is optional;
+- **no uniqueness constraints** on supplier name, tax ID or purchase reference; likely duplicates are
+  non-blocking suggestions through smart entry ("is this the same supplier?");
+- the tax ID is optional; invoice numbers are one free-text field; the document type is an optional
+  free-text label;
+- purchase status and line kind are stored as `TEXT` validated by zod — internal robustness, not a user
+  burden.
+
+**Replaces** the required supplier and currency, and the reference "unique per supplier among live
+purchases" (decision 5 in [[purchases/decisions]]), accepted on 2026-10-01. **Applied in** the governing
+principle, §2, §6, §7 and §10.
+
+**The CTO's application of D-D** (a CTO decision under the CEO's principle, not a CEO quote): generating
+or linking more assets than a line's quantity is **allowed with a warning** and shown as over-received,
+replacing "blocked on write, under a lock" (§4). The per-line count is still computed correctly under
+concurrency, because it is derived from linked assets and never stored.
 
 ## Related
 
