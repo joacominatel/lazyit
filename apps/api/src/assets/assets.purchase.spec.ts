@@ -52,7 +52,11 @@ function setup(held: readonly Permission[] = ['purchaseOrder:write']) {
       }),
     },
     purchaseOrderEvent: { create: jest.fn().mockResolvedValue({}) },
-    asset: { count: jest.fn().mockResolvedValue(0), findMany: jest.fn() },
+    asset: {
+      count: jest.fn().mockResolvedValue(0),
+      groupBy: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn((cb: (client: unknown) => unknown) => cb(tx)),
   };
   const history = { record: jest.fn() };
@@ -144,13 +148,18 @@ describe('bulk receive against a purchase line (#1473)', () => {
 
   it('allows over-receipt and flags it (derived from the live count after the loop)', async () => {
     const { service, prisma } = setup();
-    prisma.asset.count.mockResolvedValue(3); // quantity 2, three live units now
+    // quantity 2, three live units now
+    prisma.asset.groupBy.mockResolvedValue([
+      { purchaseOrderLineId: LINE, _count: { _all: 3 } },
+    ]);
     const result = await service.receiveBatch(base, member);
     expect(result.created).toHaveLength(2);
     expect(result.overReceived).toBe(true);
-    expect(prisma.asset.count).toHaveBeenCalledWith({
-      where: { purchaseOrderLineId: LINE, deletedAt: null },
-    });
+    expect(prisma.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { purchaseOrderLineId: { in: [LINE] }, deletedAt: null },
+      }),
+    );
   });
 
   it('403 without purchaseOrder:write, before any write', async () => {
@@ -272,5 +281,88 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
       true,
     );
     expect(row.endsWith(',1500.50,USD,Compumundo,OC-4512,A-1')).toBe(true);
+  });
+});
+
+describe('list filters by purchase (#1476)', () => {
+  const page = { limit: 50, offset: 0, deleted: 'active' } as const;
+
+  function listSetup(held: readonly Permission[]) {
+    const ctx = setup(held);
+    const prisma = ctx.prisma as unknown as {
+      asset: { findMany: jest.Mock; count: jest.Mock };
+      $transaction: jest.Mock;
+    };
+    prisma.asset.findMany.mockResolvedValue([]);
+    prisma.$transaction.mockImplementation((arg: unknown) =>
+      Array.isArray(arg)
+        ? Promise.all(arg as unknown[])
+        : (arg as (c: unknown) => unknown)(ctx.tx),
+    );
+    const where = () =>
+      (prisma.asset.findMany.mock.calls[0] as [{ where: Row }])[0].where;
+    return { ...ctx, where };
+  }
+
+  it('the assets of one line, of one purchase, and linked or not — AND-combined', async () => {
+    const { service, where } = listSetup(['purchaseOrder:read']);
+    const purchase = await service.authorizePurchaseFilters(
+      { purchaseOrderLineId: LINE, purchaseOrderId: PO, purchaseLinked: true },
+      member,
+    );
+    await service.findPage({ purchase }, page);
+    expect(where()).toMatchObject({
+      AND: [
+        { purchaseOrderLineId: LINE },
+        { purchaseOrderLine: { purchaseOrderId: PO } },
+        { purchaseOrderLineId: { not: null } },
+      ],
+    });
+  });
+
+  it('purchaseLinked=false: the assets linked to no purchase', async () => {
+    const { service, where } = listSetup(['purchaseOrder:read']);
+    const purchase = await service.authorizePurchaseFilters(
+      { purchaseLinked: false },
+      member,
+    );
+    await service.findPage({ purchase }, page);
+    expect(where()).toMatchObject({ AND: [{ purchaseOrderLineId: null }] });
+  });
+
+  it('a list without them adds no purchase clause', async () => {
+    const { service, where } = listSetup([]);
+    await service.findPage({ status: 'IN_STORAGE' }, page);
+    expect(where()).not.toHaveProperty('AND');
+  });
+
+  it('authorizing the purchase filters needs purchaseOrder:read (D-A): 403 without it, or without a principal', async () => {
+    const denied = listSetup(['asset:read']);
+    await expect(
+      denied.service.authorizePurchaseFilters({ purchaseOrderId: PO }, member),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      denied.service.authorizePurchaseFilters({ purchaseOrderId: PO }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('defense in depth: purchase filters that were not authorized are refused by the list AND the export, before any query', async () => {
+    const { service, prisma } = listSetup(['purchaseOrder:read']);
+    const forged = { purchaseOrderId: PO };
+    await expect(
+      service.findPage({ purchase: forged }, page),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const stream = service.streamInventoryCsvRows(
+      { purchase: forged },
+      'active',
+      member,
+    );
+    // The provenance stamp and header come first; the query (and the refusal) with the first batch.
+    await expect(
+      (async () => {
+        for await (const chunk of stream) void chunk;
+      })(),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.asset.findMany).not.toHaveBeenCalled();
   });
 });

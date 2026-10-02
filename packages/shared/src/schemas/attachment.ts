@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4 } from "./primitives";
+import { int4, optionalText } from "./primitives";
 
 /**
  * Attachment — a user-uploaded file hanging off an Asset (documents: warranty PDFs, receipts,
@@ -95,9 +95,39 @@ export const AttachmentSchema = z.object({
   mimeType: z.string().min(1),
   originalName: z.string().min(1),
   uploadedById: z.uuid().nullable(),
+  // The optional document type label (#1476). Nullish: older rows and builds lack it.
+  label: z.string().nullish(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
 
+/** The longest document type label accepted on write: a label ("Delivery note"), not a description. */
+export const ATTACHMENT_LABEL_MAX_LENGTH = 100;
+
+/**
+ * The optional free-text TYPE LABEL of an asset or purchase document (ADR-0099 §10, #1476): quote, order,
+ * invoice, delivery note — whatever the team writes. Never a closed or required list; smart entry suggests
+ * labels already used (`GET /suggestions/documentLabel`). Untrusted text (ADR-0029): stored verbatim and
+ * rendered as text, never as HTML.
+ *
+ * As the `label` field of the multipart upload: trimmed, blank = no label.
+ */
+export const AttachmentLabelSchema = optionalText(ATTACHMENT_LABEL_MAX_LENGTH);
+
+/**
+ * `PATCH /assets/:assetId/attachments/:attachmentId` and `PATCH /purchase-orders/:id/attachments/:attachmentId`:
+ * set the document's type label, or clear it with `null` — or with a blank one, as on upload (an emptied
+ * field clears the label). Only the label is editable; the file never is.
+ */
+export const UpdateAttachmentSchema = z.strictObject({
+  label: z
+    .string()
+    .trim()
+    .max(ATTACHMENT_LABEL_MAX_LENGTH)
+    .transform((value) => (value === "" ? null : value))
+    .nullable(),
+});
+
 export type AttachmentEntityType = z.infer<typeof AttachmentEntityTypeSchema>;
 export type Attachment = z.infer<typeof AttachmentSchema>;
+export type UpdateAttachment = z.infer<typeof UpdateAttachmentSchema>;

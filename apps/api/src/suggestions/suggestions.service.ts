@@ -237,6 +237,18 @@ export class SuggestionsService {
             ).map((g) => row(g.description, g._count._all, g._max.updatedAt)),
         },
       ],
+      // A document's type label (#1476): asset documents under asset:read, purchase documents under
+      // purchaseOrder:read — each source only for the documents its permission already lists.
+      documentLabel: [
+        {
+          permission: 'asset:read',
+          read: (q, take) => this.documentLabels('ASSET', q, take),
+        },
+        {
+          permission: 'purchaseOrder:read',
+          read: (q, take) => this.documentLabels('PURCHASE_ORDER', q, take),
+        },
+      ],
       vendor: [
         {
           permission: 'application:read',
@@ -307,6 +319,44 @@ export class SuggestionsService {
         count: r.count,
         lastUsedAt: r.lastUsedAt.toISOString(),
       }));
+  }
+
+  /**
+   * The type labels of the LIVE documents of LIVE parents of one kind, grouped by exact text. Raw SQL because
+   * an attachment's parent is a soft reference (no relation to filter through, ADR-0082); the parent table is
+   * one of a fixed pair and every value is a bound parameter. `q` matches case-insensitively as a plain
+   * substring (`strpos`, so `%` and `_` are not wildcards).
+   */
+  private async documentLabels(
+    entityType: 'ASSET' | 'PURCHASE_ORDER',
+    q: string | undefined,
+    take: number,
+  ): Promise<SourceRow[]> {
+    const contains = q ?? null;
+    type Group = { value: string; count: number; lastUsedAt: Date };
+    const groups =
+      entityType === 'ASSET'
+        ? await this.prisma.$queryRaw<Group[]>`
+            SELECT a."label" AS "value", COUNT(*)::int AS "count", MAX(a."updatedAt") AS "lastUsedAt"
+              FROM "attachments" a
+              JOIN "assets" p ON p."id" = a."entityId"
+             WHERE a."entityType" = 'ASSET'::"AttachmentEntityType"
+               AND a."deletedAt" IS NULL AND p."deletedAt" IS NULL AND a."label" IS NOT NULL
+               AND (${contains}::text IS NULL OR strpos(lower(a."label"), lower(${contains}::text)) > 0)
+             GROUP BY a."label"
+             ORDER BY "count" DESC
+             LIMIT ${take}`
+        : await this.prisma.$queryRaw<Group[]>`
+            SELECT a."label" AS "value", COUNT(*)::int AS "count", MAX(a."updatedAt") AS "lastUsedAt"
+              FROM "attachments" a
+              JOIN "purchase_orders" p ON p."id" = a."entityId"
+             WHERE a."entityType" = 'PURCHASE_ORDER'::"AttachmentEntityType"
+               AND a."deletedAt" IS NULL AND p."deletedAt" IS NULL AND a."label" IS NOT NULL
+               AND (${contains}::text IS NULL OR strpos(lower(a."label"), lower(${contains}::text)) > 0)
+             GROUP BY a."label"
+             ORDER BY "count" DESC
+             LIMIT ${take}`;
+    return groups.map((g) => row(g.value, Number(g.count), g.lastUsedAt));
   }
 
   /** The caller's permission set: a human via the role matrix, a service account via its grants. */

@@ -26,6 +26,8 @@ import {
   PurchaseLinkPreviewSchema,
   ReceiveFromLineResultSchema,
   ReceiveFromLineSchema,
+  ReceiveStockFromLineResultSchema,
+  ReceiveStockFromLineSchema,
   UnlinkAssetsFromLineSchema,
   UnlinkAssetsResultSchema,
   CreatePurchaseOrderLineSchema,
@@ -89,6 +91,12 @@ class UnlinkAssetsResultDto extends createZodDto(UnlinkAssetsResultSchema) {}
 class ReceiveFromLineDto extends createZodDto(ReceiveFromLineSchema) {}
 class ReceiveFromLineResultDto extends createZodDto(
   ReceiveFromLineResultSchema,
+) {}
+class ReceiveStockFromLineDto extends createZodDto(
+  ReceiveStockFromLineSchema,
+) {}
+class ReceiveStockFromLineResultDto extends createZodDto(
+  ReceiveStockFromLineResultSchema,
 ) {}
 class CancelRemainingUnitsDto extends createZodDto(
   CancelRemainingUnitsSchema,
@@ -338,7 +346,7 @@ export class PurchaseOrdersController {
   @RequirePermission('purchaseOrder:write')
   @ApiOperation({
     summary:
-      'Remove a line (soft delete) — only while no asset is linked to it (409 otherwise).',
+      'Remove a line (soft delete) — only while nothing was received on it: no linked asset, no stock moved in (409 otherwise).',
   })
   @ApiOkResponse({ type: PurchaseOrderLineDto })
   removeLine(
@@ -379,6 +387,22 @@ export class PurchaseOrdersController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     return this.receiving.receiveFromLine(id, lineId, dto, principal);
+  }
+
+  @Post(':id/lines/:lineId/receive-stock')
+  @RequirePermission('purchaseOrder:write', 'consumable:write')
+  @ApiOperation({
+    summary:
+      "Receive units of a CONSUMABLE line into its consumable's stock: one IN movement through the consumables ledger, carrying the line id. 400 when the line is not CONSUMABLE, has no consumable or names an archived one. Over-receipt is allowed and flagged (overReceived).",
+  })
+  @ApiCreatedResponse({ type: ReceiveStockFromLineResultDto })
+  receiveStock(
+    @Param('id') id: string,
+    @Param('lineId') lineId: string,
+    @Body() dto: ReceiveStockFromLineDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.receiving.receiveStock(id, lineId, dto, principal);
   }
 
   @Post(':id/lines/:lineId/link-preview')

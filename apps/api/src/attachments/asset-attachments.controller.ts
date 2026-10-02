@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Header,
   Param,
+  Patch,
   Post,
   StreamableFile,
   UploadedFile,
@@ -19,7 +21,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { createZodDto } from 'nestjs-zod';
-import { ASSET_ATTACHMENT_MAX_MB, AttachmentSchema } from '@lazyit/shared';
+import {
+  ASSET_ATTACHMENT_MAX_MB,
+  ATTACHMENT_LABEL_MAX_LENGTH,
+  AttachmentSchema,
+  UpdateAttachmentSchema,
+} from '@lazyit/shared';
 import { AttachmentsService } from './attachments.service';
 import {
   attachmentsUploadStorage,
@@ -30,6 +37,7 @@ import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import type { Principal } from '../auth/principal';
 
 class AttachmentDto extends createZodDto(AttachmentSchema) {}
+class UpdateAttachmentDto extends createZodDto(UpdateAttachmentSchema) {}
 
 /**
  * Documents on an Asset (ADR-0082): warranty PDFs, receipts, damage photos — pdf/png/jpg/webp/gif/
@@ -53,7 +61,15 @@ export class AssetAttachmentsController {
     schema: {
       type: 'object',
       required: ['file'],
-      properties: { file: { type: 'string', format: 'binary' } },
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        label: {
+          type: 'string',
+          maxLength: ATTACHMENT_LABEL_MAX_LENGTH,
+          description:
+            'Optional document type label (quote, invoice, delivery note…); blank = none.',
+        },
+      },
     },
   })
   @ApiCreatedResponse({ type: AttachmentDto })
@@ -68,9 +84,10 @@ export class AssetAttachmentsController {
   upload(
     @Param('assetId') assetId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('label') label?: unknown,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.attachments.upload('ASSET', assetId, file, principal);
+    return this.attachments.upload('ASSET', assetId, file, principal, label);
   }
 
   @Get()
@@ -110,6 +127,28 @@ export class AssetAttachmentsController {
         content.originalName,
       ),
     });
+  }
+
+  @Patch(':attachmentId')
+  @RequirePermission('asset:write')
+  @ApiOperation({
+    summary:
+      "Set or clear a document's type label (null clears it). Only the label is editable. Human callers only. (ADMIN or MEMBER)",
+  })
+  @ApiOkResponse({ type: AttachmentDto })
+  updateLabel(
+    @Param('assetId') assetId: string,
+    @Param('attachmentId') attachmentId: string,
+    @Body() dto: UpdateAttachmentDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.attachments.updateLabel(
+      'ASSET',
+      assetId,
+      attachmentId,
+      dto.label,
+      principal,
+    );
   }
 
   @Delete(':attachmentId')

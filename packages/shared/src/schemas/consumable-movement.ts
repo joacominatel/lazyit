@@ -78,6 +78,9 @@ export const ConsumableMovementSchema = z.object({
   returnOfId: int4({ min: 1 }).nullish(),
   // The resolved destination (see ConsumableDeliveryTargetSchema); null for an untargeted movement.
   target: ConsumableDeliveryTargetSchema.nullish(),
+  // On an IN posted by receiving a CONSUMABLE purchase line (ADR-0099, #1476): that line. An opaque id —
+  // the purchase behind it is read under `purchaseOrder:read`. Set at insert only; never on OUT/ADJUSTMENT.
+  purchaseOrderLineId: z.cuid().nullish(),
   createdAt: z.iso.datetime(),
 });
 

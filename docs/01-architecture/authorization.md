@@ -153,7 +153,9 @@ three roles **except** two tighter tiers:
 > listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
 > not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
 > (cost, currency, dates) included — and so does the bare `purchaseOrderLineId`, an opaque id that reveals
-> no supplier, reference, date or price.
+> no supplier, reference, date or price. The same holds for a consumable movement received from a purchase
+> (#1476): it is read under `consumable:read` with only the opaque `purchaseOrderLineId` and a fixed reason
+> (*Received from a purchase*) — never the supplier or the reference.
 >
 > **Routes that need two permissions** (#1473). Where a purchase flow also reads or writes assets, the
 > route requires both — AND semantics, so a service account needs both grants:
@@ -163,15 +165,23 @@ three roles **except** two tighter tiers:
 > | `GET /assets/:id/purchase` (provenance) | `asset:read` + `purchaseOrder:read` — a VIEWER gets `403` |
 > | `POST /purchase-orders/:id/lines/:lineId/link-preview` | `purchaseOrder:read` + `asset:read` |
 > | `POST …/lines/:lineId/link-assets` · `…/unlink-assets` · `…/receive` | `purchaseOrder:write` + `asset:write` |
+> | `POST …/lines/:lineId/receive-stock` (a `CONSUMABLE` line into stock, #1476) | `purchaseOrder:write` + `consumable:write` |
 > | `POST …/lines/:lineId/cancel-remaining` · `GET /purchase-orders/pending-lines` | `purchaseOrder:write` · `purchaseOrder:read` |
-> | `/purchase-orders/:id/attachments/**` (documents) | `purchaseOrder:read` to list and download, `:write` to upload and delete (human-only) |
+> | `/purchase-orders/:id/attachments/**` (documents) | `purchaseOrder:read` to list and download, `:write` to upload, edit the type label and delete (human-only) |
 >
-> Two decisions are made **in the service**, because a decorator cannot see them: `POST
+> The document type label (#1476) is edited under the parent's write permission — `PATCH
+> /assets/:id/attachments/:attId` needs `asset:write`, the purchase route `purchaseOrder:write` — and
+> suggested by `GET /suggestions/documentLabel`, which reads asset documents' labels for `asset:read` and
+> purchase documents' labels for `purchaseOrder:read` (`403` with neither).
+>
+> Three decisions are made **in the service**, because a decorator cannot see them: `POST
 > /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
-> `purchaseOrder:write` (`403`); and `GET /assets/export` appends the supplier, purchase reference and
-> invoice numbers columns only for a caller holding `purchaseOrder:read`. Both resolve the principal's
-> permissions through `PermissionResolverService.principalHas` — a human by role, a service account by its
-> grants, no principal never.
+> `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
+> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
+> `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
+> (`403`), since the filter itself reveals which assets came from which purchase. All three resolve the
+> principal's permissions through `PermissionResolverService.principalHas` — a human by role, a service
+> account by its grants, no principal never.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

@@ -148,7 +148,30 @@ export interface AssetFilters {
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
   serials?: string[];
+  /**
+   * Purchase provenance filters (#1476). Only an object minted by
+   * {@link AssetsService.authorizePurchaseFilters} is accepted: `buildWhere` refuses any other (403).
+   */
+  purchase?: PurchaseFilters;
 }
+
+/**
+ * The asset list's purchase provenance filters (ADR-0099, #1476): the assets linked to one line, to any line
+ * of one purchase, and linked to some purchase (`true`) or to none (`false`), AND-combined. They reveal which
+ * assets came from which purchase (D-A), so they need `purchaseOrder:read` on top of `asset:read`.
+ */
+export interface PurchaseFilters {
+  purchaseOrderLineId?: string;
+  purchaseOrderId?: string;
+  purchaseLinked?: boolean;
+}
+
+/**
+ * The purchase filters that passed the permission check — the only ones `buildWhere` applies. A runtime
+ * brand rather than a type: any caller that reaches the list query (the list, the export, a future reader)
+ * cannot apply purchase filters it did not have authorized, whatever it passes.
+ */
+const AUTHORIZED_PURCHASE_FILTERS = new WeakSet<PurchaseFilters>();
 
 /**
  * Server-side sort allowlist for `GET /assets` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
@@ -322,6 +345,64 @@ export class AssetsService {
     private readonly permissions: PermissionResolverService,
   ) {}
 
+  /**
+   * Authorize the purchase filters for `principal` (#1476): 403 unless it holds `purchaseOrder:read` — the
+   * filters reveal provenance, which follows it (ADR-0099 §8, D-A), while a list read alone is `asset:read`.
+   * Returns the filters as the one object the list query will apply.
+   */
+  async authorizePurchaseFilters(
+    filters: PurchaseFilters,
+    principal?: Principal,
+  ): Promise<PurchaseFilters> {
+    if (!(await this.holds(principal, 'purchaseOrder:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const authorized = { ...filters };
+    AUTHORIZED_PURCHASE_FILTERS.add(authorized);
+    return authorized;
+  }
+
+  /**
+   * 400 unless the location a write names is LIVE. A soft-deleted location still passes the foreign key, so
+   * without this an asset could be created into, received into or moved to an archived location. Write-only:
+   * reads stay tolerant, and an update that leaves the location unchanged is not checked (a legacy row
+   * stays editable).
+   */
+  private async assertLocationLive(
+    client: Prisma.TransactionClient | PrismaService,
+    locationId: string | null | undefined,
+  ): Promise<void> {
+    if (!locationId) return;
+    const location = await client.location.findFirst({
+      where: { id: locationId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        `Location ${locationId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /** 400 unless the model a write names is LIVE — the same rule as {@link assertLocationLive}. */
+  private async assertModelLive(
+    client: Prisma.TransactionClient | PrismaService,
+    modelId: string | null | undefined,
+  ): Promise<void> {
+    if (!modelId) return;
+    const model = await client.assetModel.findFirst({
+      where: { id: modelId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new BadRequestException(
+        `AssetModel ${modelId} not found (missing or archived)`,
+      );
+    }
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -417,8 +498,33 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
+    // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
+    // list route's own check. AND-combined, so a contradictory pair simply matches nothing.
+    if (
+      purchaseFilters !== undefined &&
+      !AUTHORIZED_PURCHASE_FILTERS.has(purchaseFilters)
+    ) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const { purchaseOrderLineId, purchaseOrderId, purchaseLinked } =
+      purchaseFilters ?? {};
+    const purchase: Prisma.AssetWhereInput[] = [
+      ...(purchaseOrderLineId ? [{ purchaseOrderLineId }] : []),
+      ...(purchaseOrderId ? [{ purchaseOrderLine: { purchaseOrderId } }] : []),
+      ...(purchaseLinked === undefined
+        ? []
+        : [
+            {
+              purchaseOrderLineId: purchaseLinked ? { not: null } : null,
+            },
+          ]),
+    ];
     return {
+      ...(purchase.length > 0 ? { AND: purchase } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.
@@ -659,9 +765,11 @@ export class AssetsService {
       try {
         const asset = await this.prisma.$transaction(async (tx) => {
           let resolvedSpecs = specs;
+          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
+          await this.assertLocationLive(tx, rest.locationId);
           if (rest.modelId) {
             const model = await tx.assetModel.findFirst({
-              where: { id: rest.modelId },
+              where: { id: rest.modelId, deletedAt: null },
               select: { specs: true },
             });
             if (!model) {
@@ -761,15 +869,16 @@ export class AssetsService {
     const line = data.purchaseOrderLineId
       ? await this.receivableLine(data.purchaseOrderLineId, principal)
       : null;
-    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
-    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    // ONE upfront model and location check: a single friendly 400 instead of N identical per-unit failures,
+    // and the model name feeds each unit's default `name`. Both must be LIVE, as in create().
     const model = await this.prisma.assetModel.findFirst({
-      where: { id: data.modelId },
+      where: { id: data.modelId, deletedAt: null },
       select: { name: true },
     });
     if (!model) {
       throw new BadRequestException(`AssetModel ${data.modelId} not found`);
     }
+    await this.assertLocationLive(this.prisma, data.locationId);
 
     // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
     // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
@@ -905,6 +1014,13 @@ export class AssetsService {
     }
     const { specs, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
+      if (rest.locationId !== before.locationId) {
+        await this.assertLocationLive(tx, rest.locationId);
+      }
+      if (rest.modelId !== before.modelId) {
+        await this.assertModelLive(tx, rest.modelId);
+      }
       const row = await tx.asset.update({
         where: { id },
         data: {

@@ -16,7 +16,7 @@ import type {
   UpdateConsumable,
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma, type ConsumableMovement } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import type { ActorAttribution } from '../common/actor.service';
@@ -107,6 +107,22 @@ export interface DeliveryFilters {
   outstandingOnly: boolean;
   from?: string;
   to?: string;
+}
+
+/**
+ * In-process extras for a movement another module posts — today a purchase receipt (ADR-0099, #1476). Never
+ * reachable from the HTTP body. `purchaseOrderLineId` is stamped on the ledger row at insert (an `IN` only;
+ * a DB CHECK backs it). `beforeWrite` runs inside the movement's transaction before the stock moves, so its
+ * checks and locks hold until the commit; `afterWrite` runs after the row is inserted, so what it writes
+ * commits or rolls back with the movement.
+ */
+export interface MovementOrigin {
+  purchaseOrderLineId: string;
+  beforeWrite?: (tx: Prisma.TransactionClient) => Promise<void>;
+  afterWrite?: (
+    tx: Prisma.TransactionClient,
+    movement: ConsumableMovement,
+  ) => Promise<void>;
 }
 
 /** The one target a create payload or a deliveries query names, or null (validated upstream). */
@@ -301,11 +317,15 @@ export class ConsumablesService {
    * Overflow guard: an IN whose result would exceed int4 (`> INT4_MAX`) is rejected as a **409**
    * before any write, so the cache can never silently wrap or hit a P2020 mid-transaction. Returns
    * the ledger row.
+   *
+   * `origin` is the in-process hook another module uses to post a movement through this same path (a
+   * purchase receipt, {@link MovementOrigin}); it is never part of the HTTP body.
    */
   async createMovement(
     consumableId: string,
     data: CreateConsumableMovement,
     principal?: Principal,
+    origin?: MovementOrigin,
   ) {
     const actor = this.actor.resolveActor(principal);
     const { type, quantity, reason, notes, returnOfId } = data;
@@ -323,6 +343,11 @@ export class ConsumablesService {
         'returnOfId (a return) is only allowed on an IN movement',
       );
     }
+    if (origin && (type !== 'IN' || target || returnOfId !== undefined)) {
+      throw new BadRequestException(
+        'A purchase receipt is a plain IN movement (no target, not a return)',
+      );
+    }
 
     // BEFORE-snapshot (live row only) for the low-stock crossing check (ADR-0056 §3). A light read
     // outside the tx; null when the row is missing/soft-deleted (the tx below 404s those). The crossing
@@ -333,6 +358,8 @@ export class ConsumablesService {
     });
 
     const movement = await this.prisma.$transaction(async (tx) => {
+      // The origin's own checks and locks first, so they hold for the whole movement.
+      await origin?.beforeWrite?.(tx);
       // A delivery must name a LIVE destination: a missing or soft-deleted user / asset / location is a
       // client error (400), not a 500 at the FK — mirrors AssetAssignmentsService's live-row guard. The
       // `deletedAt: null` is explicit even though User/Asset/Location are in the ADR-0032 auto-filtered set.
@@ -454,8 +481,13 @@ export class ConsumablesService {
           ...(target && snapshot?.returnable ? { returnable: true } : {}),
           // Return: the delivery this IN gives back.
           ...(delivery ? { returnOfId: delivery.id } : {}),
+          // Purchase receipt (ADR-0099, #1476): the line this IN was received from. Set at insert only.
+          ...(origin
+            ? { purchaseOrderLineId: origin.purchaseOrderLineId }
+            : {}),
         },
       });
+      await origin?.afterWrite?.(tx, created);
 
       // The asset's own timeline, in THIS transaction (ADR-0033): a delivery to an asset, or a return of
       // one. A user / location target writes no asset event (their record is the deliveries read).

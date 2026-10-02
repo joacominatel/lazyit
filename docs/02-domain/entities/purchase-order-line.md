@@ -8,8 +8,8 @@ updated: 2026-10-02
 
 # PurchaseOrderLine
 
-> 🟢 built — backend (#1472), receiving, linking and cancelling (#1473); their screens pending (#1475) ·
-> Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472), receiving, linking and cancelling (#1473), consumable lines (#1476); their
+> screens pending (#1475, #1476 web) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrderLine` (`purchase_order_lines`). Lines are created inline with a purchase or through
@@ -29,16 +29,16 @@ line, the units that came out of it.
 - **maps to** an optional [[asset-model]] (`assetModelId`, `SetNull`). Optional on purpose: a draft line
   does not force anyone to create a model; it is mapped when units are received.
 - **produced** N [[asset]]s (`Asset.purchaseOrderLineId`, nullable). At most one line per asset.
-- From Phase 1b, a `CONSUMABLE` line maps to a [[consumable]] and is received as `IN`
-  [[consumable-movement]]s that reference the line. From Phase 2, a `LICENSE` line links to an
-  [[application]].
+- **maps to** an optional [[consumable]] (`consumableId`, `SetNull`) — a `CONSUMABLE` line only (#1476).
+  It is received as `IN` [[consumable-movement]]s that reference the line (`ConsumableMovement.purchaseOrderLineId`).
+  From Phase 2, a `LICENSE` line links to an [[application]].
 
 ## Business rules
 
 - **Entry is light** ([[0099-purchases-scope-model-and-optionality]], governing principle, CEO decision
   D-D): a **description is the only field the user must fill**. The quantity **defaults to 1** and the
   unit price is optional.
-- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b; `LICENSE` in Phase 2. Stored as
+- **Kinds.** `ASSET` and `OTHER` in Phase 1; `CONSUMABLE` in Phase 1b (built, #1476); `LICENSE` in Phase 2. Stored as
   `TEXT` validated by the shared zod schema on write, not a Prisma enum.
   - `ASSET` — received units become assets.
   - `OTHER` — shipping, services, freebies. Recorded and counted in the total, **never pending**.
@@ -49,8 +49,9 @@ line, the units that came out of it.
 - **Unit price** is integer minor units in the purchase's currency label, 64-bit
   ([[0100-money-as-64-bit-minor-units]]). `0` is valid (a freebie) and distinct from blank (unknown).
   By convention it is the price that should become each unit's cost, usually without VAT.
-- **Received** is derived: the count of **live** assets linked to the line (from Phase 1b, units moved in
-  for a consumable line). **Pending** = quantity − received − cancelled, never below zero. Each line read
+- **Received** is derived: the count of **live** assets linked to an `ASSET` line, or, for a `CONSUMABLE`
+  line, the sum of the quantities of the `IN` movements posted from it (#1476). **Pending** = quantity −
+  received − cancelled, never below zero. Each line read
   carries `receivedQuantity`, `pendingQuantity`, `receiptState` (`NONE | PARTIAL | RECEIVED | OVER`;
   `null` for an `OTHER` line or a kind this build does not know) and `lineTotal` (quantity × unit price,
   `null` when the price is unknown). `RECEIVED` means nothing is pending — a fully cancelled line reads
@@ -69,8 +70,8 @@ line, the units that came out of it.
   when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
   records the change before and after.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
-- The **kind** of a line with live linked assets cannot change (`409`): its received units would silently
-  stop counting.
+- The **kind** of a line that received units — live linked assets, or stock moved in — cannot change
+  (`409`): its received units would silently stop counting.
 - **A different model delivered** is received *against the line* with the model overridden and a note;
   the line is not split and keeps what was ordered.
 - **Copy on confirm.** Receiving or linking copies the line's values (cost and currency, purchase date,
@@ -127,11 +128,39 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
   carries `overReceived`.
 - **Over-receipt** is allowed everywhere and reported (`overReceived`, `overReceivedAfter`, the event
   payloads), never refused (ADR-0099 §4).
-- A line can be removed (soft delete) only while nothing is linked to it (`409` otherwise), and never when it
-  is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
+- A line can be removed (soft delete) only while nothing was received on it — no linked asset, no stock
+  moved in (`409` otherwise) — and never when it is the last thing that identifies its purchase (no supplier, no reference: `400`). Registered in
   `SOFT_DELETABLE_MODELS` ([[0032-soft-delete-middleware]]).
 - `manufacturerText` / `modelText` / `description` feed smart entry (`GET /suggestions/manufacturer`,
   `/lineModel`, `/lineDescription` — the last since #1473), from live lines of live purchases.
+
+## Consumable lines (as built, #1476)
+
+- **Mapping.** `consumableId` is accepted on a `CONSUMABLE` line only (`400` otherwise — at the edge on a
+  create, against the stored kind on a PATCH), and stays **optional** there: a draft line need not pick its
+  consumable until stock is received. The consumable must be **live** (`400` for a missing or archived one,
+  on create, add and update). Changing a line away from `CONSUMABLE` clears its consumable (logged in
+  `LINE_UPDATED`). The consumable of a line that already received stock may still change ("a different item
+  came"): each movement keeps its own consumable, and the line keeps counting every unit it received.
+- **Receive into stock** — `POST /purchase-orders/:id/lines/:lineId/receive-stock { quantity, note? }`
+  (`purchaseOrder:write` + `consumable:write`). It posts **one** `IN` [[consumable-movement]] through the
+  consumables service (never a direct `currentStock` write) that carries `purchaseOrderLineId`, `reason`
+  *Received from a purchase* and `note` as its notes. Inside that movement's transaction the purchase is
+  locked `FOR KEY SHARE` first (the lock a link takes) and the line re-read: a kind change or a line removal
+  — which lock the purchase `FOR UPDATE` — serializes with the receipt and sees it, and a line whose kind or
+  consumable changed meanwhile is a `409` with nothing written. The purchase gets one `STOCK_RECEIVED` in the
+  same transaction. Result `{ movement, overReceived, line }`.
+- **Refusals.** `400` for a line that is not `CONSUMABLE`, has no consumable ("map the line to a
+  consumable") or names an archived one ("restore it or map the line to another"); `404` for an archived
+  purchase or line. Receiving more than is pending is allowed and flagged (`overReceived`, `OVER`).
+- **Received never goes down.** Movements are append-only; a mistaken receipt is corrected on the stock
+  with an ordinary movement that carries no line, and the line keeps counting the receipt (the
+  [[0098-consumable-delivery-targets]] rule for returns). This is why a line that received stock can neither
+  change kind nor be removed: unlike an asset link, a receipt cannot be undone.
+- **Everywhere receipt is read** — the line and purchase reads, the `receipt` filter, `GET
+  /purchase-orders/pending-lines` and cancel remaining units — a `CONSUMABLE` line counts its moved-in
+  units, with the same derivation. A purchase's receipt counters add units across its countable lines
+  whatever each consumable's unit; the state and the per-line counts are what the UI leads with.
 
 ## Conventions
 
@@ -145,10 +174,11 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 | `id` | `cuid` | |
 | `purchaseOrderId` | `cuid` | FK → [[purchase-order]], `Restrict`. |
 | `position` | `int` | display order (`int4()`), default after the last live line. |
-| `kind` | `text` | `ASSET \| OTHER` (+ `CONSUMABLE`, `LICENSE` later), default `ASSET`, validated by zod on write. |
+| `kind` | `text` | `ASSET \| OTHER \| CONSUMABLE` (+ `LICENSE` later), default `ASSET`, validated by zod on write. |
 | `description` | `string` | the only required field; as written on the document (≤ 500). |
 | `manufacturerText` / `modelText` | `string?` | brand and model **as written on the document**, before (or instead of) mapping to a model. Added while building (#1472) from [[purchases/technical-analysis]] §5 — the entity design had no place for them. |
 | `assetModelId` | `cuid?` | FK → [[asset-model]], `SetNull`. |
+| `consumableId` | `cuid?` | FK → [[consumable]], `SetNull` (#1476); a `CONSUMABLE` line only. |
 | `quantity` | `int` | ≥ 1 (`int4()`), default `1`. |
 | `unitPrice` | `bigint?` | minor units, ≥ 0; `null` = unknown ([[0100-money-as-64-bit-minor-units]]). |
 | `warrantyMonths` | `int?` | warranty end of a received unit = purchase date + this (0–1200). |

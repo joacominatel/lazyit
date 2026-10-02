@@ -6,6 +6,9 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   type CanActivate,
   type ExecutionContext,
@@ -82,9 +85,10 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
     linkAssets: ok,
     unlinkAssets: ok,
     receiveFromLine: ok,
+    receiveStock: ok,
     findAssetProvenance: ok,
   };
-  const attachments = { list: ok, upload: ok, remove: ok };
+  const attachments = { list: ok, upload: ok, remove: ok, updateLabel: ok };
   (purchases as Record<string, jest.Mock>).cancelRemaining = ok;
   const suppliers = {
     findPage: ok,
@@ -392,6 +396,131 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       await http()
         .get(`${base}/${ATT}/content${as('role=VIEWER')}`)
         .expect(403);
+    });
+  });
+
+  describe('consumable lines (#1476)', () => {
+    beforeEach(() => ok.mockClear());
+
+    it('receiving into stock needs purchaseOrder:write AND consumable:write', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/receive-stock`;
+      const body = { quantity: 5 };
+      await http()
+        .post(`${path}${as('role=VIEWER')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write')}`)
+        .send(body)
+        .expect(403);
+      await http()
+        .post(`${path}${as('sa=consumable:write')}`)
+        .send(body)
+        .expect(403);
+      expect(receiving.receiveStock).not.toHaveBeenCalled();
+      await http()
+        .post(`${path}${as('sa=purchaseOrder:write,consumable:write')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=MEMBER')}`)
+        .send(body)
+        .expect(201);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send(body)
+        .expect(201);
+      expect(receiving.receiveStock).toHaveBeenCalledWith(
+        PO,
+        LINE,
+        { quantity: 5 },
+        expect.objectContaining({ kind: 'human' }),
+      );
+    });
+
+    it('receive-stock validates its body at the edge: a quantity is required, nothing else is accepted', async () => {
+      const path = `/purchase-orders/${PO}/lines/${LINE}/receive-stock`;
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send({})
+        .expect(400);
+      await http()
+        .post(`${path}${as('role=ADMIN')}`)
+        .send({ quantity: 1, type: 'OUT' })
+        .expect(400);
+    });
+
+    it('a line names a consumable only on a CONSUMABLE line (400 at the edge)', async () => {
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          description: 'Toner',
+          consumableId: 'clconsumable000000000001',
+        })
+        .expect(400);
+      await http()
+        .post(`/purchase-orders/${PO}/lines${as('role=MEMBER')}`)
+        .send({
+          kind: 'CONSUMABLE',
+          description: 'Toner',
+          consumableId: 'clconsumable000000000001',
+        })
+        .expect(201);
+    });
+  });
+
+  describe('document type labels (#1476)', () => {
+    beforeEach(() => ok.mockClear());
+
+    it("editing a purchase document's label is a purchase write; the body is the label only", async () => {
+      const path = `/purchase-orders/${PO}/attachments/${ATT}`;
+      await http()
+        .patch(`${path}${as('role=VIEWER')}`)
+        .send({ label: 'Invoice' })
+        .expect(403);
+      await http()
+        .patch(`${path}${as('sa=purchaseOrder:read')}`)
+        .send({ label: 'Invoice' })
+        .expect(403);
+      await http()
+        .patch(`${path}${as('role=MEMBER')}`)
+        .send({ label: 'Invoice' })
+        .expect(200);
+      expect(attachments.updateLabel).toHaveBeenCalledWith(
+        'PURCHASE_ORDER',
+        PO,
+        ATT,
+        'Invoice',
+        expect.objectContaining({ kind: 'human' }),
+      );
+      await http()
+        .patch(`${path}${as('role=MEMBER')}`)
+        .send({ label: 'x'.repeat(101) })
+        .expect(400);
+      await http()
+        .patch(`${path}${as('role=MEMBER')}`)
+        .send({ originalName: 'evil.html' })
+        .expect(400);
+    });
+
+    it('the upload hands the multipart label to the service', async () => {
+      // The multer stage writes the file to <ATTACHMENTS_DIR>/tmp: keep it out of the tree.
+      const dir = await mkdtemp(join(tmpdir(), 'lazyit-po-authz-'));
+      process.env.ATTACHMENTS_DIR = dir;
+      await http()
+        .post(`/purchase-orders/${PO}/attachments${as('role=MEMBER')}`)
+        .field('label', 'Remito')
+        .attach('file', Buffer.from('%PDF-1.7 x'), 'remito.pdf')
+        .expect(201);
+      expect(attachments.upload).toHaveBeenCalledWith(
+        'PURCHASE_ORDER',
+        PO,
+        expect.objectContaining({ originalname: 'remito.pdf' }),
+        expect.objectContaining({ kind: 'human' }),
+        'Remito',
+      );
+      delete process.env.ATTACHMENTS_DIR;
+      await rm(dir, { recursive: true, force: true });
     });
   });
 });

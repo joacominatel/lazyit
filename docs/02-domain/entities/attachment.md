@@ -74,9 +74,31 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
 > `GET /assets/:id/purchase` — to principals holding `purchaseOrder:read` only (ADR-0099 §8, CEO decision
 > D-A) — and downloaded through the purchase's content route; upload and delete happen on the purchase. The
 > GC treats them like asset documents: pinned by their own live row, reclaimed after an explicit delete.
-> The optional free-text type label (quote, invoice, delivery note) is **not built yet** (it needs a
-> column). Because they are financial evidence, ADR-0099 §12 makes the **attachments backup a
+> The optional free-text type label (quote, invoice, delivery note) is built (#1476): see *Document type
+> label* below. Because they are financial evidence, ADR-0099 §12 makes the **attachments backup a
 > prerequisite** shipping before or alongside Phase 1.
+
+### Document type label (#1476)
+
+[[0099-purchases-scope-model-and-optionality]] §10. An asset or purchase document may carry an optional
+free-text **type label** — quote, order, invoice, delivery note, whatever the team writes. Never a closed or
+required list (CEO decision D-D).
+
+- **Set at upload** through the multipart `label` text field (trimmed; blank = no label; at most 100
+  characters, `400` beyond). The service validates it inside the upload's `try`, so a bad label still
+  discards the staged tmp file.
+- **Edited later** with `PATCH /assets/:id/attachments/:attId` (`asset:write`) or
+  `PATCH /purchase-orders/:id/attachments/:attId` (`purchaseOrder:write`), body `{ label: string | null }`
+  (`null` or a blank one clears it, as on upload). Only the label is editable — never the file, its name or its type. Human-only, like
+  every attachment write; `404` for a document of another parent or of an archived purchase. On a purchase,
+  a real change appends `DOCUMENT_UPDATED { attachmentId, originalName, label: { from, to } }` in the same
+  transaction; `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` carry the `label` too.
+- **Returned** on every list, upload and delete, and on the documents of an asset's purchase provenance.
+- **Suggested** by smart entry: `GET /suggestions/documentLabel` merges the labels of live asset documents
+  (under `asset:read`) and of live purchase documents (under `purchaseOrder:read`), each source only for a
+  live parent; a caller with neither permission gets `403`.
+- **Untrusted text** ([[0029-untrusted-content-sanitization]]): stored verbatim, rendered as plain text, never
+  as HTML. Article images take no label (the KB has no use for one).
 
 ## Fields
 
@@ -93,6 +115,7 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/attachment.ts`).
 | `mimeType` | `string` | **server-derived**, allowlisted — the served Content-Type. |
 | `originalName` | `string` | client filename — metadata only, never a path/key. |
 | `uploadedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. |
+| `label` | `string?` | optional document type label (#1476); `NULL` on every row that predates it. |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | mutable domain entity ([[0006-soft-delete-and-auditing]]); registered in the soft-delete read filter. |
 
 Indexes: `@@index([entityType, entityId])` (per-parent list), `@@index([sha256])` (dedup/GC).
@@ -106,4 +129,5 @@ Indexes: `@@index([entityType, entityId])` (per-parent list), `@@index([sha256])
 | `POST /assets/:id/attachments` · `POST /articles/:id/attachments` | parent write | multipart single-file upload |
 | `GET /assets/:id/attachments` · `GET /articles/:id/attachments` | parent read | live metadata list |
 | `GET …/attachments/:attId/content` | parent read | hardened byte stream |
+| `PATCH /assets/:id/attachments/:attId` · `PATCH /purchase-orders/:id/attachments/:attId` | parent write | set or clear the document type label (#1476) |
 | `DELETE …/attachments/:attId` | parent write | soft delete |

@@ -237,8 +237,11 @@ describe('AssetsService', () => {
   let prisma: {
     asset: PrismaAssetMock;
     assetModel: { findFirst: jest.Mock };
+    location: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
+  // The live-location check on writes (#1476): live by default; a test archives one by answering null.
+  let location: { findFirst: jest.Mock };
   let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -258,11 +261,14 @@ describe('AssetsService', () => {
     txClient = { asset: tx } as TxClientMock;
     // keep existing transaction assertions focused on the asset delegate
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
+    location = { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) };
+    Object.defineProperty(txClient, 'location', { value: location });
     // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
     prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
       asset,
       assetModel: prismaAssetModel,
+      location,
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
       // promises (findMany + count). Support both forms.
       $transaction: jest.fn(
@@ -354,7 +360,7 @@ describe('AssetsService', () => {
     await service.create(dto);
 
     expect(txAssetModel.findFirst).toHaveBeenCalledWith({
-      where: { id: 'm1' },
+      where: { id: 'm1', deletedAt: null },
       select: { specs: true },
     });
     expect(tx.create).toHaveBeenCalledWith({
@@ -597,7 +603,7 @@ describe('AssetsService', () => {
       // one upfront non-tx model lookup for the name default (not N).
       expect(prismaAssetModel.findFirst).toHaveBeenCalledTimes(1);
       expect(prismaAssetModel.findFirst).toHaveBeenCalledWith({
-        where: { id: 'm1' },
+        where: { id: 'm1', deletedAt: null },
         select: { name: true },
       });
       // ONE create transaction per unit — each its own independent tag-counter commit (ADR-0063), never
@@ -1676,6 +1682,7 @@ describe('AssetsService', () => {
   it('emits MODEL_CHANGED with {from,to} when only the model changes', async () => {
     asset.findFirst.mockResolvedValue(beforeRow({ modelId: 'm1' }));
     tx.update.mockResolvedValue(beforeRow({ modelId: 'm2' }));
+    txAssetModel.findFirst.mockResolvedValue({ id: 'm2' });
 
     await service.update('a1', { modelId: 'm2' });
 
@@ -2056,5 +2063,67 @@ describe('AssetsService', () => {
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
+  });
+
+  describe('archived references are refused on write (#1476 review)', () => {
+    it('create into an archived location is a 400 — nothing written', async () => {
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create({
+          name: 'SRV-02',
+          status: 'IN_STORAGE',
+          locationId: 'l9',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(location.findFirst).toHaveBeenCalledWith({
+        where: { id: 'l9', deletedAt: null },
+        select: { id: true },
+      });
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('bulk receive into an archived location is ONE 400 up front, not N unit failures', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'Dock' });
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.receiveBatch({
+          modelId: 'm1',
+          quantity: 3,
+          status: 'IN_STORAGE',
+          locationId: 'l9',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('moving an asset to an archived location or model is a 400; keeping a legacy one is not checked', async () => {
+      asset.findFirst.mockResolvedValue(
+        beforeRow({ locationId: 'l1', modelId: 'm1' }),
+      );
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.update('a1', { locationId: 'l9' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      txAssetModel.findFirst.mockResolvedValue(null);
+      await expect(
+        service.update('a1', { modelId: 'm9' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.update).not.toHaveBeenCalled();
+
+      // The same (now archived) location and model re-sent by an edit form: no check, the edit goes through.
+      location.findFirst.mockClear();
+      txAssetModel.findFirst.mockClear();
+      tx.update.mockResolvedValue(
+        beforeRow({ locationId: 'l1', modelId: 'm1' }),
+      );
+      await service.update('a1', {
+        locationId: 'l1',
+        modelId: 'm1',
+        name: 'renamed',
+      });
+      expect(location.findFirst).not.toHaveBeenCalled();
+      expect(txAssetModel.findFirst).not.toHaveBeenCalled();
+      expect(tx.update).toHaveBeenCalledTimes(1);
+    });
   });
 });

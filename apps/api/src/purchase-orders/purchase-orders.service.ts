@@ -38,6 +38,11 @@ import {
   type LineInput,
 } from './purchase-order-derived';
 import { recordPurchaseOrderEvent } from './purchase-order-events';
+import {
+  countReceived,
+  receivedByLine,
+  receivedUnitsSql,
+} from './purchase-order-line-receipt';
 
 /** Optional filters for listing purchases. */
 export interface PurchaseOrderFilters {
@@ -110,6 +115,7 @@ const LINE_FIELDS = [
   'manufacturerText',
   'modelText',
   'assetModelId',
+  'consumableId',
   'quantity',
   'unitPrice',
   'cancelledQuantity',
@@ -215,9 +221,9 @@ export class PurchaseOrdersService {
       }),
       this.prisma.purchaseOrder.count({ where, ...escapeHatch }),
     ]);
-    const received = await this.receivedByLine(
+    const received = await receivedByLine(
       this.prisma,
-      rows.flatMap((row) => row.lines.map((line) => line.id)),
+      rows.flatMap((row) => row.lines),
     );
     const items = rows.map((row) => {
       const { lines, ...item } = this.toDetail(row, received);
@@ -256,8 +262,9 @@ export class PurchaseOrdersService {
 
   /**
    * The purchases whose DERIVED receipt matches `filter`. Receipt is never stored, so this reads every live
-   * countable line with its live linked-asset count in ONE query and derives the state with the same
-   * functions the detail read uses — the list filter and the shown state can never disagree.
+   * countable line with its received count (live linked assets, or the units of its `IN` movements for a
+   * `CONSUMABLE` line) in ONE query and derives the state with the same functions the detail read uses — the
+   * list filter and the shown state can never disagree.
    */
   private async purchaseIdsWithReceipt(
     filter: PurchaseOrderReceiptFilter,
@@ -272,8 +279,7 @@ export class PurchaseOrdersService {
       }[]
     >`
       SELECT l."purchaseOrderId", l."kind", l."quantity", l."cancelledQuantity",
-             (SELECT COUNT(*)::int FROM "assets" a
-               WHERE a."purchaseOrderLineId" = l."id" AND a."deletedAt" IS NULL) AS "received"
+             ${receivedUnitsSql()}::int AS "received"
         FROM "purchase_order_lines" l
        WHERE l."deletedAt" IS NULL
          AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})`;
@@ -313,31 +319,8 @@ export class PurchaseOrdersService {
     if (!row) {
       throw new NotFoundException(`Purchase ${id} not found`);
     }
-    const received = await this.receivedByLine(
-      client,
-      row.lines.map((line) => line.id),
-    );
+    const received = await receivedByLine(client, row.lines);
     return this.toDetail(row, received);
-  }
-
-  /** Live linked assets per line, in one grouped query (no N+1). Absent line → 0. */
-  private async receivedByLine(
-    client: Tx | PrismaService,
-    lineIds: string[],
-  ): Promise<Map<string, number>> {
-    if (lineIds.length === 0) return new Map();
-    const groups = await client.asset.groupBy({
-      by: ['purchaseOrderLineId'],
-      // Explicit `deletedAt: null`: a received unit is a LIVE asset, whatever filter the client carries.
-      where: { purchaseOrderLineId: { in: lineIds }, deletedAt: null },
-      _count: { _all: true },
-    });
-    return new Map(
-      groups.map((group) => [
-        group.purchaseOrderLineId as string,
-        group._count._all,
-      ]),
-    );
   }
 
   /** Build the wire detail: lines with their derived values, the receipt and the totals. */
@@ -405,6 +388,10 @@ export class PurchaseOrdersService {
       await this.assertModelsLive(
         tx,
         lines.map((line) => line.assetModelId),
+      );
+      await this.assertConsumablesLive(
+        tx,
+        lines.map((line) => line.consumableId),
       );
       const created = await tx.purchaseOrder.create({
         data: {
@@ -513,6 +500,7 @@ export class PurchaseOrdersService {
     return this.prisma.$transaction(async (tx) => {
       await this.assertLive(tx, purchaseOrderId);
       await this.assertModelsLive(tx, [data.assetModelId]);
+      await this.assertConsumablesLive(tx, [data.consumableId]);
       let position = data.position;
       if (position === undefined) {
         const last = await tx.purchaseOrderLine.aggregate({
@@ -537,7 +525,10 @@ export class PurchaseOrdersService {
   /**
    * Update a line. Values are recorded before and after in `LINE_UPDATED` — "unit price changed from X to
    * Y" is what the log is for. The cancelled count may not exceed the quantity; the kind of a line that
-   * already has assets linked cannot change (its received units would silently stop counting).
+   * already received units (linked assets, or stock moved in) cannot change — they would silently stop
+   * counting. A consumable is named on a `CONSUMABLE` line only, and changing a line away from `CONSUMABLE`
+   * clears it. The consumable of a line that already received stock may still change ("a different item
+   * came"): each movement keeps its own consumable, and the line keeps counting every unit it received.
    */
   async updateLine(
     purchaseOrderId: string,
@@ -556,6 +547,19 @@ export class PurchaseOrdersService {
         { lock: data.kind !== undefined },
       );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
+      const kind = data.kind ?? before.kind;
+      if (data.consumableId && kind !== 'CONSUMABLE') {
+        throw new BadRequestException(
+          'consumableId is only accepted on a CONSUMABLE line',
+        );
+      }
+      await this.assertConsumablesLive(tx, [data.consumableId ?? undefined]);
+      const write: UpdatePurchaseOrderLine =
+        kind !== 'CONSUMABLE' &&
+        before.consumableId != null &&
+        data.consumableId === undefined
+          ? { ...data, consumableId: null }
+          : data;
       const quantity = data.quantity ?? before.quantity;
       const cancelled = data.cancelledQuantity ?? before.cancelledQuantity;
       if (cancelled > quantity) {
@@ -572,13 +576,13 @@ export class PurchaseOrdersService {
             : Number(before.unitPrice),
       );
       if (data.kind !== undefined && data.kind !== before.kind) {
-        await this.assertNothingLinked(tx, lineId, 'change the kind of');
+        await this.assertNothingReceived(tx, before, 'change the kind of');
       }
       await tx.purchaseOrderLine.update({
         where: { id: lineId },
-        data: purchaseOrderLineMoneyToDb(data),
+        data: purchaseOrderLineMoneyToDb(write),
       });
-      const changes = diff(before, data, LINE_FIELDS);
+      const changes = diff(before, write, LINE_FIELDS);
       if (Object.keys(changes).length > 0) {
         await recordPurchaseOrderEvent(
           tx,
@@ -596,10 +600,11 @@ export class PurchaseOrdersService {
   }
 
   /**
-   * Remove a line (soft delete), only while no live asset is linked to it (ADR-0099 §9), and never the
-   * last thing that identifies the purchase. The purchase row is locked first (`SELECT … FOR UPDATE`, the
-   * ADR-0098 pattern), so two concurrent removals — or a removal racing a header update that clears the
-   * supplier and reference — serialize and the second one sees the first.
+   * Remove a line (soft delete), only while nothing was received on it — no live linked asset, no stock
+   * moved in (ADR-0099 §9) — and never the last thing that identifies the purchase. The purchase row is
+   * locked first (`SELECT … FOR UPDATE`, the ADR-0098 pattern), so two concurrent removals — or a removal
+   * racing a header update that clears the supplier and reference, or a receipt — serialize and the second
+   * one sees the first.
    */
   async removeLine(
     purchaseOrderId: string,
@@ -614,7 +619,7 @@ export class PurchaseOrdersService {
         lineId,
         { lock: true },
       );
-      await this.assertNothingLinked(tx, lineId, 'remove');
+      await this.assertNothingReceived(tx, line, 'remove');
       if (purchase.supplierId === null && purchase.reference === null) {
         const others = await tx.purchaseOrderLine.count({
           where: { purchaseOrderId, deletedAt: null, id: { not: lineId } },
@@ -640,7 +645,7 @@ export class PurchaseOrdersService {
           description: line.description,
         },
       );
-      // Nothing is linked (checked above), so the line reads as received 0 — the full line shape.
+      // Nothing was received (checked above), so the line reads as received 0 — the full line shape.
       return { ...this.lineToWire(line, deriveLine(line, 0)), deletedAt: now };
     });
   }
@@ -648,8 +653,12 @@ export class PurchaseOrdersService {
   /**
    * Cancel units that will not arrive ("cancel remaining units", ADR-0099 §3): adds `quantity` (default every
    * pending unit) to the line's cancelled count and writes `UNITS_CANCELLED` with the optional reason. The
-   * line row is locked first, so two concurrent cancels cannot both take the same pending units. Refuses a
-   * line with nothing pending (409) and a quantity beyond the pending count (400).
+   * line row is locked, so two concurrent cancels cannot both take the same pending units. Lock order is
+   * purchase, then line, like every other purchase write: the purchase is taken `FOR KEY SHARE` first (what
+   * the event insert's foreign key would take anyway, only later). Locking the line first and then reaching
+   * the purchase through that FK deadlocked against a line removal or kind change, which hold the purchase
+   * `FOR UPDATE` and then write the line. Refuses a line with nothing pending (409) and a quantity beyond the
+   * pending count (400).
    */
   async cancelRemaining(
     purchaseOrderId: string,
@@ -659,13 +668,14 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
       await this.assertLineLive(tx, purchaseOrderId, lineId);
       await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
       // Re-read under the lock: the cancelled count may have moved since the check above.
       const line = await tx.purchaseOrderLine.findFirstOrThrow({
         where: { id: lineId },
       });
-      const received = await this.receivedByLine(tx, [lineId]);
+      const received = await receivedByLine(tx, [line]);
       const { pendingQuantity } = deriveLine(line, received.get(lineId) ?? 0);
       if (pendingQuantity === 0) {
         throw new ConflictException('This line has no pending units to cancel');
@@ -712,7 +722,7 @@ export class PurchaseOrdersService {
     const line = await tx.purchaseOrderLine.findFirstOrThrow({
       where: { id: lineId },
     });
-    const received = await this.receivedByLine(tx, [lineId]);
+    const received = await receivedByLine(tx, [line]);
     return this.lineToWire(line, deriveLine(line, received.get(lineId) ?? 0));
   }
 
@@ -770,16 +780,23 @@ export class PurchaseOrdersService {
     }
   }
 
-  /** 409 when a live asset is linked to the line. */
-  private async assertNothingLinked(tx: Tx, lineId: string, verb: string) {
-    const linked = await tx.asset.count({
-      where: { purchaseOrderLineId: lineId, deletedAt: null },
-    });
-    if (linked > 0) {
-      throw new ConflictException(
-        `Cannot ${verb} a line with ${linked} linked asset(s); unlink them first`,
-      );
-    }
+  /**
+   * 409 when the line already received units — live linked assets on an `ASSET` line, stock moved in on a
+   * `CONSUMABLE` one (a line only ever takes the units of its kind, and the kind is fixed once it has any).
+   * Asset links can be undone (unlink); a stock receipt cannot — the ledger is append-only.
+   */
+  private async assertNothingReceived(
+    tx: Tx,
+    line: { id: string; kind: string },
+    verb: string,
+  ) {
+    const received = await countReceived(tx, line);
+    if (received === 0) return;
+    throw new ConflictException(
+      line.kind === 'CONSUMABLE'
+        ? `Cannot ${verb} a line that already received ${received} unit(s) into stock; received stock stays recorded`
+        : `Cannot ${verb} a line with ${received} linked asset(s); unlink them first`,
+    );
   }
 
   /** The supplier and delivery location a write names must be live (a soft-deleted one passes the FK). */
@@ -806,6 +823,25 @@ export class PurchaseOrdersService {
           `Location ${data.deliveryLocationId} not found`,
         );
       }
+    }
+  }
+
+  /**
+   * 400 unless every consumable named is live. `Consumable` is not in the ADR-0032 auto-filtered set, so the
+   * `deletedAt: null` is explicit: an archived consumable is refused on write (it can be restored first).
+   */
+  private async assertConsumablesLive(tx: Tx, ids: (string | undefined)[]) {
+    const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+    if (wanted.length === 0) return;
+    const found = await tx.consumable.findMany({
+      where: { id: { in: wanted }, deletedAt: null },
+      select: { id: true },
+    });
+    const missing = wanted.filter((id) => !found.some((c) => c.id === id));
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Consumable ${missing[0]} not found (missing or archived)`,
+      );
     }
   }
 

@@ -34,6 +34,8 @@ export const purchasesToolset: AiToolset = {
         'findPendingLines',
         'cancelRemaining',
         'receive',
+        // Receiving a CONSUMABLE line into stock (#1476): moves stock, so it follows the same Phase 3 rule.
+        'receiveStock',
         'linkPreview',
         'linkAssets',
         'unlinkAssets',
@@ -41,7 +43,11 @@ export const purchasesToolset: AiToolset = {
       PHASE_3,
     ),
     unexposed(AssetPurchaseController, ['findOne'], PHASE_3),
-    unexposed(PurchaseOrderAttachmentsController, ['list', 'remove'], PHASE_3),
+    unexposed(
+      PurchaseOrderAttachmentsController,
+      ['list', 'remove', 'updateLabel'],
+      PHASE_3,
+    ),
     unexposed(
       PurchaseOrderAttachmentsController,
       ['upload', 'content'],

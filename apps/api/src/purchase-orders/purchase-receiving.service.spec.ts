@@ -13,11 +13,19 @@ jest.mock('../../generated/prisma/client', () => ({
 }));
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ActorService } from '../common/actor.service';
+import { ConsumablesService } from '../consumables/consumables.service';
 import type { Principal } from '../auth/principal';
 import { PurchaseOrdersService } from './purchase-orders.service';
-import { PurchaseReceivingService } from './purchase-receiving.service';
+import {
+  PurchaseReceivingService,
+  STOCK_RECEIPT_REASON,
+} from './purchase-receiving.service';
 
 const PO = 'clpo00000000000000000001';
 const OTHER_PO = 'clpo00000000000000000002';
@@ -31,6 +39,7 @@ const A1 = 'classet00000000000000001';
 const A2 = 'classet00000000000000002';
 const A3 = 'classet00000000000000003';
 const A4 = 'classet00000000000000004';
+const CONSUMABLE = 'clconsumable000000000001';
 
 const member = {
   kind: 'human',
@@ -119,6 +128,11 @@ function makeDb() {
     },
     location: { findFirst: jest.fn() },
     attachment: { findMany: jest.fn().mockResolvedValue([]) },
+    consumable: { findFirst: jest.fn() },
+    consumableMovement: {
+      groupBy: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { quantity: null } }),
+    },
   };
   const tx = {
     ...reads,
@@ -136,6 +150,16 @@ function makeDb() {
     },
     purchaseOrderEvent: { create: jest.fn().mockResolvedValue({}) },
     assetHistory: { create: jest.fn().mockResolvedValue({}) },
+    consumable: {
+      ...reads.consumable,
+      update: jest.fn().mockResolvedValue({}),
+    },
+    consumableMovement: {
+      ...reads.consumableMovement,
+      create: jest.fn(({ data }: { data: Row }) =>
+        Promise.resolve({ id: 77, createdAt: new Date(), ...data }),
+      ),
+    },
     $queryRaw: jest.fn().mockResolvedValue([]),
   };
   const prisma = {
@@ -164,15 +188,29 @@ function setup() {
     ),
   };
   const assets = { receiveBatch: jest.fn() };
+  // The REAL consumables service over the same fake database: a stock receipt goes through its movement path.
+  const consumables = new ConsumablesService(
+    db.prisma as never,
+    actor,
+    { emit: jest.fn() } as never,
+    history as never,
+    { resolve: jest.fn() } as never,
+  );
   const service = new PurchaseReceivingService(
     db.prisma as never,
     actor,
     history as never,
     assets as never,
     purchases,
+    consumables,
   );
-  return { ...db, service, history, assets };
+  return { ...db, service, history, assets, consumables };
 }
+
+/** The grouped count of live assets linked to the line, as `receivedByLine` reads it. */
+const linked = (count: number) => [
+  { purchaseOrderLineId: LINE, _count: { _all: count } },
+];
 
 /** The `data` of every row written through a mock, in order. */
 const written = (mock: jest.Mock): Row[] =>
@@ -193,7 +231,7 @@ describe('link preview — current vs purchase value per field (ux-proposal §3.
         purchaseOrderLine: { purchaseOrderId: OTHER_PO },
       }),
     ]);
-    reads.asset.count.mockResolvedValue(3);
+    reads.asset.groupBy.mockResolvedValue(linked(3));
 
     const preview = await service.linkPreview(PO, LINE, [A1, A2, A3]);
 
@@ -465,7 +503,7 @@ describe('link assets', () => {
   it('over-receipt is allowed and flagged', async () => {
     const { service, reads, tx } = setup();
     reads.asset.findMany.mockResolvedValue([assetRow(A1)]);
-    reads.asset.count.mockResolvedValue(5); // quantity 4
+    reads.asset.groupBy.mockResolvedValue(linked(5)); // quantity 4
     const result = await service.linkAssets(
       PO,
       LINE,
@@ -552,7 +590,7 @@ describe('receive from a line', () => {
   it('prefills from the purchase and receives the pending units against the line', async () => {
     const { service, assets, reads } = setup();
     assets.receiveBatch.mockResolvedValue(ok);
-    reads.asset.count.mockResolvedValue(1); // 3 of 4 pending
+    reads.asset.groupBy.mockResolvedValue(linked(1)); // 3 of 4 pending
     reads.location.findFirst.mockResolvedValue({ id: LOCATION });
 
     await service.receiveFromLine(PO, LINE, {}, member);
@@ -643,7 +681,7 @@ describe('receive from a line', () => {
 
   it('nothing pending and no quantity is a 400; an explicit quantity over-receives and is flagged', async () => {
     const { service, assets, reads } = setup();
-    reads.asset.count.mockResolvedValue(4);
+    reads.asset.groupBy.mockResolvedValue(linked(4));
     await expect(service.receiveFromLine(PO, LINE, {}, member)).rejects.toThrow(
       /Nothing is pending/,
     );
@@ -718,7 +756,9 @@ describe('pending units', () => {
       '"',
     );
     expect(sql).toContain(`NOT IN ('DRAFT', 'CANCELLED')`);
-    expect(sql).toContain('l."quantity" - l."cancelledQuantity" - (');
+    expect(sql).toContain('l."quantity" - l."cancelledQuantity" - ');
+    // The received count is the shared fragment: live linked assets, or a CONSUMABLE line's IN units.
+    expect(sql).toContain('"consumable_movements"');
     expect(sql).toContain('a."deletedAt" IS NULL');
     expect(sql).toContain('po."deletedAt" IS NULL');
     expect(sql).toContain('po."supplierId" = ');
@@ -753,7 +793,7 @@ describe("an asset's provenance", () => {
       ...lineRow(),
       purchaseOrder: { ...purchaseRow(), supplier },
     });
-    reads.asset.count.mockResolvedValue(2);
+    reads.asset.groupBy.mockResolvedValue(linked(2));
     reads.attachment.findMany.mockResolvedValue([{ id: 'clatt1' }]);
 
     const result = await service.findAssetProvenance(A1);
@@ -764,6 +804,8 @@ describe("an asset's provenance", () => {
       reference: 'OC-4512',
       invoiceNumbers: 'A-0003-12345',
       supplier,
+      // When the purchase was recorded (#1476): the title fallback's date.
+      createdAt: new Date('2026-03-03T00:00:00Z'),
     });
     expect(result.documents).toEqual([{ id: 'clatt1' }]);
     expect(reads.attachment.findMany).toHaveBeenCalledWith({
@@ -792,5 +834,210 @@ describe("an asset's provenance", () => {
     );
     expect(result.documents).toEqual([]);
     expect(reads.attachment.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('receive into stock — a CONSUMABLE line (#1476)', () => {
+  const consumableLine = (over: Row = {}) =>
+    lineRow({
+      kind: 'CONSUMABLE',
+      description: 'Toner HP 58A',
+      assetModelId: null,
+      consumableId: CONSUMABLE,
+      quantity: 10,
+      unitPrice: BigInt(4500000),
+      warrantyMonths: null,
+      ...over,
+    });
+
+  function stockSetup(over: Row = {}) {
+    const ctx = setup();
+    ctx.reads.purchaseOrderLine.findFirst.mockResolvedValue(
+      consumableLine(over),
+    );
+    ctx.reads.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(
+      consumableLine(over),
+    );
+    ctx.reads.consumable.findFirst.mockResolvedValue({
+      id: CONSUMABLE,
+      currentStock: 2,
+      minStock: null,
+      name: 'Toner HP 58A',
+    });
+    return ctx;
+  }
+
+  it('posts exactly ONE IN movement through the consumables path, linked to the line, in one transaction with STOCK_RECEIVED', async () => {
+    const { service, tx, prisma } = stockSetup();
+
+    const result = await service.receiveStock(
+      PO,
+      LINE,
+      { quantity: 4, note: 'box 1 of 3' },
+      member,
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(written(tx.consumableMovement.create)).toEqual([
+      {
+        consumableId: CONSUMABLE,
+        type: 'IN',
+        quantity: 4,
+        reason: STOCK_RECEIPT_REASON,
+        notes: 'box 1 of 3',
+        performedById: USER_ID,
+        purchaseOrderLineId: LINE,
+      },
+    ]);
+    // The cache moves through the movement path's atomic increment — never a direct write of a value.
+    expect(tx.consumable.update).toHaveBeenCalledWith({
+      where: { id: CONSUMABLE },
+      data: { currentStock: { increment: 4 } },
+    });
+    expect(written(tx.purchaseOrderEvent.create)).toEqual([
+      expect.objectContaining({
+        purchaseOrderId: PO,
+        eventType: 'STOCK_RECEIVED',
+        performedById: USER_ID,
+        payload: {
+          lineId: LINE,
+          consumableId: CONSUMABLE,
+          movementId: 77,
+          quantity: 4,
+          overReceived: false,
+        },
+      }),
+    ]);
+    expect(result.movement).toMatchObject({
+      id: 77,
+      purchaseOrderLineId: LINE,
+    });
+    expect(result.overReceived).toBe(false);
+  });
+
+  it('the reason names no supplier or reference (D-A: the ledger is read without purchaseOrder:read)', () => {
+    expect(STOCK_RECEIPT_REASON).not.toMatch(/OC-4512|Acme/);
+    expect(STOCK_RECEIPT_REASON).toBe('Received from a purchase');
+  });
+
+  it('locks the purchase (KEY SHARE) inside the movement transaction, before the stock moves', async () => {
+    const { service, tx } = stockSetup();
+    await service.receiveStock(PO, LINE, { quantity: 1 }, member);
+    const [strings, ...values] = tx.$queryRaw.mock.calls[0] as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    expect(strings.join('?')).toContain('FOR KEY SHARE');
+    expect(values).toEqual([PO]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.consumable.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('over-receipt is allowed and flagged: 8 already in + 4 on a line of 10', async () => {
+    const { service, tx, reads } = stockSetup();
+    reads.consumableMovement.groupBy.mockResolvedValue([
+      { purchaseOrderLineId: LINE, _sum: { quantity: 12 } },
+    ]);
+    const result = await service.receiveStock(
+      PO,
+      LINE,
+      { quantity: 4 },
+      member,
+    );
+    expect(result.overReceived).toBe(true);
+    expect(result.line).toMatchObject({
+      receivedQuantity: 12,
+      pendingQuantity: 0,
+      receiptState: 'OVER',
+    });
+    expect(written(tx.purchaseOrderEvent.create)[0]).toMatchObject({
+      payload: { overReceived: true },
+    });
+  });
+
+  it('400 for an ASSET or OTHER line, a line with no consumable, and an archived consumable — nothing moves', async () => {
+    for (const over of [
+      { kind: 'ASSET', consumableId: null },
+      { kind: 'OTHER', consumableId: null },
+      { consumableId: null },
+    ]) {
+      const { service, tx } = stockSetup(over);
+      await expect(
+        service.receiveStock(PO, LINE, { quantity: 1 }, member),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+    }
+    const { service, tx, reads } = stockSetup();
+    reads.consumable.findFirst.mockResolvedValue(null);
+    await expect(
+      service.receiveStock(PO, LINE, { quantity: 1 }, member),
+    ).rejects.toThrow(/archived/);
+    expect(reads.consumable.findFirst).toHaveBeenCalledWith({
+      where: { id: CONSUMABLE, deletedAt: null },
+      select: { id: true },
+    });
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it('404 on an archived purchase', async () => {
+    const { service, reads, tx } = stockSetup();
+    reads.purchaseOrder.findFirst.mockResolvedValue(null);
+    await expect(
+      service.receiveStock(PO, LINE, { quantity: 1 }, member),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['its consumable', { consumableId: 'clconsumable000000000002' }],
+    ['its kind', { kind: 'OTHER' }],
+  ])(
+    '409 when the line changed under the lock (%s) — the movement rolls back unwritten',
+    async (_what, changed) => {
+      const { service, tx, reads } = stockSetup();
+      reads.purchaseOrderLine.findFirst
+        .mockResolvedValueOnce(consumableLine())
+        .mockResolvedValueOnce(consumableLine(changed));
+      await expect(
+        service.receiveStock(PO, LINE, { quantity: 1 }, member),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.consumable.update).not.toHaveBeenCalled();
+      expect(tx.consumableMovement.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('the pending-units list includes CONSUMABLE lines, counted from their IN movements', async () => {
+    const { service, prisma, reads } = stockSetup();
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ id: LINE }])
+      .mockResolvedValueOnce([{ total: 1 }]);
+    reads.purchaseOrderLine.findMany.mockResolvedValue([
+      {
+        ...consumableLine(),
+        purchaseOrder: { id: PO, reference: 'OC-4512', supplier: null },
+      },
+    ]);
+    reads.consumableMovement.groupBy.mockResolvedValue([
+      { purchaseOrderLineId: LINE, _sum: { quantity: 4 } },
+    ]);
+    const page = await service.findPendingLines({}, {
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    } as never);
+    expect(page.items[0]).toMatchObject({
+      kind: 'CONSUMABLE',
+      consumableId: CONSUMABLE,
+      receivedQuantity: 4,
+      pendingQuantity: 6,
+      receiptState: 'PARTIAL',
+    });
+    const sql = JSON.stringify(prisma.$queryRaw.mock.calls[0]).replace(
+      /\\"/g,
+      '"',
+    );
+    expect(sql).toContain('consumable_movements');
+    expect(sql).toContain('CONSUMABLE');
   });
 });

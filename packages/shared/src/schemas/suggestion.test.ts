@@ -5,6 +5,7 @@ describe("suggestion contract (ADR-0099 §7)", () => {
   test("only whitelisted fields are accepted", () => {
     expect(SuggestionFieldSchema.safeParse("currency").success).toBe(true);
     expect(SuggestionFieldSchema.safeParse("passwordHash").success).toBe(false);
+    expect(SuggestionFieldSchema.safeParse("documentLabel").success).toBe(true);
   });
 
   test("limit defaults to 10 and above the maximum is refused, never clamped", () => {

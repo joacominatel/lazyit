@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AssetSchema, AssetStatusSchema } from "./asset";
 import { AttachmentSchema } from "./attachment";
 import { MAX_BATCH_IDS } from "./batch";
+import { ConsumableMovementSchema } from "./consumable-movement";
 import { pageSchema } from "./pagination";
 import { int4, money, optionalText } from "./primitives";
 import {
@@ -226,6 +227,26 @@ export const ReceiveFromLineResultSchema = z.object({
   line: PurchaseOrderLineSchema,
 });
 
+// ── Receive into stock (a CONSUMABLE line, #1476) ─────────────────────────────────────────────────────
+
+/**
+ * `POST /purchase-orders/:id/lines/:lineId/receive-stock` — receive units of a `CONSUMABLE` line into its
+ * consumable's stock. Posts ONE ordinary `IN` movement through the consumables ledger (ADR-0034: movements
+ * stay the only way stock changes) that carries the line id. `note` becomes the movement's notes. Receiving
+ * past the pending count is allowed and flagged (`overReceived`, ADR-0099 §4).
+ */
+export const ReceiveStockFromLineSchema = z.strictObject({
+  quantity: int4({ min: 1, example: 10 }),
+  note: optionalText(2000),
+});
+
+/** The receive-into-stock result: the movement posted, the over-receipt flag and the line afterwards. */
+export const ReceiveStockFromLineResultSchema = z.object({
+  movement: ConsumableMovementSchema,
+  overReceived: z.boolean(),
+  line: PurchaseOrderLineSchema,
+});
+
 // ── Cancel remaining units ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -292,6 +313,8 @@ export const AssetPurchaseProvenanceSchema = z.object({
     company: z.string().nullable(),
     invoiceNumbers: z.string().nullable(),
     invoiceDate: z.iso.datetime().nullable(),
+    // When the purchase was recorded (#1476) — the date of the title fallback when there is no order date.
+    createdAt: z.iso.datetime(),
     deletedAt: z.iso.datetime().nullable(),
     supplier: ProvenanceSupplierSchema.nullable(),
   }),
@@ -314,6 +337,8 @@ export type UnlinkAssetsFromLine = z.infer<typeof UnlinkAssetsFromLineSchema>;
 export type UnlinkAssetsResult = z.infer<typeof UnlinkAssetsResultSchema>;
 export type ReceiveFromLine = z.infer<typeof ReceiveFromLineSchema>;
 export type ReceiveFromLineResult = z.infer<typeof ReceiveFromLineResultSchema>;
+export type ReceiveStockFromLine = z.infer<typeof ReceiveStockFromLineSchema>;
+export type ReceiveStockFromLineResult = z.infer<typeof ReceiveStockFromLineResultSchema>;
 export type CancelRemainingUnits = z.infer<typeof CancelRemainingUnitsSchema>;
 export type PendingPurchaseLine = z.infer<typeof PendingPurchaseLineSchema>;
 export type PendingPurchaseLinePage = z.infer<typeof PendingPurchaseLinePageSchema>;

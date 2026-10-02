@@ -427,6 +427,7 @@ describe('AttachmentsService (ADR-0082)', () => {
           payload: {
             attachmentId: 'clatt0000000000000000000',
             originalName: 'Factura A 0003.pdf',
+            label: null,
           },
         }) as object,
       });
@@ -491,6 +492,7 @@ describe('AttachmentsService (ADR-0082)', () => {
           payload: {
             attachmentId: 'clatt0000000000000000000',
             originalName: 'order.pdf',
+            label: null,
           },
         }) as object,
       });
@@ -508,6 +510,119 @@ describe('AttachmentsService (ADR-0082)', () => {
       const file = await stageUpload(PDF_BYTES, 'warranty.pdf');
       await service.upload('ASSET', ASSET_ID, file, HUMAN);
       expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('document type label (ADR-0099 §10, #1476)', () => {
+    const ATT = 'clatt0000000000000000000';
+
+    it('upload: stores the trimmed label on the row and in DOCUMENT_ADDED; a blank one is no label', async () => {
+      const file = await stageUpload(PDF_BYTES, 'remito.pdf');
+      const row = await service.upload(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        file,
+        HUMAN,
+        '  Delivery note ',
+      );
+      expect(row).toMatchObject({ label: 'Delivery note' });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'DOCUMENT_ADDED',
+          payload: {
+            attachmentId: ATT,
+            originalName: 'remito.pdf',
+            label: 'Delivery note',
+          },
+        }) as object,
+      });
+
+      const blank = await stageUpload(PDF_BYTES, 'warranty.pdf');
+      await service.upload('ASSET', ASSET_ID, blank, HUMAN, '   ');
+      const [, second] = prisma.attachment.create.mock.calls as [
+        { data: Record<string, unknown> },
+      ][];
+      expect(second[0].data).not.toHaveProperty('label');
+    });
+
+    it('upload: an over-long label is a 400 — no row, no blob kept, tmp cleared', async () => {
+      const file = await stageUpload(PDF_BYTES, 'invoice.pdf');
+      await expect(
+        service.upload('ASSET', ASSET_ID, file, HUMAN, 'x'.repeat(101)),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(await readdir(join(root, 'tmp'))).toEqual([]);
+    });
+
+    it('edit on a purchase document: sets the label and logs DOCUMENT_UPDATED from → to, in one transaction', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: ATT,
+        originalName: 'scan.pdf',
+        label: 'Quote',
+      });
+      await service.updateLabel(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        ATT,
+        'Invoice',
+        HUMAN,
+      );
+      expect(prisma.attachment.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: ATT,
+          entityType: 'PURCHASE_ORDER',
+          entityId: PURCHASE_ID,
+        },
+      });
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: ATT },
+        data: { label: 'Invoice' },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          purchaseOrderId: PURCHASE_ID,
+          eventType: 'DOCUMENT_UPDATED',
+          performedById: UPLOADER,
+          payload: {
+            attachmentId: ATT,
+            originalName: 'scan.pdf',
+            label: { from: 'Quote', to: 'Invoice' },
+          },
+        }) as object,
+      });
+    });
+
+    it('edit on an asset document clears with null and writes no purchase event; an unchanged label writes nothing', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: ATT,
+        originalName: 'warranty.pdf',
+        label: 'Warranty',
+      });
+      await service.updateLabel('ASSET', ASSET_ID, ATT, null, HUMAN);
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: ATT },
+        data: { label: null },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+
+      prisma.attachment.update.mockClear();
+      await service.updateLabel('ASSET', ASSET_ID, ATT, 'Warranty', HUMAN);
+      expect(prisma.attachment.update).not.toHaveBeenCalled();
+    });
+
+    it('edit: 404 for a document of another parent or an archived purchase; 403 for a service account', async () => {
+      prisma.attachment.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateLabel('ASSET', ASSET_ID, ATT, 'Invoice', HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateLabel('PURCHASE_ORDER', PURCHASE_ID, ATT, 'x', HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.updateLabel('ASSET', ASSET_ID, ATT, 'Invoice', SA),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(prisma.attachment.update).not.toHaveBeenCalled();
     });
   });
 });

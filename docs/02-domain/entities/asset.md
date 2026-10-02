@@ -107,7 +107,8 @@ concrete instance of a generic [[asset-model]].
 > a principal holding `purchaseOrder:read`. The asset's own purchase fields (cost, currency, dates) stay
 > visible under `asset:read`, as today. Built as `GET /assets/:id/purchase` (#1473, `asset:read` **and**
 > `purchaseOrder:read` — a VIEWER gets a 403): the line with its received / pending counts, the purchase
-> header (reference, status, currency label, dates, company, invoice numbers, `deletedAt`) with the
+> header (reference, status, currency label, dates, company, invoice numbers, `createdAt` — since #1476,
+> the date of the title fallback — and `deletedAt`) with the
 > supplier's name and support / RMA contact, and the purchase's documents (listed while the purchase is
 > live; downloaded through `/purchase-orders/:id/attachments/:attachmentId/content`). `404` when the asset is
 > missing or not linked. An archived purchase is still the asset's provenance.
@@ -238,6 +239,14 @@ three stored fields are echoed on create/update.
   cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
   field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
   batch create uses them for its duplicate check.
+  **Purchase filters** (#1476, list only — the CSV export does not take them): `purchaseOrderLineId` (the
+  assets linked to that line), `purchaseOrderId` (linked to any line of that purchase) and
+  `purchaseLinked` (`true` = linked to some purchase line, `false` = to none), AND-combined; an id that is
+  not a cuid is a `400`. They reveal provenance, so any of them needs **`purchaseOrder:read`** on top of the
+  route's `asset:read` (`403` otherwise — checked in the service, since a decorator cannot see a query
+  param; ADR-0099 §8, D-A). A list without them is never checked. Defense in depth: the list query applies
+  only purchase filters minted by `AssetsService.authorizePurchaseFilters`, so no other caller of the query
+  (the CSV export included) can apply ones it did not authorize (`403`).
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — feeds the list's company filter ([[0076-asset-company-grouping-field]]). The form's
   smart-entry company field reads `GET /suggestions/company` instead (use counts and last use, merged with
@@ -250,7 +259,11 @@ three stored fields are echoed on create/update.
   (`AssetHistory[]`, newest first; cursor on the autoincrement id, `limit` default 50 / max 100).
   `404` if missing/soft-deleted. See [[asset-history]].
 - `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — lean `Asset` shape; an invalid
-  `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
+  `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). So does an
+  **archived** one (#1476): a soft-deleted model or location still passes the FK, so `POST`, bulk receive
+  (one upfront `400`, also for a receive from a purchase line) and a `PATCH` that **changes** the model or
+  location refuse it. Write-only: reads, and a `PATCH` that re-sends the asset's current (legacy archived)
+  model or location, are not checked. Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,

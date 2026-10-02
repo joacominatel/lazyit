@@ -23,6 +23,7 @@ describe('SuggestionsService (ADR-0099 §7)', () => {
     asset: { groupBy: jest.fn() },
     assetModel: { groupBy: jest.fn() },
     application: { groupBy: jest.fn() },
+    $queryRaw: jest.fn(),
   };
   // The role matrix as seeded; a test may override one role's set.
   let matrix: Record<string, readonly Permission[]>;
@@ -244,5 +245,89 @@ describe('SuggestionsService (ADR-0099 §7)', () => {
     await expect(
       service.suggest('company', { limit: 10 }, undefined),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  describe('documentLabel — asset and purchase document type labels (#1476)', () => {
+    /** The SQL and bound values of the n-th raw query. */
+    const raw = (n: number) => {
+      const [strings, ...values] = prisma.$queryRaw.mock.calls[n] as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      return { sql: strings.join('?'), values };
+    };
+
+    it('merges the labels of asset and purchase documents for a MEMBER (both permissions)', async () => {
+      prisma.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            value: 'Invoice',
+            count: 2,
+            lastUsedAt: at('2026-09-01T00:00:00Z'),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            value: 'Invoice',
+            count: 3,
+            lastUsedAt: at('2026-10-01T00:00:00Z'),
+          },
+          { value: 'Remito', count: 1, lastUsedAt: at('2026-10-02T00:00:00Z') },
+        ]);
+
+      const result = await service.suggest(
+        'documentLabel',
+        { q: 'i', limit: 10 },
+        human('MEMBER'),
+      );
+
+      expect(result).toEqual([
+        { value: 'Invoice', count: 5, lastUsedAt: '2026-10-01T00:00:00.000Z' },
+        { value: 'Remito', count: 1, lastUsedAt: '2026-10-02T00:00:00.000Z' },
+      ]);
+      const assets = raw(0);
+      expect(assets.sql).toContain('JOIN "assets" p');
+      expect(assets.sql).toContain(`'ASSET'::"AttachmentEntityType"`);
+      const purchases = raw(1);
+      expect(purchases.sql).toContain('JOIN "purchase_orders" p');
+      expect(purchases.sql).toContain(
+        `'PURCHASE_ORDER'::"AttachmentEntityType"`,
+      );
+      // Live documents of live parents, and the typed text as a bound value — never spliced into the SQL.
+      for (const query of [assets, purchases]) {
+        expect(query.sql).toContain('a."deletedAt" IS NULL');
+        expect(query.sql).toContain('p."deletedAt" IS NULL');
+        expect(query.values).toContain('i');
+      }
+    });
+
+    it('a VIEWER (asset:read, no purchaseOrder:read) gets the asset document labels only', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { value: 'Warranty', count: 1, lastUsedAt: at('2026-09-01T00:00:00Z') },
+      ]);
+      const result = await service.suggest(
+        'documentLabel',
+        { limit: 10 },
+        human('VIEWER'),
+      );
+      expect(result.map((r) => r.value)).toEqual(['Warranty']);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(raw(0).sql).toContain('JOIN "assets" p');
+    });
+
+    it('a caller with purchaseOrder:read only reads the purchase documents; with neither it is refused', async () => {
+      matrix = { ...matrix, VIEWER: ['purchaseOrder:read'] };
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      await service.suggest('documentLabel', { limit: 10 }, human('VIEWER'));
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(raw(0).sql).toContain('JOIN "purchase_orders" p');
+
+      matrix = { ...matrix, VIEWER: ['consumable:read'] };
+      prisma.$queryRaw.mockClear();
+      await expect(
+        service.suggest('documentLabel', { limit: 10 }, human('VIEWER')),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
   });
 });

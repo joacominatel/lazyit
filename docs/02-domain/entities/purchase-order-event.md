@@ -8,7 +8,7 @@ updated: 2026-10-02
 
 # PurchaseOrderEvent
 
-> 🟢 built (#1472; receiving, linking and document events #1473) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built (#1472; receiving, linking and document events #1473; stock receipts and document labels #1476) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — model, writer and read (#1472)
 > Model `PurchaseOrderEvent` (`purchase_order_events`), written through the one shared writer
@@ -64,7 +64,9 @@ default ([[0006-soft-delete-and-auditing]]).
 | `UNITS_CANCELLED` | cancel remaining units | `{ lineId, quantity, cancelledQuantity: { from, to }, reason }` |
 | `ASSET_LINKED` | link existing assets — one row per request | `{ lineId, assetIds, applied: { assetId: field[] }, moved: [{ assetId, purchaseOrderId, lineId }], overReceived }` |
 | `ASSET_UNLINKED` | unlink; or, on the purchase an asset was **moved** away from | `{ lineId, assetIds }`, plus `{ movedToPurchaseOrderId, movedToLineId }` on a move |
-| `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` | upload / delete a purchase document | `{ attachmentId, originalName }` |
+| `DOCUMENT_ADDED` / `DOCUMENT_REMOVED` | upload / delete a purchase document | `{ attachmentId, originalName, label }` — `label` (the document type label, `null` when none) since #1476 |
+| `STOCK_RECEIVED` | receive a `CONSUMABLE` line into stock (#1476) — one row per receipt, in the movement's transaction | `{ lineId, consumableId, movementId, quantity, overReceived }` |
+| `DOCUMENT_UPDATED` | edit a purchase document's type label (#1476); an unchanged label writes nothing | `{ attachmentId, originalName, label: { from, to } }` |
 
 Money in a payload is a JSON number of minor units. A receive's units are separate transactions (the
 asset-tag counter, [[0089-bulk-receiving-and-checkout-acknowledgement]]), so `UNITS_RECEIVED` is appended

@@ -3,7 +3,7 @@ title: "ADR-0034: Consumables design (cached stock + append-only movements)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-10-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -75,6 +75,13 @@ below 0 raises **409** and the whole transaction rolls back (no movement, no cac
 > purchase line (Phase 1b) carries the supplier and unit price, and receiving it posts an ordinary `IN`
 > movement that references the line. The stock model above is unchanged — movements stay the only way
 > stock changes, and `currentStock` is never written directly. Not built yet.
+
+> [!note] Purchase linkage built 2026-10-02 (#1476, [[0099-purchases-scope-model-and-optionality|ADR-0099]])
+> A movement gains a nullable `purchaseOrderLineId`, set at insert on the ordinary `IN` that receiving a
+> `CONSUMABLE` purchase line posts through this ledger's own write path (a DB CHECK allows it on an `IN`
+> only). Unit price and supplier are read from the purchase line and its purchase, never stored on the
+> consumable — this record's "supplier / unit-cost tracking" deferral is answered by that linkage, and the
+> consumable itself still carries neither. The stock model above is unchanged.
 
 Related: [[consumable]] · [[consumable-category]] · [[consumable-movement]] ·
 [[0008-consumables-vs-assets]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

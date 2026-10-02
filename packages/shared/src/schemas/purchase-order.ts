@@ -37,11 +37,12 @@ export const PurchaseOrderStatusSchema = z.enum(PURCHASE_ORDER_STATUSES);
 export const DEFAULT_PURCHASE_ORDER_STATUS = "ORDERED";
 
 /**
- * The line kinds this build writes. `ASSET` lines are received as assets; `OTHER` lines (shipping,
- * services, freebies) count in the total and are never pending. `CONSUMABLE` (Phase 1b) and `LICENSE`
- * (Phase 2) are appended later; a line of a kind this build does not know reads as not tracked.
+ * The line kinds this build writes. `ASSET` lines are received as assets; `CONSUMABLE` lines (Phase 1b,
+ * #1476) are received into stock as `IN` movements of their consumable; `OTHER` lines (shipping, services,
+ * freebies) count in the total and are never pending. `LICENSE` (Phase 2) is appended later; a line of a
+ * kind this build does not know reads as not tracked.
  */
-export const PURCHASE_ORDER_LINE_KINDS = ["ASSET", "OTHER"] as const;
+export const PURCHASE_ORDER_LINE_KINDS = ["ASSET", "OTHER", "CONSUMABLE"] as const;
 /** WRITE validator for `PurchaseOrderLine.kind`. Reads use a plain string. */
 export const PurchaseOrderLineKindSchema = z.enum(PURCHASE_ORDER_LINE_KINDS);
 /** The kind a line gets when the create omits it. */
@@ -55,7 +56,10 @@ export const DEFAULT_PURCHASE_ORDER_LINE_KIND = "ASSET";
  *   - `ASSET_LINKED`     { lineId, assetIds, applied: { [assetId]: field[] }, moved, overReceived }
  *   - `ASSET_UNLINKED`   { lineId, assetIds } — or { lineId, assetIds, movedToPurchaseOrderId,
  *                        movedToLineId } on the purchase an asset was moved away from
- *   - `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`  { attachmentId, originalName }
+ *   - `DOCUMENT_ADDED` / `DOCUMENT_REMOVED`  { attachmentId, originalName, label }
+ *   - `STOCK_RECEIVED`   { lineId, consumableId, movementId, quantity, overReceived } — a `CONSUMABLE` line
+ *                        received into stock (#1476)
+ *   - `DOCUMENT_UPDATED` { attachmentId, originalName, label: { from, to } } — a document's type label (#1476)
  */
 export const PURCHASE_ORDER_EVENT_TYPES = [
   "CREATED",
@@ -72,6 +76,8 @@ export const PURCHASE_ORDER_EVENT_TYPES = [
   "ASSET_UNLINKED",
   "DOCUMENT_ADDED",
   "DOCUMENT_REMOVED",
+  "STOCK_RECEIVED",
+  "DOCUMENT_UPDATED",
 ] as const;
 export const PurchaseOrderEventTypeSchema = z.enum(PURCHASE_ORDER_EVENT_TYPES);
 
@@ -132,6 +138,8 @@ export const PurchaseOrderLineSchema = z.object({
   manufacturerText: z.string().nullable(),
   modelText: z.string().nullable(),
   assetModelId: z.cuid().nullable(),
+  // The consumable a `CONSUMABLE` line is received into (#1476). Nullish: older rows and builds lack it.
+  consumableId: z.cuid().nullish(),
   quantity: int4({ min: 0 }),
   unitPrice: money().nullable(),
   cancelledQuantity: int4({ min: 0 }),
@@ -140,7 +148,10 @@ export const PurchaseOrderLineSchema = z.object({
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
   // ── Derived, never stored ──
-  /** Live assets linked to this line. */
+  /**
+   * Units received: live assets linked to an `ASSET` line, or the units of the `IN` movements posted from a
+   * `CONSUMABLE` line.
+   */
   receivedQuantity: int4({ min: 0 }),
   /** quantity − received − cancelled, floored at 0; always 0 on a line that is not countable. */
   pendingQuantity: int4({ min: 0 }),
@@ -220,7 +231,8 @@ const warrantyMonths = () => int4({ min: 0, max: 1200, example: 12 });
  * A line as a create accepts it — inline on `POST /purchase-orders` or on its own on
  * `POST /purchase-orders/:id/lines`. Only `description` is required: `kind` defaults to `ASSET`,
  * `quantity` to 1, `cancelledQuantity` to 0, and `position` to after the last line. `unitPrice` absent or
- * `null` = unknown; `0` = free.
+ * `null` = unknown; `0` = free. `consumableId` is accepted on a `CONSUMABLE` line only, and stays optional
+ * there: a line is mapped to its consumable when stock is received, at the latest.
  */
 export const CreatePurchaseOrderLineSchema = z
   .strictObject({
@@ -229,6 +241,7 @@ export const CreatePurchaseOrderLineSchema = z
     manufacturerText: optionalText(200),
     modelText: optionalText(200),
     assetModelId: z.cuid().optional(),
+    consumableId: z.cuid().optional(),
     quantity: lineQuantity().optional(),
     unitPrice: money().nullish(),
     cancelledQuantity: cancelledQuantity().optional(),
@@ -238,12 +251,16 @@ export const CreatePurchaseOrderLineSchema = z
   .refine((line) => (line.cancelledQuantity ?? 0) <= (line.quantity ?? 1), {
     error: "cancelledQuantity cannot exceed quantity",
     path: ["cancelledQuantity"],
+  })
+  .refine((line) => line.consumableId === undefined || line.kind === "CONSUMABLE", {
+    error: "consumableId is only accepted on a CONSUMABLE line",
+    path: ["consumableId"],
   });
 
 /**
  * Partial line update (an empty body is rejected). Optional fields accept `null` to clear them. The
- * cancelled ≤ quantity rule is checked by the API against the stored line, since a PATCH may carry only
- * one of the two.
+ * cancelled ≤ quantity rule, and `consumableId` only on a `CONSUMABLE` line, are checked by the API against
+ * the stored line, since a PATCH may carry only one of the two.
  */
 export const UpdatePurchaseOrderLineSchema = requireAtLeastOneKey(
   z
@@ -253,6 +270,7 @@ export const UpdatePurchaseOrderLineSchema = requireAtLeastOneKey(
       manufacturerText: z.string().trim().min(1).max(200).nullable(),
       modelText: z.string().trim().min(1).max(200).nullable(),
       assetModelId: z.cuid().nullable(),
+      consumableId: z.cuid().nullable(),
       quantity: lineQuantity(),
       unitPrice: money().nullable(),
       cancelledQuantity: cancelledQuantity(),

@@ -22,10 +22,12 @@ import { z } from "zod";
  * | `reference`    | purchase reference — the finance PO number (`purchaseOrder:read`) — #1473                  |
  * | `invoiceNumbers` | purchase invoice numbers (`purchaseOrder:read`) — #1473                                  |
  * | `lineDescription` | purchase line description (`purchaseOrder:read`) — #1473                                |
+ * | `documentLabel` | asset document type label (`asset:read`) · purchase document type label (`purchaseOrder:read`) — #1476 |
  *
  * The purchase sources read live rows of live purchases only (a line of an archived purchase is archived
- * with it). A repeated `reference` is a hint, never a refusal (ADR-0099 §6): the web surfaces "a purchase
- * with this reference already exists" from it.
+ * with it), and the document-label sources live documents of live assets and purchases. A repeated
+ * `reference` is a hint, never a refusal (ADR-0099 §6): the web surfaces "a purchase with this reference
+ * already exists" from it.
  */
 export const SUGGESTION_FIELDS = [
   "supplierName",
@@ -37,6 +39,7 @@ export const SUGGESTION_FIELDS = [
   "reference",
   "invoiceNumbers",
   "lineDescription",
+  "documentLabel",
 ] as const;
 export const SuggestionFieldSchema = z.enum(SUGGESTION_FIELDS);
 
