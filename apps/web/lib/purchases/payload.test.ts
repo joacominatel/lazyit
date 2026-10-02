@@ -280,3 +280,53 @@ describe("consumable lines (#1476)", () => {
     expect(lineDraftFrom(older, "es").consumableId).toBe("");
   });
 });
+
+describe("license lines (#1477)", () => {
+  const applicationId = "ckapplication00000000000a";
+
+  test("a license line sends its kind and, when picked, its application — never model fields", () => {
+    const result = toCreatePurchase(
+      emptyHeaderDraft(),
+      undefined,
+      [line({ kind: "LICENSE", description: "M365 E3", quantity: "25", applicationId, manufacturerText: "Microsoft" })],
+      "en",
+    );
+    expect(result).toEqual({
+      ok: true,
+      payload: {
+        status: "ORDERED",
+        lines: [{ kind: "LICENSE", description: "M365 E3", quantity: 25, applicationId }],
+      },
+    });
+    if (result.ok) expect(CreatePurchaseOrderSchema.safeParse(result.payload).success).toBe(true);
+  });
+
+  test("an application picked and then switched to another kind is not sent", () => {
+    const result = toCreatePurchase(emptyHeaderDraft(), undefined, [line({ kind: "ASSET", description: "NB", applicationId })], "en");
+    expect(result.ok && result.payload.lines).toEqual([{ description: "NB" }]);
+    if (result.ok) expect(CreatePurchaseOrderSchema.safeParse(result.payload).success).toBe(true);
+  });
+
+  test("a picked application alone is typing — the line is not blank", () => {
+    expect(isBlankLine(line({ applicationId }))).toBe(false);
+  });
+
+  test("editing maps, changes or clears the application of a license line", () => {
+    const saved: PurchaseOrderLine = { ...savedLine, kind: "LICENSE", applicationId: null };
+    const draft = lineDraftFrom(saved, "es");
+    expect(draft.applicationId).toBe("");
+    expect(toUpdateLine({ ...draft, applicationId }, saved, "es")).toEqual({ ok: true, payload: { applicationId } });
+    const mapped = { ...saved, applicationId };
+    expect(toUpdateLine(lineDraftFrom(mapped, "es"), mapped, "es")).toEqual({ ok: true, payload: null });
+    expect(toUpdateLine({ ...lineDraftFrom(mapped, "es"), applicationId: "" }, mapped, "es")).toEqual({
+      ok: true,
+      payload: { applicationId: null },
+    });
+  });
+
+  test("an older read without applicationId reads as unmapped", () => {
+    const older: PurchaseOrderLine = { ...savedLine, kind: "LICENSE" };
+    delete older.applicationId;
+    expect(lineDraftFrom(older, "es").applicationId).toBe("");
+  });
+});

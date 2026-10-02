@@ -1,6 +1,11 @@
 "use client";
 
-import { EllipsisVerticalIcon, InboxArrowDownIcon, ShoppingCartIcon } from "@heroicons/react/24/outline";
+import {
+  EllipsisVerticalIcon,
+  InboxArrowDownIcon,
+  KeyIcon,
+  ShoppingCartIcon,
+} from "@heroicons/react/24/outline";
 import type { PendingPurchaseLine } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -8,6 +13,7 @@ import { useState } from "react";
 import { ActiveFilters } from "@/components/active-filters";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { type ReceiveLineTarget, useLoadLineTarget } from "@/components/purchases/pending-line-picker";
@@ -26,7 +32,13 @@ import { useSupplier } from "@/lib/api/hooks/use-suppliers";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { groupPendingLines, isOverdue, localToday, pendingTotals } from "@/lib/purchases/pending";
+import {
+  groupPendingLines,
+  isOverdue,
+  lineReceiveAction,
+  localToday,
+  pendingTotals,
+} from "@/lib/purchases/pending";
 import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { usePurchaseTitle } from "../../_components/purchase-display";
@@ -40,8 +52,8 @@ const PENDING_LIST_OPTIONS = { filters: { supplier: "ALL" } };
  * oldest order first — the weekly view, and the one to open at the warehouse door. Drafts, cancelled
  * purchases, *Other* lines and fully cancelled remainders are not here (the API leaves them out). Each line
  * offers *Receive* and, in its menu, *Link existing* and *Cancel remaining* (a consumable line receives into
- * stock and has no *Link existing*, #1476); a purchase whose expected date
- * has passed is flagged *Overdue* (with text, never colour alone).
+ * stock and has no *Link existing*, #1476; a license line offers *Apply license* instead, #1477); a purchase
+ * whose expected date has passed is flagged *Overdue* (with text, never colour alone).
  */
 export function PendingUnitsView() {
   const t = useTranslations("purchases.pending");
@@ -53,6 +65,7 @@ export function PendingUnitsView() {
   const canWriteAssets = useCan("asset:write");
   const canReceive = canWrite && canWriteAssets;
   const canReceiveStock = useCanReceiveStock();
+  const canApplyLicense = useCanApplyLicense();
   const { offset, limit, filters, setFilter, setOffset, clearFilters } = useListParams(PENDING_LIST_OPTIONS);
   const supplierId = filters.supplier !== "ALL" ? filters.supplier : undefined;
   const { data: page, isLoading, isFetching, isError, error, refetch } = usePendingLines({
@@ -64,6 +77,7 @@ export function PendingUnitsView() {
   const loader = useLoadLineTarget();
   const [receiving, setReceiving] = useState<ReceiveLineTarget | null>(null);
   const [receivingStock, setReceivingStock] = useState<PendingPurchaseLine | null>(null);
+  const [applyingLicense, setApplyingLicense] = useState<PendingPurchaseLine | null>(null);
   const [linking, setLinking] = useState<PendingPurchaseLine | null>(null);
   const [cancelling, setCancelling] = useState<PendingPurchaseLine | null>(null);
 
@@ -167,72 +181,15 @@ export function PendingUnitsView() {
                             ) : null}
                           </p>
                         </div>
-                        {line.kind === "CONSUMABLE" ? (
-                          // A consumable line is received into stock (#1476) — never as assets, never linked.
-                          canReceiveStock ? (
-                            <div className="flex items-center gap-1">
-                              <Button variant="outline" size="sm" onClick={() => setReceivingStock(line)}>
-                                <InboxArrowDownIcon />
-                                {t("receive")}
-                              </Button>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    aria-label={t("lineActions", { line: line.description })}
-                                  >
-                                    <EllipsisVerticalIcon />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem onSelect={() => setCancelling(line)}>
-                                    {t("cancelRemaining")}
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          ) : canWrite ? (
-                            <Button variant="ghost" size="sm" onClick={() => setCancelling(line)}>
-                              {t("cancelRemaining")}
-                            </Button>
-                          ) : null
-                        ) : canReceive ? (
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={loader.loading}
-                              onClick={() => void receive(line)}
-                            >
-                              <InboxArrowDownIcon />
-                              {t("receive")}
-                            </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  aria-label={t("lineActions", { line: line.description })}
-                                >
-                                  <EllipsisVerticalIcon />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => setLinking(line)}>
-                                  {t("linkExisting")}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => setCancelling(line)}>
-                                  {t("cancelRemaining")}
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        ) : canWrite ? (
-                          <Button variant="ghost" size="sm" onClick={() => setCancelling(line)}>
-                            {t("cancelRemaining")}
-                          </Button>
-                        ) : null}
+                        <PendingLineActions
+                          line={line}
+                          onReceiveAssets={canReceive ? () => void receive(line) : undefined}
+                          receiveDisabled={loader.loading}
+                          onReceiveStock={canReceiveStock ? () => setReceivingStock(line) : undefined}
+                          onApplyLicense={canApplyLicense ? () => setApplyingLicense(line) : undefined}
+                          onLink={canReceive ? () => setLinking(line) : undefined}
+                          onCancel={canWrite ? () => setCancelling(line) : undefined}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -262,6 +219,13 @@ export function PendingUnitsView() {
           onClose={() => setReceivingStock(null)}
         />
       ) : null}
+      {applyingLicense ? (
+        <ApplyLicenseDialog
+          purchase={applyingLicense.purchaseOrder}
+          line={applyingLicense}
+          onClose={() => setApplyingLicense(null)}
+        />
+      ) : null}
       {linking ? (
         <LinkAssetsDialog
           line={{ purchase: linking.purchaseOrder, line: linking }}
@@ -275,6 +239,70 @@ export function PendingUnitsView() {
           onClose={() => setCancelling(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A pending line's actions, by what *Receive* means for its kind ({@link lineReceiveAction}): assets are
+ * received or linked, a consumable line is received into stock, a license line is applied to its
+ * application (#1477) — never an asset receive. Each handler is passed only when the viewer may use it;
+ * with none of them, a writer can still cancel the remaining units.
+ */
+function PendingLineActions({
+  line,
+  onReceiveAssets,
+  receiveDisabled,
+  onReceiveStock,
+  onApplyLicense,
+  onLink,
+  onCancel,
+}: {
+  line: PendingPurchaseLine;
+  onReceiveAssets?: () => void;
+  receiveDisabled: boolean;
+  onReceiveStock?: () => void;
+  onApplyLicense?: () => void;
+  onLink?: () => void;
+  onCancel?: () => void;
+}) {
+  const t = useTranslations("purchases.pending");
+  const action = lineReceiveAction(line.kind);
+  const primary =
+    action === "receiveAssets" && onReceiveAssets
+      ? { label: t("receive"), icon: <InboxArrowDownIcon />, onClick: onReceiveAssets, disabled: receiveDisabled }
+      : action === "receiveStock" && onReceiveStock
+        ? { label: t("receive"), icon: <InboxArrowDownIcon />, onClick: onReceiveStock, disabled: false }
+        : action === "applyLicense" && onApplyLicense
+          ? { label: t("applyLicense"), icon: <KeyIcon />, onClick: onApplyLicense, disabled: false }
+          : null;
+
+  if (!primary) {
+    return onCancel ? (
+      <Button variant="ghost" size="sm" onClick={onCancel}>
+        {t("cancelRemaining")}
+      </Button>
+    ) : null;
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <Button variant="outline" size="sm" disabled={primary.disabled} onClick={primary.onClick}>
+        {primary.icon}
+        {primary.label}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label={t("lineActions", { line: line.description })}>
+            <EllipsisVerticalIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {action === "receiveAssets" && onLink ? (
+            <DropdownMenuItem onSelect={onLink}>{t("linkExisting")}</DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem onSelect={onCancel}>{t("cancelRemaining")}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

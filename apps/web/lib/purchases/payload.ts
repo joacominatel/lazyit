@@ -41,7 +41,7 @@ export interface LineDraft {
   /** Client-side identity of the row (React key, error map key). */
   key: string;
   /**
-   * `ASSET`, `CONSUMABLE` or `OTHER` — the kinds this build writes. A saved line of a kind a newer build
+   * `ASSET`, `CONSUMABLE`, `LICENSE` or `OTHER` — the kinds this build writes. A saved line of a kind a newer build
    * added keeps its raw value here, is shown read-only and is never rewritten.
    */
   kind: string;
@@ -52,6 +52,11 @@ export interface LineDraft {
   assetModelId: string;
   /** On a `CONSUMABLE` line, the consumable it is received into, or `""` (mapped later, at the latest when receiving). */
   consumableId: string;
+  /**
+   * On a `LICENSE` line (#1477), the application its seats are for, or `""` (mapped later, at the latest when
+   * the license is applied).
+   */
+  applicationId: string;
   /** Digits; blank = 1. */
   quantity: string;
   /** Money text in the viewer's locale; blank = unknown price. */
@@ -97,6 +102,7 @@ export function emptyLineDraft(key: string): LineDraft {
     modelText: "",
     assetModelId: "",
     consumableId: "",
+    applicationId: "",
     quantity: "1",
     unitPrice: "",
     warrantyMonths: "",
@@ -121,6 +127,7 @@ export function isBlankLine(line: LineDraft): boolean {
     line.modelText.trim() === "" &&
     line.assetModelId === "" &&
     line.consumableId === "" &&
+    line.applicationId === "" &&
     (line.quantity.trim() === "" || line.quantity.trim() === "1") &&
     line.unitPrice.trim() === "" &&
     line.warrantyMonths.trim() === ""
@@ -183,8 +190,9 @@ export function lineErrors(line: LineDraft, locale: string): LineErrors {
 
 /**
  * A line → the create payload: only what was filled is sent, so the API applies its defaults (kind,
- * quantity 1). Model fields go on an `ASSET` line only — shipping or a service has no maker — and the
- * consumable on a `CONSUMABLE` line only (the API refuses it elsewhere).
+ * quantity 1). Model fields go on an `ASSET` line only — shipping or a service has no maker — the
+ * consumable on a `CONSUMABLE` line only and the application on a `LICENSE` line only (the API refuses them
+ * elsewhere).
  */
 export function toCreateLine(
   line: LineDraft,
@@ -205,6 +213,7 @@ export function toCreateLine(
     if (parsed.warrantyMonths !== null) out.warrantyMonths = parsed.warrantyMonths;
   }
   if (line.kind === "CONSUMABLE" && line.consumableId) out.consumableId = line.consumableId;
+  if (line.kind === "LICENSE" && line.applicationId) out.applicationId = line.applicationId;
   return { ok: true, line: out };
 }
 
@@ -335,6 +344,7 @@ export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraf
     modelText: line.modelText ?? "",
     assetModelId: line.assetModelId ?? "",
     consumableId: line.consumableId ?? "",
+    applicationId: line.applicationId ?? "",
     quantity: String(line.quantity),
     unitPrice: line.unitPrice == null ? "" : formatMoney(line.unitPrice, locale),
     warrantyMonths: line.warrantyMonths == null ? "" : String(line.warrantyMonths),
@@ -345,8 +355,8 @@ export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraf
  * The line dialog → `PATCH .../lines/:lineId`: only what changed, a cleared field as `null`; `null` when
  * nothing changed. The brand, model and warranty are edited only on an `ASSET` line: on any other kind
  * they are hidden and left as stored, never cleared. The consumable is edited only on a `CONSUMABLE` line
- * (the API clears it when the line changes away from that kind). A line of a kind this build does not
- * know keeps it.
+ * and the application only on a `LICENSE` line (the API clears each when the line changes away from that
+ * kind). A line of a kind this build does not know keeps it.
  */
 export function toUpdateLine(
   draft: LineDraft,
@@ -374,6 +384,10 @@ export function toUpdateLine(
   if (draft.kind === "CONSUMABLE") {
     const consumableId = draft.consumableId || null;
     if (consumableId !== (original.consumableId ?? null)) out.consumableId = consumableId;
+  }
+  if (draft.kind === "LICENSE") {
+    const applicationId = draft.applicationId || null;
+    if (applicationId !== (original.applicationId ?? null)) out.applicationId = applicationId;
   }
   return { ok: true, payload: Object.keys(out).length > 0 ? out : null };
 }

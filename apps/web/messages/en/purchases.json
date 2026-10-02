@@ -25,7 +25,8 @@
     "progress": "{received} of {ordered} received",
     "pending": "{count} pending",
     "cancelled": "{count} cancelled",
-    "over": "Over-received"
+    "over": "Over-received",
+    "seatsApplied": "{applied} of {ordered} seats applied"
   },
   "totals": {
     "tooLarge": "Too large to total",
@@ -148,7 +149,13 @@
     "descriptionConsumablePlaceholder": "Toner, cables, batteries…",
     "consumable": "Consumable (optional)",
     "consumablePlaceholder": "Map now or when you receive",
-    "consumableHelp": "The stock item the units go into when they arrive."
+    "consumableHelp": "The stock item the units go into when they arrive.",
+    "kindLicense": "License",
+    "descriptionLicensePlaceholder": "Microsoft 365 E3, Adobe Acrobat…",
+    "seats": "Seats",
+    "application": "Application (optional)",
+    "applicationPlaceholder": "Map now or when you apply it",
+    "applicationHelp": "The application whose seats this license adds to."
   },
   "lineDialog": {
     "addTitle": "Add line",
@@ -217,7 +224,10 @@
     "documentsBackupNotice": "Files uploaded here are not in lazyit's backup yet: they live on the server's file volume, which the database backup does not cover. Keep your own copy of any invoice, order or delivery note you need to keep.",
     "receivesInto": "into <link>{name}</link>",
     "consumableNotMapped": "no consumable yet",
-    "receiveStock": "Receive into stock"
+    "receiveStock": "Receive into stock",
+    "applicationNotMapped": "no application yet",
+    "seatsFor": "for <link>{name}</link>",
+    "applyLicense": "Apply license"
   },
   "activity": {
     "fields": {
@@ -286,6 +296,7 @@
     "documentLabelSet": "Set the type of “{name}” to {label}",
     "documentLabelChanged": "Changed the type of “{name}”: {from} → {to}",
     "documentLabelCleared": "Removed the type of “{name}”",
+    "kindLicense": "License",
     "licenseApplied": "Applied {count, plural, one {# seat} other {# seats}} from “{line}”",
     "licenseRenewed": "Applied the renewal of “{line}”",
     "seatsChange": "seats {from} → {to}",
@@ -297,8 +308,7 @@
     "extractionLines": "{count, plural, one {# line} other {# lines}} found",
     "extractionWarnings": "{count, plural, one {# value} other {# values}} to check",
     "createdFromAssets": "Created from {count, plural, one {# selected asset} other {# selected assets}} ({lines, plural, one {# line} other {# lines}})",
-    "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out",
-    "kindLicense": "License"
+    "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
@@ -513,7 +523,8 @@
     "lineActions": "Actions for {line}",
     "linkExisting": "Link existing assets",
     "cancelRemaining": "Cancel remaining units",
-    "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending"
+    "totals": "{purchases, plural, one {# purchase} other {# purchases}} · {units, plural, one {# unit} other {# units}} pending",
+    "applyLicense": "Apply license"
   },
   "receiveStock": {
     "title": "Receive into stock",
@@ -544,5 +555,35 @@
     "unlinkDescription": "Unlink {asset} from “{line}”? The asset keeps its purchase values; the line counts one unit less.",
     "unlinkedToast": "{asset} unlinked",
     "unlinkError": "Couldn't unlink the asset"
+  },
+  "applyLicense": {
+    "title": "Apply license",
+    "description": "{purchase} · {line}. Nothing changes on the application until you apply it.",
+    "loadError": "Couldn't read what applying this line would do.",
+    "application": "Application",
+    "applicationPlaceholder": "Choose the application",
+    "applicationMissing": "This line has no application yet. Choose one: it is saved on the line, then you can apply the seats.",
+    "applicationArchived": "{name} is archived. Choose another application, or restore it first.",
+    "saveApplication": "Save on the line",
+    "applicationSaved": "Application saved on the line",
+    "applicationSaveError": "Couldn't save the application on the line",
+    "seats": "Seats bought",
+    "untracked": "Not tracked",
+    "inUse": "In use",
+    "renewal": "Renews",
+    "applied": "Applied from this line",
+    "appliedOf": "{applied} of {bought}",
+    "seatsToAdd": "Seats to add",
+    "seatsHelp": "{pending, plural, =0 {Every seat of this line is applied} one {# seat still to apply} other {# seats still to apply}}. Leave it blank to set only the renewal.",
+    "seatsInvalid": "A whole number of seats.",
+    "renewalDate": "New renewal date (optional)",
+    "renewalHelp": "The purchase doesn't say when the license renews. Type it if this purchase renews it.",
+    "untrackedWarning": "This application doesn't track a seat count yet. Applying starts counting at {count, plural, one {# seat} other {# seats}}.",
+    "overWarning": "The line bought {bought}; this makes {after} applied. That's allowed — the line will show more seats than bought.",
+    "nothingToApply": "Add seats, a renewal date, or both.",
+    "submit": "Apply",
+    "appliedToast": "{count, plural, one {# seat} other {# seats}} applied to {name}",
+    "renewalToast": "Renewal date applied to {name}",
+    "error": "Couldn't apply the license"
   }
 }

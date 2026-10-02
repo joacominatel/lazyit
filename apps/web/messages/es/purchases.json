@@ -25,7 +25,8 @@
     "progress": "{received} de {ordered} recibidas",
     "pending": "{count, plural, one {# pendiente} other {# pendientes}}",
     "cancelled": "{count, plural, one {# cancelada} other {# canceladas}}",
-    "over": "Recibida de más"
+    "over": "Recibida de más",
+    "seatsApplied": "{applied} de {ordered} asientos aplicados"
   },
   "totals": {
     "tooLarge": "Demasiado grande para totalizar",
@@ -148,7 +149,13 @@
     "descriptionConsumablePlaceholder": "Tóner, cables, pilas…",
     "consumable": "Consumible (opcional)",
     "consumablePlaceholder": "Asígnalo ahora o al recibir",
-    "consumableHelp": "El artículo de stock al que entran las unidades cuando llegan."
+    "consumableHelp": "El artículo de stock al que entran las unidades cuando llegan.",
+    "kindLicense": "Licencia",
+    "descriptionLicensePlaceholder": "Microsoft 365 E3, Adobe Acrobat…",
+    "seats": "Asientos",
+    "application": "Aplicación (opcional)",
+    "applicationPlaceholder": "Asígnala ahora o al aplicarla",
+    "applicationHelp": "La aplicación a la que esta licencia suma asientos."
   },
   "lineDialog": {
     "addTitle": "Agregar línea",
@@ -217,7 +224,10 @@
     "documentsBackupNotice": "Los archivos que subas aquí todavía no están en la copia de seguridad de lazyit: se guardan en el volumen de archivos del servidor, que la copia de la base de datos no cubre. Guarda tu propia copia de cada factura, pedido o remito que necesites conservar.",
     "receivesInto": "a <link>{name}</link>",
     "consumableNotMapped": "sin consumible todavía",
-    "receiveStock": "Recibir en stock"
+    "receiveStock": "Recibir en stock",
+    "applicationNotMapped": "todavía sin aplicación",
+    "seatsFor": "para <link>{name}</link>",
+    "applyLicense": "Aplicar licencia"
   },
   "activity": {
     "fields": {
@@ -286,6 +296,7 @@
     "documentLabelSet": "Puso el tipo de «{name}» en {label}",
     "documentLabelChanged": "Cambió el tipo de «{name}»: {from} → {to}",
     "documentLabelCleared": "Quitó el tipo de «{name}»",
+    "kindLicense": "Licencia",
     "licenseApplied": "Aplicó {count, plural, one {# asiento} other {# asientos}} de “{line}”",
     "licenseRenewed": "Aplicó la renovación de “{line}”",
     "seatsChange": "asientos {from} → {to}",
@@ -297,8 +308,7 @@
     "extractionLines": "{count, plural, one {# línea encontrada} other {# líneas encontradas}}",
     "extractionWarnings": "{count, plural, one {# valor} other {# valores}} para revisar",
     "createdFromAssets": "Creada a partir de {count, plural, one {# activo seleccionado} other {# activos seleccionados}} ({lines, plural, one {# línea} other {# líneas}})",
-    "createdFromAssetsLeftOut": "{count, plural, one {# activo quedó afuera} other {# activos quedaron afuera}}",
-    "kindLicense": "Licencia"
+    "createdFromAssetsLeftOut": "{count, plural, one {# activo quedó afuera} other {# activos quedaron afuera}}"
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -513,7 +523,8 @@
     "lineActions": "Acciones de {line}",
     "linkExisting": "Vincular activos existentes",
     "cancelRemaining": "Cancelar unidades restantes",
-    "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}"
+    "totals": "{purchases, plural, one {# compra} other {# compras}} · {units, plural, one {# unidad pendiente} other {# unidades pendientes}}",
+    "applyLicense": "Aplicar licencia"
   },
   "receiveStock": {
     "title": "Recibir en stock",
@@ -544,5 +555,35 @@
     "unlinkDescription": "¿Desvincular {asset} de «{line}»? El activo conserva sus valores de compra; la línea cuenta una unidad menos.",
     "unlinkedToast": "{asset} desvinculado",
     "unlinkError": "No se pudo desvincular el activo"
+  },
+  "applyLicense": {
+    "title": "Aplicar licencia",
+    "description": "{purchase} · {line}. Nada cambia en la aplicación hasta que la aplicas.",
+    "loadError": "No se pudo leer qué haría aplicar esta línea.",
+    "application": "Aplicación",
+    "applicationPlaceholder": "Elige la aplicación",
+    "applicationMissing": "Esta línea todavía no tiene aplicación. Elige una: se guarda en la línea y después puedes aplicar los asientos.",
+    "applicationArchived": "{name} está archivada. Elige otra aplicación, o restáurala primero.",
+    "saveApplication": "Guardar en la línea",
+    "applicationSaved": "Aplicación guardada en la línea",
+    "applicationSaveError": "No se pudo guardar la aplicación en la línea",
+    "seats": "Asientos comprados",
+    "untracked": "Sin contar",
+    "inUse": "En uso",
+    "renewal": "Se renueva",
+    "applied": "Aplicados desde esta línea",
+    "appliedOf": "{applied} de {bought}",
+    "seatsToAdd": "Asientos a sumar",
+    "seatsHelp": "{pending, plural, =0 {Todos los asientos de esta línea están aplicados} one {Falta aplicar # asiento} other {Faltan aplicar # asientos}}. Déjalo vacío para fijar solo la renovación.",
+    "seatsInvalid": "Un número entero de asientos.",
+    "renewalDate": "Nueva fecha de renovación (opcional)",
+    "renewalHelp": "La compra no dice cuándo se renueva la licencia. Escríbela si esta compra la renueva.",
+    "untrackedWarning": "Esta aplicación todavía no cuenta asientos. Al aplicar empieza a contar desde {count, plural, one {# asiento} other {# asientos}}.",
+    "overWarning": "La línea compró {bought}; con esto quedan {after} aplicados. Está permitido: la línea mostrará más asientos que los comprados.",
+    "nothingToApply": "Suma asientos, una fecha de renovación o ambas cosas.",
+    "submit": "Aplicar",
+    "appliedToast": "{count, plural, one {# asiento aplicado} other {# asientos aplicados}} a {name}",
+    "renewalToast": "Fecha de renovación aplicada a {name}",
+    "error": "No se pudo aplicar la licencia"
   }
 }

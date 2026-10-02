@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { PendingPurchaseLine } from "@lazyit/shared";
-import { assetReceivableLines, collectPages, groupPendingLines, isOverdue, localToday, pendingLinesForModel, pendingTotals } from "./pending";
+import {
+  assetReceivableLines,
+  collectPages,
+  groupPendingLines,
+  isOverdue,
+  lineReceiveAction,
+  localToday,
+  pendingLinesForModel,
+  pendingTotals,
+} from "./pending";
 
 const MODEL = "ck00000000000000000model1";
 
@@ -116,5 +125,21 @@ describe("collectPages — the From purchase picker sees every open line (#1476 
     expect((await collectPages(bounded.fetchPage, 2)).items).toHaveLength(400);
     const shrinking = async (offset: number) => ({ items: offset === 0 ? [1] : [], total: 10 });
     expect((await collectPages(shrinking)).items).toEqual([1]);
+  });
+});
+
+describe("lineReceiveAction — what Receive means per line kind (#1477)", () => {
+  test("an asset line receives assets, a consumable line receives stock", () => {
+    expect(lineReceiveAction("ASSET")).toBe("receiveAssets");
+    expect(lineReceiveAction("CONSUMABLE")).toBe("receiveStock");
+  });
+
+  test("a license line applies the license — never an asset or stock receive", () => {
+    expect(lineReceiveAction("LICENSE")).toBe("applyLicense");
+  });
+
+  test("an Other line, or a kind a newer build writes, offers nothing to receive", () => {
+    expect(lineReceiveAction("OTHER")).toBeNull();
+    expect(lineReceiveAction("SUBSCRIPTION")).toBeNull();
   });
 });

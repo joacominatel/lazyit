@@ -5,6 +5,7 @@ import {
   EllipsisVerticalIcon,
   ExclamationTriangleIcon,
   InboxArrowDownIcon,
+  KeyIcon,
   PencilSquareIcon,
   PlusIcon,
   TrashIcon,
@@ -48,6 +49,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useApplication } from "@/lib/api/hooks/use-applications";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useConsumable } from "@/lib/api/hooks/use-consumables";
 import { useLocation } from "@/lib/api/hooks/use-locations";
@@ -61,7 +63,9 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
+import { lineReceiveAction } from "@/lib/purchases/pending";
 import { formatMoney } from "@/lib/utils/money";
+import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
 import { CancelRemainingDialog } from "@/components/purchases/cancel-remaining-dialog";
 import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
@@ -78,14 +82,19 @@ import { LineAssets } from "./line-assets";
 import { LineDialog } from "./line-dialog";
 import { PurchaseActivity } from "./purchase-activity";
 
-/** A line's received cell: "x of y" for a countable line, over-received as a warning, "—" otherwise. */
+/**
+ * A line's received cell: "x of y" for a countable line — seats applied for a license line (#1477) —,
+ * over-received as a warning, "—" otherwise.
+ */
 function LineReceipt({ line }: { line: PurchaseOrderLine }) {
   const t = useTranslations("purchases.receipt");
   if (line.receiptState === null) return <span className="text-muted-foreground">—</span>;
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
       <span className="font-mono tabular-nums">
-        {t("progress", { received: line.receivedQuantity, ordered: line.quantity })}
+        {line.kind === "LICENSE"
+          ? t("seatsApplied", { applied: line.receivedQuantity, ordered: line.quantity })
+          : t("progress", { received: line.receivedQuantity, ordered: line.quantity })}
       </span>
       {line.cancelledQuantity > 0 ? (
         <span className="text-muted-foreground">{t("cancelled", { count: line.cancelledQuantity })}</span>
@@ -121,11 +130,37 @@ function LineConsumable({ consumableId }: { consumableId: string | null | undefi
 }
 
 /**
+ * The application a license line's seats are for (#1477): its name, linked to its page. Read only with
+ * `application:read` — otherwise nothing is requested and nothing is shown.
+ */
+function LineApplication({ applicationId }: { applicationId: string | null | undefined }) {
+  const t = useTranslations("purchases.detail");
+  const canRead = useCan("application:read");
+  const { data } = useApplication(canRead && applicationId ? applicationId : undefined);
+  if (!canRead) return null;
+  if (!applicationId) return <span>{t("applicationNotMapped")}</span>;
+  if (!data) return null;
+  return (
+    <span>
+      {t.rich("seatsFor", {
+        name: data.name,
+        link: (chunks) => (
+          <Link href={`/applications/${data.id}`} className="hover:underline">
+            {chunks}
+          </Link>
+        ),
+      })}
+    </span>
+  );
+}
+
+/**
  * One purchase (ADR-0099, UX proposal §3.a "Purchase detail"): identity, status and receipt progress;
  * the lines with "x of y received" (over-received is a warning, never an error); totals per currency
  * label; the status actions; receiving units, linking existing assets and cancelling the remaining units
- * per line (#1475); consumable lines received into stock (#1476); the purchase's documents; and the
- * activity log.
+ * per line (#1475); consumable lines received into stock (#1476); license lines applied to their
+ * application (#1477); the purchase's documents — each readable into a reviewed draft when document
+ * extraction is on (#1477); and the activity log.
  */
 export function PurchaseDetailView({ id }: { id: string }) {
   const t = useTranslations("purchases");
@@ -141,6 +176,8 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const canReceive = canWrite && canWriteAssets;
   // Receiving a consumable line posts stock: purchase and consumable write (#1476).
   const canReceiveStock = useCanReceiveStock();
+  // Applying a license line changes its application: purchase and application write (#1477).
+  const canApplyLicense = useCanApplyLicense();
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -152,6 +189,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const [lineDialog, setLineDialog] = useState<{ line?: PurchaseOrderLine } | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderLine | null>(null);
   const [receivingStock, setReceivingStock] = useState<PurchaseOrderLine | null>(null);
+  const [applyingLicense, setApplyingLicense] = useState<PurchaseOrderLine | null>(null);
   const [cancelling, setCancelling] = useState<PurchaseOrderLine | null>(null);
   const [linking, setLinking] = useState<PurchaseOrderLine | null>(null);
   const [removing, setRemoving] = useState<PurchaseOrderLine | null>(null);
@@ -389,6 +427,8 @@ export function PurchaseDetailView({ id }: { id: string }) {
                   const brand = [line.manufacturerText, line.modelText].filter(Boolean).join(" ");
                   const mapped = line.assetModelId ? modelName.get(line.assetModelId) : undefined;
                   const hasAssets = line.kind === "ASSET" && line.receivedQuantity > 0;
+                  // What Receive means for this kind — never an asset receive for a license line (#1477).
+                  const action = lineReceiveAction(line.kind);
                   const assetsOpen = hasAssets && openAssets.has(line.id);
                   return (
                     <Fragment key={line.id}>
@@ -400,9 +440,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                 ? t("line.kindAsset")
                                 : line.kind === "CONSUMABLE"
                                   ? t("line.kindConsumable")
-                                  : line.kind === "OTHER"
-                                    ? t("line.kindOther")
-                                    : line.kind}
+                                  : line.kind === "LICENSE"
+                                    ? t("line.kindLicense")
+                                    : line.kind === "OTHER"
+                                      ? t("line.kindOther")
+                                      : line.kind}
                             </Badge>
                             <div className="min-w-0 space-y-0.5">
                               <p className="font-medium">{line.description}</p>
@@ -422,6 +464,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
                               {line.kind === "CONSUMABLE" ? (
                                 <p className="text-xs text-muted-foreground">
                                   <LineConsumable consumableId={line.consumableId} />
+                                </p>
+                              ) : null}
+                              {line.kind === "LICENSE" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  <LineApplication applicationId={line.applicationId} />
                                 </p>
                               ) : null}
                             </div>
@@ -463,16 +510,22 @@ export function PurchaseDetailView({ id }: { id: string }) {
                         </TableCell>
                         <TableCell className="text-right align-top">
                           <div className="flex items-center justify-end gap-1">
-                            {canReceive && line.kind === "ASSET" && line.pendingQuantity > 0 ? (
+                            {canReceive && action === "receiveAssets" && line.pendingQuantity > 0 ? (
                               <Button variant="outline" size="sm" onClick={() => setReceiving(line)}>
                                 <InboxArrowDownIcon />
                                 {t("detail.receive")}
                               </Button>
                             ) : null}
-                            {canReceiveStock && line.kind === "CONSUMABLE" && line.pendingQuantity > 0 ? (
+                            {canReceiveStock && action === "receiveStock" && line.pendingQuantity > 0 ? (
                               <Button variant="outline" size="sm" onClick={() => setReceivingStock(line)}>
                                 <InboxArrowDownIcon />
                                 {t("detail.receive")}
+                              </Button>
+                            ) : null}
+                            {canApplyLicense && action === "applyLicense" && line.pendingQuantity > 0 ? (
+                              <Button variant="outline" size="sm" onClick={() => setApplyingLicense(line)}>
+                                <KeyIcon />
+                                {t("detail.applyLicense")}
                               </Button>
                             ) : null}
                             {canWrite ? (
@@ -487,7 +540,7 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
-                                  {canReceive && line.kind === "ASSET" ? (
+                                  {canReceive && action === "receiveAssets" ? (
                                     <>
                                       <DropdownMenuItem onSelect={() => setReceiving(line)}>
                                         {t("detail.receiveUnits")}
@@ -497,9 +550,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
                                       </DropdownMenuItem>
                                     </>
                                   ) : null}
-                                  {canReceiveStock && line.kind === "CONSUMABLE" ? (
+                                  {canReceiveStock && action === "receiveStock" ? (
                                     <DropdownMenuItem onSelect={() => setReceivingStock(line)}>
                                       {t("detail.receiveStock")}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  {canApplyLicense && action === "applyLicense" ? (
+                                    <DropdownMenuItem onSelect={() => setApplyingLicense(line)}>
+                                      {t("detail.applyLicense")}
                                     </DropdownMenuItem>
                                   ) : null}
                                   <DropdownMenuItem onSelect={() => setLineDialog({ line })}>
@@ -566,6 +624,14 @@ export function PurchaseDetailView({ id }: { id: string }) {
           purchase={purchase}
           line={receivingStock}
           onClose={() => setReceivingStock(null)}
+        />
+      ) : null}
+
+      {applyingLicense ? (
+        <ApplyLicenseDialog
+          purchase={purchase}
+          line={applyingLicense}
+          onClose={() => setApplyingLicense(null)}
         />
       ) : null}
 
