@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { type AssetModel, CreateAssetModelSchema } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
 import { SuggestInput, useRecentValues } from "@/components/suggest-input";
@@ -26,10 +26,8 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import {
-  useAssetManufacturers,
-  useCreateAssetModel,
-} from "@/lib/api/hooks/use-asset-models";
+import { useCreateAssetModel } from "@/lib/api/hooks/use-asset-models";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
@@ -75,7 +73,6 @@ export function CreateAssetModelDialog({
   const tc = useTranslations("common");
   const { data: categories } = useAssetCategories();
   const create = useCreateAssetModel();
-  const manufacturers = useAssetManufacturers();
   const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
 
   const form = useForm<FormValues>({
@@ -83,6 +80,9 @@ export function CreateAssetModelDialog({
     mode: "onTouched",
     defaultValues: { name: "", manufacturer: "" },
   });
+  // Manufacturers already in use on models and purchase lines, with counts and last use (ADR-0099 §7).
+  const manufacturerText = useWatch({ control: form.control, name: "manufacturer" }) ?? "";
+  const manufacturers = useSuggestions("manufacturer", manufacturerText, { enabled: open });
 
   // Keep the seed in a ref so the reset effect stays keyed on `open` alone: a `defaultName` that
   // changes while the dialog is open must never reset the form under the operator's hands.

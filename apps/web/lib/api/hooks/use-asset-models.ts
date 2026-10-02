@@ -18,7 +18,6 @@ import {
   updateAssetModel,
 } from "../endpoints/asset-models";
 import { createQueryKeys, selectDirectoryItems } from "../query-keys";
-import { type SuggestCandidate, tallyValues } from "@/lib/utils/suggest";
 
 /** Query keys for Asset models. */
 const baseAssetModelKeys = createQueryKeys("asset-models");
@@ -43,18 +42,6 @@ export function useAssetModels() {
     queryFn: () => getAssetModels({ limit: MAX_PAGE_LIMIT }),
     select: selectDirectoryItems("asset-models"),
   });
-}
-
-/**
- * The distinct manufacturers across the model directory, each with how many models use it and when
- * one was last updated — the smart-entry source for the manufacturer field (#1470). Derived from the
- * same cached directory read as {@link useAssetModels}, so it costs no extra request.
- */
-export function useAssetManufacturers(): SuggestCandidate[] | undefined {
-  const { data: models } = useAssetModels();
-  return models
-    ? tallyValues(models.map((m) => ({ value: m.manufacturer, at: m.updatedAt })))
-    : undefined;
 }
 
 /**

@@ -49,7 +49,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useReceiveAssets } from "@/lib/api/hooks/use-asset-receive";
 import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
@@ -88,7 +88,6 @@ export function ReceiveStockButton() {
   const statusLabel = useAssetStatusLabel();
   const receive = useReceiveAssets();
   const locale = useLocale();
-  const { data: companies } = useAssetCompanies();
   const [, rememberCompany] = useRecentValues("asset.company");
   // Creating a model is its own permission — the "+" only renders when the operator actually has it.
   const canCreateModel = useCan("assetModel:write");
@@ -102,6 +101,8 @@ export function ReceiveStockButton() {
   const [status, setStatus] = useState<AssetStatus>("OPERATIONAL");
   const [locationId, setLocationId] = useState("");
   const [company, setCompany] = useState("");
+  // Company values already in use, with counts and last use (ADR-0099 §7).
+  const companies = useSuggestions("company", company, { enabled: open });
   const [purchaseDate, setPurchaseDate] = useState("");
   const [purchaseCost, setPurchaseCost] = useState("");
   const [notes, setNotes] = useState("");
@@ -352,7 +353,7 @@ export function ReceiveStockButton() {
                         id="receive-company"
                         value={company}
                         onValueChange={setCompany}
-                        source={() => companies?.map((value) => ({ value }))}
+                        source={() => companies}
                         recentKey="asset.company"
                         placeholder={t("companyPlaceholder")}
                       />
