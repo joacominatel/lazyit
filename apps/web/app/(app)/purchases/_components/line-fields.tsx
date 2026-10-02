@@ -2,6 +2,7 @@
 
 import { TrashIcon } from "@heroicons/react/24/outline";
 import type { PurchaseOrderLineKind } from "@lazyit/shared";
+import { Badge } from "@/components/ui/badge";
 import { useLocale, useTranslations } from "next-intl";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
 import { MoneyField } from "@/components/money-input";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
-import type { LineDraft, LineErrors } from "@/lib/purchases/payload";
+import { isWritableKind, type LineDraft, type LineErrors } from "@/lib/purchases/payload";
 import { formatMoney, MONEY_MAX, parseMoneyInput } from "@/lib/utils/money";
 import { SegmentedChoice } from "./segmented-choice";
 
@@ -66,14 +67,21 @@ export function LineFields({
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
         <Field className="sm:col-span-2">
-          <FieldLabel htmlFor={id("kind")}>{t("kind")}</FieldLabel>
-          <SegmentedChoice
-            id={id("kind")}
-            value={line.kind}
-            onValueChange={(kind) => onChange({ kind })}
-            options={kinds}
-            label={t("kindLabel", { index })}
-          />
+          <FieldLabel id={id("kind-label")}>{t("kind")}</FieldLabel>
+          {isWritableKind(line.kind) ? (
+            <SegmentedChoice
+              id={id("kind")}
+              value={line.kind}
+              onValueChange={(kind) => onChange({ kind })}
+              options={kinds}
+              labelledBy={id("kind-label")}
+            />
+          ) : (
+            // A kind a newer build wrote: shown as stored, never offered for change here.
+            <Badge variant="outline" className="w-fit">
+              {line.kind}
+            </Badge>
+          )}
         </Field>
         <Field className="sm:col-span-5" data-invalid={errors?.description ? true : undefined}>
           <FieldLabel htmlFor={id("description")}>{t("description")}</FieldLabel>

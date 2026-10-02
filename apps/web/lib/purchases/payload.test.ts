@@ -205,11 +205,24 @@ describe("toUpdateLine", () => {
     });
   });
 
-  test("switching to OTHER clears the model fields", () => {
-    const draft = { ...lineDraftFrom(savedLine, "es"), kind: "OTHER" as const };
-    expect(toUpdateLine(draft, savedLine, "es")).toEqual({
+  test("switching to OTHER sends only the kind — the stored brand and warranty are kept", () => {
+    const draft = { ...lineDraftFrom(savedLine, "es"), kind: "OTHER" };
+    expect(toUpdateLine(draft, savedLine, "es")).toEqual({ ok: true, payload: { kind: "OTHER" } });
+  });
+
+  test("editing an OTHER line never clears its stored model fields", () => {
+    const other = { ...savedLine, kind: "OTHER" };
+    const draft = { ...lineDraftFrom(other, "es"), manufacturerText: "", description: "Flete" };
+    expect(toUpdateLine(draft, other, "es")).toEqual({ ok: true, payload: { description: "Flete" } });
+  });
+
+  test("a kind a newer build wrote is kept as is, never rewritten to ASSET", () => {
+    const consumable = { ...savedLine, kind: "CONSUMABLE" };
+    const draft = lineDraftFrom(consumable, "es");
+    expect(draft.kind).toBe("CONSUMABLE");
+    expect(toUpdateLine({ ...draft, quantity: "5" }, consumable, "es")).toEqual({
       ok: true,
-      payload: { kind: "OTHER", manufacturerText: null, warrantyMonths: null },
+      payload: { quantity: 5 },
     });
   });
 });

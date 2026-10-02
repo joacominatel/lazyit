@@ -7,15 +7,16 @@
  * error on that field, never guessed.
  */
 
-import type {
-  CreatePurchaseOrder,
-  CreatePurchaseOrderLine,
-  PurchaseOrder,
-  PurchaseOrderLine,
-  PurchaseOrderLineKind,
-  PurchaseOrderStatus,
-  UpdatePurchaseOrder,
-  UpdatePurchaseOrderLine,
+import {
+  type CreatePurchaseOrder,
+  type CreatePurchaseOrderLine,
+  PURCHASE_ORDER_LINE_KINDS,
+  type PurchaseOrder,
+  type PurchaseOrderLine,
+  type PurchaseOrderLineKind,
+  type PurchaseOrderStatus,
+  type UpdatePurchaseOrder,
+  type UpdatePurchaseOrderLine,
 } from "@lazyit/shared";
 import { formatMoney, type MoneyParseError, parseMoneyInput } from "@/lib/utils/money";
 
@@ -39,7 +40,11 @@ export interface PurchaseHeaderDraft {
 export interface LineDraft {
   /** Client-side identity of the row (React key, error map key). */
   key: string;
-  kind: PurchaseOrderLineKind;
+  /**
+   * `ASSET` or `OTHER` — the kinds this build writes. A saved line of a kind a newer build added keeps its
+   * raw value here, is shown read-only and is never rewritten.
+   */
+  kind: string;
   description: string;
   manufacturerText: string;
   modelText: string;
@@ -118,6 +123,11 @@ export function isBlankLine(line: LineDraft): boolean {
   );
 }
 
+/** The kinds this build may write (a line's kind selector offers only these). */
+export function isWritableKind(kind: string): kind is PurchaseOrderLineKind {
+  return (PURCHASE_ORDER_LINE_KINDS as readonly string[]).includes(kind);
+}
+
 /** A whole count in `[min, max]` typed as digits, `null` when blank, `"invalid"` otherwise. */
 function parseCount(text: string, min: number, max: number): number | null | "invalid" {
   const value = text.trim();
@@ -178,7 +188,7 @@ export function toCreateLine(
   const parsed = parseLine(line, locale);
   if (!parsed.ok) return parsed;
   const out: CreatePurchaseOrderLine = { description: parsed.description };
-  if (line.kind !== "ASSET") out.kind = line.kind;
+  if (line.kind !== "ASSET" && isWritableKind(line.kind)) out.kind = line.kind;
   if (parsed.quantity !== 1) out.quantity = parsed.quantity;
   if (parsed.unitPrice !== null) out.unitPrice = parsed.unitPrice;
   if (line.kind === "ASSET") {
@@ -313,7 +323,7 @@ export function toUpdatePurchase(
 export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraft {
   return {
     key: line.id,
-    kind: line.kind === "OTHER" ? "OTHER" : "ASSET",
+    kind: line.kind,
     description: line.description,
     manufacturerText: line.manufacturerText ?? "",
     modelText: line.modelText ?? "",
@@ -326,8 +336,8 @@ export function lineDraftFrom(line: PurchaseOrderLine, locale: string): LineDraf
 
 /**
  * The line dialog → `PATCH .../lines/:lineId`: only what changed, a cleared field as `null`; `null` when
- * nothing changed. Switching to `OTHER` clears the model fields, which do not apply to it. A line of a kind
- * this build does not know keeps its kind unless the operator picks one.
+ * nothing changed. The brand, model and warranty are edited only on an `ASSET` line: on any other kind
+ * they are hidden and left as stored, never cleared. A line of a kind this build does not know keeps it.
  */
 export function toUpdateLine(
   draft: LineDraft,
@@ -339,19 +349,18 @@ export function toUpdateLine(
   const parsed = parseLine(draft, locale);
   if (!parsed.ok) return parsed;
   const out: UpdatePurchaseOrderLine = {};
-  const originalKind = original.kind === "OTHER" ? "OTHER" : "ASSET";
-  if (draft.kind !== originalKind) out.kind = draft.kind;
+  if (draft.kind !== original.kind && isWritableKind(draft.kind)) out.kind = draft.kind;
   if (parsed.description !== original.description) out.description = parsed.description;
   if (parsed.quantity !== original.quantity) out.quantity = parsed.quantity;
   if (parsed.unitPrice !== (original.unitPrice ?? null)) out.unitPrice = parsed.unitPrice;
-  const isAsset = draft.kind === "ASSET";
-  const manufacturer = isAsset ? draft.manufacturerText.trim() || null : null;
-  const model = isAsset ? draft.modelText.trim() || null : null;
-  const assetModelId = isAsset ? draft.assetModelId || null : null;
-  const warranty = isAsset ? parsed.warrantyMonths : null;
-  if (manufacturer !== original.manufacturerText) out.manufacturerText = manufacturer;
-  if (model !== original.modelText) out.modelText = model;
-  if (assetModelId !== original.assetModelId) out.assetModelId = assetModelId;
-  if (warranty !== original.warrantyMonths) out.warrantyMonths = warranty;
+  if (draft.kind === "ASSET") {
+    const manufacturer = draft.manufacturerText.trim() || null;
+    const model = draft.modelText.trim() || null;
+    const assetModelId = draft.assetModelId || null;
+    if (manufacturer !== original.manufacturerText) out.manufacturerText = manufacturer;
+    if (model !== original.modelText) out.modelText = model;
+    if (assetModelId !== original.assetModelId) out.assetModelId = assetModelId;
+    if (parsed.warrantyMonths !== original.warrantyMonths) out.warrantyMonths = parsed.warrantyMonths;
+  }
   return { ok: true, payload: Object.keys(out).length > 0 ? out : null };
 }
