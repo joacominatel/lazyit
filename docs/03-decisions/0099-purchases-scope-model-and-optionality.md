@@ -19,11 +19,12 @@ suggestions. **Phase 1 screens built** (#1474, 2026-10-02): the Purchases area (
 and edit, suppliers, activity log), the asset's currency label, the smart-entry sources and the
 Application *Publisher* label. **Phase 1 backend flows built** (#1473, 2026-10-02): receiving from a line,
 linking and unlinking assets with the apply-values diff, cancelling remaining units, purchase documents,
-the asset's provenance read, the pending-units list and the gated CSV columns. Their screens — receiving,
-linking, documents, the *Pending units* tab and the asset's *Purchase* panel — are still to build (#1475);
-what the builds settled is in [[#Decisions while building (Phase 1 core, #1472)]],
-[[#Decisions while building (Phase 1 web, #1474)]] and
-[[#Decisions while building (Phase 1 flows, #1473)]].
+the asset's provenance read, the pending-units list and the gated CSV columns. **Their screens built**
+(#1475, 2026-10-02): receiving from a line, linking with the diff, cancelling remaining units, the purchase's
+documents, the *Pending units* tab and the asset's *Purchase* panel. What the builds settled is in
+[[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
+[[#Decisions while building (Phase 1 flows, #1473)]] and
+[[#Decisions while building (Phase 1 flows web, #1475)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -639,6 +640,64 @@ a CEO decision.
   follow-up outside #1473's scope.
 - **AI tools.** Every new handler is unexposed for Phase 3 (#1478); binary upload and download stay
   file-tool exclusions. The asset AI tools gain `purchaseCurrency` next to `purchaseCost`.
+
+## Decisions while building (Phase 1 flows web, #1475)
+
+CTO decisions taken while building the flows' screens (2026-10-02), under the principles above — above all
+D-D, "not a nuisance and not heavy to fill in". None reopens a CEO decision.
+
+- **Receiving is the *Receive stock* dialog in a purchase mode** ([[purchases/ux-proposal]] §3.d), through
+  `POST /purchase-orders/:id/lines/:lineId/receive`. The serials come first and the quantity follows them
+  (the quantity field is read-only while serials are pasted, so a count mismatch cannot be sent); the
+  prefilled values read as a summary with *Change*. Every value is sent explicitly, because each one is an
+  override of the purchase's prefill: a field the operator cleared is `null`, never omitted. The purchase
+  date is the invoice date, else the viewer's today. Plain *Receive stock* keeps its own route and its
+  "serials must match the quantity" rule; the UX proposal's suggestion to make the quantity follow the
+  serials there too is left for later.
+- **A line without a model is not a dead end.** The dialog asks for the model inline (with the usual
+  *+ New model*) and saves it **on the line** (a logged line update) before receiving. Rejected: the route's
+  one-off `modelId` override — the line would stay unmapped and ask again at the next delivery.
+- **"From purchase" switches the dialog, it does not decorate the plain receive.** Picking an open line (or
+  the quiet "n units of this model are pending on …" suggestion under the chosen model) reads that purchase
+  and puts the dialog in purchase mode. On **New asset** the same picker hands off to that dialog: an asset
+  create carries no purchase line by design (linking is its own audited action), and a generated unit is
+  born linked. Rejected: create, then link — two writes that can half-fail, recording `CREATED` plus
+  `PURCHASE_LINKED` for a unit that was in fact received on the line.
+- **The over-receipt fix is a button, not a choice to make.** Receiving or linking past the line shows the
+  warning with *Raise the line to n* (n = received + cancelled + incoming), which edits the line at once;
+  continuing without it is fine (§4). The UX proposal's three-way choice is reduced to that: "link only some"
+  is unticking assets, "pick another line" is going back.
+- **The link request from the choices.** `apply` lists the fields ticked on every asset that has something
+  to apply for them; an asset that receives more gets its full list in `applyByAsset`; a field nobody ticked
+  is in neither, so it is never touched. Fills start ticked, replacements never; *Apply every purchase value*
+  ticks both; *Show each asset* opens the per-asset grid. Assets already on the line are left out; assets on
+  another purchase need a per-asset *Move here*, and `move: true` is sent only when one is ticked.
+- **Bulk linking makes the Assets list selectable for linkers.** The row checkboxes appeared only with
+  `asset:delete` (the lifecycle batch actions); they now also appear with `asset:write` +
+  `purchaseOrder:write`, and the status / delete actions stay behind `asset:delete`. The selection is the
+  current page — at most 200 rows, the link cap.
+- **The asset's *Purchase* panel is provenance only.** It renders — and `GET /assets/:id/purchase` is
+  requested — only with `purchaseOrder:read` and only for an asset that carries a line (D-A); an unlinked
+  asset shows the panel only to someone who can link it. The asset's own cost and dates stay in *Details*
+  under `asset:read` as before (not moved into the panel, no *Book value* relabel), so viewers lose nothing.
+  *Differs from purchase* marks the line price when the asset's cost differs in amount or label (cost only,
+  ux-proposal §2.3); there is no *Apply purchase value* button — the link route refuses an asset already on
+  the line, and an ordinary asset edit remains the way to change the cost. An archived purchase reads as
+  archived, without its documents.
+- **Documents reuse the asset documents panel**, parameterised by parent, with a warning that the files are
+  not in the backup until the attachments backup ships (§12, [[backups]] item 7). No document type label
+  (not built, #1473).
+- **Pending units** is its own tab (`/purchases/pending`): open lines grouped by purchase, oldest order first,
+  filtered by supplier, a purchase past its expected date marked *Overdue* (text, not colour alone). The
+  proposal's *Overdue only* toggle is not built — the list has no such filter.
+- **The purchase's activity log** now reads the flows' events (units received, linked, moved, cancelled with
+  the reason; documents added and removed), still tolerant of a type it does not know.
+- **Contract gaps, left to a backend follow-up.** (1) Nothing lists the assets linked to a line or purchase,
+  so the purchase page has no linked-assets list and unlinking happens from the asset's *Purchase* panel only.
+  (2) The provenance read carries no purchase `createdAt`, so a purchase with neither a reference nor an order
+  date is titled on the asset with its line's creation date. (3) The asset list has no "not linked" or
+  "created near the order date" filter, so the link picker filters by the line's model only; the preview still
+  marks every asset that sits on another purchase.
 
 ## Related
 
