@@ -59,16 +59,25 @@ export function NewFromDocument() {
       const reference = referenceFromFileName(file.name);
       const purchase = await create.mutateAsync({ status: "DRAFT", reference });
       let attachmentId: string;
+      let stored: string;
       try {
         const attachment = await uploadAttachment("purchaseOrder", purchase.id, file);
         attachmentId = attachment.id;
-        // The stand-in must read as the stored name, which the server may have normalized.
-        const stored = referenceFromFileName(attachment.originalName);
-        if (stored !== reference) await updatePurchaseOrder(purchase.id, { reference: stored });
+        stored = referenceFromFileName(attachment.originalName);
       } catch (error) {
         notifyError(error, t("uploadError"));
         router.push(`/purchases/${purchase.id}`);
         return;
+      }
+      // The stand-in must read as the stored name, which the server may have normalized. If that rename
+      // fails, the file is attached all the same: the review still reads it, but the reference then counts as
+      // the purchase's own (a replacement, never pre-ticked) — say so, and go on.
+      if (stored !== reference) {
+        try {
+          await updatePurchaseOrder(purchase.id, { reference: stored });
+        } catch (error) {
+          notifyError(error, t("renameError"));
+        }
       }
       router.push(`/purchases/${purchase.id}/review/${attachmentId}?read=1`);
     } catch (error) {

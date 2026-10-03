@@ -419,7 +419,7 @@
     "savedOn": "Extracción de documentos activada",
     "savedOff": "Extracción de documentos desactivada",
     "availability": {
-      "aiOff": "Primero activá el asistente de IA. La extracción de documentos usa su proveedor y necesita los dos interruptores activados.",
+      "aiOff": "Primero activa el asistente de IA. La extracción de documentos usa su proveedor y necesita los dos interruptores activados.",
       "providerUnsupported": "El proveedor configurado no puede leer documentos. La extracción de documentos funciona con Anthropic, OpenAI y Google Gemini."
     },
     "disclosure": {

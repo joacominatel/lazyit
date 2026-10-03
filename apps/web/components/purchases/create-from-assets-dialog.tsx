@@ -67,7 +67,8 @@ export function CreatePurchaseFromAssetsDialog({
   const [supplierError, setSupplierError] = useState<string>();
   const [reference, setReference] = useState("");
   const [currency, setCurrency] = useState("");
-  const [nothingLinkable, setNothingLinkable] = useState(false);
+  // The 409 "nothing could be linked": `supplier` names a supplier created inline just before it, which stays.
+  const [nothingLinkable, setNothingLinkable] = useState<{ supplier: string | null } | null>(null);
   const [result, setResult] = useState<{ id: string; linked: number; failures: FailureView[] } | null>(null);
   const { resolution, sameNamed } = useSupplierResolution(supplierText, null, supplierChoice);
   const references = useSuggestions("reference", reference);
@@ -78,15 +79,19 @@ export function CreatePurchaseFromAssetsDialog({
 
   async function save() {
     setSupplierError(undefined);
-    setNothingLinkable(false);
+    setNothingLinkable(null);
     setSaving(true);
+    let createdSupplier: string | null = null;
     try {
       const supplier = await saveSupplier(supplierText, supplierChoice);
       if (supplier === "ambiguous") {
         setSupplierError(tForm("supplierChooseError"));
         return;
       }
-      if (supplier.created) toast.success(tForm("supplierCreatedToast", { name: supplier.created }));
+      if (supplier.created) {
+        createdSupplier = supplier.created;
+        toast.success(tForm("supplierCreatedToast", { name: supplier.created }));
+      }
       const built = buildFromAssetsPayload(
         assets.map((asset) => asset.id),
         supplier.id,
@@ -106,7 +111,7 @@ export function CreatePurchaseFromAssetsDialog({
       }
       setResult({ id: created.purchaseOrder.id, linked: outcome.linked, failures: outcome.failures });
     } catch (error) {
-      if (isNothingLinkable(error)) setNothingLinkable(true);
+      if (isNothingLinkable(error)) setNothingLinkable({ supplier: createdSupplier });
       else notifyError(error, t("error"));
     } finally {
       setSaving(false);
@@ -199,7 +204,11 @@ export function CreatePurchaseFromAssetsDialog({
             <p className="text-sm text-muted-foreground">{t("linksOnly")}</p>
             {nothingLinkable ? (
               <Callout tone="warning" icon={<ExclamationTriangleIcon />} role="alert">
-                <p className="text-sm">{t("nothingLinkable")}</p>
+                <p className="text-sm">
+                  {nothingLinkable.supplier
+                    ? t("nothingLinkableSupplier", { name: nothingLinkable.supplier })
+                    : t("nothingLinkable")}
+                </p>
               </Callout>
             ) : null}
             <DialogFooter>

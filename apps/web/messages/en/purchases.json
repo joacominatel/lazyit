@@ -228,7 +228,8 @@
     "applicationNotMapped": "no application yet",
     "seatsFor": "for <link>{name}</link>",
     "applyLicense": "Apply license",
-    "readDocument": "Read this document"
+    "readDocument": "Read this document",
+    "readDocumentHint": "Sends the whole file to your AI provider to draft the purchase. Nothing is saved until you review it."
   },
   "activity": {
     "fields": {
@@ -604,7 +605,8 @@
       "linkedElsewhere": "Already on another purchase — move it from that purchase instead",
       "alreadyLinked": "Already on this purchase",
       "notLinked": "Not linked"
-    }
+    },
+    "nothingLinkableSupplier": "None of the selected assets can be linked: each is archived or already on a purchase. No purchase was created — but the supplier {name} was, and stays."
   },
   "extraction": {
     "breadcrumb": "Review document",
@@ -726,12 +728,15 @@
     "invalidValue": "This value can't be saved as it is.",
     "newFromDocument": {
       "title": "Have the invoice or quote?",
-      "description": "lazyit can read a PDF or image (up to {max} MB) and fill the purchase for you to review. The file goes to your AI provider; nothing is saved until you review it.",
+      "description": "Pick a PDF or image (up to {max} MB): lazyit creates a draft purchase holding the file and sends the file to your AI provider to read. Nothing read from it is saved until you review it.",
       "action": "New purchase from a document",
       "wrongType": "{name} can't be read: choose a PDF or an image.",
       "tooLarge": "{name} is larger than {max} MB.",
       "uploadError": "The purchase was created, but the file couldn't be attached.",
-      "createError": "Couldn't start the purchase"
-    }
+      "createError": "Couldn't start the purchase",
+      "renameError": "The file is attached, but the purchase's name couldn't be set from it. The review still reads it; its reference shows as a replacement."
+    },
+    "saveFix": "Fix the marked values to save",
+    "savedPart": "Saved"
   }
 }

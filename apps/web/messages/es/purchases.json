@@ -228,7 +228,8 @@
     "applicationNotMapped": "todavía sin aplicación",
     "seatsFor": "para <link>{name}</link>",
     "applyLicense": "Aplicar licencia",
-    "readDocument": "Leer este documento"
+    "readDocument": "Leer este documento",
+    "readDocumentHint": "Envía el archivo completo a tu proveedor de IA para hacer el borrador de la compra. No se guarda nada hasta que lo revisas."
   },
   "activity": {
     "fields": {
@@ -604,7 +605,8 @@
       "linkedElsewhere": "Ya está en otra compra: muévelo desde esa compra",
       "alreadyLinked": "Ya está en esta compra",
       "notLinked": "No vinculado"
-    }
+    },
+    "nothingLinkableSupplier": "Ninguno de los activos seleccionados se puede vincular: cada uno está archivado o ya está en una compra. No se creó la compra, pero sí el proveedor {name}, que queda."
   },
   "extraction": {
     "breadcrumb": "Revisar documento",
@@ -726,12 +728,15 @@
     "invalidValue": "Este valor no se puede guardar así.",
     "newFromDocument": {
       "title": "¿Tienes la factura o el presupuesto?",
-      "description": "lazyit puede leer un PDF o una imagen (hasta {max} MB) y completar la compra para que la revises. El archivo va a tu proveedor de IA; no se guarda nada hasta que lo revisas.",
+      "description": "Elige un PDF o una imagen (hasta {max} MB): lazyit crea una compra en borrador con el archivo y lo envía a tu proveedor de IA para leerlo. No se guarda nada de lo leído hasta que lo revisas.",
       "action": "Nueva compra desde un documento",
       "wrongType": "{name} no se puede leer: elige un PDF o una imagen.",
       "tooLarge": "{name} pesa más de {max} MB.",
       "uploadError": "La compra se creó, pero no se pudo adjuntar el archivo.",
-      "createError": "No se pudo empezar la compra"
-    }
+      "createError": "No se pudo empezar la compra",
+      "renameError": "El archivo quedó adjunto, pero no se pudo poner su nombre a la compra. La revisión lo lee igual; su referencia aparece como un reemplazo."
+    },
+    "saveFix": "Corrige los valores marcados para guardar",
+    "savedPart": "Guardado"
   }
 }

@@ -630,7 +630,11 @@ export function PurchaseDetailView({ id }: { id: string }) {
         rowAction={(attachment) =>
           canExtract(extraction, attachment) ? (
             <Button variant="ghost" size="sm" asChild>
-              <Link href={`/purchases/${purchase.id}/review/${attachment.id}?read=1`}>
+              <Link
+                href={`/purchases/${purchase.id}/review/${attachment.id}?read=1`}
+                // The one-line disclosure: what clicking sends, and that nothing is saved yet.
+                title={t("detail.readDocumentHint")}
+              >
                 <DocumentMagnifyingGlassIcon />
                 <span className="sr-only sm:not-sr-only">{t("detail.readDocument")}</span>
               </Link>
