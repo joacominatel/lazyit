@@ -42,7 +42,7 @@ import {
   toUpdatePurchase,
 } from "@/lib/purchases/payload";
 import { referenceDuplicate } from "@/lib/purchases/reference";
-import { isSaveShortcut, isUnfocusedTarget } from "@/lib/purchases/save-shortcut";
+import { isSaveShortcut, isUnfocusedTarget, lastPointerInScope } from "@/lib/purchases/save-shortcut";
 import { runExclusive } from "@/lib/purchases/submit-guard";
 import { resolveSupplier } from "@/lib/purchases/supplier";
 import { formatMoney, parseMoneyInput } from "@/lib/utils/money";
@@ -220,16 +220,27 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     if (saving || event.repeat || submitting.current) return;
     event.currentTarget.requestSubmit();
   }
-  // With focus on nothing (a click on blank space, a removed line) the key never reaches the form (#1508).
+  // With focus on nothing (a click on blank space, a removed line) the key never reaches the form (#1508) —
+  // taken only when the last click was on this page, not in the docked assistant beside it.
   useEffect(() => {
+    let lastPointer: EventTarget | null = null;
+    function onDocumentPointerDown(event: PointerEvent) {
+      lastPointer = event.target;
+    }
     function onDocumentKeyDown(event: globalThis.KeyboardEvent) {
-      if (!isSaveShortcut(event) || !isUnfocusedTarget(event.target, document) || !formRef.current) return;
+      const form = formRef.current;
+      if (!form || !isSaveShortcut(event) || !isUnfocusedTarget(event.target, document)) return;
+      if (!lastPointerInScope(lastPointer, form.closest("main") ?? form)) return;
       event.preventDefault();
       if (event.repeat || submitting.current) return;
-      formRef.current.requestSubmit();
+      form.requestSubmit();
     }
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
     document.addEventListener("keydown", onDocumentKeyDown);
-    return () => document.removeEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
   }, []);
   function onLinesKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Enter" || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;

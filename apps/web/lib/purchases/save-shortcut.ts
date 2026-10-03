@@ -7,8 +7,10 @@
  * its list open handles the same keys first (Ctrl/⌘+Enter keeps the text as typed, `suggestKeyAction`) and
  * lets the key travel on, so the save follows; the form therefore never skips a key a field already
  * handled. What the form cannot hear is a key pressed with focus on nothing — after a click on blank space,
- * or once the focused control is gone (a removed line). The document catches that case only; focus in
- * anything else (a dialog, the assistant, the search palette) is somebody else's keyboard.
+ * or once the focused control is gone (a removed line). The document catches that case only, and only when
+ * the last click was on the page the form is on (its `<main>`), or there was none yet: a click into the
+ * docked assistant's transcript also leaves focus on nothing, and a Ctrl/⌘+Enter there is not a save. Focus
+ * in anything else (a dialog, the assistant, the search palette) is somebody else's keyboard.
  */
 
 /** The parts of a keyboard event the shortcut reads — a DOM `KeyboardEvent` fits as is. */
@@ -30,4 +32,15 @@ export function isUnfocusedTarget(
   doc: { body: unknown; documentElement: unknown },
 ): boolean {
   return target == null || target === doc.body || target === doc.documentElement;
+}
+
+/**
+ * Whether the last pointer press leaves a focus-on-nothing shortcut to the form: no press since the form
+ * mounted, or one inside `scope` (the `<main>` the form is on).
+ */
+export function lastPointerInScope(
+  lastPointer: unknown,
+  scope: { contains(node: Node | null): boolean },
+): boolean {
+  return lastPointer == null || scope.contains(lastPointer as Node);
 }
