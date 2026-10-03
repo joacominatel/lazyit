@@ -3,7 +3,7 @@ title: "ADR-0035: Cross-cutting search architecture (Meilisearch)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-09-26
+updated: 2026-10-03
 deciders: [Joaquín Minatel]
 ---
 
@@ -195,6 +195,46 @@ as an operator's empty search. This amendment fixes the pair, states the policy,
    filter (including the fail-closed never-match expression), `upsert`/`remove`, and the swap rebuild.
    A client or server change that fails it is not mergeable, whatever the changelog says.
 
+## Amendment (2026-10-03) — purchases and suppliers, gated per caller (issue #1499)
+
+**Status: accepted (technical, within this ADR's direction and ADR-0099's D-A).** Two new indexes,
+`purchases` and `suppliers` ([[0099-purchases-scope-model-and-optionality]] §13 listed purchases in global
+search as not built). Nine indexes in all.
+
+- **Projections — display fields, plus searchable-only text.** A purchase document carries `reference`,
+  `supplierName` (the supplier joined, even when archived — the purchase page still shows it),
+  `invoiceNumbers`, the **stored** `status` (the received states are derived on read, ADR-0099 §3, and not
+  indexed), `orderDate` and `createdAt` as ISO strings (the palette titles a purchase the way the list does),
+  and `lineDescriptions` — the live lines' descriptions, so a purchase is found by what it bought. A supplier
+  document carries `name`, `taxId`, `salesContactName` and `supportContactName`. **Never indexed:** money,
+  notes, company, delivery location; supplier emails, phones, website and notes. **Never retrieved**
+  (searchable only, the SEC-061 pattern): `lineDescriptions` and the two contact names. The hit contract is
+  `PurchaseHitSchema` / `SupplierHitSchema` in `@lazyit/shared`.
+- **Authorization — at the result level, like `users`.** `search:read` still gates the endpoint; the
+  controller additionally drops `purchases` and `suppliers` from the requested indexes unless the
+  principal holds `purchaseOrder:read` ([[INVARIANTS]] INV-PO-1). The check is per **principal**
+  (`PermissionResolverService.principalHas`), so a service account needs the direct grant. A dropped index
+  is never queried: no hit and no count reach the caller. The `lazyit_search` AI tool runs through the same
+  controller, so it inherits the gate. The web hides the two filter chips without the permission.
+- **Sync — re-read on commit.** A purchase document joins rows its service does not hold after a line edit
+  or a supplier rename, so instead of each call site projecting a document, `PurchaseSearchSync` (in the
+  search module) is told *which* record changed, after the transaction commits, and re-reads it: live →
+  upsert, archived or missing → remove. Called from purchase create / update / archive / restore, line
+  add / update / remove, *create from assets*, and supplier create / update / archive / restore. A supplier
+  sync also re-projects that supplier's live purchases in one batched upsert (`SearchService.upsertMany`),
+  so a rename reaches `supplierName`. Receiving, linking and cancelling units change nothing indexed and do
+  not sync. Still fire-and-forget and fail-soft (§3); the reconcile sweeper repairs a dropped write.
+  **Supplier merge (#1496) must call `PurchaseSearchSync.supplier` for the surviving and the merged
+  supplier** once its transaction commits.
+- **Upgrade — no step.** On an existing instance the two indexes do not exist yet, so the boot self-heal
+  (2026-06-11 amendment) sees them as missing and builds them in the background from Postgres on the first
+  start after the update; the seven existing indexes have documents and are left alone. `reindex:all` and
+  the reconcile sweeper cover both indexes too. Not a server bump: no volume rename.
+- **Cost.** An instance with no purchases (or no suppliers) keeps an empty index, which the self-heal
+  rebuilds — cheaply, to empty — on every boot, as for any other empty index. A supplier edit re-projects
+  all of its purchases, which is fine at small-team sizes and one engine task, but grows with the supplier's
+  purchase count.
+
 ## Deferred (explicit)
 
 - Faceting / filtered search, relevance tuning, highlighting, incremental/batched reindex, and
@@ -210,7 +250,7 @@ as an operator's empty search. This amendment fixes the pair, states the policy,
   (`apps/web/components/global-search.tsx`); the response is typed in `@lazyit/shared` (`search`
   schema). Results group by entity and degrade gracefully where no detail page exists yet.
 
-Related: #383 · #1216 · [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
+Related: #383 · #1216 · #1499 · [[asset]] · [[article]] · [[user]] · [[location]] · [[application]] ·
 [[0031-logging-strategy]] · [[0032-soft-delete-middleware]] · [[0028-secrets-and-config]] ·
 [[0016-auth-strategy-deferred]] · [[0056-in-app-notification-bell]] (the retention sweeper this
 amendment's reconcile sweeper mirrors)

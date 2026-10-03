@@ -3,7 +3,7 @@ title: PurchaseOrder
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # PurchaseOrder
@@ -78,6 +78,10 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   and live line descriptions (`q`), and filters by `status` (multi-value), `supplierId` and `receipt` — a
   derived state, or `PENDING`: at least one unit pending on a purchase that is not `CANCELLED`. The receipt
   filter is computed with the same functions as the detail, so the list and the shown state agree.
+- **Global search** (#1499, [[0035-search-architecture]]): the `purchases` index carries the reference,
+  supplier name, invoice numbers, stored status, order and creation dates, and the live lines' descriptions
+  (searchable, never returned). Never money or notes. Searched only by a principal holding
+  `purchaseOrder:read`; archived purchases are removed from the index.
 - **Cancel purchase** is offered only while nothing is received; afterwards the line action *Cancel
   remaining units* closes it cleanly. That is the web's rule: the API accepts `CANCELLED` with units
   received, and a cancelled purchase can still receive and link (lazyit records what happened — ADR-0099,

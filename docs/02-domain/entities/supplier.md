@@ -3,7 +3,7 @@ title: Supplier
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # Supplier
@@ -62,6 +62,9 @@ fields stay as they are.
   it — they show it, flagged as archived. The FK from a purchase is `Restrict`, so a supplier with purchases
   can never be hard-deleted.
 - Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
+- **Global search** (#1499, [[0035-search-architecture]]): the `suppliers` index carries the name, tax ID and
+  the two contact names (the names searchable, not returned) — never emails, phones, website or notes. Searched
+  only with `purchaseOrder:read`; an archived supplier is removed, and a rename re-indexes its purchases.
 - Merging duplicate suppliers (planned for Phase 2 in ADR-0099 §13) is **not built**: the Phase 2 unit left
   it out (ADR-0099, decisions while building Phase 2). Duplicates are reduced only by the suggestions above.
 

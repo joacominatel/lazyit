@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-03
 deciders: [Joaquín Minatel]
 ---
 
@@ -389,6 +389,12 @@ across lines, the dashboard *Pending deliveries* tile, global search for purchas
 with yearly totals (1b); merging suppliers and the other back-linking helpers beyond "create purchase from
 selected assets" (2). They are **not built**; they are tracked as #1495 (sub-issues #1496–#1503) — the full
 list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
+
+*Built since (2026-10-03, #1499):* **global search for purchases and suppliers**. Both are found in the ⌘K
+palette (a purchase also by its line descriptions) only by a principal holding `purchaseOrder:read` — D-A
+applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
+The design, the projections and the upgrade path are in [[0035-search-architecture]]'s 2026-10-03
+amendment.
 
 ### 14. Upgrade safety
 

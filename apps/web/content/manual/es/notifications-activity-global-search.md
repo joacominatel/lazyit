@@ -8,7 +8,8 @@ subcategory: global-search
 # Búsqueda global
 
 La búsqueda global es la paleta de comandos que abarca todo el producto: una sola caja que busca a la
-vez en activos, artículos, usuarios, ubicaciones, aplicaciones, nodos de topología y consumibles.
+vez en activos, artículos, usuarios, ubicaciones, aplicaciones, nodos de topología, consumibles,
+compras y proveedores.
 Tolera errores de tipeo y ordena los resultados por relevancia, así que una palabra parcial o casi
 acertada igual encuentra el registro.
 
@@ -22,7 +23,7 @@ pulsa **Enter** para abrir el resultado resaltado y **Esc** para cerrar.
 
 ## Qué busca
 
-Se indexan siete tipos de registros:
+Se indexan nueve tipos de registros:
 
 - **Activos** — por nombre, etiqueta de activo o número de serie.
 - **Artículos** — artículos de la Base de Conocimiento, incluido su cuerpo de texto, así que un
@@ -35,6 +36,12 @@ Se indexan siete tipos de registros:
   infraestructura, por etiqueta, dirección IP o nombre del activo vinculado.
 - **Consumibles** — repuestos y artículos de stock, por nombre, SKU o descripción. La vista previa
   muestra cuánto queda en existencia, así que "¿cuántos cables HDMI quedan?" se responde en la paleta.
+- **Compras** — por referencia, número de factura, proveedor o **lo que se compró**: la descripción de
+  una línea encuentra su compra, así que escribir "ThinkPad" trae la compra que los pidió. Un resultado
+  muestra la compra con el mismo nombre que en la lista de Compras, con su proveedor o sus números de
+  factura al lado. Los precios y las notas nunca se buscan. Las compras archivadas no aparecen.
+- **Proveedores** — por nombre, ID fiscal o el nombre de un contacto de ventas o de soporte. Los correos
+  y teléfonos de los contactos no se buscan. Los proveedores archivados no aparecen.
 
 Usa las **fichas de filtro** encima de los resultados para acotar la búsqueda a un solo tipo, o déjala en
 **Todos** para buscar en todo. Al seleccionar un resultado se navega directamente a ese registro.
@@ -64,6 +71,9 @@ Los resultados de la búsqueda respetan el control de acceso:
   correos.
 - Los **artículos** se filtran a las carpetas que realmente puedes abrir, así que un artículo restringido
   nunca aparece para alguien que de otro modo no podría leerlo.
+- Las **compras** y los **proveedores** aparecen solo para quien puede ver compras (un Administrador o un
+  Miembro por defecto; ver [Compras y proveedores](/help/purchases-recording-purchases)). Cualquier otra
+  persona no obtiene resultados de compras, ni conteos, ni las fichas de filtro Compras y Proveedores.
 
 Por eso dos personas pueden obtener resultados distintos para la misma consulta — por diseño.
 
@@ -77,7 +87,9 @@ esté de vuelta.
 ## Mantener el índice al día
 
 El índice de búsqueda se actualiza automáticamente a medida que los registros se crean, editan y
-eliminan. Dos situaciones piden una reconstrucción manual:
+eliminan. Cuando una actualización de lazyit suma un tipo de registro nuevo a la búsqueda — Compras y
+Proveedores, por ejemplo — los registros existentes se indexan solos la primera vez que lazyit arranca
+tras la actualización; no hace falta ejecutar nada. Dos situaciones piden una reconstrucción manual:
 
 - **Tras el primer despliegue**, para poblar el índice a partir de la base de datos existente.
 - **Tras una caída del servicio de búsqueda**, para reparar cualquier desfase (por ejemplo, una
