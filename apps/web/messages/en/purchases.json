@@ -382,7 +382,7 @@
     "merge": {
       "action": "Merge into…",
       "title": "Merge {name} into another supplier",
-      "description": "Use this when {name} is a duplicate. Pick the supplier that stays: its purchases move to it, its empty details are filled from {name} without overwriting anything, and {name} is archived.",
+      "description": "Use this when {name} is a duplicate. Pick the supplier that stays: every purchase of {name} moves to it, the empty details of the supplier that stays are filled from {name} without overwriting anything, and {name} is archived.",
       "target": "Supplier that stays",
       "targetPlaceholder": "Pick a supplier",
       "targetSearch": "Search name, tax ID or contact…",

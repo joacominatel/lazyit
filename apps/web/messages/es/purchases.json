@@ -382,7 +382,7 @@
     "merge": {
       "action": "Fusionar en…",
       "title": "Fusionar {name} en otro proveedor",
-      "description": "Úsalo cuando {name} es un duplicado. Elige el proveedor que queda: las compras pasan a él, sus datos vacíos se completan desde {name} sin pisar nada, y {name} se archiva.",
+      "description": "Úsalo cuando {name} es un duplicado. Elige el proveedor que queda: todas las compras de {name} pasan a él, los datos vacíos del proveedor que queda se completan desde {name} sin pisar nada, y {name} se archiva.",
       "target": "Proveedor que queda",
       "targetPlaceholder": "Elige un proveedor",
       "targetSearch": "Busca por nombre, ID fiscal o contacto…",
