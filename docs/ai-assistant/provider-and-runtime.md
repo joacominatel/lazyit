@@ -1092,7 +1092,9 @@ three kinds of runtime record, role `system`, never sent to the model:
   step (the run row has no column for it, and the job carries only `{ runId }`);
 - `lazyit-step-v1` `{ stepIndex, calls, outcomes, untrustedSources }` — written with a step's assistant
   message (its calls) and again when the step pauses (the read results already known, and the pending
-  invocation ids); the latest record of a step wins;
+  invocation ids); the latest record of a step wins. A step that read a source marking the whole
+  conversation (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`: a purchase document read by extraction, #1478) and
+  pauses for nothing is re-recorded too, just before its tool message, so later turns find the source;
 - `lazyit-web-search-v1` `{ stepIndex, searches, queries, sources }` (#1389) — written right after a step's
   assistant message when the provider searched the web in it: the sources the web shows under that
   message (the provider message does not keep them) and the run's record of the search.
@@ -1146,7 +1148,11 @@ through the descriptor's `mutationWeight`, SEC-081; a call that would pass the c
 sources: for every read result whose data held `<untrusted_content>`, its entity refs, or the synthetic
 `toolResult` ref of the tool when it named none (SEC-080), merged across the run. Every step record stores
 the merged set so far, and a resume adds the reads and forms answered while the run was paused (a form's
-picked labels are lazyit text, wrapped), so a resumed run rebuilds it exactly (T-03). Outputs are capped once, at write time
+picked labels are lazyit text, wrapped), so a resumed run rebuilds it exactly (T-03). Two sources mark the
+**conversation**, not only the turn, because their content stays in the replayed history: a web search
+(#1389, its own record) and a purchase document read by `purchase_document_read` (#1478, a
+`purchaseDocument` ref in any step record of the conversation). Every run of such a conversation starts
+with them in its untrusted sources, so nothing in it is auto-approved again. Outputs are capped once, at write time
 (`AI_TOOL_OUTPUT_MAX_CHARS = 24 000` serialized, a `[truncated — N more characters; refine the query]`
 marker; core already truncates the data at 20 000). With no pending proposal the step's single tool message
 is appended and the loop continues. With one or more: the step record (known results + pending ids) is
@@ -1256,7 +1262,9 @@ a select left without choices still fails, and the error names the fix ("fields.
 choices: add `options` … or `optionsFrom` (one of …) — or ask with kind "text" instead"). The stored form
 stays strict (`AiInputFormSchema`).
 `optionsFrom` is a closed list — `manufacturers` (the distinct `AssetModel.manufacturer` names, up to three
-pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)") —
+pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)"), and,
+for the purchase questions (#1478), `suppliers` (ids, labelled "name (tax ID)") and `consumables` (ids,
+labelled "name (SKU)") —
 resolved at call time through the list routes **as the user** (`rt.call`, so a list they cannot read
 refuses the call with the route's 403; an empty list asks the model to use a text field).
 
