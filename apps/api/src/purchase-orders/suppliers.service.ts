@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { CreateSupplier, PageQuery, UpdateSupplier } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 
@@ -27,7 +28,11 @@ export const SUPPLIER_SORT_ALLOWLIST = {
  */
 @Injectable()
 export class SuppliersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Global search (#1499): re-index after each write. Optional, as in PurchaseOrdersService.
+    @Optional() private readonly searchSync?: PurchaseSearchSync,
+  ) {}
 
   async findPage(filters: SupplierFilters, page: PageQuery) {
     const where: Prisma.SupplierWhereInput = {
@@ -83,22 +88,28 @@ export class SuppliersService {
     return supplier;
   }
 
-  create(data: CreateSupplier) {
-    return this.prisma.supplier.create({ data });
+  async create(data: CreateSupplier) {
+    const supplier = await this.prisma.supplier.create({ data });
+    this.searchSync?.supplier(supplier.id);
+    return supplier;
   }
 
   async update(id: string, data: UpdateSupplier) {
     await this.findOne(id);
-    return this.prisma.supplier.update({ where: { id }, data });
+    const supplier = await this.prisma.supplier.update({ where: { id }, data });
+    this.searchSync?.supplier(id);
+    return supplier;
   }
 
   /** Soft delete (never hard-delete). The supplier's purchases keep pointing at it. */
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.supplier.update({
+    const supplier = await this.prisma.supplier.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    this.searchSync?.supplier(id);
+    return supplier;
   }
 
   /** Clear `deletedAt` (ADR-0041). 404 if it never existed; idempotent when already live. */
@@ -111,9 +122,11 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier ${id} not found`);
     }
     if (supplier.deletedAt === null) return supplier;
-    return this.prisma.supplier.update({
+    const restored = await this.prisma.supplier.update({
       where: { id },
       data: { deletedAt: null },
     });
+    this.searchSync?.supplier(id);
+    return restored;
   }
 }

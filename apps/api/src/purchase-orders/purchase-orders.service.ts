@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   DEFAULT_PURCHASE_ORDER_LINE_KIND,
@@ -22,6 +23,7 @@ import {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
+import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
@@ -188,6 +190,8 @@ export class PurchaseOrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
+    // Global search (#1499): re-index a purchase after its write commits. Optional, as in ConsumablesService.
+    @Optional() private readonly searchSync?: PurchaseSearchSync,
   ) {}
 
   // ── Reads ────────────────────────────────────────────────────────────────────────────────────────────
@@ -385,7 +389,7 @@ export class PurchaseOrdersService {
     lines.forEach((line) =>
       assertLineTotalFits(line.quantity ?? 1, line.unitPrice ?? null),
     );
-    return this.prisma.$transaction(async (tx) => {
+    const detail = await this.prisma.$transaction(async (tx) => {
       await this.assertReferences(tx, header);
       await this.assertModelsLive(
         tx,
@@ -415,6 +419,8 @@ export class PurchaseOrdersService {
       });
       return this.readDetail(tx, created.id);
     });
+    this.searchSync?.purchase(detail.id);
+    return detail;
   }
 
   /**
@@ -425,7 +431,7 @@ export class PurchaseOrdersService {
    */
   async update(id: string, data: UpdatePurchaseOrder, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const detail = await this.prisma.$transaction(async (tx) => {
       const before = await this.assertLive(tx, id, { lock: true });
       await this.assertReferences(tx, data);
       const supplierId =
@@ -451,12 +457,14 @@ export class PurchaseOrdersService {
       }
       return this.readDetail(tx, id);
     });
+    this.searchSync?.purchase(id);
+    return detail;
   }
 
   /** Soft delete (ADMIN). Every asset link is kept; nothing else is touched. */
   async remove(id: string, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const removed = await this.prisma.$transaction(async (tx) => {
       await this.assertLive(tx, id);
       await tx.purchaseOrder.update({
         where: { id },
@@ -468,12 +476,14 @@ export class PurchaseOrdersService {
         includeSoftDeleted: true,
       } as Prisma.PurchaseOrderFindFirstOrThrowArgs);
     });
+    this.searchSync?.purchase(id);
+    return removed;
   }
 
   /** Restore (ADMIN, ADR-0041). 404 if it never existed; idempotent (no event) when already live. */
   async restore(id: string, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const detail = await this.prisma.$transaction(async (tx) => {
       // The read filter applies inside the transaction too; restore must see the archived row (ADR-0032).
       const purchase = await tx.purchaseOrder.findFirst({
         where: { id },
@@ -491,6 +501,8 @@ export class PurchaseOrdersService {
       }
       return this.readDetail(tx, id);
     });
+    this.searchSync?.purchase(id);
+    return detail;
   }
 
   // ── Line writes ─────────────────────────────────────────────────────────────────────────────────────
@@ -503,7 +515,7 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     assertLineTotalFits(data.quantity ?? 1, data.unitPrice ?? null);
-    return this.prisma.$transaction(async (tx) => {
+    const added = await this.prisma.$transaction(async (tx) => {
       await this.assertLive(tx, purchaseOrderId);
       await this.assertModelsLive(tx, [data.assetModelId]);
       await this.assertConsumablesLive(tx, [data.consumableId]);
@@ -527,6 +539,8 @@ export class PurchaseOrdersService {
       });
       return this.readLine(tx, line.id);
     });
+    this.searchSync?.purchase(purchaseOrderId);
+    return added;
   }
 
   /**
@@ -546,7 +560,7 @@ export class PurchaseOrdersService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       // A kind change is checked against the linked assets: lock the purchase first so a concurrent link
       // (which takes KEY SHARE on it) cannot slip a unit in between the check and the write.
       const { line: before } = await this.assertLineLive(
@@ -621,6 +635,8 @@ export class PurchaseOrdersService {
       }
       return this.readLine(tx, lineId);
     });
+    this.searchSync?.purchase(purchaseOrderId);
+    return updated;
   }
 
   /**
@@ -636,7 +652,7 @@ export class PurchaseOrdersService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const removed = await this.prisma.$transaction(async (tx) => {
       const { purchase, line } = await this.assertLineLive(
         tx,
         purchaseOrderId,
@@ -672,6 +688,8 @@ export class PurchaseOrdersService {
       // Nothing was received (checked above), so the line reads as received 0 — the full line shape.
       return { ...this.lineToWire(line, deriveLine(line, 0)), deletedAt: now };
     });
+    this.searchSync?.purchase(purchaseOrderId);
+    return removed;
   }
 
   /**

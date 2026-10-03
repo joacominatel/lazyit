@@ -1,3 +1,5 @@
+// SearchService (behind the optional PurchaseSearchSync) imports the ESM `meilisearch` package jest cannot load.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 // The service imports the generated client for types and `Prisma.join` (the receipt-filter SQL); stub it so
 // no real client loads. The fake delegates below stand in for the database.
 jest.mock('../../generated/prisma/client', () => ({
@@ -20,6 +22,7 @@ import { ActorService } from '../common/actor.service';
 import { runInAiInvocation } from '../ai/core/invocation-context';
 import type { Principal } from '../auth/principal';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { PurchaseOrdersService } from './purchase-orders.service';
 
 const PO = 'clpo00000000000000000001';
@@ -1273,5 +1276,86 @@ describe('PurchaseOrdersService', () => {
       });
       expect(prisma.asset.groupBy).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('PurchaseOrdersService — global search sync (#1499)', () => {
+  let prisma: FakePrisma;
+  let service: PurchaseOrdersService;
+  let committed: boolean;
+  // Records whether the transaction had committed when the sync was asked to re-index.
+  const synced: Array<{ id: string; afterCommit: boolean }> = [];
+
+  beforeEach(() => {
+    prisma = makePrisma();
+    committed = false;
+    synced.length = 0;
+    prisma.$transaction.mockImplementation(async (arg: unknown) => {
+      const result = await (arg as (tx: unknown) => unknown)(prisma);
+      committed = true;
+      return result;
+    });
+    const searchSync = {
+      purchase: jest.fn((id: string) => {
+        synced.push({ id, afterCommit: committed });
+      }),
+    };
+    service = new PurchaseOrdersService(
+      prisma as unknown as PrismaService,
+      new ActorService(),
+      searchSync as unknown as PurchaseSearchSync,
+    );
+    prisma.purchaseOrder.findFirst.mockResolvedValue(
+      purchaseRow({ reference: 'OC-1' }),
+    );
+    prisma.purchaseOrderLine.findFirst.mockResolvedValue(lineRow());
+    prisma.purchaseOrderLine.findFirstOrThrow.mockResolvedValue(lineRow());
+  });
+
+  it('re-indexes the purchase after create, update, archive and restore commit', async () => {
+    prisma.purchaseOrder.create.mockResolvedValue(purchaseRow());
+    prisma.purchaseOrder.findFirstOrThrow.mockResolvedValue(
+      purchaseRow({ deletedAt: new Date() }),
+    );
+
+    await service.create({ reference: 'OC-1' }, human);
+    await service.update(PO, { invoiceNumbers: 'A-1' }, human);
+    await service.remove(PO, human);
+    await service.restore(PO, human);
+
+    expect(synced).toEqual([
+      { id: PO, afterCommit: true },
+      { id: PO, afterCommit: true },
+      { id: PO, afterCommit: true },
+      { id: PO, afterCommit: true },
+    ]);
+  });
+
+  it('re-indexes the purchase after a line is added, edited or removed (its descriptions are searchable)', async () => {
+    prisma.purchaseOrderLine.aggregate.mockResolvedValue({
+      _max: { position: 0 },
+    });
+    prisma.purchaseOrderLine.create.mockResolvedValue(lineRow());
+    prisma.purchaseOrderLine.count.mockResolvedValue(1);
+
+    await service.addLine(PO, { description: 'Dock' }, human);
+    await service.updateLine(PO, LINE, { description: 'USB-C dock' }, human);
+    await service.removeLine(PO, LINE, human);
+
+    expect(synced).toEqual([
+      { id: PO, afterCommit: true },
+      { id: PO, afterCommit: true },
+      { id: PO, afterCommit: true },
+    ]);
+  });
+
+  it('never touches the index when the write is refused (rolled back)', async () => {
+    prisma.purchaseOrderLine.count.mockResolvedValue(0);
+
+    await expect(
+      service.update(PO, { reference: null }, human),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(synced).toEqual([]);
   });
 });

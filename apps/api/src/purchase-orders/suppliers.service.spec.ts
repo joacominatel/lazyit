@@ -1,3 +1,5 @@
+// SearchService (behind the optional PurchaseSearchSync) imports the ESM `meilisearch` package jest cannot load.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
@@ -5,6 +7,7 @@ jest.mock('../../generated/prisma/client', () => ({
 
 import { NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { SuppliersService } from './suppliers.service';
 
 const ID = 'clsupplier00000000000001';
@@ -89,5 +92,43 @@ describe('SuppliersService (ADR-0099 §2)', () => {
     supplier.findFirst.mockResolvedValueOnce({ id: ID, deletedAt: null });
     await service.restore(ID);
     expect(supplier.update).not.toHaveBeenCalled();
+  });
+
+  describe('global search sync (#1499)', () => {
+    const searchSync = { supplier: jest.fn() };
+    const synced = new SuppliersService(
+      prisma as unknown as PrismaService,
+      searchSync as unknown as PurchaseSearchSync,
+    );
+
+    it('re-indexes the supplier after create, update, archive and restore', async () => {
+      supplier.create.mockResolvedValue({ id: ID, name: 'Compumundo' });
+      supplier.findFirst.mockResolvedValue({
+        id: ID,
+        name: 'Compumundo',
+        deletedAt: null,
+      });
+      supplier.update.mockResolvedValue({ id: ID, name: 'Compumundo SA' });
+
+      await synced.create({ name: 'Compumundo' });
+      await synced.update(ID, { name: 'Compumundo SA' });
+      await synced.remove(ID);
+      supplier.findFirst.mockResolvedValue({
+        id: ID,
+        name: 'Compumundo SA',
+        deletedAt: new Date(),
+      });
+      await synced.restore(ID);
+
+      expect(searchSync.supplier.mock.calls).toEqual([[ID], [ID], [ID], [ID]]);
+    });
+
+    it('never touches the index when the supplier does not exist (404)', async () => {
+      supplier.findFirst.mockResolvedValue(null);
+      await expect(synced.update(ID, { name: 'x' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(searchSync.supplier).not.toHaveBeenCalled();
+    });
   });
 });
