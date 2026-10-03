@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PurchaseLinkPreviewAsset } from "@lazyit/shared";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { NextIntlClientProvider } from "next-intl";
 import { renderToStaticMarkup } from "react-dom/server";
 import { linkSubmitOutcome } from "@/lib/purchases/link-apply";
@@ -33,16 +34,24 @@ function previewAsset(id: string, name: string, assetTag: string): PurchaseLinkP
   };
 }
 
-function renderResult(failed: { assetId: string; reason: string; error: string }[], linked: number): string {
+const PURCHASE = "ck00000000000000purchase1";
+
+function renderResult(
+  failed: { assetId: string; reason: string; error: string }[],
+  linked: number,
+  pathname: string | null = null,
+): string {
   const outcome = linkSubmitOutcome(
     { linked: Array.from({ length: linked }, () => ({})), failed },
     [previewAsset(A, "ThinkPad E14", "LZ-0411"), previewAsset(B, "ThinkPad E14", "LZ-0412")],
   );
   if (outcome.kind !== "result") throw new Error("expected the result step");
   return renderToStaticMarkup(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases }}>
-      <LinkResultView snapshot={outcome.snapshot} purchaseId="ck00000000000000purchase1" onDone={() => {}} />
-    </NextIntlClientProvider>,
+    <PathnameContext.Provider value={pathname}>
+      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases }}>
+        <LinkResultView snapshot={outcome.snapshot} purchaseId={PURCHASE} onDone={() => {}} />
+      </NextIntlClientProvider>
+    </PathnameContext.Provider>,
   );
 }
 
@@ -52,12 +61,23 @@ describe("the link result step", () => {
     expect(html).toContain("1 asset linked.");
     expect(html).toContain("LZ-0412 · ThinkPad E14");
     expect(html).toContain("On another purchase — tick “Move here” to move it");
-    expect(html).toContain('href="/purchases/ck00000000000000purchase1"');
+    expect(html).toContain(`href="/purchases/${PURCHASE}"`);
   });
 
   test("when nothing was linked it says so, and a reason this build does not know prints the API's text", () => {
     const html = renderResult([{ assetId: A, reason: "SOMETHING_NEW", error: "the API says why" }], 0);
     expect(html).toContain("No asset was linked");
     expect(html).toContain("the API says why");
+  });
+
+  test("opened on the purchase's own page, Open purchase closes the dialog instead of linking to it (#1505)", () => {
+    const html = renderResult([{ assetId: B, reason: "LINKED_ELSEWHERE", error: "on another line" }], 1, `/purchases/${PURCHASE}`);
+    expect(html).toContain("Open purchase");
+    expect(html).not.toContain(`href="/purchases/${PURCHASE}"`);
+  });
+
+  test("opened anywhere else, Open purchase links to it", () => {
+    const html = renderResult([{ assetId: B, reason: "LINKED_ELSEWHERE", error: "on another line" }], 1, "/purchases/pending");
+    expect(html).toContain(`href="/purchases/${PURCHASE}"`);
   });
 });
