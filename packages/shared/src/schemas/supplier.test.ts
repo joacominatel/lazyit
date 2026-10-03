@@ -3,6 +3,7 @@ import {
   CreateSupplierSchema,
   SUPPLIER_MERGE_FIELDS,
   SupplierMergeSchema,
+  SupplierSchema,
   UpdateSupplierSchema,
 } from "./supplier";
 
@@ -52,6 +53,13 @@ describe("Supplier merge contract (#1496)", () => {
     expect(
       SupplierMergeSchema.safeParse({ sourceId: "clsupplier00000000000002", overwrite: true }).success,
     ).toBe(false);
+  });
+
+  test("the mergeable fields are exactly the supplier's editable fields minus the name", () => {
+    const editable = Object.keys(SupplierSchema.shape).filter(
+      (key) => !["id", "name", "createdAt", "updatedAt", "deletedAt"].includes(key),
+    );
+    expect([...SUPPLIER_MERGE_FIELDS].sort()).toEqual(editable.sort());
   });
 
   test("a merge can fill every optional field but never the name", () => {
