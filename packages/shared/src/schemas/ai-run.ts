@@ -416,13 +416,17 @@ export type AiInputImportance = z.infer<typeof AiInputImportanceSchema>;
 /**
  * The lazyit reference lists a select may take its options from, resolved server-side through the
  * list routes as the user (a list they cannot read refuses the whole request). Values are ids, except
- * `manufacturers` (a free-text attribute of asset models: the distinct names).
+ * `manufacturers` (a free-text attribute of asset models: the distinct names). `suppliers` and
+ * `consumables` (#1478) serve the purchase questions: which supplier a document names, which consumable a
+ * line is received into.
  */
 export const AI_INPUT_OPTION_SOURCES = [
   "manufacturers",
   "assetCategories",
   "locations",
   "assetModels",
+  "suppliers",
+  "consumables",
 ] as const;
 export const AiInputOptionSourceSchema = z.enum(AI_INPUT_OPTION_SOURCES);
 export type AiInputOptionSource = z.infer<typeof AiInputOptionSourceSchema>;

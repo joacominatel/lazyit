@@ -891,9 +891,20 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
 - **Audit and privacy.** Each run whose document may have reached the provider appends an `EXTRACTION_RUN`
   [[purchase-order-event]] (who, which document, provider, model, token counts, outcome); every run writes one
   log line — never a value read from the document (ADR-0031). The draft itself is not stored anywhere.
-- **Not here.** No chat upload of files (synthesis §9.2 stands), no extraction tool for the chat or MCP —
-  that is Phase 3 (#1478), where reading a document marks the conversation untrusted and purchase changes
-  are never auto-approved (ADR-0099 §11).
+- **Not here.** No chat upload of files (synthesis §9.2 stands).
+- **In the chat (Phase 3, #1478).** `purchase_document_read` runs this same route (its permission, the
+  human-only check — a chat run is delegated as the user —, the switch, the caps, the limiters and the
+  budget) and is **chat-only**: not listed on MCP or headless, so no Service Account and no external client
+  sends a document out through it. The draft reaches the model as one `<untrusted_content>` block, and the
+  document becomes an untrusted source of the **whole conversation** (`purchaseDocument`,
+  `AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`): every later proposal carries the banner and nothing in that
+  conversation is auto-approved again — the draft stays in the replayed history, as web search results do.
+  Independently, **every purchase write is a card that is never auto-approved** (`neverAutoApprove`, enforced
+  by core from the registry), and a change that generates assets or changes money also carries
+  `CREATES_ASSETS` / `CHANGES_MONEY`, which core never auto-approves and the web leaves out of "Approve all"
+  (UX decision D11). A planted instruction in a supplier's document can therefore at most shape a proposal
+  the person reads on its card; it cannot run anything, and the model has no tool that sends anything
+  anywhere but the configured provider.
 
 ---
 
@@ -914,7 +925,9 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
   *Amended 2026-09-24 (#1376):* in a conversation whose owner switched auto-approve on, the owner's
   standing consent is the approval for ordinary writes (not elevated, no step-up) — still bound to the
   stored pending action, single-use and re-checked, recorded with `approvalMode = AUTO`. Elevated and
-  step-up actions always need the per-action human approval.
+  step-up actions always need the per-action human approval. *Amended 2026-10-02 (#1478, ADR-0099 §11):*
+  so do purchase changes (tools registered `neverAutoApprove`) and any write whose preview carries
+  `CREATES_ASSETS` or `CHANGES_MONEY` (today: purchase receipts and priced purchase changes).
 - **INV-AI-4 — Untrusted content is data, never authority.** No stored content can alter tool
   availability, approval requirements, tool metadata or the system prompt.
 - **INV-AI-5 — Secrets never enter model context.** One-time credentials (SA tokens, temporary

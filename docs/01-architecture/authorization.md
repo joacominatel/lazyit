@@ -182,6 +182,14 @@ three roles **except** two tighter tiers:
 > documents out. The capability (assistant usable, the *Document extraction* switch, a provider that reads
 > the type) is checked after the permissions, and refused with a typed `409`.
 >
+> **The AI assistant reaches Purchases through the same routes** (#1478, ADR-0099 §11). Every purchase tool
+> runs its route in-process as the invoking principal, so it needs exactly that route's permissions: a VIEWER
+> (no `purchaseOrder:read` by default) is listed no purchase tool, a Service Account only what its grants
+> admit. `purchase_document_read` binds the extract route and keeps its `purchaseOrder:write` + `ai:use`
+> gate and the service's human-only check; it is listed in the chat only, never on MCP or headless. In the
+> chat every purchase write is a card the user approves one by one — never auto-approved, whatever the
+> conversation's mode.
+>
 > The document type label (#1476) is edited under the parent's write permission — `PATCH
 > /assets/:id/attachments/:attId` needs `asset:write`, the purchase route `purchaseOrder:write` — and
 > suggested by `GET /suggestions/documentLabel`, which reads asset documents' labels for `asset:read` and

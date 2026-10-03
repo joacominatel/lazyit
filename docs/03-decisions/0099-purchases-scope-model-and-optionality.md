@@ -30,14 +30,17 @@ of serials. **Phase 2 backend built** (#1477, 2026-10-02): document extraction b
 reviewed draft, never saved), `LICENSE` lines applied to their application on confirmation, and creating a
 purchase from selected assets. **Their screens built** (#1477 web, 2026-10-02): the *Document extraction*
 switch in Settings → AI, the side-by-side review of a read document as proposed changes, *New purchase from a
-document*, license lines with *Apply license*, and *Create purchase* from selected assets. What the builds
+document*, license lines with *Apply license*, and *Create purchase* from selected assets. **Phase 3 backend
+built** (#1478, 2026-10-02): the purchase tools of the AI assistant — reads, reading an attached document as
+untrusted data, and every purchase change as a card that is never auto-approved. What the builds
 settled is in
 [[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
 [[#Decisions while building (Phase 1 flows, #1473)]],
 [[#Decisions while building (Phase 1 flows web, #1475)]],
 [[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]],
 [[#Decisions while building (Phase 1b web, #1476)]],
-[[#Decisions while building (Phase 2, #1477)]] and [[#Decisions while building (Phase 2 web, #1477)]].
+[[#Decisions while building (Phase 2, #1477)]], [[#Decisions while building (Phase 2 web, #1477)]] and
+[[#Decisions while building (Phase 3, #1478)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -340,7 +343,8 @@ invoice, delivery note — suggested by smart entry, never a closed or required 
   through the normal write path. A later document *proposes* changes field by field; it never overwrites.
 - A supplier document is **untrusted content** (INV-AI-4): reading it marks the conversation, and
   **purchase changes are never auto-approved** in the chat. The UX proposal also excludes pages that
-  create assets or change money from "Approve all" (D11); the Phase 3 design confirms it.
+  create assets or change money from "Approve all" (D11); the Phase 3 design confirms it — see
+  [[#Decisions while building (Phase 3, #1478)]] for how each rule is enforced.
 
 ### 12. Prerequisite: back up the attachments volume
 
@@ -997,7 +1001,8 @@ reopens a CEO decision. Merging suppliers, the XLSX export and the other Phase 2
   leaves the host until an admin turns it on; no line, application or seat count changes.
 - **AI tools.** The new handlers are unexposed until Phase 3 (#1478): applying a license and creating from
   assets are purchase changes (never auto-approved, §11); extraction and its status are the web's reviewed
-  flow, and the chat's `purchase_order_extract` tool is Phase 3.
+  flow, and the chat's `purchase_order_extract` tool is Phase 3. *Built in #1478 as `purchase_document_read`,
+  with every handler decided — see [[#Decisions while building (Phase 3, #1478)]].*
 
 ## Decisions while building (Phase 2 web, #1477)
 
@@ -1099,6 +1104,96 @@ review cannot be reloaded without reading the document again (the draft is never
 a second tab or window, not inside the review. Line matching by description misses a line the
 document spells differently: it is offered as a new line, ticked, so the person unticks it to avoid a
 duplicate.
+
+## Decisions while building (Phase 3, #1478)
+
+CTO decisions taken while building the backend of the AI purchase tools (2026-10-02), under §11 and the UX
+proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decision. The tools are listed in
+[[ai-assistant/tools-and-execution]] (*Purchases tools as built*).
+
+- **"Never auto-approved" is two rules in core, not a promise of each tool.** (1) Every purchase write tool is
+  registered `neverAutoApprove`; core reads the flag from the registry when it decides an automatic approval,
+  so neither the model, the stored row nor a later preview can lift it. (2) A preview that generates assets
+  (`CREATES_ASSETS`) or sets or changes money (`CHANGES_MONEY`) is never auto-approved whatever the tool
+  (`AI_NEVER_AUTO_APPROVE_WARNINGS`). Both answer `AUTO_APPROVE_NOT_ELIGIBLE`, and the user's own click on the
+  card still approves without a password. Rejected: escalating the cards to `elevated` — it would hide them
+  from read-write MCP tokens and put a "sensitive change" look on an ordinary purchase edit; a tool-side
+  convention only — the next purchase tool would be one forgotten flag away from auto-approval.
+- **"Excluded from Approve all" is the same two warnings, read by the web** (D11 confirmed). "Approve all" is
+  a client action that sends one decision per card (ADR-0097 decision 3 as amended), so the server's part is
+  the marker: the web leaves a page carrying `CREATES_ASSETS` or `CHANGES_MONEY` out of the bulk action and
+  lists it as left out, exactly like a step-up page, while a batch that only creates a supplier or adds an
+  unpriced line can still be approved at once. Which writes carry them: `CREATES_ASSETS` on receiving units as
+  assets; `CHANGES_MONEY` on a create with a priced line, a unit price set or a quantity changed on a priced
+  line, a priced line removed, the purchase's currency label changed, receiving units with a cost, and linking
+  assets with `purchaseCost` in `apply` where it fills or replaces a value, and creating a purchase from assets
+  when any selected asset has a cost (review of #1488: its lines take their unit price from those costs; the
+  card lists the derived lines — model or name, quantity, and the unit price with its label when the group
+  shares it). Applying a license (seats, not money), a stock receipt and cancelling units carry neither: they
+  stay cards that are never auto-approved, but may be approved in bulk.
+- **Reading a document is a chat-only `read` tool over the extract route.** `purchase_document_read` binds
+  `POST …/attachments/:attachmentId/extract`, so every gate stays the route's: `purchaseOrder:write` + `ai:use`,
+  the service's human-only check (a chat run is delegated as the user, so the service sees that person), the
+  switch, the provider capability, the caps, the per-person limiters and the shared token budget. It is a
+  `read` because it changes no purchase data — it appends `EXTRACTION_RUN` and a usage row, as the web flow
+  does — and it is listed in the chat only, so no Service Account (headless) and no external client (MCP)
+  can send a document out through it. Rejected: a `write` card before reading — the person already asked for
+  that document in their own words, and the instance-wide consent is the admin's OFF-by-default switch.
+- **The draft is one untrusted block, and the document marks the conversation.** The tool answers the draft
+  (values, the verbatim header evidence and, per line, the printed text of a field left blank) as ONE
+  `<untrusted_content>` block, next to lazyit's own warnings and matches, and names the document with an
+  entity ref of the new type `purchaseDocument` (parent: the purchase). That type is a conversation-wide
+  untrusted source (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`): the draft stays in the history replayed to the
+  model on every later turn, so — as with web search (#1389) — every later turn starts with it, its proposals
+  carry the "based on content written by others" banner, and nothing in that conversation is auto-approved
+  again. The runtime finds it in the step records of every run; a step that read it and paused for nothing
+  is re-recorded just before its tool message so the record exists. The draft can trigger nothing by itself:
+  the extraction call has no tools, and every change the model proposes from it is a card.
+- **The chat flow is in the tool descriptions, not the system prompt.** `purchase_document_read` tells the
+  model to ask what is blank or ambiguous in ONE `request_input` form and to propose one `purchase_create` or
+  `purchase_update`; `request_input` gains the `suppliers` and `consumables` option lists ("name (tax ID)",
+  "name (SKU)") for the supplier and consumable questions. Rejected: a primer change — it bumps the prompt
+  version, and the guidance belongs where the tool is.
+- **Ids, not names.** Purchases, lines and suppliers are taken by id (none of their texts is unique, D-D),
+  found with `purchase_search`, `purchase_get` and `supplier_search`; the page context names the purchase
+  (`purchaseOrder` joins the AI entity types, with `supplier` for supplier refs), so "this purchase" on a
+  purchase page needs no lookup.
+- **Cards show what the route will do.** A receive card shows the route's own prefill (model, status,
+  location, company, purchase date = the invoice date else today, warranty end, cost with its currency) and
+  received before → after; a link card shows, per asset, the before → after of each applied field that fills
+  or replaces; `apply` is required (`[]` links only). A card the route would refuse is not shown (a line that
+  is not `ASSET` for a receive, a line without a model, removing a line with units received, nothing pending
+  to cancel). A line card's precondition is the newer of the purchase's and the line's `updatedAt`, because a
+  line edit does not bump the purchase: either edit makes the approval `STALE`.
+- **Receiving weighs its units.** A Service Account's mutation cap counts changes (SEC-081): receiving counts
+  its `quantity`, which the tool therefore requires (the route's "every pending unit" default would weigh an
+  unknown number); linking counts its assets; a create counts the purchase and its lines; a create from assets
+  the purchase and its assets.
+- **On MCP and headless the writes follow the catalog's convention** (ADR-0097): the MCP client owns the
+  confirmation and a Service Account acts within its grants, its AI access setting and its mutation cap. The
+  never-auto-approved rule is the chat's, where a card exists to skip.
+- **Unexposed, with reasons:** archive and restore of purchases and suppliers (ADMIN lifecycle actions, from the
+  pages, as for consumables), unlinking assets (a correction, from the pages), the extraction status probe (the
+  web's; the tool answers the same refusals), document upload and download (no file tools) and document label
+  edit and delete (human-only routes).
+- **Follow-up: the conversation-wide source read.** Every run reads all the step records of its conversation
+  to find a `purchaseDocument` source (`conversationSources`) — one query, but it reads every step of a
+  long conversation. Bounded by the conversation's size and retention today; a flag on the conversation row
+  (or a dedicated record, as web search has) would make it one row read. Left for when a conversation that
+  long appears.
+- **Upgrade.** No migration and no stored data changes. The new entity types, warnings, option sources and
+  sentence codes are additive; an older web renders an unknown warning generically and drops an unknown entity
+  ref. Adding tools changes the frozen toolset of every principal who can see them (and `request_input`'s
+  description changes it for everyone with the assistant), so chat conversations started before the upgrade
+  become read-only (`VERSION_CHANGED`) and the user starts a new one — the usual cost of a catalog change
+  ([[ai-assistant/provider-and-runtime]] §8).
+- **Consequences.** A person who reads one supplier document in a conversation loses auto-approve for the rest
+  of it, for unrelated writes too; starting a new conversation restores it. A long invoice's draft can reach the
+  tool-result cap and be truncated for the model (the web review flow is unaffected). The chat cannot unlink,
+  archive or restore — the pages can. The web must add the `purchaseOrder`, `supplier` and `purchaseDocument`
+  entity labels, the two warning labels, the two option source labels, the purchase sentences and the
+  "Approve all" exclusion before the chat shows these cards in the user's language (until then it shows the
+  English and the generic warning).
 
 ## Related
 
