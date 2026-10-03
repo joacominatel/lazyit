@@ -41,12 +41,17 @@
     "columns": {
       "name": "Name",
       "assetTag": "Asset tag",
+      "serial": "Serial",
+      "manufacturer": "Manufacturer",
       "model": "Model",
       "category": "Category",
       "location": "Location",
       "company": "Company",
       "status": "Status",
       "owners": "Owners",
+      "purchaseDate": "Purchase date",
+      "warrantyEnd": "Warranty end",
+      "purchaseCost": "Purchase cost",
       "updated": "Updated",
       "actions": "Actions"
     },
@@ -55,19 +60,26 @@
       "groups": {
         "details": "Details",
         "status": "Status",
+        "purchase": "Purchase & warranty",
         "activity": "Activity"
       },
       "columns": {
         "assetTag": "Asset tag",
+        "serial": "Serial",
+        "manufacturer": "Manufacturer",
         "model": "Model",
         "category": "Category",
         "location": "Location",
         "company": "Company",
         "status": "Status",
         "owners": "Owners",
+        "purchaseDate": "Purchase date",
+        "warrantyEnd": "Warranty end",
+        "purchaseCost": "Purchase cost",
         "updated": "Updated"
       }
     },
+    "noCurrency": "No currency",
     "filters": {
       "moreFilters": "Filters",
       "allStatuses": "All statuses",

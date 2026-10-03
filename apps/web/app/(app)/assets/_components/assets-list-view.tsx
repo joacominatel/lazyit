@@ -23,7 +23,7 @@ import {
   AssetStatusSchema,
   type BatchResult,
 } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
@@ -116,6 +116,14 @@ import {
   deriveAssetFilters,
 } from "./assets-list-query";
 import { downloadAssetsExport } from "./assets-csv";
+import {
+  COLUMN_GROUPS,
+  DEFAULT_VISIBLE_COLUMNS,
+  type HideableColumn,
+  listCost,
+  toggledColumns,
+  visibleColumnSet,
+} from "./assets-list-columns";
 import { AssetRowActions } from "./asset-row-actions";
 import { ReceiveStockButton } from "./receive-stock-dialog";
 import { LinkAssetsDialog, type LinkAssetRef } from "@/components/purchases/link-assets-dialog";
@@ -149,55 +157,17 @@ const WARRANTY_LABEL_KEY: Record<
   expired: "expired",
 };
 
-/**
- * The Assets-table columns an operator can show/hide via the column picker (#695). The `name` identity
- * column (the row's canonical link) and the row `actions` column are always rendered and intentionally
- * absent here. Keys match the `ResourceColumn` keys and the per-key body-cell map below, so the header
- * and body never drift, and the ARRAY ORDER is the canonical left-to-right table order (persistence
- * re-emits selections in this order). Ported from the Users picker and scoped to this page by CTO
- * decision (the shared `ResourceTable` stays untouched).
- */
-const HIDEABLE_COLUMNS = [
-  "assetTag",
-  "model",
-  "category",
-  "location",
-  "company",
-  "status",
-  "owners",
-  "updated",
-] as const;
-type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
-
-/**
- * Column-picker grouping — purely presentational structure for the dropdown so the list reads as
- * labelled sections. The flattened union of `keys` MUST equal `HIDEABLE_COLUMNS` (every hideable
- * column appears in exactly one group); it drives only the menu, never visibility.
- */
-const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
-  { id: "details", keys: ["assetTag", "model", "category", "location", "company"] },
-  { id: "status", keys: ["status", "owners"] },
-  { id: "activity", keys: ["updated"] },
-];
-
 /** localStorage key persisting the visible hideable-column set (per browser). */
 const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
 
 /** Stable empty placeholder for the loading skeleton's mobile children slot. */
 const LOADING_MOBILE_CHILDREN = <></>;
 
-
-/**
- * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
- * column is on out of the box, so the table is unchanged for operators who never open the picker; the
- * picker just lets them turn columns off.
- */
-const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
-
 export function AssetsListView() {
   const router = useRouter();
   const t = useTranslations("assets.list");
   const { date } = useFormatters();
+  const locale = useLocale();
   const tEmpty = useTranslations("assets.empty");
   const tc = useTranslations("common");
   const tShared = useTranslations("shared");
@@ -306,28 +276,14 @@ export function AssetsListView() {
   const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
     HideableColumn[]
   >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
-  // Defend against stale/garbage storage (renamed/removed keys, or a non-array shape from an older
-  // build): only keep known hideable keys.
-  const visibleColumns = useMemo(() => {
-    if (!columnsMounted || !Array.isArray(storedColumns)) {
-      return new Set<HideableColumn>(DEFAULT_VISIBLE_COLUMNS);
-    }
-    return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
-  }, [columnsMounted, storedColumns]);
+  const visibleColumns = useMemo(
+    () => visibleColumnSet(storedColumns, columnsMounted),
+    [columnsMounted, storedColumns],
+  );
   const isColumnVisible = (key: HideableColumn) => visibleColumns.has(key);
 
   function toggleColumn(key: HideableColumn, visible: boolean) {
-    setStoredColumns((prev) => {
-      const kept = (Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS).filter(
-        (k) => HIDEABLE_COLUMNS.includes(k),
-      );
-      if (visible) {
-        if (kept.includes(key)) return kept;
-        // Re-emit in canonical column order so persistence stays stable regardless of toggle order.
-        return HIDEABLE_COLUMNS.filter((k) => k === key || kept.includes(k));
-      }
-      return kept.filter((k) => k !== key);
-    });
+    setStoredColumns((prev) => toggledColumns(prev, key, visible));
   }
 
   // The page is already scoped server-side (status/category/location/owner/ownership/#824), so the
@@ -503,6 +459,24 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
+      isColumnVisible("serial") && {
+        key: "serial",
+        header: (
+          <SortableHeader
+            label={t("columns.serial")}
+            active={sort === "serial"}
+            direction={dir}
+            onToggle={() => toggleSort("serial")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-24" />,
+      },
+      // The model's manufacturer: the API sorts plain asset columns only, so this one is not sortable.
+      isColumnVisible("manufacturer") && {
+        key: "manufacturer",
+        header: t("columns.manufacturer"),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
       isColumnVisible("model") && {
         key: "model",
         header: t("columns.model"),
@@ -539,6 +513,43 @@ export function AssetsListView() {
         key: "owners",
         header: t("columns.owners"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
+      },
+      isColumnVisible("purchaseDate") && {
+        key: "purchaseDate",
+        header: (
+          <SortableHeader
+            label={t("columns.purchaseDate")}
+            active={sort === "purchaseDate"}
+            direction={dir}
+            onToggle={() => toggleSort("purchaseDate")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      isColumnVisible("warrantyEnd") && {
+        key: "warrantyEnd",
+        header: (
+          <SortableHeader
+            label={t("columns.warrantyEnd")}
+            active={sort === "warrantyEnd"}
+            direction={dir}
+            onToggle={() => toggleSort("warrantyEnd")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      // Sorts the amounts as stored, whatever their currency label (no conversion, ADR-0099 §5).
+      isColumnVisible("purchaseCost") && {
+        key: "purchaseCost",
+        header: (
+          <SortableHeader
+            label={t("columns.purchaseCost")}
+            active={sort === "purchaseCost"}
+            direction={dir}
+            onToggle={() => toggleSort("purchaseCost")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
       },
       isColumnVisible("updated") && {
         key: "updated",
@@ -1052,6 +1063,40 @@ export function AssetsListView() {
                         assignments={asset.activeAssignments}
                       />
                     </ResourceCardMeta>
+                    {/* The #1511 columns are opt-in, so the card shows them only once turned on. */}
+                    {isColumnVisible("serial") ? (
+                      <ResourceCardMeta label={t("columns.serial")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.serial ?? "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("manufacturer") ? (
+                      <ResourceCardMeta label={t("columns.manufacturer")}>
+                        {asset.model?.manufacturer ?? "—"}
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("purchaseDate") ? (
+                      <ResourceCardMeta label={t("columns.purchaseDate")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("warrantyEnd") ? (
+                      <ResourceCardMeta label={t("columns.warrantyEnd")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("purchaseCost") ? (
+                      <ResourceCardMeta label={t("columns.purchaseCost")}>
+                        <span className="font-mono tabular-nums">
+                          <CostValue asset={asset} locale={locale} noCurrency={t("noCurrency")} />
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
                     <ResourceCardMeta label={t("columns.updated")}>
                       <span className="font-mono tabular-nums">
                         {date(asset.updatedAt)}
@@ -1111,6 +1156,19 @@ export function AssetsListView() {
                     {asset.assetTag ?? "—"}
                   </TableCell>
                 ),
+                serial: (
+                  <TableCell
+                    key="serial"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.serial ?? "—"}
+                  </TableCell>
+                ),
+                manufacturer: (
+                  <TableCell key="manufacturer" className="text-muted-foreground">
+                    {asset.model?.manufacturer ?? "—"}
+                  </TableCell>
+                ),
                 model: (
                   <TableCell key="model" className="text-muted-foreground">
                     {asset.model?.name ?? "—"}
@@ -1147,6 +1205,30 @@ export function AssetsListView() {
                     <StackedOwnerAvatars
                       assignments={asset.activeAssignments}
                     />
+                  </TableCell>
+                ),
+                purchaseDate: (
+                  <TableCell
+                    key="purchaseDate"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
+                  </TableCell>
+                ),
+                warrantyEnd: (
+                  <TableCell
+                    key="warrantyEnd"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
+                  </TableCell>
+                ),
+                purchaseCost: (
+                  <TableCell
+                    key="purchaseCost"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    <CostValue asset={asset} locale={locale} noCurrency={t("noCurrency")} />
                   </TableCell>
                 ),
                 updated: (
@@ -1403,5 +1485,27 @@ export function AssetsListView() {
         </AlertDialog>
       ) : null}
     </div>
+  );
+}
+
+/** The Cost cell: the amount as entered with its label, or "No currency" beside an unlabelled one. */
+function CostValue({
+  asset,
+  locale,
+  noCurrency,
+}: {
+  asset: AssetListItem;
+  locale: string;
+  noCurrency: string;
+}) {
+  const cost = listCost(asset.purchaseCost, asset.purchaseCurrency, locale);
+  if (!cost) return "—";
+  return (
+    <>
+      {cost.amount}
+      {cost.noCurrency ? (
+        <span className="font-sans"> · {noCurrency}</span>
+      ) : null}
+    </>
   );
 }
