@@ -9,8 +9,8 @@ updated: 2026-10-02
 # PurchaseOrderLine
 
 > 🟢 built — backend (#1472), receiving, linking and cancelling (#1473), consumable lines (#1476), license
-> lines (#1477); their screens pending (#1475, #1476 web, #1477 web) · Area: Purchases ·
-> [[0099-purchases-scope-model-and-optionality]]
+> lines (#1477); their screens (#1474, #1475, #1476 web, #1477 web); AI assistant tools (#1478) · Area:
+> Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrderLine` (`purchase_order_lines`). Lines are created inline with a purchase or through
@@ -82,7 +82,10 @@ line, the units that came out of it.
 - **Copy on confirm.** Receiving or linking copies the line's values (cost and currency, purchase date,
   warranty end from `warrantyMonths`) onto assets only through an explicit per-field confirmation: fills
   pre-checked, replacements never ([[0099-purchases-scope-model-and-optionality]] §2). A later price edit
-  only *proposes* updates to linked assets.
+  changes **no** linked asset (never write-through). As built, nothing proposes the new price to them either:
+  the asset's *Purchase* panel marks the line price *Differs from purchase*, and an ordinary asset edit is how
+  its cost changes (ADR-0099, decisions while building Phase 1 flows web). The per-asset proposal §2
+  describes is not built.
 
 ## Receiving and linking (as built, #1473)
 

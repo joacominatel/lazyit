@@ -8,13 +8,17 @@ updated: 2026-10-02
 
 # Supplier
 
-> 🟢 built — backend (#1472); screens pending (Purchases Phase 1) · Area: Purchases ·
+> 🟢 built — backend (#1472), screens (#1474), AI assistant tools (#1478) · Area: Purchases ·
 > [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `Supplier` (`suppliers`), contract `packages/shared/src/schemas/supplier.ts`, endpoints
 > `GET/POST /suppliers`, `GET/PATCH/DELETE /suppliers/:id`, `POST /suppliers/:id/restore`
-> (`apps/api/src/purchase-orders/`). The web screens come in a later Phase 1 unit.
+> (`apps/api/src/purchase-orders/`). Screens (#1474): the *Suppliers* tab of the Purchases area
+> (`/purchases/suppliers`) and the supplier page with its recent purchases; a purchase's supplier is typed and
+> resolved on save, created inline when nobody has that name ([[0099-purchases-scope-model-and-optionality]],
+> decisions while building Phase 1 web). The AI assistant reads and proposes suppliers through
+> `supplier_search`, `supplier_get`, `supplier_create` and `supplier_update` (#1478).
 
 ## Purpose
 
@@ -58,7 +62,8 @@ fields stay as they are.
   it — they show it, flagged as archived. The FK from a purchase is `Restrict`, so a supplier with purchases
   can never be hard-deleted.
 - Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
-- Merging duplicate suppliers is a Phase 2 action.
+- Merging duplicate suppliers (planned for Phase 2 in ADR-0099 §13) is **not built**: the Phase 2 unit left
+  it out (ADR-0099, decisions while building Phase 2). Duplicates are reduced only by the suggestions above.
 
 ## Conventions
 

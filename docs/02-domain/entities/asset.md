@@ -79,7 +79,8 @@ concrete instance of a generic [[asset-model]].
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
 > Purchases is always available, optional at entry, with no instance switch. The two columns below are
 > **built** (#1472); linking, the confirmation diff and the provenance read are built in the API (#1473),
-> the *Purchase* panel and the dialogs in the web are not yet (#1475). An asset has:
+> and the asset's *Purchase* panel, the receive and link dialogs and *Create purchase* from selected assets
+> in the web (#1475, #1476, #1477). An asset has:
 >
 > - **`purchaseOrderLineId`** — nullable FK → [[purchase-order-line]] (`onDelete: Restrict`; soft delete
 >   never triggers it). `NULL` = "no purchase", which is what every existing asset gets on upgrade. N
