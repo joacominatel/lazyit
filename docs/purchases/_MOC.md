@@ -12,7 +12,8 @@ updated: 2026-10-02
 > the IT team bought, from which supplier, with which documents, and which assets came out of it — tied
 > to the finance PO number. lazyit **records** purchases; it does not run procurement. Always available,
 > optional at entry — no instance switch.
-> **Accepted and built** (Phases 1 to 3, 2026-10-02) — see [[#What was built]].
+> **Accepted and built** (Phases 1, 1b and 2 and the Phase 3 backend, 2026-10-02; the Phase 3 chat surfaces
+> in #1490) — see [[#What was built]].
 >
 > **Start here:** the decision record [[0099-purchases-scope-model-and-optionality|ADR-0099]] (scope,
 > model, optionality) and [[0100-money-as-64-bit-minor-units|ADR-0100]] (money as 64-bit integers), then

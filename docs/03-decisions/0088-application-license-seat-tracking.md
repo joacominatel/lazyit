@@ -97,7 +97,8 @@ as a DERIVED, distinct-user count — never a stored column.**
 - **Label.** The application's `vendor` field is shown as **Publisher** (en) / **Fabricante** (es) from
   Purchases Phase 1, so it is not confused with a purchase supplier. Label only; the column is unchanged.
 
-Not built yet.
+Built 2026-10-02: the width (#1469), the currency labels (#1472), the *Publisher* label (#1474) and
+`LICENSE` lines (#1477).
 
 ## Related
 

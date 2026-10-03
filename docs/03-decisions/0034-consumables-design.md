@@ -74,7 +74,7 @@ below 0 raises **409** and the whole transaction rolls back (no movement, no cac
 > Supplier and unit-cost tracking arrive through **Purchases**, not on the consumable: a `CONSUMABLE`
 > purchase line (Phase 1b) carries the supplier and unit price, and receiving it posts an ordinary `IN`
 > movement that references the line. The stock model above is unchanged — movements stay the only way
-> stock changes, and `currentStock` is never written directly. Not built yet.
+> stock changes, and `currentStock` is never written directly. *Built 2026-10-02 (#1476) — see below.*
 
 > [!note] Purchase linkage built 2026-10-02 (#1476, [[0099-purchases-scope-model-and-optionality|ADR-0099]])
 > A movement gains a nullable `purchaseOrderLineId`, set at insert on the ordinary `IN` that receiving a

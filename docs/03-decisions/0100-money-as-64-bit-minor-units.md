@@ -14,7 +14,8 @@ deciders: [Joaquín Minatel]
 **accepted** — 2026-10-01 (epic #1465, issue #1466). Part of the Purchases package the CEO approved
 "con la ampliación de montos" (including the money widening) — see
 [[0099-purchases-scope-model-and-optionality]] and [[purchases/decisions]]. **Built 2026-10-02 (#1469)** for
-the three existing money columns; the Purchases money columns follow in Purchases Phase 1. Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
+the three existing money columns, and for the Purchases money column (`PurchaseOrderLine.unitPrice`) in
+#1472. Amends [[0036-int4-bounded-integers]] (money columns are no longer `Int`) and
 [[0088-application-license-seat-tracking]] (`costPerSeat` widens with the rest). **Amended 2026-10-02**:
 §5 (display) records the CEO's decision that currency is free text (D-C of
 [[0099-purchases-scope-model-and-optionality]]). **Amended again 2026-10-02** (#1469): §3 records how the
