@@ -1167,6 +1167,11 @@ proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decis
   is not `ASSET` for a receive, a line without a model, removing a line with units received, nothing pending
   to cancel). A line card's precondition is the newer of the purchase's and the line's `updatedAt`, because a
   line edit does not bump the purchase: either edit makes the approval `STALE`.
+- **Cards name records, not ids** (follow-up of #1488). Every id a card shows — a line's model, consumable or
+  application, the delivery location, a model copied onto assets — is an entity value `{ type, id, label }`,
+  labelled through the caller's own read of that record (each tool binds those reads, so each keeps its route
+  permission). A read the caller may not make, or that fails, leaves `{ type, id }`: the card never carries
+  a name its viewer could not read. The document read also takes the document id the user's message names.
 - **Receiving weighs its units.** A Service Account's mutation cap counts changes (SEC-081): receiving counts
   its `quantity`, which the tool therefore requires (the route's "every pending unit" default would weigh an
   unknown number); linking counts its assets; a create counts the purchase and its lines; a create from assets

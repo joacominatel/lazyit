@@ -62,6 +62,9 @@ import { PurchaseOrderAttachmentsController } from '../../attachments/purchase-o
 import { AttachmentsService } from '../../attachments/attachments.service';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetsController } from '../../assets/assets.controller';
+import { ApplicationsController } from '../../applications/applications.controller';
+import { ApplicationsService } from '../../applications/applications.service';
+import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { AssetsService } from '../../assets/assets.service';
 import { ArticlesService } from '../../articles/articles.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
@@ -1003,6 +1006,7 @@ describe('purchases toolset (#1478)', () => {
         PurchaseOrderAttachmentsController,
         // The card labels of a receive (best-effort reads) and the assets of a purchase from assets.
         AssetsController,
+        ApplicationsController,
         AssetModelsController,
         LocationsController,
         ConsumablesController,
@@ -1064,6 +1068,14 @@ describe('purchases toolset (#1478)', () => {
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
+        { provide: AccessGrantsService, useValue: {} },
+        {
+          provide: ApplicationsService,
+          useValue: {
+            findOne: (id: string) =>
+              Promise.resolve({ id, name: 'Microsoft 365' }),
+          },
+        },
         {
           provide: ConsumablesService,
           useValue: {
@@ -1717,6 +1729,136 @@ describe('purchases toolset (#1478)', () => {
     });
   });
 
+  describe('cards name the records they reference (#1478 follow-up)', () => {
+    const model = {
+      type: 'assetModel',
+      id: MODEL,
+      label: 'ThinkPad E14 Gen 5',
+    };
+    const consumable = {
+      type: 'consumable',
+      id: CONSUMABLE,
+      label: 'Toner HP 26A',
+    };
+    const application = {
+      type: 'application',
+      id: APPLICATION,
+      label: 'Microsoft 365',
+    };
+    const location = { type: 'location', id: LOCATION, label: 'Warehouse' };
+    const field = (
+      action: { preview: { changes: Array<{ field: string }> } | null },
+      name: string,
+    ) =>
+      action.preview!.changes.find((c) => c.field === name) as Row | undefined;
+
+    it('purchase_create: the lines name their model, consumable and application; the delivery location by name', async () => {
+      const action = await propose('purchase_create', {
+        reference: 'OC 9',
+        deliveryLocationId: LOCATION,
+        lines: [
+          { description: 'Laptop', assetModelId: MODEL },
+          {
+            description: 'Toner',
+            kind: 'CONSUMABLE',
+            consumableId: CONSUMABLE,
+          },
+          { description: 'M365', kind: 'LICENSE', applicationId: APPLICATION },
+        ],
+      });
+      expect(field(action, 'deliveryLocationId')).toMatchObject({
+        after: location,
+        valueKind: 'entity',
+      });
+      expect(field(action, 'lines')!.after).toEqual([
+        expect.objectContaining({ assetModelId: model }),
+        expect.objectContaining({ consumableId: consumable }),
+        expect.objectContaining({ applicationId: application }),
+      ]);
+    });
+
+    it('purchase_update: the delivery location before → after, by name', async () => {
+      const action = await propose('purchase_update', {
+        purchaseId: PURCHASE,
+        deliveryLocationId: null,
+      });
+      expect(field(action, 'deliveryLocationId')).toMatchObject({
+        before: location,
+        after: null,
+        valueKind: 'entity',
+      });
+    });
+
+    it('purchase_line_add and purchase_line_update: the mapped record by name, before → after', async () => {
+      const added = await propose('purchase_line_add', {
+        purchaseId: PURCHASE,
+        line: {
+          description: 'Toner',
+          kind: 'CONSUMABLE',
+          consumableId: CONSUMABLE,
+        },
+      });
+      expect(field(added, 'line')!.after).toMatchObject({
+        consumableId: consumable,
+      });
+      const updated = await propose('purchase_line_update', {
+        purchaseId: PURCHASE,
+        lineId: L_ASSET,
+        assetModelId: null,
+      });
+      expect(field(updated, 'assetModelId')).toMatchObject({
+        before: model,
+        after: null,
+        valueKind: 'entity',
+      });
+    });
+
+    it('purchase_line_remove: the removed line names its application', async () => {
+      const action = await propose('purchase_line_remove', {
+        purchaseId: PURCHASE,
+        lineId: L_LICENSE,
+      });
+      expect(field(action, 'line')!.before).toMatchObject({
+        applicationId: application,
+      });
+    });
+
+    it('purchase_link_assets: a copied model is named before → after', async () => {
+      const action = await propose('purchase_link_assets', {
+        purchaseId: PURCHASE,
+        lineId: L_ASSET,
+        assetIds: [ASSET_A],
+        apply: ['modelId'],
+      });
+      const assets = field(action, 'assets')!.after as Array<{ writes: Row }>;
+      expect(assets[0].writes.modelId).toEqual({ before: model, after: model });
+    });
+
+    it('a record the caller may not read is shown by id only — never its name', async () => {
+      roleMatrix = {
+        ...WITH_AI_FOR_VIEWERS,
+        MEMBER: WITH_AI_FOR_VIEWERS.MEMBER.filter(
+          (p) => p !== 'assetModel:read' && p !== 'location:read',
+        ),
+      };
+      resolver.invalidate();
+      const action = await propose('purchase_create', {
+        reference: 'OC 9',
+        deliveryLocationId: LOCATION,
+        lines: [{ description: 'Laptop', assetModelId: MODEL }],
+      });
+      expect(field(action, 'deliveryLocationId')!.after).toEqual({
+        type: 'location',
+        id: LOCATION,
+      });
+      expect(field(action, 'lines')!.after).toEqual([
+        expect.objectContaining({
+          assetModelId: { type: 'assetModel', id: MODEL },
+        }),
+      ]);
+    });
+  });
+
   describe('review of #1488 — what the cards say', () => {
     it('purchase_create_from_assets: the card lists the derived lines, with the shared price and label', async () => {
       const action = await propose('purchase_create_from_assets', {
@@ -1730,7 +1872,11 @@ describe('purchases toolset (#1478)', () => {
       expect(byField.lines.after).toEqual([
         {
           description: 'Lenovo ThinkPad E14',
-          assetModelId: MODEL,
+          assetModelId: {
+            type: 'assetModel',
+            id: MODEL,
+            label: 'ThinkPad E14',
+          },
           quantity: 2,
           unitPrice: { amount: 141250000, currency: 'ARS' },
         },
