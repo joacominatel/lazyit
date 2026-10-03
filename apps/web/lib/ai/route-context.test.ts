@@ -27,6 +27,25 @@ describe("routeContext", () => {
     expect(routeContext("/dashboard")).toEqual({ route: "/dashboard" });
   });
 
+  test("a purchase page carries the purchase, a supplier page the supplier (#1478)", () => {
+    expect(routeContext("/purchases/cpo1")).toEqual({
+      route: "/purchases/cpo1",
+      entity: { type: "purchaseOrder", id: "cpo1" },
+    });
+    expect(routeContext("/purchases/cpo1/edit")?.entity).toEqual({ type: "purchaseOrder", id: "cpo1" });
+    expect(routeContext("/purchases/cpo1/review/catt1")?.entity).toEqual({ type: "purchaseOrder", id: "cpo1" });
+    expect(routeContext("/purchases/suppliers/csup1")).toEqual({
+      route: "/purchases/suppliers/csup1",
+      entity: { type: "supplier", id: "csup1" },
+    });
+  });
+
+  test("the purchases area's own pages carry the route only (#1478)", () => {
+    for (const path of ["/purchases", "/purchases/new", "/purchases/pending", "/purchases/suppliers"]) {
+      expect(routeContext(path)).toEqual({ route: path });
+    }
+  });
+
   test("never sends query strings, fragments or odd ids", () => {
     expect(routeContext("/assets/a1?tab=history#x")).toEqual({
       route: "/assets/a1",

@@ -1381,7 +1381,12 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   `CHANGES_MONEY` when the change sets or changes an amount (a priced line, a unit price, a quantity on a
   priced line, a priced line removed, a relabelled currency, a cost copied onto assets, a purchase from
   assets of which any has a cost); `CREATES_ASSETS` on `purchase_receive`. The document read answers
-  lazyit's warnings and matches before the document block, so a truncated draft keeps them. A card's precondition is the purchase's version — for
+  lazyit's warnings and matches before the document block, so a truncated draft keeps them. A card names
+  the records it references — a line's `assetModelId`, `consumableId` and `applicationId`, the header's
+  `deliveryLocationId`, a link's `modelId` before → after — as entity values `{ type, id, label }` in the
+  same slots, the label read through the caller's own route (`findOne` of the model, location, consumable or
+  application); a read the caller may not make, or one that fails, leaves `{ type, id }`, so a card never
+  shows a name its viewer could not read. A card's precondition is the purchase's version — for
   a line action, the newer of the purchase's and the line's `updatedAt` (a line edit does not bump the
   purchase), so either edit makes the approval `STALE`.
 - **Mutation weights** (SEC-081): `purchase_receive` = its `quantity` (the units it creates — which is why the

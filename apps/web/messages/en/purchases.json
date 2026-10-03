@@ -229,7 +229,10 @@
     "seatsFor": "for <link>{name}</link>",
     "applyLicense": "Apply license",
     "readDocument": "Read this document",
-    "readDocumentHint": "Sends the whole file to your AI provider to draft the purchase. Nothing is saved until you review it."
+    "readDocumentHint": "Sends the whole file to your AI provider to draft the purchase. Nothing is saved until you review it.",
+    "askAi": "Ask AI to fill",
+    "askAiHint": "Opens the AI assistant with a message to read this document and fill in the purchase. Nothing is sent until you send it, and every change comes as a card for you to approve.",
+    "askAiMessage": "Read the document \"{name}\" (document id {id}) attached to this purchase and fill in the purchase from it."
   },
   "activity": {
     "fields": {

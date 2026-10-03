@@ -229,7 +229,10 @@
     "seatsFor": "para <link>{name}</link>",
     "applyLicense": "Aplicar licencia",
     "readDocument": "Leer este documento",
-    "readDocumentHint": "Envía el archivo completo a tu proveedor de IA para hacer el borrador de la compra. No se guarda nada hasta que lo revisas."
+    "readDocumentHint": "Envía el archivo completo a tu proveedor de IA para hacer el borrador de la compra. No se guarda nada hasta que lo revisas.",
+    "askAi": "Pedirle a la IA que la complete",
+    "askAiHint": "Abre el asistente de IA con un mensaje para leer este documento y completar la compra. No se envía nada hasta que lo envías, y cada cambio llega como una tarjeta que apruebas tú.",
+    "askAiMessage": "Lee el documento “{name}” (id del documento {id}) adjunto a esta compra y completa la compra con sus datos."
   },
   "activity": {
     "fields": {

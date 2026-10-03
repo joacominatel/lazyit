@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # AI assistant — Frontend surfaces
@@ -456,7 +456,8 @@ Rules:
   card keeps its own look; auto-approved records (#1376) are never paged. "Approve all" / "Reject all" send
   one decision per card through the same decision call (no bulk endpoint), show how many they cover, and
   **never** cover a card that needs step-up (server flag or a step-up warning, `CRITICAL_APPLICATION`
-  included), an elevated card (G4), or one whose last decision was refused (`STALE`, preview changed, …).
+  included), an elevated card (G4), one that creates assets or changes money (`CREATES_ASSETS`,
+  `CHANGES_MONEY` — #1478, §11d), or one whose last decision was refused (`STALE`, preview changed, …).
   A card with untrusted sources **is** covered (CEO decision, #1409); its page keeps the untrusted-source
   banner. There is no extra confirmation step: the button shows the count. Refusals are reported per card and a run-wide one (`notAwaiting`,
   `aiDisabled`, `forbidden`) stops the rest. Writes the server refused before proposing (the sixth and later
@@ -929,7 +930,7 @@ Edits to existing pages (en + es):
 - A full-page `/assistant` route; chat tabs.
 - The AI SDK's Redis-backed `resumable-stream` (the run event bus, `Last-Event-ID` and `run.snapshot`
   cover reconnection — R2).
-- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated and refused cards), per-user model choice, message edit, regenerate or branching.
+- An unconditional "Approve all" (the #1409 bulk actions skip step-up, elevated, asset-creating or money-changing (#1478) and refused cards), per-user model choice, message edit, regenerate or branching.
 - File or image attachments; voice.
 - Sharing conversations; admins reading others' conversations.
 - Usage/cost dashboards and quotas UI.
@@ -1297,6 +1298,63 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   Copy: `ai.sources.*`; the untrusted-source banner names the marker as `ai.entities.webSearch`. The
   other synthetic marker, `toolResult` (a read that carried other-authored text but named no entity,
   SEC-080), has no page either: the banner shows without a link for it (`ai.entities.toolResult`).
+
+## 11d. As built — purchases in the chat (#1478; ADR-0099 §11, *Decisions while building (Phase 3, #1478)*)
+
+- **"Approve all" exclusion.** `bulkExclusion` (`lib/ai/approval-pages.ts`) gains the reason
+  `assetsOrMoney`: a still-waiting page whose preview carries a warning in the shared
+  `AI_NEVER_AUTO_APPROVE_WARNINGS` (`CREATES_ASSETS`, `CHANGES_MONEY`, the list core enforces) is left out of
+  **Approve all** / **Reject all** and counted under "Decide these on their own page" (`pager.excluded.*`),
+  exactly like a step-up page. Precedence: `stepUp` → `elevated` → `assetsOrMoney` → `needsReview`. The page
+  itself still approves with the user's click and no password, and its warning says why on the card
+  (`approval.individualOnly`, beside the warning as "Needs your password" is). A step that only creates a
+  supplier or adds an unpriced line stays eligible. Every purchase write is also never auto-approved — that
+  is the server's rule and needs nothing from the web.
+- **Money values.** A preview value that is an object with `amount` and at most `currency` — nothing else;
+  `{ amount }` alone is money without a label — with an integer amount in minor units (or `null`) and a
+  free-text label (or `null`) is a `money` `PreviewValue` (`isMoneyShape`, `lib/ai/preview.ts`), rendered with
+  `formatMoney` in the UI locale with its label (`ARS 1.412.500`) on field rows, table cells, change lists and
+  the `/copy` transcript. `{ amount: null }` (an asset without a cost) is empty, never zero. An array holding
+  money is a `list` value (each amount kept, never a table and never dropped). An empty object is empty, never
+  `{}`.
+- **Lines and assets.** `lines` (an array of line records — a new purchase's, or the lines a purchase from
+  assets derives) is a table through the generic #1387 path.
+  `line` — the one record `purchase_line_add` adds and `purchase_line_remove` removes (its `before`) — is a
+  one-row table (`SINGLE_RECORD_FIELDS`); other single objects keep their old rendering. In a table,
+  `<key>Id` beside `<key>` (`asset` + `assetId` on a link card) is not a column but links the `<key>` cell
+  through `entityHref`, and a cell mapping field names to `{ before, after }` (a linked asset's `writes`) is a
+  list of labelled `before → after` (`TableCell.changes`). A line's `kind` and a linked asset's `linkState`
+  read with `ai.approval.table.values.*` (a covering test checks them against the shared enums). A mapped
+  line's `assetModelId` / `consumableId` / `applicationId`, the header's `deliveryLocationId` and a link's
+  `writes.modelId` (and a purchase from assets' line model) render by name when the preview sends an entity
+  ref `{ type, id, label }` (linked where the web has a page, #1492); a ref without a label — one the viewer
+  could not read — shows its id, the existing entity-value convention, and an older pending card's raw id is
+  still shown as is. `/copy` writes a table row by row
+  (`tableTranscriptLines`), money formatted.
+- **Entities and page context.** `entityHref`: `purchaseOrder` → `/purchases/:id`, `supplier` →
+  `/purchases/suppliers/:id`, `purchaseDocument` → its parent purchase (the untrusted-source banner links the
+  read document's purchase). `routeContext` maps `/purchases/:id[/…]` to `purchaseOrder` and
+  `/purchases/suppliers/:id` to `supplier` (longest prefix first; `new`, `pending`, `suppliers` are reserved).
+- **"Ask AI to fill".** On a purchase's *Documents* row, next to *Read this document* and only where it is
+  offered, when the chat is usable (`canAskAiToFill`, `lib/purchases/extraction.ts`). It calls the shell's new
+  `ask(text)` (`ai-assistant-root.tsx`), which opens the panel and holds the message with the page it was
+  asked on; the shell drops it if the panel closes or the page changes before the chat takes it. The chat
+  panel takes it (`AiChatPanel`): it switches to the chat view (never the history or the help) and, **when
+  the open chat has messages, starts a new chat** — the old one stays in the history — so the document's
+  turn, which ends auto-approve for its conversation, never lands in an unrelated chat; an empty chat is
+  reused. The composer puts the message in the box once per ask (`prefill.seq`, taken during render) **ahead
+  of any draft**, which is kept (`composerTextWithPrefill`, `lib/ai/prefill.ts`), re-enables the page chip
+  and focuses the box. It is **never sent by itself** — the person sends it, with the purchase as page
+  context; reading the document is their message, not the button's. The message carries the document's id,
+  which `purchase_document_read` takes as given, and quotes the file name sanitized (`documentNameForPrompt`): control characters, line breaks and quote marks removed, capped at 80
+  characters, since the name was typed by whoever uploaded the file and goes to the model as the person's
+  words.
+- **Catalogs.** The three entity labels, the two warnings, the two option sources (`suppliers`,
+  `consumables`), the 21 tool labels, the purchase preview fields and the 26 purchase sentences, en + es. The
+  new `es` strings address the user in the *tú* register (the Purchases catalog's); `ai.json`'s older strings
+  keep *voseo*, and the Manual's additions follow the register of the page they sit on.
+- Manual: `ai-assistant-approvals` (*Purchases*, the Approve-all list, auto-approve), `ai-assistant-using-the-chat`
+  (*Filling a purchase from a document*), `ai-assistant-overview` and `purchases-recording-purchases`.
 
 ## 12. Implementation units (superseded)
 

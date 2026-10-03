@@ -32,6 +32,37 @@ export function canExtract(
 }
 
 /**
+ * Whether *Ask AI to fill* is offered on a purchase document (#1478): the assistant's chat is usable for this
+ * person (`GET /ai/status`, fail closed) and the document can be read now — the same check as *Read this
+ * document*, since the chat reads it through the same extract route and its gates.
+ */
+export function canAskAiToFill(
+  chatAvailable: boolean,
+  status: Parameters<typeof canExtract>[0],
+  attachment: Pick<Attachment, "mimeType" | "byteSize">,
+): boolean {
+  return chatAvailable && canExtract(status, attachment);
+}
+
+/** The longest file name *Ask AI to fill* writes into the message. */
+const PROMPT_NAME_MAX = 80;
+
+/**
+ * A document's file name as *Ask AI to fill* writes it into the chat message (#1478). The name was typed by
+ * whoever uploaded the file, and the message goes to the model as the person's own words: control characters,
+ * line breaks and quote marks are removed (so the name cannot break out of its quotes or start a new
+ * paragraph of instructions), spaces are collapsed and it is capped at 80 characters. Pure.
+ */
+export function documentNameForPrompt(name: string): string {
+  const clean = name
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, " ")
+    .replace(/["'`\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u00AB\u00BB\u2039\u203A]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean.length > PROMPT_NAME_MAX ? `${clean.slice(0, PROMPT_NAME_MAX - 1).trimEnd()}…` : clean;
+}
+
+/**
  * Whether a file picked for *New purchase from a document* can be read: the same checks before anything is
  * created. `"type"` / `"size"` say why not (the size against {@link maxBytesFor} its type); `null` = fine.
  */

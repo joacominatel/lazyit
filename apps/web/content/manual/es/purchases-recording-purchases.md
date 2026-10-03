@@ -341,7 +341,7 @@ con él. Ningún otro dato de lazyit va con él, ni siquiera el nombre del archi
 presupuesto diario de IA de esa persona y queda en el registro de actividad de la compra (quién, qué
 proveedor y modelo — nunca los valores leídos).
 
-Hay dos formas de empezar:
+Hay tres formas de empezar:
 
 - En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB —
   algo menos para imágenes con algunos proveedores — y 20 páginas).
@@ -349,6 +349,11 @@ Hay dos formas de empezar:
   **borrador** con el nombre del archivo, lo adjunta y lo lee. Guardar la revisión completa la compra y la
   **marca como pedida** (viene marcado — desmárcalo para dejarla en borrador). Si lo dejas antes de guardar,
   el borrador conserva el documento y puedes completarlo a mano.
+- En una compra, **Pedirle a la IA que la complete** sobre un documento abre el [asistente de IA](/help/ai-assistant-using-the-chat#completar-una-compra-a-partir-de-un-documento)
+  — en un chat nuevo si el abierto ya tiene mensajes — con un mensaje que le pide leer ese documento y
+  completar la compra. Envíalo, responde las pocas
+  preguntas que hace y aprueba la tarjeta que propone — no hay pantalla de revisión, y no se guarda nada
+  hasta que apruebas. Solo aparece donde está *Leer este documento*, y cuando puedes usar el asistente.
 
 La lectura tarda hasta dos minutos. Si falla, no se completó nada y el documento sigue adjunto: la pantalla
 dice por qué (el proveedor estaba ocupado, el archivo tiene demasiadas páginas, se agotó el presupuesto

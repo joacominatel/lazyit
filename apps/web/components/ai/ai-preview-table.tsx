@@ -21,10 +21,12 @@ import { usePreviewFieldLabel } from "./ai-labels";
  * A preview field whose value is a list of records (a batch's rows, #1387), as a table inside the card:
  * a sticky header, its own vertical and horizontal scroll (the page never scrolls sideways), rows that
  * will be skipped visibly marked, a problems column (errors and duplicates, linking to the existing
- * record), and an "only problems" filter. Plain text only; links come from `entityHref`.
+ * record), and an "only problems" filter. Plain text only; links come from `entityHref`. A cell that lists
+ * changes (the values a linked asset gets, #1478) shows one `label: before → after` per field.
  */
 export function AiPreviewTable({ field, records }: { field: string; records: PreviewRecord[] }) {
   const t = useTranslations("ai.approval.table");
+  const tApproval = useTranslations("ai.approval");
   const tRoot = useTranslations();
   const fieldLabel = usePreviewFieldLabel();
   const switchId = useId();
@@ -33,16 +35,39 @@ export function AiPreviewTable({ field, records }: { field: string; records: Pre
   const [onlyProblems, setOnlyProblems] = useState(false);
   const rows = visibleTableRows(table, onlyProblems && table.problemCount > 0);
 
-  /** A status enum value reads with the asset status label when the catalog has one. */
-  function statusText(cell: TableCell): string | null {
-    if (cell.value.kind !== "text") return null;
-    const key = `assets.status.${cell.value.text}`;
-    return /^[A-Z_]+$/.test(cell.value.text) && tRoot.has(key) ? tRoot(key) : null;
+  /**
+   * An enum value reads with its label when the catalog has one: a `status` with the asset status label,
+   * a purchase line's `kind` and a linked asset's `linkState` (#1478) with `ai.approval.table.values.*`.
+   */
+  function enumText(column: string, cell: TableCell): string | null {
+    if (cell.value.kind !== "text" || !/^[A-Z_]+$/.test(cell.value.text)) return null;
+    const key =
+      column === "status" ? `assets.status.${cell.value.text}` : `ai.approval.table.values.${column}.${cell.value.text}`;
+    return /^[A-Za-z]+$/.test(column) && tRoot.has(key) ? tRoot(key) : null;
   }
 
   function renderCell(column: string, cell: TableCell) {
-    const status = column === "status" ? statusText(cell) : null;
-    const content = status !== null ? <span>{status}</span> : <ApprovalValue value={cell.value} />;
+    if (cell.changes) {
+      // The values a row gets (a linked asset's, #1478): one `label: before → after` per field.
+      return (
+        <ul className="space-y-0.5">
+          {cell.changes.map((change) => (
+            <li key={change.field}>
+              <span className="text-muted-foreground">{fieldLabel(change.field)}: </span>
+              <span className="sr-only">{tApproval("before")}: </span>
+              <span className="text-muted-foreground line-through decoration-muted-foreground/50">
+                <ApprovalValue value={change.before} />
+              </span>
+              <span aria-hidden className="px-1 text-muted-foreground">→</span>
+              <span className="sr-only">{tApproval("after")}: </span>
+              <ApprovalValue value={change.after} />
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    const label = enumText(column, cell);
+    const content = label !== null ? <span>{label}</span> : <ApprovalValue value={cell.value} />;
     return (
       <>
         {cell.href && cell.value.kind === "text" ? (

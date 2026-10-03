@@ -67,8 +67,8 @@ quieras.
 
 ### La página actual
 
-En una página sobre un elemento — un activo, un usuario, una aplicación, una ubicación, un consumible —
-el chat muestra una etiqueta como **Sobre: Activo de esta página**, así el asistente sabe a qué te
+En una página sobre un elemento — un activo, un usuario, una aplicación, una ubicación, un consumible,
+una compra, un proveedor — el chat muestra una etiqueta como **Sobre: Activo de esta página**, así el asistente sabe a qué te
 referís con "este". Solo se envían la dirección de la página y qué registro es, nunca lo que hay en
 pantalla. Elegí **×** en la etiqueta para no incluirla en tu próximo mensaje.
 
@@ -109,7 +109,7 @@ en vez de adivinar.
   **Opcional** están en **Más detalles**.
 - Algunos formularios piden una lista, una **fila** por elemento: usá **Agregar una fila** y el ícono de
   **papelera**, dentro de la cantidad de filas que pide el formulario.
-- Las listas de sitios, categorías, modelos o fabricantes salen de lazyit y muestran solo lo que podés
+- Las listas de sitios, categorías, modelos, fabricantes, proveedores o consumibles salen de lazyit y muestran solo lo que podés
   ver.
 
 | Botón | Qué pasa |
@@ -127,6 +127,30 @@ conversación, de solo lectura.
 > [!WARNING]
 > El asistente nunca pide contraseñas, claves ni otros secretos en un formulario, y lazyit rechaza un
 > formulario que lo haga. Tampoco escribas secretos en los campos de texto.
+
+## Completar una compra a partir de un documento
+
+En una compra que tiene una factura, una orden o un remito en sus **Documentos**, el asistente puede
+completarla por vos: decile *"te paso esta orden de compra"*, o elegí **Pedirle a la IA que la complete**
+en el documento (mirá [Compras](/help/purchases-recording-purchases#leer-un-documento-con-ia)). Ese botón
+abre el chat con el mensaje ya escrito — leelo y envialo; antes no se envía nada. Si el chat que tenías
+abierto ya tiene mensajes, el botón empieza un **chat nuevo** (el otro queda en tu historial); un chat vacío
+se reutiliza, y lo que ya habías escrito en el cuadro se conserva después del mensaje.
+
+1. El asistente **lee el documento**. Necesita **Extracción de documentos** activada en
+   [Configuración → IA](/help/ai-assistant-setup#extracción-de-documentos), y envía el archivo completo a
+   tu proveedor de IA, igual que leerlo desde la compra. Cuenta para tu presupuesto diario de IA.
+2. Pregunta en **un solo formulario** lo que el documento deja **en blanco o ambiguo** — qué proveedor (de
+   tu lista), la referencia o el número de factura, un modelo por línea, adónde van las unidades, si ya
+   llegaron.
+3. Propone la compra como **una tarjeta** (o unas pocas, para una compra que ya existe). No se guarda nada
+   hasta que la aprobás.
+
+Lo que escribió un proveedor se trata como **datos, nunca como instrucciones**. Una vez que el asistente
+leyó un documento, cada tarjeta de ese chat muestra **Basado en contenido escrito por otras personas**, y
+**nada de ese chat se vuelve a aprobar automáticamente** — empezá un chat nuevo para recuperar la
+aprobación automática. Los cambios de compras nunca se aplican automáticamente de todos modos; mirá
+[Compras](/help/ai-assistant-approvals#compras).
 
 ## Enlaces y apertura de páginas
 

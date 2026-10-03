@@ -236,6 +236,32 @@ describe("bulk eligibility", () => {
     ).toBeNull();
   });
 
+  test("never a change that creates assets or changes money (#1478)", () => {
+    for (const warnings of [["CREATES_ASSETS"], ["CHANGES_MONEY"], ["SOFT_DELETE", "CHANGES_MONEY"]]) {
+      expect(bulkExclusion(card("w1", null, { preview: { ...preview, warnings } }), EMPTY_PAGER_STATE)).toBe(
+        "assetsOrMoney",
+      );
+    }
+    // Any other warning a purchase card carries leaves it in the bulk action.
+    expect(
+      bulkExclusion(card("w1", null, { preview: { ...preview, warnings: ["SOFT_DELETE"] } }), EMPTY_PAGER_STATE),
+    ).toBeNull();
+  });
+
+  test("a batch that only adds a supplier or an unpriced line can still be approved at once (#1478)", () => {
+    const parts = [
+      card("supplier"),
+      card("unpriced"),
+      card("receive", null, { preview: { ...preview, warnings: ["CREATES_ASSETS", "CHANGES_MONEY"] } }),
+      card("priced", null, { preview: { ...preview, warnings: ["CHANGES_MONEY"] } }),
+    ];
+    expect(bulkPlan(parts, EMPTY_PAGER_STATE)).toEqual({
+      eligible: ["supplier", "unpriced"],
+      excluded: [{ reason: "assetsOrMoney", count: 2 }],
+      waiting: 4,
+    });
+  });
+
   test("never a STALE one (or any change whose last decision was refused)", () => {
     const state = recordDecision(EMPTY_PAGER_STATE, "w1", "approve", { ok: false, error: { kind: "stale" } });
     expect(bulkExclusion(card("w1"), state)).toBe("needsReview");
