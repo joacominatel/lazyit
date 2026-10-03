@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-02
 ---
 
 # Asset
@@ -28,6 +28,9 @@ concrete instance of a generic [[asset-model]].
   `GET /consumables/deliveries?targetAssetId=` (also needs `asset:read`). The FK is `Restrict`, so an
   asset that received a delivery cannot be hard-deleted; a soft delete is unaffected
   ([[0098-consumable-delivery-targets]]).
+- **was bought on** an optional [[purchase-order-line]] (`purchaseOrderLineId`) — the column exists since
+  #1472 and is **read-only** in the contract; it is set by receiving from a line and by linking, and cleared
+  by unlinking (#1473, [[purchase-order-line]] — receiving and linking). See the purchases note below.
 
 ## Business rules
 
@@ -72,6 +75,49 @@ concrete instance of a generic [[asset-model]].
   delete everywhere, references are preserved in practice.
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
+
+> [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
+> Purchases is always available, optional at entry, with no instance switch. The two columns below are
+> **built** (#1472); linking, the confirmation diff and the provenance read are built in the API (#1473),
+> and the asset's *Purchase* panel, the receive and link dialogs and *Create purchase* from selected assets
+> in the web (#1475, #1476, #1477). An asset has:
+>
+> - **`purchaseOrderLineId`** — nullable FK → [[purchase-order-line]] (`onDelete: Restrict`; soft delete
+>   never triggers it). `NULL` = "no purchase", which is what every existing asset gets on upgrade. N
+>   assets per line, at most one line per asset. Linking and unlinking write new [[asset-history]] event
+>   types and a [[purchase-order-event]], in the same transaction.
+> - **`purchaseCurrency`** — an optional currency label on the purchase cost: free text as the user typed
+>   it (trimmed, ≤ 32), suggested by smart entry (`GET /suggestions/currency`), with no ISO list and no
+>   currency semantics. Writable on create and update (`null` clears it). The design's working name was
+>   `purchaseCostCurrency`; it was built as `purchaseCurrency` (#1472).
+>   `NULL` reads as **"No currency"** — its own state, never defaulted. It qualifies `purchaseCost` and
+>   `salvageValue` alike. Any aggregate of cost groups by label (trimmed, case-insensitive) and never
+>   sums across labels. Amounts display as entered — no forced decimals on whole amounts
+>   ([[0100-money-as-64-bit-minor-units]] §5).
+>
+> **The asset's purchase fields stay authoritative.** Values from a purchase reach an asset only by
+> **copy on explicit confirmation** — when receiving units from a line or linking existing assets:
+> empty fields are pre-checked to fill, replacements are never pre-checked, cost and currency move
+> together, and unlinking never clears anything. A divergence from the line is shown, not corrected.
+> The free purchase fields stay editable exactly as today, linked or not, and no asset ever requires a
+> purchase. **Clone never copies `purchaseOrderLineId`** (the shared `cloneAssetDefaults` never maps it, and
+> the strict create body refuses it); it carries `purchaseCurrency` with the cost.
+>
+> **Provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A): the asset page's
+> *Purchase* panel — supplier, reference, dates and the purchase documents — is shown and served only to
+> a principal holding `purchaseOrder:read`. The asset's own purchase fields (cost, currency, dates) stay
+> visible under `asset:read`, as today. Built as `GET /assets/:id/purchase` (#1473, `asset:read` **and**
+> `purchaseOrder:read` — a VIEWER gets a 403): the line with its received / pending counts, the purchase
+> header (reference, status, currency label, dates, company, invoice numbers, `createdAt` — since #1476,
+> the date of the title fallback — and `deletedAt`) with the
+> supplier's name and support / RMA contact, and the purchase's documents (listed while the purchase is
+> live; downloaded through `/purchase-orders/:id/attachments/:attachmentId/content`). `404` when the asset is
+> missing or not linked. An archived purchase is still the asset's provenance.
+>
+> **The inventory CSV** (`GET /assets/export`) carries `purchaseCost` (major units, dot decimal) and
+> `purchaseCurrency` for every caller with `asset:read`, and appends `supplier`, `purchaseReference` and
+> `invoiceNumbers` **only** for a caller holding `purchaseOrder:read` — absent, not blank, otherwise
+> (#1473).
 
 > [!note] `specs` governance — advisory per-category dictionary (2026-06-30, #851)
 > `Asset.specs` (and [[asset-model]]`.specs`) still accept **any JSON object**
@@ -138,12 +184,14 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `status` | `AssetStatus` | required enum, **no default**. |
 | `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object within the structural write bound (see the notes above). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
-| `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + autocomplete over already-used values (`GET /assets/companies`); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
+| `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + smart entry over already-used values (`GET /suggestions/company`, with use counts; `GET /assets/companies` feeds the list filter); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
 | `purchaseDate` | `datetime?` | optional; ISO-8601 string over the wire ([[0018-api-documentation-swagger]]). |
 | `warrantyEnd` | `datetime?` | optional; ISO-8601 string over the wire. |
-| `purchaseCost` | `int?` | optional acquisition cost in **integer minor units** (e.g. cents) of the instance's single currency (#954) — no Prisma `Decimal`, no currency modeling (YAGNI; the UI formats the number). `null` = unknown. Non-negative, bounded to `int4`. |
+| `purchaseCost` | `bigint?` | optional acquisition cost in **integer minor units** (hundredths) (#954) — no Prisma `Decimal`. `null` = unknown. A Postgres `bigint`, a JSON number on the wire bounded to `[0, Number.MAX_SAFE_INTEGER]` by the shared `money()` ([[0100-money-as-64-bit-minor-units]]). Qualified by `purchaseCurrency`. |
+| `purchaseCurrency` | `string?` | optional free-text currency label of `purchaseCost` / `salvageValue` (#1472, [[0099-purchases-scope-model-and-optionality]] §5). `null` = "No currency" — every asset that predates Purchases. Trimmed, ≤ 32 on write; a plain-field edit names it in the `UPDATED` history event. |
 | `usefulLifeMonths` | `int?` | optional straight-line depreciation period in months (#954). `null` (or `<= 0`) = don't depreciate (book value = cost). |
-| `salvageValue` | `int?` | optional residual value at end of life, minor units (#954). `null` = 0. |
+| `salvageValue` | `bigint?` | optional residual value at end of life, minor units (#954). `null` = 0. A Postgres `bigint`, bounded on the wire like `purchaseCost` ([[0100-money-as-64-bit-minor-units]]). |
+| `purchaseOrderLineId` | `cuid?` | optional FK → [[purchase-order-line]], `onDelete: Restrict` (#1472). **Read-only** in the contract: no create or update body accepts it. `null` = no purchase. Indexed for the derived received count. |
 | `modelId` | `cuid?` | optional FK → [[asset-model]], `onDelete: SetNull`. |
 | `locationId` | `cuid?` | optional FK → [[location]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
@@ -155,7 +203,7 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 ### Depreciation — `currentBookValue` (#954)
 
 The detail read (`GET /assets/:id`, `AssetWithRelations`) carries a **computed** `currentBookValue`
-(`int | null`, minor units) — it is **never stored**. It is derived per-request from `purchaseCost`,
+(an integer or `null`, minor units) — it is **never stored**. It is derived per-request from `purchaseCost`,
 `usefulLifeMonths`, `salvageValue` and `purchaseDate` by the pure shared util
 `computeAssetBookValue` in `@lazyit/shared` (with a `bun test`). The rule is **straight-line only**
 (no MACRS / declining-balance / tax modeling, no multi-currency — deliberately minimal):
@@ -192,8 +240,18 @@ three stored fields are echoed on create/update.
   cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
   field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
   batch create uses them for its duplicate check.
+  **Purchase filters** (#1476, list only — the CSV export does not take them): `purchaseOrderLineId` (the
+  assets linked to that line), `purchaseOrderId` (linked to any line of that purchase) and
+  `purchaseLinked` (`true` = linked to some purchase line, `false` = to none), AND-combined; an id that is
+  not a cuid is a `400`. They reveal provenance, so any of them needs **`purchaseOrder:read`** on top of the
+  route's `asset:read` (`403` otherwise — checked in the service, since a decorator cannot see a query
+  param; ADR-0099 §8, D-A). A list without them is never checked. Defense in depth: the list query applies
+  only purchase filters minted by `AssetsService.authorizePurchaseFilters`, so no other caller of the query
+  (the CSV export included) can apply ones it did not authorize (`403`).
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
-  `asset:read`) — powers the form autocomplete datalist and the list filter ([[0076-asset-company-grouping-field]]).
+  `asset:read`) — feeds the list's company filter ([[0076-asset-company-grouping-field]]). The form's
+  smart-entry company field reads `GET /suggestions/company` instead (use counts and last use, merged with
+  the purchases' companies for a caller who may read them; #1481).
 - `GET /assets/:id` — one **expanded** asset (`404` if missing/soft-deleted).
 - `GET /assets/:id/assignments?activeOnly=` — the asset's ownership records, each with its `user`
   inlined (`AssetAssignmentWithUser[]`); `activeOnly` defaults to true, pass `false` for full
@@ -202,7 +260,11 @@ three stored fields are echoed on create/update.
   (`AssetHistory[]`, newest first; cursor on the autoincrement id, `limit` default 50 / max 100).
   `404` if missing/soft-deleted. See [[asset-history]].
 - `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) — lean `Asset` shape; an invalid
-  `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). Each write
+  `modelId`/`locationId` on write returns `400` (FK → [[0018-api-documentation-swagger]]). So does an
+  **archived** one (#1476): a soft-deleted model or location still passes the FK, so `POST`, bulk receive
+  (one upfront `400`, also for a receive from a purchase line) and a `PATCH` that **changes** the model or
+  location refuse it. Write-only: reads, and a `PATCH` that re-sends the asset's current (legacy archived)
+  model or location, are not checked. Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
@@ -218,7 +280,12 @@ three stored fields are echoed on create/update.
   (`201` even when some units fail — `failed[]` is the honest partial signal, mirroring the [[import]]
   row-level FAILED reporting). Each minted unit gets the full create path (model spec-defaults, the
   `CREATED` [[asset-history]] event, search upsert, #954 money pass-through) and a default
-  `name` of `"<ModelName> #<seq>"`.
+  `name` of `"<ModelName> #<seq>"`. Purchases (#1473) adds `purchaseCurrency?`, `warrantyEnd?` and
+  `purchaseOrderLineId?`: with a line, the units are received **against** it — it must be a live `ASSET`
+  line of a live purchase (`400`) and the caller must also hold `purchaseOrder:write` (`403`) — each unit is
+  created linked, and the result adds `overReceived` ([[purchase-order-line]]).
+- `GET /assets/:id/purchase` — the asset's purchase provenance (`asset:read` + `purchaseOrder:read`); see the
+  purchases note above.
 - `POST /assets/:id/restore` — **ADMIN-only** ([[0040-rbac-roles]]). Clears `deletedAt` and emits a
   `RESTORED` [[asset-history]] event transactionally; returns the expanded asset. Idempotent on a live
   asset; can `409` if a live asset took the freed serial/assetTag meanwhile
@@ -243,4 +310,5 @@ Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assign
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]] ·
 [[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]] ·
-[[0093-chassis-routing-and-asset-adoption]]
+[[0093-chassis-routing-and-asset-adoption]] · [[0099-purchases-scope-model-and-optionality]] ·
+[[0100-money-as-64-bit-minor-units]] · [[purchase-order-line]]

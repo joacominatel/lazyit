@@ -10,7 +10,7 @@
     "bulkActions": "Bulk actions",
     "clearSelection": "Clear selection",
     "selectRow": "Select row",
-    "selectedCount": "{count, plural, =0 {No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} selected} one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}} selected} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} selected}}",
+    "selectedCount": "{count, plural, =0 {No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} purchase {purchases} supplier {suppliers} other {items}} selected} one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}} selected} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} purchase {purchases} supplier {suppliers} other {items}} selected}}",
     "noResults": "No results",
     "showingRange": "Showing <b>{from}</b>–<b>{to}</b> of <b>{total}</b>",
     "previous": "Previous",
@@ -75,7 +75,9 @@
       "consumable_returned": "Consumable returned",
       "deactivated": "Deactivated",
       "reactivated": "Reactivated",
-      "session_ended": "Session ended"
+      "session_ended": "Session ended",
+      "purchase_linked": "Purchase linked",
+      "purchase_unlinked": "Purchase unlinked"
     }
   },
   "empty": {},
@@ -127,16 +129,19 @@
       "new": "New",
       "edit": "Edit",
       "ai": "AI",
-      "account": "Account"
+      "purchases": "Purchases",
+      "suppliers": "Suppliers",
+      "account": "Account",
+      "pending": "Pending units"
     },
     "aiAndConnectedApps": "AI & connected apps",
     "account": "Account"
   },
   "dialog": {
-    "deleteTitle": "Delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}?",
+    "deleteTitle": "Delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}}?",
     "deleteDescriptionPrefix": "will be archived — a soft delete that hides it from the list without erasing its history.",
-    "deleted": "{entity, select, asset {Asset} application {Application} consumable {Consumable} article {Article} user {User} location {Location} model {Model} category {Category} serviceAccount {Service account} other {Item}} deleted",
-    "deleteError": "Couldn't delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}",
+    "deleted": "{entity, select, asset {Asset} application {Application} consumable {Consumable} article {Article} user {User} location {Location} model {Model} category {Category} serviceAccount {Service account} purchase {Purchase} supplier {Supplier} other {Item}} deleted",
+    "deleteError": "Couldn't delete {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}}",
     "cancel": "Cancel",
     "delete": "Delete"
   },
@@ -213,12 +218,12 @@
     }
   },
   "field": {
-    "newEntity": "New {label, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}"
+    "newEntity": "New {label, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}}"
   },
   "batch": {
-    "allSucceeded": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}.",
-    "noneSucceeded": "No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}. {skipped, plural, one {# skipped} other {# skipped}}.",
-    "partial": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}; {skipped} skipped."
+    "allSucceeded": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} purchase {purchases} supplier {suppliers} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}.",
+    "noneSucceeded": "No {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} purchase {purchases} supplier {suppliers} other {items}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}. {skipped, plural, one {# skipped} other {# skipped}}.",
+    "partial": "{count, plural, one {# {entity, select, asset {asset} application {application} consumable {consumable} article {article} user {user} location {location} model {model} category {category} serviceAccount {service account} purchase {purchase} supplier {supplier} other {item}}} other {# {entity, select, asset {assets} application {applications} consumable {consumables} article {articles} user {users} location {locations} model {models} category {categories} serviceAccount {service accounts} purchase {purchases} supplier {suppliers} other {items}}}} {verb, select, deleted {deleted} restored {restored} revoked {revoked} updated {updated} other {{verb}}}; {skipped} skipped."
   },
   "editor": {
     "markdownPlaceholder": "Write in Markdown…",

@@ -34,6 +34,12 @@ the classic flow — ownership is otherwise a separate step you take once the as
 [Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
 reason, the asset is still created; you'll just be asked to assign the owner from the asset.
 
+Something a purchase is waiting for? When a [purchase](/help/purchases-recording-purchases) still waits for
+units, the form opens with a **From purchase** picker: choosing a line opens
+[Receive stock](/help/assets-bulk-receiving#receiving-against-a-purchase) for it, so the unit is created
+already linked to its purchase, with the purchase's values. You see it only if you can view and edit
+purchases.
+
 Registering a batch of similar units? Use **Create & add another** instead of **Create asset**: it
 saves the current one and keeps the form open with the **model, location, company and status**
 carried over, clearing just the name, serial and asset tag so you can type the next unit straight
@@ -88,10 +94,27 @@ legal entity). It is **only for grouping, filtering and reporting**: it is **not
 Company does not hide anything — anyone who can see assets sees *all* assets regardless of their
 company; setting it simply lets you narrow the list to one company when you want to.
 
-It is a free-text field with **autocomplete**: as you type, lazyit suggests companies you've already
-used on other assets, so you reuse the same spelling instead of creating near-duplicates — but you
-can always type a brand-new value. There is no separate "companies" screen to manage: a company
-exists simply because at least one asset uses it.
+It is a free-text field with **suggestions**, so you reuse the same spelling instead of creating
+near-duplicates:
+
+- **When you click into it**, lazyit lists the companies *you* used most recently (remembered in this
+  browser), then the other companies already in use — most used first, with how many records use each
+  and when one was last used. Companies typed on [purchases](/help/purchases-recording-purchases) are
+  suggested too, if you can see purchases.
+- **As you type**, the closest matches come first: a company that starts with what you typed, then one
+  where a word starts with it, then one that contains it — and even a close misspelling.
+- **With the keyboard**, **↓** opens the list, **↑**/**↓** move through it, **Enter** or **Tab** takes the
+  highlighted company, and **Esc** closes the list and keeps what you typed. When the best match
+  completes what you are typing, it is highlighted for you, so **Enter** or **Tab** finishes the word;
+  **Ctrl+Enter** (**⌘+Enter** on a Mac) keeps your text exactly as typed instead.
+
+You can always type a brand-new value — a suggestion is never forced. If what you typed is just another
+spelling of a company already in use (different capitals or accents, punctuation, or a legal suffix
+such as "S.A." or "Inc."), a hint below the field says so and offers a button to use the existing
+spelling. It is only a hint: ignore it and your value is saved exactly as typed.
+
+There is no separate "companies" screen to manage: a company exists simply because at least one asset
+uses it.
 
 On the asset detail page the company is shown when set, and links to the list filtered by that
 company. You can filter and add a **Company** column to the list (see below).
@@ -99,10 +122,13 @@ company. You can filter and add a **Company** column to the list (see below).
 ## Cost & depreciation
 
 Under **Purchase & depreciation** you can optionally record what an asset cost and how long it's
-expected to serve. All three fields are optional — leave them blank for gear whose value you don't
+expected to serve. All the fields are optional — leave them blank for gear whose value you don't
 track.
 
 - **Purchase cost** — what you paid for the unit.
+- **Currency** — an optional label for the amounts, as your team writes it (`ARS`, `USD`, `u$s`…). It
+  suggests the labels already in use. lazyit never converts or interprets it; it only prints it in front
+  of the cost.
 - **Useful life** — how long you expect to use it, **in months** (for example `36` for three years).
 - **Salvage value** — its estimated worth at the end of that life. Defaults to **0** if left blank.
 
@@ -112,8 +138,29 @@ down to the salvage value across the useful life, then holds at the salvage valu
 but no useful life, the book value simply stays at the purchase cost (there's nothing to depreciate
 over). Assets with no purchase cost show no book value at all.
 
-Amounts are plain numbers — lazyit is single-organization and doesn't attach a currency, so enter and
-read them in whatever currency your team uses.
+An asset with a cost but no currency label shows its cost as **No currency** — its own visible state,
+never a default currency. Assets recorded before currency labels existed read this way until someone
+sets one. The book value carries the same label as the cost.
+
+### Entering amounts
+
+Type an amount the way numbers are written in the language you use lazyit in:
+
+| Language | Accepted | Not accepted |
+| --- | --- | --- |
+| English | `1,234.56` · `1234.56` · `1500` | `1.234,56` |
+| Spanish | `1.234,56` · `1234,56` · `1500` | `1,234.56` |
+
+Use at most **two decimals**, and leave out currency signs and minus signs. lazyit never guesses: if an
+amount can't be read in your language's format — `1,234.56` while lazyit is in Spanish, or a third
+decimal that is most likely a mistyped thousands separator — it says so below the field when you leave
+it, and the form isn't saved until you fix it. Once read, the amount is rewritten in the standard form
+(`1234,5` becomes `1.234,50`), so you can see it was understood. One shape reads differently between
+languages — a single separator followed by exactly three digits, such as `1.150` in Spanish or `1,150`
+in English. lazyit reads it as thousands and says so under the field, for example *Read as 1150*.
+
+Amounts are **shown as entered**, with your language's separators: a whole amount has no decimals
+(`1,500` in English, `1.500` in Spanish) and an amount with cents shows two (`1,234.56` / `1.234,56`).
 
 ## Custom fields
 
@@ -163,8 +210,11 @@ that matches your **current filters** — the whole result set, not just the pag
 the status, category, location, company, owner or search you care about first (for example *all the
 Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
 row per asset with its name, asset tag, serial, status, category, manufacturer, model, location,
-company, purchase and warranty dates, current owners, notes and the created/updated timestamps, and is
-safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
+company, purchase and warranty dates, current owners, notes, the created/updated timestamps, the
+**purchase cost** (as a plain number with a dot for decimals, so a spreadsheet reads it) and its
+**currency** label — and, only if you can view [purchases](/help/purchases-recording-purchases), the
+asset's **supplier**, **purchase reference** and **invoice numbers**, as the last columns. Without that
+permission those three columns are left out of the file entirely. It is safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
 the *Show archived* view open, the export is that archived slice instead.
 
 ### Choosing which columns to show
@@ -174,6 +224,17 @@ model, category, location, company, status, owners and updated. Untick the ones 
 the table down to what matters for you. The **Name** column and the row actions always stay. Your
 choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
 governs the desktop table; the mobile card view always shows the full set.)
+
+## Where it was bought
+
+If the asset is linked to a [purchase](/help/purchases-recording-purchases), its page shows a **Purchase**
+panel right after *Details*: the purchase and its supplier, the reference, dates and invoice numbers, the
+supplier's support contact, and the purchase's documents to download. It is shown **only to people who
+can view purchases**; everyone else keeps seeing the asset's own cost and dates in *Details*, as before.
+The panel marks **Differs from purchase** when the asset's cost is not the price on its purchase, and
+offers **Unlink from purchase** to those who can edit purchases and assets. An asset that is not linked
+offers **Link to purchase** there instead. See
+[Purchases — The asset's Purchase panel](/help/purchases-recording-purchases#the-assets-purchase-panel).
 
 ## Assets on the topology map
 
@@ -199,6 +260,9 @@ asset's detail page lists them with their name, size and upload date.
 - **Delete** removes a document after a confirmation. Like the rest of lazyit this is reversible at
   the storage layer; the record of who uploaded it is kept.
 - Uploading and deleting need the asset-write permission; anyone who can view the asset can download.
+- **Type** — optional, free text (*Invoice*, *Warranty*, *Delivery note*…), suggested from the types
+  already used. Fill it before uploading, or set, change or clear it later with the pencil on the
+  document. It shows next to the file name.
 
 > **Backups.** Attachments are stored on the server's file volume, which is **not yet covered by the
 > database backup**. Until backup support ships, keep an independent copy of anything irreplaceable.

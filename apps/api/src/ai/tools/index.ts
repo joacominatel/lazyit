@@ -9,6 +9,7 @@ import { infraToolset } from './infra.tools';
 import { interactionToolset } from './input-request.tools';
 import { kbToolset } from './kb.tools';
 import { platformToolset } from './platform.tools';
+import { purchasesToolset } from './purchases.tools';
 import { referenceToolset } from './reference.tools';
 import { taxonomyToolset } from './taxonomy.tools';
 import { usersToolset } from './users.tools';
@@ -33,6 +34,7 @@ export const ALL_TOOLSETS: readonly AiToolset[] = [
   activityToolset,
   infraToolset,
   assetTagSchemeToolset,
+  purchasesToolset,
   platformToolset,
   interactionToolset,
 ];

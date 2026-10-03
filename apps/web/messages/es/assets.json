@@ -100,7 +100,9 @@
       "owner": "Responsable: {value}",
       "owners": "Responsables: {value}",
       "warranty": "Garantía: {value}"
-    }
+    },
+    "linkToPurchase": "Vincular a una compra",
+    "createPurchase": "Crear compra"
   },
   "empty": {
     "title": "Aún no hay nada registrado",
@@ -149,12 +151,15 @@
       "description": "Opcional — registra cuánto costó el activo y cuánto se espera que dure. lazyit los usa para mostrar un valor contable actual con amortización lineal."
     },
     "purchaseCost": "Costo de compra",
-    "purchaseCostPlaceholder": "p. ej. 1200.00",
+    "purchaseCostPlaceholder": "p. ej. 1200,00",
+    "purchaseCurrency": "Moneda",
+    "purchaseCurrencyPlaceholder": "p. ej. ARS, USD",
+    "purchaseCurrencyHelp": "Etiqueta opcional para los importes, como la escribe tu equipo. Nunca se convierte.",
     "usefulLifeMonths": "Vida útil",
     "usefulLifeMonthsPlaceholder": "p. ej. 36",
     "usefulLifeMonthsHelp": "En meses. Determina la amortización lineal.",
     "salvageValue": "Valor residual",
-    "salvageValuePlaceholder": "p. ej. 100.00",
+    "salvageValuePlaceholder": "p. ej. 100,00",
     "salvageValueHelp": "Valor estimado al final de la vida útil. Por defecto 0.",
     "saveChanges": "Guardar cambios",
     "createAsset": "Crear activo",
@@ -228,6 +233,7 @@
     "purchaseCost": "Costo de compra",
     "bookValue": "Valor contable",
     "bookValueHint": "Valor amortizado en línea recta a día de hoy.",
+    "noCurrency": "Sin moneda",
     "notes": "Notas",
     "customFieldsTitle": "Campos personalizados",
     "noCustomFields": "No se registraron campos personalizados.",
@@ -317,7 +323,9 @@
         "deleted": "Eliminado",
         "restored": "Restaurado",
         "consumableDelivered": "Consumible entregado",
-        "consumableReturned": "Consumible devuelto"
+        "consumableReturned": "Consumible devuelto",
+        "purchaseLinked": "Compra vinculada",
+        "purchaseUnlinked": "Compra desvinculada"
       },
       "details": {
         "created": "Activo creado",
@@ -336,7 +344,10 @@
         "consumableReturned": "{quantity, plural, one {Se devolvió} other {Se devolvieron}} {quantity} {unit} de <link>{name}</link>",
         "consumableDeliveredFallback": "Se entregó un consumible a este activo",
         "consumableReturnedFallback": "Se devolvió un consumible de este activo",
-        "consumableUnitFallback": "unidades"
+        "consumableUnitFallback": "unidades",
+        "purchaseLinked": "Se vinculó a una compra",
+        "purchaseUnlinked": "Se desvinculó de su compra; sus valores de compra se mantienen",
+        "openPurchase": "Abrir compra"
       }
     }
   },
@@ -393,7 +404,7 @@
     "companyPlaceholder": "Opcional",
     "purchaseDate": "Fecha de compra",
     "purchaseCost": "Costo de compra (c/u)",
-    "purchaseCostPlaceholder": "0.00",
+    "purchaseCostPlaceholder": "0,00",
     "purchaseCostHelp": "Se aplica a cada unidad.",
     "notes": "Notas",
     "notesPlaceholder": "Opcional — se aplica a cada unidad",
@@ -413,7 +424,36 @@
       "viewInventory": "Ver en el inventario",
       "receiveMore": "Recibir más",
       "done": "Listo"
-    }
+    },
+    "line": {
+      "title": "Recibir unidades",
+      "description": "{purchase} · {line} · {pending, plural, =0 {nada pendiente} one {# unidad pendiente} other {# unidades pendientes}}",
+      "fromPurchase": "Desde una compra",
+      "fromPurchaseHelp": "Opcional: recibe contra una línea de compra que todavía espera unidades. Todo se completa desde la compra.",
+      "modelMissing": "Esta línea todavía no tiene modelo. Elige o crea uno: se guarda en la línea y las unidades lo usan.",
+      "modelSaveError": "No se pudo guardar el modelo en la línea",
+      "quantityHelp": "{pending, plural, =0 {Nada pendiente en esta línea} one {# unidad pendiente} other {# unidades pendientes}}. Sigue a los números de serie que pegues.",
+      "serialsHelp": "Un número de serie por línea. La cantidad sigue a los números de serie; déjalo vacío para recibir unidades sin número de serie.",
+      "overWarning": "Esta línea espera {ordered} y quedaría con {after}. Recibir de más está permitido: la línea se mostrará como recibida de más.",
+      "overResult": "La línea ahora tiene {received} recibidas de {ordered} esperadas.",
+      "raise": "Subir la línea a {quantity}",
+      "raisedToast": "Línea subida a {quantity}",
+      "raiseError": "No se pudo cambiar la cantidad de la línea",
+      "fromThePurchase": "Desde la compra",
+      "change": "Cambiar",
+      "costEach": "Costo por unidad",
+      "costWithCurrency": "Costo de compra (por unidad, {currency})",
+      "warrantyEnd": "Fin de garantía",
+      "dateFromInvoice": "La fecha de factura de la compra.",
+      "dateToday": "Hoy: la compra todavía no tiene fecha de factura.",
+      "dateFromInvoiceShort": "fecha de factura",
+      "dateTodayShort": "hoy",
+      "locationFromPurchase": "Ubicación: donde se entrega la compra. Los documentos de la compra se ven en cada unidad.",
+      "noLocation": "La compra no tiene lugar de entrega. Los documentos de la compra se ven en cada unidad.",
+      "submit": "Recibir {count, plural, one {# unidad} other {# unidades}}",
+      "openPurchase": "Volver a la compra"
+    },
+    "scan": "Escanear"
   },
   "label": {
     "documentTitle": "Etiqueta de activo — {tag}",
@@ -427,6 +467,8 @@
     "subtitle": "Apunta la cámara a la etiqueta QR de un activo para abrirlo.",
     "starting": "Iniciando la cámara…",
     "permissionHint": "Permite el acceso a la cámara cuando se solicite. El escaneo requiere una conexión segura (HTTPS).",
+    "hint": "Mantén la etiqueta QR quieta dentro del cuadrado: se abre apenas se lee.",
+    "found": "Código leído: abriendo…",
     "unsupported": "El escaneo con cámara no es compatible con este dispositivo o navegador. Ingresa una etiqueta de activo.",
     "error": "No se pudo iniciar la cámara. Verifica que otorgaste permiso y que usas HTTPS, o ingresa una etiqueta de activo abajo.",
     "manualLabel": "Etiqueta de activo",

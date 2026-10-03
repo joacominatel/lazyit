@@ -5,9 +5,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { type AssetModel, CreateAssetModelSchema } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useCreateAssetModel } from "@/lib/api/hooks/use-asset-models";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 
@@ -71,12 +73,16 @@ export function CreateAssetModelDialog({
   const tc = useTranslations("common");
   const { data: categories } = useAssetCategories();
   const create = useCreateAssetModel();
+  const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(CreateAssetModelSchema),
     mode: "onTouched",
     defaultValues: { name: "", manufacturer: "" },
   });
+  // Manufacturers already in use on models and purchase lines, with counts and last use (ADR-0099 §7).
+  const manufacturerText = useWatch({ control: form.control, name: "manufacturer" }) ?? "";
+  const manufacturers = useSuggestions("manufacturer", manufacturerText, { enabled: open });
 
   // Keep the seed in a ref so the reset effect stays keyed on `open` alone: a `defaultName` that
   // changes while the dialog is open must never reset the form under the operator's hands.
@@ -102,6 +108,7 @@ export function CreateAssetModelDialog({
         },
         {
           onSuccess: (model) => {
+            rememberManufacturer(model.manufacturer);
             toast.success(t("created"));
             onCreated?.(model);
             onOpenChange(false);
@@ -170,10 +177,15 @@ export function CreateAssetModelDialog({
                   <FieldLabel htmlFor="new-model-manufacturer" required>
                     {t("manufacturerLabel")}
                   </FieldLabel>
-                  <Input
-                    {...field}
+                  <SuggestInput
                     id="new-model-manufacturer"
+                    name={field.name}
+                    ref={field.ref}
                     value={field.value ?? ""}
+                    onBlur={field.onBlur}
+                    onValueChange={field.onChange}
+                    source={() => manufacturers}
+                    recentKey="assetModel.manufacturer"
                     placeholder={t("manufacturerPlaceholder")}
                     aria-invalid={fieldState.invalid || undefined}
                   />

@@ -29,6 +29,10 @@ const KNOWN_SEGMENTS = [
   "account",
   // `/account/ai` and `/settings/ai` (ADR-0097): the humanizer would print "Ai".
   "ai",
+  // The Purchases area (ADR-0099): `/purchases`, `/purchases/pending` and `/purchases/suppliers`.
+  "purchases",
+  "pending",
+  "suppliers",
 ] as const;
 const KNOWN_SEGMENT_SET = new Set<string>(KNOWN_SEGMENTS);
 

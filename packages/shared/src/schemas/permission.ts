@@ -32,6 +32,7 @@ export const PERMISSION_DOMAINS = [
   "accessGrant",
   "accessRequest", // self-service access requests (ADR-0085) — request → approve/deny → grant
   "consumable",
+  "purchaseOrder", // Purchases (ADR-0099) — purchase orders, their lines and documents, and suppliers
   "article", // the Knowledge Base (KB) — articles
   "location",
   "assetModel",
@@ -115,6 +116,13 @@ export const PERMISSIONS = [
   "consumable:read",
   "consumable:write",
   "consumable:delete",
+  // purchaseOrder (Purchases, ADR-0099 §8) — covers purchases, their lines and documents, and suppliers.
+  // `read` is PRE-TIGHTENED (VIEWER_DENIED_READS): a VIEWER cannot see purchases or supplier prices by
+  // default. `write` = create, edit, receive, link/unlink, cancel. `delete` = soft delete AND restore,
+  // ADMIN-only like every other domain. All three are grantable to service accounts (fail-closed).
+  "purchaseOrder:read",
+  "purchaseOrder:write",
+  "purchaseOrder:delete",
   // article (KB) — `manage` is the coarse ADMIN capability that bypasses AUTHORSHIP (edit/publish/
   // delete/restore ANY article, not just your own — #877). It gates NO route on its own (the route
   // capability stays `article:write`/`article:delete`); it only lets its holder act on articles they
@@ -278,6 +286,9 @@ export const VIEWER_DENIED_READS = [
   "accessGrant:read",
   "accessRequest:read",
   "user:read",
+  // Purchases (ADR-0099 §8): purchases and supplier prices stay hidden from VIEWER by default; an admin
+  // can grant it to VIEWER from the role matrix (per role — every viewer at once).
+  "purchaseOrder:read",
 ] as const satisfies readonly Permission[];
 
 /**

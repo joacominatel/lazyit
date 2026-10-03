@@ -12,6 +12,7 @@ import {
   getMyAssets,
 } from "../endpoints/assets";
 import { invalidateDashboard } from "./use-dashboard";
+import { invalidateSuggestions } from "../query-keys";
 
 /**
  * Query keys for the Asset resource. Hand-written (not `createQueryKeys`) for the
@@ -45,6 +46,8 @@ export function useInvalidateAssets() {
   return () => {
     queryClient.invalidateQueries({ queryKey: assetKeys.all });
     invalidateDashboard(queryClient);
+    // An asset write can add a company or currency label that smart entry should now suggest.
+    void invalidateSuggestions(queryClient);
   };
 }
 

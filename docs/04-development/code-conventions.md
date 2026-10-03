@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-09-07
+updated: 2026-10-02
 ---
 
 # Code Conventions
@@ -31,6 +31,13 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 - **Integers backed by a Postgres `Int` column use `int4()`** from `@lazyit/shared`, never a bare
   `z.number().int()` — the latter inherits zod's safe-integer bounds, which overflow the column
   (P2020 → 500) and make Swagger UI autofill `MAX_SAFE_INTEGER` ([[0036-int4-bounded-integers]]).
+  **Money is the exception** ([[0100-money-as-64-bit-minor-units]]): money columns are Prisma `BigInt`
+  validated by the shared `money()` primitive — a JSON number in `[0, Number.MAX_SAFE_INTEGER]` that
+  always carries an OpenAPI `example`. Prisma returns a `bigint`, which `JSON.stringify` refuses, so the
+  service converts every row it returns (`assetMoneyToWire` / `applicationMoneyToWire` in
+  `apps/api/src/common/money.ts`) and every body it writes (`…MoneyToDb`). A new money column gets the
+  same pair of helpers there, and a test that reads it back over HTTP; there is no global
+  `BigInt.prototype.toJSON`.
 - **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
   reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
   guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass

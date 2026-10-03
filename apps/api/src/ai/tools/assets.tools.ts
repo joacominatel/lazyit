@@ -7,6 +7,8 @@ import { z } from 'zod';
 import {
   AssetStatusSchema,
   AssetWarrantyFilterSchema,
+  CURRENCY_LABEL_MAX_LENGTH,
+  money as moneySchema,
   type AiActionPreview,
   type AiEntityRef,
 } from '@lazyit/shared';
@@ -309,12 +311,9 @@ const assetReference = referenceString(
 const personReference = referenceString(
   'The person: their user id, email, exact full name, or "me" for yourself.',
 );
-const money = z
-  .number()
-  .int()
-  .min(0)
-  .max(2_147_483_647)
-  .describe('In minor units (cents) of the instance currency.');
+const money = moneySchema().describe(
+  'In minor units (cents), in the currency named by purchaseCurrency.',
+);
 const months = z.number().int().min(0).max(2_147_483_647);
 const dateTime = z.iso
   .datetime()
@@ -339,6 +338,14 @@ const editableFields = {
   notes: z.string().trim().min(1).max(2000),
   purchaseDate: dateTime,
   warrantyEnd: dateTime,
+  purchaseCurrency: z
+    .string()
+    .trim()
+    .min(1)
+    .max(CURRENCY_LABEL_MAX_LENGTH)
+    .describe(
+      'The currency label of the cost, free text as the team writes it (e.g. "USD", "ARS"). Never converted; set it together with purchaseCost.',
+    ),
   model: referenceString('The asset model: its id or exact name.'),
   location: referenceString('The location: its id or exact name.'),
 };
@@ -354,6 +361,7 @@ const SCALAR_FIELDS = [
   'purchaseDate',
   'warrantyEnd',
   'purchaseCost',
+  'purchaseCurrency',
   'usefulLifeMonths',
   'salvageValue',
 ] as const;
@@ -577,6 +585,7 @@ const assetGet = defineTool({
       asset: {
         ...assetCore(row, [
           'purchaseCost',
+          'purchaseCurrency',
           'usefulLifeMonths',
           'salvageValue',
           'currentBookValue',
@@ -681,6 +690,7 @@ const assetCreate = defineTool({
       purchaseDate: editableFields.purchaseDate.optional(),
       warrantyEnd: editableFields.warrantyEnd.optional(),
       purchaseCost: money.optional(),
+      purchaseCurrency: editableFields.purchaseCurrency.optional(),
       usefulLifeMonths: months.optional(),
       salvageValue: money.optional(),
       model: editableFields.model.optional(),
@@ -761,6 +771,7 @@ const batchSharedFields = {
   purchaseDate: editableFields.purchaseDate.optional(),
   warrantyEnd: editableFields.warrantyEnd.optional(),
   purchaseCost: money.optional(),
+  purchaseCurrency: editableFields.purchaseCurrency.optional(),
   usefulLifeMonths: months.optional(),
   salvageValue: money.optional(),
   model: editableFields.model.optional(),
@@ -1101,6 +1112,7 @@ function batchRowView(plan: BatchRowPlan): Row {
     'purchaseDate',
     'warrantyEnd',
     'purchaseCost',
+    'purchaseCurrency',
     'usefulLifeMonths',
     'salvageValue',
     'specs',
@@ -1383,6 +1395,10 @@ const assetUpdateInput = z
     purchaseDate: editableFields.purchaseDate.optional(),
     warrantyEnd: editableFields.warrantyEnd.optional(),
     purchaseCost: money.nullable().optional().describe('null clears it.'),
+    purchaseCurrency: editableFields.purchaseCurrency
+      .nullable()
+      .optional()
+      .describe('null clears it.'),
     usefulLifeMonths: months.nullable().optional().describe('null clears it.'),
     salvageValue: money.nullable().optional().describe('null clears it.'),
     model: editableFields.model.optional(),
@@ -1588,6 +1604,10 @@ const updateBatchFields = {
   purchaseDate: editableFields.purchaseDate.optional(),
   warrantyEnd: editableFields.warrantyEnd.optional(),
   purchaseCost: money.nullable().optional().describe('null clears it.'),
+  purchaseCurrency: editableFields.purchaseCurrency
+    .nullable()
+    .optional()
+    .describe('null clears it.'),
   usefulLifeMonths: months.nullable().optional().describe('null clears it.'),
   salvageValue: money.nullable().optional().describe('null clears it.'),
   model: editableFields.model.optional(),
@@ -2574,7 +2594,7 @@ export const assetsToolset: AiToolset = {
     ),
     unexposed(
       AssetAttachmentsController,
-      ['list', 'remove'],
+      ['list', 'remove', 'updateLabel'],
       'Attachments: v1.1 (tools-and-execution.md §7).',
     ),
     unexposed(

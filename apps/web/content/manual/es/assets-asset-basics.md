@@ -37,6 +37,11 @@ una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assign
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
 responsable desde el activo.
 
+¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
+espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre
+[Recibir stock](/help/assets-bulk-receiving#recibir-contra-una-compra) para ella, así la unidad se crea ya
+vinculada a su compra, con los valores de la compra. Lo ves solo si puedes ver y editar compras.
+
 ¿Registras un lote de unidades parecidas? Usa **Crear y agregar otro** en lugar de **Crear activo**:
 guarda la actual y mantiene el formulario abierto con el **modelo, la ubicación, la empresa y el
 estado** conservados, borrando solo el nombre, la serie y la etiqueta para que escribas la siguiente
@@ -94,10 +99,29 @@ un control de acceso. Empresa no oculta nada — cualquiera que pueda ver activo
 activos sin importar su empresa; fijarla solo te permite acotar la lista a una empresa cuando lo
 necesites.
 
-Es un campo de texto libre con **autocompletado**: a medida que escribes, lazyit te sugiere empresas
-que ya usaste en otros activos, así reutilizas la misma forma de escribirla en vez de crear casi
-duplicados — pero siempre puedes escribir un valor nuevo. No hay una pantalla aparte de "empresas"
-que administrar: una empresa existe simplemente porque al menos un activo la usa.
+Es un campo de texto libre con **sugerencias**, así reutilizas la misma forma de escribirla en vez de
+crear casi duplicados:
+
+- **Al hacer clic en el campo**, lazyit muestra las empresas que *tú* usaste más recientemente
+  (recordadas en este navegador) y luego las demás empresas en uso — las más usadas primero, con
+  cuántos registros usan cada una y cuándo se usó por última vez. También se sugieren las empresas
+  escritas en [compras](/help/purchases-recording-purchases), si puedes ver las compras.
+- **A medida que escribes**, primero aparecen las coincidencias más cercanas: una empresa que empieza
+  con lo que escribiste, luego una en la que alguna palabra empieza así, luego una que lo contiene — e
+  incluso una con un error de tipeo cercano.
+- **Con el teclado**, **↓** abre la lista, **↑**/**↓** se mueven por ella, **Enter** o **Tab** toman la
+  empresa resaltada y **Esc** cierra la lista y conserva lo que escribiste. Cuando la mejor coincidencia
+  completa lo que estás escribiendo, queda resaltada sola, así **Enter** o **Tab** terminan la palabra;
+  **Ctrl+Enter** (**⌘+Enter** en Mac) conserva tu texto exactamente como lo escribiste.
+
+Siempre puedes escribir un valor nuevo — nunca se te obliga a elegir una sugerencia. Si lo que
+escribiste es solo otra forma de escribir una empresa que ya está en uso (otras mayúsculas o acentos,
+puntuación, o un sufijo legal como "S.A." o "Inc."), un aviso debajo del campo lo indica y ofrece un
+botón para usar la forma existente. Es solo un aviso: si lo ignoras, tu valor se guarda tal como lo
+escribiste.
+
+No hay una pantalla aparte de "empresas" que administrar: una empresa existe simplemente porque al
+menos un activo la usa.
 
 En la página de detalle del activo la empresa se muestra cuando está fijada, y enlaza a la lista
 filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la lista (más abajo).
@@ -105,10 +129,13 @@ filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la 
 ## Costo y amortización
 
 En **Compra y amortización** puedes, de forma opcional, registrar cuánto costó un activo y cuánto se
-espera que dure. Los tres campos son opcionales — déjalos en blanco para el equipo cuyo valor no
+espera que dure. Todos los campos son opcionales — déjalos en blanco para el equipo cuyo valor no
 lleves.
 
 - **Costo de compra** — lo que pagaste por la unidad.
+- **Moneda** — una etiqueta opcional para los importes, como la escribe tu equipo (`ARS`, `USD`,
+  `u$s`…). Sugiere las etiquetas ya en uso. lazyit nunca la convierte ni la interpreta; solo la muestra
+  delante del costo.
 - **Vida útil** — cuánto esperas usarla, **en meses** (por ejemplo `36` para tres años).
 - **Valor residual** — su valor estimado al final de esa vida útil. Por defecto **0** si se deja en
   blanco.
@@ -119,8 +146,32 @@ compra hasta el valor residual a lo largo de la vida útil, y luego se mantiene 
 Si defines un costo pero no una vida útil, el valor contable simplemente se queda en el costo de
 compra (no hay nada que amortizar). Los activos sin costo de compra no muestran ningún valor contable.
 
-Los importes son números simples — lazyit es de una sola organización y no asocia una moneda, así que
-introdúcelos y léelos en la moneda que use tu equipo.
+Un activo con costo pero sin etiqueta de moneda muestra su costo como **Sin moneda** — un estado visible
+propio, nunca una moneda por defecto. Los activos registrados antes de que existieran las etiquetas de
+moneda se ven así hasta que alguien les pone una. El valor contable lleva la misma etiqueta que el
+costo.
+
+### Escribir importes
+
+Escribe un importe como se escriben los números en el idioma en que usas lazyit:
+
+| Idioma | Se acepta | No se acepta |
+| --- | --- | --- |
+| Inglés | `1,234.56` · `1234.56` · `1500` | `1.234,56` |
+| Español | `1.234,56` · `1234,56` · `1500` | `1,234.56` |
+
+Usa como máximo **dos decimales**, y no incluyas signos de moneda ni el signo menos. lazyit nunca
+adivina: si un importe no se puede leer en el formato de tu idioma — `1,234.56` con lazyit en español,
+o un tercer decimal que muy probablemente es un separador de miles mal escrito — lo indica debajo del
+campo al salir de él, y el formulario no se guarda hasta que lo corrijas. Una vez leído, el importe se
+reescribe en la forma estándar (`1234,5` pasa a `1.234,50`), para que veas cómo se entendió. Hay una
+forma que se lee distinto según el idioma — un solo separador seguido de exactamente tres dígitos, como
+`1.150` en español o `1,150` en inglés. lazyit la lee como miles y lo indica debajo del campo, por
+ejemplo *Leído como 1150*.
+
+Los importes **se muestran como se ingresaron**, con los separadores de tu idioma: un importe entero no
+lleva decimales (`1.500` en español, `1,500` en inglés) y uno con centavos muestra dos (`1.234,56` /
+`1,234.56`).
 
 ## Campos personalizados
 
@@ -176,8 +227,11 @@ página que tienes delante. Ajusta primero el estado, la categoría, la ubicaci�
 responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
 garantía*) y exporta solo esa porción. El archivo lleva una fila por activo con su nombre, etiqueta de
 activo, número de serie, estado, categoría, fabricante, modelo, ubicación, empresa, fechas de compra y
-de garantía, responsables actuales, notas y las marcas de tiempo de creación/actualización, y es
-seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
+de garantía, responsables actuales, notas, las marcas de tiempo de creación/actualización, el **costo de
+compra** (como un número simple con punto decimal, para que una hoja de cálculo lo lea) y su etiqueta de
+**moneda** — y, solo si puedes ver [compras](/help/purchases-recording-purchases), el **proveedor**, la
+**referencia de compra** y los **números de factura** del activo, como últimas columnas. Sin ese permiso
+esas tres columnas no aparecen en el archivo. Es seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
 versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
 
 ### Elegir qué columnas mostrar
@@ -188,6 +242,17 @@ para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones 
 mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
 próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
 muestra el conjunto completo.)
+
+## Dónde se compró
+
+Si el activo está vinculado a una [compra](/help/purchases-recording-purchases), su página muestra un panel
+**Compra** justo después de *Detalles*: la compra y su proveedor, la referencia, las fechas y los números
+de factura, el contacto de soporte del proveedor y los documentos de la compra para descargar. Se muestra
+**solo a quienes pueden ver compras**; los demás siguen viendo el costo y las fechas propios del activo en
+*Detalles*, como antes. El panel marca **Distinto de la compra** cuando el costo del activo no es el precio
+de su compra, y ofrece **Desvincular de la compra** a quienes pueden editar compras y activos. Un activo
+sin vincular ofrece ahí **Vincular a una compra**. Ver
+[Compras — El panel Compra del activo](/help/purchases-recording-purchases#el-panel-compra-del-activo).
 
 ## Activos en el mapa de topología
 
@@ -214,6 +279,9 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
   capa de almacenamiento; se conserva el registro de quién lo subió.
 - Subir y eliminar requieren el permiso de escritura de activos; quien pueda ver el activo puede
   descargar.
+- **Tipo** — opcional, texto libre (*Factura*, *Garantía*, *Remito*…), sugerido a partir de los tipos ya
+  usados. Complétalo antes de subir, o ponlo, cámbialo o quítalo después con el lápiz del documento. Se
+  ve junto al nombre del archivo.
 
 > **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
 > **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el

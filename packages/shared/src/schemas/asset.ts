@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, money, optionalText, requireAtLeastOneKey } from "./primitives";
+import { currencyLabel, nullableCurrencyLabel } from "./purchase-order";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -139,15 +140,22 @@ export const AssetSchema = z.object({
   company: z.string().nullable(),
   purchaseDate: z.iso.datetime().nullable(),
   warrantyEnd: z.iso.datetime().nullable(),
-  // Purchase cost + straight-line depreciation (#954). Money in INTEGER minor units (cents) of the
-  // instance's single currency — bounded to int4 like every other Int column. `.nullish()` (not
-  // required-nullable) on purpose: an optional key means existing web object-construction sites
-  // (Quick View mappers, fixtures) that build an Asset without these keys keep type-checking. The
+  // Purchase cost + straight-line depreciation (#954). Money in INTEGER minor units (cents) — `money()`:
+  // a 64-bit column, bounded on the wire to MONEY_MAX (ADR-0100). `.nullish()` (not required-nullable)
+  // on purpose: an optional key means existing web object-construction sites (Quick View mappers,
+  // fixtures) that build an Asset without these keys keep type-checking. The
   // COMPUTED `currentBookValue` lives on the detail read (AssetWithRelationsSchema), not here — it is
   // derived per-request via `computeAssetBookValue`, never a persisted column.
-  purchaseCost: int4({ min: 0 }).nullish(),
+  purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
-  salvageValue: int4({ min: 0 }).nullish(),
+  salvageValue: money().nullish(),
+  // Optional free-text currency LABEL of purchaseCost / salvageValue (ADR-0099 §5, CEO decision D-C): no ISO
+  // list, no conversion. `null` = "No currency" — every asset that predates Purchases. `.nullish()` per the
+  // new-read-field rule, so a consumer built against the older shape keeps compiling.
+  purchaseCurrency: z.string().nullish(),
+  // The purchase line this asset was bought on (ADR-0099 §2). READ-ONLY: no create/update body accepts it;
+  // linking and unlinking are their own audited actions (#1473). `null` = no purchase.
+  purchaseOrderLineId: z.cuid().nullish(),
   modelId: z.cuid().nullable(),
   locationId: z.cuid().nullable(),
   createdAt: z.iso.datetime(),
@@ -170,10 +178,13 @@ export const CreateAssetSchema = z.strictObject({
   company: optionalText(200),
   purchaseDate: z.iso.datetime().optional(),
   warrantyEnd: z.iso.datetime().optional(),
-  // Purchase cost + straight-line depreciation (#954) — optional non-negative int4 minor units.
-  purchaseCost: int4({ min: 0 }).nullish(),
+  // Purchase cost + straight-line depreciation (#954) — optional non-negative minor units: `money()` for
+  // the two amounts (ADR-0100), `int4()` for the months.
+  purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
-  salvageValue: int4({ min: 0 }).nullish(),
+  salvageValue: money().nullish(),
+  // Currency label of the cost (ADR-0099 §5) — optional free text, blank coerced to absent.
+  purchaseCurrency: currencyLabel(),
   modelId: z.cuid().optional(),
   locationId: z.cuid().optional(),
 });
@@ -194,9 +205,11 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       warrantyEnd: z.iso.datetime(),
       // Purchase cost + straight-line depreciation (#954). `.nullable()` (inside `.partial()`) so a
       // PATCH can CLEAR a value back to unknown (`{ purchaseCost: null }`) as well as set it.
-      purchaseCost: int4({ min: 0 }).nullable(),
+      purchaseCost: money().nullable(),
       usefulLifeMonths: int4({ min: 0 }).nullable(),
-      salvageValue: int4({ min: 0 }).nullable(),
+      salvageValue: money().nullable(),
+      // Currency label of the cost (ADR-0099 §5); `null` clears it back to "No currency".
+      purchaseCurrency: nullableCurrencyLabel(),
       modelId: z.cuid(),
       locationId: z.cuid(),
     })

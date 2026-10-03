@@ -198,6 +198,8 @@ model User {
   // Consumable deliveries made TO this user (ConsumableMovement.targetUserId, ADR-0098). Restrict: a
   // delivery is history; offboarding is a soft delete and never touches these rows or the stock.
   consumableDeliveries ConsumableMovement[] @relation("ConsumableDeliveryTargetUser")
+  // Purchase activity-log rows this user caused (PurchaseOrderEvent.performedById, ADR-0099). SetNull.
+  purchaseOrderEvents  PurchaseOrderEvent[] @relation("PurchaseOrderEventActor")
 
   // Auto-confirm rules this user authored (ADR-0074 §1 amendment, #1145). SetNull: the rule is
   // instance policy, so losing its author leaves it running and visibly unattributed rather than
@@ -415,6 +417,7 @@ model ServiceAccount {
   assetHistoryActed     AssetHistory[]       @relation("AssetHistorySaActor")
   userHistoryActed      UserHistory[]        @relation("UserHistorySaActor")
   consumableMovements   ConsumableMovement[] @relation("ConsumableMovementSaActor")
+  purchaseOrderEvents   PurchaseOrderEvent[] @relation("PurchaseOrderEventSaActor")
   assignmentsMade       AssetAssignment[]    @relation("AssignmentAssignedBySa")
   assignmentsReleased   AssetAssignment[]    @relation("AssignmentReleasedBySa")
   accessGrantsGranted   AccessGrant[]        @relation("AccessGrantGrantedBySa")
@@ -541,6 +544,8 @@ model Location {
   // Consumables left at this place (ConsumableMovement.targetLocationId, ADR-0098) — a destination, NOT
   // per-location stock. Restrict.
   consumableDeliveries ConsumableMovement[] @relation("ConsumableDeliveryTargetLocation")
+  // Purchases delivered here (PurchaseOrder.deliveryLocationId, ADR-0099). SetNull.
+  purchaseDeliveries   PurchaseOrder[]      @relation("PurchaseOrderDeliveryLocation")
 
   @@index([parentId])
   @@map("locations")
@@ -604,7 +609,9 @@ model AssetModel {
   updatedAt    DateTime       @updatedAt
   deletedAt    DateTime?
 
-  assets Asset[]
+  assets             Asset[]
+  // Purchase lines mapped to this model (PurchaseOrderLine.assetModelId, ADR-0099). SetNull.
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@index([categoryId])
   @@map("asset_models")
@@ -634,13 +641,23 @@ model Asset {
   company      String?
   purchaseDate DateTime?
   warrantyEnd  DateTime?
-  // Purchase cost + straight-line depreciation (#954). Money is stored as INTEGER minor units (e.g.
-  // cents) of the instance's single currency — NOT a Prisma Decimal, no currency modeling (YAGNI):
-  // the UI just formats the number. `currentBookValue` is COMPUTED (never stored) on the detail read
-  // via `computeAssetBookValue` in @lazyit/shared. Straight-line only (no MACRS/declining-balance).
-  purchaseCost     Int? // minor units (cents); null = unknown
+  // Purchase cost + straight-line depreciation (#954). Money is stored as 64-bit INTEGER minor units
+  // (hundredths) — NOT a Prisma Decimal (ADR-0100). Prisma returns a JS `bigint`: the API converts it to a
+  // JSON number at the read boundary (apps/api/src/common/money.ts) and the wire bound is MONEY_MAX.
+  // `currentBookValue` is COMPUTED (never stored) on the detail read via `computeAssetBookValue` in
+  // @lazyit/shared. Straight-line only (no MACRS/declining-balance).
+  purchaseCost     BigInt? // minor units (hundredths); null = unknown
   usefulLifeMonths Int? // straight-line depreciation period; null = don't depreciate (book value = cost)
-  salvageValue     Int? // minor units; residual value at end of life; null = 0
+  salvageValue     BigInt? // minor units; residual value at end of life; null = 0
+  // Optional free-text currency LABEL of purchaseCost / salvageValue (ADR-0099 §5, CEO decision D-C): what
+  // the user typed ("ARS", "u$s"), no ISO list and no currency semantics. NULL = "No currency" — every
+  // asset that predates Purchases. Any aggregate groups by label and never sums across labels.
+  purchaseCurrency String?
+  // The purchase line this asset was bought on (ADR-0099 §2). NULL = no purchase (every pre-existing asset).
+  // Restrict: soft deletes never fire it, and a line with assets can never be hard-deleted. N assets per
+  // line, at most one line per asset. Read-only in the contract until linking ships (#1473).
+  purchaseOrderLineId String?
+  purchaseOrderLine   PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
   // FKs are SetNull: deleting a Model/Location detaches assets, never deletes them.
   modelId      String?
   model        AssetModel? @relation(fields: [modelId], references: [id], onDelete: SetNull)
@@ -663,6 +680,8 @@ model Asset {
   @@index([modelId])
   @@index([locationId])
   @@index([status])
+  // Serves the derived per-line received count (ADR-0099 §3).
+  @@index([purchaseOrderLineId])
   @@map("assets")
 }
 
@@ -1102,6 +1121,13 @@ enum AssetHistoryEventType {
   // A RETURN against a returnable delivery made to this asset (ADR-0098): an IN movement linked to the
   // delivery via returnOfId. Same payload plus { returnOfId } (the delivery movement id).
   CONSUMABLE_RETURNED
+  // Linked to / unlinked from a purchase line (ADR-0099 §2, #1473). PURCHASE_LINKED payload
+  // { purchaseOrderId, purchaseOrderLineId, applied[] } (+ { fromPurchaseOrderId, fromPurchaseOrderLineId } on a
+  // move); PURCHASE_UNLINKED payload { purchaseOrderId, purchaseOrderLineId }. Written in the SAME transaction as
+  // the link change and its purchase-side PurchaseOrderEvent. A unit generated from a line records the line on
+  // its CREATED event instead.
+  PURCHASE_LINKED
+  PURCHASE_UNLINKED
 }
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
@@ -1530,13 +1556,13 @@ model Application {
   metadata    Json?
   notes       String?
   // License / seat tracking (#949, ADR-0088). All nullable = "untracked". `seatsPurchased` = the number
-  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in INTEGER minor
-  // units (cents) of the org's single currency — mirrors Asset.purchaseCost (#954): no float drift.
+  // of paid seats (null = unlimited / not tracked). `costPerSeat` = the price PER SEAT in 64-bit INTEGER
+  // minor units (hundredths) — mirrors Asset.purchaseCost (#954, ADR-0100): no float drift.
   // `renewalDate` = when the license/subscription next renews (informational for now; proactive renewal
   // reminders are a follow-up, #1070). `seatsUsed` is DERIVED (distinct active-grant users) and NEVER
   // stored — computed per-request in ApplicationsService.
   seatsPurchased Int?
-  costPerSeat    Int?
+  costPerSeat    BigInt?
   renewalDate    DateTime?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
@@ -1548,6 +1574,8 @@ model Application {
   accessRequests AccessRequest[]
   // KB links (ADR-0042): knowledge-base articles linked to this application ("the runbook for THIS app").
   articleLinks ArticleLink[]
+  // LICENSE purchase lines for this application (ADR-0099, #1477). SetNull on that side.
+  purchaseOrderLines PurchaseOrderLine[]
 
   // Applications Workflow Engine (ADR-0054, epic #248). An application MAY own workflows that
   // provision/deprovision access in its external system; with none enabled it behaves exactly as
@@ -1732,7 +1760,9 @@ model Consumable {
   updatedAt    DateTime            @updatedAt
   deletedAt    DateTime?
 
-  movements ConsumableMovement[]
+  movements          ConsumableMovement[]
+  // CONSUMABLE purchase lines received into this consumable (ADR-0099, #1476).
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@index([categoryId])
   @@map("consumables")
@@ -1782,6 +1812,13 @@ model ConsumableMovement {
   returnOfId       Int?
   returnOf         ConsumableMovement?    @relation("ConsumableMovementReturn", fields: [returnOfId], references: [id], onDelete: Restrict)
   returns          ConsumableMovement[]   @relation("ConsumableMovementReturn")
+  // ── Purchase receipt (ADR-0099, #1476) ───────────────────────────────────────────────────────────
+  // An IN posted by receiving a CONSUMABLE purchase line carries that line; the line's received count is
+  // the SUM of these quantities. Set at insert, never updated (the ledger stays append-only). Restrict: a
+  // received line is history-bearing (lines are only ever soft-deleted). A DB CHECK (raw SQL) allows it on
+  // an IN only. NULL on every movement that predates it.
+  purchaseOrderLineId String?
+  purchaseOrderLine   PurchaseOrderLine?   @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
   createdAt        DateTime               @default(now())
 
   // No updatedAt / deletedAt: append-only (ADR-0006). (consumableId, id) serves the ledger query; the
@@ -1791,6 +1828,7 @@ model ConsumableMovement {
   @@index([targetAssetId])
   @@index([targetLocationId])
   @@index([returnOfId])
+  @@index([purchaseOrderLineId])
   @@map("consumable_movements")
 }
 
@@ -3091,6 +3129,8 @@ model InfraAutoConfirmRule {
 enum AttachmentEntityType {
   ASSET
   ARTICLE
+  // A purchase's documents (ADR-0099 §10, #1473): the ASSET allowlist and cap, behind purchaseOrder:read/write.
+  PURCHASE_ORDER
 }
 
 /// A user-uploaded file on an Asset (documents: warranty PDFs, receipts, damage photos) or an
@@ -3121,6 +3161,9 @@ model Attachment {
   // Who uploaded it (a human). SetNull: the file outlives its uploader. @db.Uuid to match User.id.
   uploadedById String?              @db.Uuid
   uploadedBy   User?                @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  // Optional free-text document TYPE label (ADR-0099 §10, #1476): quote, invoice, delivery note… on asset
+  // and purchase documents. Untrusted text, stored verbatim (ADR-0029). NULL on every existing row.
+  label        String?
   createdAt    DateTime             @default(now())
   updatedAt    DateTime             @updatedAt
   deletedAt    DateTime?
@@ -3202,6 +3245,10 @@ model AiSettings {
   webSearchEnabled                  Boolean   @default(false)
   /// Cap on searches per model call where the provider takes one (Anthropic `max_uses`; zod 1–20).
   webSearchMaxUses                  Int       @default(5)
+  /// Purchase document extraction (ADR-0099 §11, #1477): whether a document attached to a purchase may be
+  /// sent to the provider to draft the purchase (a structured-output call with no tools; nothing is saved
+  /// from it). Off by default and independent of `enabled` — extraction needs both.
+  documentExtractionEnabled         Boolean   @default(false)
   /// The egress-disclosure acknowledgement, required before the first enable. The author is also
   /// recorded in ai_config_audit_log, which survives this row's edits.
   disclosureAcknowledgedAt          DateTime?
@@ -3652,4 +3699,153 @@ model OAuthAuditLog {
   @@index([userId, createdAt])
   @@index([createdAt])
   @@map("oauth_audit_log")
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────────────
+// Purchases (ADR-0099, epic #1465). lazyit RECORDS purchases; the finance system stays the system of
+// record. Optional at entry, always available, gated only by the `purchaseOrder:*` permissions. Entry is
+// light: nothing here is unique, and the status / kind / event type are TEXT validated by zod on write
+// (a value a newer build adds needs no enum migration and reads tolerantly on an older build).
+// ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/// Who the team buys from and pays (a reseller, a wholesaler, a CSP). NOT a manufacturer
+/// (AssetModel.manufacturer) and NOT a publisher (Application.vendor). Only `name` is required, and
+/// neither `name` nor `taxId` is unique — duplicates are reduced by suggestion, never by refusal.
+/// See docs/02-domain/entities/supplier.md
+model Supplier {
+  id                  String    @id @default(cuid())
+  name                String
+  // The legal tax ID (e.g. a CUIT). Optional and NOT unique: the strongest near-duplicate hint.
+  taxId               String?
+  website             String?
+  salesContactName    String?
+  salesContactEmail   String?
+  salesContactPhone   String?
+  // The support / RMA contact, kept separate from sales.
+  supportContactName  String?
+  supportContactEmail String?
+  supportContactPhone String?
+  notes               String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+/// One purchase: the IT side of a finance purchase order. No single field is required; the API needs a
+/// supplier, a reference or one line to save it. `status` is the USER-set DRAFT | ORDERED | CANCELLED;
+/// "partially received" / "received" are DERIVED from the lines and never stored. Totals are derived
+/// too, grouped by the free-text currency label. See docs/02-domain/entities/purchase-order.md
+model PurchaseOrder {
+  id                 String    @id @default(cuid())
+  // The finance PO / order number. Optional free text, NOT unique (ADR-0099 §6).
+  reference          String?
+  // Restrict: a supplier with purchases can never be hard-deleted (soft delete never fires it).
+  supplierId         String?
+  supplier           Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  // TEXT validated by zod on write (PurchaseOrderStatusSchema); a value from a newer build reads tolerantly.
+  status             String    @default("ORDERED")
+  // Free-text currency label shared by every line (ADR-0099 §5). NULL = "No currency".
+  currency           String?
+  orderDate          DateTime?
+  expectedDate       DateTime?
+  // Default location for units received from this purchase. SetNull, like Asset.locationId.
+  deliveryLocationId String?
+  deliveryLocation   Location? @relation("PurchaseOrderDeliveryLocation", fields: [deliveryLocationId], references: [id], onDelete: SetNull)
+  // Free-text grouping label that flows to received assets' `company` (ADR-0076).
+  company            String?
+  // One free-text field, however many invoices the purchase lists.
+  invoiceNumbers     String?
+  invoiceDate        DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  lines  PurchaseOrderLine[]
+  events PurchaseOrderEvent[]
+
+  @@index([supplierId])
+  @@map("purchase_orders")
+}
+
+/// One line of a purchase. A description is the only field the user must fill; quantity defaults to 1
+/// and the unit price is optional (NULL = unknown, 0 = free). Received = the count of LIVE assets pointing
+/// at the line, or the units of the IN movements posted from it (derived, never stored); pending =
+/// quantity − received − cancelled, floored at 0.
+/// See docs/02-domain/entities/purchase-order-line.md
+model PurchaseOrderLine {
+  id                String        @id @default(cuid())
+  purchaseOrderId   String
+  purchaseOrder     PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  // Display order within the purchase (int4).
+  position          Int           @default(0)
+  // TEXT validated by zod on write: ASSET | OTHER | CONSUMABLE | LICENSE (#1477).
+  kind              String        @default("ASSET")
+  description       String
+  // Brand and model as written on the document, before (or instead of) mapping to an AssetModel.
+  manufacturerText  String?
+  modelText         String?
+  // Optional mapping to a model; SetNull so a removed model never takes the line with it.
+  assetModelId      String?
+  assetModel        AssetModel?   @relation(fields: [assetModelId], references: [id], onDelete: SetNull)
+  // A CONSUMABLE line's consumable (#1476): received units become IN movements of it. SetNull, like the
+  // model mapping (consumables are only soft-deleted; their movements Restrict a hard delete anyway).
+  consumableId      String?
+  consumable        Consumable?   @relation(fields: [consumableId], references: [id], onDelete: SetNull)
+  // A LICENSE line's application (#1477). SetNull, like the model mapping (applications are only soft-deleted).
+  applicationId     String?
+  application       Application?  @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  // The seats a person explicitly applied to the application from this LICENSE line (#1477) — its received
+  // units. Raised only by the apply route, never computed from the application (ADR-0088: seats are one
+  // mutable number, so lazyit records what it added instead of inferring it).
+  appliedSeats      Int           @default(0)
+  quantity          Int           @default(1)
+  // Integer minor units in the purchase's currency label (ADR-0100). NULL = unknown.
+  unitPrice         BigInt?
+  // "Cancel remaining units" (ADR-0099 §3). Stored; the reason goes in the event log.
+  cancelledQuantity Int           @default(0)
+  warrantyMonths    Int?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  assets              Asset[]
+  // IN movements posted by receiving a CONSUMABLE line into stock (#1476).
+  consumableMovements ConsumableMovement[]
+
+  @@index([purchaseOrderId])
+  @@index([assetModelId])
+  @@index([consumableId])
+  @@index([applicationId])
+  @@map("purchase_order_lines")
+}
+
+/// The append-only activity log of a purchase (ADR-0006 / ADR-0033 explicit emission): written in the SAME
+/// transaction as the change it records, never updated or deleted. `eventType` is TEXT validated by zod on
+/// write (CTO decision under D-D) so a newer build's event reads tolerantly on an older one. Actor: at most
+/// ONE of (performedById, serviceAccountId) — a DB CHECK (INV-SA-4). See
+/// docs/02-domain/entities/purchase-order-event.md
+model PurchaseOrderEvent {
+  // autoincrement: a log table, never exposed as an entity id (ADR-0005).
+  id               Int             @id @default(autoincrement())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  eventType        String
+  // Context: line id, before/after values, quantities. Unvalidated jsonb.
+  payload          Json?
+  performedById    String?         @db.Uuid
+  performedBy      User?           @relation("PurchaseOrderEventActor", fields: [performedById], references: [id], onDelete: SetNull)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("PurchaseOrderEventSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  // The AI tool invocation that caused this event (ADR-0097), as on asset_history. No FK.
+  aiInvocationId   String?
+  createdAt        DateTime        @default(now())
+
+  // No updatedAt / deletedAt: append-only. (purchaseOrderId, id) serves the per-purchase timeline.
+  @@index([purchaseOrderId, id])
+  @@map("purchase_order_events")
 }

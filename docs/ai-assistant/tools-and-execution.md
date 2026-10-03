@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-02
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -458,7 +458,7 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 1 | `session_context` | UsersController.me, ConfigController.myPermissions, InstanceController.version, AccessGrants/Assets `mine` | open (self) | read | — |
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
-| 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations `findAll` (for `optionsFrom`) | open (self; `ai:use`) | navigate | — |
+| 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations/Suppliers/Consumables `findAll` (for `optionsFrom`; suppliers and consumables since #1478) | open (self; `ai:use`) | navigate | — |
 | 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
 | 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
 | 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
@@ -1337,6 +1337,74 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
   - the TOCTOU window between the approve-time precondition and the handler's write (§9, step 3) stays
     until the consumable write handlers accept an expected `updatedAt`.
 
+**Purchases tools as built (#1478, [[0099-purchases-scope-model-and-optionality]] §11 and §13 Phase 3).**
+Twenty-one tools in `tools/purchases.tools.ts` (domain `purchases`), every call through `rt.call` on the real
+`/purchase-orders`, `/suppliers`, `/assets/:id/purchase` and purchase-document routes, so each tool gets
+exactly the route's answer: `purchaseOrder:read` is denied to VIEWER by default, so a viewer is listed no
+purchase tool at all; a Service Account is listed what its grants admit (fail-closed). Purchases, lines and
+suppliers are taken **by id** (nothing about them is unique, D-D), found with `purchase_search` /
+`supplier_search` / `purchase_get`. Money is integer minor units in the purchase's free-text currency label,
+and the descriptions say so. Other-authored text — notes, line descriptions and brand / model text, event
+payloads, document names and labels, the document draft — is wrapped as untrusted content.
+
+- **Reads** (all channels): `purchase_search` (query, status, supplier, receipt, sort, page), `purchase_get`
+  (header, lines with received / cancelled / pending and receipt state, totals per currency label, and the
+  documents through `PurchaseOrderAttachmentsController.list`), `purchase_events` (payload untrusted),
+  `purchase_pending_lines`, `supplier_search`, `supplier_get`, `asset_purchase_get` (provenance: line,
+  header, the supplier's RMA contact, documents).
+- **`purchase_document_read`** (read, **chat only**) binds the extract route (`purchaseOrder:write` +
+  `ai:use`) and keeps all its gates: the route permission, the extraction service's human-only check (a chat
+  run is delegated as the user, so the service sees that person), the *Document extraction* switch, the
+  provider capability, the caps, its own limiters and the shared token budget. It answers the draft as ONE
+  `<untrusted_content>` block — values, the verbatim header evidence, and per line the text of a field left
+  blank — plus the extraction warnings and the read-only matches, and names the document as an entity ref of
+  type `purchaseDocument` (parent: the purchase). That ref is the untrusted-source marker of
+  `AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`: it marks the rest of the **conversation**, not only the turn
+  (the runtime re-reads it from the step records of every run, [[ai-assistant/provider-and-runtime|provider]]
+  §8.1). Its description tells the model to ask what is blank or ambiguous in ONE `request_input` form
+  (`optionsFrom: suppliers` / `consumables` / `assetModels` / `locations`) and then propose one
+  `purchase_create` or `purchase_update` card. It is a read because it changes no purchase data (it appends
+  `EXTRACTION_RUN` and a usage row, as the web flow does).
+- **Writes** (class `write`, all `neverAutoApprove`): `purchase_create` (the route's create body, lines
+  inline), `purchase_update`, `purchase_line_add`, `purchase_line_update`, `purchase_line_remove` (·D,
+  `SOFT_DELETE`; refused before a card while units were received), `supplier_create` (the card counts
+  suppliers already carrying the name — a hint, never a refusal), `supplier_update`, `purchase_link_assets`
+  (`apply` is required — `[]` links only; the card shows, per asset, the before → after of each applied field
+  that fills or replaces, from `linkPreview`), `purchase_receive` (`quantity` required; the card shows the
+  route's prefill — model, status, location (none when the purchase's delivery location is archived, as the
+  route applies none), company, purchase date = the invoice date else today, warranty
+  end, cost with its currency — and received before → after), `purchase_receive_stock` (`LEDGER_APPEND`),
+  `purchase_cancel_remaining`, `purchase_apply_license` (the card reads `licenseProposal`: seats before →
+  after, the renewal date), `purchase_create_from_assets` (the card reads each selected asset through
+  `GET /assets/:id` and lists the lines the route will derive — model or name, quantity, and the unit price
+  with its currency label only when the group shares it — and how many assets are left out). Warnings:
+  `CHANGES_MONEY` when the change sets or changes an amount (a priced line, a unit price, a quantity on a
+  priced line, a priced line removed, a relabelled currency, a cost copied onto assets, a purchase from
+  assets of which any has a cost); `CREATES_ASSETS` on `purchase_receive`. The document read answers
+  lazyit's warnings and matches before the document block, so a truncated draft keeps them. A card names
+  the records it references — a line's `assetModelId`, `consumableId` and `applicationId`, the header's
+  `deliveryLocationId`, a link's `modelId` before → after — as entity values `{ type, id, label }` in the
+  same slots, the label read through the caller's own route (`findOne` of the model, location, consumable or
+  application); a read the caller may not make, or one that fails, leaves `{ type, id }`, so a card never
+  shows a name its viewer could not read. A card's precondition is the purchase's version — for
+  a line action, the newer of the purchase's and the line's `updatedAt` (a line edit does not bump the
+  purchase), so either edit makes the approval `STALE`.
+- **Mutation weights** (SEC-081): `purchase_receive` = its `quantity` (the units it creates — which is why the
+  quantity is required), `purchase_link_assets` = its assets, `purchase_create` = 1 + its lines,
+  `purchase_create_from_assets` = 1 + its assets; the rest 1.
+- **On MCP and headless** the writes follow the catalog's convention: the MCP client owns the confirmation
+  and a Service Account runs within its grants, AI access setting and mutation cap (ADR-0097). The "never
+  auto-approved" rule is the chat's; there is no chat card to skip elsewhere.
+- **Unexposed**: archive / restore of purchases and suppliers (ADMIN lifecycle actions, done from the pages),
+  `unlinkAssets` (a correction, done from the pages), `extractionStatus` (the web's probe; the tool answers the
+  same refusals), document upload / download (no file tools) and label edit / delete (human-only routes).
+- **Labels**: the sentences are `purchase_*.action` / `.summary` and `supplier_*.action` / `.summary` in
+  `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
+  `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,
+  `location`, `purchaseCost`, `serials`, `consumable`, `cancelledQuantity`, `pendingQuantity`, `application`,
+  `seatsPurchased`, `renewalDate`, `licenseWarnings`, `suppliersWithThisName`, `notLinkable`, and the header
+  fields).
+
 **Workflow operations tools as built (W2-13).** Ten tools in `workflows.tools.ts`, domain `access`, every
 channel: seven reads (`workflow_search`, `workflow_get`, `workflow_connection_list`, `workflow_run_list`,
 `workflow_run_get`, `workflow_task_list`, `workflow_task_get`) and three `write`, `externalEffects` tools
@@ -1566,11 +1634,13 @@ skip classification). The preview carries:
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
   `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
   `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
-  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION`, `INSTANCE_CONFIGURATION` (`PUBLISHES_TO_READERS` …
+  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION`, `INSTANCE_CONFIGURATION`, `CREATES_ASSETS`,
+  `CHANGES_MONEY` (`PUBLISHES_TO_READERS` …
   `IRREVERSIBLE` merge the frontend's `notes` vocabulary and the security note's destination-visibility
   requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for the step-up rule below;
   the last two by W2-12 for the workflow engine, §7; `INSTANCE_CONFIGURATION` by #1394 for the asset
-  tag scheme — no step-up);
+  tag scheme — no step-up; `CREATES_ASSETS` and `CHANGES_MONEY` by #1478 for purchases — no step-up, never
+  auto-approved, and the web leaves such a page out of "Approve all");
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
 - `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
   **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
@@ -1591,7 +1661,8 @@ skip classification). The preview carries:
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source). A turn
   in which the provider searched the web (#1389) also carries the `webSearch` marker
   (`AI_WEB_SEARCH_SOURCE_REF`, entity type `webSearch`, no page), so its proposals show the banner and are
-  never auto-approved;
+  never auto-approved. A purchase document read by `purchase_document_read` (#1478) adds a
+  `purchaseDocument` ref the same way, for every later turn of the conversation;
 - `precondition {entity, updatedAt}`.
 
 Storage and display:
@@ -1621,7 +1692,12 @@ token, never a tool. The request carries only the pending-action id, plus the pa
 > **and** fresh previews are not elevated, need no step-up and carry no `untrustedSources` (else 409
 > `AUTO_APPROVE_NOT_ELIGIBLE`); and the new-warnings rule of step 0 applies unchanged (`PREVIEW_CHANGED` /
 > `STEP_UP_REQUIRED`). Every refusal leaves the action
-> `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings). The
+> `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings).
+> **Never automatic either (#1478; ADR-0099 §11, UX decision D11):** a tool registered `neverAutoApprove`
+> (every purchase write — core reads the flag from the registry at approve time, so neither the model nor
+> the stored row can lift it), and a preview carrying `CREATES_ASSETS` or `CHANGES_MONEY`
+> (`AI_NEVER_AUTO_APPROVE_WARNINGS`, `core/pending-action.ts`), whatever the tool; both answer
+> `AUTO_APPROVE_NOT_ELIGIBLE`. The
 > claim records `approvalMode = 'AUTO'` on the invocation; `APPROVED`, `EXECUTED` and `FAILED` carry
 > `approvalMode` (`USER` for a click), `approverUserId` (the owner who enabled the mode) and
 > `autoApproveEnabledAt`. A `STALE` target or a revoked permission fails exactly as for a click.

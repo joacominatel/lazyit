@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -35,7 +35,8 @@ mint a permission, CI fails on an unknown literal, and the set is greppable and 
 
 - **Domains** are the existing modules: `asset`, `application`, `accessGrant`, `consumable`,
   `article`/KB, `location`, `assetModel`, `category`, `user`, `dashboard`, `search`, `settings`, plus
-  `logs` (the estate-wide activity history for the future Reports/Informes section).
+  `logs` (the estate-wide activity history for the future Reports/Informes section), and
+  `purchaseOrder` (Purchases, #1472 — see the note in §4).
 - **Actions** are `read | write | delete` plus the **coarse capability verbs** that map to the old
   ADMIN-only gates: `accessGrant:grant`, `user:manage`, `settings:manage`. Read-only surfaces
   (`dashboard`, `search`, `logs`) expose only `:read`.
@@ -109,9 +110,10 @@ the epoch. Personal MCP tokens and OAuth grants are not sessions (§9.3).
 41 read `GET`s now carry `@RequirePermission('<domain>:read')`. Every `<domain>:read` is seeded to all
 three roles **except** two tighter tiers:
 
-- the two **pre-tightened reads** — `accessGrant:read` and `user:read` (`VIEWER_DENIED_READS`) — seeded
-  to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory**
-  (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+- the **pre-tightened reads** — `accessGrant:read`, `accessRequest:read`, `user:read` and
+  `purchaseOrder:read` (`VIEWER_DENIED_READS`) — seeded
+  to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
+  see purchases and suppliers** (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
 - the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
   (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
   disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide
@@ -121,6 +123,89 @@ three roles **except** two tighter tiers:
   closing the v1 gap where the sensitive who-did-what data was reachable on a read every role held. The
   same endpoint also gained optional server-side filters (entityType/entityId/actorId/action/from/to/q).
   Like every non-ADMIN row, `logs:read` stays admin-grantable from the role matrix.
+
+> [!note] The `purchaseOrder` domain ([[0099-purchases-scope-model-and-optionality]] §8) — built (#1472)
+> `purchaseOrder:read`, `purchaseOrder:write` and `purchaseOrder:delete` cover purchases, their lines and
+> documents, and suppliers. They gate `/purchase-orders/**` and `/suppliers/**`; removing a line is an edit
+> (`:write`), archiving and restoring a purchase or a supplier is `:delete`. In the role matrix they are
+> three separate toggles under Inventory (`purchaseOrder.view` / `.edit` / `.delete`), not part of
+> "View inventory", because the read is VIEWER-denied:
+>
+> - `purchaseOrder:read` — seeded to ADMIN + MEMBER and added to **`VIEWER_DENIED_READS`**, so a VIEWER
+>   cannot see purchases or supplier prices by default. An admin can grant it to VIEWER from the role
+>   matrix — for every viewer at once, since permissions are per role.
+> - `purchaseOrder:write` — ADMIN + MEMBER (create, edit, receive, link/unlink, cancel, upload documents).
+> - `purchaseOrder:delete` — ADMIN only (soft delete); restore stays ADMIN-only.
+>
+> The *Inventory operator* preset carries `purchaseOrder:read` and `:write` (it holds every read and every
+> Inventory write). `GET /suggestions/:field` (smart entry) carries **no** route permission on purpose: a
+> field may merge columns guarded by different permissions, so the service reads only the sources the
+> caller holds the read permission for and answers `403` when it holds none; being unannotated, the route is
+> refused to service accounts (fail-closed, §3).
+>
+> All three are grantable to service accounts (fail-closed, §6) and reach existing instances through the
+> seed-once ledger, with no data migration. They do **not** narrow `asset:read`: a viewer still sees an
+> asset's own purchase cost, as today. There is **no instance switch**: Purchases is always available,
+> gated only by these permissions (ADR-0099 §7).
+>
+> **An asset's purchase provenance follows `purchaseOrder:read`** (ADR-0099 §8, CEO decision D-A,
+> 2026-10-01). The asset page's *Purchase* panel — supplier, reference, dates and the purchase documents
+> listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
+> not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
+> (cost, currency, dates) included — and so does the bare `purchaseOrderLineId`, an opaque id that reveals
+> no supplier, reference, date or price. A consumable movement received from a purchase (#1476) is read
+> under `consumable:read` with the opaque `purchaseOrderLineId` and a reason that names the purchase
+> **reference** (*Received from purchase OC-4512*, or *Received from a purchase* when there is none) — never
+> the supplier or any other purchase detail. Every consumable reader, VIEWER included, sees that reference:
+> a CEO-accepted exception to D-A for the reference only (2026-10-02, #1494; ADR-0099, *CEO confirmations
+> (2026-10-02)*).
+>
+> **Routes that need two permissions** (#1473). Where a purchase flow also reads or writes assets, the
+> route requires both — AND semantics, so a service account needs both grants:
+>
+> | Route | Requires |
+> | --- | --- |
+> | `GET /assets/:id/purchase` (provenance) | `asset:read` + `purchaseOrder:read` — a VIEWER gets `403` |
+> | `POST /purchase-orders/:id/lines/:lineId/link-preview` | `purchaseOrder:read` + `asset:read` |
+> | `POST …/lines/:lineId/link-assets` · `…/unlink-assets` · `…/receive` | `purchaseOrder:write` + `asset:write` |
+> | `POST …/lines/:lineId/receive-stock` (a `CONSUMABLE` line into stock, #1476) | `purchaseOrder:write` + `consumable:write` |
+> | `POST …/lines/:lineId/cancel-remaining` · `GET /purchase-orders/pending-lines` | `purchaseOrder:write` · `purchaseOrder:read` |
+> | `/purchase-orders/:id/attachments/**` (documents) | `purchaseOrder:read` to list and download, `:write` to upload, edit the type label and delete (human-only) |
+> | `GET …/lines/:lineId/license-proposal` (a `LICENSE` line, #1477) | `purchaseOrder:read` + `application:read` — a VIEWER (who reads applications) gets `403` |
+> | `POST …/lines/:lineId/apply-license` (#1477) | `purchaseOrder:write` + `application:write` — the seats are written through the applications path, so the application's own write permission is required |
+> | `POST /purchase-orders/from-assets` (#1477) | `purchaseOrder:write` + `asset:write` |
+> | `POST /purchase-orders/:id/attachments/:attId/extract` (#1477) | `purchaseOrder:write` + `ai:use` — **human-only** (a service account is refused in the service, `403`) |
+> | `GET /purchase-orders/extraction/status` (#1477) | `purchaseOrder:read`; it answers `NOT_PERMITTED` for a caller who could not extract |
+>
+> **Document extraction is gated like an AI channel** (#1477, ADR-0099 §11). Sending a purchase document to
+> the provider spends the caller's AI budget and moves data off the instance, so on top of
+> `purchaseOrder:write` it requires `ai:use` — the same AND gate the chat and headless channels carry (§9.1):
+> revoking `ai:use` from a role closes extraction too, with no side door. It is human-only because it is a
+> reviewed, interactive step: a draft nobody reviews has no purpose, and no headless flow should send
+> documents out. The capability (assistant usable, the *Document extraction* switch, a provider that reads
+> the type) is checked after the permissions, and refused with a typed `409`.
+>
+> **The AI assistant reaches Purchases through the same routes** (#1478, ADR-0099 §11). Every purchase tool
+> runs its route in-process as the invoking principal, so it needs exactly that route's permissions: a VIEWER
+> (no `purchaseOrder:read` by default) is listed no purchase tool, a Service Account only what its grants
+> admit. `purchase_document_read` binds the extract route and keeps its `purchaseOrder:write` + `ai:use`
+> gate and the service's human-only check; it is listed in the chat only, never on MCP or headless. In the
+> chat every purchase write is a card the user approves one by one — never auto-approved, whatever the
+> conversation's mode.
+>
+> The document type label (#1476) is edited under the parent's write permission — `PATCH
+> /assets/:id/attachments/:attId` needs `asset:write`, the purchase route `purchaseOrder:write` — and
+> suggested by `GET /suggestions/documentLabel`, which reads asset documents' labels for `asset:read` and
+> purchase documents' labels for `purchaseOrder:read` (`403` with neither).
+>
+> Three decisions are made **in the service**, because a decorator cannot see them: `POST
+> /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
+> `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
+> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
+> `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
+> (`403`), since the filter itself reveals which assets came from which purchase. All three resolve the
+> principal's permissions through `PermissionResolverService.principalHas` — a human by role, a service
+> account by its grants, no principal never.
 
 `GET /users/me` stays open (the self-read the web gates its UI off). So does its one self-**write**,
 `PATCH /users/me` (#1421): the caller edits their own `firstName`/`lastName` and nothing else — the

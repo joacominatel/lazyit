@@ -104,3 +104,7 @@ tells you what it costs you.
 | 0094 | Assisted agent update — the server names who is behind and hands over the command | proposed |
 | 0095 | One hypervisor collector with autodetection — the agent inventories its own guests | proposed |
 | 0096 | The api Jest suite stays CommonJS and transpiles the ESM-only NestJS packages | accepted |
+| 0097 | AI assistant, MCP server and headless API | accepted |
+| 0098 | Consumable deliveries — an optional target on an OUT movement, returnable items and returns | accepted |
+| 0099 | Purchases — scope, model, and optionality | accepted |
+| 0100 | Money as 64-bit integer minor units | accepted |

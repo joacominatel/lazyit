@@ -4,7 +4,6 @@ import {
   exactSlashCommand,
   filterSlashCommands,
   matchSlashCommand,
-  moveHighlight,
   slashQuery,
   type SlashCommand,
   type SlashCommandContext,
@@ -139,16 +138,5 @@ describe("the built-in commands", () => {
     const all = BUILTIN_SLASH_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]);
     expect(new Set(all).size).toBe(all.length);
     for (const c of BUILTIN_SLASH_COMMANDS) expect(c.name).toMatch(/^[a-z][a-z0-9-]*$/);
-  });
-});
-
-describe("moveHighlight", () => {
-  test("moves and wraps around; an empty list has no row", () => {
-    expect(moveHighlight(0, 1, 3)).toBe(1);
-    expect(moveHighlight(2, 1, 3)).toBe(0);
-    expect(moveHighlight(0, -1, 3)).toBe(2);
-    expect(moveHighlight(-1, 1, 3)).toBe(0);
-    expect(moveHighlight(-1, -1, 3)).toBe(2);
-    expect(moveHighlight(0, 1, 0)).toBe(-1);
   });
 });

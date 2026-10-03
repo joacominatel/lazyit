@@ -3,7 +3,7 @@ title: "ADR-0097: AI assistant, MCP server and headless API"
 tags: [adr, ai-assistant, mcp, oauth, llm, security, authorization, data-model]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -252,6 +252,14 @@ The key forks only; each links its analysis.
    >
    > → [[ai-assistant/provider-and-runtime|provider]] §8.1 *The pending-approval limit*;
    > [[ai-assistant/tools-and-execution|tools]] §7; [[ai-assistant/frontend|frontend]] §5.3.
+
+   > Amended 2026-10-02 (#1478, purchases): **"Approve all" also skips cards that create assets or change
+   > money** — a preview carrying a warning in the shared `AI_NEVER_AUTO_APPROVE_WARNINGS` (`CREATES_ASSETS`,
+   > `CHANGES_MONEY`), which core never auto-approves either. Such a card stays individual like a step-up,
+   > elevated or refused one, and still approves with the user's click and no password. The four exclusions,
+   > in order: step-up, elevated, creates assets or changes money, refused.
+   > → [[0099-purchases-scope-model-and-optionality]] *Decisions while building (Phase 3, #1478)* and
+   > *(Phase 3 web, #1478)*; [[ai-assistant/frontend|frontend]] §11d.
 
 4. **Interactive writes need approval on a server-built preview.** A chat write becomes a pending
    action with a deterministic before→after preview; only its owner approves, from a human session,

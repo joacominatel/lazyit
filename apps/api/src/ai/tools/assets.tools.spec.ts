@@ -614,6 +614,56 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       ]);
     });
 
+    it('carries the cost currency label with the cost (ADR-0099 §5, #1473)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Laptop ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 141250000,
+        purchaseCurrency: ' ARS ',
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'purchaseCurrency', after: 'ARS', valueKind: 'text' },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 141250000,
+        purchaseCurrency: 'ARS',
+      });
+    });
+
+    it('accepts purchaseCost and salvageValue above int4; the result reads back exactly (ADR-0100)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Server ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const approved = await approve(action);
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { ok: true, mutated: true },
+      });
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const tooBig = await h.tools.propose(
+        'asset_create',
+        {
+          name: 'X',
+          status: 'IN_STORAGE',
+          purchaseCost: Number.MAX_SAFE_INTEGER + 2,
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(tooBig).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+    });
+
     it('an ambiguous or unknown model fails the proposal; nothing is stored', async () => {
       state.models.set('c0000000000000000model3x', {
         ...state.models.get(M.latitude)!,
@@ -1114,6 +1164,61 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
   });
 
   describe('asset_update', () => {
+    it('sets and clears the cost currency label (#1473)', async () => {
+      const set = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      expect((await approve(set)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[0][1]).toMatchObject({
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      const clear = await propose('asset_update', {
+        asset: A.server,
+        purchaseCurrency: null,
+      });
+      expect((await approve(clear)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[1][1]).toEqual({
+        purchaseCurrency: null,
+      });
+    });
+
+    it('accepts a purchaseCost above int4 and asset_get reads it back exactly (ADR-0100)', async () => {
+      const action = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          {
+            field: 'purchaseCost',
+            before: null,
+            after: 3_000_000_000,
+            valueKind: 'number',
+          },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      const [, body] = assetsService.update.mock.calls[0] as [string, Row];
+      expect(body).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+
+      const result = await h.tools.invoke(
+        'asset_get',
+        { asset: A.server },
+        ctx(actor('VIEWER')),
+      );
+      expect(data(result).asset).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+    });
+
     it('previews before → after with the version as precondition, and executes once', async () => {
       const action = await propose('asset_update', {
         asset: 'SN-LAPTOP-1',

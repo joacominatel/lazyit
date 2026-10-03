@@ -30,6 +30,7 @@ const SA = {
 
 const ASSET_ID = 'classet000000000000000000';
 const ARTICLE_ID = 'clart00000000000000000000';
+const PURCHASE_ID = 'clpo00000000000000000001';
 
 const PDF_BYTES = Buffer.concat([
   Buffer.from('%PDF-1.7\n'),
@@ -53,6 +54,14 @@ type PrismaMock = {
     groupBy: jest.Mock;
   };
   asset: { findFirst: jest.Mock };
+  purchaseOrder: { findFirst: jest.Mock };
+  purchaseOrderEvent: { create: jest.Mock };
+  $transaction: jest.Mock;
+  /** The client the transaction callback received — writes through it are atomic with the row. */
+  tx: {
+    attachment: PrismaMock['attachment'];
+    purchaseOrderEvent: PrismaMock['purchaseOrderEvent'];
+  };
 };
 
 /** What the budget accounting sees: existing rows, live or soft-deleted-at-some-time. */
@@ -113,7 +122,19 @@ describe('AttachmentsService (ADR-0082)', () => {
         ),
       },
       asset: { findFirst: jest.fn().mockResolvedValue({ id: ASSET_ID }) },
+      purchaseOrder: {
+        findFirst: jest.fn().mockResolvedValue({ id: PURCHASE_ID }),
+      },
+      purchaseOrderEvent: { create: jest.fn().mockResolvedValue({}) },
+      $transaction: jest.fn(),
+      tx: undefined as never,
     };
+    // A distinct transaction client sharing the delegates: a write made through `tx` is in the transaction.
+    const purchaseOrderEvent = { create: jest.fn().mockResolvedValue({}) };
+    prisma.tx = { attachment: prisma.attachment, purchaseOrderEvent };
+    prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
+      cb(prisma.tx),
+    );
     articles = {
       findOne: jest.fn().mockResolvedValue({ id: ARTICLE_ID }),
       assertAttachmentWritable: jest.fn().mockResolvedValue(undefined),
@@ -379,6 +400,229 @@ describe('AttachmentsService (ADR-0082)', () => {
           HUMAN,
         ),
       ).rejects.toMatchObject({ status: 403 });
+    });
+  });
+  describe('PURCHASE_ORDER documents (ADR-0099 §10, #1473)', () => {
+    it('upload: the asset allowlist and cap; the row and DOCUMENT_ADDED commit in one transaction', async () => {
+      const file = await stageUpload(PDF_BYTES, 'Factura A 0003.pdf');
+      await service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN);
+
+      expect(prisma.purchaseOrder.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: PURCHASE_ID, deletedAt: null },
+        }),
+      );
+      expect(prisma.attachment.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          entityType: 'PURCHASE_ORDER',
+          entityId: PURCHASE_ID,
+          mimeType: 'application/pdf',
+        }) as object,
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          purchaseOrderId: PURCHASE_ID,
+          eventType: 'DOCUMENT_ADDED',
+          performedById: UPLOADER,
+          payload: {
+            attachmentId: 'clatt0000000000000000000',
+            originalName: 'Factura A 0003.pdf',
+            label: null,
+          },
+        }) as object,
+      });
+    });
+
+    it('upload: refuses a type outside the document allowlist (HTML disguised as pdf)', async () => {
+      const file = await stageUpload(
+        Buffer.from('<!doctype html><script>x</script>'),
+        'invoice.pdf',
+      );
+      await expect(
+        service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN),
+      ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+    });
+
+    it('upload: a missing or archived purchase is a 404 — no row, no event, tmp cleared', async () => {
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      const file = await stageUpload(PDF_BYTES, 'order.pdf');
+      await expect(
+        service.upload('PURCHASE_ORDER', PURCHASE_ID, file, HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(await readdir(join(root, 'tmp'))).toEqual([]);
+    });
+
+    it('list and content are scoped to a live purchase (404 otherwise)', async () => {
+      await service.list('PURCHASE_ORDER', PURCHASE_ID);
+      expect(prisma.attachment.findMany).toHaveBeenCalledWith({
+        where: { entityType: 'PURCHASE_ORDER', entityId: PURCHASE_ID },
+        orderBy: { createdAt: 'desc' },
+      });
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      await expect(
+        service.getContent(
+          'PURCHASE_ORDER',
+          PURCHASE_ID,
+          'clatt0000000000000000000',
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('remove: soft delete and DOCUMENT_REMOVED in one transaction; a service account is refused', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: 'clatt0000000000000000000',
+        originalName: 'order.pdf',
+      });
+      await service.remove(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        'clatt0000000000000000000',
+        HUMAN,
+      );
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: 'clatt0000000000000000000' },
+        data: { deletedAt: expect.any(Date) as Date },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'DOCUMENT_REMOVED',
+          payload: {
+            attachmentId: 'clatt0000000000000000000',
+            originalName: 'order.pdf',
+            label: null,
+          },
+        }) as object,
+      });
+      await expect(
+        service.remove(
+          'PURCHASE_ORDER',
+          PURCHASE_ID,
+          'clatt0000000000000000000',
+          SA,
+        ),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
+    it('an ASSET upload writes no purchase event', async () => {
+      const file = await stageUpload(PDF_BYTES, 'warranty.pdf');
+      await service.upload('ASSET', ASSET_ID, file, HUMAN);
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('document type label (ADR-0099 §10, #1476)', () => {
+    const ATT = 'clatt0000000000000000000';
+
+    it('upload: stores the trimmed label on the row and in DOCUMENT_ADDED; a blank one is no label', async () => {
+      const file = await stageUpload(PDF_BYTES, 'remito.pdf');
+      const row = await service.upload(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        file,
+        HUMAN,
+        '  Delivery note ',
+      );
+      expect(row).toMatchObject({ label: 'Delivery note' });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          eventType: 'DOCUMENT_ADDED',
+          payload: {
+            attachmentId: ATT,
+            originalName: 'remito.pdf',
+            label: 'Delivery note',
+          },
+        }) as object,
+      });
+
+      const blank = await stageUpload(PDF_BYTES, 'warranty.pdf');
+      await service.upload('ASSET', ASSET_ID, blank, HUMAN, '   ');
+      const [, second] = prisma.attachment.create.mock.calls as [
+        { data: Record<string, unknown> },
+      ][];
+      expect(second[0].data).not.toHaveProperty('label');
+    });
+
+    it('upload: an over-long label is a 400 — no row, no blob kept, tmp cleared', async () => {
+      const file = await stageUpload(PDF_BYTES, 'invoice.pdf');
+      await expect(
+        service.upload('ASSET', ASSET_ID, file, HUMAN, 'x'.repeat(101)),
+      ).rejects.toMatchObject({ status: 400 });
+      expect(prisma.attachment.create).not.toHaveBeenCalled();
+      expect(await readdir(join(root, 'tmp'))).toEqual([]);
+    });
+
+    it('edit on a purchase document: sets the label and logs DOCUMENT_UPDATED from → to, in one transaction', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: ATT,
+        originalName: 'scan.pdf',
+        label: 'Quote',
+      });
+      await service.updateLabel(
+        'PURCHASE_ORDER',
+        PURCHASE_ID,
+        ATT,
+        'Invoice',
+        HUMAN,
+      );
+      expect(prisma.attachment.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: ATT,
+          entityType: 'PURCHASE_ORDER',
+          entityId: PURCHASE_ID,
+        },
+      });
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: ATT },
+        data: { label: 'Invoice' },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          purchaseOrderId: PURCHASE_ID,
+          eventType: 'DOCUMENT_UPDATED',
+          performedById: UPLOADER,
+          payload: {
+            attachmentId: ATT,
+            originalName: 'scan.pdf',
+            label: { from: 'Quote', to: 'Invoice' },
+          },
+        }) as object,
+      });
+    });
+
+    it('edit on an asset document clears with null and writes no purchase event; an unchanged label writes nothing', async () => {
+      prisma.attachment.findFirst.mockResolvedValue({
+        id: ATT,
+        originalName: 'warranty.pdf',
+        label: 'Warranty',
+      });
+      await service.updateLabel('ASSET', ASSET_ID, ATT, null, HUMAN);
+      expect(prisma.attachment.update).toHaveBeenCalledWith({
+        where: { id: ATT },
+        data: { label: null },
+      });
+      expect(prisma.tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+
+      prisma.attachment.update.mockClear();
+      await service.updateLabel('ASSET', ASSET_ID, ATT, 'Warranty', HUMAN);
+      expect(prisma.attachment.update).not.toHaveBeenCalled();
+    });
+
+    it('edit: 404 for a document of another parent or an archived purchase; 403 for a service account', async () => {
+      prisma.attachment.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateLabel('ASSET', ASSET_ID, ATT, 'Invoice', HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      prisma.purchaseOrder.findFirst.mockResolvedValue(null);
+      await expect(
+        service.updateLabel('PURCHASE_ORDER', PURCHASE_ID, ATT, 'x', HUMAN),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.updateLabel('ASSET', ASSET_ID, ATT, 'Invoice', SA),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(prisma.attachment.update).not.toHaveBeenCalled();
     });
   });
 });

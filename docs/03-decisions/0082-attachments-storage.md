@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -18,6 +18,20 @@ service. Serving is API-only, behind per-parent authz. Backup coverage is **defe
 explicit CEO decision** — a documented, loud gap (see [Deferred](#deferred)). Lands the long-deferred
 KB render-time sanitizer with the first image render ([[0029-untrusted-content-sanitization]] /
 SEC-003).
+
+> [!note] Amended 2026-10-01 by [[0099-purchases-scope-model-and-optionality|ADR-0099]] (#1466)
+> A third parent type, `PURCHASE_ORDER`, was planned for Purchases Phase 1, reusing the asset documents
+> allowlist and cap and gated by `purchaseOrder:read` / `:write`. Purchase documents are financial
+> evidence, so ADR-0099 §12 makes the **attachments backup a prerequisite** that ships before or
+> alongside Phase 1 — the v1.1 deferral below no longer covers it. **Built 2026-10-02 (#1473)**: the parent
+> type, its `SURFACE` entry (the asset documents one) and `PurchaseOrderAttachmentsController`; the GC
+> needed no change (purchase documents are pinned by their own live row, like asset documents).
+> **2026-10-02 (#1476)**: asset and purchase documents gain an optional free-text type label
+> (`attachments.label`, nullable), set at upload and editable with a `PATCH` under the parent's write
+> permission; untrusted text, rendered as text ([[0029-untrusted-content-sanitization]]).
+> **The backup prerequisite was not delivered with Purchases**: #1467 is open, deferred by the CEO, so the
+> v1.1 deferral below still describes what is backed up today — purchase documents included. The
+> purchase's documents panel says so, and [[backups]] item 7 carries the manual workaround.
 
 ## Context
 

@@ -19,6 +19,8 @@ import {
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { LocationsController } from '../../locations/locations.controller';
+import { SuppliersController } from '../../purchase-orders/suppliers.controller';
+import { ConsumablesController } from '../../consumables/consumables.controller';
 import { UsersController } from '../../users/users.controller';
 import { isSensitiveKey } from '../core/redaction';
 import { phrase, summaryPhrase } from '../core/sentences';
@@ -469,6 +471,38 @@ function clip(value: string): string {
     : value;
 }
 
+type PageQuery = Readonly<Record<string, string>>;
+
+/**
+ * The paged id lists a select may take its options from: the bound list route each is read through, and the
+ * field that tells two same-named rows apart in the label — a model's maker, a supplier's tax ID (#1478), a
+ * consumable's SKU (#1478).
+ */
+const PAGED_SOURCES: Record<
+  'locations' | 'assetModels' | 'suppliers' | 'consumables',
+  {
+    read: (rt: AiToolRuntime, query: PageQuery) => Promise<unknown>;
+    hint: string | null;
+  }
+> = {
+  locations: {
+    read: (rt, query) => rt.call(LocationsController, 'findAll', { query }),
+    hint: null,
+  },
+  assetModels: {
+    read: (rt, query) => rt.call(AssetModelsController, 'findAll', { query }),
+    hint: 'manufacturer',
+  },
+  suppliers: {
+    read: (rt, query) => rt.call(SuppliersController, 'findAll', { query }),
+    hint: 'taxId',
+  },
+  consumables: {
+    read: (rt, query) => rt.call(ConsumablesController, 'findAll', { query }),
+    hint: 'sku',
+  },
+};
+
 /** Pages read to collect the distinct manufacturers (models are paged; manufacturers are a model column). */
 const MANUFACTURER_PAGES = 3;
 
@@ -503,19 +537,19 @@ async function resolveOptions(
       break;
     }
     case 'locations':
-    case 'assetModels': {
-      const result =
-        source === 'locations'
-          ? await rt.call(LocationsController, 'findAll', { query: page(0) })
-          : await rt.call(AssetModelsController, 'findAll', { query: page(0) });
+    case 'assetModels':
+    case 'suppliers':
+    case 'consumables': {
+      const result = await PAGED_SOURCES[source].read(rt, page(0));
       const total = (result as { total?: unknown }).total;
+      const hintField = PAGED_SOURCES[source].hint;
       for (const row of rows(result)) {
         const name = str(row.name);
         if (typeof row.id !== 'string' || !name) continue;
-        const maker = source === 'assetModels' ? str(row.manufacturer) : null;
+        const hint = hintField ? str(row[hintField]) : null;
         out.push({
           value: row.id,
-          label: clip(maker ? `${name} (${maker})` : name),
+          label: clip(hint ? `${name} (${hint})` : name),
         });
       }
       more = typeof total === 'number' && total > out.length;
@@ -650,7 +684,7 @@ export const requestInput = defineTool({
     'Ask the person for data you need and cannot find with a tool or safely infer, with a short form you ' +
     'design: a title, why you need it, and the fields — each marked required, recommended or optional. ' +
     'Use select options (or `optionsFrom` a lazyit list: manufacturers, assetCategories, locations, ' +
-    'assetModels) when the answer is one of known values, and a repeat group when the same questions ' +
+    'assetModels, suppliers, consumables) when the answer is one of known values, and a repeat group when the same questions ' +
     'apply to several items (one row per model). Give each field only the properties of its kind: ' +
     '`options` or `optionsFrom` on a select or multiselect (exactly one), `min` / `max` on a number, ' +
     'nothing extra on the other kinds. Ask only for what is missing, in one form, before ' +
@@ -668,6 +702,8 @@ export const requestInput = defineTool({
     bind(AssetModelsController, 'findAll'),
     bind(AssetCategoriesController, 'findAll'),
     bind(LocationsController, 'findAll'),
+    bind(SuppliersController, 'findAll'),
+    bind(ConsumablesController, 'findAll'),
   ],
   async run(input, rt) {
     const { form, truncated } = await buildInputForm(input, rt);

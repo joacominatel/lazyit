@@ -236,6 +236,112 @@ export const AI_SENTENCES = {
     },
   },
 
+  /* ─── Purchases (purchases.tools.ts, #1478) ─────────────────────────────────────────────────── */
+  "purchase_create.action": {
+    en: "Record a purchase{hasSupplier, select, yes { from {supplier}} other {}} with {lines, plural, =0 {no lines} one {# line} other {# lines}}.",
+    params: { hasSupplier: YES_NO, supplier: "text", lines: "number" },
+  },
+  "purchase_create.summary": {
+    en: "Recorded the purchase {purchase}.",
+    params: { purchase: "text" },
+  },
+  "purchase_update.action": {
+    en: "Change {count, plural, one {# field} other {# fields}} of the purchase {purchase}.",
+    params: { count: "number", purchase: "text" },
+  },
+  "purchase_update.summary": {
+    en: "Updated the purchase {purchase}.",
+    params: { purchase: "text" },
+  },
+  "purchase_line_add.action": {
+    en: `Add the line "{line}" to the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_add.summary": {
+    en: `Added the line "{line}" to the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_update.action": {
+    en: `Change the line "{line}" of the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_update.summary": {
+    en: `Updated the line "{line}" of the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_remove.action": {
+    en: `Remove the line "{line}" from the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_remove.summary": {
+    en: `Removed the line "{line}" from the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_link_assets.action": {
+    en: `Link {count, plural, one {# asset} other {# assets}} to the line "{line}" of the purchase {purchase}.`,
+    params: { count: "number", line: "text", purchase: "text" },
+  },
+  "purchase_link_assets.summary": {
+    en: `Linked {linked, plural, one {# asset} other {# assets}} to the line "{line}"{failed, plural, =0 {.} other {; # not linked.}}`,
+    params: { linked: "number", line: "text", failed: "number" },
+  },
+  "purchase_receive.action": {
+    en: `Receive {quantity, plural, one {# unit} other {# units}} of the line "{line}" of the purchase {purchase} as new assets.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_receive.summary": {
+    en: `Received {created, plural, one {# unit} other {# units}} of the line "{line}" as new assets{failed, plural, =0 {.} other {; # failed.}}`,
+    params: { created: "number", line: "text", failed: "number" },
+  },
+  "purchase_receive_stock.action": {
+    en: `Receive {quantity, plural, one {# unit} other {# units}} of the line "{line}" of the purchase {purchase} into stock.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_receive_stock.summary": {
+    en: `Received {quantity, plural, one {# unit} other {# units}} of the line "{line}" into stock.`,
+    params: { quantity: "number", line: "text" },
+  },
+  "purchase_cancel_remaining.action": {
+    en: `Cancel {quantity, plural, one {# pending unit} other {# pending units}} of the line "{line}" of the purchase {purchase}.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_cancel_remaining.summary": {
+    en: `Cancelled {quantity, plural, one {# pending unit} other {# pending units}} of the line "{line}".`,
+    params: { quantity: "number", line: "text" },
+  },
+  "purchase_apply_license.action": {
+    en: `Apply the license line "{line}" of the purchase {purchase} to {application}.`,
+    params: { line: "text", purchase: "text", application: "text" },
+  },
+  "purchase_apply_license.summary": {
+    en: `Applied the license line "{line}" to {application}.`,
+    params: { line: "text", application: "text" },
+  },
+  "purchase_create_from_assets.action": {
+    en: "Record a purchase from {count, plural, one {# selected asset} other {# selected assets}} and link them to it.",
+    params: { count: "number" },
+  },
+  "purchase_create_from_assets.summary": {
+    en: "Recorded the purchase {purchase} and linked {linked, plural, one {# asset} other {# assets}}{failed, plural, =0 {.} other {; # not linked.}}",
+    params: { purchase: "text", linked: "number", failed: "number" },
+  },
+  "supplier_create.action": {
+    en: `Add the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_create.summary": {
+    en: `Added the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_update.action": {
+    en: `Change the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_update.summary": {
+    en: `Updated the supplier "{name}".`,
+    params: { name: "text" },
+  },
+
   /* ─── Asset models and locations (reference.tools.ts, taxonomy.tools.ts) ────────────────────── */
   "asset_model_create.summary": {
     en: "Created the asset model {model}.",

@@ -3,7 +3,7 @@ title: Consumable
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-10-02
 ---
 
 # Consumable
@@ -62,7 +62,12 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 - A consumable stays a **counted quantity** even when delivered. A delivery records *where* units went
   (a person, an asset, a place). It is not an ownership join, and a location target is not
   per-location stock ([[0098-consumable-delivery-targets]]).
+- **Bought through Purchases** ([[0099-purchases-scope-model-and-optionality]], #1476): a `CONSUMABLE`
+  [[purchase-order-line]] names the consumable it is received into (`consumableId`, `SetNull`), and
+  receiving it posts an ordinary `IN` movement that carries the line ([[consumable-movement]]). Supplier
+  and unit price live on the purchase and its line, never on the consumable. An archived consumable cannot
+  be named on a line nor received into.
 
-Related: [[consumable-category]] · [[consumable-movement]] · [[asset]] · [[0098-consumable-delivery-targets]] ·
+Related: [[purchase-order-line]] · [[consumable-category]] · [[consumable-movement]] · [[asset]] · [[0098-consumable-delivery-targets]] ·
 [[0008-consumables-vs-assets]] · [[0034-consumables-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0005-id-strategy]]

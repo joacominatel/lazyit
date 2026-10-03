@@ -102,6 +102,18 @@ record of where the units went; nothing is owed back.
 When someone leaves, their outstanding items are listed on the offboarding sheet and the printed
 return act. See [User lifecycle](/help/users-permissions-user-lifecycle).
 
+## Stock received from a purchase
+
+If you record [purchases](/help/purchases-recording-purchases), a **consumable line** is received with
+**Receive into stock** on the purchase. That posts an ordinary **In** movement here, with a reason that
+names the purchase's reference — for example *Received from purchase OC-4512*, or *Received from a purchase*
+when the purchase has no reference — and the note typed when receiving. The movements list is visible to
+everyone who can see consumables, so **anyone who can see this consumable's movements, Viewers included,
+sees the purchase reference**. Nothing else about the purchase is shown here: the supplier, prices and
+documents stay with the purchase, which only people who can see purchases can open. Receipts recorded by an
+earlier version keep the reason *Received from a purchase*. Correct a receipt like any other movement: with
+another movement.
+
 ## The ledger is permanent
 
 Movements are **immutable**: once recorded, a movement is never edited or deleted. If you got

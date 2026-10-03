@@ -88,9 +88,13 @@ export function cloneAssetDefaults(source: Asset): Partial<{
   company: string | undefined;
   purchaseDate: string | undefined;
   warrantyEnd: string | undefined;
+  purchaseCurrency: string | undefined;
   modelId: string | undefined;
   locationId: string | undefined;
 }> {
+  // `purchaseOrderLineId` is deliberately NEVER mapped (ADR-0099 §9): a clone pointing at the source's
+  // purchase line would count as a received unit of that line. The currency label is carried because the
+  // clone form carries the cost, and cost and currency always move together.
   return {
     name: withCopySuffix(source.name),
     status: source.status,
@@ -101,6 +105,7 @@ export function cloneAssetDefaults(source: Asset): Partial<{
     company: orUndefined(source.company),
     purchaseDate: orUndefined(source.purchaseDate),
     warrantyEnd: orUndefined(source.warrantyEnd),
+    purchaseCurrency: orUndefined(source.purchaseCurrency),
     specs: cloneJson(source.specs),
     // Unique partial-index fields — cleared so the create can't collide and the operator notices.
     serial: undefined,

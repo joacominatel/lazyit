@@ -51,6 +51,8 @@ limits.
 | **View** most areas (assets, applications, consumables, Knowledge Base, locations, models, categories, dashboard, search) | Yes | Yes | Yes |
 | **View** the user directory | Yes | Yes | No |
 | **View** who-has-access-to-what (access grants) | Yes | Yes | No |
+| **View** purchases and suppliers | Yes | Yes | No |
+| **Record & edit** purchases and suppliers | Yes | Yes | No |
 | **Create / edit** records (assets, applications, consumables, Knowledge Base, …) | Yes | Yes | No |
 | **Delete** records | Yes | No | No |
 | **Grant / revoke** application access | Yes | No | No |
@@ -64,8 +66,10 @@ limits.
 
 A few notes on the defaults:
 
-- **Two sensitive views are hidden from Viewer**: the user directory and the access-grant ledger
-  (who has access to what). Administrators and Members keep them.
+- **Three sensitive views are hidden from Viewer**: the user directory, the access-grant ledger
+  (who has access to what), and [purchases and suppliers](/help/purchases-recording-purchases) (they
+  carry prices). Administrators and Members keep them. Granting one to Viewer grants it to every
+  viewer — permissions belong to the role, not the person.
 - **A few areas are administrator-only by default**: the estate-wide activity history, the
   notification bell, and the Secret Manager. These are the most sensitive surfaces, so they start
   locked to administrators. An administrator can still grant them to Member or Viewer if they choose.

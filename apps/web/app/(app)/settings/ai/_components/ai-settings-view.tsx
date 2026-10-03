@@ -21,6 +21,7 @@ import { useAiConfig } from "@/lib/api/hooks/use-ai-config";
 import { AdminGate } from "../../_components/admin-gate";
 import { AiConnectionEditor } from "./ai-connection-editor";
 import { AiDangerZone } from "./ai-danger-zone";
+import { AiDocumentExtractionSection } from "./ai-document-extraction-section";
 import { AiLimitsEditor } from "./ai-limits-editor";
 import { AiMcpSection } from "./ai-mcp-section";
 import { AiSetupWizard } from "./ai-setup-wizard";
@@ -31,8 +32,8 @@ import { AiWebSearchSection } from "./ai-web-search-section";
  * `GET /config/ai`, prefetched by the page — drives everything:
  *   - assistant OFF → the setup wizard (a saved draft resumes where it stopped);
  *   - assistant ON  → the provider & model editor and the danger zone;
- *   - always        → behaviour & limits, web search (#1389), and the MCP card (its switch is
- *                     independent of the provider).
+ *   - always        → behaviour & limits, web search (#1389), purchase document extraction (#1477),
+ *                     and the MCP card (its switch is independent of the provider).
  * `AdminGate` hides the page from callers without `settings:manage`; the API is the real gate.
  *
  * A configuration page and little more (#1407): each control shows its label and at most one short
@@ -120,6 +121,8 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
             <AiLimitsEditor settings={settings} />
 
             <AiWebSearchSection settings={settings} />
+
+            <AiDocumentExtractionSection settings={settings} />
 
             <AiMcpSection settings={settings} />
 

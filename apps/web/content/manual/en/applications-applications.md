@@ -17,7 +17,8 @@ organizing that catalog; granting access is covered in [Access grants](/help/app
 An application is just a named target that someone can hold access to. Only the **name** is
 required — everything else is optional and there to help your team recognize and find it:
 
-- **Vendor** — the provider behind it (Atlassian, Microsoft, AWS…).
+- **Publisher** — who makes the software (Atlassian, Microsoft, AWS…). It suggests the publishers
+  already in use. This is not who you buy it from — that is a [supplier](/help/purchases-recording-purchases).
 - **Category** — a grouping for browsing (see below).
 - **URL** — where the system lives. This can be a normal `https://…` address or a scheme-less
   internal host such as `vpn.corp.local`. For safety, only scheme-less hosts and `http(s)` links
@@ -51,7 +52,7 @@ them uncategorized. Nothing is lost.
 
 ## Finding applications
 
-The Access list supports searching by **name or vendor**, and filtering by **category** and by
+The Access list supports searching by **name or publisher**, and filtering by **category** and by
 **criticality** (critical only / non-critical / any). Each row also shows the count of **active
 access** — how many people currently hold a live grant on that application — and, when you track
 licensing, a **License** cell (used / purchased, with an over-allocation warning and the next
@@ -63,8 +64,9 @@ lazyit can track the licensing behind an application, so you can see at a glance
 you pay for is actually in use. On the application form, fill in any of:
 
 - **Seats purchased** — how many paid seats the license includes. Leave it blank to not track a limit.
-- **Cost per seat** — the price of a single seat, per billing period. Enter it in normal units
-  (e.g. `12.99`); lazyit stores the amount precisely.
+- **Cost per seat** — the price of a single seat, per billing period. Enter it in normal units, in
+  your language's number format (`12.99` in English, `12,99` in Spanish — see
+  [entering amounts](/help/assets-asset-basics#entering-amounts)); lazyit stores the amount precisely.
 - **Renewal date** — when the license next renews.
 
 **Seats in use** is worked out for you: it's the number of *distinct people* who currently hold

@@ -11,6 +11,7 @@ import { ActorService } from '../common/actor.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { SearchService } from '../search/search.service';
 import { AssetTagSchemeService } from '../asset-tag-scheme/asset-tag-scheme.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` mostly for types (erased at runtime), but `isUniqueTagCollision` (ADR-0063) does a real
@@ -236,8 +237,11 @@ describe('AssetsService', () => {
   let prisma: {
     asset: PrismaAssetMock;
     assetModel: { findFirst: jest.Mock };
+    location: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
+  // The live-location check on writes (#1476): live by default; a test archives one by answering null.
+  let location: { findFirst: jest.Mock };
   let actor: ActorService;
   let history: { record: jest.Mock; list: jest.Mock };
   let search: { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -257,11 +261,14 @@ describe('AssetsService', () => {
     txClient = { asset: tx } as TxClientMock;
     // keep existing transaction assertions focused on the asset delegate
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
+    location = { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) };
+    Object.defineProperty(txClient, 'location', { value: location });
     // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
     prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
       asset,
       assetModel: prismaAssetModel,
+      location,
       // create/update/remove pass a CALLBACK (interactive tx); findPage passes an ARRAY of two
       // promises (findMany + count). Support both forms.
       $transaction: jest.fn(
@@ -286,6 +293,10 @@ describe('AssetsService', () => {
         { provide: AssetHistoryService, useValue: history },
         { provide: SearchService, useValue: search },
         { provide: AssetTagSchemeService, useValue: tagScheme },
+        {
+          provide: PermissionResolverService,
+          useValue: { principalHas: jest.fn().mockResolvedValue(false) },
+        },
       ],
     }).compile();
 
@@ -349,7 +360,7 @@ describe('AssetsService', () => {
     await service.create(dto);
 
     expect(txAssetModel.findFirst).toHaveBeenCalledWith({
-      where: { id: 'm1' },
+      where: { id: 'm1', deletedAt: null },
       select: { specs: true },
     });
     expect(tx.create).toHaveBeenCalledWith({
@@ -592,7 +603,7 @@ describe('AssetsService', () => {
       // one upfront non-tx model lookup for the name default (not N).
       expect(prismaAssetModel.findFirst).toHaveBeenCalledTimes(1);
       expect(prismaAssetModel.findFirst).toHaveBeenCalledWith({
-        where: { id: 'm1' },
+        where: { id: 'm1', deletedAt: null },
         select: { name: true },
       });
       // ONE create transaction per unit — each its own independent tag-counter commit (ADR-0063), never
@@ -645,8 +656,8 @@ describe('AssetsService', () => {
       const calls = tx.create.mock.calls as CreateCall[];
       expect(calls[0][0].data.serial).toBe('SN-A');
       expect(calls[1][0].data.serial).toBe('SN-B');
-      // purchaseCost is passed straight through — no re-coercion in the service.
-      expect(calls[0][0].data.purchaseCost).toBe(4500);
+      // purchaseCost is passed straight through — no re-coercion, only the bigint the column takes (ADR-0100).
+      expect(calls[0][0].data.purchaseCost).toBe(BigInt(4500));
       expect(calls[0][0].data.locationId).toBe('l1');
     });
 
@@ -782,10 +793,11 @@ describe('AssetsService', () => {
   });
 
   it('findOne echoes cost as currentBookValue when there is nothing to depreciate (#954)', async () => {
-    // purchaseCost set but no usefulLifeMonths → current value = cost (independent of "now").
+    // purchaseCost set but no usefulLifeMonths → current value = cost (independent of "now"). The column
+    // is BigInt, so the client hands back a bigint; the read converts it to a wire number (ADR-0100).
     asset.findFirst.mockResolvedValue(
       rawRow({
-        purchaseCost: 100_000,
+        purchaseCost: BigInt(100_000),
         usefulLifeMonths: null,
         salvageValue: null,
         purchaseDate: null,
@@ -795,6 +807,7 @@ describe('AssetsService', () => {
     const result = await service.findOne('a1');
 
     expect(result.currentBookValue).toBe(100_000);
+    expect(result.purchaseCost).toBe(100_000);
   });
 
   // --- findPage (paginated, lean) -----------------------------------------
@@ -1205,7 +1218,14 @@ describe('AssetsService', () => {
     return out;
   };
   const CSV_HEADER =
-    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt';
+    'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt,purchaseCost,purchaseCurrency';
+  // The export's projection for a caller WITHOUT purchaseOrder:read: the lean list select plus the cost
+  // columns — the linked purchase is not even read (#1473).
+  const EXPECTED_EXPORT_SELECT = {
+    ...EXPECTED_LIST_SELECT,
+    purchaseCost: true,
+    purchaseCurrency: true,
+  };
 
   it('streamInventoryCsvRows yields the header first, then batches over the lean select and terminates', async () => {
     // A FULL batch then a short (empty) one → proves the OFFSET loop terminates without an extra call.
@@ -1229,7 +1249,7 @@ describe('AssetsService', () => {
         [{ where: unknown; orderBy: unknown; take: number; select: unknown }]
       >
     )[0][0];
-    expect(args.select).toEqual(EXPECTED_LIST_SELECT);
+    expect(args.select).toEqual(EXPECTED_EXPORT_SELECT);
     expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
     expect(args.take).toBe(AssetsService.EXPORT_BATCH_SIZE);
     expect(args.where).toEqual({ deletedAt: null });
@@ -1554,6 +1574,7 @@ describe('AssetsService', () => {
         purchaseCost: true,
         usefulLifeMonths: true,
         salvageValue: true,
+        purchaseCurrency: true,
       },
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -1661,6 +1682,7 @@ describe('AssetsService', () => {
   it('emits MODEL_CHANGED with {from,to} when only the model changes', async () => {
     asset.findFirst.mockResolvedValue(beforeRow({ modelId: 'm1' }));
     tx.update.mockResolvedValue(beforeRow({ modelId: 'm2' }));
+    txAssetModel.findFirst.mockResolvedValue({ id: 'm2' });
 
     await service.update('a1', { modelId: 'm2' });
 
@@ -2041,5 +2063,67 @@ describe('AssetsService', () => {
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
+  });
+
+  describe('archived references are refused on write (#1476 review)', () => {
+    it('create into an archived location is a 400 — nothing written', async () => {
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create({
+          name: 'SRV-02',
+          status: 'IN_STORAGE',
+          locationId: 'l9',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(location.findFirst).toHaveBeenCalledWith({
+        where: { id: 'l9', deletedAt: null },
+        select: { id: true },
+      });
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('bulk receive into an archived location is ONE 400 up front, not N unit failures', async () => {
+      prismaAssetModel.findFirst.mockResolvedValue({ name: 'Dock' });
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.receiveBatch({
+          modelId: 'm1',
+          quantity: 3,
+          status: 'IN_STORAGE',
+          locationId: 'l9',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.create).not.toHaveBeenCalled();
+    });
+
+    it('moving an asset to an archived location or model is a 400; keeping a legacy one is not checked', async () => {
+      asset.findFirst.mockResolvedValue(
+        beforeRow({ locationId: 'l1', modelId: 'm1' }),
+      );
+      location.findFirst.mockResolvedValue(null);
+      await expect(
+        service.update('a1', { locationId: 'l9' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      txAssetModel.findFirst.mockResolvedValue(null);
+      await expect(
+        service.update('a1', { modelId: 'm9' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.update).not.toHaveBeenCalled();
+
+      // The same (now archived) location and model re-sent by an edit form: no check, the edit goes through.
+      location.findFirst.mockClear();
+      txAssetModel.findFirst.mockClear();
+      tx.update.mockResolvedValue(
+        beforeRow({ locationId: 'l1', modelId: 'm1' }),
+      );
+      await service.update('a1', {
+        locationId: 'l1',
+        modelId: 'm1',
+        name: 'renamed',
+      });
+      expect(location.findFirst).not.toHaveBeenCalled();
+      expect(txAssetModel.findFirst).not.toHaveBeenCalled();
+      expect(tx.update).toHaveBeenCalledTimes(1);
+    });
   });
 });

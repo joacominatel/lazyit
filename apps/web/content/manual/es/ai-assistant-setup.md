@@ -130,6 +130,29 @@ herramientas de la organización o del proyecto). Si está deshabilitada ahí mi
 está activo, fallan los chats que tienen búsqueda web — mirá
 [Resolución de problemas](/help/ai-assistant-troubleshooting#la-búsqueda-web-está-deshabilitada-en-el-proveedor).
 
+## Extracción de documentos
+
+**Permitir leer documentos de compras con IA** deja que las personas completen una compra desde una
+factura, un presupuesto o un remito adjunto: el proveedor lee el documento y lazyit muestra un borrador que
+una persona revisa — mirá [Leer un documento con IA](/help/purchases-recording-purchases#leer-un-documento-con-ia).
+Viene **desactivada**, también en las instancias que se actualizaron.
+
+- **Qué sale.** El **archivo completo** del documento que alguien elige leer — con el proveedor, los
+  precios y los IDs fiscales que muestre — va al proveedor configurado, bajo tu contrato con él. No se
+  guarda nada de él hasta que una persona revisa el borrador y guarda la compra. Mirá
+  [Qué sale de tu servidor](/help/ai-assistant-overview#documentos-de-compras-extracción-de-documentos-desactivada-por-defecto).
+- **Necesita el asistente activado**, y un proveedor que lea documentos: Anthropic, OpenAI o Google Gemini.
+  El proveedor compatible con OpenAI nunca se usa para esto (sus servidores no tienen una forma común de
+  leer un archivo); el interruptor queda deshabilitado y la tarjeta dice por qué. Sigue usable mientras está
+  activado, así que siempre lo podés desactivar.
+- **Quién lo ve.** Las personas que pueden editar compras y usar el asistente de IA. Las cuentas de
+  servicio nunca leen documentos.
+- **Qué lee.** Documentos PDF e imágenes, de hasta 10 MB (algo menos para imágenes con Anthropic; Gemini
+  no lee GIF) y 20 páginas. Los Word, planillas y archivos de
+  texto nunca se envían.
+- **Presupuesto y registro.** Cada lectura cuenta para el presupuesto diario de tokens de la persona (el
+  mismo que el del chat), y el registro de actividad de la compra la registra — nunca los valores leídos.
+
 ## Agentes de IA externos (MCP)
 
 **Permitir agentes de IA externos** deja que clientes MCP como Claude Code se conecten a lazyit como la

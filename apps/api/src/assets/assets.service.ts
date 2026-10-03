@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,7 +18,7 @@ import type {
 } from '@lazyit/shared';
 import {
   applyAssetModelSpecsDefaults,
-  ASSET_INVENTORY_CSV_HEADER,
+  assetInventoryCsvHeader,
   assetInventoryCsvRow,
   computeAssetBookValue,
   offsetOf,
@@ -33,6 +34,7 @@ import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
+import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
 import {
   AssetHistoryService,
   type RecordAssetEvent,
@@ -43,6 +45,12 @@ import {
   AssetTagSchemeService,
   isUniqueTagCollision,
 } from '../asset-tag-scheme/asset-tag-scheme.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
+import {
+  isOverReceived,
+  loadReceivableLine,
+} from '../purchase-orders/purchase-order-line-receipt';
 
 /**
  * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
@@ -85,6 +93,7 @@ const ASSET_PLAIN_FIELDS_SELECT = {
   purchaseCost: true,
   usefulLifeMonths: true,
   salvageValue: true,
+  purchaseCurrency: true,
 } as const satisfies Record<
   Exclude<keyof UpdateAsset, 'status' | 'locationId' | 'modelId' | 'specs'>,
   true
@@ -139,7 +148,30 @@ export interface AssetFilters {
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
   serials?: string[];
+  /**
+   * Purchase provenance filters (#1476). Only an object minted by
+   * {@link AssetsService.authorizePurchaseFilters} is accepted: `buildWhere` refuses any other (403).
+   */
+  purchase?: PurchaseFilters;
 }
+
+/**
+ * The asset list's purchase provenance filters (ADR-0099, #1476): the assets linked to one line, to any line
+ * of one purchase, and linked to some purchase (`true`) or to none (`false`), AND-combined. They reveal which
+ * assets came from which purchase (D-A), so they need `purchaseOrder:read` on top of `asset:read`.
+ */
+export interface PurchaseFilters {
+  purchaseOrderLineId?: string;
+  purchaseOrderId?: string;
+  purchaseLinked?: boolean;
+}
+
+/**
+ * The purchase filters that passed the permission check — the only ones `buildWhere` applies. A runtime
+ * brand rather than a type: any caller that reaches the list query (the list, the export, a future reader)
+ * cannot apply purchase filters it did not have authorized, whatever it passes.
+ */
+const AUTHORIZED_PURCHASE_FILTERS = new WeakSet<PurchaseFilters>();
 
 /**
  * Server-side sort allowlist for `GET /assets` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
@@ -173,6 +205,21 @@ const ASSET_RELATIONS = {
 type AssetWithIncludes = Prisma.AssetGetPayload<{
   include: typeof ASSET_RELATIONS;
 }>;
+
+/**
+ * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
+ * `purchaseOrder:read` (ADR-0099 §8). An archived purchase or supplier still names the asset's provenance:
+ * soft delete keeps every link (§9).
+ */
+const EXPORT_PURCHASE_SELECT = {
+  purchaseOrder: {
+    select: {
+      reference: true,
+      invoiceNumbers: true,
+      supplier: { select: { name: true } },
+    },
+  },
+} as const satisfies Prisma.PurchaseOrderLineSelect;
 
 // Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
 // `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
@@ -222,6 +269,28 @@ const ASSET_LIST_SELECT = {
     },
   },
 } satisfies Prisma.AssetSelect;
+
+/** The inventory export's projection: the list's, plus the asset's own cost columns (`asset:read`). */
+const EXPORT_SELECT = {
+  ...ASSET_LIST_SELECT,
+  purchaseCost: true,
+  purchaseCurrency: true,
+} as const satisfies Prisma.AssetSelect;
+
+/** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
+const EXPORT_SELECT_WITH_PURCHASE = {
+  ...EXPORT_SELECT,
+  purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
+} as const satisfies Prisma.AssetSelect;
+
+/** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
+type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
+  Partial<
+    Pick<
+      Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
+      'purchaseOrderLine'
+    >
+  >;
 
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
@@ -273,7 +342,74 @@ export class AssetsService {
     private readonly history: AssetHistoryService,
     private readonly search: SearchService,
     private readonly tagScheme: AssetTagSchemeService,
+    private readonly permissions: PermissionResolverService,
   ) {}
+
+  /**
+   * Authorize the purchase filters for `principal` (#1476): 403 unless it holds `purchaseOrder:read` — the
+   * filters reveal provenance, which follows it (ADR-0099 §8, D-A), while a list read alone is `asset:read`.
+   * Returns the filters as the one object the list query will apply.
+   */
+  async authorizePurchaseFilters(
+    filters: PurchaseFilters,
+    principal?: Principal,
+  ): Promise<PurchaseFilters> {
+    if (!(await this.holds(principal, 'purchaseOrder:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const authorized = { ...filters };
+    AUTHORIZED_PURCHASE_FILTERS.add(authorized);
+    return authorized;
+  }
+
+  /**
+   * 400 unless the location a write names is LIVE. A soft-deleted location still passes the foreign key, so
+   * without this an asset could be created into, received into or moved to an archived location. Write-only:
+   * reads stay tolerant, and an update that leaves the location unchanged is not checked (a legacy row
+   * stays editable).
+   */
+  private async assertLocationLive(
+    client: Prisma.TransactionClient | PrismaService,
+    locationId: string | null | undefined,
+  ): Promise<void> {
+    if (!locationId) return;
+    const location = await client.location.findFirst({
+      where: { id: locationId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        `Location ${locationId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /** 400 unless the model a write names is LIVE — the same rule as {@link assertLocationLive}. */
+  private async assertModelLive(
+    client: Prisma.TransactionClient | PrismaService,
+    modelId: string | null | undefined,
+  ): Promise<void> {
+    if (!modelId) return;
+    const model = await client.assetModel.findFirst({
+      where: { id: modelId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new BadRequestException(
+        `AssetModel ${modelId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /** Whether the principal holds `permission` (fail-closed for no principal). */
+  private holds(
+    principal: Principal | undefined,
+    permission: Parameters<PermissionResolverService['principalHas']>[1],
+  ): Promise<boolean> {
+    return this.permissions.principalHas(principal, permission);
+  }
 
   /**
    * Rows per round-trip when STREAMING the full filtered inventory export (issue #872). Mirrors the
@@ -362,8 +498,33 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
+    // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
+    // list route's own check. AND-combined, so a contradictory pair simply matches nothing.
+    if (
+      purchaseFilters !== undefined &&
+      !AUTHORIZED_PURCHASE_FILTERS.has(purchaseFilters)
+    ) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const { purchaseOrderLineId, purchaseOrderId, purchaseLinked } =
+      purchaseFilters ?? {};
+    const purchase: Prisma.AssetWhereInput[] = [
+      ...(purchaseOrderLineId ? [{ purchaseOrderLineId }] : []),
+      ...(purchaseOrderId ? [{ purchaseOrderLine: { purchaseOrderId } }] : []),
+      ...(purchaseLinked === undefined
+        ? []
+        : [
+            {
+              purchaseOrderLineId: purchaseLinked ? { not: null } : null,
+            },
+          ]),
+    ];
     return {
+      ...(purchase.length > 0 ? { AND: purchase } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.
@@ -447,11 +608,15 @@ export class AssetsService {
   async *streamInventoryCsvRows(
     filters: AssetFilters = {},
     deleted: DeletedFilter = 'active',
+    principal?: Principal,
   ): AsyncGenerator<string> {
+    // Purchase provenance columns (supplier, reference, invoice numbers) only for a caller holding
+    // `purchaseOrder:read` (ADR-0099 §8, CEO decision D-A); cost and currency are the asset's own fields.
+    const includePurchase = await this.holds(principal, 'purchaseOrder:read');
     // Leading provenance stamp (#909): names the build that wrote the file. The migrator strips it on
     // re-import and gates on major compatibility; other tools treat it as a leading `#` comment row.
     yield `${provenanceStampLine()}\n`;
-    yield `${ASSET_INVENTORY_CSV_HEADER}\n`;
+    yield `${assetInventoryCsvHeader({ includePurchase })}\n`;
 
     const where = {
       ...this.buildWhere(filters),
@@ -465,19 +630,47 @@ export class AssetsService {
 
     let skip = 0;
     for (;;) {
-      const rows = await this.prisma.asset.findMany({
+      const batch = {
         where,
         // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
         // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: AssetsService.EXPORT_BATCH_SIZE,
         skip,
-        select: ASSET_LIST_SELECT,
         ...escapeHatch,
-      });
+      } satisfies Prisma.AssetFindManyArgs;
+      // The list projection plus the asset's cost columns and — ONLY for a caller holding
+      // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
+      // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
+      const rows: ExportRow[] = includePurchase
+        ? await this.prisma.asset.findMany({
+            ...batch,
+            select: EXPORT_SELECT_WITH_PURCHASE,
+          })
+        : await this.prisma.asset.findMany({ ...batch, select: EXPORT_SELECT });
       if (rows.length === 0) break;
       yield `${rows
-        .map((row) => assetInventoryCsvRow(this.toInventoryCsvItem(row)))
+        .map((row) =>
+          assetInventoryCsvRow(
+            {
+              ...this.toInventoryCsvItem(row),
+              purchaseCost:
+                row.purchaseCost == null ? null : Number(row.purchaseCost),
+              purchaseCurrency: row.purchaseCurrency ?? null,
+              purchase: row.purchaseOrderLine
+                ? {
+                    supplierName:
+                      row.purchaseOrderLine.purchaseOrder.supplier?.name ??
+                      null,
+                    reference: row.purchaseOrderLine.purchaseOrder.reference,
+                    invoiceNumbers:
+                      row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
+                  }
+                : null,
+            },
+            { includePurchase },
+          ),
+        )
         .join('\n')}\n`;
       skip += rows.length;
       // A short batch means the estate is exhausted — stop without an extra empty round-trip.
@@ -548,6 +741,11 @@ export class AssetsService {
     options?: {
       createdPayload?: Prisma.InputJsonValue;
       suppressSearch?: boolean;
+      /**
+       * Receive the unit against this purchase line (ADR-0099, #1473). Not a body field — `CreateAsset`
+       * never accepts it; only {@link receiveBatch} sets it, after validating the line.
+       */
+      purchaseOrderLineId?: string;
     },
   ) {
     const actor = this.actor.resolveActor(principal);
@@ -567,9 +765,11 @@ export class AssetsService {
       try {
         const asset = await this.prisma.$transaction(async (tx) => {
           let resolvedSpecs = specs;
+          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
+          await this.assertLocationLive(tx, rest.locationId);
           if (rest.modelId) {
             const model = await tx.assetModel.findFirst({
-              where: { id: rest.modelId },
+              where: { id: rest.modelId, deletedAt: null },
               select: { specs: true },
             });
             if (!model) {
@@ -585,7 +785,10 @@ export class AssetsService {
           // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
           const created = await tx.asset.create({
             data: {
-              ...rest,
+              ...assetMoneyToDb(rest),
+              ...(options?.purchaseOrderLineId !== undefined
+                ? { purchaseOrderLineId: options.purchaseOrderLineId }
+                : {}),
               ...(effectiveTag !== undefined ? { assetTag: effectiveTag } : {}),
               ...(resolvedSpecs !== undefined
                 ? { specs: resolvedSpecs as Prisma.InputJsonValue }
@@ -613,7 +816,7 @@ export class AssetsService {
         if (!options?.suppressSearch) {
           this.search.upsert('assets', projectAsset(asset));
         }
-        return asset;
+        return assetMoneyToWire(asset);
       } catch (err) {
         // Only an AUTO-allocated tag may advance-and-retry on a unique collision. An EXPLICIT tag
         // colliding is the caller's own duplicate → propagate the P2002 (the global filter → 409).
@@ -653,17 +856,29 @@ export class AssetsService {
    *
    * The controller returns this envelope with HTTP 201 (NestJS `@Post` default), including an all-failed
    * batch (`created: []`) — `failed` is the honest partial signal (mirrors the import row-level FAILED).
+   *
+   * Against a purchase line (`purchaseOrderLineId`, ADR-0099 §4, #1473): the caller must also hold
+   * `purchaseOrder:write` (403) and the line must be a live `ASSET` line of a live purchase (400). Each unit
+   * is created already linked to the line, its CREATED history event carrying `{ source: 'purchase',
+   * purchaseOrderId, purchaseOrderLineId }`; the loop and the tag-counter semantics are untouched. After the
+   * loop ONE `UNITS_RECEIVED` row is appended to the purchase's log (not one per unit: the units are separate
+   * transactions, and each unit's own history already records its line). Over-receipt is allowed and
+   * reported as `overReceived` — derived from the live count after the loop, so a concurrent receive shows.
    */
   async receiveBatch(data: ReceiveAssets, principal?: Principal) {
-    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
-    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    const line = data.purchaseOrderLineId
+      ? await this.receivableLine(data.purchaseOrderLineId, principal)
+      : null;
+    // ONE upfront model and location check: a single friendly 400 instead of N identical per-unit failures,
+    // and the model name feeds each unit's default `name`. Both must be LIVE, as in create().
     const model = await this.prisma.assetModel.findFirst({
-      where: { id: data.modelId },
+      where: { id: data.modelId, deletedAt: null },
       select: { name: true },
     });
     if (!model) {
       throw new BadRequestException(`AssetModel ${data.modelId} not found`);
     }
+    await this.assertLocationLive(this.prisma, data.locationId);
 
     // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
     // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
@@ -691,6 +906,12 @@ export class AssetsService {
         ...(data.purchaseCost != null
           ? { purchaseCost: data.purchaseCost }
           : {}),
+        ...(data.purchaseCurrency !== undefined
+          ? { purchaseCurrency: data.purchaseCurrency }
+          : {}),
+        ...(data.warrantyEnd !== undefined
+          ? { warrantyEnd: data.warrantyEnd }
+          : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
         ...(data.serials?.[i] ? { serial: data.serials[i] } : {}),
       };
@@ -698,7 +919,22 @@ export class AssetsService {
         // Each unit = its own tx + its own independent counter commit + its own CREATED history + search
         // upsert. A per-unit failure NEVER aborts the batch (partial success by design); the consumed tag
         // number has already advanced past this gap.
-        created.push(await this.create(unit, principal));
+        created.push(
+          await this.create(
+            unit,
+            principal,
+            line
+              ? {
+                  purchaseOrderLineId: line.id,
+                  createdPayload: {
+                    source: 'purchase',
+                    purchaseOrderId: line.purchaseOrderId,
+                    purchaseOrderLineId: line.id,
+                  },
+                }
+              : undefined,
+          ),
+        );
       } catch (err) {
         failed.push({
           index: i,
@@ -707,7 +943,38 @@ export class AssetsService {
       }
     }
 
-    return { created, failed };
+    if (!line) return { created, failed };
+    const overReceived = await isOverReceived(this.prisma, line);
+    if (created.length > 0) {
+      await recordPurchaseOrderEvent(
+        this.prisma,
+        line.purchaseOrderId,
+        'UNITS_RECEIVED',
+        this.actor.resolveActor(principal),
+        {
+          lineId: line.id,
+          quantity: created.length,
+          assetIds: created.map((asset) => asset.id),
+          failed: failed.length,
+          overReceived,
+        },
+      );
+    }
+    return { created, failed, overReceived };
+  }
+
+  /**
+   * The purchase line a receive names, after the checks the asset route cannot express in its decorator:
+   * `purchaseOrder:write` on top of `asset:write` (linking a unit to a purchase is a purchase write), and a
+   * live `ASSET` line of a live purchase.
+   */
+  private async receivableLine(lineId: string, principal?: Principal) {
+    if (!(await this.holds(principal, 'purchaseOrder:write'))) {
+      throw new ForbiddenException(
+        'Receiving against a purchase line also needs purchaseOrder:write',
+      );
+    }
+    return loadReceivableLine(this.prisma, lineId);
   }
 
   /**
@@ -747,10 +1014,17 @@ export class AssetsService {
     }
     const { specs, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
+      if (rest.locationId !== before.locationId) {
+        await this.assertLocationLive(tx, rest.locationId);
+      }
+      if (rest.modelId !== before.modelId) {
+        await this.assertModelLive(tx, rest.modelId);
+      }
       const row = await tx.asset.update({
         where: { id },
         data: {
-          ...rest,
+          ...assetMoneyToDb(rest),
           ...(specs !== undefined
             ? { specs: specs as Prisma.InputJsonValue }
             : {}),
@@ -799,7 +1073,7 @@ export class AssetsService {
     if (!options?.suppressSearch) {
       this.search.upsert('assets', projectAsset(updated));
     }
-    return updated;
+    return assetMoneyToWire(updated);
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
@@ -820,7 +1094,7 @@ export class AssetsService {
     });
     // Drop from the index so soft-deleted assets never surface in search (ADR-0035).
     this.search.remove('assets', id);
-    return deleted;
+    return assetMoneyToWire(deleted);
   }
 
   /**
@@ -1031,7 +1305,7 @@ export class AssetsService {
    * `salvageValue` / `purchaseDate` via the shared pure util, never persisted.
    */
   private toExpanded(asset: AssetWithIncludes) {
-    const { assignments, ...rest } = asset;
+    const { assignments, ...rest } = assetMoneyToWire(asset);
     return {
       ...rest,
       activeAssignments: assignments,

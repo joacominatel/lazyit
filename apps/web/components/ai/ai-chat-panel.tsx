@@ -6,7 +6,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +38,7 @@ import { aiConversationKeys, useUpdateAiConversation } from "@/lib/api/hooks/use
 import { useAiModels } from "@/lib/api/hooks/use-ai-models";
 import { aiKeys } from "@/lib/api/hooks/use-ai-status";
 import { useAiTurn } from "@/lib/api/hooks/use-ai-turn";
+import { useAiAssistant, type AiPrefill } from "./ai-assistant-root";
 import { AiAutoApproveConsent } from "./ai-auto-approve-consent";
 import { AiChatHelp } from "./ai-chat-help";
 import { AiChatSettings } from "./ai-chat-settings";
@@ -129,10 +130,32 @@ export function AiChatPanel() {
   const updateSettings = useUpdateAiConversation();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  const { prefill, clearPrefill } = useAiAssistant();
+  // The prepared message handed to the composer, and the ask it came from.
+  const [handoff, setHandoff] = useState<AiPrefill | null>(null);
+  const [routedPrefill, setRoutedPrefill] = useState<number | null>(null);
 
   // The chat's settings (#1373, #1376): the server's for a created chat, the local draft for a new one.
   // A chat with messages has a run, so its model is pinned even if the copy of its settings is older.
   const started = state.messages.length > 0 || state.run !== null;
+
+  // "Ask AI to fill" (#1478): a prepared message shows the chat (never the history or the help) and goes to
+  // the composer. A chat that already has messages is left in the history and a new one starts, so the
+  // document's turn — which ends auto-approve for its conversation — never lands in an unrelated chat; an
+  // empty chat is reused.
+  if (prefill !== null && prefill.seq !== routedPrefill) {
+    setRoutedPrefill(prefill.seq);
+    setHandoff(prefill);
+    setView("chat");
+    setHelpOpen(false);
+  }
+  const takeHandoff = useCallback(() => setHandoff(null), []);
+  const { newChat } = turn;
+  useEffect(() => {
+    if (prefill === null) return;
+    if (started) newChat();
+    clearPrefill();
+  }, [prefill, started, newChat, clearPrefill]);
   const settingsView = turn.settings
     ? viewOfSettings(turn.settings, { started })
     : { ...viewOfDraft(turn.draft, catalog), locked: turn.conversationId !== null && started };
@@ -426,6 +449,8 @@ export function AiChatPanel() {
               commands={BUILTIN_SLASH_COMMANDS}
               onCommand={runCommand}
               autoApprove={settingsView.autoApprove}
+              prefill={handoff}
+              onPrefillTaken={takeHandoff}
               toolbar={
                 <AiChatSettings
                   catalog={catalog}

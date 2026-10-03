@@ -3,7 +3,7 @@ title: "AI Assistant — Security & Threat Model"
 tags: [ai-assistant, security, threat-model, prompt-injection, mcp, oauth, ssrf, secrets, audit, privacy]
 status: draft
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # AI Assistant — Security & Threat Model
@@ -860,6 +860,52 @@ LLM provider's own server-side search tool. As built:
 - **Freeze.** The switch applies to conversations started while it is on; turning it off closes the
   conversations that have it (`CONFIG_CHANGED`) — the kill switch applies at the next message or step.
 
+### 6.12 Purchase document extraction ([[0099-purchases-scope-model-and-optionality]] §11, #1477)
+
+A person can ask lazyit to read a document already attached to a purchase (an invoice, a quote) through the
+configured provider and fill a **draft** of the purchase. As built ([[ai-assistant/provider-and-runtime|provider]]
+§6.5):
+
+- **What leaves the host, and when.** The whole file (supplier, prices, tax IDs, sometimes names and
+  addresses) goes to the configured provider — the same destination, key and egress guard as the chat
+  (INV-AI-6, INV-AI-7) — and only when a person asks for that document. A separate switch,
+  `AiSettings.documentExtractionEnabled`, is **off by default and on every upgraded instance**, with its own
+  disclosure (`AI_DOCUMENT_EXTRACTION_DISCLOSURE`). It needs the assistant usable too. Operators who use a
+  self-hosted OpenAI-compatible model get no extraction at all (that provider is never offered), so turning
+  it on always means a hosted provider.
+- **Untrusted content cannot act (INV-AI-4).** The call declares **no lazyit tools** (there is no `tools`
+  key), so a prompt injection hidden in a supplier's PDF can only change what is transcribed. A provider may
+  carry structured output in a synthetic JSON tool of its own (Anthropic's `jsonTool` mode); it has no
+  executor and only holds the answer. The answer is
+  data validated against a fixed schema; the server reads every amount and date from the printed text
+  itself, and the person reviews every field (with its verbatim evidence) before anything is saved. The
+  extraction writes nothing to the purchase, its lines, suppliers or models; it only *suggests* matches.
+  The draft is shown, not executed: its text is rendered as text ([[0029-untrusted-content-sanitization]]).
+- **Who.** Humans only (a service account is refused even with the permissions: extraction is a reviewed,
+  interactive step, and no headless flow should send documents out), holding `purchaseOrder:write` and the
+  AI channel gate `ai:use`. The route reaches only a document of the named, live purchase.
+- **Bounded consumption (INV-AI-11).** ≤ 10 MB (less where the provider takes less for the type), ≤ 20 PDF
+  pages, a 120 s deadline, a capped output with a matching line ceiling, one extraction in flight and 5 a
+  minute per person, and the caller's daily token budget — checked before the call and charged after it
+  (`ai_usage`).
+- **Audit and privacy.** Each run whose document may have reached the provider appends an `EXTRACTION_RUN`
+  [[purchase-order-event]] (who, which document, provider, model, token counts, outcome); every run writes one
+  log line — never a value read from the document (ADR-0031). The draft itself is not stored anywhere.
+- **Not here.** No chat upload of files (synthesis §9.2 stands).
+- **In the chat (Phase 3, #1478).** `purchase_document_read` runs this same route (its permission, the
+  human-only check — a chat run is delegated as the user —, the switch, the caps, the limiters and the
+  budget) and is **chat-only**: not listed on MCP or headless, so no Service Account and no external client
+  sends a document out through it. The draft reaches the model as one `<untrusted_content>` block, and the
+  document becomes an untrusted source of the **whole conversation** (`purchaseDocument`,
+  `AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`): every later proposal carries the banner and nothing in that
+  conversation is auto-approved again — the draft stays in the replayed history, as web search results do.
+  Independently, **every purchase write is a card that is never auto-approved** (`neverAutoApprove`, enforced
+  by core from the registry), and a change that generates assets or changes money also carries
+  `CREATES_ASSETS` / `CHANGES_MONEY`, which core never auto-approves and the web leaves out of "Approve all"
+  (UX decision D11). A planted instruction in a supplier's document can therefore at most shape a proposal
+  the person reads on its card; it cannot run anything, and the model has no tool that sends anything
+  anywhere but the configured provider.
+
 ---
 
 ## 7. Proposed invariants (for [[INVARIANTS]] once accepted)
@@ -879,7 +925,9 @@ LLM provider's own server-side search tool. As built:
   *Amended 2026-09-24 (#1376):* in a conversation whose owner switched auto-approve on, the owner's
   standing consent is the approval for ordinary writes (not elevated, no step-up) — still bound to the
   stored pending action, single-use and re-checked, recorded with `approvalMode = AUTO`. Elevated and
-  step-up actions always need the per-action human approval.
+  step-up actions always need the per-action human approval. *Amended 2026-10-02 (#1478, ADR-0099 §11):*
+  so do purchase changes (tools registered `neverAutoApprove`) and any write whose preview carries
+  `CREATES_ASSETS` or `CHANGES_MONEY` (today: purchase receipts and priced purchase changes).
 - **INV-AI-4 — Untrusted content is data, never authority.** No stored content can alter tool
   availability, approval requirements, tool metadata or the system prompt.
 - **INV-AI-5 — Secrets never enter model context.** One-time credentials (SA tokens, temporary

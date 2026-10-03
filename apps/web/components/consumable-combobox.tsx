@@ -14,6 +14,9 @@ import { useConsumable, useConsumables } from "@/lib/api/hooks/use-consumables";
  *
  * Controlled by `value`/`onValueChange` (the consumable id); forwards `id` + `ariaInvalid` for the
  * `Field`/`FieldError` + `Controller` contract, like the user/asset/location pickers.
+ *
+ * `allowOutOfStock` offers every item, out of stock included — for picking what is being BOUGHT or
+ * RECEIVED (a purchase's consumable line, #1476), where an empty shelf is the usual reason.
  */
 export function ConsumableCombobox({
   id,
@@ -24,6 +27,7 @@ export function ConsumableCombobox({
   placeholder,
   searchPlaceholder,
   emptyText,
+  allowOutOfStock = false,
 }: {
   id?: string;
   value?: string;
@@ -33,6 +37,7 @@ export function ConsumableCombobox({
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  allowOutOfStock?: boolean;
 }) {
   const tc = useTranslations("common");
   const t = useTranslations("consumables.deliveries.picker");
@@ -53,9 +58,9 @@ export function ConsumableCombobox({
           unit: consumable.unit,
         }),
         keywords: consumable.sku ? [consumable.sku] : undefined,
-        disabled: consumable.currentStock <= 0,
+        disabled: !allowOutOfStock && consumable.currentStock <= 0,
       })),
-    [data, t],
+    [data, t, allowOutOfStock],
   );
 
   return (

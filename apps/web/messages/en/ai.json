@@ -153,9 +153,12 @@
       "OUTBOUND_INTEGRATION": "Changes an outside integration or where lazyit sends data.",
       "CRITICAL_APPLICATION": "Touches an application marked critical.",
       "INSTANCE_CONFIGURATION": "Changes instance-wide configuration: it applies to everyone from now on.",
+      "CREATES_ASSETS": "Creates new assets.",
+      "CHANGES_MONEY": "Sets or changes an amount of money.",
       "unknown": "Additional check: {code}"
     },
     "passwordRequired": "Needs your password",
+    "individualOnly": "Never approved automatically or with Approve all",
     "newWarning": "New",
     "changed": "This change was updated since it was proposed. Review the highlighted points and decide again.",
     "impacted": "Also affects {count, plural, one {# {type}} other {# {type}}}",
@@ -183,7 +186,20 @@
       "willBeSkipped": "Skipped — won't be applied",
       "defaulted": "default",
       "duplicateExisting": "{field} “{value}” already belongs to",
-      "duplicateRow": "{field} “{value}” is also used by row {row}"
+      "duplicateRow": "{field} “{value}” is also used by row {row}",
+      "values": {
+        "kind": {
+          "ASSET": "Asset",
+          "CONSUMABLE": "Consumable",
+          "LICENSE": "License",
+          "OTHER": "Other"
+        },
+        "linkState": {
+          "NONE": "Not linked",
+          "THIS_LINE": "Already on this line",
+          "OTHER_LINE": "On another line"
+        }
+      }
     },
     "cancelledNote": "This proposal was cancelled. Nothing was changed.",
     "errors": {
@@ -224,6 +240,7 @@
     "excluded": {
       "stepUp": "{count, plural, one {# needs your password} other {# need your password}}",
       "elevated": "{count, plural, one {# is a sensitive change} other {# are sensitive changes}}",
+      "assetsOrMoney": "{count, plural, one {# creates assets or changes money} other {# create assets or change money}}",
       "needsReview": "{count, plural, one {# needs another look} other {# need another look}}"
     },
     "bulkRunning": "{decision, select, approve {Approving} other {Rejecting}} {done} of {total}…",
@@ -263,6 +280,9 @@
     "assetTagScheme": "Asset tag scheme",
     "webSearch": "Web search results",
     "toolResult": "Content read by the assistant",
+    "purchaseOrder": "Purchase",
+    "supplier": "Supplier",
+    "purchaseDocument": "Purchase document",
     "unknown": "Item"
   },
   "errors": {
@@ -425,7 +445,28 @@
     "location_archive": "Archive a location",
     "location_restore": "Restore a location",
     "asset_tag_scheme_get": "Read the asset tag scheme",
-    "asset_tag_scheme_update": "Change the asset tag scheme"
+    "asset_tag_scheme_update": "Change the asset tag scheme",
+    "purchase_search": "Search purchases",
+    "purchase_get": "Get a purchase",
+    "purchase_events": "Read a purchase's activity",
+    "purchase_pending_lines": "List units still to receive",
+    "supplier_search": "Search suppliers",
+    "supplier_get": "Get a supplier",
+    "asset_purchase_get": "Get an asset's purchase",
+    "purchase_document_read": "Read a purchase document",
+    "purchase_create": "Record a purchase",
+    "purchase_update": "Update a purchase",
+    "purchase_line_add": "Add a purchase line",
+    "purchase_line_update": "Update a purchase line",
+    "purchase_line_remove": "Remove a purchase line",
+    "supplier_create": "Add a supplier",
+    "supplier_update": "Update a supplier",
+    "purchase_link_assets": "Link assets to a purchase line",
+    "purchase_receive": "Receive units as assets",
+    "purchase_receive_stock": "Receive units into stock",
+    "purchase_cancel_remaining": "Cancel pending units",
+    "purchase_apply_license": "Apply a license line",
+    "purchase_create_from_assets": "Record a purchase from assets"
   },
   "fields": {
     "accessLevel": "Access level",
@@ -531,11 +572,58 @@
     "username": "Username",
     "userStatus": "User status",
     "validRows": "Rows to create",
-    "vendor": "Vendor",
+    "vendor": "Publisher",
     "version": "Version",
     "warrantyEnd": "Warranty ends",
     "whatItDoes": "What it does",
-    "workflow": "Workflow"
+    "workflow": "Workflow",
+    "supplier": "Supplier",
+    "lines": "Lines",
+    "unpricedLines": "Lines without a price",
+    "line": "Line",
+    "suppliersWithThisName": "Suppliers with this name",
+    "apply": "Values to copy",
+    "assets": "Assets",
+    "received": "Received",
+    "replacedValues": "Values replaced",
+    "notFound": "Not found",
+    "overReceived": "More than ordered",
+    "serials": "Serial numbers",
+    "consumable": "Consumable",
+    "note": "Note",
+    "cancelledQuantity": "Units cancelled",
+    "pendingQuantity": "Units pending",
+    "licenseWarnings": "License checks",
+    "total": "Total",
+    "lineTotal": "Line total",
+    "unitPrice": "Unit price",
+    "reference": "Reference",
+    "currency": "Currency",
+    "orderDate": "Order date",
+    "expectedDate": "Expected date",
+    "deliveryLocationId": "Delivery location",
+    "invoiceNumbers": "Invoice numbers",
+    "invoiceDate": "Invoice date",
+    "manufacturerText": "Brand (as written)",
+    "modelText": "Model (as written)",
+    "assetModelId": "Asset model",
+    "modelId": "Asset model",
+    "consumableId": "Consumable",
+    "applicationId": "Application",
+    "warrantyMonths": "Warranty (months)",
+    "position": "Position",
+    "taxId": "Tax ID",
+    "website": "Website",
+    "salesContactName": "Sales contact",
+    "salesContactEmail": "Sales email",
+    "salesContactPhone": "Sales phone",
+    "supportContactName": "Support contact",
+    "supportContactEmail": "Support email",
+    "supportContactPhone": "Support phone",
+    "linkState": "Currently",
+    "moves": "Moves from another line",
+    "writes": "Values it gets",
+    "notLinkable": "Assets left out"
   },
   "fieldPrefixes": {
     "input": "Input: {name}",
@@ -646,7 +734,9 @@
       "manufacturers": "manufacturers",
       "assetCategories": "asset categories",
       "locations": "locations",
-      "assetModels": "asset models"
+      "assetModels": "asset models",
+      "suppliers": "suppliers",
+      "consumables": "consumables"
     },
     "yes": "Yes",
     "no": "No",
@@ -765,6 +855,58 @@
     },
     "consumable_record_movement": {
       "summary": "Recorded {type} {quantity} on {consumable}{hasStock, select, yes {; stock is now {stock}.} other {.}}"
+    },
+    "purchase_create": {
+      "action": "Record a purchase{hasSupplier, select, yes { from {supplier}} other {}} with {lines, plural, =0 {no lines} one {# line} other {# lines}}.",
+      "summary": "Recorded the purchase {purchase}."
+    },
+    "purchase_update": {
+      "action": "Change {count, plural, one {# field} other {# fields}} of the purchase {purchase}.",
+      "summary": "Updated the purchase {purchase}."
+    },
+    "purchase_line_add": {
+      "action": "Add the line \"{line}\" to the purchase {purchase}.",
+      "summary": "Added the line \"{line}\" to the purchase {purchase}."
+    },
+    "purchase_line_update": {
+      "action": "Change the line \"{line}\" of the purchase {purchase}.",
+      "summary": "Updated the line \"{line}\" of the purchase {purchase}."
+    },
+    "purchase_line_remove": {
+      "action": "Remove the line \"{line}\" from the purchase {purchase}.",
+      "summary": "Removed the line \"{line}\" from the purchase {purchase}."
+    },
+    "purchase_link_assets": {
+      "action": "Link {count, plural, one {# asset} other {# assets}} to the line \"{line}\" of the purchase {purchase}.",
+      "summary": "Linked {linked, plural, one {# asset} other {# assets}} to the line \"{line}\"{failed, plural, =0 {.} other {; # not linked.}}"
+    },
+    "purchase_receive": {
+      "action": "Receive {quantity, plural, one {# unit} other {# units}} of the line \"{line}\" of the purchase {purchase} as new assets.",
+      "summary": "Received {created, plural, one {# unit} other {# units}} of the line \"{line}\" as new assets{failed, plural, =0 {.} other {; # failed.}}"
+    },
+    "purchase_receive_stock": {
+      "action": "Receive {quantity, plural, one {# unit} other {# units}} of the line \"{line}\" of the purchase {purchase} into stock.",
+      "summary": "Received {quantity, plural, one {# unit} other {# units}} of the line \"{line}\" into stock."
+    },
+    "purchase_cancel_remaining": {
+      "action": "Cancel {quantity, plural, one {# pending unit} other {# pending units}} of the line \"{line}\" of the purchase {purchase}.",
+      "summary": "Cancelled {quantity, plural, one {# pending unit} other {# pending units}} of the line \"{line}\"."
+    },
+    "purchase_apply_license": {
+      "action": "Apply the license line \"{line}\" of the purchase {purchase} to {application}.",
+      "summary": "Applied the license line \"{line}\" to {application}."
+    },
+    "purchase_create_from_assets": {
+      "action": "Record a purchase from {count, plural, one {# selected asset} other {# selected assets}} and link them to it.",
+      "summary": "Recorded the purchase {purchase} and linked {linked, plural, one {# asset} other {# assets}}{failed, plural, =0 {.} other {; # not linked.}}"
+    },
+    "supplier_create": {
+      "action": "Add the supplier \"{name}\".",
+      "summary": "Added the supplier \"{name}\"."
+    },
+    "supplier_update": {
+      "action": "Change the supplier \"{name}\".",
+      "summary": "Updated the supplier \"{name}\"."
     },
     "asset_model_create": {
       "summary": "Created the asset model {model}."

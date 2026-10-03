@@ -61,6 +61,13 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // default. Relation reads (a token's `include: { grant }`) are not filtered by the extension and check
   // `grant.deletedAt` explicitly. The credential rows (codes, tokens) are hard-deleted protocol state.
   'OAuthGrant',
+  // Purchases (ADR-0099): the three mutable purchase entities soft-delete, so reads auto-exclude them.
+  // PurchaseOrderEvent is DELIBERATELY EXCLUDED: an append-only log with no `deletedAt`. Relation filters
+  // (a purchase's `lines`, a line's `assets`) are not rewritten by this extension and carry an explicit
+  // `deletedAt: null` where they need one.
+  'Supplier',
+  'PurchaseOrder',
+  'PurchaseOrderLine',
 ]);
 
 // Read operations whose results must hide soft-deleted rows. `findUnique`/`findUniqueOrThrow` are
