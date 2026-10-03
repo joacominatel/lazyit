@@ -3,6 +3,7 @@ import {
   AI_CHANNELS,
   AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES,
   AI_ENTITY_TYPES,
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
   AI_PREVIEW_WARNING_CODES,
   AI_TOOL_CLASSES,
   AiActionPreviewSchema,
@@ -234,6 +235,8 @@ describe("Purchases in the AI contract (#1478)", () => {
   test("the money and asset-creation warnings parse on a write preview", () => {
     expect(AI_PREVIEW_WARNING_CODES).toContain("CREATES_ASSETS");
     expect(AI_PREVIEW_WARNING_CODES).toContain("CHANGES_MONEY");
+    // One source of truth for core (never auto-approved) and the web (left out of "Approve all").
+    expect([...AI_NEVER_AUTO_APPROVE_WARNINGS]).toEqual(["CREATES_ASSETS", "CHANGES_MONEY"]);
     const parsed = AiActionPreviewSchema.safeParse({
       toolName: "purchase_receive",
       class: "write",
