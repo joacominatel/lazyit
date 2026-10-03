@@ -471,6 +471,38 @@ function clip(value: string): string {
     : value;
 }
 
+type PageQuery = Readonly<Record<string, string>>;
+
+/**
+ * The paged id lists a select may take its options from: the bound list route each is read through, and the
+ * field that tells two same-named rows apart in the label — a model's maker, a supplier's tax ID (#1478), a
+ * consumable's SKU (#1478).
+ */
+const PAGED_SOURCES: Record<
+  'locations' | 'assetModels' | 'suppliers' | 'consumables',
+  {
+    read: (rt: AiToolRuntime, query: PageQuery) => Promise<unknown>;
+    hint: string | null;
+  }
+> = {
+  locations: {
+    read: (rt, query) => rt.call(LocationsController, 'findAll', { query }),
+    hint: null,
+  },
+  assetModels: {
+    read: (rt, query) => rt.call(AssetModelsController, 'findAll', { query }),
+    hint: 'manufacturer',
+  },
+  suppliers: {
+    read: (rt, query) => rt.call(SuppliersController, 'findAll', { query }),
+    hint: 'taxId',
+  },
+  consumables: {
+    read: (rt, query) => rt.call(ConsumablesController, 'findAll', { query }),
+    hint: 'sku',
+  },
+};
+
 /** Pages read to collect the distinct manufacturers (models are paged; manufacturers are a model column). */
 const MANUFACTURER_PAGES = 3;
 
@@ -508,33 +540,13 @@ async function resolveOptions(
     case 'assetModels':
     case 'suppliers':
     case 'consumables': {
-      const result =
-        source === 'locations'
-          ? await rt.call(LocationsController, 'findAll', { query: page(0) })
-          : source === 'assetModels'
-            ? await rt.call(AssetModelsController, 'findAll', {
-                query: page(0),
-              })
-            : source === 'suppliers'
-              ? await rt.call(SuppliersController, 'findAll', {
-                  query: page(0),
-                })
-              : await rt.call(ConsumablesController, 'findAll', {
-                  query: page(0),
-                });
+      const result = await PAGED_SOURCES[source].read(rt, page(0));
       const total = (result as { total?: unknown }).total;
+      const hintField = PAGED_SOURCES[source].hint;
       for (const row of rows(result)) {
         const name = str(row.name);
         if (typeof row.id !== 'string' || !name) continue;
-        // What tells two same-named rows apart: a model's maker, a supplier's tax ID, a consumable's SKU.
-        const hint =
-          source === 'assetModels'
-            ? str(row.manufacturer)
-            : source === 'suppliers'
-              ? str(row.taxId)
-              : source === 'consumables'
-                ? str(row.sku)
-                : null;
+        const hint = hintField ? str(row[hintField]) : null;
         out.push({
           value: row.id,
           label: clip(hint ? `${name} (${hint})` : name),
