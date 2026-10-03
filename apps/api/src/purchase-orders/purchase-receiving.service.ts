@@ -209,11 +209,32 @@ function appliedData(
 }
 
 /**
- * The `reason` of a movement received from a purchase. Deliberately names no supplier or reference: the
- * consumable ledger is read under `consumable:read` (a VIEWER holds it), and a purchase's provenance follows
- * `purchaseOrder:read` (ADR-0099 §8, D-A). The link itself is the movement's `purchaseOrderLineId`.
+ * The `reason` of a movement received from a purchase that has no reference to name. The link itself is the
+ * movement's `purchaseOrderLineId`.
  */
 export const STOCK_RECEIPT_REASON = 'Received from a purchase';
+
+/** The movement `reason` limit — `CreateConsumableMovementSchema.reason` in @lazyit/shared. */
+const MOVEMENT_REASON_MAX = 500;
+
+/**
+ * The `reason` of a movement received from a purchase: it names the purchase reference
+ * (`Received from purchase OC-4512`), and falls back to {@link STOCK_RECEIPT_REASON} when there is none. The
+ * consumable ledger is read under `consumable:read` (a VIEWER holds it), so the reference is visible to every
+ * consumable reader — a CEO-accepted exception to D-A for the reference only, never the supplier (ADR-0099,
+ * CEO confirmations 2026-10-02, #1494). The reference is untrusted text, stored as written and rendered as
+ * text (ADR-0029); it is cut to keep the reason within the movement's limit, never mid surrogate pair.
+ */
+export function stockReceiptReason(reference: string | null): string {
+  const ref = reference?.trim();
+  if (!ref) return STOCK_RECEIPT_REASON;
+  const prefix = 'Received from purchase ';
+  const budget = MOVEMENT_REASON_MAX - prefix.length;
+  if (ref.length <= budget) return `${prefix}${ref}`;
+  let cut = ref.slice(0, budget - 1);
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${prefix}${cut}…`;
+}
 
 /** The first day of the current UTC day — "today" as a purchase date. */
 function todayUtc(): string {
@@ -626,7 +647,7 @@ export class PurchaseReceivingService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-    const { line } = await this.purchases.assertLineLive(
+    const { purchase, line } = await this.purchases.assertLineLive(
       this.prisma,
       purchaseOrderId,
       lineId,
@@ -647,7 +668,7 @@ export class PurchaseReceivingService {
       {
         type: 'IN',
         quantity: data.quantity,
-        reason: STOCK_RECEIPT_REASON,
+        reason: stockReceiptReason(purchase.reference),
         ...(data.note !== undefined ? { notes: data.note } : {}),
       },
       principal,

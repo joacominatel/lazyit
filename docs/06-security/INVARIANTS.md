@@ -641,12 +641,15 @@ read of another domain ([[0099-purchases-scope-model-and-optionality|ADR-0099]] 
   without it, because the filter itself reveals which assets came from which purchase, and the list query
   applies only filters minted by the authorizing method, whoever calls it;
 - smart-entry suggestions read only the sources the caller may read;
-- a consumable movement received from a purchase carries only the opaque line id and a fixed reason
-  (*Received from a purchase*), never the supplier or the reference.
+- a consumable movement received from a purchase carries only the opaque line id and a reason naming the
+  purchase **reference** (*Received from purchase OC-4512*, or the fixed *Received from a purchase* when there
+  is none), never the supplier or any other purchase detail. The reference is visible to every consumable
+  reader: a CEO-accepted exception to D-A for the reference only (ADR-0099, *CEO confirmations
+  (2026-10-02)*, #1494).
 
 What stays visible under `asset:read` / `consumable:read` is the asset's **own** purchase fields (cost,
 currency label, dates) and the opaque `purchaseOrderLineId` (ADR-0099, decisions while building Phase 1
-core — whether that bare id should be hidden too is flagged there as a CEO call).
+core — whether that bare id should be hidden too was a CEO call; the CEO kept it visible on 2026-10-02).
 
 **Why.** Purchases and supplier prices are VIEWER-denied by default, and an asset or stock read must not be
 a side door to them. lazyit has no field-level authorization, so every read that crosses into purchase data
@@ -658,12 +661,15 @@ checks the permission itself, in the API.
   `buildWhere` (`:503-511`); the export reads the linked purchase only with the permission (`:614-643`); a
   bulk receive against a line also needs `purchaseOrder:write` (`:972`).
 - `suggestions/suggestions.service.ts` — every source names the permission that guards it.
-- `purchase-orders/purchase-receiving.service.ts:214` — `STOCK_RECEIPT_REASON`.
+- `purchase-orders/purchase-receiving.service.ts` — `stockReceiptReason` (the reference, or
+  `STOCK_RECEIPT_REASON`).
 - `packages/shared/src/schemas/permission.ts:285` — `purchaseOrder:read` is in `VIEWER_DENIED_READS`.
 - Tests: `purchase-orders/purchase-orders.authz.spec.ts` (provenance `403` for a VIEWER), `assets/assets.purchase.spec.ts`
   (the CSV columns, the filters' authorization and the defense in depth on the list **and** the export),
   `assets/assets.purchase-filters.http.spec.ts`, `suggestions/suggestions.authz.spec.ts`,
-  `auth/role-permissions.golden.spec.ts` (VIEWER denied by default).
+  `auth/role-permissions.golden.spec.ts` (VIEWER denied by default),
+  `purchase-orders/purchase-receiving.service.spec.ts` (a stock receipt's reason names the reference, never the
+  supplier or the company).
 
 ---
 

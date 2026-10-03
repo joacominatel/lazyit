@@ -105,10 +105,14 @@ return act. See [User lifecycle](/help/users-permissions-user-lifecycle).
 ## Stock received from a purchase
 
 If you record [purchases](/help/purchases-recording-purchases), a **consumable line** is received with
-**Receive into stock** on the purchase. That posts an ordinary **In** movement here, with the reason
-*Received from a purchase* and the note typed when receiving. The movement does not name the supplier or
-the purchase — the movements list is visible to everyone who can see consumables, and purchases are not.
-Correct a receipt like any other movement: with another movement.
+**Receive into stock** on the purchase. That posts an ordinary **In** movement here, with a reason that
+names the purchase's reference — for example *Received from purchase OC-4512*, or *Received from a purchase*
+when the purchase has no reference — and the note typed when receiving. The movements list is visible to
+everyone who can see consumables, so **anyone who can see this consumable's movements, Viewers included,
+sees the purchase reference**. Nothing else about the purchase is shown here: the supplier, prices and
+documents stay with the purchase, which only people who can see purchases can open. Receipts recorded by an
+earlier version keep the reason *Received from a purchase*. Correct a receipt like any other movement: with
+another movement.
 
 ## The ledger is permanent
 

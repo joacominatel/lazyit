@@ -108,10 +108,14 @@ consumable's stock.
 - It posts **one ordinary `IN`** through `ConsumablesService.createMovement` — the same guarded cache
   update, int4 ceiling, actor attribution, low-stock check and search re-index as any other `IN`. Stock is
   never written directly ([[0034-consumables-design]]).
-- The movement carries `purchaseOrderLineId`, `reason` = *Received from a purchase* and the caller's `note`
-  as `notes`. The reason deliberately names no supplier or reference: this ledger is read under
-  `consumable:read`, which a VIEWER holds, while a purchase's provenance follows `purchaseOrder:read`
-  (ADR-0099 §8, D-A). The opaque line id is served like `Asset.purchaseOrderLineId`.
+- The movement carries `purchaseOrderLineId`, `reason` = *Received from purchase* and the purchase's
+  reference (*Received from purchase OC-4512*; the fixed *Received from a purchase* when the purchase has no
+  reference) and the caller's `note` as `notes`. This ledger is read under `consumable:read`, which a VIEWER
+  holds, so every consumable reader sees the reference — a CEO-accepted exception to D-A for the reference
+  only (ADR-0099, *CEO confirmations (2026-10-02)*, #1494); the supplier and every other purchase detail
+  follow `purchaseOrder:read`. The reference is stored as written and rendered as text, cut to keep the
+  reason within its 500 characters. Movements recorded before 2026-10-02 keep the fixed reason. The opaque
+  line id is served like `Asset.purchaseOrderLineId`.
 - The purchase's `STOCK_RECEIVED` [[purchase-order-event]] commits in the movement's transaction.
 - The HTTP movement endpoint can never set the line: the column is reachable only through the in-process
   `origin` argument of `createMovement`, which accepts a plain `IN` only (no target, not a return).
