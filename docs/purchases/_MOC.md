@@ -12,7 +12,7 @@ updated: 2026-10-02
 > the IT team bought, from which supplier, with which documents, and which assets came out of it — tied
 > to the finance PO number. lazyit **records** purchases; it does not run procurement. Always available,
 > optional at entry — no instance switch.
-> **Accepted, not built yet.**
+> **Accepted and built** (Phases 1 to 3, 2026-10-02) — see [[#What was built]].
 >
 > **Start here:** the decision record [[0099-purchases-scope-model-and-optionality|ADR-0099]] (scope,
 > model, optionality) and [[0100-money-as-64-bit-minor-units|ADR-0100]] (money as 64-bit integers), then
@@ -31,6 +31,33 @@ updated: 2026-10-02
 - [[purchases/decisions|CEO inputs and decisions]] — the approved package, the four decisions after
   acceptance (D-A to D-D), and the CEO's words, verbatim, with where each item is recorded.
 
+## What was built
+
+ADR-0099 records what each build settled, phase by phase; the PRs are into the epic branch
+`feat/issue-1465-purchases`.
+
+| Phase | Decisions | PRs |
+| --- | --- | --- |
+| 0 — Decide and document | [[0099-purchases-scope-model-and-optionality#Decisions after acceptance\|Decisions after acceptance]] (D-A to D-D) | #1468 (#1466) |
+| Money as 64-bit minor units | [[0100-money-as-64-bit-minor-units\|ADR-0100]] §3 *As built* and §5 | #1471 (#1469); locale-aware money input and smart entry #1479 (#1470) |
+| 1 — core | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 core, #1472)\|Phase 1 core]] | #1480 (#1472) |
+| 1 — screens | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 web, #1474)\|Phase 1 web]] | #1481 (#1474) |
+| 1 — flows | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 flows, #1473)\|Phase 1 flows]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 flows web, #1475)\|their screens]] | #1482 (#1473) · #1483 (#1475) |
+| 1b — consumable lines, document labels, scanning | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b consumable lines and document labels, #1476)\|Phase 1b]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b web, #1476)\|Phase 1b web]] | #1484 · #1485 (#1476) |
+| 2 — extraction, license lines, create from assets | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2, #1477)\|Phase 2]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] | #1486 · #1487 (#1477) |
+| 3 — AI assistant tools | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3, #1478)\|Phase 3]] | #1488 (#1478) |
+
+Phase 3 web: see #1478 (PR #1490).
+
+**Planned in ADR-0099 §13 or the UX proposal §7 but not built** (no issue open for them yet): merging
+suppliers, *Receive delivery* across lines, the dashboard *Pending deliveries* tile, purchases in global
+search, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
+field to suppliers, the warranty replacement action, and the XLSX export. Also not built: the per-asset proposal after a line's
+price is edited (§2; the asset panel shows *Differs from purchase* instead), the pending list's *Overdue only*
+toggle and the link picker's *created near the order date* chip. **The attachments backup** (§12) has not
+shipped either: #1467 is open, deferred by the CEO, and the purchase's documents panel says the files are not
+in the backup ([[backups]]).
+
 ## Research (pre-decision)
 
 - [[purchases/user-interview|Simulated user interview]] — one IT lead and one finance analyst at a
@@ -43,12 +70,16 @@ updated: 2026-10-02
   chat, receive, link, pending, legacy instance, finance reader), smart entry, en/es vocabulary,
   mobile, phasing and the D1–D16 decisions.
 
-## Domain notes (planned)
+## Domain notes
 
-- [[supplier]] · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]] — new entities.
+- [[supplier]] · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]] — the entities, as
+  built.
 - [[asset]] (the line link, the cost currency, copy on confirm) · [[application]] (the "Publisher"
   label) · [[attachment]] (the `PURCHASE_ORDER` parent) · [[authorization]] (the `purchaseOrder`
-  domain).
+  domain) · [[ai-settings]] (the *Document extraction* switch) · [[consumable-movement]] (stock received
+  from a line).
+- Security: [[INVARIANTS]] INV-PO-1 and INV-AI-3/4 · [[ai-assistant/security]] §6.12 ·
+  [[content-security-policy]] (the review's PDF tab).
 - Vocabulary: [[it-terms#Purchases vocabulary|Purchases vocabulary]].
 
 ## Key referenced decisions
