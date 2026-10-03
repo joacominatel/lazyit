@@ -1,6 +1,6 @@
 "use client";
 
-import { PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowsPointingInIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -30,6 +30,7 @@ import {
   usePurchaseTitle,
 } from "../../../_components/purchase-display";
 import { SupplierFormDialog } from "../../_components/supplier-form-dialog";
+import { MergeSupplierDialog } from "./merge-supplier-dialog";
 
 /** How many of the supplier's purchases the page lists before linking to the full, filtered list. */
 const PURCHASES_SHOWN = 20;
@@ -77,6 +78,7 @@ export function SupplierDetailView({ id }: { id: string }) {
   const deleteSupplier = useDeleteSupplier();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const breadcrumb = useMemo(
     () => (
@@ -124,6 +126,12 @@ export function SupplierDetailView({ id }: { id: string }) {
                 <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                   <PencilSquareIcon />
                   {tc("edit")}
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button variant="outline" size="sm" onClick={() => setMergeOpen(true)}>
+                  <ArrowsPointingInIcon />
+                  {t("merge.action")}
                 </Button>
               ) : null}
               {canDelete ? (
@@ -238,6 +246,14 @@ export function SupplierDetailView({ id }: { id: string }) {
       </DetailPanel>
 
       <SupplierFormDialog open={editOpen} onOpenChange={setEditOpen} supplier={supplier} />
+      {canDelete ? (
+        <MergeSupplierDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          source={supplier}
+          onMerged={(kept) => router.push(`/purchases/suppliers/${kept.id}`)}
+        />
+      ) : null}
       <DeleteConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

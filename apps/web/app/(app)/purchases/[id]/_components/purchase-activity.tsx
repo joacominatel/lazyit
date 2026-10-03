@@ -234,6 +234,8 @@ export function PurchaseActivity({
         ]
           .filter(Boolean)
           .join(" · ");
+      case "supplierMerged":
+        return view.from && view.to ? t("supplierMerged", { from: view.from, to: view.to }) : t("supplierMergedGeneric");
       case "deleted":
         return t("deleted");
       case "restored":

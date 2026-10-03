@@ -311,7 +311,9 @@
     "extractionLines": "{count, plural, one {# line} other {# lines}} found",
     "extractionWarnings": "{count, plural, one {# value} other {# values}} to check",
     "createdFromAssets": "Created from {count, plural, one {# selected asset} other {# selected assets}} ({lines, plural, one {# line} other {# lines}})",
-    "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out"
+    "createdFromAssetsLeftOut": "{count, plural, one {# asset} other {# assets}} left out",
+    "supplierMerged": "Supplier {from} merged into {to}",
+    "supplierMergedGeneric": "Supplier merged into another one"
   },
   "suppliers": {
     "subtitle": "Who you buy from and pay — not who makes the hardware.",
@@ -376,6 +378,26 @@
       "purchasesSection": "Purchases",
       "allPurchases": "All {count} purchases",
       "noPurchases": "No purchases from this supplier yet."
+    },
+    "merge": {
+      "action": "Merge into…",
+      "title": "Merge {name} into another supplier",
+      "description": "Use this when {name} is a duplicate. Pick the supplier that stays: its purchases move to it, its empty details are filled from {name} without overwriting anything, and {name} is archived.",
+      "target": "Supplier that stays",
+      "targetPlaceholder": "Pick a supplier",
+      "targetSearch": "Search name, tax ID or contact…",
+      "targetEmpty": "No other supplier matches.",
+      "previewError": "Couldn't preview the merge",
+      "purchases": "{count, plural, =0 {No purchases move} one {# purchase moves} other {# purchases move}} to {target}.",
+      "archivedPurchases": "{count, plural, one {# of them is archived} other {# of them are archived}}.",
+      "fillTitle": "Filled from {name}",
+      "fillNone": "Nothing to fill: no empty detail has a value to take.",
+      "keptTitle": "Kept as they are on {name}",
+      "notCopied": "(not copied: {value})",
+      "archiveNote": "{name} is archived, not deleted, and each moved purchase records the merge in its activity.",
+      "confirm": "Merge",
+      "mergedToast": "{source} merged into {target}",
+      "error": "Couldn't merge the suppliers"
     }
   },
   "fromPurchase": {

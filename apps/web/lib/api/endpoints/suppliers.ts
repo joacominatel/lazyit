@@ -2,6 +2,8 @@ import type {
   CreateSupplier,
   Supplier,
   SupplierListPage,
+  SupplierMergePreview,
+  SupplierMergeResult,
   UpdateSupplier,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
@@ -23,6 +25,27 @@ export const deleteSupplier = crud.remove;
 /** Restore an archived supplier (ADMIN). */
 export function restoreSupplier(id: string): Promise<Supplier> {
   return apiFetch<Supplier>(`${BASE}/${id}/restore`, { method: "POST" });
+}
+
+/**
+ * What merging the duplicate `sourceId` into `targetId` (the supplier that stays) would do — the purchases
+ * that move, the fields filled and the ones kept as they are. ADMIN; writes nothing.
+ */
+export function getSupplierMergePreview(
+  targetId: string,
+  sourceId: string,
+  signal?: AbortSignal,
+): Promise<SupplierMergePreview> {
+  const qs = new URLSearchParams({ sourceId });
+  return apiFetch<SupplierMergePreview>(`${BASE}/${targetId}/merge-preview?${qs.toString()}`, { signal });
+}
+
+/** Merge the duplicate `sourceId` into `targetId`, which stays; the duplicate is archived (ADMIN, #1496). */
+export function mergeSupplier(targetId: string, sourceId: string): Promise<SupplierMergeResult> {
+  return apiFetch<SupplierMergeResult>(`${BASE}/${targetId}/merge`, {
+    method: "POST",
+    body: { sourceId },
+  });
 }
 
 /**

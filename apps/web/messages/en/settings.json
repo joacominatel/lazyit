@@ -914,7 +914,7 @@
       },
       "purchaseOrder:delete": {
         "label": "Delete purchases & suppliers",
-        "description": "Archive and restore purchases and suppliers. Linked assets keep their link."
+        "description": "Archive and restore purchases and suppliers, and merge duplicate suppliers. Linked assets keep their link."
       },
       "infra:view": {
         "label": "View the server map",
