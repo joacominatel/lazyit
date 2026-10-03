@@ -9,7 +9,9 @@ import {
   createSupplier,
   deleteSupplier,
   getSupplier,
+  getSupplierMergePreview,
   getSuppliers,
+  mergeSupplier,
   restoreSupplier,
   type SupplierListParams,
   updateSupplier,
@@ -23,6 +25,8 @@ export const supplierKeys = {
   lists: () => [...supplierKeys.all, "list"] as const,
   list: (params: SupplierListParams) => [...supplierKeys.all, "list", params] as const,
   detail: (id: string) => [...supplierKeys.all, "detail", id] as const,
+  mergePreview: (targetId: string, sourceId: string) =>
+    [...supplierKeys.all, "merge-preview", targetId, sourceId] as const,
 };
 
 /** One page of suppliers (server-side search and paging). */
@@ -88,6 +92,27 @@ export function useRestoreSupplier() {
   const invalidate = useInvalidateSuppliers();
   return useMutation({
     mutationFn: (id: string) => restoreSupplier(id),
+    onSuccess: invalidate,
+  });
+}
+
+/** What merging `sourceId` into `targetId` would do; idle until both are chosen. */
+export function useSupplierMergePreview(targetId: string | undefined, sourceId: string | undefined) {
+  return useQuery({
+    queryKey: supplierKeys.mergePreview(targetId ?? "", sourceId ?? ""),
+    queryFn: ({ signal }) => getSupplierMergePreview(targetId as string, sourceId as string, signal),
+    enabled: Boolean(targetId && sourceId && targetId !== sourceId),
+    // Always re-read on open: the duplicate's purchases may have changed since.
+    staleTime: 0,
+  });
+}
+
+/** Merge a duplicate into the supplier that stays (ADMIN): refreshes suppliers, purchases and suggestions. */
+export function useMergeSupplier() {
+  const invalidate = useInvalidateSuppliers();
+  return useMutation({
+    mutationFn: ({ targetId, sourceId }: { targetId: string; sourceId: string }) =>
+      mergeSupplier(targetId, sourceId),
     onSuccess: invalidate,
   });
 }

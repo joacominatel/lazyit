@@ -390,6 +390,8 @@ with yearly totals (1b); merging suppliers and the other back-linking helpers be
 selected assets" (2). They are **not built**; they are tracked as #1495 (sub-issues #1496–#1503) — the full
 list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
 
+*Since built:* merging suppliers (2026-10-03, #1496) — see [[#Merge duplicate suppliers (2026-10-03, #1496)]].
+
 *Built since (2026-10-03, #1499):* **global search for purchases and suppliers**. Both are found in the ⌘K
 palette (a purchase also by its line descriptions) only by a principal holding `purchaseOrder:read` — D-A
 applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
@@ -431,7 +433,8 @@ amendment.
   - A line can end up over-received; the warning is advisory, so the data can say "5 of 4". Concurrent
     receives must still be tested to show the derived count is right.
   - With no uniqueness constraints, duplicate suppliers and repeated references can exist. Suggestions
-    reduce them; merging suppliers was meant to clean them up, but it is not built (§13).
+    reduce them; an administrator cleans up the ones that slip through by merging them
+    ([[#Merge duplicate suppliers (2026-10-03, #1496)]]).
   - Currency labels are not normalised beyond trimming and case: "USD" and "u$s" are two groups in any
     total. Smart-entry suggestions are the mitigation; lazyit never interprets a label.
   - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
@@ -1377,6 +1380,65 @@ keeps the text as typed and the key travels on to the form. Rejected: making Ctr
 typed" — a save shortcut that does nothing in half the form's fields. No other form uses the shortcut, so
 smart entry elsewhere is unchanged.
 
+## Merge duplicate suppliers (2026-10-03, #1496)
+
+With no uniqueness constraints (D-D), duplicates slip through the suggestions. Merging them is the clean-up
+§13 planned for Phase 2. Asked how, the CEO chose the recommended option:
+
+CEO, verbatim: "Solo Admin (Recomendado)" (Admin only, recommended) — the option read: pick the supplier that
+stays; the duplicate's purchases move to it; the duplicate is **archived, never deleted**, and the merge is
+recorded in the history; the empty fields of the supplier that stays (tax ID, contacts…) are filled from the
+duplicate **without overwriting anything**. Permission: ADMIN only, as for archiving (`purchaseOrder:delete`).
+
+What the build settled under that answer (CTO decisions):
+
+- **Routes.** `POST /suppliers/:id/merge { sourceId }` — `:id` is the supplier that stays, `sourceId` the
+  duplicate — answers the saved supplier that stays, the number of purchases moved and the fields filled.
+  `GET /suppliers/:id/merge-preview?sourceId=` answers the same without writing: the purchases that would move
+  (live and archived counted apart), the fields that would be filled, and the fields both suppliers hold with
+  different values. Both need `purchaseOrder:delete`, the preview included: it is the first step of an ADMIN
+  action, not a read anyone needs. A service account holding `:delete` may merge (fail-closed and grantable,
+  like archiving); the events name it, never a human ([[INVARIANTS]] INV-SA-4).
+- **Every purchase moves, archived ones included**, so a supplier's history stays in one place and a purchase
+  restored later points at the live supplier. Rejected: moving only live purchases — the archived ones would
+  be left on an archived duplicate nobody looks at.
+- **Fill, field by field, never overwrite.** For each optional field (tax ID, website, the six contact fields,
+  notes — never the name), the duplicate's value is copied only where the supplier that stays has none (a
+  blank value counts as none). A field both hold differently keeps the value of the supplier that stays; the
+  preview lists it as *not copied*, and the duplicate keeps it on its archived record. Filling field by field is
+  the CEO's rule as worded; its cost is that a contact can end up with the name from one supplier and the email
+  from the other — the preview names every field before the merge, and an edit fixes it after. Rejected:
+  filling a contact only as a whole block — it would drop details the CEO asked to keep.
+- **The duplicate is archived** (soft delete, [[0041-soft-delete-reuse-and-restore]]). Restoring it later brings
+  it back with no purchases: a merge is not undone by a restore, and its purchases are re-pointed by editing
+  them.
+- **Where the merge is recorded.** Suppliers have no activity log of their own (their edits and archiving are
+  not logged either). Each moved purchase records **`SUPPLIER_MERGED`** `{ from: { id, name }, to: { id, name },
+  filledFields }` with the actor and any AI invocation, in the merge's transaction — one insert for all of them,
+  so the transaction does not grow with the purchase count. A duplicate with no purchases leaves no event row;
+  its record is the archived duplicate, the same trail archiving one leaves. Rejected: a supplier activity log —
+  a new table and migration for one action. The event type is text (Phase 1 core), so no migration; a build
+  without it shows the event generically.
+- **Refusals.** The same supplier twice is `400`; a supplier that never existed `404`; an archived supplier on
+  either side `409` — which is also what a second merge of an already merged duplicate gets.
+- **Lock order: suppliers, then purchases, each in id order.** The merge locks both supplier rows `FOR NO KEY
+  UPDATE` (`ORDER BY id`), checks them under the lock, then locks the duplicate's purchases `FOR NO KEY UPDATE`
+  (`ORDER BY id`) and moves exactly those. Two merges touching the same supplier serialize on the supplier
+  locks, and the second sees the first's result. `NO KEY UPDATE` does not conflict with the `KEY SHARE` a
+  purchase's supplier foreign key takes, and no purchase writer locks a supplier in any other mode, so a
+  purchase write never waits on a merge's supplier locks and cannot form a cycle with it; a link's or receipt's
+  `KEY SHARE` on a purchase does not conflict with moving it either. A purchase moved to another supplier while
+  the merge waited is re-read under its lock and left where it is. **The accepted window:** a purchase saved onto
+  the duplicate in the instant the merge commits can still land on the archived duplicate, exactly as when a
+  supplier is archived while a purchase is being saved; it shows the supplier flagged as archived and an edit
+  re-points it. Closing it would make every purchase write lock its supplier.
+- **AI.** Both handlers are unexposed: an ADMIN-only clean-up reviewed through its preview, not part of the
+  chat purchase flow (§13).
+- **Screens.** The duplicate's page offers **Merge into…** to whoever holds `purchaseOrder:delete`: pick the
+  supplier that stays (the picker shows tax IDs beside names and leaves out the duplicate itself), read the
+  preview, confirm; the page then opens the supplier that stays. The near-duplicate hints do not offer the merge
+  yet. Each moved purchase's activity reads *Supplier X merged into Y*.
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1386,4 +1448,4 @@ smart entry elsewhere is unchanged.
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495 · #1507 · #1508
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1507 · #1508

@@ -3,7 +3,7 @@ title: "Purchases — UX proposal"
 tags: [purchases, research, ux, design]
 status: draft
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # Purchases in lazyit: UX proposal
@@ -36,9 +36,12 @@ updated: 2026-10-02
 > - The extraction review (§3.b) does not block saving on a missing supplier or currency and has no
 >   "n fields still marked check — save anyway?" step; a PDF opens in a new tab instead of being framed.
 > - Not built: *Receive delivery* across lines, the *Overdue only* toggle and the *created within 90 days*
->   chip, the dashboard *Pending deliveries* tile, purchases in global search, merging suppliers, *Suggest
+>   chip, the dashboard *Pending deliveries* tile, purchases in global search, *Suggest
 >   purchases*, *Map a custom field to suppliers*, the warranty replacement action, the XLSX export, and
 >   proposing a new line price to linked assets. Tracked as #1495.
+> - *Merge suppliers* (§4.3) shipped later (2026-10-03, #1496): ADMIN, from the duplicate's page, with a
+>   preview; it fills the empty fields of the supplier that stays and archives the duplicate. Suppliers have no
+>   log, so it logs on each moved purchase rather than "on both".
 >
 > What each build settled: [[0099-purchases-scope-model-and-optionality|ADR-0099]], *Decisions while
 > building*, and [[purchases/_MOC#What was built]].

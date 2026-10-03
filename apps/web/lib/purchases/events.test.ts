@@ -262,4 +262,22 @@ describe("Phase 2 events (#1477) read as sentences, tolerant of a thin payload",
       failed: 0,
     });
   });
+
+  test("a supplier merge names both suppliers as they were, and reads a partial payload without crashing", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "SUPPLIER_MERGED",
+        payload: {
+          from: { id: "s2", name: "COMPUMUNDO SA" },
+          to: { id: "s1", name: "Compumundo" },
+          filledFields: ["taxId"],
+        },
+      }),
+    ).toEqual({ kind: "supplierMerged", from: "COMPUMUNDO SA", to: "Compumundo" });
+    expect(describePurchaseEvent({ eventType: "SUPPLIER_MERGED", payload: { from: "s2" } })).toEqual({
+      kind: "supplierMerged",
+      from: null,
+      to: null,
+    });
+  });
 });

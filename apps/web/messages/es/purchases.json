@@ -311,7 +311,9 @@
     "extractionLines": "{count, plural, one {# línea encontrada} other {# líneas encontradas}}",
     "extractionWarnings": "{count, plural, one {# valor} other {# valores}} para revisar",
     "createdFromAssets": "Creada a partir de {count, plural, one {# activo seleccionado} other {# activos seleccionados}} ({lines, plural, one {# línea} other {# líneas}})",
-    "createdFromAssetsLeftOut": "{count, plural, one {# activo quedó afuera} other {# activos quedaron afuera}}"
+    "createdFromAssetsLeftOut": "{count, plural, one {# activo quedó afuera} other {# activos quedaron afuera}}",
+    "supplierMerged": "Proveedor {from} fusionado en {to}",
+    "supplierMergedGeneric": "Proveedor fusionado en otro"
   },
   "suppliers": {
     "subtitle": "A quién le compras y le pagas — no quién fabrica el hardware.",
@@ -376,6 +378,26 @@
       "purchasesSection": "Compras",
       "allPurchases": "Las {count} compras",
       "noPurchases": "Todavía no hay compras de este proveedor."
+    },
+    "merge": {
+      "action": "Fusionar en…",
+      "title": "Fusionar {name} en otro proveedor",
+      "description": "Úsalo cuando {name} es un duplicado. Elige el proveedor que queda: todas las compras de {name} pasan a él, los datos vacíos del proveedor que queda se completan desde {name} sin pisar nada, y {name} se archiva.",
+      "target": "Proveedor que queda",
+      "targetPlaceholder": "Elige un proveedor",
+      "targetSearch": "Busca por nombre, ID fiscal o contacto…",
+      "targetEmpty": "Ningún otro proveedor coincide.",
+      "previewError": "No se pudo previsualizar la fusión",
+      "purchases": "{count, plural, =0 {Ninguna compra pasa} one {# compra pasa} other {# compras pasan}} a {target}.",
+      "archivedPurchases": "{count, plural, one {# de ellas está archivada} other {# de ellas están archivadas}}.",
+      "fillTitle": "Se completa desde {name}",
+      "fillNone": "Nada que completar: ningún dato vacío tiene un valor para tomar.",
+      "keptTitle": "Se mantienen como están en {name}",
+      "notCopied": "(no se copia: {value})",
+      "archiveNote": "{name} se archiva, no se borra, y cada compra que pasa registra la fusión en su actividad.",
+      "confirm": "Fusionar",
+      "mergedToast": "{source} fusionado en {target}",
+      "error": "No se pudieron fusionar los proveedores"
     }
   },
   "fromPurchase": {

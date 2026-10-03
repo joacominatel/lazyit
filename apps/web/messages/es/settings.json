@@ -914,7 +914,7 @@
       },
       "purchaseOrder:delete": {
         "label": "Eliminar compras y proveedores",
-        "description": "Archivar y restaurar compras y proveedores. Los activos vinculados conservan su vínculo."
+        "description": "Archivar y restaurar compras y proveedores, y fusionar proveedores duplicados. Los activos vinculados conservan su vínculo."
       },
       "infra:view": {
         "label": "Ver el mapa de infraestructura",

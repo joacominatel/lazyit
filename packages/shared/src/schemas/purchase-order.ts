@@ -69,6 +69,8 @@ export const DEFAULT_PURCHASE_ORDER_LINE_KIND = "ASSET";
  *                        AI provider to draft it (#1477). Metadata only: never a value read from the document.
  *   - `CREATED_FROM_ASSETS` { lineCount, linkedAssetIds, failed } — the purchase was created from selected
  *                        existing assets (#1477); written next to `CREATED`
+ *   - `SUPPLIER_MERGED`  { from: { id, name }, to: { id, name }, filledFields } — the purchase's supplier was
+ *                        merged into another one, which the purchase now points at (#1496)
  */
 export const PURCHASE_ORDER_EVENT_TYPES = [
   "CREATED",
@@ -90,6 +92,7 @@ export const PURCHASE_ORDER_EVENT_TYPES = [
   "LICENSE_APPLIED",
   "EXTRACTION_RUN",
   "CREATED_FROM_ASSETS",
+  "SUPPLIER_MERGED",
 ] as const;
 export const PurchaseOrderEventTypeSchema = z.enum(PURCHASE_ORDER_EVENT_TYPES);
 

@@ -8,7 +8,7 @@ updated: 2026-10-03
 
 # Supplier
 
-> 🟢 built — backend (#1472), screens (#1474), AI assistant tools (#1478) · Area: Purchases ·
+> 🟢 built — backend (#1472), screens (#1474), AI assistant tools (#1478), merge (#1496) · Area: Purchases ·
 > [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
@@ -18,7 +18,9 @@ updated: 2026-10-03
 > (`/purchases/suppliers`) and the supplier page with its recent purchases; a purchase's supplier is typed and
 > resolved on save, created inline when nobody has that name ([[0099-purchases-scope-model-and-optionality]],
 > decisions while building Phase 1 web). The AI assistant reads and proposes suppliers through
-> `supplier_search`, `supplier_get`, `supplier_create` and `supplier_update` (#1478).
+> `supplier_search`, `supplier_get`, `supplier_create` and `supplier_update` (#1478). Merging a duplicate
+> (#1496): `POST /suppliers/:id/merge` and `GET /suppliers/:id/merge-preview`, **Merge into…** on the supplier
+> page.
 
 ## Purpose
 
@@ -65,8 +67,19 @@ fields stay as they are.
 - **Global search** (#1499, [[0035-search-architecture]]): the `suppliers` index carries the name, tax ID and
   the two contact names (the names searchable, not returned) — never emails, phones, website or notes. Searched
   only with `purchaseOrder:read`; an archived supplier is removed, and a rename re-indexes its purchases.
-- Merging duplicate suppliers (planned for Phase 2 in ADR-0099 §13) is **not built**: the Phase 2 unit left
-  it out (ADR-0099, decisions while building Phase 2). Duplicates are reduced only by the suggestions above.
+- **Merging a duplicate** (CEO decision, 2026-10-03; [[0099-purchases-scope-model-and-optionality#Merge duplicate suppliers (2026-10-03, #1496)]]).
+  An administrator (`purchaseOrder:delete`) merges the duplicate into the supplier that stays, after a preview,
+  in one transaction:
+  - **every purchase** of the duplicate — archived ones included — moves to the supplier that stays;
+  - the supplier that stays gets the duplicate's value for each **empty** optional field (never the name);
+    nothing it already holds is overwritten, and a differing value stays on the archived duplicate;
+  - the duplicate is **archived**, never deleted; restoring it later brings it back with no purchases;
+  - each moved purchase records `SUPPLIER_MERGED` with the actor ([[purchase-order-event]]). Suppliers have no
+    activity log of their own, so a duplicate with no purchases leaves only its archived record.
+
+  Refused: the same supplier twice (`400`), a supplier that never existed (`404`), an archived one on either
+  side (`409` — also a second merge of an already merged duplicate). Both supplier rows are locked first, then
+  the purchases, each in id order.
 
 ## Conventions
 
