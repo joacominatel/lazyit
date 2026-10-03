@@ -856,7 +856,7 @@ function ReceiveResult({
           </Button>
         ) : null}
         {target ? (
-          <OpenPurchaseButton purchaseId={target.purchase.id} onBack={onDone}>
+          <OpenPurchaseButton purchaseId={target.purchase.id}>
             {tl("openPurchase")}
           </OpenPurchaseButton>
         ) : null}

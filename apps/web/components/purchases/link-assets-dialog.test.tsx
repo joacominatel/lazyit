@@ -1,11 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { PurchaseLinkPreviewAsset } from "@lazyit/shared";
-import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { NextIntlClientProvider } from "next-intl";
 import { renderToStaticMarkup } from "react-dom/server";
 import { linkSubmitOutcome } from "@/lib/purchases/link-apply";
 import purchases from "@/messages/en/purchases.json";
-import { LinkResultView } from "./link-assets-dialog";
+
+// The page the dialog is open on, as `usePathname` reports it — set per test.
+let pathname: string | null = null;
+mock.module("next/navigation", () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {}, refresh: () => {} }),
+  usePathname: () => pathname,
+}));
+const { LinkResultView } = await import("./link-assets-dialog");
 
 /**
  * The link dialog's result step (#1475 review): a partial link closes nothing — the dialog keeps the
@@ -39,19 +45,18 @@ const PURCHASE = "ck00000000000000purchase1";
 function renderResult(
   failed: { assetId: string; reason: string; error: string }[],
   linked: number,
-  pathname: string | null = null,
+  on: string | null = null,
 ): string {
+  pathname = on;
   const outcome = linkSubmitOutcome(
     { linked: Array.from({ length: linked }, () => ({})), failed },
     [previewAsset(A, "ThinkPad E14", "LZ-0411"), previewAsset(B, "ThinkPad E14", "LZ-0412")],
   );
   if (outcome.kind !== "result") throw new Error("expected the result step");
   return renderToStaticMarkup(
-    <PathnameContext.Provider value={pathname}>
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases }}>
-        <LinkResultView snapshot={outcome.snapshot} purchaseId={PURCHASE} onDone={() => {}} />
-      </NextIntlClientProvider>
-    </PathnameContext.Provider>,
+    <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases }}>
+      <LinkResultView snapshot={outcome.snapshot} purchaseId={PURCHASE} onDone={() => {}} />
+    </NextIntlClientProvider>,
   );
 }
 
@@ -70,10 +75,11 @@ describe("the link result step", () => {
     expect(html).toContain("the API says why");
   });
 
-  test("opened on the purchase's own page, Open purchase closes the dialog instead of linking to it (#1505)", () => {
+  test("opened on the purchase's own page, Open purchase is not offered — Done returns there (#1505)", () => {
     const html = renderResult([{ assetId: B, reason: "LINKED_ELSEWHERE", error: "on another line" }], 1, `/purchases/${PURCHASE}`);
-    expect(html).toContain("Open purchase");
+    expect(html).not.toContain("Open purchase");
     expect(html).not.toContain(`href="/purchases/${PURCHASE}"`);
+    expect(html).toContain("Done");
   });
 
   test("opened anywhere else, Open purchase links to it", () => {

@@ -896,7 +896,7 @@ export function LinkResultView({
         <FailureList failures={snapshot.failures} title={t("failedTitle")} />
       </div>
       <DialogFooter>
-        <OpenPurchaseButton purchaseId={purchaseId} onBack={onDone}>
+        <OpenPurchaseButton purchaseId={purchaseId}>
           {t("openPurchase")}
         </OpenPurchaseButton>
         <Button onClick={onDone}>{t("done")}</Button>
