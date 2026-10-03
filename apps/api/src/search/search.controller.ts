@@ -20,6 +20,12 @@ import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { Principal } from '../auth/principal';
 import type { User } from '../../generated/prisma/client';
 
+/**
+ * The indexes that need `purchaseOrder:read` on top of `search:read` (#1499, ADR-0099 §8 / INV-PO-1): a
+ * VIEWER is denied purchases by default, and search must not be a side door to them — no hit, no count.
+ */
+const PURCHASE_INDEXES: readonly SearchIndex[] = ['purchases', 'suppliers'];
+
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const MIN_LIMIT = 1;
@@ -47,7 +53,7 @@ export class SearchController {
   @RequirePermission('search:read')
   @ApiOperation({
     summary:
-      'Cross-entity search (Meilisearch). Returns { assets, articles, users, locations, applications } — only the requested entities, or all when omitted. The `users` facet is omitted for callers without user:read (VIEWER).',
+      'Cross-entity search (Meilisearch). Returns one { hits, total } block per requested entity, or per entity when omitted. The `users` facet is omitted for callers without user:read (VIEWER), and the `purchases` and `suppliers` facets for callers without purchaseOrder:read (VIEWER by default).',
   })
   @ApiQuery({
     name: 'q',
@@ -75,11 +81,11 @@ export class SearchController {
     @Query('limit') limit?: string,
   ): Promise<SearchResults> {
     const requested = parseEntities(entities);
-    const allowed = await this.allowedEntities(requested, user);
-    // An empty `allowed` (a VIEWER who asked ONLY for `users`) must return an empty envelope — NOT be
+    const allowed = await this.allowedEntities(requested, user, principal);
+    // An empty `allowed` (a VIEWER who asked ONLY for `users` or purchases) must return an empty envelope — NOT be
     // re-expanded to "all" by the service (which treats `[]` as all). Short-circuit it here.
     if (allowed !== undefined && allowed.length === 0) {
-      return {} as SearchResults;
+      return {};
     }
     return this.search.search({
       q: q ?? '',
@@ -93,7 +99,9 @@ export class SearchController {
 
   /**
    * Drop the `users` index unless the caller holds `user:read` (ADR-0046 P3 — VIEWER cannot enumerate
-   * the directory via search). `requested === undefined` means "search all": we materialize the full
+   * the directory via search), and the `purchases` / `suppliers` indexes unless the principal holds
+   * `purchaseOrder:read` (#1499, INV-PO-1 — resolved per principal, so a service account needs the direct
+   * grant). `requested === undefined` means "search all": we materialize the full
    * index list so we can subtract `users` for a caller without the permission. An authorized caller's
    * request is returned unchanged (still `undefined` = all when they asked for everything).
    *
@@ -103,15 +111,24 @@ export class SearchController {
   private async allowedEntities(
     requested: SearchIndex[] | undefined,
     user?: User,
+    principal?: Principal,
   ): Promise<SearchIndex[] | undefined> {
     const canReadUsers =
       user !== undefined &&
       (await this.permissions.hasAll(user.role, ['user:read']));
-    if (canReadUsers) {
+    const canReadPurchases = await this.permissions.principalHas(
+      principal,
+      'purchaseOrder:read',
+    );
+    if (canReadUsers && canReadPurchases) {
       return requested;
     }
     const base = requested ?? [...SEARCH_INDEXES];
-    return base.filter((index) => index !== 'users');
+    return base.filter(
+      (index) =>
+        (canReadUsers || index !== 'users') &&
+        (canReadPurchases || !PURCHASE_INDEXES.includes(index)),
+    );
   }
 }
 
