@@ -214,7 +214,9 @@
       "locations": "Ubicaciones",
       "applications": "Aplicaciones",
       "infra": "Infraestructura",
-      "consumables": "Consumibles"
+      "consumables": "Consumibles",
+      "purchases": "Compras",
+      "suppliers": "Proveedores"
     }
   },
   "field": {
