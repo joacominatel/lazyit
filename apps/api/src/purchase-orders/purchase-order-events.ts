@@ -25,18 +25,14 @@ export function recordPurchaseOrderEvent(
   actor: ActorAttribution,
   payload?: Record<string, Prisma.InputJsonValue | null>,
 ) {
-  const aiInvocationId = currentAiInvocationId();
   return tx.purchaseOrderEvent.create({
-    data: {
+    data: eventRow(
       purchaseOrderId,
       eventType,
-      ...(payload !== undefined ? { payload: payload } : {}),
-      ...(actor.userId != null ? { performedById: actor.userId } : {}),
-      ...(actor.serviceAccountId != null
-        ? { serviceAccountId: actor.serviceAccountId }
-        : {}),
-      ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
-    },
+      actor,
+      payload,
+      currentAiInvocationId(),
+    ),
   });
 }
 
@@ -65,15 +61,28 @@ export async function recordPurchaseOrderEvents(
   if (purchaseOrderIds.length === 0) return;
   const aiInvocationId = currentAiInvocationId();
   await tx.purchaseOrderEvent.createMany({
-    data: purchaseOrderIds.map((purchaseOrderId) => ({
-      purchaseOrderId,
-      eventType,
-      ...(payload !== undefined ? { payload: payload } : {}),
-      ...(actor.userId != null ? { performedById: actor.userId } : {}),
-      ...(actor.serviceAccountId != null
-        ? { serviceAccountId: actor.serviceAccountId }
-        : {}),
-      ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
-    })),
+    data: purchaseOrderIds.map((purchaseOrderId) =>
+      eventRow(purchaseOrderId, eventType, actor, payload, aiInvocationId),
+    ),
   });
+}
+
+/** One event row: exactly one actor column (or none), and the AI invocation when there is one. */
+function eventRow(
+  purchaseOrderId: string,
+  eventType: PurchaseOrderEventType,
+  actor: ActorAttribution,
+  payload: Record<string, Prisma.InputJsonValue | null> | undefined,
+  aiInvocationId: string | undefined,
+): Prisma.PurchaseOrderEventUncheckedCreateInput {
+  return {
+    purchaseOrderId,
+    eventType,
+    ...(payload !== undefined ? { payload: payload } : {}),
+    ...(actor.userId != null ? { performedById: actor.userId } : {}),
+    ...(actor.serviceAccountId != null
+      ? { serviceAccountId: actor.serviceAccountId }
+      : {}),
+    ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
+  };
 }
