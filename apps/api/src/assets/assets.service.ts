@@ -191,6 +191,24 @@ export const ASSET_SORT_ALLOWLIST = {
   purchaseCost: 'purchaseCost',
 } as const;
 
+/**
+ * The sort keys whose column is nullable and new with #1511: an asset with no purchase date, warranty end
+ * or cost sorts after every dated or priced one, in both directions, so "no value" never tops the list.
+ */
+const ASSET_NULLS_LAST_SORT_KEYS: ReadonlySet<string> = new Set([
+  'purchaseDate',
+  'warrantyEnd',
+  'purchaseCost',
+]);
+
+/**
+ * The unique key appended to EVERY list sort, allowlisted or default (ADR-0030 §9 — a contract rule, as
+ * `INFRA_NODE_TIEBREAKER` does for nodes). No sortable column is unique — received stock and imports share
+ * a `createdAt`, many assets share a status or have no warranty end — and under LIMIT/OFFSET a tie Postgres
+ * reorders between reads drops one row from the window and repeats another.
+ */
+const ASSET_TIEBREAKER = { id: 'desc' } as const;
+
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
 // category, which lives on the model), the location, and the *active* owners (releasedAt = null)
 // each with their user. One nested include → a constant number of queries, never N+1.
@@ -278,17 +296,16 @@ const ASSET_LIST_SELECT = {
   },
 } satisfies Prisma.AssetSelect;
 
-/** The inventory export's projection: the list's, which carries the asset's own cost columns (`asset:read`). */
-const EXPORT_SELECT = ASSET_LIST_SELECT;
-
-/** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
+/** The export's projection for a caller holding `purchaseOrder:read`: the list's plus the linked purchase. */
 const EXPORT_SELECT_WITH_PURCHASE = {
-  ...EXPORT_SELECT,
+  ...ASSET_LIST_SELECT,
   purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
 } as const satisfies Prisma.AssetSelect;
 
 /** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
-type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
+type ExportRow = Prisma.AssetGetPayload<{
+  select: typeof ASSET_LIST_SELECT;
+}> &
   Partial<
     Pick<
       Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
@@ -465,13 +482,24 @@ export class AssetsService {
     const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     // Server-side sort over the FULL result set (not page-local) via the per-resource allowlist
-    // (ADR-0030 amendment). No `sort` ⇒ undefined ⇒ the default `createdAt desc` order below.
-    const orderBy =
+    // (ADR-0030 amendment). No `sort` ⇒ the default `createdAt desc`; either way the unique `id` follows.
+    const sorted =
       resolveSortOrBadRequest<Prisma.AssetOrderByWithRelationInput>(
         page,
         ASSET_SORT_ALLOWLIST,
-      ) ??
-      ({ createdAt: 'desc' } satisfies Prisma.AssetOrderByWithRelationInput);
+      );
+    const primary: Prisma.AssetOrderByWithRelationInput =
+      sorted && page.sort && ASSET_NULLS_LAST_SORT_KEYS.has(page.sort)
+        ? {
+            [ASSET_SORT_ALLOWLIST[
+              page.sort as keyof typeof ASSET_SORT_ALLOWLIST
+            ]]: { sort: page.dir ?? 'asc', nulls: 'last' },
+          }
+        : (sorted ?? { createdAt: 'desc' });
+    const orderBy = [
+      primary,
+      ASSET_TIEBREAKER,
+    ] satisfies Prisma.AssetOrderByWithRelationInput[];
     // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
     // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
     // object — keeping the `select` inference intact so the lean row type is preserved.
@@ -662,7 +690,10 @@ export class AssetsService {
             ...batch,
             select: EXPORT_SELECT_WITH_PURCHASE,
           })
-        : await this.prisma.asset.findMany({ ...batch, select: EXPORT_SELECT });
+        : await this.prisma.asset.findMany({
+            ...batch,
+            select: ASSET_LIST_SELECT,
+          });
       if (rows.length === 0) break;
       yield `${rows
         .map((row) =>

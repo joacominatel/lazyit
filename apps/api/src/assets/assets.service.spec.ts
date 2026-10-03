@@ -825,7 +825,7 @@ describe('AssetsService', () => {
     expect(asset.findMany).toHaveBeenCalledWith({
       // The default `active` slice scopes the list to live assets (ADR-0041).
       where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       select: EXPECTED_LIST_SELECT,
@@ -1366,7 +1366,7 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
   });
 
   it('findPage honors an allowlisted sort field + direction (server-side, full set)', async () => {
@@ -1381,7 +1381,7 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ name: 'asc' });
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
   });
 
   it('findPage maps each sortable field (assetTag/status/updatedAt) to its column', async () => {
@@ -1395,23 +1395,50 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ status: 'desc' });
+    expect(args.orderBy).toEqual([{ status: 'desc' }, { id: 'desc' }]);
   });
 
-  it.each(['purchaseDate', 'warrantyEnd', 'purchaseCost'])(
-    'findPage sorts by %s, the list purchase & warranty columns (#1511)',
+  it.each([
+    ['purchaseDate', 'asc'],
+    ['purchaseDate', 'desc'],
+    ['warrantyEnd', 'asc'],
+    ['warrantyEnd', 'desc'],
+    ['purchaseCost', 'asc'],
+    ['purchaseCost', 'desc'],
+  ] as const)(
+    'findPage sorts by %s %s with empty values last, then by id (#1511)',
+    async (field, dir) => {
+      asset.findMany.mockResolvedValue([]);
+      asset.count.mockResolvedValue(0);
+
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: field, dir, deleted: 'active' },
+      );
+      const args = (
+        asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
+      )[0][0];
+      expect(args.orderBy).toEqual([
+        { [field]: { sort: dir, nulls: 'last' } },
+        { id: 'desc' },
+      ]);
+    },
+  );
+
+  it.each(['name', 'assetTag', 'serial', 'status', 'createdAt', 'updatedAt'])(
+    'findPage appends the unique id tiebreaker to the %s sort (ADR-0030 §9)',
     async (field) => {
       asset.findMany.mockResolvedValue([]);
       asset.count.mockResolvedValue(0);
 
       await service.findPage(
         {},
-        { limit: 50, offset: 0, sort: field, dir: 'desc', deleted: 'active' },
+        { limit: 50, offset: 0, sort: field, dir: 'asc', deleted: 'active' },
       );
       const args = (
-        asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
+        asset.findMany.mock.calls as Array<[{ orderBy: unknown[] }]>
       )[0][0];
-      expect(args.orderBy).toEqual({ [field]: 'desc' });
+      expect(args.orderBy).toEqual([{ [field]: 'asc' }, { id: 'desc' }]);
     },
   );
 
