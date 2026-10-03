@@ -122,7 +122,8 @@ canceladas.
 La lista de **Compras** se abre con **todas las compras, de la más nueva a la más vieja**. Para ver solo
 las que todavía esperan una entrega, elige **Esperando unidades** en el filtro de entrega, o abre la
 pestaña **Unidades pendientes**. También puedes filtrar por estado o proveedor, y buscar por referencia,
-número de factura, proveedor o ítem.
+número de factura, proveedor o ítem. Las compras y los proveedores también están en la
+[búsqueda global](/help/notifications-activity-global-search) (**⌘K**), para quien puede ver compras.
 
 ## Recibir unidades
 

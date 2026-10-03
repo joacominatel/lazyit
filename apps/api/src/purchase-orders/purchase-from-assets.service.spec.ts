@@ -1,3 +1,5 @@
+// SearchService (behind the optional PurchaseSearchSync) imports the ESM `meilisearch` package jest cannot load.
+jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 // The service imports the generated client for `Prisma.join` (the asset lock); stub it so no real client
 // loads. The fake delegates below stand in for the database.
 jest.mock('../../generated/prisma/client', () => ({
@@ -16,6 +18,7 @@ import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import type { PrismaService } from '../prisma/prisma.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import type { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { PurchaseFromAssetsService } from './purchase-from-assets.service';
 
@@ -127,13 +130,15 @@ function setup(assets: Row[]) {
     prisma as unknown as PrismaService,
     actor,
   );
+  const searchSync = { purchase: jest.fn() };
   const service = new PurchaseFromAssetsService(
     prisma as unknown as PrismaService,
     actor,
     new AssetHistoryService(prisma as unknown as PrismaService),
     purchases,
+    searchSync as unknown as PurchaseSearchSync,
   );
-  return { service, prisma, lines, locks };
+  return { service, prisma, lines, locks, searchSync };
 }
 
 const events = (prisma: ReturnType<typeof setup>['prisma']) =>
@@ -277,6 +282,22 @@ describe('PurchaseFromAssetsService (#1477)', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.purchaseOrderLine.create).not.toHaveBeenCalled();
     expect(prisma.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('indexes the new purchase for global search once it commits, and not when it rolls back (#1499)', async () => {
+    const created = setup([asset('a1')]);
+    const result = await created.service.create({ assetIds: ['a1'] }, human);
+    expect(created.searchSync.purchase).toHaveBeenCalledWith(
+      result.purchaseOrder.id,
+    );
+
+    const refused = setup([
+      asset('a1', { purchaseOrderLineId: 'cllineOther0000000000001' }),
+    ]);
+    await expect(
+      refused.service.create({ assetIds: ['a1'], reference: 'OC-9' }, human),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(refused.searchSync.purchase).not.toHaveBeenCalled();
   });
 
   it('locks the purchase first (created), then the assets in id order; logs created before the links', async () => {

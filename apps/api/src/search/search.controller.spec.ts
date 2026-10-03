@@ -33,6 +33,7 @@ describe('SearchController', () => {
   let app: INestApplication;
   const search = jest.fn();
   let canReadUsers = true;
+  let canReadPurchases = true;
 
   // The mock resolver: `hasAll` honours the per-test `canReadUsers` flag for `user:read`. Returns a
   // resolved Promise<boolean> to match the real signature (the controller awaits it).
@@ -42,18 +43,31 @@ describe('SearchController', () => {
     ),
   );
 
+  // `principalHas` (the per-principal check the purchase indexes use, #1499) honours `canReadPurchases`.
+  const principalHas = jest.fn((_principal: unknown, perm: string) =>
+    Promise.resolve(perm === 'purchaseOrder:read' ? canReadPurchases : true),
+  );
+
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [SearchController],
       providers: [
         { provide: SearchService, useValue: { search } },
-        { provide: PermissionResolverService, useValue: { hasAll } },
+        {
+          provide: PermissionResolverService,
+          useValue: { hasAll, principalHas },
+        },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
     // Inject a fake authenticated user so the controller's user:read check has an actor to resolve.
     app.use((req: Request, _res: Response, next: NextFunction) => {
-      (req as Request & { user?: unknown }).user = { role: 'VIEWER' };
+      const user = { role: 'VIEWER' };
+      (req as Request & { user?: unknown }).user = user;
+      (req as Request & { principal?: unknown }).principal = {
+        kind: 'human',
+        user,
+      };
       next();
     });
     await app.init();
@@ -67,7 +81,9 @@ describe('SearchController', () => {
     search.mockReset();
     search.mockResolvedValue({});
     hasAll.mockClear();
+    principalHas.mockClear();
     canReadUsers = true;
+    canReadPurchases = true;
   });
 
   const lastArg = (): SearchArg =>
@@ -78,7 +94,7 @@ describe('SearchController', () => {
       '/search?q=vpn&entities=assets,articles&limit=10',
     );
     expect(res.status).toBe(200);
-    expect(lastArg()).toEqual({
+    expect(lastArg()).toMatchObject({
       q: 'vpn',
       entities: ['assets', 'articles'],
       limit: 10,
@@ -87,7 +103,8 @@ describe('SearchController', () => {
 
   it('defaults q to "", entities to all (undefined) and limit to 20 when omitted', async () => {
     await request(app.getHttpServer()).get('/search');
-    expect(lastArg()).toEqual({ q: '', entities: undefined, limit: 20 });
+    expect(lastArg()).toMatchObject({ q: '', limit: 20 });
+    expect(lastArg().entities).toBeUndefined();
   });
 
   it('drops unknown entities and de-dupes, preserving canonical order', async () => {
@@ -140,6 +157,8 @@ describe('SearchController', () => {
       'applications',
       'infra',
       'consumables',
+      'purchases',
+      'suppliers',
     ]);
   });
 
@@ -164,5 +183,52 @@ describe('SearchController', () => {
     canReadUsers = true;
     await request(app.getHttpServer()).get('/search?entities=assets,users');
     expect(lastArg().entities).toEqual(['assets', 'users']);
+  });
+
+  // ── purchases and suppliers follow purchaseOrder:read (#1499, INV-PO-1) ───────────────────────────────
+
+  it('a caller without purchaseOrder:read (a VIEWER by default) never searches purchases or suppliers', async () => {
+    canReadPurchases = false;
+    await request(app.getHttpServer()).get('/search');
+    expect(lastArg().entities).toEqual([
+      'assets',
+      'articles',
+      'users',
+      'locations',
+      'applications',
+      'infra',
+      'consumables',
+    ]);
+    // The check is made on the request's principal, so a service account needs the direct grant.
+    expect(principalHas).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'human' }),
+      'purchaseOrder:read',
+    );
+  });
+
+  it('a VIEWER (neither user:read nor purchaseOrder:read) gets neither users nor purchase data', async () => {
+    canReadUsers = false;
+    canReadPurchases = false;
+    await request(app.getHttpServer()).get(
+      '/search?entities=assets,users,purchases,suppliers',
+    );
+    expect(lastArg().entities).toEqual(['assets']);
+  });
+
+  it('returns an empty envelope — no hits, no counts — when a caller without the permission asks only for purchases', async () => {
+    canReadPurchases = false;
+    const res = await request(app.getHttpServer()).get(
+      '/search?entities=purchases,suppliers',
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({});
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('a caller WITH purchaseOrder:read (a MEMBER by default) searches purchases and suppliers', async () => {
+    await request(app.getHttpServer()).get(
+      '/search?entities=purchases,suppliers',
+    );
+    expect(lastArg().entities).toEqual(['purchases', 'suppliers']);
   });
 });

@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # Security invariants — auth & authorization
@@ -641,6 +641,10 @@ read of another domain ([[0099-purchases-scope-model-and-optionality|ADR-0099]] 
   without it, because the filter itself reveals which assets came from which purchase, and the list query
   applies only filters minted by the authorizing method, whoever calls it;
 - smart-entry suggestions read only the sources the caller may read;
+- global search (`GET /search`, and the `lazyit_search` AI tool through it) never queries the `purchases` or
+  `suppliers` index for a principal without it — no hit and no count (#1499); and a purchase or supplier hit
+  carries display fields only (reference, supplier name, invoice numbers, stored status, dates; name and tax
+  ID), never money, notes or contact details;
 - a consumable movement received from a purchase carries only the opaque line id and a reason naming the
   purchase **reference** (*Received from purchase OC-4512*, or the fixed *Received from a purchase* when there
   is none), never the supplier or any other purchase detail. The reference is visible to every consumable
@@ -661,6 +665,9 @@ checks the permission itself, in the API.
   `buildWhere` (`:503-511`); the export reads the linked purchase only with the permission (`:614-643`); a
   bulk receive against a line also needs `purchaseOrder:write` (`:972`).
 - `suggestions/suggestions.service.ts` — every source names the permission that guards it.
+- `search/search.controller.ts` — `allowedEntities` drops `purchases` / `suppliers` unless
+  `principalHas(principal, 'purchaseOrder:read')`; `search/search.service.ts` drops them again in `search()`
+  (defense in depth, an absent principal fails closed) and `RETRIEVE` caps their hit fields.
 - `purchase-orders/purchase-receiving.service.ts` — `stockReceiptReason` (the reference, or
   `STOCK_RECEIPT_REASON`).
 - `packages/shared/src/schemas/permission.ts:285` — `purchaseOrder:read` is in `VIEWER_DENIED_READS`.
@@ -669,7 +676,8 @@ checks the permission itself, in the API.
   `assets/assets.purchase-filters.http.spec.ts`, `suggestions/suggestions.authz.spec.ts`,
   `auth/role-permissions.golden.spec.ts` (VIEWER denied by default),
   `purchase-orders/purchase-receiving.service.spec.ts` (a stock receipt's reason names the reference, never the
-  supplier or the company).
+  supplier or the company), `search/search.controller.spec.ts` and `ai/core/tool-route-parity.spec.ts` (no
+  purchase indexes searched without the permission), `search/search.service.spec.ts` (their retrieved fields).
 
 ---
 

@@ -49,10 +49,10 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | 3 — AI assistant tools | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3, #1478)\|Phase 3]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3 web, #1478)\|Phase 3 web]] | #1488 · #1490 · #1492 (#1478) |
 | CEO confirmations; stock receipts name the reference | [[0099-purchases-scope-model-and-optionality#CEO confirmations (2026-10-02)\|CEO confirmations (2026-10-02)]] | #1494 |
 | Merge duplicate suppliers | [[0099-purchases-scope-model-and-optionality#Merge duplicate suppliers (2026-10-03, #1496)\|Merge duplicate suppliers]] | #1496 |
+| Purchases and suppliers in global search | [[0035-search-architecture#Amendment (2026-10-03) — purchases and suppliers, gated per caller (issue #1499)\|ADR-0035 amendment]] | #1499 |
 
 **Planned in ADR-0099 §13 or the UX proposal §7 but not built** (tracked as #1495, with sub-issues
-#1496–#1503; merging suppliers has since shipped, #1496): *Receive delivery* across lines, the dashboard *Pending deliveries* tile, purchases in global
-search, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
+#1496–#1503; merging suppliers has since shipped, #1496): *Receive delivery* across lines, the dashboard *Pending deliveries* tile, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
 field to suppliers, the warranty replacement action, and the XLSX export. Also not built: the per-asset proposal after a line's
 price is edited (§2; the asset panel shows *Differs from purchase* instead), the pending list's *Overdue only*
 toggle and the link picker's *created near the order date* chip. **The attachments backup** (§12) has not

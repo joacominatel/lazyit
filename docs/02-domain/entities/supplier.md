@@ -64,6 +64,9 @@ fields stay as they are.
   it — they show it, flagged as archived. The FK from a purchase is `Restrict`, so a supplier with purchases
   can never be hard-deleted.
 - Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
+- **Global search** (#1499, [[0035-search-architecture]]): the `suppliers` index carries the name, tax ID and
+  the two contact names (the names searchable, not returned) — never emails, phones, website or notes. Searched
+  only with `purchaseOrder:read`; an archived supplier is removed, and a rename re-indexes its purchases.
 - **Merging a duplicate** (CEO decision, 2026-10-03; [[0099-purchases-scope-model-and-optionality#Merge duplicate suppliers (2026-10-03, #1496)]]).
   An administrator (`purchaseOrder:delete`) merges the duplicate into the supplier that stays, after a preview,
   in one transaction:

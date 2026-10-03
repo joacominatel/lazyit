@@ -392,6 +392,12 @@ list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
 
 *Since built:* merging suppliers (2026-10-03, #1496) — see [[#Merge duplicate suppliers (2026-10-03, #1496)]].
 
+*Built since (2026-10-03, #1499):* **global search for purchases and suppliers**. Both are found in the ⌘K
+palette (a purchase also by its line descriptions) only by a principal holding `purchaseOrder:read` — D-A
+applies to search: the API never queries the two indexes for anyone else, so neither hits nor counts leak.
+The design, the projections and the upgrade path are in [[0035-search-architecture]]'s 2026-10-03
+amendment.
+
 ### 14. Upgrade safety
 
 - **Migrations are additive.** New tables; a nullable `purchaseOrderLineId` and a nullable currency

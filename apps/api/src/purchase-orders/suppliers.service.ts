@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type {
   CreateSupplier,
@@ -13,6 +14,7 @@ import type {
 import { SUPPLIER_MERGE_FIELDS, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, type Supplier } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -77,6 +79,8 @@ export class SuppliersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly actor: ActorService,
+    // Global search (#1499): re-index after each write. Optional, as in PurchaseOrdersService.
+    @Optional() private readonly searchSync?: PurchaseSearchSync,
   ) {}
 
   async findPage(filters: SupplierFilters, page: PageQuery) {
@@ -133,22 +137,29 @@ export class SuppliersService {
     return supplier;
   }
 
-  create(data: CreateSupplier) {
-    return this.prisma.supplier.create({ data });
+  async create(data: CreateSupplier) {
+    const supplier = await this.prisma.supplier.create({ data });
+    this.searchSync?.supplier(supplier.id, { purchases: false });
+    return supplier;
   }
 
   async update(id: string, data: UpdateSupplier) {
     await this.findOne(id);
-    return this.prisma.supplier.update({ where: { id }, data });
+    const supplier = await this.prisma.supplier.update({ where: { id }, data });
+    // Only a rename changes what its purchases' documents hold.
+    this.searchSync?.supplier(id, { purchases: data.name !== undefined });
+    return supplier;
   }
 
   /** Soft delete (never hard-delete). The supplier's purchases keep pointing at it. */
   async remove(id: string) {
     await this.findOne(id);
-    return this.prisma.supplier.update({
+    const supplier = await this.prisma.supplier.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
+    this.searchSync?.supplier(id, { purchases: false });
+    return supplier;
   }
 
   /** Clear `deletedAt` (ADR-0041). 404 if it never existed; idempotent when already live. */
@@ -161,10 +172,12 @@ export class SuppliersService {
       throw new NotFoundException(`Supplier ${id} not found`);
     }
     if (supplier.deletedAt === null) return supplier;
-    return this.prisma.supplier.update({
+    const restored = await this.prisma.supplier.update({
       where: { id },
       data: { deletedAt: null },
     });
+    this.searchSync?.supplier(id, { purchases: false });
+    return restored;
   }
 
   // ── Merge (#1496) ─────────────────────────────────────────────────────────────────────────────────────
@@ -212,7 +225,7 @@ export class SuppliersService {
   async merge(targetId: string, sourceId: string, principal?: Principal) {
     assertDistinct(targetId, sourceId);
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const merged = await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Supplier[]>`
         SELECT * FROM "suppliers" WHERE "id" IN (${targetId}, ${sourceId}) ORDER BY "id" FOR NO KEY UPDATE`;
       const target = assertMergeable(locked, targetId);
@@ -258,6 +271,11 @@ export class SuppliersService {
       );
       return { supplier, movedPurchases: purchaseIds.length, filledFields };
     });
+    // Global search (#1499), after commit: the kept supplier (its filled fields) and every purchase now
+    // naming it — the moved ones included — are re-indexed; the archived duplicate leaves the index.
+    this.searchSync?.supplier(targetId);
+    this.searchSync?.supplier(sourceId, { purchases: false });
+    return merged;
   }
 
   /** A supplier a merge can use: 404 if it never existed, 409 if it is archived. */

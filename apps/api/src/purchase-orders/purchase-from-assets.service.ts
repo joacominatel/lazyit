@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Optional } from '@nestjs/common';
 import {
   DEFAULT_PURCHASE_ORDER_STATUS,
   MONEY_MAX,
@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { PurchaseSearchSync } from '../search/purchase-search.sync';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { recordPurchaseOrderEvent } from './purchase-order-events';
 
@@ -115,6 +116,8 @@ export class PurchaseFromAssetsService {
     private readonly actor: ActorService,
     private readonly history: AssetHistoryService,
     private readonly purchases: PurchaseOrdersService,
+    // Global search (#1499): index the new purchase once it commits. Optional, as in PurchaseOrdersService.
+    @Optional() private readonly searchSync?: PurchaseSearchSync,
   ) {}
 
   /**
@@ -127,7 +130,7 @@ export class PurchaseFromAssetsService {
   async create(data: CreatePurchaseFromAssets, principal?: Principal) {
     const actor = this.actor.resolveActor(principal);
     const { assetIds, ...header } = data;
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await this.purchases.assertReferences(tx, header);
       const purchase = await tx.purchaseOrder.create({
         data: {
@@ -247,5 +250,7 @@ export class PurchaseFromAssetsService {
         failed,
       };
     });
+    this.searchSync?.purchase(result.purchaseOrder.id);
+    return result;
   }
 }

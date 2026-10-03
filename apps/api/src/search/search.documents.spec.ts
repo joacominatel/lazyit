@@ -5,10 +5,14 @@ import {
   projectConsumable,
   projectInfraNode,
   projectLocation,
+  projectPurchaseOrder,
+  projectSupplier,
   projectUser,
   type AssetRow,
   type ConsumableRow,
   type InfraNodeRow,
+  type PurchaseOrderRow,
+  type SupplierRow,
 } from './search.documents';
 
 // Pure projectors: assert each maps a row to exactly the documented search fields (id + searchable
@@ -227,6 +231,86 @@ describe('search document projectors', () => {
       state: 'CONFIRMED',
       ipAddress: null,
       assetName: null,
+    });
+  });
+
+  // ── purchases and suppliers (#1499, ADR-0099) ──────────────────────────────────────────────────────
+
+  it('projectPurchaseOrder keeps the display fields and the line descriptions — never money, notes or company', () => {
+    // A wider row (what a full purchase + lines load would carry) proves only the documented subset is copied.
+    const row: PurchaseOrderRow & Record<string, unknown> = {
+      id: 'po1',
+      reference: 'OC-4512',
+      status: 'ORDERED',
+      orderDate: new Date('2026-09-12T00:00:00.000Z'),
+      invoiceNumbers: 'A-0001, A-0002',
+      createdAt: new Date('2026-09-12T10:30:00.000Z'),
+      supplier: { name: 'Compumundo' },
+      lines: [{ description: 'ThinkPad T14' }, { description: 'USB-C dock' }],
+      notes: 'negotiated 10% off',
+      company: 'ACME AR',
+      currency: 'USD',
+      invoiceDate: new Date('2026-09-15T00:00:00.000Z'),
+      deliveryLocationId: 'loc1',
+      deletedAt: null,
+    };
+    expect(projectPurchaseOrder(row)).toEqual({
+      id: 'po1',
+      reference: 'OC-4512',
+      supplierName: 'Compumundo',
+      invoiceNumbers: 'A-0001, A-0002',
+      status: 'ORDERED',
+      orderDate: '2026-09-12T00:00:00.000Z',
+      createdAt: '2026-09-12T10:30:00.000Z',
+      lineDescriptions: ['ThinkPad T14', 'USB-C dock'],
+    });
+  });
+
+  it('projectPurchaseOrder passes a purchase identified only by its lines through with nulls', () => {
+    expect(
+      projectPurchaseOrder({
+        id: 'po2',
+        reference: null,
+        status: 'DRAFT',
+        orderDate: null,
+        invoiceNumbers: null,
+        createdAt: new Date('2026-10-01T08:00:00.000Z'),
+        supplier: null,
+        lines: [],
+      }),
+    ).toEqual({
+      id: 'po2',
+      reference: null,
+      supplierName: null,
+      invoiceNumbers: null,
+      status: 'DRAFT',
+      orderDate: null,
+      createdAt: '2026-10-01T08:00:00.000Z',
+      lineDescriptions: [],
+    });
+  });
+
+  it('projectSupplier keeps name, tax ID and contact names — never emails, phones, website or notes', () => {
+    const row: SupplierRow & Record<string, unknown> = {
+      id: 's1',
+      name: 'Compumundo',
+      taxId: '30-12345678-9',
+      salesContactName: 'Ana',
+      supportContactName: null,
+      salesContactEmail: 'ana@example.com',
+      salesContactPhone: '+54 11 5555',
+      supportContactEmail: 'rma@example.com',
+      supportContactPhone: null,
+      website: 'https://example.com',
+      notes: 'slow RMAs',
+      deletedAt: null,
+    };
+    expect(projectSupplier(row)).toEqual({
+      id: 's1',
+      name: 'Compumundo',
+      taxId: '30-12345678-9',
+      salesContactName: 'Ana',
+      supportContactName: null,
     });
   });
 });

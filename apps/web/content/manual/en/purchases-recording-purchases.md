@@ -118,7 +118,9 @@ the assets linked to each line — and, on a consumable line, from the stock rec
 
 The **Purchases** list opens on **every purchase, newest first**. To see only the ones still waiting for
 a delivery, choose **Waiting for units** in the delivery filter, or open the **Pending units** tab. You can
-also filter by status or supplier, and search by reference, invoice number, supplier or item.
+also filter by status or supplier, and search by reference, invoice number, supplier or item. Purchases
+and suppliers are also in [global search](/help/notifications-activity-global-search) (**⌘K**), for
+anyone who may view purchases.
 
 ## Receiving units
 

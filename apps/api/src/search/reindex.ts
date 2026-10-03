@@ -39,6 +39,9 @@ interface ReindexIndex {
   // use them; setting requires a re-index, which is exactly what this rebuild does). Used to make the
   // article `categoryId` (home folder) a filterable attribute for folder-access scoping.
   updateFilterableAttributes(attributes: string[]): AwaitableTask;
+  // #1499: pins which attributes full-text matching reads (default: every attribute). Set on the indexes
+  // whose documents carry display-only values that must not match a query (purchase dates and status).
+  updateSearchableAttributes(attributes: string[]): AwaitableTask;
 }
 
 /**
@@ -51,6 +54,23 @@ const FILTERABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
   articles: ['categoryId'],
   // ADR-0070 v1: filter topology nodes by kind/status/state (the canvas/Servers-list filters).
   infra: ['kind', 'status', 'state'],
+};
+
+/**
+ * Per-index SEARCHABLE attributes (#1499). Unset = Meilisearch's default, every attribute. A purchase
+ * document carries its dates and stored status for display only: without this list a query such as "2026"
+ * or "10" would match every purchase through its ISO dates. Applied on the temp index before the swap, so
+ * every rebuild — the boot self-heal that creates the index on an upgraded instance, the hourly reconcile
+ * and `reindex:all` — leaves the live index with these settings.
+ */
+const SEARCHABLE_ATTRIBUTES: Partial<Record<SearchIndex, string[]>> = {
+  purchases: [
+    'reference',
+    'supplierName',
+    'invoiceNumbers',
+    'lineDescriptions',
+  ],
+  suppliers: ['name', 'taxId', 'salesContactName', 'supportContactName'],
 };
 
 /**
@@ -156,6 +176,15 @@ export async function reindexIndex(
       await client
         .index(tempUid)
         .updateFilterableAttributes(filterable)
+        .waitTask();
+    }
+
+    // #1499: and the searchable attributes, for the indexes that pin them (dates must not match a query).
+    const searchable = SEARCHABLE_ATTRIBUTES[index];
+    if (searchable !== undefined) {
+      await client
+        .index(tempUid)
+        .updateSearchableAttributes(searchable)
         .waitTask();
     }
 

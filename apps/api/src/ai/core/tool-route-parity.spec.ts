@@ -703,6 +703,31 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
       expect((args.principal as Principal).kind).toBe('service');
     });
 
+    it('lazyit_search follows purchaseOrder:read for purchases and suppliers: a MEMBER keeps them, an SA without the grant does not (#1499)', async () => {
+      await tools.invoke(
+        'lazyit_search',
+        { query: 'oc-4512', entities: ['purchases', 'suppliers', 'assets'] },
+        ctx(actor('MEMBER')),
+      );
+      expect(
+        (search.search.mock.calls.at(-1) as [{ entities: string[] }])[0]
+          .entities,
+      ).toEqual(['assets', 'purchases', 'suppliers']);
+
+      await tools.invoke(
+        'lazyit_search',
+        { query: 'oc-4512', entities: ['purchases', 'suppliers', 'assets'] },
+        {
+          identity: { kind: 'service', serviceAccountId: SA.ai },
+          channel: 'HEADLESS',
+        },
+      );
+      expect(
+        (search.search.mock.calls.at(-1) as [{ entities: string[] }])[0]
+          .entities,
+      ).toEqual(['assets']);
+    });
+
     it('rejects invalid input before anything is dispatched', async () => {
       const spy = jest.spyOn(dispatcher, 'dispatch');
       for (const bad of [
