@@ -261,6 +261,19 @@ describe("purchase tables with entity refs (#1478)", () => {
     expect(t.rows[2]!.cells.applicationId!.href).toBe("/applications/ca1");
   });
 
+  test("a ref the viewer could not read (no label) shows its id, linked where the web has a page", () => {
+    const t = buildPreviewTable([
+      { description: "Toner", consumableId: { type: "consumable", id: "cc9" } },
+      { description: "Notebook", assetModelId: { type: "assetModel", id: "cm9" } },
+    ]);
+    expect(t.rows[0]!.cells.consumableId).toEqual({
+      value: { kind: "text", text: "cc9", untrusted: false },
+      href: "/consumables/cc9",
+      defaulted: false,
+    });
+    expect(t.rows[1]!.cells.assetModelId!.value).toEqual({ kind: "text", text: "cm9", untrusted: false });
+  });
+
   test("an older preview's raw id is still shown", () => {
     const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cm1" }]);
     expect(t.rows[0]!.cells.assetModelId!.value).toEqual({ kind: "text", text: "cm1", untrusted: false });

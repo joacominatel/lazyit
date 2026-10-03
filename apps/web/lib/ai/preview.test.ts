@@ -190,3 +190,26 @@ describe("money in lists (#1478)", () => {
     expect(formatPreviewValue([{ amount: null, currency: "ARS" }])).toEqual({ kind: "empty" });
   });
 });
+
+describe("purchase header refs (#1478)", () => {
+  test("the delivery location reads by name, or by id when the viewer could not read it", () => {
+    const named = presentPreview({
+      changes: [
+        {
+          field: "deliveryLocationId",
+          before: { type: "location", id: "l1" },
+          after: { type: "location", id: "l2", label: "HQ" },
+          valueKind: "entity",
+        },
+      ],
+    });
+    expect(named.rows[0]).toEqual({
+      field: "deliveryLocationId",
+      before: { kind: "text", text: "l1", untrusted: false },
+      after: { kind: "text", text: "HQ", untrusted: false },
+    });
+    // An older pending card sent the raw id.
+    const raw = presentPreview({ changes: [{ field: "deliveryLocationId", after: "l2" }] });
+    expect(raw.rows[0]!.after).toEqual({ kind: "text", text: "l2", untrusted: false });
+  });
+});
