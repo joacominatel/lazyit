@@ -5,6 +5,7 @@ import {
   DECODE_WIDTH,
   feedbackOnRead,
   msUntilFeedbackChange,
+  QR_BOX_MAX_EDGE,
   SCAN_FORMATS,
   SCAN_SUCCESS_MS,
   SCAN_TIP_AFTER_MS,
@@ -43,9 +44,11 @@ describe("camera scan setup (#1506)", () => {
   test("barcodes get a wide, short box; QR a square one", () => {
     expect(scanBox("barcodes", 1280, 720)).toEqual({ width: 1152, height: 360 });
     expect(scanBox("qr", 1280, 720)).toEqual({ width: 504, height: 504 });
-    // A portrait phone stream: the barcode box stays wider than tall.
+    // A portrait phone stream: the barcode box stays wider than tall, and the QR box is capped.
     const portrait = scanBox("barcodes", 1280, 2276);
     expect(portrait.width).toBeGreaterThan(portrait.height);
+    expect(scanBox("qr", 1280, 2276)).toEqual({ width: QR_BOX_MAX_EDGE, height: QR_BOX_MAX_EDGE });
+    expect(QR_BOX_MAX_EDGE).toBe(640);
   });
 
   test("the viewfinder is laid out at the decode width and scaled down to fit its frame", () => {

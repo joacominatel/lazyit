@@ -56,6 +56,13 @@ export const CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
 /** Decode attempts per second — each waits for the previous one, so a slow device scans less often. */
 export const SCAN_FPS = 10;
 
+/**
+ * The largest QR box edge, in layout pixels. A QR label needs far fewer pixels than a row of bars, and the box
+ * is decoded in full on the main thread, so a portrait phone stream (1280 × 2276 laid out) stays at 640² rather
+ * than 896².
+ */
+export const QR_BOX_MAX_EDGE = 640;
+
 /** The scan box inside a viewfinder of the given layout size: wide and short for 1D codes, square for QR. */
 export function scanBox(
   mode: CameraScanMode,
@@ -68,7 +75,7 @@ export function scanBox(
       height: Math.round(Math.min(viewfinderHeight * 0.5, viewfinderWidth * 0.45)),
     };
   }
-  const edge = Math.round(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
+  const edge = Math.min(Math.round(Math.min(viewfinderWidth, viewfinderHeight) * 0.7), QR_BOX_MAX_EDGE);
   return { width: edge, height: edge };
 }
 
