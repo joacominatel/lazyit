@@ -334,8 +334,9 @@ There are two ways in:
 - On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB — a little less
   for images with some providers — and 20 pages).
 - On **New purchase**, **New purchase from a document**: pick the file, and lazyit creates a **draft**
-  purchase named after the file, attaches the file and reads it. If you stop there, the draft keeps the
-  document and you can fill it in by hand.
+  purchase named after the file, attaches the file and reads it. Saving the review fills in the purchase
+  and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop before saving, the
+  draft keeps the document and you can fill it in by hand.
 
 Reading takes up to two minutes. If it fails, nothing was filled and the document stays attached — the
 screen says why (the provider was busy, the file has too many pages, the daily budget is spent…).
@@ -357,6 +358,8 @@ you select Save**, and then only what is ticked:
   - a date that could be day/month or month/day, with nothing in the document to settle it, is left blank;
   - a currency shown only as a symbol several currencies share (`$`);
   - a line whose quantity × unit price is not the line total the document prints.
+- **If saving stops half-way** (a connection drop, a refusal), what was already saved is kept and shown as
+  **Saved**, locked; **Save** then writes only the rest.
 - **The totals check** compares the lines, as you correct them, with the net (or total) the document
   prints: **Match**, or by how much they **differ** — usually a line without a price.
 - **The supplier** is matched to one you have, by tax ID (most reliable) or by name (check it). You can use

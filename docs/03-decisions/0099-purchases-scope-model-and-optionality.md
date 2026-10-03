@@ -1040,14 +1040,21 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
   purchase, and a purchase must be identifiable to exist (§2). Picking a file creates a **`DRAFT`** purchase
   whose **reference is the file name without its extension**, attaches the file and opens the review. While
   the purchase is still only that holder — no supplier, no line, the reference equal to the stand-in for the
-  stored file name — the review treats the reference as empty (the one read fills it, ticked) and offers
-  *Mark as ordered*, ticked. An abandoned or failed read leaves a draft purchase holding the document, to be
+  stored file name, **this its only document, attached within five minutes of the purchase being created**
+  (review of #1487: the one request sequence that makes a holder, so a person's own purchase whose hand-typed
+  reference happens to equal a file's name is never pre-ticked for replacement) — the review treats the
+  reference as empty (the one read fills it, ticked, while the stand-in still shows as what it has *now*) and
+  offers *Mark as ordered*, ticked. If renaming the stand-in to the stored file name fails after the upload,
+  the person is told and the review still opens; the reference then reads as the purchase's own. An abandoned or failed read leaves a draft purchase holding the document, to be
   filled by hand (the UX proposal's "the document stays attached either way"); deleting it is an admin's
   archive, as for any purchase. Rejected: a placeholder line (data that is not on the document); creating
   the purchase after the review (there is no document to read before it).
 - **Saving goes through the ordinary routes, in order:** the supplier (resolved or created), one header
-  `PATCH`, each new line, each changed line. A failure stops there with what was written kept; saving again
-  skips what already went through.
+  `PATCH`, each new line, each changed line. A failure stops there with what was written kept; those parts
+  are then **locked** on screen and marked *Saved* (an edit there could no longer reach the purchase), and
+  saving again writes only the rest. The toast counts the changes actually written; *Save* counts what is
+  still to write, says *Fix the marked values to save* while a value cannot be sent, and is disabled with
+  nothing to save.
 - **Where the action is offered, and what it says when it is not.** *Read this document* appears per PDF or
   image document only while the status is available. Otherwise the documents panel says why **only to an
   admin** (`settings:manage`, who can change Settings → AI) and only for a reason Settings → AI can fix; for

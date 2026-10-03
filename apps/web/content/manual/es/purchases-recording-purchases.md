@@ -346,8 +346,9 @@ Hay dos formas de empezar:
 - En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB —
   algo menos para imágenes con algunos proveedores — y 20 páginas).
 - En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo, y lazyit crea una compra en
-  **borrador** con el nombre del archivo, lo adjunta y lo lee. Si lo dejas ahí, el borrador conserva el
-  documento y puedes completarlo a mano.
+  **borrador** con el nombre del archivo, lo adjunta y lo lee. Guardar la revisión completa la compra y la
+  **marca como pedida** (viene marcado — desmárcalo para dejarla en borrador). Si lo dejas antes de guardar,
+  el borrador conserva el documento y puedes completarlo a mano.
 
 La lectura tarda hasta dos minutos. Si falla, no se completó nada y el documento sigue adjunto: la pantalla
 dice por qué (el proveedor estaba ocupado, el archivo tiene demasiadas páginas, se agotó el presupuesto
@@ -370,6 +371,8 @@ se guarda nada hasta que eliges Guardar**, y entonces solo lo que está marcado:
   - una fecha que puede ser día/mes o mes/día, sin nada en el documento que lo aclare, queda vacía;
   - una moneda que solo aparece como un símbolo que comparten varias monedas (`$`);
   - una línea cuya cantidad × precio unitario no es el total de línea que imprime el documento.
+- **Si el guardado se corta a mitad de camino** (una caída de la conexión, un rechazo), lo que ya se guardó
+  se conserva y aparece como **Guardado**, bloqueado; **Guardar** escribe entonces solo el resto.
 - **El control de totales** compara las líneas, a medida que las corriges, con el neto (o el total) que
   imprime el documento: **Coinciden**, o en cuánto **difieren** — casi siempre una línea sin precio.
 - **El proveedor** se busca entre los que ya tienes, por ID fiscal (lo más confiable) o por nombre
