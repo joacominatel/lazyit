@@ -68,7 +68,8 @@ it. The values are:
 Status appears as a colored badge in the list and on the detail page. Changing it is recorded in the
 asset's activity log. You can change it quickly without opening the editor: on the **detail page**
 the status badge itself is a dropdown, and in the list the row's **⋯** menu has a **Change status**
-option. You can also set the status of several assets at once from the list.
+option. You can also set the status of several assets at once from the list: select them and pick one
+under **Set status** in the selection bar.
 
 ## Serial and asset tag
 

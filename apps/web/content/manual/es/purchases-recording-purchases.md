@@ -236,8 +236,8 @@ a su línea de compra después. Hay tres caminos:
   lista empieza filtrada por el modelo de la línea y por activos **sin compra vinculada**; quita una
   etiqueta para ampliarla (un activo que ya está en otra compra igual se puede mover aquí, ver más abajo).
 - En un activo sin vincular, **Vincular a una compra** en su panel **Compra**.
-- En la lista de **Activos**, selecciona varias filas y elige **Vincular a una compra** en la barra de
-  selección. Luego elige la compra y la línea — las líneas del mismo modelo aparecen primero.
+- En la lista de **Activos**, selecciona varias filas y elige **Compra › Vincular a una compra** en la barra
+  de selección. Luego elige la compra y la línea — las líneas del mismo modelo aparecen primero.
 
 ### Elegir qué valores copiar
 
@@ -271,8 +271,8 @@ vinculan igual, y el resultado lista cada uno que no, con el motivo.
 
 ### Crear una compra a partir de activos
 
-Cuando la compra nunca se registró, selecciona los activos en la lista de **Activos** y elige **Crear
-compra** en la barra de selección. Un formulario corto pide el **proveedor**, la **referencia** y la
+Cuando la compra nunca se registró, selecciona los activos en la lista de **Activos** y elige **Compra ›
+Crear compra** en la barra de selección. Un formulario corto pide el **proveedor**, la **referencia** y la
 **moneda** — todos opcionales, todos sugeridos mientras escribes. lazyit crea entonces **una compra** con
 **una línea por modelo** (los activos sin modelo se agrupan por nombre), con la cantidad de activos de cada
 línea, y vincula cada activo a su línea.

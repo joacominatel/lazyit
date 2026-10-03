@@ -71,7 +71,7 @@ El estado aparece como una etiqueta de color en la lista y en la página de deta
 registrado en la actividad del activo. Puedes cambiarlo rápido sin abrir el editor: en la **página de
 detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el menú **⋯** de la fila
 tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
-la lista.
+la lista: selecciónalos y elige uno en **Definir estado** de la barra de selección.
 
 ## Serie y etiqueta de activo
 
