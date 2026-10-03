@@ -12,8 +12,7 @@ updated: 2026-10-02
 > the IT team bought, from which supplier, with which documents, and which assets came out of it — tied
 > to the finance PO number. lazyit **records** purchases; it does not run procurement. Always available,
 > optional at entry — no instance switch.
-> **Accepted and built** (Phases 1, 1b and 2 and the Phase 3 backend, 2026-10-02; the Phase 3 chat surfaces
-> in #1490) — see [[#What was built]].
+> **Accepted and built** (Phases 1, 1b, 2 and 3, 2026-10-02) — see [[#What was built]].
 >
 > **Start here:** the decision record [[0099-purchases-scope-model-and-optionality|ADR-0099]] (scope,
 > model, optionality) and [[0100-money-as-64-bit-minor-units|ADR-0100]] (money as 64-bit integers), then
@@ -46,9 +45,7 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | 1 — flows | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 flows, #1473)\|Phase 1 flows]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1 flows web, #1475)\|their screens]] | #1482 (#1473) · #1483 (#1475) |
 | 1b — consumable lines, document labels, scanning | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b consumable lines and document labels, #1476)\|Phase 1b]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b web, #1476)\|Phase 1b web]] | #1484 · #1485 (#1476) |
 | 2 — extraction, license lines, create from assets | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2, #1477)\|Phase 2]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] | #1486 · #1487 (#1477) |
-| 3 — AI assistant tools | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3, #1478)\|Phase 3]] | #1488 (#1478) |
-
-Phase 3 web: see #1478 (PR #1490).
+| 3 — AI assistant tools | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3, #1478)\|Phase 3]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3 web, #1478)\|Phase 3 web]] | #1488 · #1490 · #1492 (#1478) |
 
 **Planned in ADR-0099 §13 or the UX proposal §7 but not built** (no issue open for them yet): merging
 suppliers, *Receive delivery* across lines, the dashboard *Pending deliveries* tile, purchases in global
