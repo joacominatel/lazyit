@@ -622,7 +622,8 @@
     "supportContactPhone": "Teléfono de soporte",
     "linkState": "Situación actual",
     "moves": "Se mueve desde otra línea",
-    "writes": "Valores que recibe"
+    "writes": "Valores que recibe",
+    "notLinkable": "Activos que quedan afuera"
   },
   "fieldPrefixes": {
     "input": "Entrada: {name}",

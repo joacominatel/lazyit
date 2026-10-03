@@ -622,7 +622,8 @@
     "supportContactPhone": "Support phone",
     "linkState": "Currently",
     "moves": "Moves from another line",
-    "writes": "Values it gets"
+    "writes": "Values it gets",
+    "notLinkable": "Assets left out"
   },
   "fieldPrefixes": {
     "input": "Input: {name}",

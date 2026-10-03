@@ -1,4 +1,4 @@
-import type { AiMessagePart } from "@lazyit/shared";
+import { AI_NEVER_AUTO_APPROVE_WARNINGS, type AiMessagePart } from "@lazyit/shared";
 import type { DecisionErrorKind } from "./error-kinds";
 import { STEP_UP_WARNINGS } from "./error-kinds";
 import { groupMessageParts, type MessageItem, type ToolPart } from "./tool-groups";
@@ -194,10 +194,10 @@ export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", 
 
 /**
  * The preview warnings whose change is decided on its own page, never by "Approve all" / "Reject all"
- * (#1478): generating assets and setting or changing money. The server never auto-approves them either
- * (`AI_NEVER_AUTO_APPROVE_WARNINGS`); the user's own click on the page still approves, with no password.
+ * (#1478): generating assets and setting or changing money — the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, which
+ * the server never auto-approves either. The user's own click on the page still approves, with no password.
  */
-export const INDIVIDUAL_APPROVAL_WARNINGS: readonly string[] = ["CREATES_ASSETS", "CHANGES_MONEY"];
+export const INDIVIDUAL_APPROVAL_WARNINGS: readonly string[] = AI_NEVER_AUTO_APPROVE_WARNINGS;
 
 /** Why a still-waiting change can't be decided in bulk, or null when it can. Pure. */
 export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclusion | null {

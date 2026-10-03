@@ -233,6 +233,33 @@ describe("AiApprovalCard", () => {
     expect(enHtml).not.toContain(">NONE<");
   });
 
+  test("a purchase from assets shows its derived lines like a new purchase (#1478)", () => {
+    const req = approval("p3", { preview: {
+      ...approval("p3").preview,
+      toolName: "purchase_create_from_assets",
+      target: undefined,
+      warnings: ["CHANGES_MONEY"],
+      changes: [
+        { field: "action", after: "Record a purchase from 3 selected assets and link them to it." },
+        { field: "currency", after: "USD" },
+        {
+          field: "lines",
+          valueKind: "text",
+          after: [
+            { description: "Dell Latitude 5440", assetModelId: "cmodel1", quantity: 2, unitPrice: { amount: 98000, currency: "USD" } },
+            { description: "Old monitor", quantity: 1, unitPrice: null },
+          ],
+        },
+        { field: "notLinkable", after: 1, valueKind: "number" },
+      ],
+    } });
+    const html = render({ type: "approval", request: req, outcome: null });
+    expect(html).toContain(`>${en.fields.lines} <`);
+    expect(html).toContain("USD 980");
+    expect(html).toContain(`>${en.fields.notLinkable}</dt>`);
+    expect(html).toContain(en.approval.individualOnly);
+  });
+
   test("an added line is a one-row table, not a JSON string (#1478)", () => {
     const req = approval("p2", { preview: {
       ...approval("p2").preview,
