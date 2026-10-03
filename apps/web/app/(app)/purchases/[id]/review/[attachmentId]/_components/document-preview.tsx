@@ -28,6 +28,8 @@ export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string
     let objectUrl: string | null = null;
     fetchAttachmentBlob("purchaseOrder", purchaseId, attachment.id, controller.signal)
       .then((blob) => {
+        // Unmounted (or another document) meanwhile: never mint a URL nobody will revoke.
+        if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(new Blob([blob], { type: preview.type }));
         setUrl(objectUrl);
       })

@@ -76,7 +76,12 @@ const purchase = {
 } as unknown as PurchaseOrderDetail;
 
 function render(): string {
-  const review = buildReview(draft, purchase, "factura.pdf", "en");
+  const review = buildReview(
+    draft,
+    purchase,
+    { originalName: "factura.pdf", createdAt: "2026-03-05T00:00:00.000Z", count: 1 },
+    "en",
+  );
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases, common }}>
@@ -125,6 +130,12 @@ describe("the extraction review", () => {
 
   test("nothing is saved until Save, and the page says so", () => {
     expect(html).toContain(esc(x.saveNote));
+  });
+
+  test("while a value cannot be sent, Save says to fix it instead of counting changes", () => {
+    // The new line's quantity was not read, so the line cannot be added as it is.
+    expect(html).toContain(esc(x.saveFix));
+    expect(html).not.toContain("Save 0 changes");
   });
 });
 

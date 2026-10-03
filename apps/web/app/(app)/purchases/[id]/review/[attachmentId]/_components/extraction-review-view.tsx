@@ -37,7 +37,13 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, useMyPermissions } from "@/lib/hooks/use-permissions";
-import { canExtract, extractionErrorKey, maxBytesFor, unavailableHint } from "@/lib/purchases/extraction";
+import {
+  canExtract,
+  createArrivalRead,
+  extractionErrorKey,
+  maxBytesFor,
+  unavailableHint,
+} from "@/lib/purchases/extraction";
 import {
   buildReview,
   buildReviewPayload,
@@ -48,6 +54,7 @@ import {
   proposalAction,
   type ReviewHeaderField,
   type ReviewLine,
+  type ReviewPayload,
   type ReviewState,
   supplierAction,
   totalsCheck,
@@ -60,15 +67,6 @@ import { usePurchaseTitle } from "../../../../_components/purchase-display";
 import { SupplierField, useSupplierResolution, useSupplierSaver } from "../../../../_components/supplier-field";
 import { DocumentPreview } from "./document-preview";
 import { ActionBadge, Evidence, ProposalRow, ReadNote, Warnings } from "./review-fields";
-
-/** The header labels, from the purchase form. */
-const HEADER_LABEL: Record<ReviewHeaderField, string> = {
-  reference: "reference",
-  currency: "currency",
-  orderDate: "orderDate",
-  invoiceNumbers: "invoiceNumbers",
-  invoiceDate: "invoiceDate",
-};
 
 /**
  * The extraction review (ADR-0099 §11, Phase 2 #1477; UX proposal §3.b): the document on one side, the
@@ -116,13 +114,20 @@ export function ExtractionReviewView({
   const [draft, setDraft] = useState<PurchaseExtractionDraft | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
   const [builtFor, setBuiltFor] = useState<string | null>(null);
-  const started = useRef(false);
+  const arrivalRead = useRef(createArrivalRead());
   const eligible = attachment !== undefined && canExtract(status, attachment);
 
   // The review is built once per draft, against the purchase as it was read — adjusted during render.
   if (draft && purchase && attachment && builtFor !== draft.extractionId) {
     setBuiltFor(draft.extractionId);
-    setReview(buildReview(draft, purchase, attachment.originalName, locale));
+    setReview(
+      buildReview(
+        draft,
+        purchase,
+        { originalName: attachment.originalName, createdAt: attachment.createdAt, count: attachments?.length ?? 0 },
+        locale,
+      ),
+    );
   }
 
   function read() {
@@ -138,10 +143,13 @@ export function ExtractionReviewView({
   const decided =
     !permissionsLoading && !attachmentsLoading && (!canWrite || status !== undefined || statusFailed);
   useEffect(() => {
-    if (!autoRead || started.current || !decided) return;
-    started.current = true;
-    router.replace(pathname);
-    if (eligible) extract.mutate({ id: purchaseId, attachmentId }, { onSuccess: setDraft });
+    arrivalRead.current({
+      requested: autoRead,
+      decided,
+      eligible,
+      clearFlag: () => router.replace(pathname),
+      start: () => extract.mutate({ id: purchaseId, attachmentId }, { onSuccess: setDraft }),
+    });
   }, [autoRead, decided, eligible, router, pathname, extract, purchaseId, attachmentId]);
 
   const title = purchase ? titleOf(purchase) : "";
@@ -288,8 +296,18 @@ export function ReviewForm({
   const addLine = useAddPurchaseOrderLine();
   const updateLine = useUpdatePurchaseOrderLine();
   const submitting = useRef(false);
-  // What a failed save already wrote, so a retry never writes it twice.
-  const done = useRef<{ header: boolean; items: Set<string> }>({ header: false, items: new Set() });
+  // What a failed save already wrote, so a retry never writes it twice: the ref drives the save, the state
+  // locks those parts on screen (an edit there could no longer be saved), and `written` counts the changes.
+  const done = useRef<{ header: boolean; items: Set<string>; written: number }>({
+    header: false,
+    items: new Set(),
+    written: 0,
+  });
+  const [locked, setLocked] = useState<{ header: boolean; items: ReadonlySet<string> }>({
+    header: false,
+    items: new Set(),
+  });
+  const lockWritten = () => setLocked({ header: done.current.header, items: new Set(done.current.items) });
   const [saving, setSaving] = useState(false);
   const [headerErrors, setHeaderErrors] = useState<Partial<Record<ReviewHeaderField, string>>>({});
   const [lineErrors, setLineErrors] = useState<Record<number, LineErrors>>({});
@@ -316,7 +334,8 @@ export function ReviewForm({
   const totals = totalsCheck(review.lines, draft.totals, locale);
   const truncated = draft.warnings.some((w) => w.code === "LINES_TRUNCATED");
   const built = buildReviewPayload(review, locale);
-  const changes = built.ok ? built.changes : null;
+  // What Save would still write (parts a failed save already wrote are locked and not counted again).
+  const changes = built.ok ? pendingChanges(built.payload, locked) : null;
 
   useBeforeUnloadGuard(!saving);
 
@@ -358,10 +377,7 @@ export function ReviewForm({
       );
       return;
     }
-    if (result.changes === 0) {
-      router.push(`/purchases/${purchase.id}`);
-      return;
-    }
+    if (pendingChanges(result.payload, done.current) === 0) return;
     setSaving(true);
     try {
       const header = { ...(result.payload.header ?? {}) };
@@ -378,27 +394,33 @@ export function ReviewForm({
         if (resolved.created) toast.success(tForm("supplierCreatedToast", { name: resolved.created }));
         header.supplierId = resolved.id;
       }
-      if (Object.keys(header).length > 0 && !done.current.header) {
-        await updatePurchase.mutateAsync({ id: purchase.id, data: header });
+      if (!done.current.header) {
+        if (Object.keys(header).length > 0) {
+          await updatePurchase.mutateAsync({ id: purchase.id, data: header });
+          done.current.written += Object.keys(header).length;
+        }
         done.current.header = true;
       }
       for (const { index, line } of result.payload.addLines) {
-        const key = `add-${index}`;
+        const key = lineKey(index);
         if (done.current.items.has(key)) continue;
         await addLine.mutateAsync({ id: purchase.id, data: line });
         done.current.items.add(key);
+        done.current.written += 1;
       }
       for (const { index, lineId, data } of result.payload.lineUpdates) {
-        const key = `update-${index}`;
+        const key = lineKey(index);
         if (done.current.items.has(key)) continue;
         await updateLine.mutateAsync({ id: purchase.id, lineId, data });
         done.current.items.add(key);
+        done.current.written += Object.keys(data).length;
       }
-      toast.success(t("savedToast", { count: result.changes }));
+      toast.success(t("savedToast", { count: done.current.written }));
       router.push(`/purchases/${purchase.id}`);
     } catch (err) {
       notifyError(err, t("saveError"));
     } finally {
+      lockWritten();
       setSaving(false);
     }
   }
@@ -433,9 +455,11 @@ export function ReviewForm({
       )}
 
       <section aria-labelledby="review-purchase-heading" className="space-y-3">
-        <h2 id="review-purchase-heading" className="text-base font-semibold">
+        <h2 id="review-purchase-heading" className="flex items-center gap-2 text-base font-semibold">
           {t("purchaseSection")}
+          {locked.header ? <StatusBadge tone="success">{t("savedPart")}</StatusBadge> : null}
         </h2>
+        <fieldset disabled={locked.header} className="m-0 min-w-0 space-y-3 border-0 p-0">
 
         <div
           className={
@@ -512,7 +536,7 @@ export function ReviewForm({
 
         {review.header.map((item) => {
           if (unchanged.has(item.field)) return null;
-          const label = tForm(HEADER_LABEL[item.field]);
+          const label = tForm(item.field);
           const isDate = item.field === "orderDate" || item.field === "invoiceDate";
           const currentText = isDate && item.current ? date(`${item.current}T00:00:00.000Z`) : item.current;
           const currencyNote =
@@ -555,6 +579,7 @@ export function ReviewForm({
             {t("markOrdered")}
           </label>
         ) : null}
+        </fieldset>
       </section>
 
       <section aria-labelledby="review-lines-heading" className="space-y-3">
@@ -564,18 +589,27 @@ export function ReviewForm({
         {review.lines.length === 0 ? <p className="text-sm text-muted-foreground">{t("noLines")}</p> : null}
         {review.lines.map((line) =>
           line.target ? (
-            <MatchedLine
+            <fieldset
               key={line.index}
-              line={line}
-              currency={purchase.currency ?? ""}
-              errors={lineErrors[line.index]}
-              onChange={(next) => setLine(line.index, next)}
-            />
+              disabled={locked.items.has(lineKey(line.index))}
+              className="m-0 min-w-0 border-0 p-0"
+            >
+              <MatchedLine
+                line={line}
+                currency={purchase.currency ?? ""}
+                errors={lineErrors[line.index]}
+                saved={locked.items.has(lineKey(line.index))}
+                onChange={(next) => setLine(line.index, next)}
+              />
+            </fieldset>
           ) : (
-            <div
+            <fieldset
               key={line.index}
+              disabled={locked.items.has(lineKey(line.index))}
               className={
-                line.checked ? "space-y-3 rounded-lg border p-3" : "space-y-3 rounded-lg border border-dashed p-3 opacity-80"
+                line.checked
+                  ? "m-0 min-w-0 space-y-3 rounded-lg border p-3"
+                  : "m-0 min-w-0 space-y-3 rounded-lg border border-dashed p-3 opacity-80"
               }
             >
               <label className="flex items-center gap-3 text-sm font-medium">
@@ -584,7 +618,11 @@ export function ReviewForm({
                   onCheckedChange={(checked) => setLine(line.index, { ...line, checked: checked === true })}
                 />
                 {t("addLine", { index: line.index + 1 })}
-                <StatusBadge tone="info">{t("action.add")}</StatusBadge>
+                {locked.items.has(lineKey(line.index)) ? (
+                  <StatusBadge tone="success">{t("savedPart")}</StatusBadge>
+                ) : (
+                  <StatusBadge tone="info">{t("action.add")}</StatusBadge>
+                )}
               </label>
               <Warnings codes={line.warnings.line} />
               <LineFields
@@ -604,7 +642,7 @@ export function ReviewForm({
                   <Warnings codes={line.warnings.lineTotal} />
                 </div>
               ) : null}
-            </div>
+            </fieldset>
           ),
         )}
       </section>
@@ -616,15 +654,34 @@ export function ReviewForm({
         </Button>
         <Button
           type="button"
-          disabled={saving}
+          disabled={saving || changes === 0}
           onClick={() => void runExclusive(submitting, save)}
         >
           {saving && <ArrowPathIcon className="animate-spin" />}
-          {changes === null || changes > 0 ? t("save", { count: changes ?? 0 }) : t("saveNothing")}
+          {changes === null ? t("saveFix") : changes > 0 ? t("save", { count: changes }) : t("saveNothing")}
         </Button>
       </div>
     </div>
   );
+}
+
+/** A line's key in the save's bookkeeping. */
+function lineKey(index: number): string {
+  return `line-${index}`;
+}
+
+/** How many changes Save would still write, leaving out the parts a failed save already wrote. */
+function pendingChanges(
+  payload: ReviewPayload,
+  written: { header: boolean; items: ReadonlySet<string> },
+): number {
+  let count = 0;
+  if (!written.header) count += Object.keys(payload.header ?? {}).length + (payload.supplier ? 1 : 0);
+  for (const { index } of payload.addLines) if (!written.items.has(lineKey(index))) count += 1;
+  for (const { index, data } of payload.lineUpdates) {
+    if (!written.items.has(lineKey(index))) count += Object.keys(data).length;
+  }
+  return count;
 }
 
 /** The fields the review asks the person to check on a new line. */
@@ -675,11 +732,14 @@ function MatchedLine({
   line,
   currency,
   errors,
+  saved,
   onChange,
 }: {
   line: ReviewLine;
   currency: string;
   errors?: LineErrors;
+  /** Already written by a save that failed later. */
+  saved: boolean;
   onChange: (next: ReviewLine) => void;
 }) {
   const t = useTranslations("purchases.extraction");
@@ -698,7 +758,7 @@ function MatchedLine({
     <div className="space-y-3 rounded-lg border p-3">
       <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
         {t("existingLine", { line: target.description })}
-        <StatusBadge tone="neutral">{t("onPurchase")}</StatusBadge>
+        <StatusBadge tone={saved ? "success" : "neutral"}>{saved ? t("savedPart") : t("onPurchase")}</StatusBadge>
       </p>
       <Warnings codes={line.warnings.line} />
       {changes.length === 0 ? (

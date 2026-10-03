@@ -29,7 +29,7 @@ import type {
   UpdatePurchaseOrderLine,
 } from "@lazyit/shared";
 import { formatMoney, parseMoneyInput } from "@/lib/utils/money";
-import { isDocumentHolder } from "./extraction";
+import { isDocumentHolder, type ReviewDocument } from "./extraction";
 import {
   dateInputToIso,
   emptyLineDraft,
@@ -68,6 +68,11 @@ export interface FieldProposal<F extends string = string> {
   warnings: string[];
   /** Whether it is applied on save. */
   checked: boolean;
+  /**
+   * The purchase's stand-in value, shown as what it has now although it is filled like an empty field (the
+   * reference of a *New purchase from a document* holder).
+   */
+  standIn?: string;
 }
 
 /** The supplier as proposed: matched to an existing one, or a name to create. */
@@ -281,18 +286,18 @@ function lineFrom(
 }
 
 /**
- * The draft against the purchase → the review. `attachmentName` is the document's file name: on a purchase
- * that is still only the holder of *New purchase from a document* (its reference is the file name's
- * stand-in), the reference is treated as empty, so the one read from the document fills it.
+ * The draft against the purchase → the review. `document` is the document read: on a purchase that is still
+ * only the holder of *New purchase from a document* ({@link isDocumentHolder}), the reference is treated as
+ * empty, so the one read from the document fills it — and the stand-in is still shown as what it has now.
  */
 export function buildReview(
   draft: PurchaseExtractionDraft,
   purchase: PurchaseOrderDetail,
-  attachmentName: string,
+  document: ReviewDocument,
   locale: string,
 ): ReviewState {
   const warnings = warningsByPath(draft.warnings);
-  const holder = isDocumentHolder(purchase, attachmentName);
+  const holder = isDocumentHolder(purchase, document);
   const header = draft.header;
   const at = (path: string) => warnings.get(`header.${path}`) ?? [];
   const date = (value: string | null) => (value === null ? null : isoToDateInput(value));
@@ -311,9 +316,10 @@ export function buildReview(
     invoiceNumbers: header.invoiceNumbers,
     invoiceDate: { value: date(header.invoiceDate.value), evidence: header.invoiceDate.evidence },
   };
-  const headerProposals = REVIEW_HEADER_FIELDS.map((field) =>
-    proposal(field, currentText[field], readText[field], at(field)),
-  );
+  const headerProposals = REVIEW_HEADER_FIELDS.map((field) => {
+    const item = proposal(field, currentText[field], readText[field], at(field));
+    return holder && field === "reference" && purchase.reference ? { ...item, standIn: purchase.reference } : item;
+  });
 
   const match = draft.matches.supplier;
   const readName = text(header.supplierName.value);

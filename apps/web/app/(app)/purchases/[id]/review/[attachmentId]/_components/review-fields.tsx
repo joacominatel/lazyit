@@ -148,8 +148,10 @@ export function ProposalRow({
             className={type === "date" ? "font-mono" : undefined}
           />
         )}
-        {action === "replace" || action === "same" ? (
-          <p className="text-xs text-muted-foreground">{t("now", { value: currentText ?? item.current })}</p>
+        {action === "replace" || action === "same" || item.standIn ? (
+          <p className="text-xs text-muted-foreground">
+            {t("now", { value: item.standIn ?? currentText ?? item.current })}
+          </p>
         ) : null}
         <ReadNote read={item.read} evidence={item.evidence} warnings={item.warnings} />
         {note}

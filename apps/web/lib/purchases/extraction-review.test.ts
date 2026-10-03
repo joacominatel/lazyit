@@ -17,6 +17,7 @@ import {
   type ReviewState,
   totalsCheck,
 } from "./extraction-review";
+import type { ReviewDocument } from "./extraction";
 
 const ev = (text: string, page = 1) => ({ text, page });
 const read = <T,>(value: T, text: string) => ({ value, evidence: ev(text) });
@@ -123,6 +124,14 @@ function savedLine(patch: Partial<PurchaseOrderLine> = {}): PurchaseOrderLine {
   };
 }
 
+/** The document read, attached half a minute after the purchase was created (as a holder's is). */
+const doc = (originalName: string, patch: Partial<ReviewDocument> = {}): ReviewDocument => ({
+  originalName,
+  createdAt: "2026-03-01T00:00:30.000Z",
+  count: 1,
+  ...patch,
+});
+
 const header = (state: ReviewState, field: string) => state.header.find((item) => item.field === field)!;
 
 describe("proposalAction — the client-side diff", () => {
@@ -140,7 +149,7 @@ describe("proposalAction — the client-side diff", () => {
 
 describe("buildReview — draft → form", () => {
   test("values read fill the empty purchase, pre-checked; nulls stay blank and unchecked", () => {
-    const state = buildReview(draft(), purchase(), "factura.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("factura.pdf"), "es");
     expect(header(state, "reference")).toMatchObject({ proposed: "OC 4471", read: true, checked: true });
     expect(header(state, "orderDate")).toMatchObject({ proposed: "", read: false, checked: false });
     expect(header(state, "invoiceDate")).toMatchObject({
@@ -157,7 +166,7 @@ describe("buildReview — draft → form", () => {
     const state = buildReview(
       draft({ lines: [draftLine({ quantity: blank })] }),
       purchase(),
-      "factura.pdf",
+      doc("factura.pdf"),
       "es",
     );
     const [line] = state.lines;
@@ -165,27 +174,27 @@ describe("buildReview — draft → form", () => {
     expect(line!.draft.quantity).toBe("");
     expect(line!.unread).toContain("quantity");
     expect(line!.draft.warrantyMonths).toBe("");
-    expect(buildReview(draft(), purchase(), "factura.pdf", "en").lines[0]!.draft.unitPrice).toBe("1,412,500");
+    expect(buildReview(draft(), purchase(), doc("factura.pdf"), "en").lines[0]!.draft.unitPrice).toBe("1,412,500");
   });
 
   test("the model matched by line memory is mapped on an asset line; nothing is mapped on other kinds", () => {
-    const state = buildReview(draft(), purchase(), "factura.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("factura.pdf"), "es");
     expect(state.lines[0]!.draft.assetModelId).toBe(MODEL);
     expect(state.lines[1]!.draft).toMatchObject({ kind: "OTHER", assetModelId: "" });
   });
 
   test("a line whose kind was not read starts as an asset line and says so", () => {
-    const state = buildReview(draft({ lines: [draftLine({ kind: null })] }), purchase(), "f.pdf", "es");
+    const state = buildReview(draft({ lines: [draftLine({ kind: null })] }), purchase(), doc("f.pdf"), "es");
     expect(state.lines[0]).toMatchObject({ kindRead: false, draft: { kind: "ASSET" } });
   });
 
   test("a line nobody could name is not added until a description is typed", () => {
-    const state = buildReview(draft({ lines: [draftLine({ description: blank })] }), purchase(), "f.pdf", "es");
+    const state = buildReview(draft({ lines: [draftLine({ description: blank })] }), purchase(), doc("f.pdf"), "es");
     expect(state.lines[0]!.checked).toBe(false);
   });
 
   test("the matched supplier is proposed by its own name, picked by id", () => {
-    const state = buildReview(draft(), purchase(), "factura.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("factura.pdf"), "es");
     expect(state.supplier).toMatchObject({ text: "Compumundo", chosenId: SUPPLIER, checked: true, readTaxId: "30-71234567-9" });
   });
 });
@@ -201,7 +210,7 @@ describe("buildReview — proposed changes on a purchase that has data", () => {
   });
 
   test("filling an empty field is pre-checked; replacing a value never is", () => {
-    const state = buildReview(draft(), existing, "factura.pdf", "es");
+    const state = buildReview(draft(), existing, doc("factura.pdf"), "es");
     expect(header(state, "invoiceNumbers")).toMatchObject({ current: "", checked: true });
     expect(header(state, "reference")).toMatchObject({ current: "OC 4470", proposed: "OC 4471", checked: false });
     expect(header(state, "currency")).toMatchObject({ current: "USD", proposed: "ARS", checked: false });
@@ -209,7 +218,7 @@ describe("buildReview — proposed changes on a purchase that has data", () => {
   });
 
   test("a document line with the same description proposes changes to that line, field by field", () => {
-    const state = buildReview(draft(), existing, "factura.pdf", "es");
+    const state = buildReview(draft(), existing, doc("factura.pdf"), "es");
     const [matched, added] = state.lines;
     expect(matched!.target?.id).toBe("ckline0000000000000000000");
     expect(matched!.fields.find((f) => f.field === "quantity")).toMatchObject({ current: "4", proposed: "4", checked: false });
@@ -227,24 +236,40 @@ describe("buildReview — proposed changes on a purchase that has data", () => {
       supplierId: SUPPLIER,
       supplier: { id: SUPPLIER, name: "Compumundo", deletedAt: null } as PurchaseOrderDetail["supplier"],
     });
-    expect(buildReview(draft(), same, "factura.pdf", "es").supplier.checked).toBe(false);
+    expect(buildReview(draft(), same, doc("factura.pdf"), "es").supplier.checked).toBe(false);
   });
 
   test("the holder of New purchase from a document is filled like an empty purchase", () => {
     const holder = purchase({ reference: "factura", status: "DRAFT" });
-    const state = buildReview(draft(), holder, "factura.pdf", "es");
+    const state = buildReview(draft(), holder, doc("factura.pdf"), "es");
     expect(state.holder).toBe(true);
     expect(state.markOrdered).toBe(true);
-    expect(header(state, "reference")).toMatchObject({ current: "", checked: true });
+    expect(header(state, "reference")).toMatchObject({ current: "", checked: true, standIn: "factura" });
     // A purchase someone typed the same reference into is not a holder once it has a supplier.
     const typed = purchase({ reference: "factura", supplierId: SUPPLIER });
-    expect(buildReview(draft(), typed, "factura.pdf", "es").holder).toBe(false);
+    expect(buildReview(draft(), typed, doc("factura.pdf"), "es").holder).toBe(false);
+  });
+
+  test("a hand-typed reference equal to the file name is never pre-ticked for replacement", () => {
+    // Same stem, no supplier, no line — but the document came long after the purchase, or is not its only one.
+    const typed = purchase({ reference: "factura", status: "DRAFT" });
+    for (const document of [
+      doc("factura.pdf", { createdAt: "2026-03-09T10:00:00.000Z" }),
+      doc("factura.pdf", { count: 2 }),
+      doc("factura.pdf", { createdAt: "2026-02-28T23:59:00.000Z" }),
+    ]) {
+      const state = buildReview(draft(), typed, document, "es");
+      expect(state.holder).toBe(false);
+      expect(state.markOrdered).toBe(false);
+      expect(header(state, "reference")).toMatchObject({ current: "factura", proposed: "OC 4471", checked: false });
+      expect(header(state, "reference").standIn).toBeUndefined();
+    }
   });
 });
 
 describe("editing a proposal", () => {
   test("typing a value checks it; emptying it unchecks it", () => {
-    const state = buildReview(draft(), purchase({ reference: "OC 4470" }), "f.pdf", "es");
+    const state = buildReview(draft(), purchase({ reference: "OC 4470" }), doc("f.pdf"), "es");
     const reference = header(state, "reference");
     expect(reference.checked).toBe(false);
     expect(editProposal(reference, "OC 4472").checked).toBe(true);
@@ -252,14 +277,14 @@ describe("editing a proposal", () => {
   });
 
   test("choosing to create the supplier as read drops the match", () => {
-    const state = buildReview(draft(), purchase(), "f.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("f.pdf"), "es");
     expect(editSupplier(state.supplier, "COMPUMUNDO S.A.", "")).toMatchObject({ chosenId: "", checked: true });
   });
 });
 
 describe("buildReviewPayload — only what the person confirmed", () => {
   test("a new purchase: header, supplier and lines, all through the ordinary write shapes", () => {
-    const state = buildReview(draft(), purchase(), "f.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("f.pdf"), "es");
     state.lines[1]!.checked = true;
     const result = buildReviewPayload(state, "es");
     expect(result.ok).toBe(true);
@@ -290,7 +315,7 @@ describe("buildReviewPayload — only what the person confirmed", () => {
   });
 
   test("a new supplier as read is created with the tax ID read", () => {
-    const state = buildReview(draft({ matches: { supplier: null, lineModels: [] } }), purchase(), "f.pdf", "es");
+    const state = buildReview(draft({ matches: { supplier: null, lineModels: [] } }), purchase(), doc("f.pdf"), "es");
     const result = buildReviewPayload(state, "es");
     expect(result.ok && result.payload.supplier).toEqual({
       text: "COMPUMUNDO S.A.",
@@ -300,14 +325,14 @@ describe("buildReviewPayload — only what the person confirmed", () => {
   });
 
   test("a blank is never sent, so nothing is cleared — even when checked", () => {
-    const state = buildReview(draft(), purchase({ orderDate: "2026-01-01T00:00:00.000Z" }), "f.pdf", "es");
+    const state = buildReview(draft(), purchase({ orderDate: "2026-01-01T00:00:00.000Z" }), doc("f.pdf"), "es");
     header(state, "orderDate").checked = true;
     const result = buildReviewPayload(state, "es");
     expect(result.ok && result.payload.header && "orderDate" in result.payload.header).toBe(false);
   });
 
   test("replacements apply only when ticked", () => {
-    const state = buildReview(draft(), purchase({ reference: "OC 4470" }), "f.pdf", "es");
+    const state = buildReview(draft(), purchase({ reference: "OC 4470" }), doc("f.pdf"), "es");
     const unticked = buildReviewPayload(state, "es");
     expect(unticked.ok && unticked.payload.header?.reference).toBeUndefined();
     header(state, "reference").checked = true;
@@ -316,7 +341,7 @@ describe("buildReviewPayload — only what the person confirmed", () => {
   });
 
   test("a new line whose quantity was not read must be typed (blanks over guesses)", () => {
-    const state = buildReview(draft({ lines: [draftLine({ quantity: blank })] }), purchase(), "f.pdf", "es");
+    const state = buildReview(draft({ lines: [draftLine({ quantity: blank })] }), purchase(), doc("f.pdf"), "es");
     expect(buildReviewPayload(state, "es")).toEqual({
       ok: false,
       headerErrors: {},
@@ -328,13 +353,13 @@ describe("buildReviewPayload — only what the person confirmed", () => {
   });
 
   test("an unknown price stays unknown (ADR-0099 §2)", () => {
-    const state = buildReview(draft({ lines: [draftLine({ unitPrice: blank })] }), purchase(), "f.pdf", "es");
+    const state = buildReview(draft({ lines: [draftLine({ unitPrice: blank })] }), purchase(), doc("f.pdf"), "es");
     const result = buildReviewPayload(state, "es");
     expect(result.ok && "unitPrice" in result.payload.addLines[0]!.line).toBe(false);
   });
 
   test("a matched line sends only its ticked field changes, as minor units", () => {
-    const state = buildReview(draft(), purchase({ lines: [savedLine({ unitPrice: null })] }), "f.pdf", "es");
+    const state = buildReview(draft(), purchase({ lines: [savedLine({ unitPrice: null })] }), doc("f.pdf"), "es");
     const result = buildReviewPayload(state, "es");
     expect(result.ok && result.payload.lineUpdates).toEqual([
       { index: 0, lineId: "ckline0000000000000000000", data: { unitPrice: 141250000 } },
@@ -342,7 +367,7 @@ describe("buildReviewPayload — only what the person confirmed", () => {
   });
 
   test("the holder is marked as ordered with the review", () => {
-    const state = buildReview(draft(), purchase({ reference: "factura", status: "DRAFT" }), "factura.pdf", "es");
+    const state = buildReview(draft(), purchase({ reference: "factura", status: "DRAFT" }), doc("factura.pdf"), "es");
     const result = buildReviewPayload(state, "es");
     expect(result.ok && result.payload.header?.status).toBe("ORDERED");
   });
@@ -350,7 +375,7 @@ describe("buildReviewPayload — only what the person confirmed", () => {
 
 describe("totalsCheck — lines against the printed net and gross", () => {
   test("a mismatch says by how much, and counts the lines it could not add", () => {
-    const state = buildReview(draft(), purchase(), "f.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("f.pdf"), "es");
     expect(totalsCheck(state.lines, draft().totals, "es")).toEqual({
       linesTotal: 565000000,
       incomplete: 1,
@@ -362,13 +387,13 @@ describe("totalsCheck — lines against the printed net and gross", () => {
   });
 
   test("fixing the blank line makes it match", () => {
-    const state = buildReview(draft(), purchase(), "f.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("f.pdf"), "es");
     state.lines[1]!.draft.unitPrice = "25.000";
     expect(totalsCheck(state.lines, draft().totals, "es")).toMatchObject({ state: "match", incomplete: 0 });
   });
 
   test("nothing printed to compare with is unknown, not a match", () => {
-    const state = buildReview(draft(), purchase(), "f.pdf", "es");
+    const state = buildReview(draft(), purchase(), doc("f.pdf"), "es");
     expect(totalsCheck(state.lines, { net: blank, gross: blank }, "es").state).toBe("unknown");
   });
 });
@@ -384,7 +409,7 @@ describe("checkCount", () => {
         ],
       }),
       purchase(),
-      "f.pdf",
+      doc("f.pdf"),
       "es",
     );
     expect(checkCount(state)).toBe(2);

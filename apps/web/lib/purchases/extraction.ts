@@ -159,21 +159,62 @@ export function referenceFromFileName(name: string): string {
   return (stem || trimmed || "Document").slice(0, REFERENCE_MAX);
 }
 
+/** How close the document's upload must follow the purchase's creation for the pair to be one holder. */
+export const HOLDER_WINDOW_MS = 5 * 60 * 1000;
+
+/** The document under review, as the holder check needs it. */
+export interface ReviewDocument {
+  originalName: string;
+  createdAt: string;
+  /** How many live documents the purchase has. */
+  count: number;
+}
+
 /**
- * Whether the purchase is still only that holder: its reference is the stand-in for this document's name and
- * nothing else identifies it (no supplier, no line). Then the review fills the reference like any empty field
- * — it is not a value a person typed.
+ * Whether the purchase is still only that holder: its reference is the stand-in for this document's name,
+ * nothing else identifies it (no supplier, no line), this is its only document, and the document was attached
+ * within {@link HOLDER_WINDOW_MS} of the purchase being created — the one request sequence that makes a
+ * holder. Then the review fills the reference like any empty field. Each condition guards a person's own
+ * purchase whose hand-typed reference happens to equal a file's name: such a reference is never pre-ticked
+ * for replacement.
  */
 export function isDocumentHolder(
-  purchase: { reference: string | null; supplierId: string | null; lines: readonly unknown[] },
-  attachmentName: string,
+  purchase: { reference: string | null; supplierId: string | null; lines: readonly unknown[]; createdAt: string },
+  document: ReviewDocument,
 ): boolean {
+  const gap = Date.parse(document.createdAt) - Date.parse(purchase.createdAt);
   return (
     purchase.supplierId === null &&
     purchase.lines.length === 0 &&
+    document.count === 1 &&
+    Number.isFinite(gap) &&
+    gap >= 0 &&
+    gap <= HOLDER_WINDOW_MS &&
     purchase.reference !== null &&
-    purchase.reference === referenceFromFileName(attachmentName)
+    purchase.reference === referenceFromFileName(document.originalName)
   );
+}
+
+/**
+ * The read on arrival (`?read=1`), at most once per page: `step` is called on every effect run with what is
+ * known so far; once everything is known it drops the flag from the URL and, when the document can be read,
+ * starts the read — exactly once, however many times the effect runs again (a re-render, React's development
+ * double run, the URL change itself).
+ */
+export function createArrivalRead(): (state: {
+  requested: boolean;
+  decided: boolean;
+  eligible: boolean;
+  clearFlag: () => void;
+  start: () => void;
+}) => void {
+  let done = false;
+  return ({ requested, decided, eligible, clearFlag, start }) => {
+    if (done || !requested || !decided) return;
+    done = true;
+    clearFlag();
+    if (eligible) start();
+  };
 }
 
 /** The image types the review previews inline (an `<img>` of a `blob:` URL). */

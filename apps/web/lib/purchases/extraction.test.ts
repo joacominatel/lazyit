@@ -5,6 +5,7 @@ import en from "@/messages/en/purchases.json";
 import es from "@/messages/es/purchases.json";
 import {
   canExtract,
+  createArrivalRead,
   EXTRACTION_ERROR_KEYS,
   extractionErrorKey,
   fileProblem,
@@ -129,11 +130,57 @@ describe("the holder purchase of New purchase from a document", () => {
   });
 
   test("is recognised only while nothing else identifies the purchase", () => {
-    const holder = { reference: "Factura A 1", supplierId: null, lines: [] };
-    expect(isDocumentHolder(holder, "Factura A 1.pdf")).toBe(true);
-    expect(isDocumentHolder({ ...holder, supplierId: "cksupplier000000000000000" }, "Factura A 1.pdf")).toBe(false);
-    expect(isDocumentHolder({ ...holder, lines: [{}] }, "Factura A 1.pdf")).toBe(false);
-    expect(isDocumentHolder({ ...holder, reference: "OC 77" }, "Factura A 1.pdf")).toBe(false);
+    const holder = { reference: "Factura A 1", supplierId: null, lines: [], createdAt: "2026-03-01T10:00:00.000Z" };
+    const document = { originalName: "Factura A 1.pdf", createdAt: "2026-03-01T10:00:04.000Z", count: 1 };
+    expect(isDocumentHolder(holder, document)).toBe(true);
+    expect(isDocumentHolder({ ...holder, supplierId: "cksupplier000000000000000" }, document)).toBe(false);
+    expect(isDocumentHolder({ ...holder, lines: [{}] }, document)).toBe(false);
+    expect(isDocumentHolder({ ...holder, reference: "OC 77" }, document)).toBe(false);
+  });
+
+  test("a hand-typed reference equal to the file stem is not a holder: one document, attached right after", () => {
+    const typed = { reference: "Factura A 1", supplierId: null, lines: [], createdAt: "2026-03-01T10:00:00.000Z" };
+    const document = { originalName: "Factura A 1.pdf", createdAt: "2026-03-01T10:00:04.000Z", count: 1 };
+    expect(isDocumentHolder(typed, { ...document, count: 2 })).toBe(false);
+    expect(isDocumentHolder(typed, { ...document, createdAt: "2026-03-01T10:06:00.000Z" })).toBe(false);
+    expect(isDocumentHolder(typed, { ...document, createdAt: "2026-03-01T09:59:00.000Z" })).toBe(false);
+    expect(isDocumentHolder(typed, { ...document, createdAt: "2026-03-01T10:04:59.000Z" })).toBe(true);
+  });
+});
+
+describe("createArrivalRead — ?read=1 reads once", () => {
+  function run() {
+    const calls: string[] = [];
+    const step = createArrivalRead();
+    const at = (decided: boolean, eligible = true, requested = true) =>
+      step({ requested, decided, eligible, clearFlag: () => calls.push("clear"), start: () => calls.push("read") });
+    return { calls, at };
+  }
+
+  test("waits until everything is known, then clears the flag and reads exactly once", () => {
+    const { calls, at } = run();
+    at(false);
+    at(false);
+    expect(calls).toEqual([]);
+    at(true);
+    // Re-renders, the development double run and the URL change run the effect again: nothing more happens.
+    at(true);
+    at(true, true, false);
+    at(true);
+    expect(calls).toEqual(["clear", "read"]);
+  });
+
+  test("a document that cannot be read only clears the flag", () => {
+    const { calls, at } = run();
+    at(true, false);
+    at(true, true);
+    expect(calls).toEqual(["clear"]);
+  });
+
+  test("without the flag nothing happens", () => {
+    const { calls, at } = run();
+    at(true, true, false);
+    expect(calls).toEqual([]);
   });
 });
 
