@@ -30,14 +30,15 @@ updated: 2026-10-02
 >
 > **Built differently (2026-10-02, epic #1465).** Kept as written; what changed while building:
 > - The chat tool that reads a document (§3.c) is `purchase_document_read`, not `purchase_order_extract`.
-> - A stock receipt from a consumable line (§7) posts its `IN` movement with the fixed reason *Received from
->   a purchase*, never the purchase's details (the consumable ledger is readable by Viewers, D-A).
+> - A stock receipt from a consumable line (§7) posts its `IN` movement with the reason *Received from
+>   purchase* and the purchase's reference (the CEO's decision of 2026-10-02, #1494; the fixed *Received from a
+>   purchase* without one) — never the supplier or another purchase detail.
 > - The extraction review (§3.b) does not block saving on a missing supplier or currency and has no
 >   "n fields still marked check — save anyway?" step; a PDF opens in a new tab instead of being framed.
 > - Not built: *Receive delivery* across lines, the *Overdue only* toggle and the *created within 90 days*
 >   chip, the dashboard *Pending deliveries* tile, purchases in global search, merging suppliers, *Suggest
 >   purchases*, *Map a custom field to suppliers*, the warranty replacement action, the XLSX export, and
->   proposing a new line price to linked assets.
+>   proposing a new line price to linked assets. Tracked as #1495.
 >
 > What each build settled: [[0099-purchases-scope-model-and-optionality|ADR-0099]], *Decisions while
 > building*, and [[purchases/_MOC#What was built]].

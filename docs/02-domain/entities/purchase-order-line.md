@@ -153,11 +153,12 @@ case-insensitive), `SAME` or `UNAVAILABLE`.
 - **Receive into stock** — `POST /purchase-orders/:id/lines/:lineId/receive-stock { quantity, note? }`
   (`purchaseOrder:write` + `consumable:write`). It posts **one** `IN` [[consumable-movement]] through the
   consumables service (never a direct `currentStock` write) that carries `purchaseOrderLineId`, `reason`
-  *Received from a purchase* and `note` as its notes. Inside that movement's transaction the purchase is
-  locked `FOR KEY SHARE` first (the lock a link takes) and the line re-read: a kind change or a line removal
-  — which lock the purchase `FOR UPDATE` — serializes with the receipt and sees it, and a line whose kind or
-  consumable changed meanwhile is a `409` with nothing written. The purchase gets one `STOCK_RECEIVED` in the
-  same transaction. Result `{ movement, overReceived, line }`.
+  *Received from purchase* and the purchase's reference (the fixed *Received from a purchase* without one —
+  visible to every consumable reader, a CEO decision of 2026-10-02, #1494) and `note` as its notes. Inside
+  that movement's transaction the purchase is locked `FOR KEY SHARE` first (the lock a link takes) and the
+  line re-read: a kind change or a line removal — which lock the purchase `FOR UPDATE` — serializes with the
+  receipt and sees it, and a line whose kind or consumable changed meanwhile is a `409` with nothing written.
+  The purchase gets one `STOCK_RECEIVED` in the same transaction. Result `{ movement, overReceived, line }`.
 - **Refusals.** `400` for a line that is not `CONSUMABLE`, has no consumable ("map the line to a
   consumable") or names an archived one ("restore it or map the line to another"); `404` for an archived
   purchase or line. Receiving more than is pending is allowed and flagged (`overReceived`, `OVER`).

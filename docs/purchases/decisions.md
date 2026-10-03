@@ -8,8 +8,9 @@ updated: 2026-10-02
 
 # Purchases — CEO inputs and decisions
 
-> The CEO's inputs to the design, the package approved on 2026-10-01, and the four decisions taken after
-> acceptance (2026-10-01 and 2026-10-02), with the CEO's words quoted verbatim. Where a later decision
+> The CEO's inputs to the design, the package approved on 2026-10-01, the four decisions taken after
+> acceptance (2026-10-01 and 2026-10-02) and the confirmations of the decisions taken while building
+> (2026-10-02), with the CEO's words quoted verbatim. Where a later decision
 > replaces part of an earlier one, the earlier text is kept as approved and marked *superseded* or
 > *refined*. The decision record built from this note is
 > [[0099-purchases-scope-model-and-optionality|ADR-0099]], with the money widening in
@@ -160,3 +161,37 @@ per-line count stays correct under concurrency because it is derived from linked
 | D-B | ADR-0099 §7, §11, §13, §14 |
 | D-C | ADR-0099 §5, [[0100-money-as-64-bit-minor-units|ADR-0100]] §5, [[purchase-order]], [[asset]] |
 | D-D and its CTO application | ADR-0099 governing principle, §2, §4, §6, [[supplier]], [[purchase-order]], [[purchase-order-line]] |
+| The confirmations and the stock-receipt reason (§5 below) | ADR-0099 *CEO confirmations (2026-10-02)*, [[0100-money-as-64-bit-minor-units\|ADR-0100]] §5, [[consumable-movement]], [[purchase-order-line]], [[INVARIANTS]] INV-PO-1 |
+
+## 5. CEO confirmations (2026-10-02)
+
+After the build, the CEO answered direct questions on the decisions the builds had taken provisionally
+(#1494). The recommended option of each question is marked *(Recomendado)*; the answers are verbatim.
+
+**The stock receipt names the purchase reference** (a new decision; it amends ADR-0099 Phase 1b). Asked
+whether a consumable stock receipt keeps the fixed reason *Received from a purchase* — no supplier, no
+reference, because Viewers read the stock ledger:
+
+CEO, verbatim: "Incluir el número de orden" (include the order number).
+
+The receipt's movement now reads *Received from purchase OC-4512* (the fixed text when the purchase has no
+reference). Everyone who can see the consumable's movements, Viewers included, sees the reference: an
+accepted exception to D-A for the reference only — the supplier and every other purchase detail still
+follow `purchaseOrder:read`. Movements recorded earlier keep the fixed reason.
+
+**The provisional decisions, confirmed:**
+
+| Question | CEO, verbatim |
+| --- | --- |
+| Document extraction permissions: `purchaseOrder:write` + `ai:use`, human-only | "Compras + uso de IA (Recomendado)" |
+| AI approvals: never-auto-approve and the "Approve all" exclusion stay purchase-only, not extended to the asset tools | "Solo Compras, como está (Recomendado)" |
+| The bare `purchaseOrderLineId` visible under `asset:read` | "Dejarlo como está" |
+| The *Inventory operator* preset with purchase read and write | "Sí, ver y editar (Recomendado)" |
+| Over-receipt | "Avisar sin bloquear (Recomendado)" |
+| A cancelled purchase can still receive and link | "Sí, sin trabas (Recomendado)" |
+| Identifiability (a supplier, a reference or one line) and the *Purchase · date* title | "Sí, como está (Recomendado)" |
+| *New purchase from a document* keeps its draft when abandoned | "Sí, que quede (Recomendado)" |
+| Money displayed as entered, a third decimal refused, the "Read as" echo | "Sí, como está (Recomendado)" |
+| Extraction providers, limits, PDFs in a new tab | "Sí, como está (Recomendado)" |
+| The Spanish register (the Manual's AI pages in *voseo*, the rest in *tú*) | "Dejarlo como está" |
+| The items planned but not built | "Un unico issues y sub-issues de ese" (one issue, with sub-issues of it) — #1495, sub-issues #1496–#1503 |

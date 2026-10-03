@@ -29,7 +29,8 @@ updated: 2026-10-02
 - [[0100-money-as-64-bit-minor-units|ADR-0100]] — money columns to `bigint`, the wire kept as a bounded
   JSON number through a shared `money()` primitive, and the upgrade path.
 - [[purchases/decisions|CEO inputs and decisions]] — the approved package, the four decisions after
-  acceptance (D-A to D-D), and the CEO's words, verbatim, with where each item is recorded.
+  acceptance (D-A to D-D), the CEO's confirmations of the decisions taken while building (2026-10-02), and
+  the CEO's words, verbatim, with where each item is recorded.
 
 ## What was built
 
@@ -46,8 +47,10 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | 1b — consumable lines, document labels, scanning | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b consumable lines and document labels, #1476)\|Phase 1b]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 1b web, #1476)\|Phase 1b web]] | #1484 · #1485 (#1476) |
 | 2 — extraction, license lines, create from assets | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2, #1477)\|Phase 2]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] | #1486 · #1487 (#1477) |
 | 3 — AI assistant tools | [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3, #1478)\|Phase 3]] · [[0099-purchases-scope-model-and-optionality#Decisions while building (Phase 3 web, #1478)\|Phase 3 web]] | #1488 · #1490 · #1492 (#1478) |
+| CEO confirmations; stock receipts name the reference | [[0099-purchases-scope-model-and-optionality#CEO confirmations (2026-10-02)\|CEO confirmations (2026-10-02)]] | #1494 |
 
-**Planned in ADR-0099 §13 or the UX proposal §7 but not built** (no issue open for them yet): merging
+**Planned in ADR-0099 §13 or the UX proposal §7 but not built** (tracked as #1495, with sub-issues
+#1496–#1503): merging
 suppliers, *Receive delivery* across lines, the dashboard *Pending deliveries* tile, purchases in global
 search, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom
 field to suppliers, the warranty replacement action, and the XLSX export. Also not built: the per-asset proposal after a line's

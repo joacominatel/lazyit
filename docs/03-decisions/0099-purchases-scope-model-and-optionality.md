@@ -56,6 +56,10 @@ purchase-order entity as a non-goal) and lifts the supplier deferral of
 Those records keep their other decisions and carry dated pointers here. The money-width change the
 package includes is its own decision: [[0100-money-as-64-bit-minor-units]].
 
+**Confirmed and amended 2026-10-02** (#1494): the CEO confirmed the provisional decisions taken while
+building, and decided that a stock receipt's movement reason names the purchase reference — see
+[[#CEO confirmations (2026-10-02)]].
+
 Research and the CEO's verbatim answers: [[purchases/_MOC|Purchases research vault]] — start with
 [[purchases/decisions|the decisions note]].
 
@@ -233,8 +237,9 @@ Receiving or linking more units than a line's open quantity (quantity − cancel
 **allowed with a warning**, and the line is then shown as **over-received** ("5 of 4 received"). The
 warning offers a one-click "raise the line to *n*" that edits the line (logged); continuing without it
 is fine. This is the **CTO's application of the light-entry principle** (D-D, 2026-10-02), not a CEO
-quote; it replaces the "blocked on write, under a lock" rule accepted on 2026-10-01 and matches what the
-research persona asked for: "warn me, don't block me" ([[purchases/user-interview]]).
+quote, **confirmed by the CEO on 2026-10-02** ([[#CEO confirmations (2026-10-02)]]); it replaces the
+"blocked on write, under a lock" rule accepted on 2026-10-01 and matches what the research persona asked
+for: "warn me, don't block me" ([[purchases/user-interview]]).
 
 **The count stays right under concurrency** because it is derived, never stored: received = the count of
 live assets linked to the line, read when it is shown. Two users receiving the same line at once both
@@ -378,8 +383,8 @@ excluded), so the tool-coverage test stays green.
 *As built (2026-10-02, #1489):* Phases 1, 1b, 2 and 3 shipped on the epic branch, except: *Receive delivery*
 across lines, the dashboard *Pending deliveries* tile, global search for purchases and the supplier history
 with yearly totals (1b); merging suppliers and the other back-linking helpers beyond "create purchase from
-selected assets" (2). They are **not built**, with no issue open yet — the full list, with the UX proposal's
-items, is in [[purchases/_MOC#What was built]].
+selected assets" (2). They are **not built**; they are tracked as #1495 (sub-issues #1496–#1503) — the full
+list, with the UX proposal's items, is in [[purchases/_MOC#What was built]].
 
 ### 14. Upgrade safety
 
@@ -427,7 +432,7 @@ items, is in [[purchases/_MOC#What was built]].
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
   - The attachments backup sidecar (§12, #1467 — deferred by the CEO).
-  - The items §13 lists as not built.
+  - The items §13 lists as not built (#1495).
   - The four questions left open at acceptance are settled below; none remains open before Phase 1.
 
 ## Decisions after acceptance
@@ -551,7 +556,8 @@ reopens a CEO decision.
   per-caller asset shape (no field-level authorization exists, §8) and lets the web decide whether to
   offer the *Purchase* panel. If that fact itself must be hidden from viewers, the asset read has to drop
   the field for callers without `purchaseOrder:read` — a CEO call, flagged here; the D-A provenance read
-  itself is gated in #1473.
+  itself is gated in #1473. **Settled 2026-10-02:** the CEO kept the bare id as it is
+  ([[#CEO confirmations (2026-10-02)]]).
 - **Kind is fixed once units are linked.** Changing the kind of a line with live linked assets is a 409:
   the received units would silently stop counting.
 - **Supplier FK `Restrict`, delivery location `SetNull`.** A supplier with purchases can never be
@@ -568,7 +574,8 @@ CEO decision.
 - **The title fallback (§6).** A purchase is called by its reference; without one, *Supplier · date*;
   without either — a purchase identified only by its lines — *Purchase · date*. The date is the order
   date, or the day it was recorded. Rejected: the first line's description, because the list read does
-  not carry lines and the same purchase must read the same everywhere.
+  not carry lines and the same purchase must read the same everywhere. Confirmed by the CEO on 2026-10-02,
+  with the identifiability rule (a supplier, a reference or one line) ([[#CEO confirmations (2026-10-02)]]).
 - **The supplier is typed, not picked.** The purchase form's supplier is a smart-entry text field over
   `GET /suggestions/supplierName`, resolved when saving: the exact trimmed name of one live supplier
   links it; a name nobody has creates the supplier inline, with no dialog; several suppliers with the
@@ -651,6 +658,7 @@ a CEO decision.
   lets a cancelled purchase receive and link: lazyit records what happened, and an order cancelled after a
   partial delivery is real. The web offers *Cancel purchase* only while nothing is received (§3) and warns
   otherwise. Rejected: a 409 — a refusal the operator can only work around by editing the receipt.
+  Confirmed by the CEO on 2026-10-02 ([[#CEO confirmations (2026-10-02)]]).
 - **Cancel remaining units** cancels the pending units by default, never more than are pending (400), and
   is a 409 on a line with nothing pending. The line row is locked so two cancels cannot take the same
   units. The reason is optional (D-D); the web may still ask for one.
@@ -767,12 +775,19 @@ under the principles above. None reopens a CEO decision.
   link, cannot be undone, a line that received stock can neither change kind nor be removed (`409`), the
   asset rule extended. Rejected: an `OUT` linked to the line that subtracts — a second receipt semantics
   (and a "return to supplier" flow) nobody asked for; it can be added later on the same column.
-- **The movement's reason names no purchase detail.** The reason is the fixed *Received from a purchase*;
-  the caller's note goes to `notes`. The consumable ledger is read under `consumable:read`, which a VIEWER
-  holds, and a purchase's provenance follows `purchaseOrder:read` (D-A), so neither the supplier nor the
-  reference is written into it. This **deviates** from [[purchases/ux-proposal]] §7 ("posts an IN movement
-  with the purchase as reason"). The opaque `purchaseOrderLineId` is served on the movement under
-  `consumable:read`, on the same terms as `Asset.purchaseOrderLineId` (#1472).
+- **The movement's reason names the purchase reference** (*amended 2026-10-02 by a CEO decision, #1494*).
+  The reason is *Received from purchase* and the reference (*Received from purchase OC-4512*) — the fixed
+  *Received from a purchase* when the purchase has no reference — and the caller's note goes to `notes`.
+  The consumable ledger is read under `consumable:read`, which a VIEWER holds, so **every consumable reader
+  sees the reference**: a CEO-accepted exception to D-A for the reference only. The supplier, dates, prices
+  and documents are never written into it. The reference is untrusted text, stored as written and rendered
+  as text ([[0029-untrusted-content-sanitization]]); it is cut (with an ellipsis, never mid surrogate pair)
+  to keep the reason within the movement's 500-character limit. The opaque `purchaseOrderLineId` is served on
+  the movement under `consumable:read`, on the same terms as `Asset.purchaseOrderLineId` (#1472). *As built
+  in #1476* the reason was the fixed *Received from a purchase* for every receipt, deviating from
+  [[purchases/ux-proposal]] §7 ("posts an IN movement with the purchase as reason"); that is superseded — see
+  [[#CEO confirmations (2026-10-02)]]. Movements already recorded keep the fixed reason (the ledger is
+  append-only).
 - **The consumable mapping is light.** `consumableId` is accepted on a `CONSUMABLE` line only and stays
   optional there; it is required when stock is received (a `400` that says how to fix the line), as an asset
   line's model is (#1473). An archived consumable is refused on write and on receipt (`400`). Changing a line
@@ -919,7 +934,8 @@ reopens a CEO decision. Merging suppliers, the XLSX export and the other Phase 2
   sees the blank). Rejected: trusting the model's numbers, which is where a 1,000× separator error would come
   from.
 - **Gates.** `purchaseOrder:write` + `ai:use` (the AI channel gate, so revoking `ai:use` closes extraction
-  too), **human-only** (a draft nobody reviews has no purpose; no headless flow sends documents out), then the
+  too), **human-only** (a draft nobody reviews has no purpose; no headless flow sends documents out;
+  confirmed by the CEO on 2026-10-02), then the
   capability: the assistant usable (enabled, configured, its key decrypting, not shim), the
   `documentExtractionEnabled` switch on, and a provider that reads the document's type. The refusals are
   typed (`code`): `409` unavailable (`AI_DISABLED`, `EXTRACTION_DISABLED`, `PROVIDER_UNSUPPORTED`), `422` the
@@ -1081,7 +1097,8 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
   admin** (`settings:manage`, who can change Settings → AI) and only for a reason Settings → AI can fix; for
   anyone else, and for `NOT_PERMITTED`, the action is simply absent. *New purchase from a document* is absent
   unless available.
-- **The preview: images inline, PDFs in a new tab — never framed** (CTO decision, 2026-10-02). The document
+- **The preview: images inline, PDFs in a new tab — never framed** (CTO decision, 2026-10-02; confirmed by
+  the CEO the same day). The document
   is fetched with the Bearer token and re-typed to its stored, server-sniffed type before it gets a `blob:`
   URL, so the URL never holds markup. A raster image is shown inline beside the review (`img-src` already
   allows `blob:`). A PDF is a document card whose *Open in a new tab* opens the same `blob:` URL in the
@@ -1115,7 +1132,8 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
 - **The activity log reads `LICENSE_APPLIED`, `EXTRACTION_RUN` (provider and model, never a value read) and
   `CREATED_FROM_ASSETS`.**
 
-**Consequences.** An abandoned *New purchase from a document* leaves a draft purchase named after the file. The
+**Consequences.** An abandoned *New purchase from a document* leaves a draft purchase named after the file
+(confirmed by the CEO on 2026-10-02). The
 review cannot be reloaded without reading the document again (the draft is never stored). A PDF is compared in
 a second tab or window, not inside the review. Line matching by description misses a line the
 document spells differently: it is offered as a new line, ticked, so the person unticks it to avoid a
@@ -1127,7 +1145,8 @@ CTO decisions taken while building the backend of the AI purchase tools (2026-10
 proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decision. The tools are listed in
 [[ai-assistant/tools-and-execution]] (*Purchases tools as built*).
 
-- **"Never auto-approved" is two rules in core, not a promise of each tool.** (1) Every purchase write tool is
+- **"Never auto-approved" is two rules in core, not a promise of each tool** (purchase tools only; the CEO
+  confirmed on 2026-10-02 that it is not extended to the asset tools). (1) Every purchase write tool is
   registered `neverAutoApprove`; core reads the flag from the registry when it decides an automatic approval,
   so neither the model, the stored row nor a later preview can lift it. (2) A preview that generates assets
   (`CREATES_ASSETS`) or sets or changes money (`CHANGES_MONEY`) is never auto-approved whatever the tool
@@ -1249,6 +1268,48 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
   is dropped when the panel closes or the page changes. Line kinds and link states have their own copy in the
   chat's catalog, apart from the Purchases screens'.
 
+## CEO confirmations (2026-10-02)
+
+After the build, the CEO answered direct questions on the decisions the builds had taken provisionally
+(#1494). Each answer is quoted verbatim; the recommended option is the one marked *(Recomendado)*. Every item
+below is **confirmed** and binding as written in the section that records it; one item is a new decision
+that amends Phase 1b.
+
+### The stock receipt names the purchase reference (amends Phase 1b)
+
+Asked whether a consumable stock receipt keeps the fixed reason *Received from a purchase* — no supplier, no
+reference, because Viewers read the stock ledger — the CEO answered:
+
+CEO, verbatim: "Incluir el número de orden" (include the order number).
+
+A receipt's `IN` movement now reads *Received from purchase OC-4512*: the purchase's reference, cut to keep
+the reason within the movement's 500-character limit, and the fixed *Received from a purchase* when the
+purchase has no reference. The consumable ledger is read under `consumable:read`, which a VIEWER holds, so
+**everyone who can see a consumable's movements sees the purchase reference**. This is an accepted,
+CEO-decided **exception to D-A for the reference only**: the supplier, the dates, the prices, the invoice
+numbers and the documents still follow `purchaseOrder:read`. The reference is untrusted text, stored as written
+and rendered as text ([[0029-untrusted-content-sanitization]]). Movements recorded before the change keep the
+fixed reason — the ledger is append-only. Recorded in
+[[#Decisions while building (Phase 1b consumable lines and document labels, #1476)|Phase 1b]],
+[[consumable-movement]], [[purchase-order-line]] and [[INVARIANTS]] INV-PO-1.
+
+### The provisional decisions, confirmed
+
+| Decision | CEO, verbatim | Recorded in |
+| --- | --- | --- |
+| Document extraction needs `purchaseOrder:write` + `ai:use` and is human-only | "Compras + uso de IA (Recomendado)" | [[#Decisions while building (Phase 2, #1477)\|Phase 2]] (*Gates*) |
+| "Never auto-approved" and the "Approve all" exclusion stay purchase-only — not extended to the asset tools | "Solo Compras, como está (Recomendado)" | [[#Decisions while building (Phase 3, #1478)\|Phase 3]] · [[#Decisions while building (Phase 3 web, #1478)\|Phase 3 web]] |
+| The bare `purchaseOrderLineId` stays visible under `asset:read` | "Dejarlo como está" | [[#Decisions while building (Phase 1 core, #1472)\|Phase 1 core]] · [[INVARIANTS]] INV-PO-1 |
+| The *Inventory operator* preset carries `purchaseOrder:read` and `:write` | "Sí, ver y editar (Recomendado)" | [[authorization]] (role presets) |
+| Over-receipt is allowed with a warning, never blocked | "Avisar sin bloquear (Recomendado)" | §4 |
+| A cancelled purchase can still receive and link | "Sí, sin trabas (Recomendado)" | [[#Decisions while building (Phase 1 flows, #1473)\|Phase 1 flows]] (*Cancelled purchases*) |
+| A purchase needs a supplier, a reference or one line, and is called *Purchase · date* without the first two | "Sí, como está (Recomendado)" | Governing principle (D-D) · [[#Decisions while building (Phase 1 web, #1474)\|Phase 1 web]] (*The title fallback*) |
+| An abandoned *New purchase from a document* leaves its draft purchase | "Sí, que quede (Recomendado)" | [[#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] (*Consequences*) |
+| Money displayed as entered (`costPerSeat` included), a third decimal refused on input, the "Read as" echo | "Sí, como está (Recomendado)" | [[0100-money-as-64-bit-minor-units\|ADR-0100]] §5 |
+| Extraction providers and document types, its size, page and time limits, PDFs opened in a new tab | "Sí, como está (Recomendado)" | [[#Decisions while building (Phase 2, #1477)\|Phase 2]] · [[#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] |
+| The Spanish register: the Manual's AI pages in *voseo*, the rest in *tú* | "Dejarlo como está" | [[ai-assistant/frontend]] |
+| The items planned but not built | "Un unico issues y sub-issues de ese" (one issue, with sub-issues of it) | §13 — tracked as #1495 (sub-issues #1496–#1503) |
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1258,4 +1319,4 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466
+[[vision]] · #1465 · #1466 · #1494 · #1495
