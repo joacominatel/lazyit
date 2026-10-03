@@ -219,11 +219,27 @@ the *Show archived* view open, the export is that archived slice instead.
 
 ### Choosing which columns to show
 
-The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
-model, category, location, company, status, owners and updated. Untick the ones you don't care about to slim
-the table down to what matters for you. The **Name** column and the row actions always stay. Your
-choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
-governs the desktop table; the mobile card view always shows the full set.)
+The **Columns** button (next to *Filters*) opens a checklist of the table's columns, in groups:
+
+- **Details** — asset tag, serial, manufacturer (from the asset's model), model, category, location
+  and company.
+- **Status** — status and owners.
+- **Purchase & warranty** — purchase date, warranty end and purchase cost.
+- **Activity** — updated.
+
+Untick the ones you don't care about to slim the table down, or tick more to bring them in. Out of the
+box the table shows asset tag, model, category, location, company, status, owners and updated; **serial**,
+**manufacturer** and the **Purchase & warranty** columns stay off until you turn them on. The **Name**
+column and the row actions always stay. Your choice is remembered in this browser, so the table keeps the
+same shape next time you visit.
+
+**Purchase cost** shows the amount as it was entered, with its currency label (for example *USD 1,500*).
+An amount recorded without a label reads **No currency** beside it — lazyit never assumes a currency.
+Click the **Serial**, **Purchase date**, **Warranty end** or **Purchase cost** header to sort the whole
+list by it; costs sort by amount alone, whatever their label. **Manufacturer** cannot be sorted.
+
+On a phone the asset cards always show the usual details, plus any of the serial, manufacturer and
+purchase & warranty columns you have turned on.
 
 ## Where it was bought
 
