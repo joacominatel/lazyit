@@ -185,6 +185,10 @@ export const ASSET_SORT_ALLOWLIST = {
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
+  // Plain asset columns behind the list's optional purchase & warranty columns (#1511).
+  purchaseDate: 'purchaseDate',
+  warrantyEnd: 'warrantyEnd',
+  purchaseCost: 'purchaseCost',
 } as const;
 
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
@@ -235,6 +239,10 @@ const ASSET_LIST_SELECT = {
   company: true,
   purchaseDate: true,
   warrantyEnd: true,
+  // The cost and its free-text currency label behind the list's optional Cost column (#1511) — the same
+  // `asset:read` values the detail read shows. A `bigint` column: toLeanListItem converts it for the wire.
+  purchaseCost: true,
+  purchaseCurrency: true,
   modelId: true,
   locationId: true,
   createdAt: true,
@@ -270,12 +278,8 @@ const ASSET_LIST_SELECT = {
   },
 } satisfies Prisma.AssetSelect;
 
-/** The inventory export's projection: the list's, plus the asset's own cost columns (`asset:read`). */
-const EXPORT_SELECT = {
-  ...ASSET_LIST_SELECT,
-  purchaseCost: true,
-  purchaseCurrency: true,
-} as const satisfies Prisma.AssetSelect;
+/** The inventory export's projection: the list's, which carries the asset's own cost columns (`asset:read`). */
+const EXPORT_SELECT = ASSET_LIST_SELECT;
 
 /** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
 const EXPORT_SELECT_WITH_PURCHASE = {
@@ -295,6 +299,13 @@ type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
+
+/** A lean list row; the `/assets/mine` self-read selects no cost columns (#1511). */
+type LeanListRow = Omit<
+  AssetWithLeanSelect,
+  'purchaseCost' | 'purchaseCurrency'
+> &
+  Partial<Pick<AssetWithLeanSelect, 'purchaseCost' | 'purchaseCurrency'>>;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -328,6 +339,10 @@ function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
 const assetMineListSelect = (userId: string) =>
   ({
     ...ASSET_LIST_SELECT,
+    // The self-read carries no `asset:read` gate, so it leaves out the cost the directory list shows
+    // (#1511): a holder sees what they hold, not what it cost.
+    purchaseCost: false,
+    purchaseCurrency: false,
     assignments: {
       ...ASSET_LIST_SELECT.assignments,
       where: { releasedAt: null, userId },
@@ -639,7 +654,7 @@ export class AssetsService {
         skip,
         ...escapeHatch,
       } satisfies Prisma.AssetFindManyArgs;
-      // The list projection plus the asset's cost columns and — ONLY for a caller holding
+      // The list projection (with the asset's cost columns) and — ONLY for a caller holding
       // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
       // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
       const rows: ExportRow[] = includePurchase
@@ -1321,10 +1336,21 @@ export class AssetsService {
     };
   }
 
-  /** Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem). */
-  private toLeanListItem(asset: AssetWithLeanSelect) {
-    const { assignments, ...rest } = asset;
-    return { ...rest, activeAssignments: assignments };
+  /**
+   * Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem), with the
+   * `bigint` cost as a wire number (ADR-0100) — absent on the self-read, which selects no cost.
+   */
+  private toLeanListItem(asset: LeanListRow) {
+    const { assignments, purchaseCost, ...rest } = asset;
+    return {
+      ...rest,
+      ...(purchaseCost === undefined
+        ? {}
+        : {
+            purchaseCost: purchaseCost === null ? null : Number(purchaseCost),
+          }),
+      activeAssignments: assignments,
+    };
   }
 
   /** One discrete history event per field that actually changed in an update (ADR-0033). */
