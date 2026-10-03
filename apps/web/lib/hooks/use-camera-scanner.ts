@@ -14,8 +14,6 @@ import {
   startFeedback,
 } from "@/lib/utils/camera-scan";
 
-export type { CameraScanMode, ScanFeedback } from "@/lib/utils/camera-scan";
-
 /** Where the camera is: starting, reading, refused/failed, or not available at all on this device. */
 export type CameraScanStatus = "starting" | "scanning" | "error" | "unsupported";
 
