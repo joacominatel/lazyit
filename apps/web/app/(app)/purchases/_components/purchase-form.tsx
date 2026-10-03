@@ -309,7 +309,8 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     await runExclusive(submitting, () => save(form));
   }
 
-  async function save(form: HTMLFormElement) {
+  /** Returns `"hold"` once saved and navigating away: the lock and the disabled button stay until the page changes. */
+  async function save(form: HTMLFormElement): Promise<void | "hold"> {
     setSupplierError(undefined);
     setHeaderErrors({});
     const draft = { ...header, currency };
@@ -342,6 +343,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     }
 
     setSaving(true);
+    let navigating = false;
     try {
       const supplierId = await resolveSupplierId();
       if (supplierId === "stop") {
@@ -359,19 +361,22 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
           rememberTyped();
           toast.success(t("savedToast"));
         }
+        navigating = true;
         router.push(`/purchases/${purchase.id}`);
-        return;
+        return "hold";
       }
       const result = toCreatePurchase(draft, supplierId ?? undefined, lines, locale);
       if (!result.ok) return;
       const created = await createPurchase.mutateAsync(result.payload);
       rememberTyped();
       toast.success(t("createdToast"));
+      navigating = true;
       router.push(`/purchases/${created.id}`);
+      return "hold";
     } catch (error) {
       notifyError(error, isEdit ? t("saveError") : t("createError"));
     } finally {
-      setSaving(false);
+      if (!navigating) setSaving(false);
     }
   }
 

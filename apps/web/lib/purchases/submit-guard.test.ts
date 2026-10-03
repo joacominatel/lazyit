@@ -25,4 +25,17 @@ describe("runExclusive — one save at a time", () => {
     expect(lock.current).toBe(false);
     expect(await runExclusive(lock, async () => {})).toBe(true);
   });
+
+  test("a save that succeeded and is navigating away keeps the lock, so it cannot run twice", async () => {
+    const lock = { current: false };
+    let runs = 0;
+    const create = async () => {
+      runs += 1;
+      return "hold" as const;
+    };
+    expect(await runExclusive(lock, create)).toBe(true);
+    expect(await runExclusive(lock, create)).toBe(false);
+    expect(lock.current).toBe(true);
+    expect(runs).toBe(1);
+  });
 });
