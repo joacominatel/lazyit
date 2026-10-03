@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isRecordArray, presentPreview } from "./preview";
-import { buildPreviewTable, visibleTableRows } from "./preview-table";
+import { buildPreviewTable, tableTranscriptLines, visibleTableRows } from "./preview-table";
 
 /** Rows shaped like `asset_create_batch`'s preview (tools-and-execution.md, "asset_create_batch"). */
 const batchRows = [
@@ -193,5 +193,120 @@ describe("visibleTableRows", () => {
     ]);
     expect(visibleTableRows(t, false).map((r) => r.number)).toEqual([1, 2, 3]);
     expect(visibleTableRows(t, true).map((r) => r.number)).toEqual([2, 3]);
+  });
+});
+
+describe("purchase tables (#1478)", () => {
+  test("a line's unit price is a money cell", () => {
+    const t = buildPreviewTable([
+      { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } },
+      { description: "Mouse", kind: "ASSET", quantity: 1, unitPrice: null },
+    ]);
+    expect(t.columns).toEqual(["description", "kind", "quantity", "unitPrice"]);
+    expect(t.rows[0]!.cells.unitPrice!.value).toEqual({ kind: "money", minor: 150000, currency: "ARS" });
+    expect(t.rows[1]!.cells.unitPrice!.value).toEqual({ kind: "empty" });
+  });
+
+  test("a linked asset: its id links the asset cell, and the values it gets are a list of changes", () => {
+    const t = buildPreviewTable([
+      {
+        asset: "LZ-0001",
+        assetId: "casset1",
+        linkState: "NONE",
+        writes: {
+          purchaseCost: { before: { amount: null, currency: null }, after: { amount: 150000, currency: "ARS" } },
+          company: { before: "Old", after: "Acme" },
+        },
+      },
+      { asset: "LZ-0002", assetId: "casset2", linkState: "NONE", writes: {} },
+    ]);
+    expect(t.columns).toEqual(["asset", "linkState", "writes"]);
+    expect(t.rows[0]!.cells.asset).toEqual({
+      value: { kind: "text", text: "LZ-0001", untrusted: false },
+      href: "/assets/casset1",
+      defaulted: false,
+    });
+    expect(t.rows[0]!.cells.writes!.changes).toEqual([
+      { field: "purchaseCost", before: { kind: "empty" }, after: { kind: "money", minor: 150000, currency: "ARS" } },
+      {
+        field: "company",
+        before: { kind: "text", text: "Old", untrusted: false },
+        after: { kind: "text", text: "Acme", untrusted: false },
+      },
+    ]);
+    // Nothing applied: an empty cell, not an empty list.
+    expect(t.rows[1]!.cells.writes!.changes).toBeUndefined();
+    expect(t.rows[1]!.cells.writes!.value).toEqual({ kind: "empty" });
+  });
+
+  test("an id without the column it names stays a column", () => {
+    const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cmodel1" }]);
+    expect(t.columns).toEqual(["description", "assetModelId"]);
+  });
+});
+
+describe("purchase tables with entity refs (#1478)", () => {
+  test("a mapped line names its model, consumable or application, linked where the web has a page", () => {
+    const t = buildPreviewTable([
+      { description: "Notebook", assetModelId: { type: "assetModel", id: "cm1", label: "Latitude 5440" } },
+      { description: "Toner", consumableId: { type: "consumable", id: "cc1", label: "HP 105A" } },
+      { description: "M365", applicationId: { type: "application", id: "ca1", label: "Microsoft 365" } },
+    ]);
+    expect(t.rows[0]!.cells.assetModelId).toEqual({
+      value: { kind: "text", text: "Latitude 5440", untrusted: false },
+      href: null,
+      defaulted: false,
+    });
+    expect(t.rows[1]!.cells.consumableId!.href).toBe("/consumables/cc1");
+    expect(t.rows[2]!.cells.applicationId!.href).toBe("/applications/ca1");
+  });
+
+  test("a ref the viewer could not read (no label) shows its id, linked where the web has a page", () => {
+    const t = buildPreviewTable([
+      { description: "Toner", consumableId: { type: "consumable", id: "cc9" } },
+      { description: "Notebook", assetModelId: { type: "assetModel", id: "cm9" } },
+    ]);
+    expect(t.rows[0]!.cells.consumableId).toEqual({
+      value: { kind: "text", text: "cc9", untrusted: false },
+      href: "/consumables/cc9",
+      defaulted: false,
+    });
+    expect(t.rows[1]!.cells.assetModelId!.value).toEqual({ kind: "text", text: "cm9", untrusted: false });
+  });
+
+  test("an older preview's raw id is still shown", () => {
+    const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cm1" }]);
+    expect(t.rows[0]!.cells.assetModelId!.value).toEqual({ kind: "text", text: "cm1", untrusted: false });
+  });
+
+  test("a linked asset's model change reads with the model's name", () => {
+    const t = buildPreviewTable([
+      {
+        asset: "LZ-1",
+        assetId: "ca",
+        writes: { modelId: { before: null, after: { type: "assetModel", id: "cm1", label: "Latitude 5440" } } },
+      },
+    ]);
+    expect(t.rows[0]!.cells.writes!.changes).toEqual([
+      { field: "modelId", before: { kind: "empty" }, after: { kind: "text", text: "Latitude 5440", untrusted: false } },
+    ]);
+  });
+});
+
+describe("tableTranscriptLines (#1478)", () => {
+  test("one line per row; money and change lists go through the transcript's formatters", () => {
+    const value = (v: { kind: string; minor?: number; text?: string }) =>
+      v.kind === "money" ? `$${v.minor}` : v.kind === "text" ? v.text! : v.kind === "number" ? "n" : "—";
+    const lines = tableTranscriptLines(
+      [
+        { description: "Notebook", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } },
+        { asset: "LZ-1", assetId: "ca", writes: { purchaseCost: { before: null, after: { amount: 5, currency: null } } } },
+      ],
+      value as never,
+      (field) => field.toUpperCase(),
+    );
+    expect(lines[0]).toBe("1. ASSET: —; DESCRIPTION: Notebook; QUANTITY: n; UNITPRICE: $150000; WRITES: —");
+    expect(lines[1]).toContain("WRITES: PURCHASECOST — → $5");
+    expect(lines.join("\n")).not.toContain("amount");
   });
 });

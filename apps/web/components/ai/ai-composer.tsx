@@ -3,7 +3,7 @@
 import type { AiPageContext } from "@lazyit/shared";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { routeContext } from "@/lib/ai/route-context";
@@ -15,6 +15,8 @@ import {
 } from "@/lib/ai/slash-commands";
 import { AI_PROMPT_MAX_LENGTH } from "@lazyit/shared";
 import { moveHighlight } from "@/lib/utils/move-highlight";
+import { composerTextWithPrefill } from "@/lib/ai/prefill";
+import type { AiPrefill } from "./ai-assistant-root";
 import { AiCommandPalette, commandOptionId } from "./ai-command-palette";
 import { AiCloseIcon, AiSendIcon, AiStopIcon } from "./ai-icons";
 import { useEntityTypeLabel } from "./ai-labels";
@@ -44,6 +46,8 @@ export function AiComposer<C>({
   onCommand,
   toolbar,
   autoApprove = false,
+  prefill = null,
+  onPrefillTaken,
 }: {
   /** A send is in flight. */
   busy: boolean;
@@ -66,6 +70,10 @@ export function AiComposer<C>({
   toolbar?: ReactNode;
   /** Auto-approve is on in this chat: the hint says basic changes apply without asking. */
   autoApprove?: boolean;
+  /** A message an entry point prepared (#1478): put in the box once, before any draft — never sent. */
+  prefill?: AiPrefill | null;
+  /** The box took `prefill`. */
+  onPrefillTaken?: () => void;
 }) {
   const t = useTranslations("ai.composer");
   const tCommands = useTranslations("ai.commands");
@@ -80,6 +88,23 @@ export function AiComposer<C>({
   const inputId = useId();
   const hintId = useId();
   const listId = useId();
+  const [takenPrefill, setTakenPrefill] = useState<number | null>(null);
+
+  // A message an entry point prepared ("Ask AI to fill", #1478) goes into the box ahead of any draft and puts
+  // the page back as context — taken while rendering, once per ask. It is only typed in: the person reads it
+  // and sends it.
+  if (prefill !== null && prefill.seq !== takenPrefill) {
+    setTakenPrefill(prefill.seq);
+    setText(composerTextWithPrefill(prefill.text, text, AI_PROMPT_MAX_LENGTH));
+    setWithContext(true);
+    setDismissedFor(null);
+  }
+  // Then the chat forgets it and the box takes the focus.
+  useEffect(() => {
+    if (prefill === null) return;
+    onPrefillTaken?.();
+    document.getElementById(inputId)?.focus();
+  }, [prefill, onPrefillTaken, inputId]);
 
   const context = routeContext(pathname);
   const disabled = busy || running || blockedByApproval || blockedByInput;

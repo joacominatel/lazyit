@@ -32,15 +32,17 @@ purchase from selected assets. **Their screens built** (#1477 web, 2026-10-02): 
 switch in Settings → AI, the side-by-side review of a read document as proposed changes, *New purchase from a
 document*, license lines with *Apply license*, and *Create purchase* from selected assets. **Phase 3 backend
 built** (#1478, 2026-10-02): the purchase tools of the AI assistant — reads, reading an attached document as
-untrusted data, and every purchase change as a card that is never auto-approved. What the builds
+untrusted data, and every purchase change as a card that is never auto-approved. **Its chat surfaces
+built** (#1478 web, 2026-10-02): the purchase labels and sentences, purchase cards with money, lines and
+linked assets, the "Approve all" exclusion and *Ask AI to fill* on a document. What the builds
 settled is in
 [[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
 [[#Decisions while building (Phase 1 flows, #1473)]],
 [[#Decisions while building (Phase 1 flows web, #1475)]],
 [[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]],
 [[#Decisions while building (Phase 1b web, #1476)]],
-[[#Decisions while building (Phase 2, #1477)]], [[#Decisions while building (Phase 2 web, #1477)]] and
-[[#Decisions while building (Phase 3, #1478)]].
+[[#Decisions while building (Phase 2, #1477)]], [[#Decisions while building (Phase 2 web, #1477)]],
+[[#Decisions while building (Phase 3, #1478)]] and [[#Decisions while building (Phase 3 web, #1478)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -1199,6 +1201,39 @@ proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decis
   entity labels, the two warning labels, the two option source labels, the purchase sentences and the
   "Approve all" exclusion before the chat shows these cards in the user's language (until then it shows the
   English and the generic warning).
+
+## Decisions while building (Phase 3 web, #1478)
+
+CTO-delegated decisions taken while building the chat side of the AI purchase tools (2026-10-02). None reopens a
+CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
+
+- **"Excluded from Approve all" is a fourth reason, after step-up and sensitive.** A page carrying
+  `CREATES_ASSETS` or `CHANGES_MONEY` is counted as "creates assets or changes money" among the pages to decide on
+  their own, and the warning on the card says it is never approved automatically or with Approve all. The web
+  reads the two codes from the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, the list core enforces; ADR-0097 decision 3
+  carries the dated amendment. Rejected: folding them into "sensitive" — these cards are not elevated, and saying so
+  would mislead.
+- **Money is recognised by shape.** A preview value that is an object with `amount` and at most `currency` (so
+  `{ amount }` alone is money without a label), the amount an integer, is money, formatted with the purchase's
+  label in the user's locale; anything else renders as before. Rejected: a new
+  `valueKind` — a contract change for what the shape already says.
+- **A purchase line is a one-row table**, and a linked asset's values are a `before → after` list inside its row,
+  so a priced line is readable before it is approved. Only the `line` field becomes a one-row table; other single
+  objects keep their rendering, so no existing card changes.
+- **"Ask AI to fill" only writes the message.** It opens the chat on the purchase page with a message naming the
+  document; the person sends it. Sending a document to the provider stays the person's own act in their own
+  words, as in the backend decision, and nothing is sent by a click. It sits on the document row, next to *Read
+  this document* and shown under the same conditions plus the chat being usable — not on the header, which has no
+  document to name. **It starts a new chat when the open one has messages** (the old one stays in the history) and
+  reuses an empty one, so a document's turn — which ends auto-approve for its conversation — never lands in an
+  unrelated chat (CTO decision in review). A draft in the box is kept, after the message. The message carries the
+  document's id, which the read tool uses as given, and its file name, sanitized — control characters, line
+  breaks and quote marks removed, at most 80 characters — because whoever uploaded the file chose it and the
+  message reaches the model as the person's words.
+- **Consequences.** Every *Ask AI to fill* from a chat in progress opens a new chat, so a person who wanted the
+  document read inside the conversation they were having types the request there instead. A message not yet taken
+  is dropped when the panel closes or the page changes. Line kinds and link states have their own copy in the
+  chat's catalog, apart from the Purchases screens'.
 
 ## Related
 
