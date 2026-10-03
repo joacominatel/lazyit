@@ -10,6 +10,7 @@ import {
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
 import type { Principal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 /** The Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
@@ -27,6 +28,17 @@ export const SEARCH_INDEXES = [
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
+
+/**
+ * The indexes that need `purchaseOrder:read` on top of `search:read` (#1499, ADR-0099 D-A / INV-PO-1): a
+ * VIEWER is denied purchases by default, and search must not be a side door to them — no hit, no count.
+ * Enforced twice: the controller drops them from the request, and {@link SearchService.search} drops them
+ * again for any caller, so a future direct caller of the service cannot get them ungated.
+ */
+export const PURCHASE_INDEXES: readonly SearchIndex[] = [
+  'purchases',
+  'suppliers',
+];
 
 /**
  * What each index is allowed to **return** in a hit — pinned to the shared `*HitSchema` (the wire
@@ -148,6 +160,8 @@ export class SearchService {
     // ADR-0060 §5: the read-path folder-access evaluator, used to post-filter article hits so a
     // restricted article never surfaces to a non-matching caller (INV-9, the search-leak fix).
     private readonly folderAccess: FolderAccessService,
+    // #1499: the purchase-index gate's second layer (the controller is the first).
+    private readonly permissions: PermissionResolverService,
   ) {
     const host = process.env.MEILI_HOST;
     const apiKey = process.env.MEILI_MASTER_KEY;
@@ -243,8 +257,14 @@ export class SearchService {
     limit,
     principal,
   }: SearchArgs): Promise<SearchResults> {
-    const requested: SearchIndex[] =
+    const asked: SearchIndex[] =
       entities && entities.length > 0 ? entities : [...SEARCH_INDEXES];
+    // #1499 defense in depth: never query the purchase indexes for a principal without
+    // `purchaseOrder:read` (an absent principal fails closed), whatever the caller asked for.
+    const requested = await this.withoutUnreadablePurchases(asked, principal);
+    if (requested.length === 0) {
+      return {};
+    }
 
     if (!this.client) {
       return this.emptyResults(requested);
@@ -411,6 +431,20 @@ export class SearchService {
       hits: kept,
       total: Math.max(0, block.total - dropped),
     };
+  }
+
+  /** `indexes` minus the purchase indexes when `principal` lacks `purchaseOrder:read` (#1499). */
+  private async withoutUnreadablePurchases(
+    indexes: SearchIndex[],
+    principal: Principal | undefined,
+  ): Promise<SearchIndex[]> {
+    if (!indexes.some((index) => PURCHASE_INDEXES.includes(index))) {
+      return indexes;
+    }
+    if (await this.permissions.principalHas(principal, 'purchaseOrder:read')) {
+      return indexes;
+    }
+    return indexes.filter((index) => !PURCHASE_INDEXES.includes(index));
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

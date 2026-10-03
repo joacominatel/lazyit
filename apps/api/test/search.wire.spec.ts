@@ -51,6 +51,7 @@ import type {
   VisibleFolders,
 } from '../src/article-categories/folder-access.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
+import type { PermissionResolverService } from '../src/auth/permission-resolver.service';
 
 const HOST = process.env.MEILI_HOST;
 const KEY = process.env.MEILI_MASTER_KEY;
@@ -207,6 +208,11 @@ function folderAccess(visible: VisibleFolders): FolderAccessService {
   } as unknown as FolderAccessService;
 }
 
+/** A permission double for the purchase-index gate (#1499): this suite reads purchases. */
+const permissions = {
+  principalHas: jest.fn().mockResolvedValue(true),
+} as unknown as PermissionResolverService;
+
 /** Poll `probe` until it holds (fire-and-forget writes return before the engine task completes). */
 async function eventually(probe: () => Promise<boolean>): Promise<void> {
   for (let i = 0; i < 100; i += 1) {
@@ -249,7 +255,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('self-heal on an EMPTY engine rebuilds every index from the database (new data volume)', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     expect(await search.isHealthy()).toBe(true);
     expect((await search.emptyOrMissingIndexes()).sort()).toEqual(
       [...SEARCH_INDEXES].sort(),
@@ -278,7 +284,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('cross-entity search returns the retrievable hit fields only', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     const results = await search.search({ q: 'vpn', limit: 20 });
 
     expect(results.degraded).toBeUndefined();
@@ -358,6 +364,7 @@ describe('Meilisearch wire (pinned server image)', () => {
     const scoped = new SearchService(
       logger,
       folderAccess(new Set(['folder-public'])),
+      permissions,
     );
     const res = await scoped.search({
       q: 'vpn',
@@ -371,7 +378,11 @@ describe('Meilisearch wire (pinned server image)', () => {
     expect(res.articles?.total).toBe(1);
 
     // Fail-closed never-match expression for a caller with no visible folders — must stay valid syntax.
-    const none = new SearchService(logger, folderAccess(new Set()));
+    const none = new SearchService(
+      logger,
+      folderAccess(new Set()),
+      permissions,
+    );
     const empty = await none.search({
       q: 'vpn',
       entities: ['articles'],
@@ -389,7 +400,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('fire-and-forget upsert and remove reach the engine', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     search.upsert(
       'users',
       projectUser({

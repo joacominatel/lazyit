@@ -3,6 +3,7 @@ import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import { SearchService } from './search.service';
 import { FolderAccessService } from '../article-categories/folder-access.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { VisibleFolders } from '../article-categories/folder-access.service';
 
 // Mock the Meili client with an explicit factory: jest can't transform the ESM `meilisearch`
@@ -47,6 +48,11 @@ function folderAccessMock(visible: VisibleFolders = 'ALL'): {
   return { visibleFolderIds: jest.fn().mockResolvedValue(visible) };
 }
 
+// The purchase-index gate (#1499): `principalHas` grants `purchaseOrder:read` unless a test revokes it.
+const permissionsMock = {
+  principalHas: jest.fn(),
+};
+
 async function buildService(
   logger: { info: jest.Mock; error: jest.Mock },
   folderAccess: { visibleFolderIds: jest.Mock } = folderAccessMock(),
@@ -56,6 +62,7 @@ async function buildService(
       SearchService,
       { provide: getLoggerToken(SearchService.name), useValue: logger },
       { provide: FolderAccessService, useValue: folderAccess },
+      { provide: PermissionResolverService, useValue: permissionsMock },
     ],
   }).compile();
   return moduleRef.get(SearchService);
@@ -63,6 +70,10 @@ async function buildService(
 
 describe('SearchService', () => {
   const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    permissionsMock.principalHas.mockResolvedValue(true);
+  });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -579,6 +590,55 @@ describe('SearchService', () => {
         'name',
         'taxId',
       ]);
+    });
+
+    it('drops the purchase indexes itself for a principal without purchaseOrder:read — defense in depth behind the controller (#1499)', async () => {
+      permissionsMock.principalHas.mockResolvedValue(false);
+      client.multiSearch.mockResolvedValue({ results: [] });
+      const viewer = { kind: 'human', user: { role: 'VIEWER' } } as never;
+
+      const all = await service.search({ q: 'x', limit: 5, principal: viewer });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string }> },
+      ];
+      const queried = params.queries.map((query) => query.indexUid);
+      expect(queried).not.toContain('purchases');
+      expect(queried).not.toContain('suppliers');
+      expect(all).not.toHaveProperty('purchases');
+      expect(permissionsMock.principalHas).toHaveBeenCalledWith(
+        viewer,
+        'purchaseOrder:read',
+      );
+
+      // Asking ONLY for them yields nothing at all — never re-expanded to "every index".
+      client.multiSearch.mockClear();
+      const only = await service.search({
+        q: 'x',
+        entities: ['purchases', 'suppliers'],
+        limit: 5,
+        principal: viewer,
+      });
+      expect(only).toEqual({});
+      expect(client.multiSearch).not.toHaveBeenCalled();
+    });
+
+    it('fails closed for a call with no principal at all', async () => {
+      permissionsMock.principalHas.mockImplementation((principal: unknown) =>
+        Promise.resolve(principal !== undefined),
+      );
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await service.search({
+        q: 'x',
+        entities: ['purchases', 'assets'],
+        limit: 5,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string }> },
+      ];
+      expect(params.queries.map((query) => query.indexUid)).toEqual(['assets']);
     });
 
     it('upsertMany writes every document in one engine task, and skips an empty batch', () => {

@@ -8,6 +8,7 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import { SearchResultsSchema } from '@lazyit/shared';
 import {
+  PURCHASE_INDEXES,
   SEARCH_INDEXES,
   SearchService,
   type SearchIndex,
@@ -19,12 +20,6 @@ import { RequirePermission } from '../auth/require-permission.decorator';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { Principal } from '../auth/principal';
 import type { User } from '../../generated/prisma/client';
-
-/**
- * The indexes that need `purchaseOrder:read` on top of `search:read` (#1499, ADR-0099 §8 / INV-PO-1): a
- * VIEWER is denied purchases by default, and search must not be a side door to them — no hit, no count.
- */
-const PURCHASE_INDEXES: readonly SearchIndex[] = ['purchases', 'suppliers'];
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
