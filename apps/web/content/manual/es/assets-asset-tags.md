@@ -124,11 +124,24 @@ manos. Apunta la cámara a la etiqueta y lazyit actúa según lo que lee:
 - cualquier otro código o texto → ejecuta una **búsqueda** de activos con ese valor, para que una
   etiqueta de texto simple también encuentre la unidad.
 
-El escaneo funciona en el navegador — sin instalar ninguna app — en Safari móvil (iOS), Android Chrome y
-Firefox de escritorio. Requiere **permiso de cámara** y una **conexión segura (HTTPS)**; permite la
-cámara cuando el navegador lo solicite. Si la cámara no está disponible o deniegas el acceso, la misma
-pantalla ofrece un campo de **entrada manual** — escribe una etiqueta de activo y ejecuta la misma
-búsqueda.
+Mantén la etiqueta quieta dentro del cuadrado. Mientras busca, la cámara muestra **Escaneando…**; cuando
+lee un código muestra un check verde (con una vibración corta en los teléfonos que la admiten) y abre el
+resultado. Además de las etiquetas QR lee Data Matrix y los códigos de barras habituales de las etiquetas
+adhesivas (Code 128, Code 39, EAN, UPC, ITF).
+
+Si después de unos segundos no lee nada, aparece una sugerencia. Lo que suele ayudar:
+
+- **Primero, nitidez.** La cámara de una notebook no enfoca de cerca: sostén la etiqueta a la distancia
+  en la que se ve nítida en pantalla (suele ser entre 20 y 30 cm), no pegada al lente. Un teléfono
+  enfoca solo.
+- **Luz.** Ponte frente a una ventana o una lámpara; evita reflejos en etiquetas brillantes.
+- **Plana y quieta.** Mantén la etiqueta plana, de frente a la cámara y quieta un segundo.
+
+El escaneo funciona en el navegador — sin instalar ninguna app — en teléfonos (Safari en iOS, Chrome en
+Android) y en computadoras con cámara web (Chrome, Safari, Firefox). Requiere **permiso de cámara** y una
+**conexión segura (HTTPS)**; permite la cámara cuando el navegador lo solicite. Si la cámara no está
+disponible o deniegas el acceso, la misma pantalla ofrece un campo de **entrada manual** — escribe una
+etiqueta de activo y ejecuta la misma búsqueda.
 
 ## Qué sigue
 

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useRef, useState } from "react";
+import { CameraViewfinder } from "@/components/camera-viewfinder";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,9 +28,13 @@ const READER_ID = "asset-qr-reader";
  */
 export default function AssetScanner() {
   const t = useTranslations("assets.scan");
+  const tc = useTranslations("common.cameraScanner");
   const router = useRouter();
   // Guards against a second decode firing (and a second navigation) between the first hit and teardown.
   const handledRef = useRef(false);
+  // The read is taken and the camera stopped: hold the success state until the navigation lands, rather than
+  // a "scanning" badge or a tip over a frozen camera.
+  const [found, setFound] = useState(false);
   const [manual, setManual] = useState("");
 
   /**
@@ -58,11 +63,13 @@ export default function AssetScanner() {
   );
 
   // The camera session (shared with the serials scanner of Receive stock, #1476): one read is enough here.
-  const status = useCameraScanner(READER_ID, (decodedText, stop) => {
-    if (handledRef.current) return;
+  const { status, feedback } = useCameraScanner(READER_ID, (decodedText, stop) => {
+    if (handledRef.current) return false;
     handledRef.current = true;
     stop();
+    setFound(true);
     resolveScan(decodedText);
+    return true;
   });
 
   function handleManualSubmit(event: FormEvent) {
@@ -93,12 +100,20 @@ export default function AssetScanner() {
           target node; the library injects the <video> here. */}
       {showViewfinder ? (
         <div className="space-y-3">
-          <div
-            id={READER_ID}
-            className="overflow-hidden rounded-lg border bg-muted [&_video]:w-full"
+          <CameraViewfinder
+            readerId={READER_ID}
+            feedback={found ? "success" : feedback}
+            scanningLabel={tc("scanning")}
+            className="rounded-lg border"
           />
-          <p className="text-center text-sm text-muted-foreground">
-            {status === "starting" ? t("starting") : t("permissionHint")}
+          <p className="text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+            {found || feedback === "success"
+              ? t("found")
+              : status === "starting"
+                ? `${t("starting")} ${t("permissionHint")}`
+                : feedback === "tip"
+                  ? tc("tip")
+                  : t("hint")}
           </p>
         </div>
       ) : (
