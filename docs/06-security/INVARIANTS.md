@@ -666,7 +666,8 @@ checks the permission itself, in the API.
   bulk receive against a line also needs `purchaseOrder:write` (`:972`).
 - `suggestions/suggestions.service.ts` — every source names the permission that guards it.
 - `search/search.controller.ts` — `allowedEntities` drops `purchases` / `suppliers` unless
-  `principalHas(principal, 'purchaseOrder:read')`; `search/search.service.ts` `RETRIEVE` caps their hit fields.
+  `principalHas(principal, 'purchaseOrder:read')`; `search/search.service.ts` drops them again in `search()`
+  (defense in depth, an absent principal fails closed) and `RETRIEVE` caps their hit fields.
 - `purchase-orders/purchase-receiving.service.ts` — `stockReceiptReason` (the reference, or
   `STOCK_RECEIPT_REASON`).
 - `packages/shared/src/schemas/permission.ts:285` — `purchaseOrder:read` is in `VIEWER_DENIED_READS`.

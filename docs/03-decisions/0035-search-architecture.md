@@ -209,30 +209,39 @@ search as not built). Nine indexes in all.
   document carries `name`, `taxId`, `salesContactName` and `supportContactName`. **Never indexed:** money,
   notes, company, delivery location; supplier emails, phones, website and notes. **Never retrieved**
   (searchable only, the SEC-061 pattern): `lineDescriptions` and the two contact names. The hit contract is
-  `PurchaseHitSchema` / `SupplierHitSchema` in `@lazyit/shared`.
+  `PurchaseHitSchema` / `SupplierHitSchema` in `@lazyit/shared`. **Searchable attributes are pinned**
+  (`SEARCHABLE_ATTRIBUTES` in `reindex.ts`, set on the temp index before every swap): purchases match on
+  `reference`, `supplierName`, `invoiceNumbers` and `lineDescriptions` only, suppliers on `name`, `taxId`
+  and the two contact names — so the display-only dates and status never match a query ("2026" or "10"
+  would otherwise hit every purchase through its ISO dates). The other indexes keep the engine default.
 - **Authorization — at the result level, like `users`.** `search:read` still gates the endpoint; the
   controller additionally drops `purchases` and `suppliers` from the requested indexes unless the
   principal holds `purchaseOrder:read` ([[INVARIANTS]] INV-PO-1). The check is per **principal**
   (`PermissionResolverService.principalHas`), so a service account needs the direct grant. A dropped index
   is never queried: no hit and no count reach the caller. The `lazyit_search` AI tool runs through the same
-  controller, so it inherits the gate. The web hides the two filter chips without the permission.
+  controller, so it inherits the gate. `SearchService.search` applies the same rule again over the
+  principal it receives (an absent principal fails closed), so a future direct caller of the service cannot
+  get the indexes ungated. The web hides the two filter chips without the permission.
 - **Sync — re-read on commit.** A purchase document joins rows its service does not hold after a line edit
   or a supplier rename, so instead of each call site projecting a document, `PurchaseSearchSync` (in the
   search module) is told *which* record changed, after the transaction commits, and re-reads it: live →
   upsert, archived or missing → remove. Called from purchase create / update / archive / restore, line
-  add / update / remove, *create from assets*, and supplier create / update / archive / restore / merge. A supplier
-  sync also re-projects that supplier's live purchases in one batched upsert (`SearchService.upsertMany`),
-  so a rename reaches `supplierName`. Receiving, linking and cancelling units change nothing indexed and do
+  add / update / remove, *create from assets*, and supplier create / update / archive / restore / merge. A
+  supplier **rename** (and a merge, for the kept supplier) also re-projects that supplier's live purchases in
+  one batched upsert (`SearchService.upsertMany`), so the new name reaches `supplierName`; a create, an
+  archive, a restore or an edit that keeps the name does not, since an archived supplier keeps its name on
+  its purchases. Receiving, linking and cancelling units change nothing indexed and do
   not sync. Still fire-and-forget and fail-soft (§3); the reconcile sweeper repairs a dropped write.
   A **supplier merge** (#1496) calls it for the kept supplier (its filled fields, and every purchase now
   naming it — the moved ones included) and for the archived duplicate (removed), once its transaction
   commits.
 - **Upgrade — no step.** On an existing instance the two indexes do not exist yet, so the boot self-heal
   (2026-06-11 amendment) sees them as missing and builds them in the background from Postgres on the first
-  start after the update; the seven existing indexes have documents and are left alone. `reindex:all` and
+  start after the update, with their searchable attributes; the seven existing indexes have documents and
+  are left alone. `reindex:all` and
   the reconcile sweeper cover both indexes too. Not a server bump: no volume rename.
 - **Cost.** An instance with no purchases (or no suppliers) keeps an empty index, which the self-heal
-  rebuilds — cheaply, to empty — on every boot, as for any other empty index. A supplier edit re-projects
+  rebuilds — cheaply, to empty — on every boot, as for any other empty index. A supplier rename re-projects
   all of its purchases, which is fine at small-team sizes and one engine task, but grows with the supplier's
   purchase count.
 
