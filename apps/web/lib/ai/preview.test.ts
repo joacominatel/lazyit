@@ -113,3 +113,65 @@ describe("presentPreview with sentences (#1384)", () => {
     expect(model.rows[0]!.after).toEqual({ kind: "redacted" });
   });
 });
+
+describe("purchase cards (#1478)", () => {
+  test("money is { amount, currency }: integer minor units with a free-text label", () => {
+    expect(formatPreviewValue({ amount: 150000, currency: "ARS" })).toEqual({
+      kind: "money",
+      minor: 150000,
+      currency: "ARS",
+    });
+    expect(formatPreviewValue({ amount: 999, currency: null })).toEqual({ kind: "money", minor: 999, currency: null });
+    expect(formatPreviewValue({ amount: 5 })).toEqual({ kind: "money", minor: 5, currency: null });
+    expect(formatPreviewValue({ amount: 5, currency: "<untrusted_content> USD </untrusted_content>" })).toEqual({
+      kind: "money",
+      minor: 5,
+      currency: "USD",
+    });
+    // An unknown amount (an asset without a cost) is empty, not zero.
+    expect(formatPreviewValue({ amount: null, currency: "ARS" })).toEqual({ kind: "empty" });
+    // Not money: a fractional amount, extra keys, a string amount.
+    expect(formatPreviewValue({ amount: 1.5, currency: "ARS" }).kind).toBe("text");
+    expect(formatPreviewValue({ amount: 1, currency: "ARS", note: "x" }).kind).toBe("text");
+    expect(formatPreviewValue({ amount: "1", currency: "ARS" }).kind).toBe("text");
+  });
+
+  test("money rows keep their before → after", () => {
+    const model = presentPreview({
+      changes: [
+        {
+          field: "unitPrice",
+          before: { amount: 100000, currency: "ARS" },
+          after: { amount: 120000, currency: "ARS" },
+          valueKind: "text",
+        },
+      ],
+    });
+    expect(model.rows[0]).toEqual({
+      field: "unitPrice",
+      before: { kind: "money", minor: 100000, currency: "ARS" },
+      after: { kind: "money", minor: 120000, currency: "ARS" },
+    });
+  });
+
+  test("a create's lines are a table; one added line is a one-row table", () => {
+    const line = { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } };
+    const created = presentPreview({ changes: [{ field: "lines", after: [line, { ...line, unitPrice: null }] }] });
+    expect(created.rows[0]!.records).toHaveLength(2);
+    const added = presentPreview({ changes: [{ field: "line", after: line }] });
+    expect(added.rows[0]!.records).toEqual([line]);
+  });
+
+  test("a removed line shows the line it removes", () => {
+    const line = { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: null };
+    const removed = presentPreview({ changes: [{ field: "line", before: line, after: null }] });
+    expect(removed.rows[0]!.records).toEqual([line]);
+  });
+
+  test("only the single-record fields become a one-row table; other objects stay a value", () => {
+    const model = presentPreview({ changes: [{ field: "trigger", after: { event: "x" } }] });
+    expect(model.rows[0]!.records).toBeUndefined();
+    const money = presentPreview({ changes: [{ field: "line", after: { amount: 1, currency: "ARS" } }] });
+    expect(money.rows[0]!.records).toBeUndefined();
+  });
+});

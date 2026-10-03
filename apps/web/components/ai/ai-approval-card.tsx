@@ -8,7 +8,7 @@ import {
   ShieldExclamationIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import { localizedText } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/utils/money";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 import { AiPreviewTable } from "./ai-preview-table";
 import { useAiSentences } from "./use-ai-sentences";
@@ -92,6 +93,7 @@ export function isPasswordSubmitKey(e: {
 export function ApprovalValue({ value }: { value: PreviewValue | null }) {
   const t = useTranslations("ai.approval");
   const format = useFormatter();
+  const locale = useLocale();
   if (value === null || value.kind === "empty") {
     return <span className="text-muted-foreground">{t("empty")}</span>;
   }
@@ -107,6 +109,8 @@ export function ApprovalValue({ value }: { value: PreviewValue | null }) {
       return <span>{value.value ? t("yes") : t("no")}</span>;
     case "number":
       return <span className="font-mono tabular-nums">{format.number(value.value)}</span>;
+    case "money":
+      return <span className="font-mono tabular-nums">{formatMoney(value.minor, locale, value.currency)}</span>;
     case "date":
       return (
         <span className="font-mono tabular-nums">

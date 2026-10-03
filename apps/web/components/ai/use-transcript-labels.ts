@@ -1,12 +1,13 @@
 "use client";
 
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useMemo } from "react";
 import { runErrorKind } from "@/lib/ai/error-kinds";
 import { displayAnswer, type AnswerDisplay } from "@/lib/ai/input-form";
 import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { TranscriptLabels } from "@/lib/ai/transcript-markdown";
+import { formatMoney } from "@/lib/utils/money";
 import { approvalStage } from "./ai-approval-card";
 import { usePreviewFieldLabel, useToolDisplayName } from "./ai-labels";
 import { toolLineText } from "./ai-tool-activity";
@@ -19,6 +20,7 @@ import { useAiSentences } from "./use-ai-sentences";
 export function useTranscriptLabels(): TranscriptLabels {
   const t = useTranslations("ai");
   const format = useFormatter();
+  const locale = useLocale();
   const toolName = useToolDisplayName();
   const fieldLabel = usePreviewFieldLabel();
   const sentences = useAiSentences();
@@ -33,6 +35,8 @@ export function useTranscriptLabels(): TranscriptLabels {
           return v.value ? t("approval.yes") : t("approval.no");
         case "number":
           return format.number(v.value);
+        case "money":
+          return formatMoney(v.minor, locale, v.currency);
         case "date":
           return format.dateTime(new Date(v.iso), { dateStyle: "medium", timeStyle: "short" });
         case "text":
@@ -107,5 +111,5 @@ export function useTranscriptLabels(): TranscriptLabels {
           : t(`errors.run.${runErrorKind(part.error.code).key}`),
       unsupported: t("message.unsupported"),
     };
-  }, [t, format, toolName, fieldLabel, sentences]);
+  }, [t, format, locale, toolName, fieldLabel, sentences]);
 }

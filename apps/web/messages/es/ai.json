@@ -186,7 +186,20 @@
       "willBeSkipped": "Omitida — no se aplica",
       "defaulted": "por defecto",
       "duplicateExisting": "{field} “{value}” ya pertenece a",
-      "duplicateRow": "{field} “{value}” también se usa en la fila {row}"
+      "duplicateRow": "{field} “{value}” también se usa en la fila {row}",
+      "values": {
+        "kind": {
+          "ASSET": "Activo",
+          "CONSUMABLE": "Consumible",
+          "LICENSE": "Licencia",
+          "OTHER": "Otro"
+        },
+        "linkState": {
+          "NONE": "Sin vincular",
+          "THIS_LINE": "Ya está en esta línea",
+          "OTHER_LINE": "En otra línea"
+        }
+      }
     },
     "cancelledNote": "Esta propuesta se canceló. No se modificó nada.",
     "errors": {

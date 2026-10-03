@@ -183,6 +183,73 @@ describe("AiApprovalCard", () => {
     expect(html).not.toContain("already belongs to LZ-9");
   });
 
+  test("a purchase card: money in the locale with its label, lines and linked assets as tables (#1478)", () => {
+    const req = approval("p1", { preview: {
+      ...approval("p1").preview,
+      toolName: "purchase_create",
+      target: undefined,
+      warnings: ["CHANGES_MONEY"],
+      changes: [
+        { field: "action", after: "Record a purchase with 2 lines." },
+        {
+          field: "lines",
+          valueKind: "text",
+          after: [
+            { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } },
+            { description: "Dock", kind: "ASSET", quantity: 1, unitPrice: { amount: 123456, currency: "ARS" } },
+          ],
+        },
+        { field: "total", after: { amount: 423456, currency: "ARS" }, valueKind: "text" },
+        {
+          field: "assets",
+          valueKind: "text",
+          after: [
+            { asset: "LZ-0001", assetId: "casset1", linkState: "NONE",
+              writes: { purchaseCost: { before: { amount: null, currency: null }, after: { amount: 150000, currency: "ARS" } } } },
+          ],
+        },
+      ],
+    } });
+    const part: ApprovalPart = { type: "approval", request: req, outcome: null };
+    const enHtml = render(part, "en");
+    expect(enHtml).toContain("ARS 4,234.56");
+    expect(enHtml).toContain("ARS 1,500");
+    expect(enHtml).toContain("ARS 1,234.56");
+    expect(enHtml).not.toContain("&quot;amount&quot;");
+    expect(enHtml).toContain(`>${en.fields.unitPrice}</th>`);
+    expect(enHtml).toContain('href="/assets/casset1"');
+    expect(enHtml).toContain(`${en.fields.purchaseCost}: `);
+    expect(enHtml).not.toContain(`>${en.fields.assetId ?? "Asset id"}</th>`);
+    expect(enHtml).toContain(en.approval.warnings.CHANGES_MONEY);
+    expect(enHtml).toContain(en.approval.individualOnly);
+    const esHtml = render(part, "es");
+    expect(esHtml).toContain("ARS 4.234,56");
+    expect(esHtml).toContain("ARS 1.500");
+    expect(esHtml).toContain(es.approval.individualOnly);
+    // Enum values read with their labels, never the raw code.
+    expect(enHtml).toContain(`>${en.approval.table.values.linkState.NONE}<`);
+    expect(esHtml).toContain(`>${es.approval.table.values.linkState.NONE}<`);
+    expect(esHtml).toContain(`>${es.approval.table.values.kind.ASSET}<`);
+    expect(enHtml).not.toContain(">NONE<");
+  });
+
+  test("an added line is a one-row table, not a JSON string (#1478)", () => {
+    const req = approval("p2", { preview: {
+      ...approval("p2").preview,
+      toolName: "purchase_line_add",
+      warnings: ["CHANGES_MONEY"],
+      changes: [
+        { field: "action", after: "Add the line." },
+        { field: "line", valueKind: "text",
+          after: { description: "Monitor", kind: "ASSET", quantity: 3, unitPrice: { amount: 9900, currency: "USD" } } },
+      ],
+    } });
+    const html = render({ type: "approval", request: req, outcome: null });
+    expect(html).toContain("<table");
+    expect(html).toContain("USD 99");
+    expect(html).not.toContain("{&quot;");
+  });
+
   test("decided cards have no buttons", () => {
     const html = render({ ...pending(), outcome: "rejected" });
     expect(html).not.toContain(">Approve<");

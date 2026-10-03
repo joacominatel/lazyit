@@ -195,3 +195,52 @@ describe("visibleTableRows", () => {
     expect(visibleTableRows(t, true).map((r) => r.number)).toEqual([2, 3]);
   });
 });
+
+describe("purchase tables (#1478)", () => {
+  test("a line's unit price is a money cell", () => {
+    const t = buildPreviewTable([
+      { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } },
+      { description: "Mouse", kind: "ASSET", quantity: 1, unitPrice: null },
+    ]);
+    expect(t.columns).toEqual(["description", "kind", "quantity", "unitPrice"]);
+    expect(t.rows[0]!.cells.unitPrice!.value).toEqual({ kind: "money", minor: 150000, currency: "ARS" });
+    expect(t.rows[1]!.cells.unitPrice!.value).toEqual({ kind: "empty" });
+  });
+
+  test("a linked asset: its id links the asset cell, and the values it gets are a list of changes", () => {
+    const t = buildPreviewTable([
+      {
+        asset: "LZ-0001",
+        assetId: "casset1",
+        linkState: "NONE",
+        writes: {
+          purchaseCost: { before: { amount: null, currency: null }, after: { amount: 150000, currency: "ARS" } },
+          company: { before: "Old", after: "Acme" },
+        },
+      },
+      { asset: "LZ-0002", assetId: "casset2", linkState: "NONE", writes: {} },
+    ]);
+    expect(t.columns).toEqual(["asset", "linkState", "writes"]);
+    expect(t.rows[0]!.cells.asset).toEqual({
+      value: { kind: "text", text: "LZ-0001", untrusted: false },
+      href: "/assets/casset1",
+      defaulted: false,
+    });
+    expect(t.rows[0]!.cells.writes!.changes).toEqual([
+      { field: "purchaseCost", before: { kind: "empty" }, after: { kind: "money", minor: 150000, currency: "ARS" } },
+      {
+        field: "company",
+        before: { kind: "text", text: "Old", untrusted: false },
+        after: { kind: "text", text: "Acme", untrusted: false },
+      },
+    ]);
+    // Nothing applied: an empty cell, not an empty list.
+    expect(t.rows[1]!.cells.writes!.changes).toBeUndefined();
+    expect(t.rows[1]!.cells.writes!.value).toEqual({ kind: "empty" });
+  });
+
+  test("an id without the column it names stays a column", () => {
+    const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cmodel1" }]);
+    expect(t.columns).toEqual(["description", "assetModelId"]);
+  });
+});

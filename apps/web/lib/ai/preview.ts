@@ -15,6 +15,8 @@ export type PreviewValue =
   | { kind: "number"; value: number }
   | { kind: "date"; iso: string }
   | { kind: "boolean"; value: boolean }
+  /** An amount in integer minor units with its free-text currency label (#1478; ADR-0100). */
+  | { kind: "money"; minor: number; currency: string | null }
   | { kind: "redacted" };
 
 export type PreviewRecord = Record<string, unknown>;
@@ -24,8 +26,9 @@ export interface PreviewRow {
   before: PreviewValue | null;
   after: PreviewValue;
   /**
-   * Set when `after` is an array of objects (a batch's rows, #1387): the raw records, which the card
-   * renders as a table (`preview-table.ts`) instead of the flat `after` text.
+   * Set when `after` is an array of objects (a batch's rows, #1387), or the one record of a
+   * {@link SINGLE_RECORD_FIELDS} field (#1478): the raw records, which the card renders as a table
+   * (`preview-table.ts`) instead of the flat `after` text.
    */
   records?: PreviewRecord[];
 }
@@ -66,6 +69,28 @@ function labelOf(value: Record<string, unknown>): string | null {
   return null;
 }
 
+/**
+ * A money value as the purchase previews send it (#1478): `{ amount, currency }` and nothing else, the
+ * amount in integer minor units (or `null` = unknown) and the currency a free-text label (or `null`).
+ */
+export function isMoneyShape(value: unknown): value is { amount: number | null; currency?: string | null } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (!keys.includes("amount") || keys.some((key) => key !== "amount" && key !== "currency")) return false;
+  const { amount, currency } = record;
+  return (
+    (amount === null || (typeof amount === "number" && Number.isSafeInteger(amount))) &&
+    (currency === undefined || currency === null || typeof currency === "string")
+  );
+}
+
+function moneyValue(value: { amount: number | null; currency?: string | null }): PreviewValue {
+  if (value.amount === null) return { kind: "empty" };
+  const label = typeof value.currency === "string" ? stripUntrusted(value.currency).text.trim() : "";
+  return { kind: "money", minor: value.amount, currency: label === "" ? null : label };
+}
+
 export function formatPreviewValue(value: unknown, kind?: AiPreviewValueKind): PreviewValue {
   if (kind === "redacted") return { kind: "redacted" };
   if (value === undefined || value === null || value === "") return { kind: "empty" };
@@ -86,6 +111,9 @@ export function formatPreviewValue(value: unknown, kind?: AiPreviewValueKind): P
     return items.length === 0 ? { kind: "empty" } : textValue(items.join(", "));
   }
   if (typeof value === "object") {
+    if (isMoneyShape(value)) return moneyValue(value);
+    // Nothing in it (a linked asset that gets no values, #1478): empty, never "{}".
+    if (Object.keys(value).length === 0) return { kind: "empty" };
     const label = labelOf(value as Record<string, unknown>);
     if (label !== null) return textValue(label);
     let json: string;
@@ -106,6 +134,30 @@ export function isRecordArray(value: unknown): value is PreviewRecord[] {
     value.length > 0 &&
     value.every((item) => typeof item === "object" && item !== null && !Array.isArray(item))
   );
+}
+
+/**
+ * Fields whose value is ONE record of a list's shape — a purchase line as `purchase_line_add` adds it and
+ * `purchase_line_remove` removes it (#1478) — shown as a one-row table like the list's rows (`lines`).
+ */
+export const SINGLE_RECORD_FIELDS: readonly string[] = ["line"];
+
+function isPlainRecord(value: unknown): value is PreviewRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !isMoneyShape(value);
+}
+
+/** The records a change shows as a table: a list of records, or a single-record field's one (its `before` when removed). */
+function tableRecords(change: { field: string; before?: unknown; after?: unknown }): PreviewRecord[] | null {
+  if (isRecordArray(change.after)) return change.after;
+  if (!SINGLE_RECORD_FIELDS.includes(change.field)) return null;
+  if (isPlainRecord(change.after)) return [change.after];
+  if ((change.after === null || change.after === undefined) && isPlainRecord(change.before)) return [change.before];
+  return null;
+}
+
+function recordsOf(change: { field: string; before?: unknown; after?: unknown }): { records?: PreviewRecord[] } {
+  const records = tableRecords(change);
+  return records ? { records } : {};
 }
 
 /** A value the server also sent as sentences (#1384): the localized text when it renders whole, else null. */
@@ -152,7 +204,7 @@ export function presentPreview(
         (!redacted && sentenceValue(change.afterSentences, render)) ||
         formatPreviewValue(change.after, change.valueKind),
       // A redacted value never reaches the table: its records are dropped with it.
-      ...(change.valueKind !== "redacted" && isRecordArray(change.after) ? { records: change.after } : {}),
+      ...(redacted ? {} : recordsOf(change)),
     });
   }
   return { action, rows, notices };

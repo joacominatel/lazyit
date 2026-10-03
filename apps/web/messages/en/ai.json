@@ -186,7 +186,20 @@
       "willBeSkipped": "Skipped — won't be applied",
       "defaulted": "default",
       "duplicateExisting": "{field} “{value}” already belongs to",
-      "duplicateRow": "{field} “{value}” is also used by row {row}"
+      "duplicateRow": "{field} “{value}” is also used by row {row}",
+      "values": {
+        "kind": {
+          "ASSET": "Asset",
+          "CONSUMABLE": "Consumable",
+          "LICENSE": "License",
+          "OTHER": "Other"
+        },
+        "linkState": {
+          "NONE": "Not linked",
+          "THIS_LINE": "Already on this line",
+          "OTHER_LINE": "On another line"
+        }
+      }
     },
     "cancelledNote": "This proposal was cancelled. Nothing was changed.",
     "errors": {
