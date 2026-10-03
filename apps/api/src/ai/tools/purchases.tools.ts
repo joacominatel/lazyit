@@ -23,12 +23,15 @@ import {
   UpdatePurchaseOrderSchema,
   UpdateSupplierSchema,
   aiPurchaseDocumentSourceRef,
+  currencyGroupKey,
   int4,
+  MONEY_MAX,
   warrantyEndFrom,
   type AiActionPreview,
   type AiEntityRef,
 } from '@lazyit/shared';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
+import { AssetsController } from '../../assets/assets.controller';
 import { ConsumablesController } from '../../consumables/consumables.controller';
 import { LocationsController } from '../../locations/locations.controller';
 import { PurchaseOrdersController } from '../../purchase-orders/purchase-orders.controller';
@@ -41,6 +44,7 @@ import {
   AI_TOOL_LIST_DEFAULT_LIMIT,
   AI_TOOL_LIST_MAX_LIMIT,
 } from '../ai.constants';
+import { mapToolError } from '../core/error-mapper';
 import { untrusted } from '../core/result-shaper';
 import { afterPhrase, phrase, summaryPhrase, yesNo } from '../core/sentences';
 import {
@@ -300,13 +304,16 @@ async function entityValue(
   type: 'assetModel' | 'location' | 'supplier' | 'consumable',
   id: string | null,
   read: (id: string) => Promise<unknown>,
+  options: { missingIsNone?: boolean } = {},
 ): Promise<Row | null> {
   if (!id) return null;
   try {
     const row = asRow(await read(id));
     const name = str(row.name);
     return { type, id, ...(name ? { label: name } : {}) };
-  } catch {
+  } catch (err) {
+    // `missingIsNone`: a missing or archived record is no value at all, as the route would treat it.
+    if (options.missingIsNone && mapToolError(err).status === 404) return null;
     return { type, id };
   }
 }
@@ -829,12 +836,13 @@ const purchaseDocumentRead = defineTool({
         purchaseId: input.purchaseId,
         attachmentId: input.attachmentId,
         extractionId: draft.extractionId ?? null,
-        // Everything read from the document, as ONE untrusted block: data, never instructions (INV-AI-4).
-        document: untrusted(JSON.stringify(documentDraftView(draft))),
+        // lazyit's own findings first: a long draft is truncated from the end, never these.
         warnings: asRows(draft.warnings).map((w) =>
           pick(w, ['code', 'path', 'detail']),
         ),
         matches: draft.matches ?? null,
+        // Everything read from the document, as ONE untrusted block: data, never instructions (INV-AI-4).
+        document: untrusted(JSON.stringify(documentDraftView(draft))),
       },
       // The read document marks the rest of the conversation untrusted (AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES).
       entityRefs: [
@@ -1752,10 +1760,21 @@ const purchaseReceive = defineTool({
           : str(purchase.currency);
     const company =
       input.company !== undefined ? input.company : str(purchase.company);
-    const locationId =
-      input.locationId !== undefined
-        ? input.locationId
-        : str(purchase.deliveryLocationId);
+    // The purchase's delivery location applies only while it is live (the route's `liveLocation()`): an
+    // archived one is not offered, so the card shows none.
+    const readLocation = (lid: string) =>
+      rt.call(LocationsController, 'findOne', { params: { id: lid } });
+    let location: Row | null;
+    if (input.locationId !== undefined) {
+      location = await entityValue('location', input.locationId, readLocation);
+    } else {
+      const fallback = str(purchase.deliveryLocationId);
+      location = fallback
+        ? await entityValue('location', fallback, readLocation, {
+            missingIsNone: true,
+          })
+        : null;
+    }
     const label = purchaseLabel(purchase);
     const pending = num(line.pendingQuantity) ?? 0;
     const received = num(line.receivedQuantity) ?? 0;
@@ -1786,13 +1805,7 @@ const purchaseReceive = defineTool({
         valueKind: 'entity',
       },
       { field: 'status', after: input.status ?? 'IN_STORAGE' },
-      {
-        field: 'location',
-        after: await entityValue('location', locationId, (lid) =>
-          rt.call(LocationsController, 'findOne', { params: { id: lid } }),
-        ),
-        valueKind: 'entity',
-      },
+      { field: 'location', after: location, valueKind: 'entity' },
       { field: 'company', after: company },
       { field: 'purchaseDate', after: purchaseDate, valueKind: 'date' },
       { field: 'warrantyEnd', after: warrantyEnd, valueKind: 'date' },
@@ -2205,6 +2218,103 @@ const purchaseApplyLicense = defineTool({
   },
 });
 
+/** What one selected asset contributes to a purchase from assets. */
+interface FromAsset {
+  name: string;
+  modelId: string | null;
+  model: Row | null;
+  cost: number | null;
+  currency: string | null;
+}
+
+/** A money amount as a number, whether the service answered a number or a 64-bit integer. */
+function amountOf(value: unknown): number | null {
+  if (typeof value === 'bigint') return Number(value);
+  return num(value);
+}
+
+/**
+ * The lines a purchase from assets will get, as the route derives them: one per model (assets without a
+ * model, per name), the quantity its assets, and the unit price only when every asset of the group has the
+ * same cost in the purchase's currency label — the request's, else the one label every priced asset shares.
+ * Assets that are missing, archived or already on a purchase are left out, as the route leaves them.
+ */
+async function fromAssetsPlan(
+  rt: AiToolRuntime,
+  assetIds: readonly string[],
+  requested: string | undefined,
+): Promise<{
+  lines: Row[];
+  currency: string | null;
+  anyCost: boolean;
+  notLinkable: number;
+}> {
+  const reads = await Promise.all(
+    assetIds.map(async (id) => {
+      try {
+        return asRow(
+          await rt.call(AssetsController, 'findOne', { params: { id } }),
+        );
+      } catch (err) {
+        if (mapToolError(err).status === 404) return null;
+        throw err;
+      }
+    }),
+  );
+  const assets: FromAsset[] = [];
+  let anyCost = false;
+  for (const row of reads) {
+    if (!row) continue;
+    const cost = amountOf(row.purchaseCost);
+    if (cost !== null) anyCost = true;
+    if (row.purchaseOrderLineId) continue;
+    assets.push({
+      name: str(row.name) ?? String(row.id),
+      modelId: str(row.modelId),
+      model: row.model ? asRow(row.model) : null,
+      cost,
+      currency: str(row.purchaseCurrency),
+    });
+  }
+  const priced = assets.filter((a) => a.cost !== null);
+  const keys = new Set(priced.map((a) => currencyGroupKey(a.currency)));
+  const currency =
+    requested ?? (keys.size === 1 ? (priced[0].currency ?? null) : null);
+  const groups = new Map<string, FromAsset[]>();
+  for (const asset of assets) {
+    const key = asset.modelId
+      ? `model:${asset.modelId}`
+      : `name:${asset.name.trim().toLowerCase()}`;
+    groups.set(key, [...(groups.get(key) ?? []), asset]);
+  }
+  const lines = [...groups.values()].map((group) => {
+    const [first] = group;
+    const model = first.model;
+    const shared =
+      first.cost !== null &&
+      group.every(
+        (a) =>
+          a.cost === first.cost &&
+          currencyGroupKey(a.currency) === currencyGroupKey(currency),
+      ) &&
+      first.cost * group.length <= MONEY_MAX;
+    return {
+      description: model
+        ? `${str(model.manufacturer) ?? ''} ${str(model.name) ?? ''}`.trim()
+        : first.name.trim(),
+      ...(first.modelId ? { assetModelId: first.modelId } : {}),
+      quantity: group.length,
+      unitPrice: shared ? { amount: first.cost, currency } : null,
+    };
+  });
+  return {
+    lines,
+    currency,
+    anyCost,
+    notLinkable: assetIds.length - assets.length,
+  };
+}
+
 const purchaseCreateFromAssets = defineTool({
   name: 'purchase_create_from_assets',
   title: 'Record a purchase from assets',
@@ -2223,6 +2333,7 @@ const purchaseCreateFromAssets = defineTool({
   bindings: [
     bind(PurchaseOrdersController, 'createFromAssets'),
     bind(SuppliersController, 'findOne'),
+    bind(AssetsController, 'findOne'),
   ],
   async run(input, rt) {
     const result = asRow(
@@ -2275,12 +2386,25 @@ const purchaseCreateFromAssets = defineTool({
     if (supplier) {
       changes.push({ field: 'supplier', after: supplier, valueKind: 'entity' });
     }
+    // The lines the route will derive, from the assets as they read now (`purchase-from-assets.service`).
+    const plan = await fromAssetsPlan(rt, input.assetIds, input.currency);
+    if (plan.currency !== null && input.currency === undefined) {
+      changes.push({ field: 'currency', after: plan.currency });
+    }
     for (const field of HEADER_FIELDS) {
       if (input[field] !== undefined) {
         changes.push(headerRow(field, input[field]));
       }
     }
-    return card(changes, [], {
+    changes.push({ field: 'lines', after: plan.lines, valueKind: 'text' });
+    if (plan.notLinkable > 0) {
+      changes.push({
+        field: 'notLinkable',
+        after: plan.notLinkable,
+        valueKind: 'number',
+      });
+    }
+    return card(changes, plan.anyCost ? ['CHANGES_MONEY'] : [], {
       impacted: [
         {
           type: 'asset',
