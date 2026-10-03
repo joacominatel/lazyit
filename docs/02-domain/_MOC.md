@@ -57,6 +57,8 @@ erDiagram
     PurchaseOrder ||--o{ PurchaseOrderLine : "has"
     PurchaseOrder ||--o{ PurchaseOrderEvent : "logged in"
     PurchaseOrderLine |o--o{ Asset : "produced"
+    PurchaseOrderLine |o--o{ ConsumableMovement : "received as"
+    Application |o--o{ PurchaseOrderLine : "licensed by"
 ```
 
 > [!note] Conceptual ERD. Relationships only — no fields. `Asset ↔ User` via
@@ -85,8 +87,9 @@ The model is organized in loosely-coupled areas:
    secret value (INV-10, [[0061-secret-manager-zero-knowledge]]). **Built (#366).**
 10. **Purchases** — [[supplier]], [[purchase-order]], [[purchase-order-line]], [[purchase-order-event]]:
     an always-available, optional-at-entry record of purchases that assets point back to; asset purchase fields stay
-    authoritative ([[0099-purchases-scope-model-and-optionality]]). **Backend core built (#1472)**; receiving,
-    linking, documents and the screens follow in Phase 1.
+    authoritative ([[0099-purchases-scope-model-and-optionality]]). **Built** (#1472–#1478): asset, other,
+    consumable and license lines, receiving and linking, documents, extraction and the AI tools — see
+    [[purchases/_MOC#What was built]].
 
 ## Implementation order
 
