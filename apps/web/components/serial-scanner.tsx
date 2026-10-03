@@ -108,7 +108,7 @@ export function SerialScanner({
         </Button>
       </div>
       {/* Always mounted, so screen readers hear the tip when it appears. */}
-      <p className="text-sm text-muted-foreground empty:hidden" role="status" aria-live="polite">
+      <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
         {feedback === "tip" ? tc("tip") : null}
       </p>
     </div>
