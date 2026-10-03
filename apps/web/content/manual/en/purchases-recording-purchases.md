@@ -84,7 +84,8 @@ There are four kinds of line:
 - **Other** — shipping, a service, a freebie. It counts in the total but never waits for delivery.
 
 The keyboard does most of the work: **Enter** in a line adds the next line, and **Ctrl+Enter** (**⌘+Enter**
-on a Mac) saves the purchase. The running total is shown under the lines.
+on a Mac) saves the purchase from anywhere on the form — even from a field with its suggestions open, which
+keeps what you typed. The running total is shown under the lines.
 
 After saving, lines are edited, added and removed on the purchase's page. A line can be removed only
 while no asset has been received on it.

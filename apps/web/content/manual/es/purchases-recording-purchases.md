@@ -86,7 +86,8 @@ Hay cuatro tipos de línea:
 - **Otro** — flete, un servicio, una bonificación. Cuenta en el total pero nunca espera una entrega.
 
 El teclado hace casi todo: **Enter** en una línea agrega la siguiente, y **Ctrl+Enter** (**⌘+Enter** en
-Mac) guarda la compra. El total acumulado se muestra debajo de las líneas.
+Mac) guarda la compra desde cualquier parte del formulario — incluso desde un campo con sus sugerencias
+abiertas, que conserva lo que escribiste. El total acumulado se muestra debajo de las líneas.
 
 Una vez guardada, las líneas se editan, agregan y quitan en la página de la compra. Una línea solo se
 puede quitar mientras no se haya recibido ningún activo en ella.

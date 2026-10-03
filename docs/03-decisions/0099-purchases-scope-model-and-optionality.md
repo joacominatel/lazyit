@@ -1319,7 +1319,7 @@ fixed reason — the ledger is append-only. Recorded in
 ## After local testing (2026-10-03)
 
 The CEO tested the whole build on a local instance and reported what did not work or did not read right
-(#1505–#1508). One report changes a decision recorded above.
+(#1505–#1508). One report changes a decision recorded above; another settles how two keyboard models meet.
 
 ### The purchases list opens on every purchase, newest first (amends Phase 1 web)
 
@@ -1337,6 +1337,22 @@ from existing assets — so that order would open on the purchases with the leas
 would be a backend change (#1507 is web-only); it can be added later on the same allowlist. Ordering by
 order date stays a column the operator can choose. Existing bookmarks with
 `?receipt=PENDING` keep opening the filtered view.
+
+### Ctrl/⌘+Enter saves from anywhere on the purchase form (#1508)
+
+CEO, verbatim: "El cmd+enter no me funciono tampoco, no hace nada" (Cmd+Enter did not work for me either,
+it does nothing).
+
+The form heard the shortcut only from inside itself. Driven key by key in Chrome, ⌘+Enter and Ctrl+Enter
+saved from every kind of field — plain inputs, money and date fields, the notes, smart-entry fields with
+their list open, a combobox list — but with focus on nothing (after a click on blank space, or once the
+focused control is gone, as with a removed line) the key reached the page and nothing else. The form keeps
+listening for its own fields and the lists its comboboxes open, and the page now passes it a Ctrl/⌘+Enter
+pressed with focus on nothing; focus in anything else (a dialog, the assistant, the search palette) is left
+alone. **A smart-entry field keeps the text and lets the save follow**: with its list open, Ctrl/⌘+Enter
+keeps the text as typed and the key travels on to the form. Rejected: making Ctrl/⌘+Enter only "keep as
+typed" — a save shortcut that does nothing in half the form's fields. No other form uses the shortcut, so
+smart entry elsewhere is unchanged.
 
 ## Related
 
