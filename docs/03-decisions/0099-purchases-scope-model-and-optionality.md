@@ -1205,7 +1205,7 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
 - **"Excluded from Approve all" is a fourth reason, after step-up and sensitive.** A page carrying
   `CREATES_ASSETS` or `CHANGES_MONEY` is counted as "creates assets or changes money" among the pages to decide on
   their own, and the warning on the card says it is never approved automatically or with Approve all. The web
-  keeps its own copy of the two codes next to the step-up list. Rejected: folding them into "sensitive" — these
+  reads the two codes from the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, the list core enforces. Rejected: folding them into "sensitive" — these
   cards are not elevated, and saying so would mislead.
 - **Money is recognised by shape.** A preview value that is exactly `{ amount, currency }` with an integer amount is
   money, formatted with the purchase's label in the user's locale; anything else renders as before. Rejected: a new

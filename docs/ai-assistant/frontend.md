@@ -1302,7 +1302,7 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
 
 - **"Approve all" exclusion.** `bulkExclusion` (`lib/ai/approval-pages.ts`) gains the reason
   `assetsOrMoney`: a still-waiting page whose preview carries a warning in `INDIVIDUAL_APPROVAL_WARNINGS`
-  (`CREATES_ASSETS`, `CHANGES_MONEY` — the server's `AI_NEVER_AUTO_APPROVE_WARNINGS`) is left out of
+  (`CREATES_ASSETS`, `CHANGES_MONEY` — the shared `AI_NEVER_AUTO_APPROVE_WARNINGS` core enforces) is left out of
   **Approve all** / **Reject all** and counted under "Decide these on their own page" (`pager.excluded.*`),
   exactly like a step-up page. Precedence: `stepUp` → `elevated` → `assetsOrMoney` → `needsReview`. The page
   itself still approves with the user's click and no password, and its warning says why on the card
@@ -1314,7 +1314,8 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   `formatMoney` in the UI locale with its label (`ARS 1.412.500`) on field rows, table cells, change lists and
   the `/copy` transcript. `{ amount: null }` (an asset without a cost) is empty, never zero. An empty object is
   empty, never `{}`.
-- **Lines and assets.** `lines` (an array of line records) is a table through the generic #1387 path.
+- **Lines and assets.** `lines` (an array of line records — a new purchase's, or the lines a purchase from
+  assets derives) is a table through the generic #1387 path.
   `line` — the one record `purchase_line_add` adds and `purchase_line_remove` removes (its `before`) — is a
   one-row table (`SINGLE_RECORD_FIELDS`); other single objects keep their old rendering. In a table,
   `<key>Id` beside `<key>` (`asset` + `assetId` on a link card) is not a column but links the `<key>` cell
