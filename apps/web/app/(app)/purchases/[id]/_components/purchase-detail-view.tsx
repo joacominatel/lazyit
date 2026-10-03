@@ -651,7 +651,13 @@ export function PurchaseDetailView({ id }: { id: string }) {
                   size="sm"
                   title={t("detail.askAiHint")}
                   onClick={() =>
-                    assistant.ask(t("detail.askAiMessage", { name: documentNameForPrompt(attachment.originalName) }))
+                    assistant.ask(
+                      t("detail.askAiMessage", {
+                        name: documentNameForPrompt(attachment.originalName),
+                        // The id lets the assistant read exactly this document (purchase_document_read).
+                        id: attachment.id,
+                      }),
+                    )
                   }
                 >
                   <AiChatIcon />
