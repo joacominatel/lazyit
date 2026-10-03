@@ -92,17 +92,21 @@ export function AssetDocumentsPanel({
  * Each document may carry an optional type label (#1476) — "Invoice", "Delivery note" — typed with smart
  * entry over `/suggestions/documentLabel`: set it in the optional *Type* field before uploading (it applies
  * to the files of that upload) or edit it inline on the row; emptying it clears it. Never required.
+ *
+ * `rowAction` adds an action to a document's row — a purchase's *Read this document* (#1477).
  */
 export function DocumentsPanel({
   parent,
   parentId,
   canWrite,
   notice,
+  rowAction,
 }: {
   parent: Extract<AttachmentParent, "asset" | "purchaseOrder">;
   parentId: string;
   canWrite: boolean;
   notice?: ReactNode;
+  rowAction?: (attachment: Attachment) => ReactNode;
 }) {
   const t = useTranslations("attachments");
   const { date } = useFormatters();
@@ -331,6 +335,7 @@ export function DocumentsPanel({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  {rowAction?.(attachment)}
                   {canWrite && editingId !== attachment.id ? (
                     <Button
                       id={pencilId(attachment.id)}

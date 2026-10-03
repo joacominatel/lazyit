@@ -1,5 +1,7 @@
 import type {
+  ApplyLicense,
   CancelRemainingUnits,
+  CreatePurchaseFromAssets,
   CreatePurchaseOrder,
   CreatePurchaseOrderLine,
   LinkAssetsToLine,
@@ -17,10 +19,15 @@ import {
 } from "@tanstack/react-query";
 import {
   addPurchaseOrderLine,
+  applyLicense,
   cancelRemainingUnits,
+  createPurchaseFromAssets,
   createPurchaseOrder,
   deletePurchaseOrder,
+  extractPurchaseDocument,
   getAssetPurchase,
+  getExtractionStatus,
+  getLicenseProposal,
   getLinkPreview,
   getPendingLines,
   getPurchaseOrder,
@@ -36,6 +43,7 @@ import {
   updatePurchaseOrder,
   updatePurchaseOrderLine,
 } from "../endpoints/purchase-orders";
+import { applicationKeys } from "./use-applications";
 import { assetHistoryKeys } from "./use-asset-history";
 import { useInvalidateAssets } from "./use-assets";
 import { consumableKeys } from "./use-consumables";
@@ -63,6 +71,9 @@ export const purchaseOrderKeys = {
     [...purchaseOrderKeys.all, "link-preview", lineId, assetIds] as const,
   /** An asset's provenance lives under the purchase keys, so any purchase write refreshes it. */
   provenance: (assetId: string) => [...purchaseOrderKeys.all, "provenance", assetId] as const,
+  /** Whether document extraction can be offered to this caller (#1477). */
+  extractionStatus: () => [...purchaseOrderKeys.all, "extraction-status"] as const,
+  licenseProposal: (lineId: string) => [...purchaseOrderKeys.all, "license-proposal", lineId] as const,
 };
 
 /** One page of purchases (server-side search, filters and paging). */
@@ -281,6 +292,69 @@ export function useCancelRemainingUnits() {
   return useMutation({
     mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: CancelRemainingUnits }) =>
       cancelRemainingUnits(id, lineId, data),
+    onSuccess: invalidate,
+  });
+}
+
+// ── Phase 2 (#1477) ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether *Read this document* can be offered, and for which types. Idle unless `enabled` (callers ask only
+ * when the viewer can write purchases). Not a fast-moving fact: an admin flips the switch rarely.
+ */
+export function useExtractionStatus({ enabled }: { enabled: boolean }) {
+  return useQuery({
+    queryKey: purchaseOrderKeys.extractionStatus(),
+    queryFn: ({ signal }) => getExtractionStatus(signal),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Read a document into a draft (#1477). Explicit only — a mutation, never a query, because each run sends the
+ * document out and spends the caller's AI budget. Success or failure, the purchase gains an `EXTRACTION_RUN`
+ * event, so its log is refreshed either way; nothing else changed.
+ */
+export function useExtractPurchaseDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, attachmentId }: { id: string; attachmentId: string }) =>
+      extractPurchaseDocument(id, attachmentId),
+    onSettled: (_data, _error, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.events(id) });
+    },
+  });
+}
+
+/** What applying a license line would do; idle until a line is given. */
+export function useLicenseProposal(target: { purchaseOrderId: string; lineId: string } | null) {
+  return useQuery({
+    queryKey: purchaseOrderKeys.licenseProposal(target?.lineId ?? ""),
+    queryFn: ({ signal }) => getLicenseProposal(target!.purchaseOrderId, target!.lineId, signal),
+    enabled: target !== null,
+  });
+}
+
+/** Apply a license line: the purchase (applied seats, log) and the application (seats, renewal) both change. */
+export function useApplyLicense() {
+  const queryClient = useQueryClient();
+  const invalidatePurchases = useInvalidatePurchases();
+  return useMutation({
+    mutationFn: ({ id, lineId, data }: { id: string; lineId: string; data: ApplyLicense }) =>
+      applyLicense(id, lineId, data),
+    onSuccess: () => {
+      invalidatePurchases();
+      void queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+    },
+  });
+}
+
+/** Create a purchase from selected assets: a new purchase, and the assets' links and history. */
+export function useCreatePurchaseFromAssets() {
+  const invalidate = useInvalidateFlows();
+  return useMutation({
+    mutationFn: (data: CreatePurchaseFromAssets) => createPurchaseFromAssets(data),
     onSuccess: invalidate,
   });
 }

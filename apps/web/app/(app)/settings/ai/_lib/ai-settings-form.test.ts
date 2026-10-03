@@ -15,6 +15,7 @@ import {
   buildUpdate,
   curatedAllowlistView,
   describeAiSettingsError,
+  documentExtractionAvailability,
   draftFromSettings,
   draftToPatch,
   draftToTest,
@@ -572,5 +573,25 @@ describe("web search (#1389)", () => {
     for (const bad of ["0", "21", "", "2.5", "-1", "x"]) {
       expect(parseWebSearchMaxUses(bad)).toBeNull();
     }
+  });
+});
+
+describe("document extraction (#1477)", () => {
+  test("available only with the assistant on and a provider that reads documents", () => {
+    expect(documentExtractionAvailability({ enabled: true, provider: "anthropic" })).toBe("available");
+    expect(documentExtractionAvailability({ enabled: true, provider: "google" })).toBe("available");
+    expect(documentExtractionAvailability({ enabled: false, provider: "anthropic" })).toBe("aiOff");
+    expect(documentExtractionAvailability({ enabled: true, provider: null })).toBe("aiOff");
+    expect(documentExtractionAvailability({ enabled: true, provider: "openai-compatible" })).toBe(
+      "providerUnsupported",
+    );
+  });
+
+  test("the switch saves through the shared PUT schema; a re-save of anything else leaves it as stored", () => {
+    const on = buildUpdate(BASE, { documentExtractionEnabled: true });
+    expect(on.documentExtractionEnabled).toBe(true);
+    expect(UpdateAiSettingsSchema.safeParse(on).success).toBe(true);
+    // Omitted = keep the stored value (the API's rule), so another card's save never switches it.
+    expect("documentExtractionEnabled" in settingsToUpdate({ ...BASE, documentExtractionEnabled: true })).toBe(false);
   });
 });

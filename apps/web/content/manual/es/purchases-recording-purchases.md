@@ -42,7 +42,9 @@ pero no el panel **Compra** del activo (más abajo).
 Recibir unidades y vincular o desvincular activos también crea o cambia activos, así que necesitan
 **Registrar y editar compras** *y* el permiso para crear y editar activos. Recibir una línea de
 consumible en stock cambia el stock, así que necesita **Registrar y editar compras** *y* el permiso para
-editar consumibles.
+editar consumibles. Aplicar una línea de licencia cambia su aplicación, así que necesita **Registrar y
+editar compras** *y* el permiso para editar aplicaciones. [Leer un documento con IA](#leer-un-documento-con-ia)
+necesita **Registrar y editar compras** *y* el permiso para usar el asistente de IA.
 
 ## Registrar una compra
 
@@ -70,7 +72,7 @@ presupuesto o la factura; se sugieren las descripciones que ya escribiste, para 
 escriba siempre igual. Su **cantidad** es 1 por defecto y el **precio unitario** es opcional (en
 blanco significa desconocido; `0` significa sin cargo). El precio unitario suele ir sin IVA.
 
-Hay tres tipos de línea:
+Hay cuatro tipos de línea:
 
 - **Activo** — hardware que vas a registrar como activos. Puedes anotar la **marca** y el **modelo como
   figura** en el documento, asignarla a un **modelo de activo** si ya lo tienes (no es obligatorio — se
@@ -78,6 +80,9 @@ Hay tres tipos de línea:
 - **Consumible** — tóner, cables, pilas: unidades que entran al stock de un
   [consumible](/help/consumables-consumables-categories) en lugar de convertirse en activos. Puedes elegir
   ahora el **consumible** al que entran, o dejarlo para cuando lleguen.
+- **Licencia** — asientos de software: la renovación de una suscripción, más asientos de una aplicación. Su
+  cantidad son los **asientos** comprados, y puedes elegir ahora la [aplicación](/help/applications-applications)
+  a la que corresponden, o al aplicarlos. Ver [Aplicar una licencia](#aplicar-una-licencia).
 - **Otro** — flete, un servicio, una bonificación. Cuenta en el total pero nunca espera una entrega.
 
 El teclado hace casi todo: **Enter** en una línea agrega la siguiente, y **Ctrl+Enter** (**⌘+Enter** en
@@ -185,6 +190,32 @@ Una recepción de stock no se puede deshacer desde la compra: si recibiste de m�
 movimiento normal en el consumible — la línea sigue contando lo que se recibió. Por lo mismo, una línea de
 consumible que ya recibió stock no puede cambiar de tipo ni quitarse.
 
+## Aplicar una licencia
+
+Una línea de **licencia** nunca cambia por sí sola los asientos de su aplicación. Cuando los asientos ya
+son tuyos, elige **Aplicar licencia** en la línea (o en *Unidades pendientes*). El formulario lee primero
+la aplicación y muestra qué haría aplicarla:
+
+- los **asientos comprados** de la aplicación ahora — y después —, los asientos **en uso** y su **fecha de
+  renovación**;
+- **Asientos a sumar** empieza con los asientos de la línea que todavía no se aplicaron. Cámbialo si
+  llegaron menos, o déjalo vacío para fijar solo la renovación;
+- **Nueva fecha de renovación** es opcional y nunca se completa por ti: la compra no dice cuánto dura la
+  licencia, así que escríbela cuando esta compra la renueva.
+
+Solo se aplica lo que confirmas, exactamente como si hubieras editado la aplicación. La línea cuenta los
+asientos como **aplicados** ("10 de 25 asientos aplicados"), igual que las unidades recibidas.
+
+- Aplicar **más asientos de los que compró la línea** está permitido, con un aviso; la línea muestra
+  entonces más asientos que los comprados.
+- Una aplicación que **todavía no cuenta asientos** (sin asientos comprados — ilimitada) empieza a
+  contarlos desde los que sumas; el formulario lo avisa antes.
+- Una línea **sin aplicación** pide una primero, y la guarda en la línea.
+
+Los asientos aplicados no se le quitan a la compra: si aplicaste de más, corrige los asientos en la
+aplicación. Por eso mismo, una línea de licencia con asientos aplicados ya no puede cambiar de tipo ni
+quitarse.
+
 ## Vincular activos que ya tienes
 
 Los activos comprados antes de que empezaras a registrar compras — o cargados a mano — se pueden vincular
@@ -227,6 +258,22 @@ marca **Mover aquí** en cada uno que en realidad pertenece a esta línea.
 Si algunos activos no se pueden vincular — por ejemplo, uno se archivó mientras tanto — los demás se
 vinculan igual, y el resultado lista cada uno que no, con el motivo.
 
+### Crear una compra a partir de activos
+
+Cuando la compra nunca se registró, selecciona los activos en la lista de **Activos** y elige **Crear
+compra** en la barra de selección. Un formulario corto pide el **proveedor**, la **referencia** y la
+**moneda** — todos opcionales, todos sugeridos mientras escribes. lazyit crea entonces **una compra** con
+**una línea por modelo** (los activos sin modelo se agrupan por nombre), con la cantidad de activos de cada
+línea, y vincula cada activo a su línea.
+
+- **Solo cambia el vínculo.** No se toca el costo, la fecha ni ningún otro campo de los activos. El precio
+  unitario de una línea se completa solo cuando **todos** sus activos tienen el mismo costo en la moneda de
+  la compra; si no, queda vacío — nunca un promedio.
+- Deja **Moneda** vacía para usar la etiqueta que ya comparten los costos de los activos.
+- Los activos archivados, o que ya están en otra compra, **quedan afuera** y se listan con el motivo; la
+  compra se crea con los demás. (Para mover un activo desde su compra, usa **Vincular activos
+  existentes**.) Si ninguno de los activos seleccionados se puede vincular, no se crea nada.
+
 ### Desvincular
 
 **Desvincular de la compra** en el panel **Compra** del activo quita el vínculo. El activo **conserva sus
@@ -254,7 +301,8 @@ Se puede filtrar por proveedor.
 
 Cada línea muestra "x de y recibidas" y lo que sigue pendiente, con **Recibir** y, en su menú, **Vincular
 activos existentes** y **Cancelar unidades restantes**. En una línea de consumible, **Recibir** abre
-[Recibir en stock](#recibir-en-stock), y no hay nada que vincular. Una compra cuya **entrega prevista** ya pasó se
+[Recibir en stock](#recibir-en-stock), y no hay nada que vincular. Una línea de licencia ofrece
+[Aplicar licencia](#aplicar-una-licencia) en su lugar. Una compra cuya **entrega prevista** ya pasó se
 marca como **Atrasada**.
 
 ## Documentos
@@ -280,6 +328,74 @@ archivos en su panel **Compra**.
 > también lo dice. Hasta que llegue esa copia, guarda tu propia copia de cada factura, orden o remito que
 > necesites conservar.
 
+## Leer un documento con IA
+
+lazyit puede leer una factura, un presupuesto o un remito y **completar la compra para que la revises**.
+Viene **desactivado**: un administrador activa **Extracción de documentos** en
+[Configuración → IA](/help/ai-assistant-setup#extracción-de-documentos), y necesita el asistente de IA
+activado con un proveedor que lea documentos (Anthropic, OpenAI o Google Gemini).
+
+**Qué se envía.** Cuando alguien lee un documento, el **archivo completo** — con el proveedor, los precios
+y los IDs fiscales que muestre — va al proveedor de IA configurado en Configuración → IA, bajo tu contrato
+con él. Ningún otro dato de lazyit va con él, ni siquiera el nombre del archivo. Cada lectura cuenta para el
+presupuesto diario de IA de esa persona y queda en el registro de actividad de la compra (quién, qué
+proveedor y modelo — nunca los valores leídos).
+
+Hay dos formas de empezar:
+
+- En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB —
+  algo menos para imágenes con algunos proveedores — y 20 páginas).
+- En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo, y lazyit crea una compra en
+  **borrador** con el nombre del archivo, lo adjunta y lo lee. Guardar la revisión completa la compra y la
+  **marca como pedida** (viene marcado — desmárcalo para dejarla en borrador). Si lo dejas antes de guardar,
+  el borrador conserva el documento y puedes completarlo a mano.
+
+La lectura tarda hasta dos minutos. Si falla, no se completó nada y el documento sigue adjunto: la pantalla
+dice por qué (el proveedor estaba ocupado, el archivo tiene demasiadas páginas, se agotó el presupuesto
+diario…).
+
+### Revisar el borrador
+
+La revisión muestra el **documento junto al borrador**: una imagen ahí mismo, un PDF como una tarjeta cuyo
+**Abrir en una pestaña nueva** lo abre en el visor de tu navegador — pon esa pestaña junto a la revisión. **No
+se guarda nada hasta que eliges Guardar**, y entonces solo lo que está marcado:
+
+- **Pasa el puntero o el foco por un valor** para ver qué se leyó y en qué página — `Leído "1.412.500,00" ·
+  página 1`. Así se detecta de un vistazo un separador de miles mal puesto.
+- **Vacío antes que adivinar.** Un valor que el documento no dice con claridad queda **vacío**, marcado
+  **No leído** — nunca se completa con una suposición. Si no se leyó la cantidad de una línea nueva, hay
+  que escribirla antes de poder agregarla; un precio desconocido simplemente queda desconocido.
+- **Revisar** marca lo que necesita tu atención, y el contador de arriba salta de uno al siguiente:
+  - un importe que se lee de dos maneras (`1.150` — ¿mil ciento cincuenta, o uno coma quince?) queda vacío;
+    también uno con más de dos decimales;
+  - una fecha que puede ser día/mes o mes/día, sin nada en el documento que lo aclare, queda vacía;
+  - una moneda que solo aparece como un símbolo que comparten varias monedas (`$`);
+  - una línea cuya cantidad × precio unitario no es el total de línea que imprime el documento.
+- **Si el guardado se corta a mitad de camino** (una caída de la conexión, un rechazo), lo que ya se guardó
+  se conserva y aparece como **Guardado**, bloqueado; **Guardar** escribe entonces solo el resto.
+- **El control de totales** compara las líneas, a medida que las corriges, con el neto (o el total) que
+  imprime el documento: **Coinciden**, o en cuánto **difieren** — casi siempre una línea sin precio.
+- **El proveedor** se busca entre los que ya tienes, por ID fiscal (lo más confiable) o por nombre
+  (revísalo). Puedes usar la coincidencia, **crear** el proveedor como figura en el documento (con su ID
+  fiscal) o escribir otro.
+- **El modelo de una línea** se asigna como una línea de una compra anterior con la misma descripción, o se
+  sugiere a partir de la marca y el modelo escritos en el documento (revísalo). Puedes cambiarlo, o dejarlo
+  para cuando lleguen las unidades.
+
+### Cambios propuestos en una compra con datos
+
+Leer un documento posterior — la factura después del presupuesto — nunca sobrescribe la compra. Cada valor
+se compara con lo que tiene la compra, con la misma regla que al [vincular activos](#elegir-qué-valores-copiar):
+
+- un valor que la compra **todavía no tiene** viene marcado (**Completar**);
+- un valor que **reemplazaría** otro distinto **nunca** viene marcado (**Reemplazar**): marca los que
+  quieras;
+- un valor que la compra ya tiene queda afuera.
+
+Una línea del documento con la **misma descripción** que una línea de la compra propone cambios en esa
+línea (cantidad, precio unitario, garantía); cualquier otra línea se ofrece como **línea nueva**. Cambiar la
+moneda la cambia para toda la compra, y el formulario lo avisa.
+
 ## El panel Compra del activo
 
 Un activo vinculado a una compra muestra un panel **Compra** en su página, justo después de *Detalles*:
@@ -301,8 +417,10 @@ del proveedor — útil para un reclamo de garantía — y los documentos de la 
 Cada compra lleva un registro de **actividad** de solo agregado: quién la registró, quién cambió el
 estado, quién agregó, editó o quitó una línea — con un cambio de precio o cantidad mostrado como
 *antes → después* —, quién recibió, vinculó, movió o desvinculó unidades, quién recibió stock en una línea
-de consumible, quién canceló unidades restantes (con el motivo) y quién agregó o quitó un documento o
-cambió su tipo. No se puede editar ni borrar.
+de consumible, quién aplicó asientos de una línea de licencia, quién canceló unidades restantes (con el
+motivo), quién agregó o quitó un documento o cambió su tipo, quién leyó un documento con IA (y con qué
+proveedor — nunca los valores leídos) y si la compra se creó a partir de activos seleccionados. No se puede
+editar ni borrar.
 
 ## Proveedores
 

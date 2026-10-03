@@ -4,6 +4,8 @@ import { TrashIcon } from "@heroicons/react/24/outline";
 import type { PurchaseOrderLineKind } from "@lazyit/shared";
 import { Badge } from "@/components/ui/badge";
 import { useLocale, useTranslations } from "next-intl";
+import type { ReactNode } from "react";
+import { ApplicationCombobox } from "@/components/application-combobox";
 import { AssetModelCombobox } from "@/components/asset-model-combobox";
 import { ConsumableCombobox } from "@/components/consumable-combobox";
 import { MoneyField } from "@/components/money-input";
@@ -30,8 +32,12 @@ function previewTotal(line: LineDraft, locale: string): number | null {
  * The fields of one purchase line (ADR-0099 §2): kind, description (the only thing a line needs),
  * quantity (default 1), unit price in the viewer's locale, and — on an asset line — the brand and model
  * as written on the document, an optional mapping to an asset model and the warranty; on a consumable line
- * (#1476) an optional mapping to the consumable it is received into. Used by the create form's line editor
- * and the edit-line dialog.
+ * (#1476) an optional mapping to the consumable it is received into; on a license line (#1477) an optional
+ * mapping to the application its seats are for. Used by the create form's line editor, the edit-line dialog
+ * and the extraction review.
+ *
+ * `annotations` add a line under a field (the extraction review's "read …" evidence or "not read"), and
+ * `flagged` marks the fields the review asks the person to check.
  */
 export function LineFields({
   line,
@@ -41,6 +47,8 @@ export function LineFields({
   currency,
   autoFocus,
   onRemove,
+  annotations,
+  flagged,
 }: {
   line: LineDraft;
   /** 1-based position, for accessible names. */
@@ -52,6 +60,10 @@ export function LineFields({
   autoFocus?: boolean;
   /** When set, a remove button ends the row. */
   onRemove?: () => void;
+  /** A note under a field, keyed by the draft field (`assetModelId` for the model mapping). */
+  annotations?: Partial<Record<keyof LineDraft, ReactNode>>;
+  /** Fields to mark for checking. */
+  flagged?: ReadonlySet<keyof LineDraft>;
 }) {
   const t = useTranslations("purchases.line");
   const locale = useLocale();
@@ -65,17 +77,24 @@ export function LineFields({
   // Picking the consumable reads the consumables list; without that permission the line is still a
   // consumable line, mapped later by someone who can.
   const canReadConsumables = useCan("consumable:read");
+  // Likewise the application of a license line (#1477): picked with `application:read`, else mapped later.
+  const canReadApplications = useCan("application:read");
+  const note = (field: keyof LineDraft) =>
+    annotations?.[field] ? <div className="text-xs text-muted-foreground">{annotations[field]}</div> : null;
+  const mark = (field: keyof LineDraft) => (flagged?.has(field) ? { "data-review-flag": "" } : {});
   const total = previewTotal(line, locale);
   const kinds: { value: PurchaseOrderLineKind; label: string }[] = [
     { value: "ASSET", label: t("kindAsset") },
     { value: "CONSUMABLE", label: t("kindConsumable") },
+    { value: "LICENSE", label: t("kindLicense") },
     { value: "OTHER", label: t("kindOther") },
   ];
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-        <Field className="sm:col-span-4">
+      {/* Four kinds do not fit a fixed column beside the description, so the row wraps. */}
+      <div className="flex flex-wrap items-start gap-3">
+        <Field className="group/field w-fit" {...mark("kind")}>
           <FieldLabel id={id("kind-label")}>{t("kind")}</FieldLabel>
           {isWritableKind(line.kind) ? (
             <SegmentedChoice
@@ -91,8 +110,13 @@ export function LineFields({
               {line.kind}
             </Badge>
           )}
+          {note("kind")}
         </Field>
-        <Field className="sm:col-span-8" data-invalid={errors?.description ? true : undefined}>
+        <Field
+          className="group/field min-w-60 flex-1"
+          data-invalid={errors?.description ? true : undefined}
+          {...mark("description")}
+        >
           <FieldLabel htmlFor={id("description")}>{t("description")}</FieldLabel>
           <SuggestInput
             id={id("description")}
@@ -105,12 +129,15 @@ export function LineFields({
                 ? t("descriptionPlaceholder")
                 : line.kind === "CONSUMABLE"
                   ? t("descriptionConsumablePlaceholder")
-                  : t("descriptionOtherPlaceholder")
+                  : line.kind === "LICENSE"
+                    ? t("descriptionLicensePlaceholder")
+                    : t("descriptionOtherPlaceholder")
             }
             aria-invalid={errors?.description ? true : undefined}
             // A new row takes focus so the keyboard flow continues (Enter adds the next line).
             autoFocus={autoFocus}
           />
+          {note("description")}
           {errors?.description ? <FieldError>{t("descriptionRequired")}</FieldError> : null}
         </Field>
       </div>
@@ -118,8 +145,12 @@ export function LineFields({
       {/* Three kinds do not fit beside the description and the amounts, so the amounts get their own row —
           shared with the consumable a consumable line is received into. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-        <Field className="sm:col-span-2" data-invalid={errors?.quantity ? true : undefined}>
-          <FieldLabel htmlFor={id("quantity")}>{t("quantity")}</FieldLabel>
+        <Field
+          className="group/field sm:col-span-2"
+          data-invalid={errors?.quantity ? true : undefined}
+          {...mark("quantity")}
+        >
+          <FieldLabel htmlFor={id("quantity")}>{line.kind === "LICENSE" ? t("seats") : t("quantity")}</FieldLabel>
           <Input
             id={id("quantity")}
             inputMode="numeric"
@@ -128,14 +159,16 @@ export function LineFields({
             aria-invalid={errors?.quantity ? true : undefined}
             className="font-mono tabular-nums"
           />
+          {note("quantity")}
           {errors?.quantity ? <FieldError>{t("quantityInvalid")}</FieldError> : null}
         </Field>
-        <div className="sm:col-span-3">
+        <div className="group/field sm:col-span-3" {...mark("unitPrice")}>
           <MoneyField
             id={id("unitPrice")}
             label={t("unitPrice")}
             value={line.unitPrice}
             onValueChange={(unitPrice) => onChange({ unitPrice })}
+            description={annotations?.unitPrice}
           />
         </div>
         {line.kind === "CONSUMABLE" && canReadConsumables ? (
@@ -151,11 +184,23 @@ export function LineFields({
             <FieldDescription>{t("consumableHelp")}</FieldDescription>
           </Field>
         ) : null}
+        {line.kind === "LICENSE" && canReadApplications ? (
+          <Field className="sm:col-span-7">
+            <FieldLabel htmlFor={id("application")}>{t("application")}</FieldLabel>
+            <ApplicationCombobox
+              id={id("application")}
+              value={line.applicationId}
+              onValueChange={(applicationId) => onChange({ applicationId })}
+              placeholder={t("applicationPlaceholder")}
+            />
+            <FieldDescription>{t("applicationHelp")}</FieldDescription>
+          </Field>
+        ) : null}
       </div>
 
       {line.kind === "ASSET" ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-12 sm:items-start">
-          <Field className="sm:col-span-3">
+          <Field className="group/field sm:col-span-3" {...mark("manufacturerText")}>
             <FieldLabel htmlFor={id("manufacturer")}>{t("manufacturer")}</FieldLabel>
             <SuggestInput
               id={id("manufacturer")}
@@ -164,8 +209,9 @@ export function LineFields({
               source={() => manufacturers}
               recentKey="assetModel.manufacturer"
             />
+            {note("manufacturerText")}
           </Field>
-          <Field className="sm:col-span-3">
+          <Field className="group/field sm:col-span-3" {...mark("modelText")}>
             <FieldLabel htmlFor={id("modelText")}>{t("modelText")}</FieldLabel>
             <SuggestInput
               id={id("modelText")}
@@ -174,8 +220,9 @@ export function LineFields({
               source={() => models}
               recentKey="purchase.lineModel"
             />
+            {note("modelText")}
           </Field>
-          <Field className="sm:col-span-4">
+          <Field className="group/field sm:col-span-4" {...mark("assetModelId")}>
             <FieldLabel htmlFor={id("assetModel")}>{t("assetModel")}</FieldLabel>
             <AssetModelCombobox
               id={id("assetModel")}
@@ -192,8 +239,13 @@ export function LineFields({
               }
               placeholder={t("assetModelPlaceholder")}
             />
+            {note("assetModelId")}
           </Field>
-          <Field className="sm:col-span-2" data-invalid={errors?.warrantyMonths ? true : undefined}>
+          <Field
+            className="group/field sm:col-span-2"
+            data-invalid={errors?.warrantyMonths ? true : undefined}
+            {...mark("warrantyMonths")}
+          >
             <FieldLabel htmlFor={id("warranty")}>{t("warrantyMonths")}</FieldLabel>
             <Input
               id={id("warranty")}
@@ -203,6 +255,7 @@ export function LineFields({
               aria-invalid={errors?.warrantyMonths ? true : undefined}
               className="font-mono tabular-nums"
             />
+            {note("warrantyMonths")}
             {errors?.warrantyMonths ? <FieldError>{t("warrantyInvalid")}</FieldError> : null}
           </Field>
         </div>

@@ -38,6 +38,7 @@ const FIELD_LABELS = new Set([
   "modelText",
   "assetModelId",
   "consumableId",
+  "applicationId",
   "quantity",
   "unitPrice",
   "cancelledQuantity",
@@ -56,7 +57,8 @@ const STATUS_KEY: Record<string, string> = {
  * The purchase's append-only activity log (ADR-0099, purchase-order-event entity note), newest first:
  * who did what and when, with a price or quantity change shown before → after; units received, linked,
  * moved and cancelled; documents added and removed (#1475); stock received on a consumable line and a
- * document's type label changed (#1476). Read tolerantly — an event type a later build
+ * document's type label changed (#1476); a license applied to its application, a document read by the AI
+ * provider and a purchase created from selected assets (#1477). Read tolerantly — an event type a later build
  * adds shows generically until this screen learns it.
  */
 export function PurchaseActivity({
@@ -97,6 +99,7 @@ export function PurchaseActivity({
     if (change.field === "kind" && typeof side === "string") {
       if (side === "ASSET") return t("kindAsset");
       if (side === "CONSUMABLE") return t("kindConsumable");
+      if (side === "LICENSE") return t("kindLicense");
       return side === "OTHER" ? t("kindOther") : side;
     }
     return String(side);
@@ -191,6 +194,46 @@ export function PurchaseActivity({
         if (view.from === null) return t("documentLabelSet", { name, label: view.to });
         return t("documentLabelChanged", { name, from: view.from, to: view.to });
       }
+      case "licenseApplied": {
+        const seats =
+          view.seats && view.seats.to !== null
+            ? view.seats.from === null
+              ? t("seatsStarted", { to: view.seats.to })
+              : t("seatsChange", { from: view.seats.from, to: view.seats.to })
+            : null;
+        const renewal = view.renewal?.to ? t("renewalSet", { date: date(view.renewal.to) }) : null;
+        return [
+          view.seatsAdded
+            ? t("licenseApplied", { count: view.seatsAdded, line: lineName(view.lineId, null) })
+            : t("licenseRenewed", { line: lineName(view.lineId, null) }),
+          seats,
+          renewal,
+          view.over ? t("overApplied") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      }
+      case "extractionRun": {
+        const via = [view.provider, view.model].filter(Boolean).join(" · ");
+        if (!view.succeeded) {
+          return [t("extractionFailed"), via || null, view.errorCode].filter(Boolean).join(" · ");
+        }
+        return [
+          t("extractionRun"),
+          via || null,
+          view.lineCount !== null ? t("extractionLines", { count: view.lineCount }) : null,
+          view.warningCount ? t("extractionWarnings", { count: view.warningCount }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+      }
+      case "createdFromAssets":
+        return [
+          t("createdFromAssets", { count: view.linked ?? 0, lines: view.lineCount ?? 0 }),
+          view.failed > 0 ? t("createdFromAssetsLeftOut", { count: view.failed }) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
       case "deleted":
         return t("deleted");
       case "restored":

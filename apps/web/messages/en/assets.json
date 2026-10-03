@@ -101,7 +101,8 @@
       "owners": "Owners: {value}",
       "warranty": "Warranty: {value}"
     },
-    "linkToPurchase": "Link to purchase"
+    "linkToPurchase": "Link to purchase",
+    "createPurchase": "Create purchase"
   },
   "empty": {
     "title": "Nothing tracked yet",
