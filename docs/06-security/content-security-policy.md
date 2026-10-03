@@ -3,7 +3,7 @@ title: Web Content-Security-Policy
 tags: [security, web, csp, headers, defence-in-depth]
 status: accepted
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # Web Content-Security-Policy
@@ -29,7 +29,8 @@ log what they *would* block (`[Report Only]` console messages), but block nothin
 
 Why not enforce on day one: every page family below was driven in Chromium against a production build
 with the policy **enforced**, with zero violations — but two families could not be exercised end to
-end in that pass, and a wrong CSP breaks a page silently:
+end in that pass, and a wrong CSP breaks a page silently (the Purchases area, which shipped after that
+pass, is listed separately below):
 
 - **AI chat streaming with approval cards** — needs a reachable model provider; the local pass had
   none, so the SSE stream and the approval card were not rendered under the policy.
@@ -40,6 +41,28 @@ Both only use mechanisms the verified pages already exercise (`fetch` to the API
 scripts, inline styles; the consent redirect is a `window.location.assign`, which `form-action` does
 not govern), so no violation is expected. Report-only turns that expectation into evidence before
 anything can break.
+
+### Not yet verified: Purchases (epic #1465, after the 2026-09-26 pass)
+
+The Purchases area ([[0099-purchases-scope-model-and-optionality|ADR-0099]]) was built after the verified
+pass, so none of its pages has been driven under the enforced policy:
+
+- `/purchases` (list), `/purchases/pending`, `/purchases/suppliers` and a supplier page, `/purchases/new`,
+  a purchase page with **documents** (the asset documents panel, parameterised by parent) and its
+  activity log, and `/purchases/:id/edit`.
+- **The extraction review**, `/purchases/:id/review/:attachmentId` — needs a provider and the *Document
+  extraction* switch on. The document is fetched with the Bearer token and turned into a `blob:` URL: an
+  **image** is shown inline (`img-src` already allows `blob:`); a **PDF is never framed** — it is a card
+  whose *Open in a new tab* opens the same `blob:` URL in the browser's own PDF viewer (ADR-0099, decisions
+  while building Phase 2 web). `frame-src` and `object-src` stay `'none'` for it.
+- **The `blob:` PDF tab itself.** A document at a `blob:` URL inherits the policy of the page that created
+  it, so the new tab is governed by this policy (including `object-src 'none'`) while the browser renders
+  the PDF. Confirm in each supported browser that the PDF opens and the console shows no `[Report Only]`
+  message for it.
+- The serial **camera scanner** inside *Receive stock* (the `/assets/scan` camera, already verified, in a
+  new place) and the asset page's *Purchase* panel.
+
+Exercise them with the report-only policy alongside the two families above.
 
 ### Verified (production build, policy enforced, Chromium, 2026-09-26)
 
@@ -54,8 +77,9 @@ settings page including `/settings/ai`. The next-themes class was applied before
 
 ### Enforcing
 
-1. Exercise the two families above on a real instance with the report-only policy and confirm the
-   browser console shows no `[Report Only]` CSP message.
+1. Exercise the two families above and the Purchases pages (including the extraction review and its
+   `blob:` PDF tab) on a real instance with the report-only policy and confirm the browser console shows
+   no `[Report Only]` CSP message.
 2. Set `CSP_ENFORCED = true` in `apps/web/lib/security/csp.ts` and update the delivery-mode test. That
    switches the header name and adds `frame-ancestors 'none'` to the policy.
 3. Update the Manual's *Reverse proxy & TLS* page ("report-only" → enforced) and this note.
@@ -76,7 +100,7 @@ settings page including `/settings/ai`. The next-themes class was applied before
 | `object-src` | `'none'` | No plugins. |
 | `base-uri` | `'self'` | An injected `<base>` cannot re-point relative URLs. |
 | `form-action` | `'self'` | Forms submit to lazyit only. |
-| `frame-src` | `'none'` | lazyit embeds nothing. |
+| `frame-src` | `'none'` | lazyit embeds nothing — a purchase PDF opens in a new tab rather than a frame (ADR-0099, Phase 2 web). |
 | `frame-ancestors` | `'none'` | Only in the enforcing policy (report-only cannot carry it); enforced today by the baseline header. |
 
 Not set, deliberately: **`upgrade-insecure-requests`** — `lan` mode ([[0087-plain-http-lan-deployment-axis]])
