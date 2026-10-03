@@ -65,7 +65,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
-import { canAskAiToFill, canExtract, unavailableHint } from "@/lib/purchases/extraction";
+import { canAskAiToFill, canExtract, documentNameForPrompt, unavailableHint } from "@/lib/purchases/extraction";
 import { lineReceiveAction } from "@/lib/purchases/pending";
 import { formatMoney } from "@/lib/utils/money";
 import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
@@ -650,7 +650,9 @@ export function PurchaseDetailView({ id }: { id: string }) {
                   variant="ghost"
                   size="sm"
                   title={t("detail.askAiHint")}
-                  onClick={() => assistant.ask(t("detail.askAiMessage", { name: attachment.originalName }))}
+                  onClick={() =>
+                    assistant.ask(t("detail.askAiMessage", { name: documentNameForPrompt(attachment.originalName) }))
+                  }
                 >
                   <AiChatIcon />
                   <span className="sr-only sm:not-sr-only">{t("detail.askAi")}</span>
