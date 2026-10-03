@@ -219,7 +219,8 @@ describe("AiApprovalCard", () => {
     expect(enHtml).toContain(`>${en.fields.unitPrice}</th>`);
     expect(enHtml).toContain('href="/assets/casset1"');
     expect(enHtml).toContain(`${en.fields.purchaseCost}: `);
-    expect(enHtml).not.toContain(`>${en.fields.assetId ?? "Asset id"}</th>`);
+    // `assetId` links the asset cell; it is not a column (its humanized label would be "Asset id").
+    expect(enHtml).not.toContain(">Asset id</th>");
     expect(enHtml).toContain(en.approval.warnings.CHANGES_MONEY);
     expect(enHtml).toContain(en.approval.individualOnly);
     const esHtml = render(part, "es");
