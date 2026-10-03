@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,6 +12,8 @@ import {
 import {
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiOperation,
   ApiQuery,
   ApiTags,
@@ -19,24 +22,35 @@ import { createZodDto } from 'nestjs-zod';
 import {
   CreateSupplierSchema,
   SupplierListPageSchema,
+  SupplierMergePreviewSchema,
+  SupplierMergeResultSchema,
+  SupplierMergeSchema,
   SupplierSchema,
   UpdateSupplierSchema,
 } from '@lazyit/shared';
 import { SuppliersService, SUPPLIER_SORT_ALLOWLIST } from './suppliers.service';
 import { parsePageQuery } from '../common/parse-page-query';
+import { parseCuidQuery } from '../common/parse-cuid-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
+import type { Principal } from '../auth/principal';
 
 class SupplierDto extends createZodDto(SupplierSchema) {}
 class SupplierListPageDto extends createZodDto(SupplierListPageSchema) {}
 class CreateSupplierDto extends createZodDto(CreateSupplierSchema) {}
 class UpdateSupplierDto extends createZodDto(UpdateSupplierSchema) {}
+class SupplierMergeDto extends createZodDto(SupplierMergeSchema) {}
+class SupplierMergePreviewDto extends createZodDto(
+  SupplierMergePreviewSchema,
+) {}
+class SupplierMergeResultDto extends createZodDto(SupplierMergeResultSchema) {}
 
 /**
  * Suppliers (ADR-0099 §2). Part of the Purchases permission domain: `purchaseOrder:read` to see them
- * (VIEWER denied by default), `:write` to create and edit, `:delete` (ADMIN) to archive and restore.
+ * (VIEWER denied by default), `:write` to create and edit, `:delete` (ADMIN) to archive, restore and merge.
  */
 @ApiTags('suppliers')
 @Controller('suppliers')
@@ -140,5 +154,47 @@ export class SuppliersController {
   @ApiOkResponse({ type: SupplierDto })
   restore(@Param('id') id: string) {
     return this.suppliers.restore(id);
+  }
+
+  @Get(':id/merge-preview')
+  @RequirePermission('purchaseOrder:delete')
+  @ApiOperation({
+    summary:
+      'Preview merging the duplicate sourceId into this supplier — ADMIN only. Writes nothing.',
+  })
+  @ApiQuery({ name: 'sourceId', required: true })
+  @ApiOkResponse({ type: SupplierMergePreviewDto })
+  @ApiBadRequestResponse({
+    description: 'sourceId missing, malformed or equal to the id',
+  })
+  @ApiConflictResponse({ description: 'One of the two suppliers is archived' })
+  mergePreview(@Param('id') id: string, @Query('sourceId') sourceId?: string) {
+    const source = parseCuidQuery(sourceId, 'sourceId');
+    if (source === undefined) {
+      throw new BadRequestException('sourceId is required');
+    }
+    return this.suppliers.mergePreview(id, source);
+  }
+
+  @Post(':id/merge')
+  @RequirePermission('purchaseOrder:delete')
+  @ApiOperation({
+    summary:
+      'Merge the duplicate sourceId into this supplier — ADMIN only. Its purchases (archived ones included) move here, ' +
+      "this supplier's empty fields are filled from it (nothing is overwritten), and the duplicate is archived.",
+  })
+  @ApiOkResponse({ type: SupplierMergeResultDto })
+  @ApiBadRequestResponse({
+    description: 'A supplier cannot be merged into itself',
+  })
+  @ApiConflictResponse({
+    description: 'One of the two suppliers is archived (e.g. already merged)',
+  })
+  merge(
+    @Param('id') id: string,
+    @Body() dto: SupplierMergeDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.suppliers.merge(id, dto.sourceId, principal);
   }
 }

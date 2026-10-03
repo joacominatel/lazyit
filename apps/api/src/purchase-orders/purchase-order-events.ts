@@ -39,3 +39,41 @@ export function recordPurchaseOrderEvent(
     },
   });
 }
+
+/** A client able to append many rows to `purchase_order_events` in one statement (a `$transaction` client). */
+export interface PurchaseOrderEventBatchWriter {
+  purchaseOrderEvent: {
+    createMany: (args: {
+      data: Prisma.PurchaseOrderEventCreateManyInput[];
+    }) => Promise<unknown>;
+  };
+}
+
+/**
+ * Append the same event to many purchases in one insert, in the caller's transaction — for a change that
+ * touches every purchase of a supplier at once (a supplier merge, #1496), where one insert per purchase would
+ * scale the transaction with the purchase count. Same actor, AI provenance and payload rules as
+ * {@link recordPurchaseOrderEvent}. No ids → no insert.
+ */
+export async function recordPurchaseOrderEvents(
+  tx: PurchaseOrderEventBatchWriter,
+  purchaseOrderIds: readonly string[],
+  eventType: PurchaseOrderEventType,
+  actor: ActorAttribution,
+  payload?: Record<string, Prisma.InputJsonValue | null>,
+): Promise<void> {
+  if (purchaseOrderIds.length === 0) return;
+  const aiInvocationId = currentAiInvocationId();
+  await tx.purchaseOrderEvent.createMany({
+    data: purchaseOrderIds.map((purchaseOrderId) => ({
+      purchaseOrderId,
+      eventType,
+      ...(payload !== undefined ? { payload: payload } : {}),
+      ...(actor.userId != null ? { performedById: actor.userId } : {}),
+      ...(actor.serviceAccountId != null
+        ? { serviceAccountId: actor.serviceAccountId }
+        : {}),
+      ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
+    })),
+  });
+}

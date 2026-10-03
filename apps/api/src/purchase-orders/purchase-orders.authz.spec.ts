@@ -103,6 +103,8 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
     update: ok,
     remove: ok,
     restore: ok,
+    merge: ok,
+    mergePreview: ok,
   };
 
   beforeAll(async () => {
@@ -233,6 +235,78 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
       await http()
         .get(`/purchase-orders${as('role=ADMIN')}&deleted=only`)
         .expect(200);
+    });
+  });
+
+  describe('merge suppliers (#1496) — ADMIN only, through purchaseOrder:delete', () => {
+    const DUP = 'clsupplier00000000000002';
+
+    it('403 for a MEMBER on the merge and its preview, and nothing reaches the service', async () => {
+      suppliers.merge.mockClear();
+      suppliers.mergePreview.mockClear();
+      await http()
+        .post(`/suppliers/${PO}/merge${as('role=MEMBER')}`)
+        .send({ sourceId: DUP })
+        .expect(403);
+      await http()
+        .get(
+          `/suppliers/${PO}/merge-preview${as('role=MEMBER')}&sourceId=${DUP}`,
+        )
+        .expect(403);
+      expect(suppliers.merge).not.toHaveBeenCalled();
+      expect(suppliers.mergePreview).not.toHaveBeenCalled();
+    });
+
+    it('an ADMIN merges and previews; the principal reaches the service for attribution', async () => {
+      suppliers.merge.mockClear();
+      await http()
+        .post(`/suppliers/${PO}/merge${as('role=ADMIN')}`)
+        .send({ sourceId: DUP })
+        .expect(201);
+      expect(suppliers.merge).toHaveBeenCalledWith(
+        PO,
+        DUP,
+        expect.objectContaining({ kind: 'human' }),
+      );
+      await http()
+        .get(
+          `/suppliers/${PO}/merge-preview${as('role=ADMIN')}&sourceId=${DUP}`,
+        )
+        .expect(200);
+    });
+
+    it('a service account needs purchaseOrder:delete (fail-closed)', async () => {
+      await http()
+        .post(
+          `/suppliers/${PO}/merge${as('sa=purchaseOrder:read,purchaseOrder:write')}`,
+        )
+        .send({ sourceId: DUP })
+        .expect(403);
+      await http()
+        .post(`/suppliers/${PO}/merge${as('sa=purchaseOrder:delete')}`)
+        .send({ sourceId: DUP })
+        .expect(201);
+    });
+
+    it('400 on a missing or malformed sourceId, or an unknown body field', async () => {
+      await http()
+        .post(`/suppliers/${PO}/merge${as('role=ADMIN')}`)
+        .send({})
+        .expect(400);
+      await http()
+        .post(`/suppliers/${PO}/merge${as('role=ADMIN')}`)
+        .send({ sourceId: 'nope' })
+        .expect(400);
+      await http()
+        .post(`/suppliers/${PO}/merge${as('role=ADMIN')}`)
+        .send({ sourceId: DUP, overwrite: true })
+        .expect(400);
+      await http()
+        .get(`/suppliers/${PO}/merge-preview${as('role=ADMIN')}`)
+        .expect(400);
+      await http()
+        .get(`/suppliers/${PO}/merge-preview${as('role=ADMIN')}&sourceId=nope`)
+        .expect(400);
     });
   });
 
