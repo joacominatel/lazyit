@@ -1335,8 +1335,8 @@ the database's default null placement — under `desc`, every purchase without a
 no fallback to `createdAt`. The order date is optional (D-D) and often blank — a draft, a purchase made
 from existing assets — so that order would open on the purchases with the least information. The fallback
 would be a backend change (#1507 is web-only); it can be added later on the same allowlist. Ordering by
-order date stays a column the operator can choose. Existing bookmarks with
-`?receipt=PENDING` keep opening the filtered view.
+order date stays a column the operator can choose. Existing bookmarks with `?receipt=PENDING` keep opening
+the filtered view.
 
 ### Ctrl/⌘+Enter saves from anywhere on the purchase form (#1508)
 
@@ -1363,4 +1363,4 @@ smart entry elsewhere is unchanged.
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1507 · #1508
