@@ -44,6 +44,10 @@ function ownRoute(ref: { type: string; id: string; slug?: string }): string | nu
     case "assetTagScheme":
       // The single instance-wide scheme (#1394): its editor lives on the instance settings page.
       return "/settings/instance";
+    case "purchaseOrder":
+      return `/purchases/${seg(ref.id)}`;
+    case "supplier":
+      return `/purchases/suppliers/${seg(ref.id)}`;
     default:
       return null;
   }
@@ -59,6 +63,8 @@ function buildRoute(ref: EntityPointer): string | null {
     case "assetAssignment":
     case "accessGrant":
     case "consumableMovement":
+    // A purchase document (#1478) is shown on its purchase's page.
+    case "purchaseDocument":
       return ref.parent ? ownRoute(ref.parent) : null;
     case "accessRequest":
       return ref.parent ? ownRoute(ref.parent) : "/applications/access-requests";
