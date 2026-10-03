@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { RequestIdNote } from "@/components/request-id-note";
+import { INDIVIDUAL_APPROVAL_WARNINGS } from "@/lib/ai/approval-pages";
 import { entityHref, linkableRefs } from "@/lib/ai/entity-href";
 import {
   isKnownWarning,
@@ -154,7 +155,8 @@ interface ApprovalCardProps {
  * Approve is never autofocused and no global key approves anything; each click disables both buttons
  * until the server answers. One card, one decision — several cards of one step are paged by
  * `AiApprovalPager` (#1409), whose "Approve all" still sends one decision per card and never covers a
- * card that needs the password, is sensitive, or whose last decision was refused.
+ * card that needs the password, is sensitive, creates assets or changes money (#1478 — the warning says
+ * so on the card), or whose last decision was refused.
  */
 export function AiApprovalCard({
   part,
@@ -381,6 +383,7 @@ export function AiApprovalCard({
               {warnings.map((code) => {
                 const isNew = addedWarnings.includes(code);
                 const needsPassword = STEP_UP_WARNINGS.includes(code);
+                const individualOnly = INDIVIDUAL_APPROVAL_WARNINGS.includes(code);
                 return (
                   <li
                     key={code}
@@ -397,6 +400,9 @@ export function AiApprovalCard({
                           <LockClosedIcon className="size-3" aria-hidden />
                           {t("passwordRequired")}
                         </span>
+                      )}
+                      {individualOnly && (
+                        <span className="ml-1 text-muted-foreground">· {t("individualOnly")}</span>
                       )}
                     </span>
                     {isNew && <StatusBadge tone="warning">{t("newWarning")}</StatusBadge>}

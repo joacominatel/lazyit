@@ -181,14 +181,23 @@ export function clampPage(page: number, count: number): number {
  * - `stepUp`: it needs the user's password (the server asks for it, or a step-up warning is on it —
  *   roles, identity, privileges, credentials, a critical application);
  * - `elevated`: a sensitive change (security.md G4 — no batch approval of elevated cards);
+ * - `assetsOrMoney`: it creates assets or sets or changes an amount of money — a warning in
+ *   {@link INDIVIDUAL_APPROVAL_WARNINGS} (ADR-0099 §11 and its Phase 3 decisions, UX decision D11);
  * - `needsReview`: a decision on it was refused (STALE, preview changed, expired…) — the page shows why.
  *
  * A change proposed after reading content other people wrote IS covered (CEO decision, #1409): each
  * page still shows its "Based on content written by others" banner.
  */
-export type BulkExclusion = "stepUp" | "elevated" | "needsReview";
+export type BulkExclusion = "stepUp" | "elevated" | "assetsOrMoney" | "needsReview";
 
-export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "needsReview"];
+export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "assetsOrMoney", "needsReview"];
+
+/**
+ * The preview warnings whose change is decided on its own page, never by "Approve all" / "Reject all"
+ * (#1478): generating assets and setting or changing money. The server never auto-approves them either
+ * (`AI_NEVER_AUTO_APPROVE_WARNINGS`); the user's own click on the page still approves, with no password.
+ */
+export const INDIVIDUAL_APPROVAL_WARNINGS: readonly string[] = ["CREATES_ASSETS", "CHANGES_MONEY"];
 
 /** Why a still-waiting change can't be decided in bulk, or null when it can. Pure. */
 export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclusion | null {
@@ -202,6 +211,7 @@ export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclus
     return "stepUp";
   }
   if (request.elevated || preview.elevated || preview.class === "elevated") return "elevated";
+  if (preview.warnings.some((code) => INDIVIDUAL_APPROVAL_WARNINGS.includes(code))) return "assetsOrMoney";
   if (state.errors[request.toolCallId] !== undefined) return "needsReview";
   return null;
 }

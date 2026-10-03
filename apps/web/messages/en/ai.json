@@ -158,6 +158,7 @@
       "unknown": "Additional check: {code}"
     },
     "passwordRequired": "Needs your password",
+    "individualOnly": "Never approved automatically or with Approve all",
     "newWarning": "New",
     "changed": "This change was updated since it was proposed. Review the highlighted points and decide again.",
     "impacted": "Also affects {count, plural, one {# {type}} other {# {type}}}",
@@ -226,6 +227,7 @@
     "excluded": {
       "stepUp": "{count, plural, one {# needs your password} other {# need your password}}",
       "elevated": "{count, plural, one {# is a sensitive change} other {# are sensitive changes}}",
+      "assetsOrMoney": "{count, plural, one {# creates assets or changes money} other {# create assets or change money}}",
       "needsReview": "{count, plural, one {# needs another look} other {# need another look}}"
     },
     "bulkRunning": "{decision, select, approve {Approving} other {Rejecting}} {done} of {total}…",
