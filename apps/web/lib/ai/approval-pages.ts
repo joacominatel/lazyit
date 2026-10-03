@@ -182,7 +182,8 @@ export function clampPage(page: number, count: number): number {
  *   roles, identity, privileges, credentials, a critical application);
  * - `elevated`: a sensitive change (security.md G4 — no batch approval of elevated cards);
  * - `assetsOrMoney`: it creates assets or sets or changes an amount of money — a warning in
- *   {@link INDIVIDUAL_APPROVAL_WARNINGS} (ADR-0099 §11 and its Phase 3 decisions, UX decision D11);
+ *   the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, which core never auto-approves either (ADR-0099 §11 and its
+ *   Phase 3 decisions, UX decision D11); the page itself still approves with a click and no password;
  * - `needsReview`: a decision on it was refused (STALE, preview changed, expired…) — the page shows why.
  *
  * A change proposed after reading content other people wrote IS covered (CEO decision, #1409): each
@@ -191,13 +192,6 @@ export function clampPage(page: number, count: number): number {
 export type BulkExclusion = "stepUp" | "elevated" | "assetsOrMoney" | "needsReview";
 
 export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "assetsOrMoney", "needsReview"];
-
-/**
- * The preview warnings whose change is decided on its own page, never by "Approve all" / "Reject all"
- * (#1478): generating assets and setting or changing money — the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, which
- * the server never auto-approves either. The user's own click on the page still approves, with no password.
- */
-export const INDIVIDUAL_APPROVAL_WARNINGS: readonly string[] = AI_NEVER_AUTO_APPROVE_WARNINGS;
 
 /** Why a still-waiting change can't be decided in bulk, or null when it can. Pure. */
 export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclusion | null {
@@ -211,7 +205,9 @@ export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclus
     return "stepUp";
   }
   if (request.elevated || preview.elevated || preview.class === "elevated") return "elevated";
-  if (preview.warnings.some((code) => INDIVIDUAL_APPROVAL_WARNINGS.includes(code))) return "assetsOrMoney";
+  if (preview.warnings.some((code) => (AI_NEVER_AUTO_APPROVE_WARNINGS as readonly string[]).includes(code))) {
+    return "assetsOrMoney";
+  }
   if (state.errors[request.toolCallId] !== undefined) return "needsReview";
   return null;
 }

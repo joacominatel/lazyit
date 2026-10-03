@@ -1,6 +1,10 @@
 "use client";
 
-import type { AiMessagePart, AiToolInvocationStatus } from "@lazyit/shared";
+import {
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
+  type AiMessagePart,
+  type AiToolInvocationStatus,
+} from "@lazyit/shared";
 import {
   ExclamationTriangleIcon,
   EyeSlashIcon,
@@ -15,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { RequestIdNote } from "@/components/request-id-note";
-import { INDIVIDUAL_APPROVAL_WARNINGS } from "@/lib/ai/approval-pages";
 import { entityHref, linkableRefs } from "@/lib/ai/entity-href";
 import {
   isKnownWarning,
@@ -398,7 +401,7 @@ export function AiApprovalCard({
               {warnings.map((code) => {
                 const isNew = addedWarnings.includes(code);
                 const needsPassword = STEP_UP_WARNINGS.includes(code);
-                const individualOnly = INDIVIDUAL_APPROVAL_WARNINGS.includes(code);
+                const individualOnly = (AI_NEVER_AUTO_APPROVE_WARNINGS as readonly string[]).includes(code);
                 return (
                   <li
                     key={code}
