@@ -118,8 +118,9 @@ the label and lazyit acts on what it reads:
   finds the unit.
 
 Hold the label steady inside the square. While it looks, the camera shows **Scanning…**; when it reads
-a code it flashes a green check (with a short vibration on phones) and opens the result. Besides QR
-labels it reads Data Matrix and the common barcodes on tag stickers (Code 128, Code 39, EAN, UPC, ITF).
+a code it flashes a green check (with a short vibration on phones that support it) and opens the result.
+Besides QR labels it reads Data Matrix and the common barcodes on tag stickers (Code 128, Code 39, EAN,
+UPC, ITF).
 
 If nothing is read after a few seconds, a tip appears. What usually helps:
 

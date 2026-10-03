@@ -905,7 +905,7 @@ None reopens a CEO decision.
   pixels per bar, and a fixed-focus laptop webcam can't make up for it by going closer. Now the camera is
   asked for HD (`ideal` 1920×1080), the viewfinder is laid out at 1280 px and only **scaled down for
   display** (`CameraViewfinder`; a portrait phone stream is capped at 60% of the screen and centred on the
-  scan box), `disableFlip` drops the library's second decode of the same pixels on every missed frame, and
+  scan box; the QR box is capped at 640 px to bound main-thread work on phones), `disableFlip` drops the library's second decode of the same pixels on every missed frame, and
   both modes read one format list — QR, Data Matrix, Code 128/39/93, EAN-13/8, UPC-A/E, ITF — instead of
   the library's seventeen (the lookup keeps reading tag-sticker barcodes, which then search). The pure
   setup and feedback rules live in `lib/utils/camera-scan.ts`. Feedback: a *Scanning…* badge, a green

@@ -125,9 +125,9 @@ manos. Apunta la cámara a la etiqueta y lazyit actúa según lo que lee:
   etiqueta de texto simple también encuentre la unidad.
 
 Mantén la etiqueta quieta dentro del cuadrado. Mientras busca, la cámara muestra **Escaneando…**; cuando
-lee un código muestra un check verde (con una vibración corta en los teléfonos) y abre el resultado.
-Además de las etiquetas QR lee Data Matrix y los códigos de barras habituales de las etiquetas adhesivas
-(Code 128, Code 39, EAN, UPC, ITF).
+lee un código muestra un check verde (con una vibración corta en los teléfonos que la admiten) y abre el
+resultado. Además de las etiquetas QR lee Data Matrix y los códigos de barras habituales de las etiquetas
+adhesivas (Code 128, Code 39, EAN, UPC, ITF).
 
 Si después de unos segundos no lee nada, aparece una sugerencia. Lo que suele ayudar:
 
