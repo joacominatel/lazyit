@@ -153,9 +153,12 @@ three roles **except** two tighter tiers:
 > listed on the asset — is served only to a principal holding `purchaseOrder:read`; the API enforces it,
 > not only the UI. Without it, the asset still reads normally under `asset:read`, own purchase fields
 > (cost, currency, dates) included — and so does the bare `purchaseOrderLineId`, an opaque id that reveals
-> no supplier, reference, date or price. The same holds for a consumable movement received from a purchase
-> (#1476): it is read under `consumable:read` with only the opaque `purchaseOrderLineId` and a fixed reason
-> (*Received from a purchase*) — never the supplier or the reference.
+> no supplier, reference, date or price. A consumable movement received from a purchase (#1476) is read
+> under `consumable:read` with the opaque `purchaseOrderLineId` and a reason that names the purchase
+> **reference** (*Received from purchase OC-4512*, or *Received from a purchase* when there is none) — never
+> the supplier or any other purchase detail. Every consumable reader, VIEWER included, sees that reference:
+> a CEO-accepted exception to D-A for the reference only (2026-10-02, #1494; ADR-0099, *CEO confirmations
+> (2026-10-02)*).
 >
 > **Routes that need two permissions** (#1473). Where a purchase flow also reads or writes assets, the
 > route requires both — AND semantics, so a service account needs both grants:
