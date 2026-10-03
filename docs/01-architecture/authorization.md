@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -127,7 +127,8 @@ three roles **except** two tighter tiers:
 > [!note] The `purchaseOrder` domain ([[0099-purchases-scope-model-and-optionality]] §8) — built (#1472)
 > `purchaseOrder:read`, `purchaseOrder:write` and `purchaseOrder:delete` cover purchases, their lines and
 > documents, and suppliers. They gate `/purchase-orders/**` and `/suppliers/**`; removing a line is an edit
-> (`:write`), archiving and restoring a purchase or a supplier is `:delete`. In the role matrix they are
+> (`:write`), archiving and restoring a purchase or a supplier is `:delete`, and so is merging a duplicate
+> supplier into another one, its preview included (#1496). In the role matrix they are
 > three separate toggles under Inventory (`purchaseOrder.view` / `.edit` / `.delete`), not part of
 > "View inventory", because the read is VIEWER-denied:
 >
@@ -135,7 +136,8 @@ three roles **except** two tighter tiers:
 >   cannot see purchases or supplier prices by default. An admin can grant it to VIEWER from the role
 >   matrix — for every viewer at once, since permissions are per role.
 > - `purchaseOrder:write` — ADMIN + MEMBER (create, edit, receive, link/unlink, cancel, upload documents).
-> - `purchaseOrder:delete` — ADMIN only (soft delete); restore stays ADMIN-only.
+> - `purchaseOrder:delete` — ADMIN only (soft delete); restore stays ADMIN-only. It also gates merging
+>   suppliers (`POST /suppliers/:id/merge`, `GET /suppliers/:id/merge-preview`), which archives the duplicate.
 >
 > The *Inventory operator* preset carries `purchaseOrder:read` and `:write` (it holds every read and every
 > Inventory write). `GET /suggestions/:field` (smart entry) carries **no** route permission on purpose: a
