@@ -224,7 +224,7 @@ export class SuppliersService {
   async merge(targetId: string, sourceId: string, principal?: Principal) {
     assertDistinct(targetId, sourceId);
     const actor = this.actor.resolveActor(principal);
-    return this.prisma.$transaction(async (tx) => {
+    const merged = await this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Supplier[]>`
         SELECT * FROM "suppliers" WHERE "id" IN (${targetId}, ${sourceId}) ORDER BY "id" FOR NO KEY UPDATE`;
       const target = assertMergeable(locked, targetId);
@@ -270,6 +270,11 @@ export class SuppliersService {
       );
       return { supplier, movedPurchases: purchaseIds.length, filledFields };
     });
+    // Global search (#1499), after commit: the kept supplier (its filled fields) and every purchase now
+    // naming it — the moved ones included — are re-indexed; the archived duplicate leaves the index.
+    this.searchSync?.supplier(targetId);
+    this.searchSync?.supplier(sourceId);
+    return merged;
   }
 
   /** A supplier a merge can use: 404 if it never existed, 409 if it is archived. */

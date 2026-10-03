@@ -220,12 +220,13 @@ search as not built). Nine indexes in all.
   or a supplier rename, so instead of each call site projecting a document, `PurchaseSearchSync` (in the
   search module) is told *which* record changed, after the transaction commits, and re-reads it: live →
   upsert, archived or missing → remove. Called from purchase create / update / archive / restore, line
-  add / update / remove, *create from assets*, and supplier create / update / archive / restore. A supplier
+  add / update / remove, *create from assets*, and supplier create / update / archive / restore / merge. A supplier
   sync also re-projects that supplier's live purchases in one batched upsert (`SearchService.upsertMany`),
   so a rename reaches `supplierName`. Receiving, linking and cancelling units change nothing indexed and do
   not sync. Still fire-and-forget and fail-soft (§3); the reconcile sweeper repairs a dropped write.
-  **Supplier merge (#1496) must call `PurchaseSearchSync.supplier` for the surviving and the merged
-  supplier** once its transaction commits.
+  A **supplier merge** (#1496) calls it for the kept supplier (its filled fields, and every purchase now
+  naming it — the moved ones included) and for the archived duplicate (removed), once its transaction
+  commits.
 - **Upgrade — no step.** On an existing instance the two indexes do not exist yet, so the boot self-heal
   (2026-06-11 amendment) sees them as missing and builds them in the background from Postgres on the first
   start after the update; the seven existing indexes have documents and are left alone. `reindex:all` and

@@ -447,6 +447,47 @@ describe('SuppliersService.merge (#1496)', () => {
     expect(prisma.supplier.update).not.toHaveBeenCalled();
   });
 
+  it('re-indexes the kept supplier (with its purchases) and drops the duplicate from search once the merge commits (#1499)', async () => {
+    const searchSync = { supplier: jest.fn() };
+    const synced = (prisma: FakePrisma) =>
+      new SuppliersService(
+        prisma as unknown as PrismaService,
+        new ActorService(),
+        searchSync as unknown as PurchaseSearchSync,
+      );
+
+    const prisma = makePrisma();
+    let committed = false;
+    prisma.$transaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => {
+        const result = await fn(prisma);
+        committed = true;
+        return result;
+      },
+    );
+    searchSync.supplier.mockImplementation(() => {
+      expect(committed).toBe(true);
+    });
+    given(
+      prisma,
+      [supplierRow(KEPT), supplierRow(DUP)],
+      ['clpo00000000000000000001'],
+    );
+    await synced(prisma).merge(KEPT, DUP, admin);
+    expect(searchSync.supplier.mock.calls).toEqual([[KEPT], [DUP]]);
+
+    searchSync.supplier.mockClear();
+    const refused = makePrisma();
+    given(refused, [
+      supplierRow(KEPT),
+      supplierRow(DUP, { deletedAt: new Date() }),
+    ]);
+    await expect(
+      synced(refused).merge(KEPT, DUP, admin),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(searchSync.supplier).not.toHaveBeenCalled();
+  });
+
   it('a second merge of the same duplicate waits on the lock, then sees it archived and is refused (409)', async () => {
     const prisma = makePrisma();
     // What the second merge reads under the supplier lock once the first has committed.
