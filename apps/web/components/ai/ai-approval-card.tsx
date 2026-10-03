@@ -111,6 +111,17 @@ export function ApprovalValue({ value }: { value: PreviewValue | null }) {
       return <span className="font-mono tabular-nums">{format.number(value.value)}</span>;
     case "money":
       return <span className="font-mono tabular-nums">{formatMoney(value.minor, locale, value.currency)}</span>;
+    case "list":
+      return (
+        <span>
+          {value.items.map((item, index) => (
+            <span key={index}>
+              {index > 0 && ", "}
+              <ApprovalValue value={item} />
+            </span>
+          ))}
+        </span>
+      );
     case "date":
       return (
         <span className="font-mono tabular-nums">

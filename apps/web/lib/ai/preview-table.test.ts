@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isRecordArray, presentPreview } from "./preview";
-import { buildPreviewTable, visibleTableRows } from "./preview-table";
+import { buildPreviewTable, tableTranscriptLines, visibleTableRows } from "./preview-table";
 
 /** Rows shaped like `asset_create_batch`'s preview (tools-and-execution.md, "asset_create_batch"). */
 const batchRows = [
@@ -242,5 +242,58 @@ describe("purchase tables (#1478)", () => {
   test("an id without the column it names stays a column", () => {
     const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cmodel1" }]);
     expect(t.columns).toEqual(["description", "assetModelId"]);
+  });
+});
+
+describe("purchase tables with entity refs (#1478)", () => {
+  test("a mapped line names its model, consumable or application, linked where the web has a page", () => {
+    const t = buildPreviewTable([
+      { description: "Notebook", assetModelId: { type: "assetModel", id: "cm1", label: "Latitude 5440" } },
+      { description: "Toner", consumableId: { type: "consumable", id: "cc1", label: "HP 105A" } },
+      { description: "M365", applicationId: { type: "application", id: "ca1", label: "Microsoft 365" } },
+    ]);
+    expect(t.rows[0]!.cells.assetModelId).toEqual({
+      value: { kind: "text", text: "Latitude 5440", untrusted: false },
+      href: null,
+      defaulted: false,
+    });
+    expect(t.rows[1]!.cells.consumableId!.href).toBe("/consumables/cc1");
+    expect(t.rows[2]!.cells.applicationId!.href).toBe("/applications/ca1");
+  });
+
+  test("an older preview's raw id is still shown", () => {
+    const t = buildPreviewTable([{ description: "Notebook", assetModelId: "cm1" }]);
+    expect(t.rows[0]!.cells.assetModelId!.value).toEqual({ kind: "text", text: "cm1", untrusted: false });
+  });
+
+  test("a linked asset's model change reads with the model's name", () => {
+    const t = buildPreviewTable([
+      {
+        asset: "LZ-1",
+        assetId: "ca",
+        writes: { modelId: { before: null, after: { type: "assetModel", id: "cm1", label: "Latitude 5440" } } },
+      },
+    ]);
+    expect(t.rows[0]!.cells.writes!.changes).toEqual([
+      { field: "modelId", before: { kind: "empty" }, after: { kind: "text", text: "Latitude 5440", untrusted: false } },
+    ]);
+  });
+});
+
+describe("tableTranscriptLines (#1478)", () => {
+  test("one line per row; money and change lists go through the transcript's formatters", () => {
+    const value = (v: { kind: string; minor?: number; text?: string }) =>
+      v.kind === "money" ? `$${v.minor}` : v.kind === "text" ? v.text! : v.kind === "number" ? "n" : "—";
+    const lines = tableTranscriptLines(
+      [
+        { description: "Notebook", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } },
+        { asset: "LZ-1", assetId: "ca", writes: { purchaseCost: { before: null, after: { amount: 5, currency: null } } } },
+      ],
+      value as never,
+      (field) => field.toUpperCase(),
+    );
+    expect(lines[0]).toBe("1. ASSET: —; DESCRIPTION: Notebook; QUANTITY: n; UNITPRICE: $150000; WRITES: —");
+    expect(lines[1]).toContain("WRITES: PURCHASECOST — → $5");
+    expect(lines.join("\n")).not.toContain("amount");
   });
 });

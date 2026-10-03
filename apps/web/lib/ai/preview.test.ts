@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatPreviewValue, humanizeKey, presentPreview } from "./preview";
+import { formatPreviewValue, humanizeKey, isRecordArray, presentPreview } from "./preview";
 
 describe("presentPreview", () => {
   test("the action row comes first, as a sentence, and is not a field row", () => {
@@ -173,5 +173,20 @@ describe("purchase cards (#1478)", () => {
     expect(model.rows[0]!.records).toBeUndefined();
     const money = presentPreview({ changes: [{ field: "line", after: { amount: 1, currency: "ARS" } }] });
     expect(money.rows[0]!.records).toBeUndefined();
+  });
+});
+
+describe("money in lists (#1478)", () => {
+  test("a list of amounts keeps every amount; it is never a table or empty", () => {
+    const value = [{ amount: 100, currency: "ARS" }, { amount: 250, currency: "USD" }];
+    expect(isRecordArray(value)).toBe(false);
+    expect(formatPreviewValue(value)).toEqual({
+      kind: "list",
+      items: [
+        { kind: "money", minor: 100, currency: "ARS" },
+        { kind: "money", minor: 250, currency: "USD" },
+      ],
+    });
+    expect(formatPreviewValue([{ amount: null, currency: "ARS" }])).toEqual({ kind: "empty" });
   });
 });

@@ -218,3 +218,26 @@ export function buildPreviewTable(items: readonly Obj[]): PreviewTable {
 export function visibleTableRows(table: PreviewTable, onlyProblems: boolean): TableRow[] {
   return onlyProblems ? table.rows.filter((row) => !row.applied || row.problems.length > 0) : table.rows;
 }
+
+/**
+ * A table as plain-text lines for the `/copy` transcript (#1478): one line per row, `Label: value` per
+ * column, a change list as `Label before → after`. `value` and `label` are the transcript's own formatters,
+ * so money keeps its currency label and locale there too. Pure.
+ */
+export function tableTranscriptLines(
+  records: readonly Obj[],
+  value: (v: PreviewValue) => string,
+  label: (field: string) => string,
+): string[] {
+  const table = buildPreviewTable(records);
+  return table.rows.map((row) => {
+    const cells = table.columns.map((column) => {
+      const cell = row.cells[column]!;
+      const shown = cell.changes
+        ? cell.changes.map((c) => `${label(c.field)} ${value(c.before)} → ${value(c.after)}`).join(", ")
+        : value(cell.value);
+      return `${label(column)}: ${shown}`;
+    });
+    return `${row.number}. ${cells.join("; ")}`;
+  });
+}

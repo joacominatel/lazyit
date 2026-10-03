@@ -17,6 +17,8 @@ export type PreviewValue =
   | { kind: "boolean"; value: boolean }
   /** An amount in integer minor units with its free-text currency label (#1478; ADR-0100). */
   | { kind: "money"; minor: number; currency: string | null }
+  /** A list holding money (#1478): each item keeps its own kind, so an amount is never dropped. */
+  | { kind: "list"; items: PreviewValue[] }
   | { kind: "redacted" };
 
 export type PreviewRecord = Record<string, unknown>;
@@ -70,8 +72,9 @@ function labelOf(value: Record<string, unknown>): string | null {
 }
 
 /**
- * A money value as the purchase previews send it (#1478): `{ amount, currency }` and nothing else, the
- * amount in integer minor units (or `null` = unknown) and the currency a free-text label (or `null`).
+ * A money value as the purchase previews send it (#1478): an object with `amount` and at most `currency`,
+ * nothing else — `{ amount }` alone is money without a label. The amount is integer minor units (or `null` =
+ * unknown) and the currency a free-text label (or `null`).
  */
 export function isMoneyShape(value: unknown): value is { amount: number | null; currency?: string | null } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -102,6 +105,10 @@ export function formatPreviewValue(value: unknown, kind?: AiPreviewValueKind): P
   if (typeof value === "number" && Number.isFinite(value)) return { kind: "number", value };
   if (typeof value === "string") return textValue(value);
   if (Array.isArray(value)) {
+    if (value.some(isMoneyShape)) {
+      const items = value.map((item) => formatPreviewValue(item)).filter((item) => item.kind !== "empty");
+      return items.length === 0 ? { kind: "empty" } : { kind: "list", items };
+    }
     const items = value
       .map((item) => {
         const formatted = formatPreviewValue(item);
@@ -127,12 +134,12 @@ export function formatPreviewValue(value: unknown, kind?: AiPreviewValueKind): P
   return textValue(String(value));
 }
 
-/** True when a preview value is a non-empty array whose every item is a (non-array) object. */
+/** True when a preview value is a non-empty array whose every item is a (non-array) object — not money. */
 export function isRecordArray(value: unknown): value is PreviewRecord[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every((item) => typeof item === "object" && item !== null && !Array.isArray(item))
+    value.every((item) => typeof item === "object" && item !== null && !Array.isArray(item) && !isMoneyShape(item))
   );
 }
 

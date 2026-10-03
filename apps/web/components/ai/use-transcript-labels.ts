@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { runErrorKind } from "@/lib/ai/error-kinds";
 import { displayAnswer, type AnswerDisplay } from "@/lib/ai/input-form";
 import { presentPreview, type PreviewValue } from "@/lib/ai/preview";
+import { tableTranscriptLines } from "@/lib/ai/preview-table";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { TranscriptLabels } from "@/lib/ai/transcript-markdown";
 import { formatMoney } from "@/lib/utils/money";
@@ -27,6 +28,7 @@ export function useTranscriptLabels(): TranscriptLabels {
 
   return useMemo<TranscriptLabels>(() => {
     const value = (v: PreviewValue | null): string => {
+      if (v !== null && v.kind === "list") return v.items.map(value).join(", ");
       if (v === null || v.kind === "empty") return t("approval.empty");
       switch (v.kind) {
         case "redacted":
@@ -61,6 +63,12 @@ export function useTranscriptLabels(): TranscriptLabels {
           model.action ? model.action.text : t("approval.noAction"),
         ];
         for (const row of model.rows) {
+          if (row.records) {
+            // A table (a batch's rows, a purchase's lines): one line per row, money formatted (#1478).
+            lines.push(`- ${fieldLabel(row.field)}:`);
+            for (const line of tableTranscriptLines(row.records, value, fieldLabel)) lines.push(`  ${line}`);
+            continue;
+          }
           const after = value(row.after);
           const shown = row.before !== null ? `${value(row.before)} → ${after}` : after;
           lines.push(`- ${fieldLabel(row.field)}: ${shown}`);
