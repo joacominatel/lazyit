@@ -71,7 +71,7 @@ El estado aparece como una etiqueta de color en la lista y en la página de deta
 registrado en la actividad del activo. Puedes cambiarlo rápido sin abrir el editor: en la **página de
 detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el menú **⋯** de la fila
 tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
-la lista.
+la lista: selecciónalos y elige uno en **Definir estado** de la barra de selección.
 
 ## Serie y etiqueta de activo
 
@@ -236,12 +236,28 @@ versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa po
 
 ### Elegir qué columnas mostrar
 
-El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,
-modelo, categoría, ubicación, empresa, estado, responsables y actualizado. Desmarca las que no te interesan
-para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones de fila siempre se
-mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
-próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
-muestra el conjunto completo.)
+El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla, por grupos:
+
+- **Detalles** — etiqueta, número de serie, fabricante (del modelo del activo), modelo, categoría,
+  ubicación y empresa.
+- **Estado** — estado y responsables.
+- **Compra y garantía** — fecha de compra, fin de garantía y costo de compra.
+- **Actividad** — actualizado.
+
+Desmarca las que no te interesan para reducir la tabla, o marca otras para sumarlas. De entrada la tabla
+muestra etiqueta, modelo, categoría, ubicación, empresa, estado, responsables y actualizado; el **número de
+serie**, el **fabricante** y las columnas de **Compra y garantía** quedan apagadas hasta que las actives.
+La columna **Nombre** y las acciones de fila siempre se mantienen. Tu elección se recuerda en este
+navegador, así que la tabla conserva la misma forma la próxima vez que entres.
+
+El **costo de compra** muestra el monto tal como se cargó, con su etiqueta de moneda (por ejemplo
+*USD 1.500*). Un monto cargado sin etiqueta muestra **Sin moneda** al lado: lazyit nunca supone una moneda.
+Haz clic en el encabezado **Número de serie**, **Fecha de compra**, **Fin de garantía** o **Costo de
+compra** para ordenar toda la lista por esa columna; los costos se ordenan solo por el monto, sea cual sea
+su etiqueta. El **fabricante** no se puede ordenar.
+
+En el teléfono, las tarjetas de activos siempre muestran los datos habituales, más las columnas de número
+de serie, fabricante y compra y garantía que hayas activado.
 
 ## Dónde se compró
 

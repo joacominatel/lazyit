@@ -229,7 +229,7 @@ purchase line afterwards. There are three ways in:
   filtered to the line's model and to assets **not linked to a purchase**; remove a chip to widen it (an
   asset already on another purchase can still be moved here, see below).
 - On an asset that is not linked, **Link to purchase** in its **Purchase** panel.
-- On the **Assets** list, select several rows and choose **Link to purchase** in the selection bar. Then
+- On the **Assets** list, select several rows and choose **Purchase › Link to purchase** in the selection bar. Then
   pick the purchase and the line — lines of the same model come first.
 
 ### Choosing which values to copy
@@ -263,8 +263,8 @@ result lists each one that was not, with the reason.
 
 ### Creating a purchase from assets
 
-When the purchase was never recorded at all, select the assets on the **Assets** list and choose **Create
-purchase** in the selection bar. A small form asks for the **supplier**, the **reference** and the
+When the purchase was never recorded at all, select the assets on the **Assets** list and choose **Purchase ›
+Create purchase** in the selection bar. A small form asks for the **supplier**, the **reference** and the
 **currency** — all optional, all suggested as you type. lazyit then creates **one purchase** with **one
 line per model** (assets without a model are grouped by name), each line's quantity being its assets, and
 links every asset to its line.

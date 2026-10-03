@@ -248,6 +248,14 @@ three stored fields are echoed on create/update.
   param; ADR-0099 §8, D-A). A list without them is never checked. Defense in depth: the list query applies
   only purchase filters minted by `AssetsService.authorizePurchaseFilters`, so no other caller of the query
   (the CSV export included) can apply ones it did not authorize (`403`).
+  **Cost on the list row** (#1511): each row carries `purchaseCost` (a JSON number, minor units —
+  [[0100-money-as-64-bit-minor-units]]) and its `purchaseCurrency` label, for the list's optional *Cost*
+  column — the same `asset:read` values the detail read shows. The self-read `GET /assets/mine` carries no
+  `asset:read` gate and omits both. Sortable (`?sort=`, [[0030-list-pagination-contract]]): `name`,
+  `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost`
+  (amounts compare as stored, whatever their currency label; an asset without a purchase date, warranty
+  end or cost sorts last in both directions). Every order ends with the unique `id`, so a page boundary is
+  stable ([[0030-list-pagination-contract]] §9). The model's manufacturer is not sortable.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — feeds the list's company filter ([[0076-asset-company-grouping-field]]). The form's
   smart-entry company field reads `GET /suggestions/company` instead (use counts and last use, merged with

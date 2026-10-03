@@ -185,7 +185,29 @@ export const ASSET_SORT_ALLOWLIST = {
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
+  // Plain asset columns behind the list's optional purchase & warranty columns (#1511).
+  purchaseDate: 'purchaseDate',
+  warrantyEnd: 'warrantyEnd',
+  purchaseCost: 'purchaseCost',
 } as const;
+
+/**
+ * The sort keys whose column is nullable and new with #1511: an asset with no purchase date, warranty end
+ * or cost sorts after every dated or priced one, in both directions, so "no value" never tops the list.
+ */
+const ASSET_NULLS_LAST_SORT_KEYS: ReadonlySet<string> = new Set([
+  'purchaseDate',
+  'warrantyEnd',
+  'purchaseCost',
+]);
+
+/**
+ * The unique key appended to EVERY list sort, allowlisted or default (ADR-0030 §9 — a contract rule, as
+ * `INFRA_NODE_TIEBREAKER` does for nodes). No sortable column is unique — received stock and imports share
+ * a `createdAt`, many assets share a status or have no warranty end — and under LIMIT/OFFSET a tie Postgres
+ * reorders between reads drops one row from the window and repeats another.
+ */
+const ASSET_TIEBREAKER = { id: 'desc' } as const;
 
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
 // category, which lives on the model), the location, and the *active* owners (releasedAt = null)
@@ -235,6 +257,10 @@ const ASSET_LIST_SELECT = {
   company: true,
   purchaseDate: true,
   warrantyEnd: true,
+  // The cost and its free-text currency label behind the list's optional Cost column (#1511) — the same
+  // `asset:read` values the detail read shows. A `bigint` column: toLeanListItem converts it for the wire.
+  purchaseCost: true,
+  purchaseCurrency: true,
   modelId: true,
   locationId: true,
   createdAt: true,
@@ -270,21 +296,16 @@ const ASSET_LIST_SELECT = {
   },
 } satisfies Prisma.AssetSelect;
 
-/** The inventory export's projection: the list's, plus the asset's own cost columns (`asset:read`). */
-const EXPORT_SELECT = {
-  ...ASSET_LIST_SELECT,
-  purchaseCost: true,
-  purchaseCurrency: true,
-} as const satisfies Prisma.AssetSelect;
-
-/** The export's projection for a caller holding `purchaseOrder:read`: plus the linked purchase. */
+/** The export's projection for a caller holding `purchaseOrder:read`: the list's plus the linked purchase. */
 const EXPORT_SELECT_WITH_PURCHASE = {
-  ...EXPORT_SELECT,
+  ...ASSET_LIST_SELECT,
   purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
 } as const satisfies Prisma.AssetSelect;
 
 /** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
-type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
+type ExportRow = Prisma.AssetGetPayload<{
+  select: typeof ASSET_LIST_SELECT;
+}> &
   Partial<
     Pick<
       Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
@@ -295,6 +316,13 @@ type ExportRow = Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT }> &
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
+
+/** A lean list row; the `/assets/mine` self-read selects no cost columns (#1511). */
+type LeanListRow = Omit<
+  AssetWithLeanSelect,
+  'purchaseCost' | 'purchaseCurrency'
+> &
+  Partial<Pick<AssetWithLeanSelect, 'purchaseCost' | 'purchaseCurrency'>>;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -328,6 +356,10 @@ function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
 const assetMineListSelect = (userId: string) =>
   ({
     ...ASSET_LIST_SELECT,
+    // The self-read carries no `asset:read` gate, so it leaves out the cost the directory list shows
+    // (#1511): a holder sees what they hold, not what it cost.
+    purchaseCost: false,
+    purchaseCurrency: false,
     assignments: {
       ...ASSET_LIST_SELECT.assignments,
       where: { releasedAt: null, userId },
@@ -450,13 +482,24 @@ export class AssetsService {
     const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     // Server-side sort over the FULL result set (not page-local) via the per-resource allowlist
-    // (ADR-0030 amendment). No `sort` ⇒ undefined ⇒ the default `createdAt desc` order below.
-    const orderBy =
+    // (ADR-0030 amendment). No `sort` ⇒ the default `createdAt desc`; either way the unique `id` follows.
+    const sorted =
       resolveSortOrBadRequest<Prisma.AssetOrderByWithRelationInput>(
         page,
         ASSET_SORT_ALLOWLIST,
-      ) ??
-      ({ createdAt: 'desc' } satisfies Prisma.AssetOrderByWithRelationInput);
+      );
+    const primary: Prisma.AssetOrderByWithRelationInput =
+      sorted && page.sort && ASSET_NULLS_LAST_SORT_KEYS.has(page.sort)
+        ? {
+            [ASSET_SORT_ALLOWLIST[
+              page.sort as keyof typeof ASSET_SORT_ALLOWLIST
+            ]]: { sort: page.dir ?? 'asc', nulls: 'last' },
+          }
+        : (sorted ?? { createdAt: 'desc' });
+    const orderBy = [
+      primary,
+      ASSET_TIEBREAKER,
+    ] satisfies Prisma.AssetOrderByWithRelationInput[];
     // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
     // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
     // object — keeping the `select` inference intact so the lean row type is preserved.
@@ -639,7 +682,7 @@ export class AssetsService {
         skip,
         ...escapeHatch,
       } satisfies Prisma.AssetFindManyArgs;
-      // The list projection plus the asset's cost columns and — ONLY for a caller holding
+      // The list projection (with the asset's cost columns) and — ONLY for a caller holding
       // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
       // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
       const rows: ExportRow[] = includePurchase
@@ -647,7 +690,10 @@ export class AssetsService {
             ...batch,
             select: EXPORT_SELECT_WITH_PURCHASE,
           })
-        : await this.prisma.asset.findMany({ ...batch, select: EXPORT_SELECT });
+        : await this.prisma.asset.findMany({
+            ...batch,
+            select: ASSET_LIST_SELECT,
+          });
       if (rows.length === 0) break;
       yield `${rows
         .map((row) =>
@@ -1321,10 +1367,21 @@ export class AssetsService {
     };
   }
 
-  /** Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem). */
-  private toLeanListItem(asset: AssetWithLeanSelect) {
-    const { assignments, ...rest } = asset;
-    return { ...rest, activeAssignments: assignments };
+  /**
+   * Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem), with the
+   * `bigint` cost as a wire number (ADR-0100) — absent on the self-read, which selects no cost.
+   */
+  private toLeanListItem(asset: LeanListRow) {
+    const { assignments, purchaseCost, ...rest } = asset;
+    return {
+      ...rest,
+      ...(purchaseCost === undefined
+        ? {}
+        : {
+            purchaseCost: purchaseCost === null ? null : Number(purchaseCost),
+          }),
+      activeAssignments: assignments,
+    };
   }
 
   /** One discrete history event per field that actually changed in an update (ADR-0033). */

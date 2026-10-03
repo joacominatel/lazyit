@@ -28,7 +28,7 @@
     "batchRestoreError": "No se pudieron restaurar los activos seleccionados",
     "batchStatusError": "No se pudieron actualizar los activos seleccionados",
     "batchDeleteError": "No se pudieron eliminar los activos seleccionados",
-    "setStatusPlaceholder": "Definir estado…",
+    "setStatus": "Definir estado",
     "restore": "Restaurar",
     "assign": "Asignar",
     "unassign": "Desasignar",
@@ -41,12 +41,17 @@
     "columns": {
       "name": "Nombre",
       "assetTag": "Etiqueta",
+      "serial": "Número de serie",
+      "manufacturer": "Fabricante",
       "model": "Modelo",
       "category": "Categoría",
       "location": "Ubicación",
       "company": "Empresa",
       "status": "Estado",
       "owners": "Responsables",
+      "purchaseDate": "Fecha de compra",
+      "warrantyEnd": "Fin de garantía",
+      "purchaseCost": "Costo de compra",
       "updated": "Actualizado",
       "actions": "Acciones"
     },
@@ -55,19 +60,26 @@
       "groups": {
         "details": "Detalles",
         "status": "Estado",
+        "purchase": "Compra y garantía",
         "activity": "Actividad"
       },
       "columns": {
         "assetTag": "Etiqueta",
+        "serial": "Número de serie",
+        "manufacturer": "Fabricante",
         "model": "Modelo",
         "category": "Categoría",
         "location": "Ubicación",
         "company": "Empresa",
         "status": "Estado",
         "owners": "Responsables",
+        "purchaseDate": "Fecha de compra",
+        "warrantyEnd": "Fin de garantía",
+        "purchaseCost": "Costo de compra",
         "updated": "Actualizado"
       }
     },
+    "noCurrency": "Sin moneda",
     "filters": {
       "moreFilters": "Filtros",
       "allStatuses": "Todos los estados",
@@ -102,7 +114,8 @@
       "warranty": "Garantía: {value}"
     },
     "linkToPurchase": "Vincular a una compra",
-    "createPurchase": "Crear compra"
+    "createPurchase": "Crear compra",
+    "purchaseActions": "Compra"
   },
   "empty": {
     "title": "Aún no hay nada registrado",
