@@ -12,10 +12,11 @@ import { type LastScan, scanStep } from "@/lib/utils/scanned-serials";
 /**
  * Scan serial numbers with the camera into a serials box (ADR-0099 Phase 1b, UX proposal §6, #1476) — the
  * `/assets/scan` camera (`useCameraScanner`) reading the barcodes on hardware boxes (Code 128 / 39, EAN, UPC,
- * QR…) in a wide box. It scans continuously: each new code goes to `onScan` with a short tick (and a
+ * QR…) in a wide box. It scans continuously: each new code goes to `onScan` with a flash and a check (and a
  * vibration where the phone has one), a code held in front of the camera stays silent however long it stays
- * there, and a code already in the box is reported (once it comes back into view), never added twice.
- * *Done* closes it; the box stays editable throughout.
+ * there, and a code already in the box is reported (once it comes back into view), never added twice. When
+ * nothing is read for a few seconds a tip says how to get a read (#1506). *Done* closes it; the box stays
+ * editable throughout.
  *
  * Without a camera, without permission or outside HTTPS it says so and the box is typed as before.
  */
@@ -30,6 +31,7 @@ export function SerialScanner({
   onDone: () => void;
 }) {
   const t = useTranslations("common.serialScanner");
+  const tc = useTranslations("common.cameraScanner");
   // A unique host per mount: html5-qrcode looks the node up by id.
   const readerId = `serial-reader-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const existingRef = useRef(existing);
@@ -47,7 +49,7 @@ export function SerialScanner({
     existingRef.current = existing;
   }, [existing]);
 
-  const status = useCameraScanner(
+  const { status, feedback } = useCameraScanner(
     readerId,
     (text) => {
       // Every sighting refreshes "last seen", so a code held in view stays silent (scanStep).
@@ -58,16 +60,16 @@ export function SerialScanner({
       });
       lastRef.current = last;
       const code = text.trim();
-      if (decision === "invalid" || decision === "repeat") return;
+      if (decision === "invalid" || decision === "repeat") return false;
       if (decision === "duplicate") {
         toast.info(t("duplicate", { code }));
-        return;
+        return false;
       }
       // Counted here as well: the parent's list catches up on its next render.
       existingRef.current = [...existingRef.current, code];
       onScan(code);
       setAdded((prev) => ({ code, count: (prev?.count ?? 0) + 1 }));
-      navigator.vibrate?.(40);
+      return true;
     },
     "barcodes",
   );
@@ -77,7 +79,12 @@ export function SerialScanner({
   return (
     <div className="space-y-2 rounded-md border p-2">
       {live ? (
-        <CameraViewfinder readerId={readerId} className="rounded-md" />
+        <CameraViewfinder
+          readerId={readerId}
+          feedback={feedback}
+          scanningLabel={tc("scanning")}
+          className="rounded-md"
+        />
       ) : (
         <p className="rounded-md border border-dashed px-3 py-3 text-center text-sm text-muted-foreground">
           {status === "unsupported" ? t("unsupported") : t("error")}
@@ -100,6 +107,10 @@ export function SerialScanner({
           {t("done")}
         </Button>
       </div>
+      {/* Always mounted, so screen readers hear the tip when it appears. */}
+      <p className="text-sm text-muted-foreground empty:hidden" role="status" aria-live="polite">
+        {feedback === "tip" ? tc("tip") : null}
+      </p>
     </div>
   );
 }

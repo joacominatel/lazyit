@@ -3,8 +3,14 @@ import {
   CAPTURE_CONSTRAINTS,
   cameraScanConfig,
   DECODE_WIDTH,
+  feedbackOnRead,
+  msUntilFeedbackChange,
   SCAN_FORMATS,
+  SCAN_SUCCESS_MS,
+  SCAN_TIP_AFTER_MS,
   scanBox,
+  scanFeedback,
+  startFeedback,
   viewfinderFit,
 } from "./camera-scan";
 
@@ -53,5 +59,40 @@ describe("camera scan setup (#1506)", () => {
     // 1080×1920 laid out 1280 wide is 2276 tall; shown 320 wide that is 569 px.
     expect(viewfinderFit(320, 2276, 400)).toEqual({ scale: 0.25, height: 400, offsetY: 85 });
     expect(viewfinderFit(320, 720, 400)).toEqual({ scale: 0.25, height: 180, offsetY: 0 });
+  });
+});
+
+describe("scan feedback (#1506)", () => {
+  const t0 = 1_000_000;
+
+  test("reads, then shows the tip once nothing has been seen for a while", () => {
+    const state = startFeedback(t0);
+    expect(scanFeedback(state, t0)).toBe("reading");
+    expect(scanFeedback(state, t0 + SCAN_TIP_AFTER_MS - 1)).toBe("reading");
+    expect(scanFeedback(state, t0 + SCAN_TIP_AFTER_MS)).toBe("tip");
+    expect(msUntilFeedbackChange(state, t0 + 1000)).toBe(SCAN_TIP_AFTER_MS - 1000);
+    expect(msUntilFeedbackChange(state, t0 + SCAN_TIP_AFTER_MS)).toBeNull();
+  });
+
+  test("a taken read flashes success, then goes back to reading and restarts the tip clock", () => {
+    const at = t0 + SCAN_TIP_AFTER_MS + 500;
+    const state = feedbackOnRead(startFeedback(t0), at, true);
+    expect(scanFeedback(state, at)).toBe("success");
+    expect(msUntilFeedbackChange(state, at)).toBe(SCAN_SUCCESS_MS);
+    expect(scanFeedback(state, at + SCAN_SUCCESS_MS)).toBe("reading");
+    expect(scanFeedback(state, at + SCAN_TIP_AFTER_MS)).toBe("tip");
+  });
+
+  test("a code seen but not taken (held in view, already listed) clears the tip without a flash", () => {
+    const at = t0 + SCAN_TIP_AFTER_MS + 500;
+    const state = feedbackOnRead(startFeedback(t0), at, false);
+    expect(scanFeedback(state, at)).toBe("reading");
+    expect(state.successAt).toBeNull();
+  });
+
+  test("the frame-by-frame reads of a code held in view return the same state, so nothing re-renders", () => {
+    const state = startFeedback(t0);
+    expect(feedbackOnRead(state, t0 + 100, false)).toBe(state);
+    expect(feedbackOnRead(state, t0 + 1000, false)).not.toBe(state);
   });
 });

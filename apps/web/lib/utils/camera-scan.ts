@@ -1,8 +1,8 @@
 import type { Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 /**
- * How the camera scanner is set up (#875, #1476, #1506) — pure, so the camera configuration is tested
- * without a camera.
+ * How the camera scanner is set up and how it tells the operator what it is doing (#875, #1476, #1506) —
+ * pure, so the camera configuration and the feedback timing are tested without a camera.
  *
  * `html5-qrcode` decodes a canvas the size of its scan box **in layout pixels**, not in camera pixels: a
  * viewfinder laid out 430 px wide is decoded at about 390 px whatever the camera delivers, too few pixels
@@ -102,4 +102,58 @@ export function viewfinderFit(
   const full = Math.round(layoutHeight * scale);
   const height = Math.min(full, Math.round(maxHeight));
   return { scale, height, offsetY: Math.round((full - height) / 2) };
+}
+
+/**
+ * What the scanner shows while the camera runs:
+ *   - `reading` — looking for a code;
+ *   - `success` — a code was just taken (a short flash);
+ *   - `tip`     — nothing has been seen for {@link SCAN_TIP_AFTER_MS}: how to get a read, or to type it.
+ */
+export type ScanFeedback = "reading" | "success" | "tip";
+
+/** How long nothing must be seen before the tip shows, in ms. */
+export const SCAN_TIP_AFTER_MS = 6000;
+/** How long the success flash lasts, in ms. */
+export const SCAN_SUCCESS_MS = 1200;
+/** A code seen again within this window does not restart the tip clock (the library reports every frame). */
+const SIGHTING_REFRESH_MS = 1000;
+
+/** When the camera last saw a code (or started), and when a read was last taken. */
+export interface ScanFeedbackState {
+  since: number;
+  successAt: number | null;
+}
+
+/** The camera has just started reading. */
+export function startFeedback(now: number): ScanFeedbackState {
+  return { since: now, successAt: null };
+}
+
+/**
+ * A code was seen. `taken` when the caller used it (a new serial, the asset to open) — that flashes; a code
+ * still in view or already in the list only keeps the tip away. Returns the same state when nothing changes,
+ * so the 10 reads a second of a code held in view do not re-render.
+ */
+export function feedbackOnRead(state: ScanFeedbackState, now: number, taken: boolean): ScanFeedbackState {
+  if (taken) return { since: now, successAt: now };
+  if (now - state.since < SIGHTING_REFRESH_MS) return state;
+  return { ...state, since: now };
+}
+
+/** What to show at `now`. */
+export function scanFeedback(state: ScanFeedbackState, now: number): ScanFeedback {
+  if (state.successAt !== null && now - state.successAt < SCAN_SUCCESS_MS) return "success";
+  if (now - state.since >= SCAN_TIP_AFTER_MS) return "tip";
+  return "reading";
+}
+
+/** In how many ms {@link scanFeedback} changes on its own, or `null` when it waits for the next read. */
+export function msUntilFeedbackChange(state: ScanFeedbackState, now: number): number | null {
+  const changes: number[] = [];
+  if (state.successAt !== null && now - state.successAt < SCAN_SUCCESS_MS) {
+    changes.push(state.successAt + SCAN_SUCCESS_MS - now);
+  }
+  if (now - state.since < SCAN_TIP_AFTER_MS) changes.push(state.since + SCAN_TIP_AFTER_MS - now);
+  return changes.length > 0 ? Math.min(...changes) : null;
 }

@@ -28,6 +28,7 @@ const READER_ID = "asset-qr-reader";
  */
 export default function AssetScanner() {
   const t = useTranslations("assets.scan");
+  const tc = useTranslations("common.cameraScanner");
   const router = useRouter();
   // Guards against a second decode firing (and a second navigation) between the first hit and teardown.
   const handledRef = useRef(false);
@@ -59,11 +60,12 @@ export default function AssetScanner() {
   );
 
   // The camera session (shared with the serials scanner of Receive stock, #1476): one read is enough here.
-  const status = useCameraScanner(READER_ID, (decodedText, stop) => {
-    if (handledRef.current) return;
+  const { status, feedback } = useCameraScanner(READER_ID, (decodedText, stop) => {
+    if (handledRef.current) return false;
     handledRef.current = true;
     stop();
     resolveScan(decodedText);
+    return true;
   });
 
   function handleManualSubmit(event: FormEvent) {
@@ -94,9 +96,20 @@ export default function AssetScanner() {
           target node; the library injects the <video> here. */}
       {showViewfinder ? (
         <div className="space-y-3">
-          <CameraViewfinder readerId={READER_ID} className="rounded-lg border" />
-          <p className="text-center text-sm text-muted-foreground">
-            {status === "starting" ? t("starting") : t("permissionHint")}
+          <CameraViewfinder
+            readerId={READER_ID}
+            feedback={feedback}
+            scanningLabel={tc("scanning")}
+            className="rounded-lg border"
+          />
+          <p className="text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+            {status === "starting"
+              ? `${t("starting")} ${t("permissionHint")}`
+              : feedback === "success"
+                ? t("found")
+                : feedback === "tip"
+                  ? tc("tip")
+                  : t("hint")}
           </p>
         </div>
       ) : (

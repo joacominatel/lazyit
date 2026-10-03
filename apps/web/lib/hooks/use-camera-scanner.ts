@@ -2,9 +2,19 @@
 
 import type { Html5Qrcode } from "html5-qrcode";
 import { useEffect, useRef, useState } from "react";
-import { type CameraScanMode, cameraScanConfig, SCAN_FORMATS } from "@/lib/utils/camera-scan";
+import {
+  type CameraScanMode,
+  cameraScanConfig,
+  feedbackOnRead,
+  msUntilFeedbackChange,
+  SCAN_FORMATS,
+  type ScanFeedback,
+  type ScanFeedbackState,
+  scanFeedback,
+  startFeedback,
+} from "@/lib/utils/camera-scan";
 
-export type { CameraScanMode } from "@/lib/utils/camera-scan";
+export type { CameraScanMode, ScanFeedback } from "@/lib/utils/camera-scan";
 
 /** Where the camera is: starting, reading, refused/failed, or not available at all on this device. */
 export type CameraScanStatus = "starting" | "scanning" | "error" | "unsupported";
@@ -45,7 +55,12 @@ export function stopQuietly(instance: StoppableScanner, { clear = false }: { cle
  * `readerId` is the DOM node the library mounts its `<video>` into: render it — inside a `CameraViewfinder`,
  * which lays it out at the decode width — while the status is `starting` or `scanning`. `onDecode` runs for
  * every read — the library reports the same code on every frame it sees it, so a caller that keeps scanning
- * de-duplicates. Its `stop` argument ends the session early (a one-shot lookup that already has its answer).
+ * de-duplicates. Its `stop` argument ends the session early (a one-shot lookup that already has its answer);
+ * it returns `true` when it took the read (a new serial, the asset to open), which flashes the success
+ * feedback and gives a short vibration where the device has one.
+ *
+ * `feedback` is what the viewfinder shows while scanning (`null` otherwise): reading, a just-taken read, or
+ * a tip once nothing has been seen for a few seconds.
  *
  * Progressive enhancement: the camera needs permission and a secure (HTTPS) context. Without the API the
  * status is `unsupported`; a refusal, a missing camera or an insecure origin is `error`. Callers always keep
@@ -53,13 +68,15 @@ export function stopQuietly(instance: StoppableScanner, { clear = false }: { cle
  */
 export function useCameraScanner(
   readerId: string,
-  onDecode: (text: string, stop: () => void) => void,
+  onDecode: (text: string, stop: () => void) => boolean | void,
   mode: CameraScanMode = "qr",
-): CameraScanStatus {
+): { status: CameraScanStatus; feedback: ScanFeedback | null } {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   // The latest callback, so a parent re-render never restarts the camera.
   const onDecodeRef = useRef(onDecode);
   const [status, setStatus] = useState<CameraScanStatus>("starting");
+  // The feedback state and the time it was last evaluated at — time only moves on a read or a timer.
+  const [clock, setClock] = useState<{ state: ScanFeedbackState; now: number } | null>(null);
 
   useEffect(() => {
     onDecodeRef.current = onDecode;
@@ -87,7 +104,16 @@ export function useCameraScanner(
           // Ignored by the library when `videoConstraints` is given, but required.
           { facingMode: "environment" },
           cameraScanConfig(mode),
-          (decodedText) => onDecodeRef.current(decodedText, () => void stopQuietly(instance)),
+          (decodedText) => {
+            const taken = onDecodeRef.current(decodedText, () => void stopQuietly(instance)) === true;
+            if (taken) navigator.vibrate?.(40);
+            const at = Date.now();
+            setClock((prev) => {
+              if (!prev) return prev;
+              const state = feedbackOnRead(prev.state, at, taken);
+              return state === prev.state ? prev : { state, now: at };
+            });
+          },
           undefined,
         );
         if (cancelled) {
@@ -95,6 +121,8 @@ export function useCameraScanner(
           return;
         }
         setStatus("scanning");
+        const at = Date.now();
+        setClock({ state: startFeedback(at), now: at });
       } catch {
         // Permission denied, no camera, or an insecure (non-HTTPS) origin — all land here.
         setStatus("error");
@@ -109,5 +137,17 @@ export function useCameraScanner(
     };
   }, [readerId, mode]);
 
-  return status;
+  // Re-evaluate the feedback when it changes on its own: the success flash ends, or the tip is due.
+  useEffect(() => {
+    if (!clock) return;
+    const wait = msUntilFeedbackChange(clock.state, clock.now);
+    if (wait === null) return;
+    const timer = setTimeout(() => setClock((prev) => prev && { ...prev, now: Date.now() }), wait);
+    return () => clearTimeout(timer);
+  }, [clock]);
+
+  return {
+    status,
+    feedback: status === "scanning" && clock ? scanFeedback(clock.state, clock.now) : null,
+  };
 }
