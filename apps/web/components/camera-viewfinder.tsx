@@ -38,54 +38,66 @@ export function CameraViewfinder({
     if (!frame || !scaler || typeof ResizeObserver === "undefined") return;
     // The frame's width sets the scale; the scaler's height (the video's, once it has a size) sets the frame's,
     // up to 60% of the screen so a portrait phone camera doesn't push the rest of the form away.
-    const observer = new ResizeObserver(() => {
+    const update = () => {
+      // No video: not started yet (the 16:9 placeholder holds), or stopped after a read — the library removes
+      // its video then, and the frame keeps its last size instead of jumping.
+      if (scaler.offsetHeight === 0) return;
       const next = viewfinderFit(frame.clientWidth, scaler.offsetHeight, window.innerHeight * MAX_VIEWPORT_SHARE);
       setFit((prev) =>
         prev.scale === next.scale && prev.height === next.height && prev.offsetY === next.offsetY ? prev : next,
       );
-    });
+    };
+    const observer = new ResizeObserver(update);
     observer.observe(frame);
     observer.observe(scaler);
-    return () => observer.disconnect();
+    // The cap follows the screen: rotating a phone or resizing the window changes it.
+    window.addEventListener("resize", update);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
   }, []);
 
   return (
-    <div
-      ref={frameRef}
-      className={cn("relative w-full overflow-hidden bg-muted", className)}
-      // Until the video has a size, hold a 16:9 frame so the layout doesn't jump.
-      style={fit.height > 0 ? { height: fit.height } : { aspectRatio: "16 / 9" }}
-    >
-      {/* Absolutely placed, so its 1280 px never widen the dialog or page around it; the library makes the
-          reader itself `position: relative`, hence the wrapper. */}
+    // The border and rounding (`className`) go on the outside, so the measured frame's height is all video.
+    <div className={cn("w-full overflow-hidden bg-muted", className)}>
       <div
-        ref={scalerRef}
-        className="absolute top-0 left-0"
-        style={{
-          width: DECODE_WIDTH,
-          transform: `translateY(${-fit.offsetY}px) scale(${fit.scale})`,
-          transformOrigin: "0 0",
-        }}
+        ref={frameRef}
+        className="relative w-full overflow-hidden"
+        // Until the video has a size, hold a 16:9 frame so the layout doesn't jump.
+        style={fit.height > 0 ? { height: fit.height } : { aspectRatio: "16 / 9" }}
       >
-        <div id={readerId} />
-      </div>
-      {feedback === "reading" || feedback === "tip" ? (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1.5 rounded-full bg-background/85 px-2 py-0.5 text-xs font-medium text-foreground shadow-sm"
-        >
-          <span className="size-2 rounded-full bg-success motion-safe:animate-pulse" />
-          {scanningLabel}
-        </span>
-      ) : null}
-      {feedback === "success" ? (
+        {/* Absolutely placed, so its 1280 px never widen the dialog or page around it; the library makes the
+            reader itself `position: relative`, hence the wrapper. */}
         <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-success/15 ring-4 ring-success ring-inset motion-safe:animate-in motion-safe:fade-in"
+          ref={scalerRef}
+          className="absolute top-0 left-0"
+          style={{
+            width: DECODE_WIDTH,
+            transform: `translateY(${-fit.offsetY}px) scale(${fit.scale})`,
+            transformOrigin: "0 0",
+          }}
         >
-          <CheckCircleIcon className="size-14 rounded-full bg-background/85 text-success" />
+          <div id={readerId} />
         </div>
-      ) : null}
+        {feedback === "reading" || feedback === "tip" ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1.5 rounded-full bg-background/85 px-2 py-0.5 text-xs font-medium text-foreground shadow-sm"
+          >
+            <span className="size-2 rounded-full bg-success motion-safe:animate-pulse" />
+            {scanningLabel}
+          </span>
+        ) : null}
+        {feedback === "success" ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 flex items-center justify-center bg-success/15 ring-4 ring-success ring-inset motion-safe:animate-in motion-safe:fade-in"
+          >
+            <CheckCircleIcon className="size-14 rounded-full bg-background/85 text-success" />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

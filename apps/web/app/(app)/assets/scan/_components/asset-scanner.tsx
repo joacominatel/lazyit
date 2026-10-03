@@ -32,6 +32,9 @@ export default function AssetScanner() {
   const router = useRouter();
   // Guards against a second decode firing (and a second navigation) between the first hit and teardown.
   const handledRef = useRef(false);
+  // The read is taken and the camera stopped: hold the success state until the navigation lands, rather than
+  // a "scanning" badge or a tip over a frozen camera.
+  const [found, setFound] = useState(false);
   const [manual, setManual] = useState("");
 
   /**
@@ -64,6 +67,7 @@ export default function AssetScanner() {
     if (handledRef.current) return false;
     handledRef.current = true;
     stop();
+    setFound(true);
     resolveScan(decodedText);
     return true;
   });
@@ -98,15 +102,15 @@ export default function AssetScanner() {
         <div className="space-y-3">
           <CameraViewfinder
             readerId={READER_ID}
-            feedback={feedback}
+            feedback={found ? "success" : feedback}
             scanningLabel={tc("scanning")}
             className="rounded-lg border"
           />
           <p className="text-center text-sm text-muted-foreground" role="status" aria-live="polite">
-            {status === "starting"
-              ? `${t("starting")} ${t("permissionHint")}`
-              : feedback === "success"
-                ? t("found")
+            {found || feedback === "success"
+              ? t("found")
+              : status === "starting"
+                ? `${t("starting")} ${t("permissionHint")}`
                 : feedback === "tip"
                   ? tc("tip")
                   : t("hint")}
