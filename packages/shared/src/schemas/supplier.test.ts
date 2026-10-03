@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CreateSupplierSchema, UpdateSupplierSchema } from "./supplier";
+import {
+  CreateSupplierSchema,
+  SUPPLIER_MERGE_FIELDS,
+  SupplierMergeSchema,
+  UpdateSupplierSchema,
+} from "./supplier";
 
 describe("CreateSupplierSchema (ADR-0099 §2, CEO decision D-D)", () => {
   test("only the name is required", () => {
@@ -36,5 +41,22 @@ describe("UpdateSupplierSchema", () => {
     expect(UpdateSupplierSchema.parse({ taxId: null })).toEqual({ taxId: null });
     expect(UpdateSupplierSchema.safeParse({ name: null }).success).toBe(false);
     expect(UpdateSupplierSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("Supplier merge contract (#1496)", () => {
+  test("the merge body is just the duplicate's id, a cuid; nothing else is accepted", () => {
+    expect(SupplierMergeSchema.safeParse({ sourceId: "clsupplier00000000000002" }).success).toBe(true);
+    expect(SupplierMergeSchema.safeParse({ sourceId: "not-an-id" }).success).toBe(false);
+    expect(SupplierMergeSchema.safeParse({}).success).toBe(false);
+    expect(
+      SupplierMergeSchema.safeParse({ sourceId: "clsupplier00000000000002", overwrite: true }).success,
+    ).toBe(false);
+  });
+
+  test("a merge can fill every optional field but never the name", () => {
+    expect(SUPPLIER_MERGE_FIELDS).not.toContain("name");
+    expect(SUPPLIER_MERGE_FIELDS).toContain("taxId");
+    expect(SUPPLIER_MERGE_FIELDS).toContain("supportContactEmail");
   });
 });

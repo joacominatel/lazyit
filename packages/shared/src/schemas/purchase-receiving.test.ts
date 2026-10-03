@@ -130,7 +130,7 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("the purchase log gains the receiving, linking and document events", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-11, -5)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-12, -6)).toEqual([
       "UNITS_RECEIVED",
       "UNITS_CANCELLED",
       "ASSET_LINKED",
@@ -141,15 +141,19 @@ describe("enum appends (ADR-0099 §14: appended at the tail)", () => {
   });
 
   test("Phase 1b (#1476) appends the stock receipt and the document label edit", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-5, -3)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-6, -4)).toEqual(["STOCK_RECEIVED", "DOCUMENT_UPDATED"]);
   });
 
   test("Phase 2 (#1477) appends the license apply, the extraction run and the create from assets", () => {
-    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-3)).toEqual([
+    expect(PURCHASE_ORDER_EVENT_TYPES.slice(-4, -1)).toEqual([
       "LICENSE_APPLIED",
       "EXTRACTION_RUN",
       "CREATED_FROM_ASSETS",
     ]);
+  });
+
+  test("merging suppliers (#1496) appends SUPPLIER_MERGED at the tail", () => {
+    expect(PURCHASE_ORDER_EVENT_TYPES.at(-1)).toBe("SUPPLIER_MERGED");
   });
 });
 

@@ -86,6 +86,60 @@ export const UpdateSupplierSchema = requireAtLeastOneKey(
     .partial(),
 );
 
+/**
+ * The fields a merge may fill on the supplier that stays: every optional text field, never the name. A field
+ * is filled only where the kept supplier has none and the duplicate has one; nothing is ever overwritten
+ * (ADR-0099, merge suppliers, #1496).
+ */
+export const SUPPLIER_MERGE_FIELDS = [
+  "taxId",
+  "website",
+  "salesContactName",
+  "salesContactEmail",
+  "salesContactPhone",
+  "supportContactName",
+  "supportContactEmail",
+  "supportContactPhone",
+  "notes",
+] as const;
+export const SupplierMergeFieldSchema = z.enum(SUPPLIER_MERGE_FIELDS);
+
+/** `POST /suppliers/:id/merge` — merge the duplicate `sourceId` into the supplier `:id`, which stays. */
+export const SupplierMergeSchema = z.strictObject({
+  sourceId: z.cuid(),
+});
+
+/**
+ * `GET /suppliers/:id/merge-preview?sourceId=` — what a merge would do, read without writing:
+ *   - `purchases` — how many purchases move from the duplicate, live and archived (all of them move);
+ *   - `fill` — the kept supplier's empty fields the duplicate's values would fill;
+ *   - `kept` — fields both hold with different values: the kept supplier's value stays, the duplicate's is
+ *     not copied (it remains on the archived duplicate).
+ */
+export const SupplierMergePreviewSchema = z.object({
+  target: SupplierSchema,
+  source: SupplierSchema,
+  purchases: z.object({
+    live: z.number().int().min(0),
+    archived: z.number().int().min(0),
+  }),
+  fill: z.array(z.object({ field: SupplierMergeFieldSchema, value: z.string() })),
+  kept: z.array(
+    z.object({
+      field: SupplierMergeFieldSchema,
+      value: z.string(),
+      sourceValue: z.string(),
+    }),
+  ),
+});
+
+/** The merge's answer: the kept supplier as saved, how many purchases moved, which fields were filled. */
+export const SupplierMergeResultSchema = z.object({
+  supplier: SupplierSchema,
+  movedPurchases: z.number().int().min(0),
+  filledFields: z.array(SupplierMergeFieldSchema),
+});
+
 /** Paginated `GET /suppliers` envelope (ADR-0030). */
 export const SupplierListPageSchema = pageSchema(SupplierSchema);
 
@@ -93,3 +147,7 @@ export type Supplier = z.infer<typeof SupplierSchema>;
 export type CreateSupplier = z.infer<typeof CreateSupplierSchema>;
 export type UpdateSupplier = z.infer<typeof UpdateSupplierSchema>;
 export type SupplierListPage = z.infer<typeof SupplierListPageSchema>;
+export type SupplierMergeField = z.infer<typeof SupplierMergeFieldSchema>;
+export type SupplierMerge = z.infer<typeof SupplierMergeSchema>;
+export type SupplierMergePreview = z.infer<typeof SupplierMergePreviewSchema>;
+export type SupplierMergeResult = z.infer<typeof SupplierMergeResultSchema>;
