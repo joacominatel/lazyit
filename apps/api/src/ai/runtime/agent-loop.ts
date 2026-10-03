@@ -1,5 +1,6 @@
 import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES,
   AI_WEB_SEARCH_SOURCE_REF,
   aiToolResultSourceRef,
   AiInputFormSchema,
@@ -589,10 +590,33 @@ export class AgentLoop {
         };
       });
       const message = this.model.toolResultsMessage(answered);
+      const rows: AppendRow[] = [];
+      if (
+        stepUntrusted.some((ref) =>
+          AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES.includes(ref.type),
+        )
+      ) {
+        // A source that marks the whole conversation (a purchase document read, #1478) must reach the step
+        // records even when the step pauses for nothing: later turns read it from there. The re-written
+        // record goes BEFORE the tool message, so the step stays answered (the latest record of a step wins).
+        const record: StepRecord = {
+          stepIndex,
+          calls: result.toolCalls.map((call) => ({
+            toolCallId: call.toolCallId,
+            toolName: call.toolName,
+          })),
+          outcomes: [],
+          untrustedSources: untrusted,
+        };
+        rows.push({
+          role: AI_RUNTIME_RECORD_ROLE,
+          content: record,
+          format: AI_MESSAGE_FORMAT_STEP,
+        });
+      }
+      rows.push({ role: roleOf(message), content: message });
       await this.prisma.$transaction((tx) =>
-        this.lifecycle.append(tx, conversation.id, runId, [
-          { role: roleOf(message), content: message },
-        ]),
+        this.lifecycle.append(tx, conversation.id, runId, rows),
       );
     }
   }
@@ -1414,7 +1438,41 @@ export class AgentLoop {
     if (await this.conversationSearched(conversation)) {
       untrusted = mergeRefs(untrusted, [AI_WEB_SEARCH_SOURCE_REF]);
     }
+    // A purchase document read by extraction (#1478) stays in the history the same way: every later turn
+    // of the conversation counts as having read it.
+    untrusted = mergeRefs(
+      untrusted,
+      await this.conversationSources(conversation.id),
+    );
     return { toolCalls, untrusted, callIds };
+  }
+
+  /**
+   * The untrusted sources that mark the whole conversation (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`), read
+   * from the step records of every run of it — earlier turns included.
+   */
+  private async conversationSources(
+    conversationId: string,
+  ): Promise<AiEntityRef[]> {
+    const rows = await this.prisma.aiMessage.findMany({
+      where: { conversationId, format: AI_MESSAGE_FORMAT_STEP },
+      select: { content: true },
+    });
+    let sources: AiEntityRef[] = [];
+    for (const row of rows) {
+      const record = readStepRecord(row.content);
+      if (!record) continue;
+      sources = mergeRefs(
+        sources,
+        record.untrustedSources.filter(
+          (ref) =>
+            !!ref &&
+            typeof ref === 'object' &&
+            AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES.includes(ref.type),
+        ),
+      );
+    }
+    return sources;
   }
 
   /**
