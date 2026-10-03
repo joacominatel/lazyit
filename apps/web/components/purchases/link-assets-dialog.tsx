@@ -19,6 +19,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
 import { Combobox } from "@/components/combobox";
+import { OpenPurchaseButton } from "@/components/purchases/open-purchase-button";
 import { SearchInput } from "@/components/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -895,9 +896,9 @@ export function LinkResultView({
         <FailureList failures={snapshot.failures} title={t("failedTitle")} />
       </div>
       <DialogFooter>
-        <Button variant="outline" asChild>
-          <Link href={`/purchases/${purchaseId}`}>{t("openPurchase")}</Link>
-        </Button>
+        <OpenPurchaseButton purchaseId={purchaseId}>
+          {t("openPurchase")}
+        </OpenPurchaseButton>
         <Button onClick={onDone}>{t("done")}</Button>
       </DialogFooter>
     </div>

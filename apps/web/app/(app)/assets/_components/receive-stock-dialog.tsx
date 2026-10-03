@@ -28,6 +28,7 @@ import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
 import { MoneyField } from "@/components/money-input";
+import { OpenPurchaseButton } from "@/components/purchases/open-purchase-button";
 import {
   PendingLinePicker,
   PendingLineSuggestion,
@@ -855,9 +856,9 @@ function ReceiveResult({
           </Button>
         ) : null}
         {target ? (
-          <Button variant="outline" asChild>
-            <Link href={`/purchases/${target.purchase.id}`}>{tl("openPurchase")}</Link>
-          </Button>
+          <OpenPurchaseButton purchaseId={target.purchase.id}>
+            {tl("openPurchase")}
+          </OpenPurchaseButton>
         ) : null}
         <Button variant="outline" onClick={onReceiveMore}>
           {t("result.receiveMore")}

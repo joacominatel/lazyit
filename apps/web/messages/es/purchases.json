@@ -49,9 +49,7 @@
     "allStatuses": "Cualquier estado",
     "allSuppliers": "Cualquier proveedor",
     "filteredEmpty": "Ninguna compra coincide con estos filtros.",
-    "pendingEmpty": "Ninguna compra espera unidades.",
     "archivedEmpty": "No hay compras archivadas.",
-    "showAll": "Ver todas las compras",
     "columns": {
       "purchase": "Compra",
       "supplier": "Proveedor",

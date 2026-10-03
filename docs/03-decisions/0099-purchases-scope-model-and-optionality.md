@@ -60,6 +60,10 @@ package includes is its own decision: [[0100-money-as-64-bit-minor-units]].
 building, and decided that a stock receipt's movement reason names the purchase reference — see
 [[#CEO confirmations (2026-10-02)]].
 
+**Amended 2026-10-03** (#1507): after testing the build locally, the CEO decided the purchases list opens
+on every purchase, newest first, instead of on the purchases waiting for units — see
+[[#After local testing (2026-10-03)]].
+
 Research and the CEO's verbatim answers: [[purchases/_MOC|Purchases research vault]] — start with
 [[purchases/decisions|the decisions note]].
 
@@ -586,9 +590,11 @@ CEO decision.
   *Partially received*, *Received* or *Over-received* (a warning tone) from its derived receipt. A
   status a newer build writes shows as its raw text. The status is changed from the purchase page
   (*Mark as draft / ordered*, *Cancel purchase* only while nothing is received), not from the edit form.
-- **The list opens on purchases waiting for units** (`receipt=PENDING`). Because that view can be empty
-  while purchases exist, the "optional feature" empty state is shown only when the area holds no purchase
-  at all.
+- **The list opens on every purchase, newest first** (*amended 2026-10-03 by a CEO decision, #1507*). The
+  receipt filter (*Waiting for units* among its values) and the *Pending units* tab narrow it. The "optional
+  feature" empty state shows when the unfiltered list is empty. *As built in #1474* the list opened on the
+  purchases waiting for units (`receipt=PENDING`); that is superseded — see
+  [[#After local testing (2026-10-03)]].
 - **The currency label starts at the last one used** — the viewer's own (kept in the browser), else the
   instance's most recently used — on a new purchase only. The asset's currency label is never prefilled:
   an asset without one reads *No currency*.
@@ -607,6 +613,8 @@ CEO decision.
   `reference`, `invoiceNumbers`, `lineDescription`); wiring them into the form stays #1475.*
 - **One save at a time.** A purchase save can be two writes (the inline supplier, then the purchase), so a
   repeated Ctrl/⌘+Enter or a double click is held off by a ref-based lock, not only the disabled button.
+  A save that succeeded keeps the lock (and the disabled button) until the page changes, so a submit in the
+  moment before the navigation cannot create the purchase twice (#1508 review).
 
 ## Decisions while building (Phase 1 flows, #1473)
 
@@ -1323,6 +1331,46 @@ fixed reason — the ledger is append-only. Recorded in
 | The Spanish register: the Manual's AI pages in *voseo*, the rest in *tú* | "Dejarlo como está" | [[ai-assistant/frontend]] |
 | The items planned but not built | "Un unico issues y sub-issues de ese" (one issue, with sub-issues of it) | §13 — tracked as #1495 (sub-issues #1496–#1503) |
 
+## After local testing (2026-10-03)
+
+The CEO tested the whole build on a local instance and reported what did not work or did not read right
+(#1505–#1508). One report changes a decision recorded above; another settles how two keyboard models meet.
+
+### The purchases list opens on every purchase, newest first (amends Phase 1 web)
+
+CEO, verbatim: "en esta pantalla mostraria por defecto TODO pero ordenado por lo que esperan unidades (o
+mejor, por fecha de mas nuevo a mas viejo)" (on this screen I would show EVERYTHING by default, but sorted
+by what is waiting for units — or better, by date from newest to oldest).
+
+The list opens with no receipt filter, sorted by the day each purchase was recorded, newest first
+(`sort=createdAt&dir=desc`, the order `GET /purchase-orders` already defaults to). The purchases still
+waiting for units stay one step away: the receipt filter's *Waiting for units*, and the *Pending units* tab.
+**Rejected: sorting by order date, falling back to the recorded date.** The API sorts by `orderDate` with
+the database's default null placement — under `desc`, every purchase without an order date first — and has
+no fallback to `createdAt`. The order date is optional (D-D) and often blank — a draft, a purchase made
+from existing assets — so that order would open on the purchases with the least information. The fallback
+would be a backend change (#1507 is web-only); it can be added later on the same allowlist. Ordering by
+order date stays a column the operator can choose. Existing bookmarks with `?receipt=PENDING` keep opening
+the filtered view.
+
+### Ctrl/⌘+Enter saves from anywhere on the purchase form (#1508)
+
+CEO, verbatim: "El cmd+enter no me funciono tampoco, no hace nada" (Cmd+Enter did not work for me either,
+it does nothing).
+
+The form heard the shortcut only from inside itself. Driven key by key in Chrome, ⌘+Enter and Ctrl+Enter
+saved from every kind of field — plain inputs, money and date fields, the notes, smart-entry fields with
+their list open, a combobox list — but with focus on nothing (after a click on blank space, or once the
+focused control is gone, as with a removed line) the key reached the page and nothing else. The form keeps
+listening for its own fields and the lists its comboboxes open, and the page now passes it a Ctrl/⌘+Enter
+pressed with focus on nothing — but only when the last click was on the page the form is on (its `<main>`),
+or there was no click yet. A click into the docked assistant's transcript also leaves focus on nothing, and a
+Ctrl/⌘+Enter there is not a save. Focus in anything else (a dialog, the assistant, the search palette) is
+left alone. **A smart-entry field keeps the text and lets the save follow**: with its list open, Ctrl/⌘+Enter
+keeps the text as typed and the key travels on to the form. Rejected: making Ctrl/⌘+Enter only "keep as
+typed" — a save shortcut that does nothing in half the form's fields. No other form uses the shortcut, so
+smart entry elsewhere is unchanged.
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1332,4 +1380,4 @@ fixed reason — the ledger is append-only. Recorded in
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1507 · #1508

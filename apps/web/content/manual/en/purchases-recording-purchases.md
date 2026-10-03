@@ -84,7 +84,8 @@ There are four kinds of line:
 - **Other** — shipping, a service, a freebie. It counts in the total but never waits for delivery.
 
 The keyboard does most of the work: **Enter** in a line adds the next line, and **Ctrl+Enter** (**⌘+Enter**
-on a Mac) saves the purchase. The running total is shown under the lines.
+on a Mac) saves the purchase from anywhere on the form — even from a field with its suggestions open, which
+keeps what you typed. The running total is shown under the lines.
 
 After saving, lines are edited, added and removed on the purchase's page. A line can be removed only
 while no asset has been received on it.
@@ -115,8 +116,9 @@ the assets linked to each line — and, on a consumable line, from the stock rec
 - **Cancel purchase** (in the *Status* menu) is offered only while nothing has been received. A
   cancelled purchase can be marked as ordered again.
 
-The **Purchases** list opens on the purchases still **waiting for units**; switch the filter to see all
-of them, or filter by status or supplier, and search by reference, invoice number, supplier or item.
+The **Purchases** list opens on **every purchase, newest first**. To see only the ones still waiting for
+a delivery, choose **Waiting for units** in the delivery filter, or open the **Pending units** tab. You can
+also filter by status or supplier, and search by reference, invoice number, supplier or item.
 
 ## Receiving units
 

@@ -82,7 +82,7 @@ const RECEIPT_LABEL = {
 const STATUS_LABEL = { DRAFT: "draft", ORDERED: "ordered", CANCELLED: "cancelled" } as const;
 
 /**
- * The Purchases list (ADR-0099, UX proposal §3.0): opens on the purchases still waiting for units, with
+ * The Purchases list (ADR-0099, UX proposal §3.0): opens on every purchase, newest first (#1507), with
  * search, receipt / status / supplier filters, "x of y received" and totals per currency label. The
  * area is optional — an instance that never records a purchase sees an empty state that says so.
  */
@@ -117,14 +117,8 @@ export function PurchasesListView() {
     derivePurchaseParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
   );
   const total = page?.total ?? 0;
-  // The list opens filtered (pending units), so an empty page does not mean the area is empty. Only then
-  // ask whether ANY purchase exists, to choose between the "optional feature" empty state and "none open".
-  const probeEmpty = !isLoading && !isError && total === 0 && !filtersActive;
-  const { data: anyPage, isLoading: anyLoading } = usePurchaseOrders(
-    { limit: 1 },
-    { enabled: probeEmpty },
-  );
-  const areaEmpty = probeEmpty && anyPage?.total === 0;
+  // The list opens unfiltered, so an empty page with no filter means the area holds no purchase at all.
+  const areaEmpty = !isLoading && !isError && total === 0 && !filtersActive;
 
   const { data: supplierFilter } = useSupplier(
     filters.supplier !== "ALL" ? filters.supplier : undefined,
@@ -267,7 +261,7 @@ export function PurchasesListView() {
       />
       <PurchasesTabs active="purchases" />
 
-      {isLoading || (probeEmpty && anyLoading) ? (
+      {isLoading ? (
         <ResourceTable columns={columns} isLoading mobileChildren={LOADING_MOBILE_CHILDREN} />
       ) : isError ? (
         <ErrorState title={t("list.loadError")} onRetry={() => refetch()} error={error} />
@@ -332,22 +326,8 @@ export function PurchasesListView() {
           <ResourceTable
             columns={columns}
             isFilteredEmpty={rows.length === 0}
-            filteredEmptyMessage={
-              archived
-                ? t("list.archivedEmpty")
-                : filtersActive
-                  ? t("list.filteredEmpty")
-                  : t("list.pendingEmpty")
-            }
-            filteredEmptyAction={
-              filtersActive ? (
-                <ClearFiltersLink onClick={clearFilters} />
-              ) : (
-                <Button variant="link" className="h-auto p-0" onClick={() => setFilter("receipt", "ALL")}>
-                  {t("list.showAll")}
-                </Button>
-              )
-            }
+            filteredEmptyMessage={archived ? t("list.archivedEmpty") : t("list.filteredEmpty")}
+            filteredEmptyAction={filtersActive ? <ClearFiltersLink onClick={clearFilters} /> : undefined}
             mobileChildren={rows.map((purchase) => (
               <ResourceCard
                 key={purchase.id}

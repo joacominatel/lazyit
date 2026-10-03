@@ -7,18 +7,26 @@ import type { PurchaseOrderListParams } from "@/lib/api/endpoints/purchase-order
 import type { DerivedListState } from "@/lib/hooks/list-params-url";
 
 /**
- * URL filters of the purchases list. The list opens on the purchases still waiting for units
- * (`receipt=PENDING`); "ALL" lifts a filter. `archived` drives the ADMIN-only archived view.
+ * URL filters of the purchases list. The list opens on every purchase (#1507, ADR-0099 Phase 1 web as
+ * amended); the receipt filter narrows it, to the purchases still waiting for units among others. "ALL"
+ * lifts a filter. `archived` drives the ADMIN-only archived view.
  */
 export const PURCHASE_FILTER_DEFAULTS = {
-  receipt: "PENDING",
+  receipt: "ALL",
   status: "ALL",
   supplier: "ALL",
   archived: "ALL",
 } as const;
 
+/**
+ * Newest first: by the day the purchase was recorded, the order the API defaults to. Sorting by order date
+ * would put every purchase without one first (`GET /purchase-orders` has no nulls-last nor a fallback to the
+ * recorded date), so it stays a column the operator chooses.
+ */
 export const PURCHASE_LIST_OPTIONS = {
   filters: PURCHASE_FILTER_DEFAULTS,
+  defaultSort: "createdAt",
+  defaultDir: "desc" as const,
   filterValidators: {
     receipt: ["ALL", ...PurchaseOrderReceiptFilterSchema.options],
     status: PURCHASE_ORDER_STATUSES,
@@ -27,7 +35,7 @@ export const PURCHASE_LIST_OPTIONS = {
 
 /**
  * Whether the receipt filter is lifted: the archived view lists every archived purchase, and a
- * *Cancelled* status filter would otherwise meet the default `PENDING`, which excludes cancelled
+ * *Cancelled* status filter would otherwise meet a `PENDING` receipt filter, which excludes cancelled
  * purchases and so always reads empty.
  */
 export function receiptFilterLifted(
