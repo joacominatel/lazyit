@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # Security invariants — auth & authorization
@@ -21,6 +21,10 @@ finding is measured against*. If code diverges from any of them, that divergence
 >
 > **AI assistant, MCP and OAuth.** INV-AI-1…17 (and the INV-MCP-1…7 mapping) are the last section,
 > [[#AI assistant, MCP and OAuth invariants (ADR-0097)]]. They joined on 2026-09-26 (#1315, W4-4).
+>
+> **Purchases** ([[0099-purchases-scope-model-and-optionality|ADR-0099]], epic #1465) added INV-PO-1 and
+> amended INV-AI-3, -4, -7, -11 and -12 on 2026-10-02 (#1489). Their `file:line` references are to the
+> integration branch at `74a2a485`.
 
 ---
 
@@ -624,6 +628,43 @@ irrevocable, dangling grant. The `assertUserUsable` guard prevents the orphan fr
 - Tests: `access-grants.service.spec.ts` — `assertUserUsable` with `directoryOnly=true` → 400.
   `users.service.spec.ts` — `skipIdpWriteBack=true` with `supportsManagement=true` does NOT call `idp.createUser`.
 
+## INV-PO-1 — Purchase provenance follows `purchaseOrder:read`, enforced at the API, never UI-only
+
+**Rule.** A principal without `purchaseOrder:read` (a VIEWER, by default) never receives purchase
+provenance — supplier, reference, invoice numbers, purchase dates, price or purchase documents — through a
+read of another domain ([[0099-purchases-scope-model-and-optionality|ADR-0099]] §8, CEO decision D-A):
+
+- `GET /assets/:id/purchase` (the asset's *Purchase* panel) needs `asset:read` **and** `purchaseOrder:read`;
+- the inventory CSV appends the supplier, purchase reference and invoice numbers columns only for a caller
+  holding it — absent, not blank, otherwise;
+- the asset list's purchase filters (`purchaseOrderLineId`, `purchaseOrderId`, `purchaseLinked`) are a `403`
+  without it, because the filter itself reveals which assets came from which purchase, and the list query
+  applies only filters minted by the authorizing method, whoever calls it;
+- smart-entry suggestions read only the sources the caller may read;
+- a consumable movement received from a purchase carries only the opaque line id and a fixed reason
+  (*Received from a purchase*), never the supplier or the reference.
+
+What stays visible under `asset:read` / `consumable:read` is the asset's **own** purchase fields (cost,
+currency label, dates) and the opaque `purchaseOrderLineId` (ADR-0099, decisions while building Phase 1
+core — whether that bare id should be hidden too is flagged there as a CEO call).
+
+**Why.** Purchases and supplier prices are VIEWER-denied by default, and an asset or stock read must not be
+a side door to them. lazyit has no field-level authorization, so every read that crosses into purchase data
+checks the permission itself, in the API.
+
+**Where enforced** (at `74a2a485`; paths relative to `apps/api/src/`).
+- `purchase-orders/asset-purchase.controller.ts:24` — `@RequirePermission('asset:read', 'purchaseOrder:read')`.
+- `assets/assets.service.ts` — `authorizePurchaseFilters` (`:353-360`) and the runtime-brand check in
+  `buildWhere` (`:503-511`); the export reads the linked purchase only with the permission (`:614-643`); a
+  bulk receive against a line also needs `purchaseOrder:write` (`:972`).
+- `suggestions/suggestions.service.ts` — every source names the permission that guards it.
+- `purchase-orders/purchase-receiving.service.ts:214` — `STOCK_RECEIPT_REASON`.
+- `packages/shared/src/schemas/permission.ts:285` — `purchaseOrder:read` is in `VIEWER_DENIED_READS`.
+- Tests: `purchase-orders/purchase-orders.authz.spec.ts` (provenance `403` for a VIEWER), `assets/assets.purchase.spec.ts`
+  (the CSV columns, the filters' authorization and the defense in depth on the list **and** the export),
+  `assets/assets.purchase-filters.http.spec.ts`, `suggestions/suggestions.authz.spec.ts`,
+  `auth/role-permissions.golden.spec.ts` (VIEWER denied by default).
+
 ---
 
 # AI assistant, MCP and OAuth invariants (ADR-0097)
@@ -703,7 +744,12 @@ ledger cannot record is not executed. Step-up is derived by core from the closed
 `write`-class tool whose stored and fresh previews are not elevated, need no step-up and name no
 untrusted source; the mode is re-checked inside the claim's transaction under the conversation row
 lock, and the ledger records `approvalMode = AUTO`. "Approve all" (#1409) is one decision per action,
-never a batch endpoint.
+never a batch endpoint. *Never auto-approved (#1478, ADR-0099 §11):* purchase changes — every tool
+registered `neverAutoApprove` — and any write whose preview carries a warning of
+`AI_NEVER_AUTO_APPROVE_WARNINGS` (`CREATES_ASSETS`, `CHANGES_MONEY`; today purchase receipts and priced
+purchase changes) always wait for the owner's own approval on the card (no password unless step-up applies).
+Core reads the flag from the tool registry, never from the model, the stored row or a later preview; the
+asset tools are unchanged. The web leaves a page carrying either warning out of "Approve all".
 
 **Why.** The model will be fooled sooner or later (security §0). A human decision bound to exactly what
 the card showed is the one control injected text cannot forge.
@@ -714,16 +760,24 @@ the card showed is the one control injected text cannot forge.
   `PREVIEW_CHANGED` on the fresh preview before the claim (`:386-468`), then claims with an atomic
   `updateMany` on `AWAITING_APPROVAL` + owner + unexpired (`:477-503`), write-ahead `APPROVED` (`:521-551`);
   `requireHumanSession` (`:941`); input and schema hashes (`:787`, `:795`); `STALE` (`:839`);
-  `autoEligible` (`:99-112`) and the in-transaction mode check (`:486-501`).
+  `autoEligible` (`:99-112`) and the in-transaction mode check (`:486-501`). At `74a2a485`, `autoEligible`
+  (`:104-123`) also refuses a tool whose `descriptor.neverAutoApprove` is set and a preview carrying a
+  never-auto-approve warning, on the stored **and** the fresh preview (`:453-454`).
+- `ai/core/tool-descriptor.ts:155` — the `neverAutoApprove` registry flag; `ai/tools/purchases.tools.ts` sets
+  it on every purchase write tool and emits `CREATES_ASSETS` / `CHANGES_MONEY` from the preview.
+- `ai/core/pending-action.ts:97` — re-exports `AI_NEVER_AUTO_APPROVE_WARNINGS`, defined once in
+  `packages/shared/src/schemas/ai-tools.ts:309` so core and the web's "Approve all" read one list.
 - `ai/core/pending-action.ts:85-110` — `AI_STEP_UP_WARNINGS`, `requiresStepUp`;
   `ai/runtime/approval.service.ts:146-153` derives step-up from the stored preview, never the client, and
   `:229` verifies the password through the shared `auth/local/password-step-up.verifier.ts` (per-account
   backoff; the password is never stored).
 - `ai/runtime/agent-loop.ts:178-200` — `untrustedRefsOf` (SEC-080, closed): any read whose data carries
   `<untrusted_content>` marks the turn, with its entity refs or the synthetic `toolResult` ref.
-- Tests: `ai/core/ai-tool.write-path.spec.ts`, `ai/core/pending-action.spec.ts`,
-  `ai/runtime/approval.service.spec.ts`, `ai/runtime/agent-loop.untrusted-sources.spec.ts` (real read tools,
-  auto-approve refused after an untrusted read), `ai/runs/ai-runs.http.spec.ts`.
+- Tests: `ai/core/ai-tool.write-path.spec.ts` (including the `neverAutoApprove` tool and the two warnings),
+  `ai/core/pending-action.spec.ts`, `ai/runtime/approval.service.spec.ts`,
+  `ai/runtime/agent-loop.untrusted-sources.spec.ts` (real read tools, auto-approve refused after an untrusted
+  read), `ai/runs/ai-runs.http.spec.ts`, `ai/tools/purchases.tools.spec.ts` (every purchase write tool is a
+  card never auto-approved, with its warnings), `packages/shared/src/schemas/ai-tools.test.ts` (the list).
 
 ## INV-AI-4 — Untrusted content is data, never authority
 
@@ -731,7 +785,11 @@ the card showed is the one control injected text cannot forge.
 from lazyit lists — can alter tool availability, approval requirements, tool metadata or the system
 prompt. Other-authored free text reaches the model wrapped in `<untrusted_content>`, and a turn that read
 it shows the untrusted-source banner and is never auto-approved. Provider web-search results count as
-untrusted for the rest of the conversation.
+untrusted for the rest of the conversation, and so does a purchase document read by
+`purchase_document_read` (#1478): its entity ref of type `purchaseDocument` is a conversation-wide source
+(`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`), so every later turn starts untrusted, its proposals carry the
+banner, and nothing in that conversation is auto-approved again. The extraction call behind it declares no
+lazyit tools, so a supplier's document can only change what is transcribed.
 
 **Why.** Most of what the AI reads is written by someone other than the person it acts for; the blast
 radius must not depend on the model resisting it.
@@ -742,7 +800,14 @@ radius must not depend on the model resisting it.
 - `ai/core/result-shaper.ts:18-28` — `untrusted()` wraps and neutralizes nested tags.
 - `ai/runtime/agent-loop.ts:178-200` and the run-wide merge (`:1406`); the web-search marker is seeded on
   every later turn (security §6.11).
+- At `74a2a485`: `ai/runtime/agent-loop.ts` `conversationSources` (`:1454`) reads the conversation-wide
+  sources from the step records of every run and merges them into each turn (`:1445`); a step that read a
+  purchase document is re-recorded before its tool message so the record exists (`:594-600`). The type list
+  is `packages/shared/src/schemas/ai-tools.ts:169`. `ai/providers/structured-extraction.ts` sends the
+  extraction with no `tools` key (security §6.12).
 - Tests: `ai/runtime/agent-loop.untrusted-sources.spec.ts`, `ai/runtime/agent-loop.web-search.spec.ts`,
+  `ai/runtime/agent-loop.purchase-document.spec.ts` (later turns stay untrusted; a conversation that never
+  read a document keeps auto-approve), `ai/providers/structured-extraction.spec.ts` (no tools),
   `ai/prompt/system-prompt.spec.ts`.
 
 ## INV-AI-5 — Secrets never enter model context
@@ -785,7 +850,9 @@ Tests: `ai/settings/ai-settings.service.spec.ts`, `ai/settings/ai-connection-tes
 IP pinned, size and time bounded, no redirects. A private target is reachable only through the explicit,
 audited `allowPrivateNetwork` seam for the OpenAI-compatible provider's own configured host; CIMD never.
 Loopback and IMDS never. Provider-native web search adds **no** lazyit egress (the provider runs it).
-Absorbs INV-MCP-6.
+Purchase document extraction (#1477) goes to the configured provider and model only, through the same
+provider definition and guarded fetch as a chat step, with the SDK's URL download refused. Absorbs
+INV-MCP-6.
 
 **Why.** An admin-set base URL and a client-supplied `client_id` URL are both attacker-influenced
 destinations (SSRF).
@@ -793,9 +860,11 @@ destinations (SSRF).
 **Where enforced.** `ai/providers/provider-fetch.ts:129` (private only with the toggle, for the
 configured host), `:172` (`maxRedirects: 0`), `:206` (`guardedFetch`); `oauth/cimd/cimd-fetcher.ts:73-115`
 (https only, no userinfo, public addresses only, no redirects, one total deadline including DNS, size
-cap); `ai/providers/sdk-import-boundary.spec.ts` keeps the AI SDK inside `ai/providers/`. Tests:
+cap); `ai/providers/sdk-import-boundary.spec.ts` keeps the AI SDK inside `ai/providers/`;
+`ai/providers/aisdk-chat-model.ts` `extractStructured` (re-checks the provider and model the capability was
+checked for) and `ai/providers/structured-extraction.ts` (`experimental_download` refused). Tests:
 `ai/providers/provider-fetch.spec.ts`, `ai/providers/__compat__/aisdk-guarded-fetch.spec.ts`,
-`oauth/cimd/cimd.spec.ts`.
+`oauth/cimd/cimd.spec.ts`, `ai/providers/structured-extraction.spec.ts`.
 
 ## INV-AI-8 — Model output renders only through the sanitized pipeline
 
@@ -865,7 +934,10 @@ database-level test (the Jest suite runs without Postgres).
 24 h), concurrency (3 active runs, 8 streams per principal), rate (per principal; per grant and per IP on
 `/mcp`) and per-SA mutation limits are enforced server-side, persisted where they must survive a restart,
 and fail closed. A batch counts its rows toward the per-SA mutation cap (SEC-081, closed). The `/mcp`
-query-token scan is charged to the per-IP limiter before it runs (SEC-083, closed).
+query-token scan is charged to the per-IP limiter before it runs (SEC-083, closed). Purchase document
+extraction (#1477) is bounded too: size, page and output caps and a 120 s deadline checked before or around
+the call, one extraction in flight and five a minute per person, and the same persisted daily token budget
+as the chat.
 
 **Why.** A model in a loop, or a script holding an SA token, must not exhaust the provider budget or
 the instance.
@@ -876,7 +948,10 @@ the instance.
 `mcp/mcp-rate-limit.ts`; `mcp/mcp-auth.guard.ts:111-119`. Tests: `ai/core/mutation-weight.spec.ts`,
 `ai/runtime/agent-loop.spec.ts`, `ai/runtime/agent-loop.untrusted-sources.spec.ts`,
 `mcp/mcp-server.factory.spec.ts`, `mcp/mcp-auth.guard.spec.ts`, `ai/runs/run-event-stream.http.spec.ts`.
-Two limits are soft by design (provider §8.1): the active-run cap is counted outside the creating
+Extraction (at `74a2a485`): `purchase-orders/extraction/purchase-extraction.service.ts` (the in-flight set
+`:240-256`, the per-minute bucket `:283-288`, the budget check before the call); tests in
+`purchase-orders/extraction/purchase-extraction.service.spec.ts`. Its limiters are in memory per API process,
+like the chat's buckets. Two limits are soft by design (provider §8.1): the active-run cap is counted outside the creating
 transaction and the budget is checked before a step, so either can overshoot by one.
 
 ## INV-AI-12 — Off by default and gated by mode
@@ -885,14 +960,19 @@ transaction and the budget is checked before a step, so either can overshoot by 
 acknowledged egress disclosure; MCP has its own switch, independent of the provider; every AI, OAuth and
 MCP route answers 404 while its switch is off. Nothing is available under `AUTH_MODE=shim`. The OAuth
 authorization server exists only with a pinned HTTPS origin; on `lan`, MCP authenticates with personal
-tokens only.
+tokens only. Purchase document extraction (#1477) has its own switch, `documentExtractionEnabled`, **off by
+default and on every upgraded instance**; it needs the assistant usable too, and it is human-only — a
+service account is refused even holding the permissions, and the chat tool is listed in the chat only.
 
 **Why.** An operator who never enables AI must see no new surface, including during guided updates.
 
 **Where enforced.** `ai/settings/ai-settings.service.ts:120-122` (shim), `:356-399` (the enable gate);
 `mcp/mcp-auth.guard.ts:123-125` (shim and switch → 404); `oauth/oauth-config.ts` (null without a pinned
-HTTPS origin or in shim); `ai/status/ai-status.service.ts`. Tests: `ai/settings/ai-settings.service.spec.ts`,
-`ai/status/ai-status.service.spec.ts`, `oauth/oauth-config.spec.ts`, `mcp/mcp-auth.guard.spec.ts`.
+HTTPS origin or in shim); `ai/status/ai-status.service.ts`; at `74a2a485`,
+`purchase-orders/extraction/purchase-extraction.service.ts` `capability` (`:360`, the switch) and `permitted`
+(`:390`, human and both permissions). Tests: `ai/settings/ai-settings.service.spec.ts`,
+`ai/status/ai-status.service.spec.ts`, `oauth/oauth-config.spec.ts`, `mcp/mcp-auth.guard.spec.ts`,
+`purchase-orders/extraction/purchase-extraction.service.spec.ts`.
 
 ## INV-AI-13 — No OIDC path
 
