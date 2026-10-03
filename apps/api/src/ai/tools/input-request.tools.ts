@@ -19,6 +19,8 @@ import {
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { LocationsController } from '../../locations/locations.controller';
+import { SuppliersController } from '../../purchase-orders/suppliers.controller';
+import { ConsumablesController } from '../../consumables/consumables.controller';
 import { UsersController } from '../../users/users.controller';
 import { isSensitiveKey } from '../core/redaction';
 import { phrase, summaryPhrase } from '../core/sentences';
@@ -503,19 +505,39 @@ async function resolveOptions(
       break;
     }
     case 'locations':
-    case 'assetModels': {
+    case 'assetModels':
+    case 'suppliers':
+    case 'consumables': {
       const result =
         source === 'locations'
           ? await rt.call(LocationsController, 'findAll', { query: page(0) })
-          : await rt.call(AssetModelsController, 'findAll', { query: page(0) });
+          : source === 'assetModels'
+            ? await rt.call(AssetModelsController, 'findAll', {
+                query: page(0),
+              })
+            : source === 'suppliers'
+              ? await rt.call(SuppliersController, 'findAll', {
+                  query: page(0),
+                })
+              : await rt.call(ConsumablesController, 'findAll', {
+                  query: page(0),
+                });
       const total = (result as { total?: unknown }).total;
       for (const row of rows(result)) {
         const name = str(row.name);
         if (typeof row.id !== 'string' || !name) continue;
-        const maker = source === 'assetModels' ? str(row.manufacturer) : null;
+        // What tells two same-named rows apart: a model's maker, a supplier's tax ID, a consumable's SKU.
+        const hint =
+          source === 'assetModels'
+            ? str(row.manufacturer)
+            : source === 'suppliers'
+              ? str(row.taxId)
+              : source === 'consumables'
+                ? str(row.sku)
+                : null;
         out.push({
           value: row.id,
-          label: clip(maker ? `${name} (${maker})` : name),
+          label: clip(hint ? `${name} (${hint})` : name),
         });
       }
       more = typeof total === 'number' && total > out.length;
@@ -650,7 +672,7 @@ export const requestInput = defineTool({
     'Ask the person for data you need and cannot find with a tool or safely infer, with a short form you ' +
     'design: a title, why you need it, and the fields — each marked required, recommended or optional. ' +
     'Use select options (or `optionsFrom` a lazyit list: manufacturers, assetCategories, locations, ' +
-    'assetModels) when the answer is one of known values, and a repeat group when the same questions ' +
+    'assetModels, suppliers, consumables) when the answer is one of known values, and a repeat group when the same questions ' +
     'apply to several items (one row per model). Give each field only the properties of its kind: ' +
     '`options` or `optionsFrom` on a select or multiselect (exactly one), `min` / `max` on a number, ' +
     'nothing extra on the other kinds. Ask only for what is missing, in one form, before ' +
@@ -668,6 +690,8 @@ export const requestInput = defineTool({
     bind(AssetModelsController, 'findAll'),
     bind(AssetCategoriesController, 'findAll'),
     bind(LocationsController, 'findAll'),
+    bind(SuppliersController, 'findAll'),
+    bind(ConsumablesController, 'findAll'),
   ],
   async run(input, rt) {
     const { form, truncated } = await buildInputForm(input, rt);
