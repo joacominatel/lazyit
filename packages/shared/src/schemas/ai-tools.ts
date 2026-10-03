@@ -301,6 +301,16 @@ export const AI_PREVIEW_WARNING_CODES = [
 export const AiPreviewWarningCodeSchema = z.enum(AI_PREVIEW_WARNING_CODES);
 export type AiPreviewWarningCode = z.infer<typeof AiPreviewWarningCodeSchema>;
 
+/**
+ * The preview warnings whose action is never approved automatically, whatever the tool (#1478; ADR-0099 §11,
+ * UX decision D11): a change that generates assets or sets or changes money always waits for the user's
+ * card. The AI core enforces it; the web leaves such a page out of "Approve all". Neither needs a step-up.
+ */
+export const AI_NEVER_AUTO_APPROVE_WARNINGS: readonly AiPreviewWarningCode[] = [
+  "CREATES_ASSETS",
+  "CHANGES_MONEY",
+];
+
 /** How the web renders a changed value on the preview card. */
 export const AI_PREVIEW_VALUE_KINDS = [
   "text",

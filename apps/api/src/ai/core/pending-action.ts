@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
 import {
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
   AiActionPreviewSchema,
   AiApprovalModeSchema,
   AiToolInvocationStatusSchema,
@@ -90,14 +91,10 @@ export const AI_STEP_UP_WARNINGS: readonly AiPreviewWarningCode[] = [
 ];
 
 /**
- * Preview warnings whose action is never approved automatically, whatever the tool (#1478; ADR-0099 §11,
- * UX decision D11): a change that generates assets or sets or changes money always waits for the user's
- * card. They need no step-up, and the web also leaves such a page out of "Approve all".
+ * Preview warnings whose action is never approved automatically, whatever the tool (#1478): the shared list,
+ * so core and the web's "Approve all" read the same one.
  */
-export const AI_NEVER_AUTO_APPROVE_WARNINGS: readonly AiPreviewWarningCode[] = [
-  'CREATES_ASSETS',
-  'CHANGES_MONEY',
-];
+export { AI_NEVER_AUTO_APPROVE_WARNINGS };
 
 /**
  * Whether an action needs the password step-up: the tool asked, or its preview carries a listed warning.

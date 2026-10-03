@@ -1371,12 +1371,17 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   suppliers already carrying the name — a hint, never a refusal), `supplier_update`, `purchase_link_assets`
   (`apply` is required — `[]` links only; the card shows, per asset, the before → after of each applied field
   that fills or replaces, from `linkPreview`), `purchase_receive` (`quantity` required; the card shows the
-  route's prefill — model, status, location, company, purchase date = the invoice date else today, warranty
+  route's prefill — model, status, location (none when the purchase's delivery location is archived, as the
+  route applies none), company, purchase date = the invoice date else today, warranty
   end, cost with its currency — and received before → after), `purchase_receive_stock` (`LEDGER_APPEND`),
   `purchase_cancel_remaining`, `purchase_apply_license` (the card reads `licenseProposal`: seats before →
-  after, the renewal date), `purchase_create_from_assets`. Warnings: `CHANGES_MONEY` when the change sets or
-  changes an amount (a priced line, a unit price, a priced line removed, a relabelled currency, a cost copied
-  onto assets); `CREATES_ASSETS` on `purchase_receive`. A card's precondition is the purchase's version — for
+  after, the renewal date), `purchase_create_from_assets` (the card reads each selected asset through
+  `GET /assets/:id` and lists the lines the route will derive — model or name, quantity, and the unit price
+  with its currency label only when the group shares it — and how many assets are left out). Warnings:
+  `CHANGES_MONEY` when the change sets or changes an amount (a priced line, a unit price, a quantity on a
+  priced line, a priced line removed, a relabelled currency, a cost copied onto assets, a purchase from
+  assets of which any has a cost); `CREATES_ASSETS` on `purchase_receive`. The document read answers
+  lazyit's warnings and matches before the document block, so a truncated draft keeps them. A card's precondition is the purchase's version — for
   a line action, the newer of the purchase's and the line's `updatedAt` (a line edit does not bump the
   purchase), so either edit makes the approval `STALE`.
 - **Mutation weights** (SEC-081): `purchase_receive` = its `quantity` (the units it creates — which is why the
@@ -1392,7 +1397,8 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
   `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,
   `location`, `purchaseCost`, `serials`, `consumable`, `cancelledQuantity`, `pendingQuantity`, `application`,
-  `seatsPurchased`, `renewalDate`, `licenseWarnings`, `suppliersWithThisName`, and the header fields).
+  `seatsPurchased`, `renewalDate`, `licenseWarnings`, `suppliersWithThisName`, `notLinkable`, and the header
+  fields).
 
 **Workflow operations tools as built (W2-13).** Ten tools in `workflows.tools.ts`, domain `access`, every
 channel: seven reads (`workflow_search`, `workflow_get`, `workflow_connection_list`, `workflow_run_list`,

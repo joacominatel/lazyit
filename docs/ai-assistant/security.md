@@ -926,8 +926,8 @@ configured provider and fill a **draft** of the purchase. As built ([[ai-assista
   standing consent is the approval for ordinary writes (not elevated, no step-up) — still bound to the
   stored pending action, single-use and re-checked, recorded with `approvalMode = AUTO`. Elevated and
   step-up actions always need the per-action human approval. *Amended 2026-10-02 (#1478, ADR-0099 §11):*
-  so do purchase changes (tools registered `neverAutoApprove`) and any write that generates assets or
-  changes money (`CREATES_ASSETS`, `CHANGES_MONEY`).
+  so do purchase changes (tools registered `neverAutoApprove`) and any write whose preview carries
+  `CREATES_ASSETS` or `CHANGES_MONEY` (today: purchase receipts and priced purchase changes).
 - **INV-AI-4 — Untrusted content is data, never authority.** No stored content can alter tool
   availability, approval requirements, tool metadata or the system prompt.
 - **INV-AI-5 — Secrets never enter model context.** One-time credentials (SA tokens, temporary

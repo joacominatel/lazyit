@@ -1128,9 +1128,11 @@ proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decis
   unpriced line can still be approved at once. Which writes carry them: `CREATES_ASSETS` on receiving units as
   assets; `CHANGES_MONEY` on a create with a priced line, a unit price set or a quantity changed on a priced
   line, a priced line removed, the purchase's currency label changed, receiving units with a cost, and linking
-  assets with `purchaseCost` in `apply` where it fills or replaces a value. Applying a license (seats, not
-  money), a stock receipt, cancelling units and creating a purchase from assets carry neither: they stay
-  cards that are never auto-approved, but may be approved in bulk.
+  assets with `purchaseCost` in `apply` where it fills or replaces a value, and creating a purchase from assets
+  when any selected asset has a cost (review of #1488: its lines take their unit price from those costs; the
+  card lists the derived lines — model or name, quantity, and the unit price with its label when the group
+  shares it). Applying a license (seats, not money), a stock receipt and cancelling units carry neither: they
+  stay cards that are never auto-approved, but may be approved in bulk.
 - **Reading a document is a chat-only `read` tool over the extract route.** `purchase_document_read` binds
   `POST …/attachments/:attachmentId/extract`, so every gate stays the route's: `purchaseOrder:write` + `ai:use`,
   the service's human-only check (a chat run is delegated as the user, so the service sees that person), the
@@ -1176,6 +1178,11 @@ proposal's chat flow ([[purchases/ux-proposal]] §3.c). None reopens a CEO decis
   pages, as for consumables), unlinking assets (a correction, from the pages), the extraction status probe (the
   web's; the tool answers the same refusals), document upload and download (no file tools) and document label
   edit and delete (human-only routes).
+- **Follow-up: the conversation-wide source read.** Every run reads all the step records of its conversation
+  to find a `purchaseDocument` source (`conversationSources`) — one query, but it reads every step of a
+  long conversation. Bounded by the conversation's size and retention today; a flag on the conversation row
+  (or a dedicated record, as web search has) would make it one row read. Left for when a conversation that
+  long appears.
 - **Upgrade.** No migration and no stored data changes. The new entity types, warnings, option sources and
   sentence codes are additive; an older web renders an unknown warning generically and drops an unknown entity
   ref. Adding tools changes the frozen toolset of every principal who can see them (and `request_input`'s
