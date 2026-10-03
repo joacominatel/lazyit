@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-02
 ---
 
 # AI assistant — Frontend surfaces
@@ -1297,6 +1297,46 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   Copy: `ai.sources.*`; the untrusted-source banner names the marker as `ai.entities.webSearch`. The
   other synthetic marker, `toolResult` (a read that carried other-authored text but named no entity,
   SEC-080), has no page either: the banner shows without a link for it (`ai.entities.toolResult`).
+
+## 11d. As built — purchases in the chat (#1478; ADR-0099 §11, *Decisions while building (Phase 3, #1478)*)
+
+- **"Approve all" exclusion.** `bulkExclusion` (`lib/ai/approval-pages.ts`) gains the reason
+  `assetsOrMoney`: a still-waiting page whose preview carries a warning in `INDIVIDUAL_APPROVAL_WARNINGS`
+  (`CREATES_ASSETS`, `CHANGES_MONEY` — the server's `AI_NEVER_AUTO_APPROVE_WARNINGS`) is left out of
+  **Approve all** / **Reject all** and counted under "Decide these on their own page" (`pager.excluded.*`),
+  exactly like a step-up page. Precedence: `stepUp` → `elevated` → `assetsOrMoney` → `needsReview`. The page
+  itself still approves with the user's click and no password, and its warning says why on the card
+  (`approval.individualOnly`, beside the warning as "Needs your password" is). A step that only creates a
+  supplier or adds an unpriced line stays eligible. Every purchase write is also never auto-approved — that
+  is the server's rule and needs nothing from the web.
+- **Money values.** A preview value that is exactly `{ amount, currency }` (integer minor units, a free-text
+  label or `null`) is a `money` `PreviewValue` (`isMoneyShape`, `lib/ai/preview.ts`), rendered with
+  `formatMoney` in the UI locale with its label (`ARS 1.412.500`) on field rows, table cells, change lists and
+  the `/copy` transcript. `{ amount: null }` (an asset without a cost) is empty, never zero. An empty object is
+  empty, never `{}`.
+- **Lines and assets.** `lines` (an array of line records) is a table through the generic #1387 path.
+  `line` — the one record `purchase_line_add` adds and `purchase_line_remove` removes (its `before`) — is a
+  one-row table (`SINGLE_RECORD_FIELDS`); other single objects keep their old rendering. In a table,
+  `<key>Id` beside `<key>` (`asset` + `assetId` on a link card) is not a column but links the `<key>` cell
+  through `entityHref`, and a cell mapping field names to `{ before, after }` (a linked asset's `writes`) is a
+  list of labelled `before → after` (`TableCell.changes`). A line's `kind` and a linked asset's `linkState`
+  read with `ai.approval.table.values.*`.
+- **Entities and page context.** `entityHref`: `purchaseOrder` → `/purchases/:id`, `supplier` →
+  `/purchases/suppliers/:id`, `purchaseDocument` → its parent purchase (the untrusted-source banner links the
+  read document's purchase). `routeContext` maps `/purchases/:id[/…]` to `purchaseOrder` and
+  `/purchases/suppliers/:id` to `supplier` (longest prefix first; `new`, `pending`, `suppliers` are reserved).
+- **"Ask AI to fill".** On a purchase's *Documents* row, next to *Read this document* and only where it is
+  offered, when the chat is usable (`canAskAiToFill`, `lib/purchases/extraction.ts`). It calls the shell's new
+  `ask(text)` (`ai-assistant-root.tsx`): the panel opens and the composer takes the localized message
+  (`purchases.detail.askAiMessage`, naming the file) once per ask (`prefill.seq`, taken during render),
+  re-enables the page chip and focuses the box. It is **never sent by itself** — the person sends it, with the
+  purchase as page context; reading the document is their message, not the button's.
+- **Catalogs.** The three entity labels, the two warnings, the two option sources (`suppliers`,
+  `consumables`), the 21 tool labels, the purchase preview fields and the 26 purchase sentences, en + es. The
+  new `es` strings address the user in the *tú* register (the Purchases catalog's); `ai.json`'s older strings
+  keep *voseo*, and the Manual's additions follow the register of the page they sit on.
+- Manual: `ai-assistant-approvals` (*Purchases*, the Approve-all list, auto-approve), `ai-assistant-using-the-chat`
+  (*Filling a purchase from a document*), `ai-assistant-overview` and `purchases-recording-purchases`.
 
 ## 12. Implementation units (superseded)
 

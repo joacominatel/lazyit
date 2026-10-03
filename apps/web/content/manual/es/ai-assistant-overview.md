@@ -88,6 +88,11 @@ va al proveedor, que lo lee sin herramientas. Ningún otro dato de lazyit va con
 del archivo, y no se guarda nada leído hasta que una persona revisa el borrador. El proveedor autoalojado
 compatible con OpenAI nunca se usa para esto. Mirá [Extracción de documentos](/help/ai-assistant-setup#extracción-de-documentos).
 
+Cuando el **chat** lee un documento — *"te paso esta orden de compra"* — el archivo sale de la misma
+manera, y lo leído (el borrador, con el nombre del archivo) pasa a formar parte de esa conversación, que
+va al proveedor en cada mensaje siguiente como el resto. Mirá
+[Completar una compra a partir de un documento](/help/ai-assistant-using-the-chat#completar-una-compra-a-partir-de-un-documento).
+
 ### A través de agentes externos (MCP)
 
 Un cliente MCP usa su propio modelo. Lo que lee de lazyit va **al proveedor que use ese cliente, bajo
@@ -114,6 +119,9 @@ resista:
 - **El contenido escrito por otras personas queda marcado.** Un cambio propuesto después de que el
   asistente leyó ese contenido muestra el aviso **Basado en contenido escrito por otras personas** y
   nunca se aplica automáticamente.
+- **Los cambios de compras nunca se aplican automáticamente**, y uno que crea activos o cambia dinero
+  nunca entra en **Aprobar todos**. El documento de un proveedor marca todo el chat como basado en
+  contenido escrito por otras personas.
 - **Los cambios sensibles** — roles, identidad, accesos, inicio de sesión, aplicaciones marcadas como
   críticas, configuración de la instancia — tienen una tarjeta propia, nunca se aprueban
   automáticamente y algunos piden tu contraseña.

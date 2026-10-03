@@ -96,6 +96,9 @@ que necesitan una mirada más atenta — el número del botón dice cuántos. Nu
 
 - un cambio que necesita tu contraseña;
 - un *Cambio sensible*;
+- un cambio que **crea activos** o **fija o cambia un importe de dinero** — recibir como activos las
+  unidades de una compra, un precio, la moneda de una compra, un costo copiado a un activo. Su aviso dice
+  *Nunca se aprueba automáticamente ni con Aprobar todos*;
 - un cambio cuya última decisión fue rechazada — por ejemplo porque el elemento cambió mientras tanto.
 
 La tarjeta indica cuántos quedaron afuera y por qué; decidilos en su propia página. **Un cambio basado
@@ -176,7 +179,11 @@ Mientras está activa:
   - cualquier cambio propuesto **después de que el asistente leyó texto libre** — de otra persona o tuyo
     — en el mismo turno: un artículo, una nota, una descripción, un fragmento de búsqueda, las opciones
     que elegiste en uno de sus formularios;
-  - **todos los cambios de un chat en el que el asistente buscó en la web**, por el resto de ese chat.
+  - **todos los cambios de un chat en el que el asistente buscó en la web**, por el resto de ese chat;
+  - **todos los cambios de compras** — una compra, sus líneas, un proveedor, recibir unidades, vincular
+    activos, aplicar una licencia;
+  - **todos los cambios de un chat en el que el asistente leyó un documento de compra**, por el resto de
+    ese chat.
 - Una etiqueta **Auto** arriba del chat te recuerda que está activa.
 
 Rige **solo en ese chat** y está desactivada en cada chat nuevo. Desactivala cuando quieras con el mismo
@@ -216,6 +223,34 @@ El asistente sigue tu [esquema de etiquetas de activos](/help/configuration-asse
   pueden **Configurar la instancia** pueden hacerlo.
 
 Cualquiera que pueda crear activos puede hacer que el asistente lea el esquema y la próxima etiqueta.
+
+## Compras
+
+Si podés ver compras, el asistente puede buscar compras y proveedores y decirte qué sigue esperando
+unidades. Con **Registrar y editar compras** también puede registrar una compra con sus líneas,
+cambiarla, agregar o editar un proveedor, recibir unidades, vincular activos que ya tenés, cancelar
+unidades que no van a llegar y aplicar una línea de licencia — cada cosa en una tarjeta. Para que
+complete una compra a partir de una factura o una orden, mirá
+[Completar una compra a partir de un documento](/help/ai-assistant-using-the-chat#completar-una-compra-a-partir-de-un-documento).
+
+En una tarjeta de compra:
+
+- **Los importes** se muestran en tu formato de números con la etiqueta de moneda de la compra —
+  *ARS 1.412.500*. lazyit nunca convierte entre monedas.
+- **Las líneas** son una tabla chica — descripción, tipo, cantidad, precio unitario — seguida del
+  **total** y de cuántas líneas todavía **no tienen precio**.
+- **Recibir unidades** muestra qué reciben los activos nuevos: modelo, estado, ubicación, empresa, fecha
+  de compra, fin de garantía y costo.
+- **Vincular activos** lista cada activo con los valores que recibe, como **antes → después**.
+
+**Los cambios de compras nunca se aplican automáticamente**, ni siquiera con la aprobación automática
+activa. Una tarjeta que crea activos o cambia dinero (*Crea activos nuevos.*, *Fija o cambia un importe
+de dinero.*) además queda afuera de **Aprobar todos** — un paso que solo agrega un proveedor o una línea
+sin precio se puede aprobar de una vez. Alcanza con tu propio **Aprobar** en cada tarjeta; no se pide
+contraseña.
+
+El chat no puede archivar ni restaurar compras y proveedores, desvincular activos, ni subir, descargar o
+eliminar documentos — eso se hace desde la página de la compra.
 
 ## Dónde quedan registrados los cambios aprobados
 

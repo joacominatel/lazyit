@@ -90,6 +90,9 @@ need a closer look — the number on the button says how many. They never includ
 
 - a change that needs your password;
 - a *Sensitive change*;
+- a change that **creates assets** or **sets or changes an amount of money** — receiving purchased units
+  as assets, a price, a purchase's currency, a cost copied to an asset. Its warning says *Never approved
+  automatically or with Approve all*;
 - a change whose last decision was refused — for example because the item changed in the meantime.
 
 The card lists how many were left out and why; decide those on their own page. **A change based on
@@ -165,7 +168,11 @@ While it is on:
   - any change proposed **after the assistant read free text** — someone else's, or your own — in the
     same turn: an article, a note, a description, a search excerpt, the options you picked in one of its
     forms;
-  - **every change in a chat where the assistant has searched the web**, for the rest of that chat.
+  - **every change in a chat where the assistant has searched the web**, for the rest of that chat;
+  - **every purchase change** — a purchase, its lines, a supplier, receiving units, linking assets,
+    applying a license;
+  - **every change in a chat where the assistant has read a purchase document**, for the rest of that
+    chat.
 - An **Auto** tag at the top of the chat reminds you it is on.
 
 It applies **only to that chat** and is off in every new chat. Turn it off at any time with the same
@@ -203,6 +210,32 @@ The assistant follows your [asset tag scheme](/help/configuration-asset-tag-sche
   existing tags are never rewritten. Only people who can **Configure the instance** can make it.
 
 Anyone who can create assets can have the assistant read the scheme and the next tag.
+
+## Purchases
+
+If you can see purchases, the assistant can find purchases and suppliers and tell you what is still
+waiting for units. With **Record & edit purchases** it can also record a purchase with its lines, change
+one, add or edit a supplier, receive units, link assets you already have, cancel units that will not
+arrive and apply a license line — each on a card. To have it fill a purchase from an invoice or an
+order, see [Filling a purchase from a document](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document).
+
+On a purchase card:
+
+- **Amounts** show in your number format with the purchase's currency label — *ARS 1,412,500*. lazyit
+  never converts between currencies.
+- **Lines** are a small table — description, type, quantity, unit price — followed by the **total** and
+  how many lines have **no price** yet.
+- **Receiving units** shows what the new assets get: model, status, location, company, purchase date,
+  warranty end and cost.
+- **Linking assets** lists each asset with the values it gets, as **before → after**.
+
+**Purchase changes are never applied automatically**, not even with auto-approve on. A card that
+creates assets or changes money (*Creates new assets.*, *Sets or changes an amount of money.*) is also
+left out of **Approve all** — a step that only adds a supplier or a line without a price can still be
+approved at once. Your own **Approve** on each card is enough; no password is asked.
+
+The chat can't archive or restore purchases and suppliers, unlink assets, or upload, download or delete
+documents — do those from the purchase's page.
 
 ## Where approved changes are recorded
 

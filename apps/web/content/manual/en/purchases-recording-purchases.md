@@ -329,7 +329,7 @@ lazyit data goes with it, not even the file name. Each read counts against that 
 budget and is recorded in the purchase's activity log (who, which provider and model — never the values
 read).
 
-There are two ways in:
+There are three ways in:
 
 - On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB — a little less
   for images with some providers — and 20 pages).
@@ -337,6 +337,10 @@ There are two ways in:
   purchase named after the file, attaches the file and reads it. Saving the review fills in the purchase
   and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop before saving, the
   draft keeps the document and you can fill it in by hand.
+- On a purchase, **Ask AI to fill** on a document opens the [AI assistant](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document)
+  with a message asking it to read that document and fill in the purchase. Send it, answer the few
+  questions it asks, and approve the card it proposes — there is no review screen, and nothing is saved
+  until you approve. It is shown only where *Read this document* is, and when you can use the assistant.
 
 Reading takes up to two minutes. If it fails, nothing was filled and the document stays attached — the
 screen says why (the provider was busy, the file has too many pages, the daily budget is spent…).
