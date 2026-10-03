@@ -49,9 +49,7 @@
     "allStatuses": "Any status",
     "allSuppliers": "Any supplier",
     "filteredEmpty": "No purchases match these filters.",
-    "pendingEmpty": "No purchase is waiting for units.",
     "archivedEmpty": "No archived purchases.",
-    "showAll": "Show all purchases",
     "columns": {
       "purchase": "Purchase",
       "supplier": "Supplier",
