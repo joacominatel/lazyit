@@ -1326,8 +1326,10 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   list of labelled `before → after` (`TableCell.changes`). A line's `kind` and a linked asset's `linkState`
   read with `ai.approval.table.values.*` (a covering test checks them against the shared enums). A mapped
   line's `assetModelId` / `consumableId` / `applicationId`, the header's `deliveryLocationId` and a link's
-  `writes.modelId` render by name when the preview sends an entity ref `{ type, id, label }` (linked where the
-  web has a page), and an older preview's raw id is still shown as is. `/copy` writes a table row by row
+  `writes.modelId` (and a purchase from assets' line model) render by name when the preview sends an entity
+  ref `{ type, id, label }` (linked where the web has a page, #1492); a ref without a label — one the viewer
+  could not read — shows its id, the existing entity-value convention, and an older pending card's raw id is
+  still shown as is. `/copy` writes a table row by row
   (`tableTranscriptLines`), money formatted.
 - **Entities and page context.** `entityHref`: `purchaseOrder` → `/purchases/:id`, `supplier` →
   `/purchases/suppliers/:id`, `purchaseDocument` → its parent purchase (the untrusted-source banner links the
@@ -1343,8 +1345,8 @@ The chat follows §5.2 and K3–K6. Where it settled a detail this note left ope
   reused. The composer puts the message in the box once per ask (`prefill.seq`, taken during render) **ahead
   of any draft**, which is kept (`composerTextWithPrefill`, `lib/ai/prefill.ts`), re-enables the page chip
   and focuses the box. It is **never sent by itself** — the person sends it, with the purchase as page
-  context; reading the document is their message, not the button's. The message quotes the file name
-  sanitized (`documentNameForPrompt`): control characters, line breaks and quote marks removed, capped at 80
+  context; reading the document is their message, not the button's. The message carries the document's id,
+  which `purchase_document_read` takes as given, and quotes the file name sanitized (`documentNameForPrompt`): control characters, line breaks and quote marks removed, capped at 80
   characters, since the name was typed by whoever uploaded the file and goes to the model as the person's
   words.
 - **Catalogs.** The three entity labels, the two warnings, the two option sources (`suppliers`,

@@ -1226,9 +1226,10 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
   this document* and shown under the same conditions plus the chat being usable — not on the header, which has no
   document to name. **It starts a new chat when the open one has messages** (the old one stays in the history) and
   reuses an empty one, so a document's turn — which ends auto-approve for its conversation — never lands in an
-  unrelated chat (CTO decision in review). A draft in the box is kept, after the message. The file name in the
-  message is sanitized — control characters, line breaks and quote marks removed, at most 80 characters — because
-  whoever uploaded the file chose it and the message reaches the model as the person's words.
+  unrelated chat (CTO decision in review). A draft in the box is kept, after the message. The message carries the
+  document's id, which the read tool uses as given, and its file name, sanitized — control characters, line
+  breaks and quote marks removed, at most 80 characters — because whoever uploaded the file chose it and the
+  message reaches the model as the person's words.
 - **Consequences.** Every *Ask AI to fill* from a chat in progress opens a new chat, so a person who wanted the
   document read inside the conversation they were having types the request there instead. A message not yet taken
   is dropped when the panel closes or the page changes. Line kinds and link states have their own copy in the
