@@ -613,6 +613,8 @@ CEO decision.
   `reference`, `invoiceNumbers`, `lineDescription`); wiring them into the form stays #1475.*
 - **One save at a time.** A purchase save can be two writes (the inline supplier, then the purchase), so a
   repeated Ctrl/⌘+Enter or a double click is held off by a ref-based lock, not only the disabled button.
+  A save that succeeded keeps the lock (and the disabled button) until the page changes, so a submit in the
+  moment before the navigation cannot create the purchase twice (#1508 review).
 
 ## Decisions while building (Phase 1 flows, #1473)
 
@@ -1361,8 +1363,10 @@ saved from every kind of field — plain inputs, money and date fields, the note
 their list open, a combobox list — but with focus on nothing (after a click on blank space, or once the
 focused control is gone, as with a removed line) the key reached the page and nothing else. The form keeps
 listening for its own fields and the lists its comboboxes open, and the page now passes it a Ctrl/⌘+Enter
-pressed with focus on nothing; focus in anything else (a dialog, the assistant, the search palette) is left
-alone. **A smart-entry field keeps the text and lets the save follow**: with its list open, Ctrl/⌘+Enter
+pressed with focus on nothing — but only when the last click was on the page the form is on (its `<main>`),
+or there was no click yet. A click into the docked assistant's transcript also leaves focus on nothing, and a
+Ctrl/⌘+Enter there is not a save. Focus in anything else (a dialog, the assistant, the search palette) is
+left alone. **A smart-entry field keeps the text and lets the save follow**: with its list open, Ctrl/⌘+Enter
 keeps the text as typed and the key travels on to the form. Rejected: making Ctrl/⌘+Enter only "keep as
 typed" — a save shortcut that does nothing in half the form's fields. No other form uses the shortcut, so
 smart entry elsewhere is unchanged.
