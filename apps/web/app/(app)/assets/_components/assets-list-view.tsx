@@ -5,6 +5,7 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
+  ChevronDownIcon,
   FunnelIcon,
   LinkIcon,
   PlusIcon,
@@ -65,6 +66,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -1312,69 +1314,86 @@ export function AssetsListView() {
               </Button>
             ) : (
               <>
+                {/* Purchase actions share one menu so the bar stays a single row (#1512). */}
                 {canLinkPurchases ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setLinking(
-                        rows
-                          .filter((asset) => selection.isSelected(asset.id))
-                          .map((asset) => ({
-                            id: asset.id,
-                            name: asset.name,
-                            assetTag: asset.assetTag,
-                            modelId: asset.modelId,
-                          })),
-                      )
-                    }
-                  >
-                    <LinkIcon />
-                    {t("linkToPurchase")}
-                  </Button>
-                ) : null}
-                {canLinkPurchases ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setCreatingFrom(
-                        rows
-                          .filter((asset) => selection.isSelected(asset.id))
-                          .map((asset) => ({ id: asset.id, name: asset.name, assetTag: asset.assetTag })),
-                      )
-                    }
-                  >
-                    <ShoppingCartIcon />
-                    {t("createPurchase")}
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm" variant="outline">
+                        <ShoppingCartIcon />
+                        {/* Icon-only on a phone so the actions keep to one line; still the button's name. */}
+                        <span className="sr-only sm:not-sr-only">
+                          {t("purchaseActions")}
+                        </span>
+                        <ChevronDownIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setLinking(
+                            rows
+                              .filter((asset) => selection.isSelected(asset.id))
+                              .map((asset) => ({
+                                id: asset.id,
+                                name: asset.name,
+                                assetTag: asset.assetTag,
+                                modelId: asset.modelId,
+                              })),
+                          )
+                        }
+                      >
+                        <LinkIcon />
+                        {t("linkToPurchase")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setCreatingFrom(
+                            rows
+                              .filter((asset) => selection.isSelected(asset.id))
+                              .map((asset) => ({ id: asset.id, name: asset.name, assetTag: asset.assetTag })),
+                          )
+                        }
+                      >
+                        <ShoppingCartIcon />
+                        {t("createPurchase")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 ) : null}
                 {canDelete ? (
                   <>
-                    <Select
-                      onValueChange={(value) =>
-                        runBatch(
-                          () =>
-                            batchStatus.mutateAsync({
-                              ids: selection.selectedIds,
-                              status: value as AssetStatus,
-                            }),
-                          { entityKey: "asset", verb: "updated" },
-                          t("batchStatusError"),
-                        )
-                      }
-                    >
-                      <SelectTrigger size="sm" className="w-40">
-                        <SelectValue placeholder={t("setStatusPlaceholder")} />
-                      </SelectTrigger>
-                      <SelectContent>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={batchStatus.isPending}
+                        >
+                          {t("setStatus")}
+                          <ChevronDownIcon />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
                         {AssetStatusSchema.options.map((status) => (
-                          <SelectItem key={status} value={status}>
+                          <DropdownMenuItem
+                            key={status}
+                            onSelect={() =>
+                              runBatch(
+                                () =>
+                                  batchStatus.mutateAsync({
+                                    ids: selection.selectedIds,
+                                    status,
+                                  }),
+                                { entityKey: "asset", verb: "updated" },
+                                t("batchStatusError"),
+                              )
+                            }
+                          >
                             {statusLabel(status)}
-                          </SelectItem>
+                          </DropdownMenuItem>
                         ))}
-                      </SelectContent>
-                    </Select>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button
                       size="sm"
                       variant="destructive"
@@ -1388,7 +1407,9 @@ export function AssetsListView() {
                       disabled={batchDelete.isPending}
                     >
                       <TrashIcon />
-                      {tc("delete")}
+                      <span className="sr-only sm:not-sr-only">
+                        {tc("delete")}
+                      </span>
                     </Button>
                   </>
                 ) : null}

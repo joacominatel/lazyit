@@ -28,7 +28,7 @@
     "batchRestoreError": "Couldn't restore the selected assets",
     "batchStatusError": "Couldn't update the selected assets",
     "batchDeleteError": "Couldn't delete the selected assets",
-    "setStatusPlaceholder": "Set status…",
+    "setStatus": "Set status",
     "restore": "Restore",
     "assign": "Assign",
     "unassign": "Unassign",
@@ -114,7 +114,8 @@
       "warranty": "Warranty: {value}"
     },
     "linkToPurchase": "Link to purchase",
-    "createPurchase": "Create purchase"
+    "createPurchase": "Create purchase",
+    "purchaseActions": "Purchase"
   },
   "empty": {
     "title": "Nothing tracked yet",

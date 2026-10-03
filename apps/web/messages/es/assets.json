@@ -28,7 +28,7 @@
     "batchRestoreError": "No se pudieron restaurar los activos seleccionados",
     "batchStatusError": "No se pudieron actualizar los activos seleccionados",
     "batchDeleteError": "No se pudieron eliminar los activos seleccionados",
-    "setStatusPlaceholder": "Definir estado…",
+    "setStatus": "Definir estado",
     "restore": "Restaurar",
     "assign": "Asignar",
     "unassign": "Desasignar",
@@ -114,7 +114,8 @@
       "warranty": "Garantía: {value}"
     },
     "linkToPurchase": "Vincular a una compra",
-    "createPurchase": "Crear compra"
+    "createPurchase": "Crear compra",
+    "purchaseActions": "Compra"
   },
   "empty": {
     "title": "Aún no hay nada registrado",
