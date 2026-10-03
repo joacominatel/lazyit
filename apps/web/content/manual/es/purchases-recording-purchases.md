@@ -185,10 +185,13 @@ línea (o **Recibir en stock** en su menú, o **Recibir** en *Unidades pendiente
   de la factura ni del proveedor.
 
 Recibir registra un movimiento de **Entrada** en el consumible (su stock sube, como con cualquier
-[movimiento de stock](/help/consumables-stock-movements)) y la línea cuenta las unidades como recibidas.
-Una recepción de stock no se puede deshacer desde la compra: si recibiste de más, corrige el stock con un
-movimiento normal en el consumible — la línea sigue contando lo que se recibió. Por lo mismo, una línea de
-consumible que ya recibió stock no puede cambiar de tipo ni quitarse.
+[movimiento de stock](/help/consumables-stock-movements)) y la línea cuenta las unidades como recibidas. El
+motivo del movimiento nombra la referencia de la compra — *Received from purchase OC-4512*, o *Received from
+a purchase* si la compra no tiene referencia —, así que **cualquiera que pueda ver los movimientos de ese
+consumible ve la referencia, incluidos los Lectores**. Nada más de la compra (proveedor, precios,
+documentos) aparece ahí. Una recepción de stock no se puede deshacer desde la compra: si recibiste de más,
+corrige el stock con un movimiento normal en el consumible — la línea sigue contando lo que se recibió. Por
+lo mismo, una línea de consumible que ya recibió stock no puede cambiar de tipo ni quitarse.
 
 ## Aplicar una licencia
 

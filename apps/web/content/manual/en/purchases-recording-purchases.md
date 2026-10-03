@@ -179,8 +179,11 @@ line (or **Receive into stock** in its menu, or **Receive** on *Pending units*):
   consumable's movements can read it — Viewers included** — so don't put invoice or supplier details there.
 
 Receiving posts one **In** movement on the consumable (its stock goes up, as with any [stock
-movement](/help/consumables-stock-movements)) and the line counts the units as received. A stock receipt
-cannot be undone from the purchase: if you received too much, correct the stock with an ordinary
+movement](/help/consumables-stock-movements)) and the line counts the units as received. The movement's
+reason names the purchase's reference — *Received from purchase OC-4512*, or *Received from a purchase* when
+the purchase has no reference — so **anyone who can see that consumable's movements sees the reference,
+Viewers included**. Nothing else about the purchase (supplier, prices, documents) is shown there. A stock
+receipt cannot be undone from the purchase: if you received too much, correct the stock with an ordinary
 movement on the consumable — the line keeps counting what was received. For the same reason, a consumable
 line that has received stock can no longer change its type or be removed.
 

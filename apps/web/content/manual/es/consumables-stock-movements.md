@@ -110,10 +110,14 @@ impresa. Consulta [Ciclo de vida del usuario](/help/users-permissions-user-lifec
 ## Stock recibido de una compra
 
 Si registras [compras](/help/purchases-recording-purchases), una **línea de consumible** se recibe con
-**Recibir en stock** en la compra. Eso registra aquí un movimiento de **Entrada** normal, con el motivo
-*Received from a purchase* y la nota escrita al recibir. El movimiento no nombra al proveedor ni a la
-compra — la lista de movimientos la ve cualquiera que pueda ver consumibles, y las compras no. Una
-recepción se corrige como cualquier otro movimiento: con otro movimiento.
+**Recibir en stock** en la compra. Eso registra aquí un movimiento de **Entrada** normal, con un motivo que
+nombra la referencia de la compra — por ejemplo *Received from purchase OC-4512*, o *Received from a
+purchase* si la compra no tiene referencia — y la nota escrita al recibir. La lista de movimientos la ve
+cualquiera que pueda ver consumibles, así que **cualquiera que pueda ver los movimientos de este consumible,
+incluidos los Lectores, ve la referencia de la compra**. Nada más de la compra aparece aquí: el proveedor,
+los precios y los documentos quedan en la compra, que solo abre quien puede ver compras. Las recepciones
+registradas por una versión anterior conservan el motivo *Received from a purchase*. Una recepción se
+corrige como cualquier otro movimiento: con otro movimiento.
 
 ## El registro es permanente
 
