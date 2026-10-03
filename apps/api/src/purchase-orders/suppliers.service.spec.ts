@@ -454,6 +454,9 @@ describe('SuppliersService.mergePreview (#1496)', () => {
     expect(preview.kept).toEqual([
       { field: 'taxId', value: '30-1', sourceValue: '30-2' },
     ]);
+    expect(count).toHaveBeenNthCalledWith(1, {
+      where: { supplierId: DUP },
+    });
     expect(count).toHaveBeenNthCalledWith(2, {
       where: { supplierId: DUP, deletedAt: { not: null } },
       includeSoftDeleted: true,
