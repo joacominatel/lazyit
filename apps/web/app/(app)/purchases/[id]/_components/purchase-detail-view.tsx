@@ -65,7 +65,7 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { canCancelPurchase } from "@/lib/purchases/display";
-import { canExtract, unavailableHint } from "@/lib/purchases/extraction";
+import { canAskAiToFill, canExtract, unavailableHint } from "@/lib/purchases/extraction";
 import { lineReceiveAction } from "@/lib/purchases/pending";
 import { formatMoney } from "@/lib/utils/money";
 import { ApplyLicenseDialog, useCanApplyLicense } from "@/components/purchases/apply-license-dialog";
@@ -74,6 +74,8 @@ import { LinkAssetsDialog } from "@/components/purchases/link-assets-dialog";
 import { ReceiveIntoStockDialog, useCanReceiveStock } from "@/components/purchases/receive-into-stock-dialog";
 import { ReceiveStockDialog } from "../../../assets/_components/receive-stock-dialog";
 import { DocumentsPanel } from "../../../assets/[id]/_components/asset-documents-panel";
+import { useAiAssistant } from "@/components/ai/ai-assistant-root";
+import { AiChatIcon } from "@/components/ai/ai-icons";
 import {
   MoneyTotals,
   PurchaseStatusBadge,
@@ -186,6 +188,9 @@ export function PurchaseDetailView({ id }: { id: string }) {
   const isAdmin = useCan("settings:manage");
   const { data: extraction } = useExtractionStatus({ enabled: canWrite });
   const extractionHint = extraction && !extraction.available ? unavailableHint(extraction.reason, isAdmin) : null;
+  // Or in the chat (#1478): the assistant opens on this page with a message to read the document, which the
+  // person sends — it reads the document as untrusted data and proposes the purchase as cards.
+  const assistant = useAiAssistant();
 
   const { data: purchase, isLoading, isError, error, refetch } = usePurchaseOrder(id);
   const { data: location } = useLocation(purchase?.deliveryLocationId ?? undefined);
@@ -629,16 +634,29 @@ export function PurchaseDetailView({ id }: { id: string }) {
         }
         rowAction={(attachment) =>
           canExtract(extraction, attachment) ? (
-            <Button variant="ghost" size="sm" asChild>
-              <Link
-                href={`/purchases/${purchase.id}/review/${attachment.id}?read=1`}
-                // The one-line disclosure: what clicking sends, and that nothing is saved yet.
-                title={t("detail.readDocumentHint")}
-              >
-                <DocumentMagnifyingGlassIcon />
-                <span className="sr-only sm:not-sr-only">{t("detail.readDocument")}</span>
-              </Link>
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link
+                  href={`/purchases/${purchase.id}/review/${attachment.id}?read=1`}
+                  // The one-line disclosure: what clicking sends, and that nothing is saved yet.
+                  title={t("detail.readDocumentHint")}
+                >
+                  <DocumentMagnifyingGlassIcon />
+                  <span className="sr-only sm:not-sr-only">{t("detail.readDocument")}</span>
+                </Link>
+              </Button>
+              {canAskAiToFill(assistant.available, extraction, attachment) ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  title={t("detail.askAiHint")}
+                  onClick={() => assistant.ask(t("detail.askAiMessage", { name: attachment.originalName }))}
+                >
+                  <AiChatIcon />
+                  <span className="sr-only sm:not-sr-only">{t("detail.askAi")}</span>
+                </Button>
+              ) : null}
+            </>
           ) : null
         }
       />

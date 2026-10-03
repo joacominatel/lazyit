@@ -32,6 +32,19 @@ export function canExtract(
 }
 
 /**
+ * Whether *Ask AI to fill* is offered on a purchase document (#1478): the assistant's chat is usable for this
+ * person (`GET /ai/status`, fail closed) and the document can be read now — the same check as *Read this
+ * document*, since the chat reads it through the same extract route and its gates.
+ */
+export function canAskAiToFill(
+  chatAvailable: boolean,
+  status: Parameters<typeof canExtract>[0],
+  attachment: Pick<Attachment, "mimeType" | "byteSize">,
+): boolean {
+  return chatAvailable && canExtract(status, attachment);
+}
+
+/**
  * Whether a file picked for *New purchase from a document* can be read: the same checks before anything is
  * created. `"type"` / `"size"` say why not (the size against {@link maxBytesFor} its type); `null` = fine.
  */

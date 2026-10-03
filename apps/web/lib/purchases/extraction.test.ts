@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api/client";
 import en from "@/messages/en/purchases.json";
 import es from "@/messages/es/purchases.json";
 import {
+  canAskAiToFill,
   canExtract,
   createArrivalRead,
   EXTRACTION_ERROR_KEYS,
@@ -26,6 +27,23 @@ const STATUS: PurchaseExtractionStatus = {
   disclosure: "…",
 };
 const pdf = { mimeType: "application/pdf", byteSize: 200_000 };
+
+describe("canAskAiToFill — the chat entry point on a document (#1478)", () => {
+  test("offered when the chat is usable and the document can be read now", () => {
+    expect(canAskAiToFill(true, STATUS, pdf)).toBe(true);
+  });
+
+  test("hidden without the chat, whatever the extraction status", () => {
+    expect(canAskAiToFill(false, STATUS, pdf)).toBe(false);
+  });
+
+  test("hidden while extraction is unknown or off, or for a document the provider cannot read", () => {
+    expect(canAskAiToFill(true, undefined, pdf)).toBe(false);
+    expect(canAskAiToFill(true, { ...STATUS, available: false }, pdf)).toBe(false);
+    expect(canAskAiToFill(true, STATUS, { mimeType: "text/csv", byteSize: 10 })).toBe(false);
+    expect(canAskAiToFill(true, STATUS, { ...pdf, byteSize: STATUS.maxBytes + 1 })).toBe(false);
+  });
+});
 
 describe("canExtract — the extract route is called only when the status says so", () => {
   test("an available status and a type the provider reads", () => {

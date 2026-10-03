@@ -3,7 +3,7 @@
 import type { AiPageContext } from "@lazyit/shared";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { routeContext } from "@/lib/ai/route-context";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/ai/slash-commands";
 import { AI_PROMPT_MAX_LENGTH } from "@lazyit/shared";
 import { moveHighlight } from "@/lib/utils/move-highlight";
+import { useAiAssistant } from "./ai-assistant-root";
 import { AiCommandPalette, commandOptionId } from "./ai-command-palette";
 import { AiCloseIcon, AiSendIcon, AiStopIcon } from "./ai-icons";
 import { useEntityTypeLabel } from "./ai-labels";
@@ -80,6 +81,24 @@ export function AiComposer<C>({
   const inputId = useId();
   const hintId = useId();
   const listId = useId();
+  const { prefill, clearPrefill } = useAiAssistant();
+  const [takenPrefill, setTakenPrefill] = useState<number | null>(null);
+
+  // A message an entry point prepared ("Ask AI to fill", #1478) replaces the box's text and puts the page
+  // back as context — taken while rendering, once per ask. It is only typed in: the person reads it and
+  // sends it.
+  if (prefill !== null && prefill.seq !== takenPrefill) {
+    setTakenPrefill(prefill.seq);
+    setText(prefill.text.slice(0, AI_PROMPT_MAX_LENGTH));
+    setWithContext(true);
+    setDismissedFor(null);
+  }
+  // Then the shell forgets it and the box takes the focus.
+  useEffect(() => {
+    if (prefill === null) return;
+    clearPrefill();
+    document.getElementById(inputId)?.focus();
+  }, [prefill, clearPrefill, inputId]);
 
   const context = routeContext(pathname);
   const disabled = busy || running || blockedByApproval || blockedByInput;

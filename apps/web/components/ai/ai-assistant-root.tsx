@@ -32,6 +32,18 @@ export interface AiAssistantState {
   launcherRef: RefObject<HTMLButtonElement | null>;
   /** The panel's element id, for the launcher's `aria-controls`. */
   panelId: string;
+  /**
+   * A message an entry point put in the composer, waiting for the composer to take it (#1478 — "Ask AI to
+   * fill" on a purchase document). `seq` tells two equal texts apart.
+   */
+  prefill: { text: string; seq: number } | null;
+  /**
+   * Opens the panel with `text` in the composer, ready to review and send. It is NEVER sent by itself: the
+   * person sends it (with the current page as context, like any message). A no-op while unavailable.
+   */
+  ask: (text: string) => void;
+  /** The composer took the prefill. */
+  clearPrefill: () => void;
 }
 
 const OFF: AiAssistantState = {
@@ -41,6 +53,9 @@ const OFF: AiAssistantState = {
   toggle: () => {},
   launcherRef: { current: null },
   panelId: "",
+  prefill: null,
+  ask: () => {},
+  clearPrefill: () => {},
 };
 
 const AiAssistantContext = createContext<AiAssistantState>(OFF);
@@ -51,6 +66,15 @@ export function AiAssistantRoot({ children }: { children: React.ReactNode }) {
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
   const toggle = useCallback(() => setOpen((prev) => !prev), []);
+  const [prefill, setPrefill] = useState<AiAssistantState["prefill"]>(null);
+  // Never reset, so every ask is a new one to the composer even after it cleared the last.
+  const askSeq = useRef(0);
+  const ask = useCallback((text: string) => {
+    askSeq.current += 1;
+    setPrefill({ text, seq: askSeq.current });
+    setOpen(true);
+  }, []);
+  const clearPrefill = useCallback(() => setPrefill(null), []);
 
   const state = useMemo<AiAssistantState>(
     () => ({
@@ -61,8 +85,11 @@ export function AiAssistantRoot({ children }: { children: React.ReactNode }) {
       toggle,
       launcherRef,
       panelId,
+      prefill: available ? prefill : null,
+      ask: available ? ask : OFF.ask,
+      clearPrefill,
     }),
-    [available, open, toggle, panelId],
+    [available, open, toggle, panelId, prefill, ask, clearPrefill],
   );
 
   return <AiAssistantContext.Provider value={state}>{children}</AiAssistantContext.Provider>;
