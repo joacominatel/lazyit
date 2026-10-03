@@ -133,7 +133,9 @@ conversación, de solo lectura.
 En una compra que tiene una factura, una orden o un remito en sus **Documentos**, el asistente puede
 completarla por vos: decile *"te paso esta orden de compra"*, o elegí **Pedirle a la IA que la complete**
 en el documento (mirá [Compras](/help/purchases-recording-purchases#leer-un-documento-con-ia)). Ese botón
-abre el chat con el mensaje ya escrito — leelo y envialo; antes no se envía nada.
+abre el chat con el mensaje ya escrito — leelo y envialo; antes no se envía nada. Si el chat que tenías
+abierto ya tiene mensajes, el botón empieza un **chat nuevo** (el otro queda en tu historial); un chat vacío
+se reutiliza, y lo que ya habías escrito en el cuadro se conserva después del mensaje.
 
 1. El asistente **lee el documento**. Necesita **Extracción de documentos** activada en
    [Configuración → IA](/help/ai-assistant-setup#extracción-de-documentos), y envía el archivo completo a

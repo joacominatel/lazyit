@@ -1205,10 +1205,12 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
 - **"Excluded from Approve all" is a fourth reason, after step-up and sensitive.** A page carrying
   `CREATES_ASSETS` or `CHANGES_MONEY` is counted as "creates assets or changes money" among the pages to decide on
   their own, and the warning on the card says it is never approved automatically or with Approve all. The web
-  reads the two codes from the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, the list core enforces. Rejected: folding them into "sensitive" — these
-  cards are not elevated, and saying so would mislead.
-- **Money is recognised by shape.** A preview value that is exactly `{ amount, currency }` with an integer amount is
-  money, formatted with the purchase's label in the user's locale; anything else renders as before. Rejected: a new
+  reads the two codes from the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, the list core enforces; ADR-0097 decision 3
+  carries the dated amendment. Rejected: folding them into "sensitive" — these cards are not elevated, and saying so
+  would mislead.
+- **Money is recognised by shape.** A preview value that is an object with `amount` and at most `currency` (so
+  `{ amount }` alone is money without a label), the amount an integer, is money, formatted with the purchase's
+  label in the user's locale; anything else renders as before. Rejected: a new
   `valueKind` — a contract change for what the shape already says.
 - **A purchase line is a one-row table**, and a linked asset's values are a `before → after` list inside its row,
   so a priced line is readable before it is approved. Only the `line` field becomes a one-row table; other single
@@ -1217,11 +1219,15 @@ CEO decision; the detail is in [[ai-assistant/frontend]] §11d.
   document; the person sends it. Sending a document to the provider stays the person's own act in their own
   words, as in the backend decision, and nothing is sent by a click. It sits on the document row, next to *Read
   this document* and shown under the same conditions plus the chat being usable — not on the header, which has no
-  document to name.
-- **Consequences.** A message prepared while a chat is waiting on a card or a form sits in the paused box until the
-  run is free. An earlier conversation is kept: the message lands in whichever chat is open, so the person may want
-  a new chat first, because reading a document turns off auto-approve for the rest of that chat. Line kinds and
-  link states have their own copy in the chat's catalog, apart from the Purchases screens'.
+  document to name. **It starts a new chat when the open one has messages** (the old one stays in the history) and
+  reuses an empty one, so a document's turn — which ends auto-approve for its conversation — never lands in an
+  unrelated chat (CTO decision in review). A draft in the box is kept, after the message. The file name in the
+  message is sanitized — control characters, line breaks and quote marks removed, at most 80 characters — because
+  whoever uploaded the file chose it and the message reaches the model as the person's words.
+- **Consequences.** Every *Ask AI to fill* from a chat in progress opens a new chat, so a person who wanted the
+  document read inside the conversation they were having types the request there instead. A message not yet taken
+  is dropped when the panel closes or the page changes. Line kinds and link states have their own copy in the
+  chat's catalog, apart from the Purchases screens'.
 
 ## Related
 

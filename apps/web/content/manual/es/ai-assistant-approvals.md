@@ -237,8 +237,9 @@ En una tarjeta de compra:
 
 - **Los importes** se muestran en tu formato de números con la etiqueta de moneda de la compra —
   *ARS 1.412.500*. lazyit nunca convierte entre monedas.
-- **Las líneas** son una tabla chica — descripción, tipo, cantidad, precio unitario — seguida del
-  **total** y de cuántas líneas todavía **no tienen precio**.
+- **Las líneas** son una tabla chica — descripción, tipo, cantidad, precio unitario y, si lo tiene, el
+  modelo de activo, consumible o aplicación al que corresponde la línea — seguida del **total** y de
+  cuántas líneas todavía **no tienen precio**.
 - **Recibir unidades** muestra qué reciben los activos nuevos: modelo, estado, ubicación, empresa, fecha
   de compra, fin de garantía y costo.
 - **Vincular activos** lista cada activo con los valores que recibe, como **antes → después**.

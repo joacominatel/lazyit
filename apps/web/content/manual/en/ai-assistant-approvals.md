@@ -223,8 +223,9 @@ On a purchase card:
 
 - **Amounts** show in your number format with the purchase's currency label — *ARS 1,412,500*. lazyit
   never converts between currencies.
-- **Lines** are a small table — description, type, quantity, unit price — followed by the **total** and
-  how many lines have **no price** yet.
+- **Lines** are a small table — description, type, quantity, unit price and, when set, the asset model,
+  consumable or application the line is mapped to — followed by the **total** and how many lines have
+  **no price** yet.
 - **Receiving units** shows what the new assets get: model, status, location, company, purchase date,
   warranty end and cost.
 - **Linking assets** lists each asset with the values it gets, as **before → after**.

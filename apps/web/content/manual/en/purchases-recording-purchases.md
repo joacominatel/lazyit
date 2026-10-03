@@ -338,7 +338,8 @@ There are three ways in:
   and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop before saving, the
   draft keeps the document and you can fill it in by hand.
 - On a purchase, **Ask AI to fill** on a document opens the [AI assistant](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document)
-  with a message asking it to read that document and fill in the purchase. Send it, answer the few
+  — in a new chat if the open one has messages — with a message asking it to read that document and fill in
+  the purchase. Send it, answer the few
   questions it asks, and approve the card it proposes — there is no review screen, and nothing is saved
   until you approve. It is shown only where *Read this document* is, and when you can use the assistant.
 

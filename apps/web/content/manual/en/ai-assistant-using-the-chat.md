@@ -129,7 +129,9 @@ continue. Answered forms stay in the conversation, read-only.
 On a purchase that has an invoice, an order or a delivery note in its **Documents**, the assistant can
 fill the purchase for you: say *"here is this purchase order"*, or select **Ask AI to fill** on the
 document (see [Purchases](/help/purchases-recording-purchases#reading-a-document-with-ai)). That button
-opens the chat with the message written for you — read it and send it; nothing is sent before.
+opens the chat with the message written for you — read it and send it; nothing is sent before. If the chat
+you had open already has messages, the button starts a **new chat** for it (the other one stays in your
+history); an empty chat is reused, and anything you had typed in the box is kept after the message.
 
 1. The assistant **reads the document**. This needs **Document extraction** on in
    [Settings → AI](/help/ai-assistant-setup#document-extraction), and sends the whole file to your AI
