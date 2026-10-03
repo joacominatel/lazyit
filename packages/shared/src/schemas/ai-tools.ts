@@ -60,6 +60,11 @@ export type AiToolName = z.infer<typeof AiToolNameSchema>;
  * `toolResult` is not a lazyit record either: it is the marker for a read whose result carried
  * other-authored text but named no entity (a search, a list — SEC-080, {@link aiToolResultSourceRef}). Its
  * id is the tool name. It has no page.
+ *
+ * `purchaseDocument` is a document attached to a purchase that the assistant read through document
+ * extraction (#1478, {@link aiPurchaseDocumentSourceRef}): its id is the attachment id and its `parent` the
+ * purchase, the page it is shown on. It is the untrusted-source marker that stays on a conversation once
+ * read ({@link AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES}).
  */
 export const AI_ENTITY_TYPES = [
   "asset",
@@ -82,6 +87,10 @@ export const AI_ENTITY_TYPES = [
   "assetTagScheme",
   "webSearch",
   "toolResult",
+  /** Purchases (ADR-0099, #1478): a purchase (its lines live on its page) and a supplier. */
+  "purchaseOrder",
+  "supplier",
+  "purchaseDocument",
 ] as const;
 export const AiEntityTypeSchema = z.enum(AI_ENTITY_TYPES);
 export type AiEntityType = z.infer<typeof AiEntityTypeSchema>;
@@ -130,6 +139,36 @@ export const AI_WEB_SEARCH_SOURCE_REF: AiEntityRef = Object.freeze({
 export function aiToolResultSourceRef(toolName: string): AiEntityRef {
   return { type: "toolResult", id: toolName, op: "navigate" };
 }
+
+/**
+ * The untrusted-source marker of a purchase document the assistant read through document extraction
+ * (#1478; ADR-0099 §11). A supplier's document is other-authored content (INV-AI-4): a proposal made after
+ * reading it shows the untrusted-source banner and is never auto-approved.
+ */
+export function aiPurchaseDocumentSourceRef(
+  purchaseOrderId: string,
+  attachmentId: string,
+  label?: string,
+): AiEntityRef {
+  return {
+    type: "purchaseDocument",
+    id: attachmentId,
+    op: "navigate",
+    ...(label ? { label } : {}),
+    parent: { type: "purchaseOrder", id: purchaseOrderId },
+  };
+}
+
+/**
+ * The untrusted-source types that mark a whole CONVERSATION, not only the turn that read them (#1478). A
+ * tool result stays in the history and is replayed to the model on every later turn, so a document read by
+ * extraction keeps influencing the conversation after its turn: every later turn counts as having read it —
+ * the banner on every proposal, and never an auto-approval. (A web search marks the conversation the same
+ * way, through its own record, #1389.)
+ */
+export const AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES: readonly AiEntityRef["type"][] = [
+  "purchaseDocument",
+];
 
 /**
  * The READ-TOLERANT list of entity refs used inside every read shape: each item is parsed on its own and
@@ -247,6 +286,17 @@ export const AI_PREVIEW_WARNING_CODES = [
    * now on. Always an `elevated` card; no step-up by itself (CEO decision 2026-09-24).
    */
   "INSTANCE_CONFIGURATION",
+  /**
+   * Generates new assets (receiving units of a purchase line, #1478). Never approved automatically, and the
+   * web leaves the page out of "Approve all" (ADR-0099 §11, UX decision D11). No step-up.
+   */
+  "CREATES_ASSETS",
+  /**
+   * Sets or changes an amount of money: a unit price, a currency label, or an asset's cost copied from a
+   * purchase (#1478). Never approved automatically, and the web leaves the page out of "Approve all"
+   * (ADR-0099 §11, UX decision D11). No step-up.
+   */
+  "CHANGES_MONEY",
 ] as const;
 export const AiPreviewWarningCodeSchema = z.enum(AI_PREVIEW_WARNING_CODES);
 export type AiPreviewWarningCode = z.infer<typeof AiPreviewWarningCodeSchema>;
