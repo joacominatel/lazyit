@@ -60,6 +60,10 @@ package includes is its own decision: [[0100-money-as-64-bit-minor-units]].
 building, and decided that a stock receipt's movement reason names the purchase reference — see
 [[#CEO confirmations (2026-10-02)]].
 
+**Amended 2026-10-03** (#1507): after testing the build locally, the CEO decided the purchases list opens
+on every purchase, newest first, instead of on the purchases waiting for units — see
+[[#After local testing (2026-10-03)]].
+
 Research and the CEO's verbatim answers: [[purchases/_MOC|Purchases research vault]] — start with
 [[purchases/decisions|the decisions note]].
 
@@ -586,9 +590,11 @@ CEO decision.
   *Partially received*, *Received* or *Over-received* (a warning tone) from its derived receipt. A
   status a newer build writes shows as its raw text. The status is changed from the purchase page
   (*Mark as draft / ordered*, *Cancel purchase* only while nothing is received), not from the edit form.
-- **The list opens on purchases waiting for units** (`receipt=PENDING`). Because that view can be empty
-  while purchases exist, the "optional feature" empty state is shown only when the area holds no purchase
-  at all.
+- **The list opens on every purchase, newest first** (*amended 2026-10-03 by a CEO decision, #1507*). The
+  receipt filter (*Waiting for units* among its values) and the *Pending units* tab narrow it. The "optional
+  feature" empty state shows when the unfiltered list is empty. *As built in #1474* the list opened on the
+  purchases waiting for units (`receipt=PENDING`); that is superseded — see
+  [[#After local testing (2026-10-03)]].
 - **The currency label starts at the last one used** — the viewer's own (kept in the browser), else the
   instance's most recently used — on a new purchase only. The asset's currency label is never prefilled:
   an asset without one reads *No currency*.
@@ -1309,6 +1315,28 @@ fixed reason — the ledger is append-only. Recorded in
 | Extraction providers and document types, its size, page and time limits, PDFs opened in a new tab | "Sí, como está (Recomendado)" | [[#Decisions while building (Phase 2, #1477)\|Phase 2]] · [[#Decisions while building (Phase 2 web, #1477)\|Phase 2 web]] |
 | The Spanish register: the Manual's AI pages in *voseo*, the rest in *tú* | "Dejarlo como está" | [[ai-assistant/frontend]] |
 | The items planned but not built | "Un unico issues y sub-issues de ese" (one issue, with sub-issues of it) | §13 — tracked as #1495 (sub-issues #1496–#1503) |
+
+## After local testing (2026-10-03)
+
+The CEO tested the whole build on a local instance and reported what did not work or did not read right
+(#1505–#1508). One report changes a decision recorded above.
+
+### The purchases list opens on every purchase, newest first (amends Phase 1 web)
+
+CEO, verbatim: "en esta pantalla mostraria por defecto TODO pero ordenado por lo que esperan unidades (o
+mejor, por fecha de mas nuevo a mas viejo)" (on this screen I would show EVERYTHING by default, but sorted
+by what is waiting for units — or better, by date from newest to oldest).
+
+The list opens with no receipt filter, sorted by the day each purchase was recorded, newest first
+(`sort=createdAt&dir=desc`, the order `GET /purchase-orders` already defaults to). The purchases still
+waiting for units stay one step away: the receipt filter's *Waiting for units*, and the *Pending units* tab.
+**Rejected: sorting by order date, falling back to the recorded date.** The API sorts by `orderDate` with
+the database's default null placement — under `desc`, every purchase without an order date first — and has
+no fallback to `createdAt`. The order date is optional (D-D) and often blank — a draft, a purchase made
+from existing assets — so that order would open on the purchases with the least information. The fallback
+would be a backend change (#1507 is web-only); it can be added later on the same allowlist. Ordering by
+order date stays a column the operator can choose. Existing bookmarks with
+`?receipt=PENDING` keep opening the filtered view.
 
 ## Related
 

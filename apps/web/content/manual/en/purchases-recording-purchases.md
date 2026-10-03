@@ -115,8 +115,9 @@ the assets linked to each line — and, on a consumable line, from the stock rec
 - **Cancel purchase** (in the *Status* menu) is offered only while nothing has been received. A
   cancelled purchase can be marked as ordered again.
 
-The **Purchases** list opens on the purchases still **waiting for units**; switch the filter to see all
-of them, or filter by status or supplier, and search by reference, invoice number, supplier or item.
+The **Purchases** list opens on **every purchase, newest first**. To see only the ones still waiting for
+a delivery, choose **Waiting for units** in the delivery filter, or open the **Pending units** tab. You can
+also filter by status or supplier, and search by reference, invoice number, supplier or item.
 
 ## Receiving units
 

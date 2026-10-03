@@ -118,9 +118,10 @@ canceladas.
 - **Cancelar compra** (en el menú *Estado*) solo se ofrece mientras no se haya recibido nada. Una compra
   cancelada se puede volver a marcar como pedida.
 
-La lista de **Compras** se abre en las compras que todavía **esperan unidades**; cambia el filtro para
-verlas todas, o filtra por estado o proveedor, y busca por referencia, número de factura, proveedor o
-ítem.
+La lista de **Compras** se abre con **todas las compras, de la más nueva a la más vieja**. Para ver solo
+las que todavía esperan una entrega, elige **Esperando unidades** en el filtro de entrega, o abre la
+pestaña **Unidades pendientes**. También puedes filtrar por estado o proveedor, y buscar por referencia,
+número de factura, proveedor o ítem.
 
 ## Recibir unidades
 
