@@ -182,3 +182,84 @@ describe("consumable receipts and document labels (#1476)", () => {
     });
   });
 });
+
+describe("Phase 2 events (#1477) read as sentences, tolerant of a thin payload", () => {
+  test("a license applied carries the seats added, before and after, and the renewal", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "LICENSE_APPLIED",
+        payload: {
+          lineId: "l1",
+          applicationId: "a1",
+          seatsAdded: 10,
+          seatsPurchased: { from: 20, to: 30 },
+          renewalDate: { from: null, to: "2027-03-01T00:00:00.000Z" },
+          appliedSeats: { from: 0, to: 10 },
+          overApplied: false,
+        },
+      }),
+    ).toEqual({
+      kind: "licenseApplied",
+      lineId: "l1",
+      seatsAdded: 10,
+      seats: { from: 20, to: 30 },
+      renewal: { from: null, to: "2027-03-01T00:00:00.000Z" },
+      over: false,
+    });
+  });
+
+  test("a renewal-only apply has no seat change, and an over-application is flagged", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "LICENSE_APPLIED",
+        payload: { lineId: "l1", seatsAdded: 0, seatsPurchased: null, overApplied: true },
+      }),
+    ).toMatchObject({ kind: "licenseApplied", seats: null, renewal: null, over: true });
+  });
+
+  test("an extraction run says whether it succeeded, with the provider and model — never document values", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "EXTRACTION_RUN",
+        payload: {
+          extractionId: "ext_1",
+          attachmentId: "att1",
+          outcome: "SUCCEEDED",
+          errorCode: null,
+          provider: "anthropic",
+          model: "claude-x",
+          inputTokens: 1200,
+          outputTokens: 300,
+          lineCount: 4,
+          warningCount: 2,
+        },
+      }),
+    ).toEqual({
+      kind: "extractionRun",
+      succeeded: true,
+      errorCode: null,
+      provider: "anthropic",
+      model: "claude-x",
+      lineCount: 4,
+      warningCount: 2,
+    });
+    expect(
+      describePurchaseEvent({ eventType: "EXTRACTION_RUN", payload: { outcome: "FAILED", errorCode: "EXTRACTION_TIMEOUT" } }),
+    ).toMatchObject({ kind: "extractionRun", succeeded: false, errorCode: "EXTRACTION_TIMEOUT", lineCount: null });
+  });
+
+  test("a purchase created from assets counts the assets linked and the ones left out", () => {
+    expect(
+      describePurchaseEvent({
+        eventType: "CREATED_FROM_ASSETS",
+        payload: { lineCount: 2, linkedAssetIds: ["a", "b", "c"], failed: 1 },
+      }),
+    ).toEqual({ kind: "createdFromAssets", linked: 3, lineCount: 2, failed: 1 });
+    expect(describePurchaseEvent({ eventType: "CREATED_FROM_ASSETS", payload: null })).toEqual({
+      kind: "createdFromAssets",
+      linked: null,
+      lineCount: null,
+      failed: 0,
+    });
+  });
+});

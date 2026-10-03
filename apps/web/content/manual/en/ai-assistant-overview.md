@@ -78,6 +78,14 @@ search backend or a search partner, and may bill searches separately. lazyit its
 any other website. With OpenAI, lazyit restricts search to OpenAI's cached copy of the web, so no page
 is fetched live from its site. See [Web search](/help/ai-assistant-setup#web-search).
 
+### Purchase documents (document extraction, off by default)
+
+When **Document extraction** is on and someone chooses **Read this document** on a purchase, the **whole
+file** — an invoice, a quote or a delivery note, with its supplier, prices and tax IDs — goes to the
+provider, which reads it with no tools. No other lazyit data goes with it, not even the file name, and nothing
+read is saved until a person reviews the draft. The self-hosted OpenAI-compatible provider is never used
+for it. See [Document extraction](/help/ai-assistant-setup#document-extraction).
+
 ### Through external agents (MCP)
 
 An MCP client uses its own model. What it reads from lazyit goes to **whatever provider that client

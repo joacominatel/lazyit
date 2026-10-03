@@ -63,6 +63,30 @@ export function assetReceivableLines(lines: readonly PendingPurchaseLine[]): Pen
   return lines.filter((line) => line.kind === "ASSET");
 }
 
+/**
+ * What *Receive* means for a line of this kind — the one place the screens decide it (#1477):
+ *   - `ASSET`      → generate or link assets (*Receive stock* in purchase mode);
+ *   - `CONSUMABLE` → *Receive into stock*, one movement on the line's consumable (#1476);
+ *   - `LICENSE`    → *Apply license*: seats and renewal proposed to the line's application, applied on confirm;
+ *   - anything else (`OTHER`, or a kind a newer build writes) → nothing to receive.
+ * A license line must never reach an asset or stock receive, and an unknown kind must never be taken for an
+ * asset line.
+ */
+export type LineReceiveAction = "receiveAssets" | "receiveStock" | "applyLicense";
+
+export function lineReceiveAction(kind: string): LineReceiveAction | null {
+  switch (kind) {
+    case "ASSET":
+      return "receiveAssets";
+    case "CONSUMABLE":
+      return "receiveStock";
+    case "LICENSE":
+      return "applyLicense";
+    default:
+      return null;
+  }
+}
+
 /** The most pages {@link collectPages} reads for one list — a safety bound, far above a real backlog. */
 export const MAX_COLLECTED_PAGES = 10;
 

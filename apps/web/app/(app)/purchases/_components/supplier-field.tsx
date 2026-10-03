@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { getSuppliers } from "@/lib/api/endpoints/suppliers";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
-import { useSuppliers } from "@/lib/api/hooks/use-suppliers";
+import { useCreateSupplier, useSuppliers } from "@/lib/api/hooks/use-suppliers";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { resolveSupplier, type SupplierResolution } from "@/lib/purchases/supplier";
 
@@ -35,6 +35,44 @@ export async function findSuppliersNamed(name: string): Promise<Supplier[]> {
     found.push(...page.items);
     if (page.items.length === 0 || found.length >= page.total) return found;
   }
+}
+
+/** The longest tax ID a supplier stores; a longer one read from a document is left out, never cut. */
+const TAX_ID_MAX = 50;
+
+/**
+ * Resolve a typed supplier name to an id when saving (#1477, the same rule as the purchase form): nothing
+ * typed is no supplier; one live supplier with that exact name — or the one picked among same-named ones —
+ * is linked; a new name creates the supplier, with the tax ID when one is given (read from a document);
+ * several with the name and none picked is `"ambiguous"`, for the field to ask. `created` names a supplier
+ * made here, for the toast.
+ */
+export function useSupplierSaver(): (
+  text: string,
+  chosenId: string,
+  taxId?: string | null,
+) => Promise<{ id: string | null; created: string | null } | "ambiguous"> {
+  const createSupplier = useCreateSupplier();
+  return async (text, chosenId, taxId) => {
+    if (text.trim() === "") return { id: null, created: null };
+    const resolution = resolveSupplier(text, await findSuppliersNamed(text), null, chosenId);
+    switch (resolution.kind) {
+      case "none":
+        return { id: null, created: null };
+      case "existing":
+        return { id: resolution.id, created: null };
+      case "ambiguous":
+        return "ambiguous";
+      case "new": {
+        const tax = taxId?.trim();
+        const created = await createSupplier.mutateAsync({
+          name: resolution.name,
+          ...(tax && tax.length <= TAX_ID_MAX ? { taxId: tax } : {}),
+        });
+        return { id: created.id, created: created.name };
+      }
+    }
+  };
 }
 
 /**

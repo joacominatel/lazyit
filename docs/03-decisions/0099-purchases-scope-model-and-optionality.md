@@ -28,13 +28,16 @@ filters. **Their screens built** (#1476, 2026-10-02): consumable lines and *Rece
 type labels, linked assets per line with unlink, the link picker's *Not linked* filter and camera scanning
 of serials. **Phase 2 backend built** (#1477, 2026-10-02): document extraction behind its own AI switch (a
 reviewed draft, never saved), `LICENSE` lines applied to their application on confirmation, and creating a
-purchase from selected assets; their screens are a separate frontend unit. What the builds settled is in
+purchase from selected assets. **Their screens built** (#1477 web, 2026-10-02): the *Document extraction*
+switch in Settings → AI, the side-by-side review of a read document as proposed changes, *New purchase from a
+document*, license lines with *Apply license*, and *Create purchase* from selected assets. What the builds
+settled is in
 [[#Decisions while building (Phase 1 core, #1472)]], [[#Decisions while building (Phase 1 web, #1474)]],
 [[#Decisions while building (Phase 1 flows, #1473)]],
 [[#Decisions while building (Phase 1 flows web, #1475)]],
 [[#Decisions while building (Phase 1b consumable lines and document labels, #1476)]],
-[[#Decisions while building (Phase 1b web, #1476)]] and
-[[#Decisions while building (Phase 2, #1477)]].
+[[#Decisions while building (Phase 1b web, #1476)]],
+[[#Decisions while building (Phase 2, #1477)]] and [[#Decisions while building (Phase 2 web, #1477)]].
 
 **Amended 2026-10-01 and 2026-10-02** by four CEO decisions taken after acceptance, before anything was
 built: purchase provenance follows `purchaseOrder:read`, there is **no instance switch**, currency is a
@@ -995,6 +998,107 @@ reopens a CEO decision. Merging suppliers, the XLSX export and the other Phase 2
 - **AI tools.** The new handlers are unexposed until Phase 3 (#1478): applying a license and creating from
   assets are purchase changes (never auto-approved, §11); extraction and its status are the web's reviewed
   flow, and the chat's `purchase_order_extract` tool is Phase 3.
+
+## Decisions while building (Phase 2 web, #1477)
+
+CTO decisions taken while building the Phase 2 screens (2026-10-02), under the principles above — above all
+D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO decision.
+
+**Reading a document** ([[purchases/ux-proposal]] §3.b):
+
+- **The review is a page, and the read runs only when asked.** `/purchases/:id/review/:attachmentId` shows the
+  document beside the draft. The read is a mutation, never a query: each one sends the document out and
+  spends the person's AI budget. *Read this document* on a purchase document, and *New purchase from a
+  document*, land on the page with `?read=1`, which runs the read once — after the permissions, the document
+  and `GET …/extraction/status` are known — and is dropped from the URL at once, so a reload shows an
+  explicit *Read the document* button instead of sending the file again. The web never calls the extract
+  route unless the status says `available` and the document's type and size are among those it reports.
+  Rejected: a dialog on the purchase page — the side-by-side review needs the room, and *New purchase from
+  a document* has to land somewhere.
+- **One review for both cases: proposed changes.** The draft is compared with the purchase on the client
+  (the Phase 2 backend decision): filling an empty field starts ticked, replacing never does, a value equal
+  to the purchase's (and unflagged) is left out — decided once from the draft, so a row never vanishes
+  while someone types in it. A new purchase is all fills, so *New purchase from a document* and *Propose
+  changes* on a purchase with data are the same screen. A blank is never sent, so a review never clears a
+  field. A document line with the same description (trimmed, case-insensitive) as a line of the purchase
+  proposes changes to that line — quantity, unit price, warranty only, one purchase line per document line;
+  every other line is a new line, ticked when it was named.
+- **Blanks over guesses, in the form too.** A value not read stays blank and says *Not read*; a new line's
+  quantity not read must be typed before the line is added (it is not defaulted to 1), while an unknown price
+  stays unknown (§2). Each value shows the text read and its page on hover or focus — always when flagged —
+  never a highlighted region. The API's warnings are written where they apply, counted in the header and
+  jumped to; the totals check is recomputed from the lines as corrected, against the printed net, else the
+  gross. **Deviations from the UX proposal:** saving is not blocked by a missing supplier or currency (D-D:
+  nothing is required beyond what identifies the purchase), and there is no "n fields still marked check —
+  save anyway?" confirmation (one step less; the counter stays visible).
+- **The supplier and the models are suggestions.** The matched supplier is proposed by its own name, picked by
+  id, with *Use {match}* and *Create "{name as read}"*; typing another name is *choose*. A new supplier is
+  created on save by the purchase form's rule, with the tax ID read when it is the name read (and fits the
+  50-character column; a longer one is left out, never cut). A line's model starts at the API's match; a match
+  by name is flagged *check*.
+- **New purchase from a document needs a holder purchase.** Extraction reads a document already attached to a
+  purchase, and a purchase must be identifiable to exist (§2). Picking a file creates a **`DRAFT`** purchase
+  whose **reference is the file name without its extension**, attaches the file and opens the review. While
+  the purchase is still only that holder — no supplier, no line, the reference equal to the stand-in for the
+  stored file name, **this its only document, attached within five minutes of the purchase being created**
+  (review of #1487: the one request sequence that makes a holder, so a person's own purchase whose hand-typed
+  reference happens to equal a file's name is never pre-ticked for replacement) — the review treats the
+  reference as empty (the one read fills it, ticked, while the stand-in still shows as what it has *now*) and
+  offers *Mark as ordered*, ticked. If renaming the stand-in to the stored file name fails after the upload,
+  the person is told and the review still opens; the reference then reads as the purchase's own. An abandoned or failed read leaves a draft purchase holding the document, to be
+  filled by hand (the UX proposal's "the document stays attached either way"); deleting it is an admin's
+  archive, as for any purchase. Rejected: a placeholder line (data that is not on the document); creating
+  the purchase after the review (there is no document to read before it).
+- **Saving goes through the ordinary routes, in order:** the supplier (resolved or created), one header
+  `PATCH`, each new line, each changed line. A failure stops there with what was written kept; those parts
+  are then **locked** on screen and marked *Saved* (an edit there could no longer reach the purchase), and
+  saving again writes only the rest. The toast counts the changes actually written; *Save* counts what is
+  still to write, says *Fix the marked values to save* while a value cannot be sent, and is disabled with
+  nothing to save.
+- **Where the action is offered, and what it says when it is not.** *Read this document* appears per PDF or
+  image document only while the status is available. Otherwise the documents panel says why **only to an
+  admin** (`settings:manage`, who can change Settings → AI) and only for a reason Settings → AI can fix; for
+  anyone else, and for `NOT_PERMITTED`, the action is simply absent. *New purchase from a document* is absent
+  unless available.
+- **The preview: images inline, PDFs in a new tab — never framed** (CTO decision, 2026-10-02). The document
+  is fetched with the Bearer token and re-typed to its stored, server-sniffed type before it gets a `blob:`
+  URL, so the URL never holds markup. A raster image is shown inline beside the review (`img-src` already
+  allows `blob:`). A PDF is a document card whose *Open in a new tab* opens the same `blob:` URL in the
+  browser's own viewer, to put beside the review. The web Content-Security-Policy keeps **`frame-src 'none'`**
+  and `object-src 'none'` ([[content-security-policy]]): lazyit still embeds nothing. Rejected: an `iframe`,
+  `object` or `embed` of the PDF, which would need `frame-src blob:` — a wider policy for a convenience the
+  new tab already gives.
+- **The Settings card.** The switch is saved alone (`documentExtractionEnabled` in the `PUT`); every other card
+  omits it, so another card's save never switches it. It is disabled with the reason while the assistant is
+  off or the provider reads no documents, and stays usable while on, to turn it off. The disclosure is the
+  shared reference text, localized.
+
+**License lines and create from assets:**
+
+- **What *Receive* means is decided in one place, per kind:** asset lines receive or link assets, consumable
+  lines receive into stock, license lines *Apply license*, any other kind (`OTHER`, or one a newer build
+  writes) offers nothing. *Pending units* used to treat every kind but `CONSUMABLE` as an asset line; a license
+  line would have opened the asset receive.
+- ***Apply license* reads the proposal first** and shows the seats now and after, the seats in use and the
+  renewal date; the seats to add start at the line's pending seats and stay editable; the renewal date is
+  typed, never prefilled; at least one of the two is sent. Over-application and an untracked count are
+  warnings, not refusals. A line without a live application asks for one and saves it on the line first
+  (the asset-model and consumable rule). Gated by `purchaseOrder:write` + `application:read` + `application:write`.
+- **The line editor gains *License*** with an optional application picker (`application:read`). Four kinds no
+  longer fit a fixed column beside the description, so that row wraps.
+- ***Create purchase*** sits beside *Link to purchase* in the Assets list's selection bar, under the same gate
+  (`asset:write` + `purchaseOrder:write`). The form asks only for the supplier, the reference and the currency
+  label; a blank currency is left out so the API takes the label the assets share. Everything linked → the new
+  purchase opens; assets left out are listed with their reason, the purchase one click away; a `409` says
+  nothing was created.
+- **The activity log reads `LICENSE_APPLIED`, `EXTRACTION_RUN` (provider and model, never a value read) and
+  `CREATED_FROM_ASSETS`.**
+
+**Consequences.** An abandoned *New purchase from a document* leaves a draft purchase named after the file. The
+review cannot be reloaded without reading the document again (the draft is never stored). A PDF is compared in
+a second tab or window, not inside the review. Line matching by description misses a line the
+document spells differently: it is offered as a new line, ticked, so the person unticks it to avoid a
+duplicate.
 
 ## Related
 

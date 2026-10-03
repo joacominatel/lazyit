@@ -38,6 +38,25 @@ export type PurchaseEventView =
   // Consumable lines and document type labels (#1476).
   | { kind: "stockReceived"; lineId: string | null; quantity: number | null; over: boolean }
   | { kind: "documentUpdated"; name: string | null; from: string | null; to: string | null }
+  // License lines, document extraction and create-from-assets (#1477).
+  | {
+      kind: "licenseApplied";
+      lineId: string | null;
+      seatsAdded: number | null;
+      seats: { from: number | null; to: number | null } | null;
+      renewal: { from: string | null; to: string | null } | null;
+      over: boolean;
+    }
+  | {
+      kind: "extractionRun";
+      succeeded: boolean;
+      errorCode: string | null;
+      provider: string | null;
+      model: string | null;
+      lineCount: number | null;
+      warningCount: number | null;
+    }
+  | { kind: "createdFromAssets"; linked: number | null; lineCount: number | null; failed: number }
   | { kind: "deleted" }
   | { kind: "restored" }
   | { kind: "other"; eventType: string };
@@ -48,6 +67,13 @@ const num = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 /** The length of a logged id list; `null` when the payload has none. */
 const count = (value: unknown): number | null => (Array.isArray(value) ? value.length : null);
+
+/** A logged `{ from, to }` pair, or `null` when the payload carries none (nothing changed there). */
+function fromTo<T>(value: unknown, read: (side: unknown) => T | null): { from: T | null; to: T | null } | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const pair = value as Record<string, unknown>;
+  return { from: read(pair.from), to: read(pair.to) };
+}
 
 /** `{ field: { from, to } | { changed: true } }` → a list, in the order logged; anything else is skipped. */
 export function parseChanges(value: unknown): FieldChange[] {
@@ -129,6 +155,32 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
       const label = p.label !== null && typeof p.label === "object" ? (p.label as Record<string, unknown>) : {};
       return { kind: "documentUpdated", name: str(p.originalName), from: str(label.from), to: str(label.to) };
     }
+    case "LICENSE_APPLIED":
+      return {
+        kind: "licenseApplied",
+        lineId: str(p.lineId),
+        seatsAdded: num(p.seatsAdded),
+        seats: fromTo(p.seatsPurchased, num),
+        renewal: fromTo(p.renewalDate, str),
+        over: p.overApplied === true,
+      };
+    case "EXTRACTION_RUN":
+      return {
+        kind: "extractionRun",
+        succeeded: p.outcome === "SUCCEEDED",
+        errorCode: str(p.errorCode),
+        provider: str(p.provider),
+        model: str(p.model),
+        lineCount: num(p.lineCount),
+        warningCount: num(p.warningCount),
+      };
+    case "CREATED_FROM_ASSETS":
+      return {
+        kind: "createdFromAssets",
+        linked: count(p.linkedAssetIds),
+        lineCount: num(p.lineCount),
+        failed: count(p.failed) ?? num(p.failed) ?? 0,
+      };
     case "DELETED":
       return { kind: "deleted" };
     case "RESTORED":
@@ -143,4 +195,10 @@ export const MONEY_FIELDS = new Set(["unitPrice"]);
 /** Fields whose logged values are ISO dates. */
 export const DATE_FIELDS = new Set(["orderDate", "expectedDate", "invoiceDate"]);
 /** Fields whose logged values are ids — shown by name only ("changed"), never as a raw id. */
-export const ID_FIELDS = new Set(["supplierId", "deliveryLocationId", "assetModelId", "consumableId"]);
+export const ID_FIELDS = new Set([
+  "supplierId",
+  "deliveryLocationId",
+  "assetModelId",
+  "consumableId",
+  "applicationId",
+]);

@@ -404,6 +404,28 @@
     "webSearch": "/help/ai-assistant-setup#web-search",
     "mcp": "/help/ai-assistant-setup#external-ai-agents-mcp",
     "allowlist": "/help/ai-assistant-setup#allowed-clients",
-    "disclosure": "/help/ai-assistant-overview#what-leaves-your-server"
+    "disclosure": "/help/ai-assistant-overview#what-leaves-your-server",
+    "documentExtraction": "/help/ai-assistant-setup#document-extraction"
+  },
+  "documentExtraction": {
+    "title": "Document extraction",
+    "on": "On",
+    "off": "Off",
+    "description": "Let people fill a purchase from an invoice, quote or delivery note attached to it: the AI provider reads the document and lazyit shows a draft for a person to review. Nothing is saved until they confirm.",
+    "switch": {
+      "label": "Allow reading purchase documents with AI",
+      "description": "Applies right away. Only people who can edit purchases and use the AI assistant see the action, and only for PDF and image documents."
+    },
+    "savedOn": "Document extraction turned on",
+    "savedOff": "Document extraction turned off",
+    "availability": {
+      "aiOff": "Turn the AI assistant on first. Document extraction uses its provider and needs both switches on.",
+      "providerUnsupported": "The configured provider can't read documents. Document extraction works with Anthropic, OpenAI and Google Gemini."
+    },
+    "disclosure": {
+      "title": "What leaves lazyit",
+      "egress": "Purchase documents are sent to the configured AI provider. When someone asks lazyit to read a document attached to a purchase, the whole file (an invoice, a quote or a delivery note, with its supplier, prices and tax IDs) goes to the provider, under your contract with it.",
+      "review": "Nothing is saved from it until a person reviews the draft and saves the purchase. Each read counts against that person's daily AI budget and is recorded in the purchase's activity."
+    }
   }
 }

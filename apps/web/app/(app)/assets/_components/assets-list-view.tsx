@@ -11,6 +11,7 @@ import {
   QrCodeIcon,
   ServerStackIcon,
   ShareIcon,
+  ShoppingCartIcon,
   TrashIcon,
   UserMinusIcon,
   UserPlusIcon,
@@ -118,6 +119,10 @@ import { downloadAssetsExport } from "./assets-csv";
 import { AssetRowActions } from "./asset-row-actions";
 import { ReceiveStockButton } from "./receive-stock-dialog";
 import { LinkAssetsDialog, type LinkAssetRef } from "@/components/purchases/link-assets-dialog";
+import {
+  CreatePurchaseFromAssetsDialog,
+  type FromAssetsRef,
+} from "@/components/purchases/create-from-assets-dialog";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
@@ -337,6 +342,8 @@ export function AssetsListView() {
   const canLinkPurchases = canWrite && canWritePurchases && !archived;
   const selectable = canDelete || canLinkPurchases;
   const [linking, setLinking] = useState<LinkAssetRef[] | null>(null);
+  // Create one purchase from the selection (#1477) — the same permissions as linking it to one.
+  const [creatingFrom, setCreatingFrom] = useState<FromAssetsRef[] | null>(null);
 
   // Which of the assets ON THIS PAGE back a topology node — the small "On topology" glyph per row
   // (issue #765), made exact in #1152. It resolves the visible ids as a bounded batch (`?assetIds=`)
@@ -1244,6 +1251,22 @@ export function AssetsListView() {
                     {t("linkToPurchase")}
                   </Button>
                 ) : null}
+                {canLinkPurchases ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setCreatingFrom(
+                        rows
+                          .filter((asset) => selection.isSelected(asset.id))
+                          .map((asset) => ({ id: asset.id, name: asset.name, assetTag: asset.assetTag })),
+                      )
+                    }
+                  >
+                    <ShoppingCartIcon />
+                    {t("createPurchase")}
+                  </Button>
+                ) : null}
                 {canDelete ? (
                   <>
                     <Select
@@ -1296,6 +1319,14 @@ export function AssetsListView() {
               assets={linking}
               onClose={() => setLinking(null)}
               onLinked={selection.clear}
+            />
+          ) : null}
+
+          {creatingFrom ? (
+            <CreatePurchaseFromAssetsDialog
+              assets={creatingFrom}
+              onClose={() => setCreatingFrom(null)}
+              onCreated={selection.clear}
             />
           ) : null}
 
