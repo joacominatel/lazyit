@@ -115,6 +115,9 @@ const EXPECTED_LIST_SELECT = {
   company: true,
   purchaseDate: true,
   warrantyEnd: true,
+  // The optional Cost column's cost + currency label (#1511).
+  purchaseCost: true,
+  purchaseCurrency: true,
   modelId: true,
   locationId: true,
   createdAt: true,
@@ -161,6 +164,8 @@ const leanRow = (overrides: Record<string, unknown> = {}) => ({
   company: null,
   purchaseDate: null,
   warrantyEnd: null,
+  purchaseCost: null,
+  purchaseCurrency: null,
   modelId: 'm1',
   locationId: 'l1',
   createdAt: new Date(),
@@ -820,7 +825,7 @@ describe('AssetsService', () => {
     expect(asset.findMany).toHaveBeenCalledWith({
       // The default `active` slice scopes the list to live assets (ADR-0041).
       where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       select: EXPECTED_LIST_SELECT,
@@ -890,6 +895,48 @@ describe('AssetsService', () => {
     expect(result.items[0].activeAssignments).toHaveLength(2);
   });
 
+  it('findPage returns the cost as a JSON number with its currency label, never a bigint (#1511)', async () => {
+    asset.findMany.mockResolvedValue([
+      // The real client returns a BigInt column as a `bigint`; 3e9 is past the old int4 ceiling.
+      leanRow({ purchaseCost: BigInt(3_000_000_000), purchaseCurrency: 'u$s' }),
+      leanRow({ id: 'a2', purchaseCost: null, purchaseCurrency: null }),
+    ]);
+    asset.count.mockResolvedValue(2);
+
+    const result = await service.findPage(
+      {},
+      { limit: 50, offset: 0, deleted: 'active' },
+    );
+
+    expect(result.items[0]).toMatchObject({
+      purchaseCost: 3_000_000_000,
+      purchaseCurrency: 'u$s',
+    });
+    expect(result.items[1]).toMatchObject({
+      purchaseCost: null,
+      purchaseCurrency: null,
+    });
+    // The page must serialize: a leaked bigint would make JSON.stringify throw.
+    expect(() => JSON.stringify(result)).not.toThrow();
+  });
+
+  it('findPage on the self-read returns rows without any cost key (#1511)', async () => {
+    // The mine select asks for no cost columns, so the row arrives without them.
+    const row: Record<string, unknown> = leanRow();
+    delete row.purchaseCost;
+    delete row.purchaseCurrency;
+    asset.findMany.mockResolvedValue([row]);
+    asset.count.mockResolvedValue(1);
+
+    const result = await service.findPage(
+      { assignedToUserId: 'u1' },
+      { limit: 50, offset: 0, deleted: 'active' },
+      'u1',
+    );
+
+    expect(result.items[0]).not.toHaveProperty('purchaseCost');
+  });
+
   it('the lean assignments select filters to active (releasedAt null) so released owners are excluded', async () => {
     asset.findMany.mockResolvedValue([]);
     asset.count.mockResolvedValue(0);
@@ -928,6 +975,9 @@ describe('AssetsService', () => {
     });
     expect(calls[0][0].select).toEqual({
       ...EXPECTED_LIST_SELECT,
+      // The ungated self-read leaves out the cost the directory list shows (#1511).
+      purchaseCost: false,
+      purchaseCurrency: false,
       assignments: {
         ...EXPECTED_LIST_SELECT.assignments,
         where: { releasedAt: null, userId: 'u1' },
@@ -1316,7 +1366,7 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    expect(args.orderBy).toEqual([{ createdAt: 'desc' }, { id: 'desc' }]);
   });
 
   it('findPage honors an allowlisted sort field + direction (server-side, full set)', async () => {
@@ -1331,7 +1381,7 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ name: 'asc' });
+    expect(args.orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
   });
 
   it('findPage maps each sortable field (assetTag/status/updatedAt) to its column', async () => {
@@ -1345,8 +1395,52 @@ describe('AssetsService', () => {
     const args = (
       asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(args.orderBy).toEqual({ status: 'desc' });
+    expect(args.orderBy).toEqual([{ status: 'desc' }, { id: 'desc' }]);
   });
+
+  it.each([
+    ['purchaseDate', 'asc'],
+    ['purchaseDate', 'desc'],
+    ['warrantyEnd', 'asc'],
+    ['warrantyEnd', 'desc'],
+    ['purchaseCost', 'asc'],
+    ['purchaseCost', 'desc'],
+  ] as const)(
+    'findPage sorts by %s %s with empty values last, then by id (#1511)',
+    async (field, dir) => {
+      asset.findMany.mockResolvedValue([]);
+      asset.count.mockResolvedValue(0);
+
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: field, dir, deleted: 'active' },
+      );
+      const args = (
+        asset.findMany.mock.calls as Array<[{ orderBy: unknown }]>
+      )[0][0];
+      expect(args.orderBy).toEqual([
+        { [field]: { sort: dir, nulls: 'last' } },
+        { id: 'desc' },
+      ]);
+    },
+  );
+
+  it.each(['name', 'assetTag', 'serial', 'status', 'createdAt', 'updatedAt'])(
+    'findPage appends the unique id tiebreaker to the %s sort (ADR-0030 §9)',
+    async (field) => {
+      asset.findMany.mockResolvedValue([]);
+      asset.count.mockResolvedValue(0);
+
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, sort: field, dir: 'asc', deleted: 'active' },
+      );
+      const args = (
+        asset.findMany.mock.calls as Array<[{ orderBy: unknown[] }]>
+      )[0][0];
+      expect(args.orderBy).toEqual([{ [field]: 'asc' }, { id: 'desc' }]);
+    },
+  );
 
   it('findPage REJECTS an unknown sort field with 400 (never silently ignored)', async () => {
     await expect(

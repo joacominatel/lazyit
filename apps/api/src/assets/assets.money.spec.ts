@@ -342,7 +342,11 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
       .expect(201);
     const id = (created.body as { id: string }).id;
 
-    await http().get('/assets').expect(200);
+    // The list carries the cost for its optional Cost column (#1511) — as the exact JSON number.
+    const list = await http().get('/assets').expect(200);
+    expect(list.body).toMatchObject({
+      items: [{ id, purchaseCost: ABOVE_INT4 }],
+    });
     const removed = await http().delete(`/assets/${id}`).expect(200);
     expect(removed.body).toMatchObject({ purchaseCost: ABOVE_INT4 });
     const restored = await http().post(`/assets/${id}/restore`).expect(201);

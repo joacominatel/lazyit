@@ -1155,7 +1155,7 @@ D-D, "not a nuisance and not heavy to fill in" — and §11. None reopens a CEO 
 - **The line editor gains *License*** with an optional application picker (`application:read`). Four kinds no
   longer fit a fixed column beside the description, so that row wraps.
 - ***Create purchase*** sits beside *Link to purchase* in the Assets list's selection bar, under the same gate
-  (`asset:write` + `purchaseOrder:write`). The form asks only for the supplier, the reference and the currency
+  (`asset:write` + `purchaseOrder:write`) — both in one *Purchase* menu since #1512, so the bar keeps to one row. The form asks only for the supplier, the reference and the currency
   label; a blank currency is left out so the API takes the label the assets share. Everything linked → the new
   purchase opens; assets left out are listed with their reason, the purchase one click away; a `409` says
   nothing was created.
