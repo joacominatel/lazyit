@@ -253,7 +253,9 @@ three stored fields are echoed on create/update.
   column — the same `asset:read` values the detail read shows. The self-read `GET /assets/mine` carries no
   `asset:read` gate and omits both. Sortable (`?sort=`, [[0030-list-pagination-contract]]): `name`,
   `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost`
-  (amounts compare as stored, whatever their currency label). The model's manufacturer is not sortable.
+  (amounts compare as stored, whatever their currency label; an asset without a purchase date, warranty
+  end or cost sorts last in both directions). Every order ends with the unique `id`, so a page boundary is
+  stable ([[0030-list-pagination-contract]] §9). The model's manufacturer is not sortable.
 - `GET /assets/companies` — the distinct, non-empty `company` values across live assets (sorted;
   `asset:read`) — feeds the list's company filter ([[0076-asset-company-grouping-field]]). The form's
   smart-entry company field reads `GET /suggestions/company` instead (use counts and last use, merged with

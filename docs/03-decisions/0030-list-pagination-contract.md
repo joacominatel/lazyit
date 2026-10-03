@@ -112,7 +112,7 @@ Per-resource sortable-field allowlists:
 
 | Endpoint | `sort` keys | default order |
 | --- | --- | --- |
-| `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost` (the last three added for the list's purchase & warranty columns, #1511) | `createdAt desc` |
+| `GET /assets` | `name`, `assetTag`, `serial`, `status`, `createdAt`, `updatedAt`, `purchaseDate`, `warrantyEnd`, `purchaseCost` (the last three added for the list's purchase & warranty columns, #1511; empty values sort last in both directions) | `createdAt desc`; every order then `id desc` (§9 tiebreaker, #1511) |
 | `GET /applications` | `name`, `vendor`, `isCritical`, `createdAt`, `updatedAt` | `name asc` |
 | `GET /consumables` | `name`, `sku`, `currentStock`, `createdAt`, `updatedAt` | `name asc` |
 | `GET /users` | `firstName`, `lastName`, `email`, `role`, `createdAt` | `createdAt desc` |
