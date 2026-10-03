@@ -34,8 +34,9 @@ updated: 2026-10-02
 
 The always-available, optional-at-entry record of what the team bought, from whom, with which documents, and which
 assets came out of it. lazyit records purchases; the finance system stays the system of record — no
-approvals, budgets, payables or exchange rates. **Backend core built** (#1472); receiving, linking, documents
-and the screens follow in Phase 1 under epic #1465. See
+approvals, budgets, payables or exchange rates. **Built** under epic #1465: Phase 1 (core #1472, flows #1473,
+screens #1474 and #1475), Phase 1b (consumable lines and document labels, #1476), Phase 2 (document
+extraction, license lines, create from assets, #1477) and Phase 3 (AI assistant tools and their chat surfaces, #1478). See
 [[0099-purchases-scope-model-and-optionality]] · [[0100-money-as-64-bit-minor-units]] · research in
 [[purchases/_MOC|the Purchases vault]].
 

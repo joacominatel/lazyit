@@ -72,7 +72,9 @@ including the money widening).
 9. AI: extraction produces a draft that a human always reviews; a separate "Document extraction" switch
    under AI settings, OFF by default, with disclosure; purchase changes are never auto-approved.
    Extraction reads a document already attached to the purchase (no chat upload).
-10. Back up the attachments volume before or alongside Phase 1.
+10. Back up the attachments volume before or alongside Phase 1. *Not delivered with the epic:* #1467 is
+    open, deferred by the CEO; until it ships, the purchase's documents panel says the files are not in the
+    backup ([[backups]]).
 11. Money widening: money amounts move from int4 to 64-bit integers (minor units) — the new purchase
     tables and the existing `Asset.purchaseCost` / `salvageValue` and `Application.costPerSeat`.
     Widening is non-destructive. Amends [[0036-int4-bounded-integers|ADR-0036]] and

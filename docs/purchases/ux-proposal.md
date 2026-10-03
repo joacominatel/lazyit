@@ -28,6 +28,20 @@ updated: 2026-10-02
 >   identifies it; the reference is **not unique per supplier** (§8.1 item 5, D6) — a repeat is a
 >   suggestion; and over-receipt is **allowed with a warning**, not blocked (§3.d, §8.1 item 6).
 >
+> **Built differently (2026-10-02, epic #1465).** Kept as written; what changed while building:
+> - The chat tool that reads a document (§3.c) is `purchase_document_read`, not `purchase_order_extract`.
+> - A stock receipt from a consumable line (§7) posts its `IN` movement with the fixed reason *Received from
+>   a purchase*, never the purchase's details (the consumable ledger is readable by Viewers, D-A).
+> - The extraction review (§3.b) does not block saving on a missing supplier or currency and has no
+>   "n fields still marked check — save anyway?" step; a PDF opens in a new tab instead of being framed.
+> - Not built: *Receive delivery* across lines, the *Overdue only* toggle and the *created within 90 days*
+>   chip, the dashboard *Pending deliveries* tile, purchases in global search, merging suppliers, *Suggest
+>   purchases*, *Map a custom field to suppliers*, the warranty replacement action, the XLSX export, and
+>   proposing a new line price to linked assets.
+>
+> What each build settled: [[0099-purchases-scope-model-and-optionality|ADR-0099]], *Decisions while
+> building*, and [[purchases/_MOC#What was built]].
+>
 > Entity design: [[supplier]] · [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]].
 > Back to [[purchases/_MOC|the Purchases vault]].
 

@@ -8,8 +8,8 @@ updated: 2026-10-02
 
 # PurchaseOrder
 
-> 🟢 built — backend (#1472, flows #1473, Phase 2 #1477), screens (#1474, #1475); the Phase 2 screens
-> pending (#1477 web) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
+> 🟢 built — backend (#1472, flows #1473, Phase 1b #1476, Phase 2 #1477), screens (#1474, #1475, #1476 web,
+> #1477 web), AI assistant tools (#1478) · Area: Purchases · [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — API and contract (#1472)
 > Model `PurchaseOrder` (`purchase_orders`), contract `packages/shared/src/schemas/purchase-order.ts`,
@@ -123,6 +123,10 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   Each run whose document reached the provider writes an `EXTRACTION_RUN` event (metadata only) and spends the
   caller's AI token budget. The
   full design is in [[ai-assistant/provider-and-runtime]] §6.5.
+- **In the AI assistant** (#1478, ADR-0099 §11) — the purchase tools run these same routes as the invoking
+  principal: reads, `purchase_document_read` over the extract route (chat only), and every purchase change as
+  an approval card that is **never auto-approved**. The tools are listed in
+  [[ai-assistant/tools-and-execution]] (*Purchases tools as built*).
 
 ## Conventions
 

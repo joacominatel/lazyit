@@ -24,6 +24,22 @@ updated: 2026-10-02
 > over-receipt is **allowed with a warning**, not blocked (§7 risk 7, decision 8). Entity design: [[supplier]] ·
 > [[purchase-order]] · [[purchase-order-line]] · [[purchase-order-event]]. Back to
 > [[purchases/_MOC|the Purchases vault]].
+>
+> **Built differently (2026-10-02, epic #1465).** Kept as written; the names and shapes that changed:
+> - Generating assets from a line is `POST /purchase-orders/:id/lines/:lineId/receive` (not `…/generate-assets`).
+> - Extraction is `POST /purchase-orders/:id/attachments/:attachmentId/extract` (not `POST /purchase-orders/extract`),
+>   behind its own `StructuredExtractionPort`, a sibling of the chat port rather than a method on it.
+> - The AI tools are `purchase_search` / `purchase_get`, `purchase_create` / `purchase_update`,
+>   `purchase_receive` (was `purchase_order_generate_assets`), `purchase_document_read` (was
+>   `purchase_order_extract` — a chat-only `read` tool over the extract route) and `supplier_search` /
+>   `supplier_get` / `supplier_create` / `supplier_update`, among others
+>   ([[ai-assistant/tools-and-execution]], *Purchases tools as built*).
+> - `unitPrice` is a 64-bit `BIGINT` (ADR-0100), and there are no header `shippingCost` / `taxAmount`
+>   amounts and no unique index.
+> - Purchase events are not part of the `recent_activity` view.
+>
+> What each build settled: [[0099-purchases-scope-model-and-optionality|ADR-0099]], *Decisions while
+> building*, and [[purchases/_MOC#What was built]].
 
 
 ## Executive summary

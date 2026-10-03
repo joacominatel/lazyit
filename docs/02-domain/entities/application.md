@@ -46,7 +46,7 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
-> - **`vendor` is labelled "Publisher" (en) / "Fabricante" (es)** from Purchases Phase 1. It means
+> - **`vendor` is labelled "Publisher" (en) / "Fabricante" (es)** since Purchases Phase 1 (#1474). It means
 >   **who makes the software** (Microsoft, Atlassian), not who you buy it from — that is a
 >   [[supplier]], and the old Spanish label "Proveedor" is exactly the word for supplier. **Label only:**
 >   the column, the API field and existing values are unchanged.
@@ -94,7 +94,7 @@ Prisma model `Application` → table `applications`. Validation schemas (`Applic
 | `name` | `string` | required (≤200). |
 | `description` | `string?` | optional (≤2000). |
 | `url` | `string?` | optional system URL; stored as a free string (not strictly URL-validated; non-http(s) schemes rejected — SEC-008). |
-| `vendor` | `string?` | optional publisher — who makes the software (Atlassian, Microsoft, AWS, …). Shown as **Publisher** / **Fabricante** from Purchases Phase 1 (planned; label only). Not a [[supplier]]. |
+| `vendor` | `string?` | optional publisher — who makes the software (Atlassian, Microsoft, AWS, …). Shown as **Publisher** / **Fabricante** since Purchases Phase 1 (#1474; label only). Not a [[supplier]]. |
 | `categoryId` | `cuid?` | optional FK → [[application-category]], `onDelete: SetNull`. |
 | `isCritical` | `boolean` | `@default(false)`. |
 | `metadata` | `jsonb?` | free-form extras; any JSON object for now (see debt note). |

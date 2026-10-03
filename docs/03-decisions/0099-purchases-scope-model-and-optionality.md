@@ -151,7 +151,7 @@ orders. It lives in the sidebar under **Inventory**, next to Assets and Consumab
 
 ### 2. Entity model
 
-Four new entities, all planned for Phase 1 (details in the entity notes):
+Four new entities, all built in Phase 1 (#1472; details in the entity notes):
 
 - **[[supplier]]** — who the team buys from and pays. Soft-deletable. A name (its only required field),
   an optional tax ID (the strongest near-duplicate hint), website, a sales contact, a **separate
@@ -204,7 +204,11 @@ assets:
   value" switch checks them all;
 - cost and its currency always move together;
 - **unlinking never clears values**, and editing a line price afterwards only *proposes* updates to linked
-  assets (pre-checked only where the asset still holds the old purchase value).
+  assets (pre-checked only where the asset still holds the old purchase value). *Not built — deferred
+  (2026-10-02, #1489):* a price edit changes no linked asset and proposes nothing; the asset's *Purchase*
+  panel marks the line price *Differs from purchase*, and an ordinary asset edit changes the cost
+  ([[#Decisions while building (Phase 1 flows web, #1475)]]). The rule that nothing is ever overwritten
+  silently holds either way.
 
 A divergence between an asset's cost and its line is shown ("differs from purchase"); it is never
 corrected silently.
@@ -256,8 +260,8 @@ success stays the correct outcome.
 - **Amounts are stored and shown as entered.** Storage is ADR-0100's, unchanged: 64-bit integer minor
   units. Display uses the viewer's locale grouping and shows decimals only as the user entered them — a
   whole amount is never padded with ",00" ([[0100-money-as-64-bit-minor-units]] §5).
-- The asset's purchase cost gains an **optional currency label** of the same kind (planned column on
-  [[asset]]). Existing assets read as **"No currency"** — its own visible state, never defaulted to a
+- The asset's purchase cost gains an **optional currency label** of the same kind (built as
+  `Asset.purchaseCurrency`, #1472, on [[asset]]). Existing assets read as **"No currency"** — its own visible state, never defaulted to a
   "usual" currency. Copying cost from a purchase copies the label with it.
 - lazyit **never** fetches, stores or applies exchange rates, and **never sums or converts across
   labels**. Any aggregate of money **groups by label**, compared trimmed and case-insensitively ("usd" and
@@ -354,6 +358,10 @@ Purchase documents are financial evidence, and the attachments volume is outside
 ([[0082-attachments-storage]], [[backups]]). **The attachments backup ships before or alongside Phase 1.**
 Until it does, the purchase's documents panel says plainly that files are not in the backup.
 
+*Not delivered (2026-10-02, #1489):* the epic shipped without the attachments backup. #1467 is open and
+deferred by the CEO; the purchase's documents panel warns that the files are not in the backup, and
+[[backups]] item 7 carries the manual workaround.
+
 ### 13. Phasing
 
 | Phase | Scope |
@@ -366,6 +374,12 @@ Until it does, the purchase's documents panel says plainly that files are not in
 
 Every new API handler is decided in the AI toolsets in the phase that adds it (exposed, deferred or
 excluded), so the tool-coverage test stays green.
+
+*As built (2026-10-02, #1489):* Phases 1, 1b, 2 and 3 shipped on the epic branch, except: *Receive delivery*
+across lines, the dashboard *Pending deliveries* tile, global search for purchases and the supplier history
+with yearly totals (1b); merging suppliers and the other back-linking helpers beyond "create purchase from
+selected assets" (2). They are **not built**, with no issue open yet — the full list, with the UX proposal's
+items, is in [[purchases/_MOC#What was built]].
 
 ### 14. Upgrade safety
 
@@ -402,18 +416,18 @@ excluded), so the tool-coverage test stays green.
   - A line can end up over-received; the warning is advisory, so the data can say "5 of 4". Concurrent
     receives must still be tested to show the derived count is right.
   - With no uniqueness constraints, duplicate suppliers and repeated references can exist. Suggestions
-    reduce them; merging suppliers (Phase 2) cleans them up.
+    reduce them; merging suppliers was meant to clean them up, but it is not built (§13).
   - Currency labels are not normalised beyond trimming and case: "USD" and "u$s" are two groups in any
     total. Smart-entry suggestions are the mitigation; lazyit never interprets a label.
   - With no switch, every upgraded instance gains a visible (empty) Purchases area for ADMIN and MEMBER.
   - Viewers keep seeing asset cost while purchases and an asset's purchase provenance are hidden from
     them; there is no field-level authorization.
-  - Purchase documents raise the stakes of the attachments backup gap until §12 ships.
+  - Purchase documents raise the stakes of the attachments backup gap until §12 ships (#1467, deferred).
   - A supplier's PDF goes to the configured AI provider when extraction is on; the disclosure and the
     separate OFF-by-default switch are the mitigation.
 - **Follow-ups:**
-  - Phase 1 backend and frontend units under epic #1465, starting with [[0100-money-as-64-bit-minor-units]].
-  - The attachments backup sidecar (§12).
+  - The attachments backup sidecar (§12, #1467 — deferred by the CEO).
+  - The items §13 lists as not built.
   - The four questions left open at acceptance are settled below; none remains open before Phase 1.
 
 ## Decisions after acceptance
