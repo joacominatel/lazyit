@@ -20,7 +20,7 @@
  * compose.yaml, i.e. the pinned image). It FAILS — never silently skips — when they are missing, so the CI job cannot go
  * green without having made a wire call.
  *
- * It drops and recreates the seven lazyit indexes: point it only at a throwaway engine.
+ * It drops and recreates every lazyit index: point it only at a throwaway engine.
  */
 import { Meilisearch } from 'meilisearch';
 import type { PinoLogger } from 'nestjs-pino';
@@ -42,6 +42,8 @@ import {
   projectConsumable,
   projectInfraNode,
   projectLocation,
+  projectPurchaseOrder,
+  projectSupplier,
   projectUser,
 } from '../src/search/search.documents';
 import type {
@@ -151,6 +153,28 @@ const CONSUMABLES = [
   },
 ];
 
+const PURCHASES = [
+  {
+    id: 'po-1',
+    reference: 'OC-4512',
+    status: 'ORDERED',
+    orderDate: new Date('2026-09-12T00:00:00.000Z'),
+    invoiceNumbers: 'A-0001-00001234',
+    createdAt: new Date('2026-09-12T10:30:00.000Z'),
+    supplier: { name: 'Compumundo' },
+    lines: [{ description: 'ThinkPad T14 Gen 5' }],
+  },
+];
+const SUPPLIERS = [
+  {
+    id: 'sup-1',
+    name: 'Compumundo',
+    taxId: '30-71234567-8',
+    salesContactName: 'Ana Gómez',
+    supportContactName: null,
+  },
+];
+
 /** A Prisma double answering the self-heal's `findMany` loads with the fixture rows above. */
 function prismaFixture(): PrismaService {
   const rows = (data: unknown[]) => ({
@@ -164,6 +188,8 @@ function prismaFixture(): PrismaService {
     application: rows(APPLICATIONS),
     infraNode: rows(INFRA),
     consumable: rows(CONSUMABLES),
+    purchaseOrder: rows(PURCHASES),
+    supplier: rows(SUPPLIERS),
   } as unknown as PrismaService;
 }
 
@@ -288,6 +314,33 @@ describe('Meilisearch wire (pinned server image)', () => {
       unit: 'units',
     });
 
+    // #1499: a purchase is found by what it bought (the line description is searchable) but the hit
+    // carries display fields only; a supplier by a contact name, which is not returned.
+    const purchase = await search.search({
+      q: 'ThinkPad',
+      entities: ['purchases'],
+      limit: 5,
+    });
+    expect(purchase.purchases?.hits[0]).toEqual({
+      id: 'po-1',
+      reference: 'OC-4512',
+      supplierName: 'Compumundo',
+      invoiceNumbers: 'A-0001-00001234',
+      status: 'ORDERED',
+      orderDate: '2026-09-12T00:00:00.000Z',
+      createdAt: '2026-09-12T10:30:00.000Z',
+    });
+    const supplier = await search.search({
+      q: 'Gómez',
+      entities: ['suppliers'],
+      limit: 5,
+    });
+    expect(supplier.suppliers?.hits[0]).toEqual({
+      id: 'sup-1',
+      name: 'Compumundo',
+      taxId: '30-71234567-8',
+    });
+
     const node = await search.search({
       q: 'Catalyst',
       entities: ['infra', 'assets'],
@@ -390,6 +443,8 @@ describe('Meilisearch wire (pinned server image)', () => {
       applications: APPLICATIONS.map(projectApplication),
       infra: INFRA.map(projectInfraNode),
       consumables: CONSUMABLES.map(projectConsumable),
+      purchases: PURCHASES.map(projectPurchaseOrder),
+      suppliers: SUPPLIERS.map(projectSupplier),
     } as const;
     for (const [index, docs] of Object.entries(shapes)) {
       const stored = await client.index(index).getDocument(docs[0].id);

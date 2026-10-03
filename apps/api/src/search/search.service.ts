@@ -20,6 +20,10 @@ export const SEARCH_INDEXES = [
   'applications',
   'infra', // topology nodes (ADR-0070 v1) — kind/status/state filterable (see reindex.ts)
   'consumables', // #873 — name/sku/description searchable; currentStock/unit for the lean hit preview
+  // #1499 (ADR-0099): served only to a caller holding `purchaseOrder:read` — the controller drops both
+  // for anyone else (search.controller.ts), so a VIEWER never sees a hit or a count.
+  'purchases',
+  'suppliers',
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
@@ -48,6 +52,18 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
   // returned so the palette renders a "12 units" preview from the lean hit (zero extra fetch). Keep in
   // lockstep with `ConsumableHitSchema` in @lazyit/shared.
   consumables: ['id', 'name', 'sku', 'description', 'currentStock', 'unit'],
+  // #1499: display fields only. `lineDescriptions` (purchases) and the contact names (suppliers) are
+  // searchable but never returned (SEC-061). Keep in lockstep with `PurchaseHitSchema` / `SupplierHitSchema`.
+  purchases: [
+    'id',
+    'reference',
+    'supplierName',
+    'invoiceNumbers',
+    'status',
+    'orderDate',
+    'createdAt',
+  ],
+  suppliers: ['id', 'name', 'taxId'],
 };
 
 /** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
@@ -169,6 +185,24 @@ export class SearchService {
         this.logger.error(
           { err, index, id: doc.id, op: 'upsert' },
           'Dropped Meilisearch sync: failed to index document (row stale until next write or reindex)',
+        );
+      });
+  }
+
+  /**
+   * {@link upsert} for several documents in ONE engine task (#1499 — a supplier rename re-projects every
+   * purchase that carries its name). Same contract: fire-and-forget, never throws, logs on failure, no-op
+   * when disabled or when there is nothing to write.
+   */
+  upsertMany(index: SearchIndex, docs: SearchDocument[]): void {
+    if (!this.client || docs.length === 0) return;
+    this.client
+      .index(index)
+      .addDocuments(docs, { primaryKey: 'id' })
+      .catch((err: unknown) => {
+        this.logger.error(
+          { err, index, ids: docs.map((doc) => doc.id), op: 'upsert' },
+          'Dropped Meilisearch sync: failed to index documents (rows stale until next write or reindex)',
         );
       });
   }

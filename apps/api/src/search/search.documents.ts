@@ -89,6 +89,47 @@ export interface ConsumableRow {
   unit: string;
 }
 
+/**
+ * A purchase row with its supplier's name and its live lines' descriptions (#1499, ADR-0099). Load it with
+ * {@link PURCHASE_ORDER_SEARCH_SELECT} so the shape matches; the supplier is joined even when archived, as
+ * the purchase page still shows it.
+ */
+export interface PurchaseOrderRow {
+  id: string;
+  reference: string | null;
+  status: string;
+  orderDate: Date | null;
+  invoiceNumbers: string | null;
+  createdAt: Date;
+  supplier: { name: string } | null;
+  lines: { description: string }[];
+}
+
+/**
+ * The Prisma `select` every purchase load path uses (the write-path sync, the boot self-heal / reconcile and
+ * `reindex:all`). A relation select is not rewritten by the soft-delete read filter (ADR-0032), so the live-
+ * line filter is explicit. Plain data, no Prisma import: this file stays framework-agnostic.
+ */
+export const PURCHASE_ORDER_SEARCH_SELECT = {
+  id: true,
+  reference: true,
+  status: true,
+  orderDate: true,
+  invoiceNumbers: true,
+  createdAt: true,
+  supplier: { select: { name: true } },
+  lines: { where: { deletedAt: null }, select: { description: true } },
+} as const;
+
+/** A supplier row (#1499). The name, tax ID and contact names — never contact emails or phones. */
+export interface SupplierRow {
+  id: string;
+  name: string;
+  taxId: string | null;
+  salesContactName: string | null;
+  supportContactName: string | null;
+}
+
 /** A projected search document — always carries the `id` primary key plus its searchable fields. */
 export type SearchDocument = { id: string } & Record<string, unknown>;
 
@@ -179,5 +220,40 @@ export function projectConsumable(row: ConsumableRow): SearchDocument {
     description: row.description,
     currentStock: row.currentStock,
     unit: row.unit,
+  };
+}
+
+/**
+ * Project a purchase (#1499, ADR-0099). Searchable: the reference, the supplier's name, the invoice numbers
+ * and the live lines' descriptions (`lineDescriptions`, so "ThinkPad" finds the purchase that bought it —
+ * indexed but never returned, like an article's body, SEC-061). `status` is the STORED status; the received
+ * states are derived on read and not indexed. Dates are ISO strings (`orderDate`, else `createdAt`, titles
+ * a purchase with no reference). No money, no notes, no company, no delivery location.
+ */
+export function projectPurchaseOrder(row: PurchaseOrderRow): SearchDocument {
+  return {
+    id: row.id,
+    reference: row.reference,
+    supplierName: row.supplier?.name ?? null,
+    invoiceNumbers: row.invoiceNumbers,
+    status: row.status,
+    orderDate: row.orderDate?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    lineDescriptions: row.lines.map((line) => line.description),
+  };
+}
+
+/**
+ * Project a supplier (#1499). Searchable: name, tax ID and the two contact names (`salesContactName`,
+ * `supportContactName` — indexed, not returned). Contact emails, phones, the website and notes are not
+ * indexed at all.
+ */
+export function projectSupplier(row: SupplierRow): SearchDocument {
+  return {
+    id: row.id,
+    name: row.name,
+    taxId: row.taxId,
+    salesContactName: row.salesContactName,
+    supportContactName: row.supportContactName,
   };
 }

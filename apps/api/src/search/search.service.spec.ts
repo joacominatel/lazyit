@@ -117,6 +117,8 @@ describe('SearchService', () => {
         'consumables',
         'infra',
         'locations',
+        'purchases',
+        'suppliers',
         'users',
       ]);
       expect(result.assets).toEqual({ hits: [], total: 0 });
@@ -546,6 +548,61 @@ describe('SearchService', () => {
       ]);
     });
 
+    it('purchase and supplier hits carry display fields only — never line descriptions or contact names (#1499, SEC-061)', async () => {
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await service.search({
+        q: 'thinkpad',
+        entities: ['purchases', 'suppliers'],
+        limit: 10,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        {
+          queries: Array<{ indexUid: string; attributesToRetrieve?: string[] }>;
+        },
+      ];
+      const byIndex = new Map(
+        params.queries.map((query) => [query.indexUid, query]),
+      );
+      expect(byIndex.get('purchases')?.attributesToRetrieve).toEqual([
+        'id',
+        'reference',
+        'supplierName',
+        'invoiceNumbers',
+        'status',
+        'orderDate',
+        'createdAt',
+      ]);
+      expect(byIndex.get('suppliers')?.attributesToRetrieve).toEqual([
+        'id',
+        'name',
+        'taxId',
+      ]);
+    });
+
+    it('upsertMany writes every document in one engine task, and skips an empty batch', () => {
+      const docs = [{ id: 'po1' }, { id: 'po2' }];
+      service.upsertMany('purchases', docs);
+      service.upsertMany('purchases', []);
+      expect(index.addDocuments).toHaveBeenCalledTimes(1);
+      expect(index.addDocuments).toHaveBeenCalledWith(docs, {
+        primaryKey: 'id',
+      });
+    });
+
+    it('upsertMany swallows a rejected addDocuments and logs every id (fire-and-forget)', async () => {
+      index.addDocuments.mockRejectedValueOnce(new Error('meili down'));
+
+      expect(() =>
+        service.upsertMany('purchases', [{ id: 'po1' }, { id: 'po2' }]),
+      ).not.toThrow();
+      await Promise.resolve();
+      await Promise.resolve();
+      const [meta] = logger.error.mock.calls[0] as [{ ids: string[] }];
+      expect(meta.ids).toEqual(['po1', 'po2']);
+    });
+
     it('search defaults to every index when entities is omitted', async () => {
       client.multiSearch.mockResolvedValue({ results: [] });
 
@@ -562,6 +619,8 @@ describe('SearchService', () => {
         'applications',
         'infra',
         'consumables',
+        'purchases',
+        'suppliers',
       ]);
     });
 
@@ -646,6 +705,8 @@ describe('SearchService', () => {
         'degraded',
         'infra',
         'locations',
+        'purchases',
+        'suppliers',
         'users',
       ]);
       expect(result.assets).toEqual({ hits: [], total: 0 });
@@ -675,7 +736,7 @@ describe('SearchService', () => {
             articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
             users: { numberOfDocuments: 3 },
             infra: { numberOfDocuments: 4 },
-            // locations + applications + consumables absent from the map -> never created -> need rebuild
+            // locations + applications + consumables + purchases + suppliers absent -> never created -> rebuild
           },
         });
 
@@ -686,6 +747,8 @@ describe('SearchService', () => {
           'articles',
           'consumables',
           'locations',
+          'purchases',
+          'suppliers',
         ]);
       });
 
@@ -699,10 +762,32 @@ describe('SearchService', () => {
             applications: { numberOfDocuments: 1 },
             infra: { numberOfDocuments: 1 },
             consumables: { numberOfDocuments: 1 },
+            purchases: { numberOfDocuments: 1 },
+            suppliers: { numberOfDocuments: 1 },
           },
         });
 
         expect(await service.emptyOrMissingIndexes()).toEqual([]);
+      });
+
+      it('after an upgrade, reports exactly the two new purchase indexes (#1499) — the boot self-heal builds them', async () => {
+        // An instance that ran the previous release: the seven older indexes are populated.
+        client.getStats.mockResolvedValue({
+          indexes: {
+            assets: { numberOfDocuments: 1 },
+            articles: { numberOfDocuments: 1 },
+            users: { numberOfDocuments: 1 },
+            locations: { numberOfDocuments: 1 },
+            applications: { numberOfDocuments: 1 },
+            infra: { numberOfDocuments: 1 },
+            consumables: { numberOfDocuments: 1 },
+          },
+        });
+
+        expect(await service.emptyOrMissingIndexes()).toEqual([
+          'purchases',
+          'suppliers',
+        ]);
       });
     });
   });
