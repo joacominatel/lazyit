@@ -37,14 +37,19 @@ export class PurchaseSearchSync {
   }
 
   /**
-   * Re-project one supplier — upsert when live, remove when archived or gone — and every live purchase
-   * that names it, so a rename reaches the purchases' `supplierName`. A supplier merge (#1496) calls this
-   * for the surviving supplier (its purchases now include the moved ones) and for the merged one (removed
-   * once archived).
+   * Re-project one supplier — upsert when live, remove when archived or gone — and, unless `purchases` is
+   * false, every live purchase that names it, so a rename reaches the purchases' `supplierName`. Pass
+   * `purchases: false` when the write cannot change what a purchase document holds: a create (no purchases
+   * yet), an archive or restore (an archived supplier keeps its name on its purchases), an edit that leaves
+   * the name alone. A supplier merge (#1496) re-projects the kept supplier with its purchases (the moved
+   * ones included) and removes the archived duplicate.
    */
-  supplier(id: string): void {
+  supplier(
+    id: string,
+    { purchases = true }: { purchases?: boolean } = {},
+  ): void {
     if (!this.search.enabled) return;
-    void this.run('supplier', id, () => this.syncSupplier(id));
+    void this.run('supplier', id, () => this.syncSupplier(id, { purchases }));
   }
 
   /** The awaitable pass behind {@link purchase}, for the tests. */
@@ -58,20 +63,24 @@ export class PurchaseSearchSync {
   }
 
   /** The awaitable pass behind {@link supplier}, for the tests. */
-  async syncSupplier(id: string): Promise<void> {
+  async syncSupplier(
+    id: string,
+    { purchases = true }: { purchases?: boolean } = {},
+  ): Promise<void> {
     const row = await this.prisma.supplier.findFirst({
       where: { id, deletedAt: null },
     });
     if (row) this.search.upsert('suppliers', projectSupplier(row));
     else this.search.remove('suppliers', id);
 
+    if (!purchases) return;
     // An archived supplier keeps its name on its purchases (the purchase page still shows it), so its
-    // purchases are re-projected either way.
-    const purchases = await this.prisma.purchaseOrder.findMany({
+    // purchases are re-projected whether it is live or not.
+    const rows = await this.prisma.purchaseOrder.findMany({
       where: { supplierId: id, deletedAt: null },
       select: PURCHASE_ORDER_SEARCH_SELECT,
     });
-    this.search.upsertMany('purchases', purchases.map(projectPurchaseOrder));
+    this.search.upsertMany('purchases', rows.map(projectPurchaseOrder));
   }
 
   private async run(

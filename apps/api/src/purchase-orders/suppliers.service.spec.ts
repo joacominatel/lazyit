@@ -130,7 +130,28 @@ describe('SuppliersService (ADR-0099 §2)', () => {
       });
       await synced.restore(ID);
 
-      expect(searchSync.supplier.mock.calls).toEqual([[ID], [ID], [ID], [ID]]);
+      // Only the rename fans out to the supplier's purchases; an archive or restore keeps the name on them.
+      expect(searchSync.supplier.mock.calls).toEqual([
+        [ID, { purchases: false }],
+        [ID, { purchases: true }],
+        [ID, { purchases: false }],
+        [ID, { purchases: false }],
+      ]);
+    });
+
+    it('an edit that keeps the name re-indexes the supplier but not its purchases', async () => {
+      supplier.findFirst.mockResolvedValue({
+        id: ID,
+        name: 'Compumundo',
+        deletedAt: null,
+      });
+      supplier.update.mockResolvedValue({ id: ID, name: 'Compumundo' });
+
+      await synced.update(ID, { taxId: '30-2' });
+
+      expect(searchSync.supplier).toHaveBeenCalledWith(ID, {
+        purchases: false,
+      });
     });
 
     it('never touches the index when the supplier does not exist (404)', async () => {
@@ -474,7 +495,10 @@ describe('SuppliersService.merge (#1496)', () => {
       ['clpo00000000000000000001'],
     );
     await synced(prisma).merge(KEPT, DUP, admin);
-    expect(searchSync.supplier.mock.calls).toEqual([[KEPT], [DUP]]);
+    expect(searchSync.supplier.mock.calls).toEqual([
+      [KEPT],
+      [DUP, { purchases: false }],
+    ]);
 
     searchSync.supplier.mockClear();
     const refused = makePrisma();

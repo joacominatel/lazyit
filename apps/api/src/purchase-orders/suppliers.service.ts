@@ -139,14 +139,15 @@ export class SuppliersService {
 
   async create(data: CreateSupplier) {
     const supplier = await this.prisma.supplier.create({ data });
-    this.searchSync?.supplier(supplier.id);
+    this.searchSync?.supplier(supplier.id, { purchases: false });
     return supplier;
   }
 
   async update(id: string, data: UpdateSupplier) {
     await this.findOne(id);
     const supplier = await this.prisma.supplier.update({ where: { id }, data });
-    this.searchSync?.supplier(id);
+    // Only a rename changes what its purchases' documents hold.
+    this.searchSync?.supplier(id, { purchases: data.name !== undefined });
     return supplier;
   }
 
@@ -157,7 +158,7 @@ export class SuppliersService {
       where: { id },
       data: { deletedAt: new Date() },
     });
-    this.searchSync?.supplier(id);
+    this.searchSync?.supplier(id, { purchases: false });
     return supplier;
   }
 
@@ -175,7 +176,7 @@ export class SuppliersService {
       where: { id },
       data: { deletedAt: null },
     });
-    this.searchSync?.supplier(id);
+    this.searchSync?.supplier(id, { purchases: false });
     return restored;
   }
 
@@ -273,7 +274,7 @@ export class SuppliersService {
     // Global search (#1499), after commit: the kept supplier (its filled fields) and every purchase now
     // naming it — the moved ones included — are re-indexed; the archived duplicate leaves the index.
     this.searchSync?.supplier(targetId);
-    this.searchSync?.supplier(sourceId);
+    this.searchSync?.supplier(sourceId, { purchases: false });
     return merged;
   }
 

@@ -125,6 +125,20 @@ describe('PurchaseSearchSync (#1499)', () => {
     ]);
   });
 
+  it('skips the purchases fan-out when the write cannot change a purchase document', async () => {
+    const { sync, search, prisma } = setup();
+    prisma.supplier.findFirst.mockResolvedValue(SUPPLIER);
+
+    await sync.syncSupplier('s1', { purchases: false });
+
+    expect(search.upsert).toHaveBeenCalledWith(
+      'suppliers',
+      expect.objectContaining({ id: 's1' }),
+    );
+    expect(prisma.purchaseOrder.findMany).not.toHaveBeenCalled();
+    expect(search.upsertMany).not.toHaveBeenCalled();
+  });
+
   it('the fire-and-forget entry points never throw on a failed read', async () => {
     const { sync, search, prisma } = setup();
     prisma.purchaseOrder.findFirst.mockRejectedValue(new Error('db down'));
