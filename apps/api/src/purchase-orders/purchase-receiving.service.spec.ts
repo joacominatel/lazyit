@@ -25,6 +25,7 @@ import { PurchaseOrdersService } from './purchase-orders.service';
 import {
   PurchaseReceivingService,
   STOCK_RECEIPT_REASON,
+  stockReceiptReason,
 } from './purchase-receiving.service';
 
 const PO = 'clpo00000000000000000001';
@@ -883,7 +884,7 @@ describe('receive into stock — a CONSUMABLE line (#1476)', () => {
         consumableId: CONSUMABLE,
         type: 'IN',
         quantity: 4,
-        reason: STOCK_RECEIPT_REASON,
+        reason: 'Received from purchase OC-4512',
         notes: 'box 1 of 3',
         performedById: USER_ID,
         purchaseOrderLineId: LINE,
@@ -915,9 +916,49 @@ describe('receive into stock — a CONSUMABLE line (#1476)', () => {
     expect(result.overReceived).toBe(false);
   });
 
-  it('the reason names no supplier or reference (D-A: the ledger is read without purchaseOrder:read)', () => {
-    expect(STOCK_RECEIPT_REASON).not.toMatch(/OC-4512|Acme/);
-    expect(STOCK_RECEIPT_REASON).toBe('Received from a purchase');
+  it('the reason names the purchase reference, never the supplier or the company (CEO decision, #1494)', async () => {
+    const { service, tx } = stockSetup();
+    await service.receiveStock(PO, LINE, { quantity: 1 }, member);
+    const [{ reason }] = written(tx.consumableMovement.create);
+    expect(reason).toBe('Received from purchase OC-4512');
+    expect(reason).not.toMatch(/Acme|A-0003/);
+  });
+
+  it.each([null, '', '   '])(
+    'a purchase with no reference (%p) falls back to the fixed reason',
+    async (reference) => {
+      const { service, tx, reads } = stockSetup();
+      reads.purchaseOrder.findFirst.mockResolvedValue(
+        purchaseRow({ reference }),
+      );
+      await service.receiveStock(PO, LINE, { quantity: 1 }, member);
+      expect(written(tx.consumableMovement.create)).toEqual([
+        expect.objectContaining({ reason: 'Received from a purchase' }),
+      ]);
+      expect(STOCK_RECEIPT_REASON).toBe('Received from a purchase');
+    },
+  );
+
+  it('an overlong reference is cut to keep the reason within the 500-character movement limit', async () => {
+    const { service, tx, reads } = stockSetup();
+    reads.purchaseOrder.findFirst.mockResolvedValue(
+      purchaseRow({ reference: 'X'.repeat(600) }),
+    );
+    await service.receiveStock(PO, LINE, { quantity: 1 }, member);
+    const [{ reason }] = written(tx.consumableMovement.create);
+    expect(reason).toHaveLength(500);
+    expect(reason).toMatch(/^Received from purchase X+…$/);
+  });
+
+  it('the cut never splits a surrogate pair, and markup in a reference is kept as written (ADR-0029)', () => {
+    // The cut keeps 476 code units of the reference: the 476th is the first half of the emoji's pair.
+    const reference = `${'X'.repeat(475)}😀${'Y'.repeat(50)}`;
+    const reason = stockReceiptReason(reference);
+    expect(reason.length).toBeLessThanOrEqual(500);
+    expect(reason).toMatch(/^Received from purchase X{475}…$/);
+    expect(stockReceiptReason('<b>OC-1</b>')).toBe(
+      'Received from purchase <b>OC-1</b>',
+    );
   });
 
   it('locks the purchase (KEY SHARE) inside the movement transaction, before the stock moves', async () => {
