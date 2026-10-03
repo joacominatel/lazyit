@@ -31,7 +31,7 @@ Purchases has its own permissions, separate from the inventory ones:
 | --- | :---: | :---: | :---: |
 | **View purchases & suppliers** | Yes | Yes | No |
 | **Record & edit purchases** (purchases, lines and suppliers) | Yes | Yes | No |
-| **Delete purchases & suppliers** (archive and restore) | Yes | No | No |
+| **Delete purchases & suppliers** (archive, restore, and merge duplicate suppliers) | Yes | No | No |
 
 **Viewers have no access by default**, because purchases carry prices and suppliers. An administrator
 can grant it from the role permissions screen (see [Permissions](/help/permissions)) — but permissions
@@ -420,8 +420,9 @@ Every purchase keeps an append-only **activity** log: who recorded it, who chang
 added, edited or removed a line — with a price or quantity change shown as *before → after* — who received,
 linked, moved or unlinked units, who received stock on a consumable line, who applied seats from a license
 line, who cancelled remaining units (with the reason), who added or removed a document or changed its type,
-who read a document with AI (and with which provider — never the values read), and whether the purchase was
-created from selected assets. It cannot be edited or deleted.
+who read a document with AI (and with which provider — never the values read), whether the purchase was
+created from selected assets, and whether its supplier was merged into another one. It cannot be edited or
+deleted.
 
 ## Suppliers
 
@@ -435,6 +436,25 @@ purchases made from it.
 
 Names and tax IDs are not unique, so lazyit never refuses a duplicate; it suggests instead. Typing a
 tax ID that another supplier already has tells you whose it is.
+
+### Merging duplicate suppliers
+
+When the same supplier was recorded twice, an administrator can merge them. Open the duplicate — the one
+that should go — and choose **Merge into…**, then pick the **supplier that stays**. Before you confirm, the
+dialog shows what will happen:
+
+- **The purchases that move.** Every purchase of the duplicate moves to the supplier that stays, archived
+  purchases included, so the whole history ends up in one place.
+- **The details that are filled.** Any detail the supplier that stays has **empty** — tax ID, website, a
+  contact's name, email or phone, notes — takes the duplicate's value. **Nothing is overwritten**: where both
+  have a value, the one that stays keeps its own, and the dialog lists the duplicate's as *not copied*. The name
+  is never changed. Details are filled one by one, so check a contact that ends up with the name from one
+  supplier and the email from the other, and edit it if needed.
+- **The duplicate is archived**, not deleted. It can be restored from the archived view, but it comes back
+  with no purchases: restoring does not undo the merge.
+
+Each purchase that moved records the merge in its activity (*Supplier X merged into Y*), with who did it.
+After the merge, the page of the supplier that stays opens.
 
 ## Archiving
 

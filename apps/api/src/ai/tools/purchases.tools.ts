@@ -2596,6 +2596,12 @@ export const purchasesToolset: AiToolset = {
         'Suppliers page; not part of the chat purchase flow (#1478).',
     ),
     unexposed(
+      SuppliersController,
+      ['merge', 'mergePreview'],
+      'Merging suppliers is an ADMIN-only clean-up that archives the duplicate and re-points every purchase ' +
+        '(#1496): done from the supplier page after reviewing its preview, not part of the chat purchase flow.',
+    ),
+    unexposed(
       PurchaseOrderAttachmentsController,
       ['remove', 'updateLabel'],
       'Document edits are human-only routes, done on the purchase page (ADR-0099 §10); asset documents are not ' +

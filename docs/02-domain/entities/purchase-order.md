@@ -53,6 +53,9 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   supplier, a reference, or one line. A generic supplier is fine. The rule holds after creation too: a
   header update that clears the supplier and the reference of a purchase with no live line is a `400`, and
   so is removing the last line of a purchase with neither ([[purchase-order-line]]).
+- **A supplier merge re-points the purchase** (#1496): when its supplier is merged into another one, the
+  purchase — live or archived — moves to the supplier that stays and records `SUPPLIER_MERGED`
+  ([[supplier]], [[purchase-order-event]]).
 - The supplier and the delivery location a write names must be **live** (`400` otherwise — a soft-deleted
   row would still pass the FK).
 - **Currency** is an **optional free-text label** the user types ("ARS", "USD", "u$s"), suggested by smart

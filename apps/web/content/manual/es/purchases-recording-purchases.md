@@ -31,7 +31,7 @@ Compras tiene sus propios permisos, separados de los de inventario:
 | --- | :---: | :---: | :---: |
 | **Ver compras y proveedores** | Sí | Sí | No |
 | **Registrar y editar compras** (compras, líneas y proveedores) | Sí | Sí | No |
-| **Eliminar compras y proveedores** (archivar y restaurar) | Sí | No | No |
+| **Eliminar compras y proveedores** (archivar, restaurar y fusionar proveedores duplicados) | Sí | No | No |
 
 **El Lector no tiene acceso por defecto**, porque las compras llevan precios y proveedores. Un
 administrador puede concederlo desde la pantalla de permisos de roles (ver [Permisos](/help/permissions))
@@ -435,8 +435,8 @@ estado, quién agregó, editó o quitó una línea — con un cambio de precio o
 *antes → después* —, quién recibió, vinculó, movió o desvinculó unidades, quién recibió stock en una línea
 de consumible, quién aplicó asientos de una línea de licencia, quién canceló unidades restantes (con el
 motivo), quién agregó o quitó un documento o cambió su tipo, quién leyó un documento con IA (y con qué
-proveedor — nunca los valores leídos) y si la compra se creó a partir de activos seleccionados. No se puede
-editar ni borrar.
+proveedor — nunca los valores leídos), si la compra se creó a partir de activos seleccionados y si su
+proveedor se fusionó en otro. No se puede editar ni borrar.
 
 ## Proveedores
 
@@ -450,6 +450,25 @@ garantía — y notas. Su página lista las compras que se le hicieron.
 
 Los nombres y los ID fiscales no son únicos, así que lazyit nunca rechaza un duplicado; en cambio,
 sugiere. Escribir un ID fiscal que otro proveedor ya tiene te dice de quién es.
+
+### Fusionar proveedores duplicados
+
+Cuando el mismo proveedor quedó cargado dos veces, un administrador puede fusionarlos. Abre el duplicado —
+el que tiene que irse — y elige **Fusionar en…**; después elige el **proveedor que queda**. Antes de
+confirmar, el diálogo muestra lo que va a pasar:
+
+- **Las compras que pasan.** Todas las compras del duplicado pasan al proveedor que queda, incluidas las
+  archivadas, así toda la historia queda en un solo lugar.
+- **Los datos que se completan.** Cada dato que el proveedor que queda tiene **vacío** — ID fiscal, sitio
+  web, el nombre, el email o el teléfono de un contacto, las notas — toma el valor del duplicado. **No se pisa
+  nada**: donde los dos tienen un valor, el que queda conserva el suyo, y el diálogo lista el del duplicado como
+  *no se copia*. El nombre nunca cambia. Los datos se completan uno por uno, así que revisa un contacto que
+  termine con el nombre de un proveedor y el email del otro, y edítalo si hace falta.
+- **El duplicado se archiva**, no se borra. Se puede restaurar desde la vista de archivados, pero vuelve sin
+  compras: restaurarlo no deshace la fusión.
+
+Cada compra que pasó registra la fusión en su actividad (*Proveedor X fusionado en Y*), con quién la hizo.
+Después de fusionar se abre la página del proveedor que queda.
 
 ## Archivar
 

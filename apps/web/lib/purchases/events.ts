@@ -57,6 +57,8 @@ export type PurchaseEventView =
       warningCount: number | null;
     }
   | { kind: "createdFromAssets"; linked: number | null; lineCount: number | null; failed: number }
+  // Merging suppliers (#1496): the names as they were when merged.
+  | { kind: "supplierMerged"; from: string | null; to: string | null }
   | { kind: "deleted" }
   | { kind: "restored" }
   | { kind: "other"; eventType: string };
@@ -181,6 +183,11 @@ export function describePurchaseEvent(event: Pick<PurchaseOrderEvent, "eventType
         lineCount: num(p.lineCount),
         failed: count(p.failed) ?? num(p.failed) ?? 0,
       };
+    case "SUPPLIER_MERGED": {
+      const name = (side: unknown) =>
+        side !== null && typeof side === "object" ? str((side as Record<string, unknown>).name) : null;
+      return { kind: "supplierMerged", from: name(p.from), to: name(p.to) };
+    }
     case "DELETED":
       return { kind: "deleted" };
     case "RESTORED":

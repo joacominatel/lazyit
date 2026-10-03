@@ -5,7 +5,7 @@
  * refusal.
  */
 
-import type { CreateSupplier, Supplier, UpdateSupplier } from "@lazyit/shared";
+import { type CreateSupplier, type Supplier, SUPPLIER_MERGE_FIELDS, type UpdateSupplier } from "@lazyit/shared";
 
 /** How the supplier name typed on a purchase resolves. */
 export type SupplierResolution =
@@ -56,17 +56,8 @@ export function taxIdOwner(
 /** The supplier form's values: text, `""` (or undefined) for blank. */
 export type SupplierDraft = { name: string } & Partial<Record<SupplierTextField, string>>;
 
-const SUPPLIER_TEXT_FIELDS = [
-  "taxId",
-  "website",
-  "salesContactName",
-  "salesContactEmail",
-  "salesContactPhone",
-  "supportContactName",
-  "supportContactEmail",
-  "supportContactPhone",
-  "notes",
-] as const;
+/** Every optional text field — the shared list a merge fills (the supplier's fields minus the name). */
+const SUPPLIER_TEXT_FIELDS = SUPPLIER_MERGE_FIELDS;
 type SupplierTextField = (typeof SUPPLIER_TEXT_FIELDS)[number];
 
 /** A saved supplier → the form values. */

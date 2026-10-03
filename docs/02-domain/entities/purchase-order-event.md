@@ -3,13 +3,13 @@ title: PurchaseOrderEvent
 tags: [domain, entity, purchases, audit]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-03
 ---
 
 # PurchaseOrderEvent
 
 > 🟢 built (#1472; receiving, linking and document events #1473; stock receipts and document labels #1476;
-> license applies, extraction runs and creation from assets #1477) · Area: Purchases ·
+> license applies, extraction runs and creation from assets #1477; supplier merges #1496) · Area: Purchases ·
 > [[0099-purchases-scope-model-and-optionality]]
 
 > [!note] Built — model, writer and read (#1472)
@@ -72,6 +72,7 @@ default ([[0006-soft-delete-and-auditing]]).
 | `LICENSE_APPLIED` | apply a `LICENSE` line to its application (#1477), in the same transaction as the application write | `{ lineId, applicationId, seatsAdded, seatsPurchased: { from, to } \| null, renewalDate: { from, to } \| null, appliedSeats: { from, to }, overApplied }` |
 | `EXTRACTION_RUN` | a document of the purchase was sent to the AI provider to draft it (#1477) — on success and on a failure after the request; not when the call failed before any I/O (the document never left) | `{ extractionId, attachmentId, outcome: SUCCEEDED \| FAILED, errorCode, provider, model, inputTokens, outputTokens, lineCount, warningCount }` — **metadata only**: never a value read from the document |
 | `CREATED_FROM_ASSETS` | create a purchase from selected assets (#1477), right after its `CREATED`; each line's links follow as `ASSET_LINKED` | `{ lineCount, linkedAssetIds, failed }` (`failed` is a count) |
+| `SUPPLIER_MERGED` | the purchase's supplier was merged into another one (#1496) — one row per moved purchase, archived purchases included, written in one insert in the merge's transaction | `{ from: { id, name }, to: { id, name }, filledFields }` — the two suppliers as named at the merge, and the fields of the supplier that stays filled from the duplicate |
 
 Money in a payload is a JSON number of minor units. A receive's units are separate transactions (the
 asset-tag counter, [[0089-bulk-receiving-and-checkout-acknowledgement]]), so `UNITS_RECEIVED` is appended
