@@ -899,6 +899,19 @@ None reopens a CEO decision.
   follows the scanned serials** — only for scans; pasting keeps #1475's "serials must match the quantity" — so
   a scanned delivery never trips that rule. *Receive delivery* across lines (the scanner filling the focused
   line) is not part of this unit.
+  *Fixed 2026-10-03 (#1506): a Mac's built-in webcam read neither a clear Code 128 serial here nor a QR label
+  on `/assets/scan`.* `html5-qrcode` decodes a canvas the size of its scan box **in layout pixels**, so a
+  viewfinder ~430 px wide was decoded at ~390 px from a 640×480 stream (no size was requested) — too few
+  pixels per bar, and a fixed-focus laptop webcam can't make up for it by going closer. Now the camera is
+  asked for HD (`ideal` 1920×1080), the viewfinder is laid out at 1280 px and only **scaled down for
+  display** (`CameraViewfinder`; a portrait phone stream is capped at 60% of the screen and centred on the
+  scan box), `disableFlip` drops the library's second decode of the same pixels on every missed frame, and
+  both modes read one format list — QR, Data Matrix, Code 128/39/93, EAN-13/8, UPC-A/E, ITF — instead of
+  the library's seventeen (the lookup keeps reading tag-sticker barcodes, which then search). The pure
+  setup and feedback rules live in `lib/utils/camera-scan.ts`. Feedback: a *Scanning…* badge, a green
+  check flash and a short vibration when a read is taken, and an `aria-live` tip (sharpness, light, or
+  type it) after 6 s without seeing a code; no sound. `html5-qrcode` 2.3.8 is in maintenance mode, which
+  is why the decode-size limit is worked around in layout rather than fixed in the library.
 - **Consequences.** The per-line list is capped at 50 with no paging; the "next upload" type field is one more
   control in the Documents header (optional, cleared after each upload); the scanner depends on the device's
   camera and browser support, with typing as the fallback.
