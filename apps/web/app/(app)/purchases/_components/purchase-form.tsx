@@ -11,7 +11,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
 import { LocationCombobox } from "@/components/location-combobox";
@@ -42,6 +42,7 @@ import {
   toUpdatePurchase,
 } from "@/lib/purchases/payload";
 import { referenceDuplicate } from "@/lib/purchases/reference";
+import { isSaveShortcut, isUnfocusedTarget } from "@/lib/purchases/save-shortcut";
 import { runExclusive } from "@/lib/purchases/submit-guard";
 import { resolveSupplier } from "@/lib/purchases/supplier";
 import { formatMoney, parseMoneyInput } from "@/lib/utils/money";
@@ -97,6 +98,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
   const [saving, setSaving] = useState(false);
   // A save is several requests; the ref (not the state, which lags a render) keeps it to one at a time.
   const submitting = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const titleOf = usePurchaseTitle();
 
   const [header, setHeader] = useState<PurchaseHeaderDraft>(() =>
@@ -210,16 +212,25 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
     return entries.length > 0 ? groupMoneyTotals(entries)[0] : undefined;
   }, [lines, locale, currency]);
 
-  /** Enter in a line field adds the next line; Ctrl/Cmd+Enter anywhere saves. */
+  /** Enter in a line field adds the next line; Ctrl/Cmd+Enter anywhere saves (`lib/purchases/save-shortcut`). */
   function onFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
-    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-    if (event.ctrlKey || event.metaKey) {
-      event.preventDefault();
-      // A held or repeated shortcut must not submit again while a save is running.
-      if (saving || event.repeat || submitting.current) return;
-      event.currentTarget.requestSubmit();
-    }
+    if (!isSaveShortcut(event.nativeEvent)) return;
+    event.preventDefault();
+    // A held or repeated shortcut must not submit again while a save is running.
+    if (saving || event.repeat || submitting.current) return;
+    event.currentTarget.requestSubmit();
   }
+  // With focus on nothing (a click on blank space, a removed line) the key never reaches the form (#1508).
+  useEffect(() => {
+    function onDocumentKeyDown(event: globalThis.KeyboardEvent) {
+      if (!isSaveShortcut(event) || !isUnfocusedTarget(event.target, document) || !formRef.current) return;
+      event.preventDefault();
+      if (event.repeat || submitting.current) return;
+      formRef.current.requestSubmit();
+    }
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => document.removeEventListener("keydown", onDocumentKeyDown);
+  }, []);
   function onLinesKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Enter" || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
@@ -393,6 +404,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseOrderDetail }) {
 
   return (
     <form
+      ref={formRef}
       id={FORM_ID}
       onSubmit={onSubmit}
       onKeyDown={onFormKeyDown}

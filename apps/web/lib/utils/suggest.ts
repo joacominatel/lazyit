@@ -288,8 +288,9 @@ export type SuggestKeyAction =
  * The keyboard model of a smart-entry field, kept pure so it is testable without a DOM:
  *
  * - ↓ / ↑ open a closed list (on the first / last option) or move the highlight, wrapping;
- * - Enter takes the highlighted option; with Ctrl/Cmd it keeps the text as typed; with the list
- *   closed or nothing highlighted it does nothing, so the form submits as usual;
+ * - Enter takes the highlighted option; with Ctrl/Cmd it keeps the text as typed and the key travels
+ *   on, so a form's Ctrl/Cmd+Enter save follows (the purchase form, #1508); with the list closed or
+ *   nothing highlighted it does nothing, so the form submits as usual;
  * - Tab takes the highlighted option and lets focus move on; Shift+Tab, or nothing highlighted, just
  *   closes the list;
  * - Esc closes the list and keeps the text.
