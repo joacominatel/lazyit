@@ -13,6 +13,7 @@ type Op =
   | { kind: 'createIndex'; uid: string }
   | { kind: 'addDocuments'; uid: string; ids: string[] }
   | { kind: 'updateFilterableAttributes'; uid: string; attributes: string[] }
+  | { kind: 'updateSearchableAttributes'; uid: string; attributes: string[] }
   | {
       kind: 'swap';
       indexes: [string, string];
@@ -67,6 +68,10 @@ function fakeClient(opts: FakeOptions = {}): {
       updateFilterableAttributes: (attributes: string[]) =>
         task(() => {
           ops.push({ kind: 'updateFilterableAttributes', uid, attributes });
+        }),
+      updateSearchableAttributes: (attributes: string[]) =>
+        task(() => {
+          ops.push({ kind: 'updateSearchableAttributes', uid, attributes });
         }),
     }),
     swapIndexes: (params) =>
@@ -216,6 +221,46 @@ describe('reindexIndex (authoritative rebuild)', () => {
     const swapIdx = ops.findIndex((op) => op.kind === 'swap');
     expect(filterableIdx).toBeLessThan(addIdx);
     expect(filterableIdx).toBeLessThan(swapIdx);
+  });
+
+  it('pins the PURCHASES and SUPPLIERS searchable attributes on the temp index before docs and swap (#1499)', async () => {
+    for (const [index, attributes] of [
+      [
+        'purchases',
+        ['reference', 'supplierName', 'invoiceNumbers', 'lineDescriptions'],
+      ],
+      [
+        'suppliers',
+        ['name', 'taxId', 'salesContactName', 'supportContactName'],
+      ],
+    ] as const) {
+      const { client, ops } = fakeClient();
+      await reindexIndex(client, index, docs('x1'), RUN);
+
+      const searchableIdx = ops.findIndex(
+        (op) => op.kind === 'updateSearchableAttributes',
+      );
+      // Dates and status are display-only: they are not in the list, so they never match a query.
+      expect(ops[searchableIdx]).toEqual({
+        kind: 'updateSearchableAttributes',
+        uid: `${index}__reindex_tmp_${RUN}`,
+        attributes: [...attributes],
+      });
+      expect(searchableIdx).toBeLessThan(
+        ops.findIndex((op) => op.kind === 'addDocuments'),
+      );
+      expect(searchableIdx).toBeLessThan(
+        ops.findIndex((op) => op.kind === 'swap'),
+      );
+    }
+  });
+
+  it('leaves the searchable attributes at the engine default on every other index (assets)', async () => {
+    const { client, ops } = fakeClient();
+    await reindexIndex(client, 'assets', docs('a1'));
+    expect(ops.some((op) => op.kind === 'updateSearchableAttributes')).toBe(
+      false,
+    );
   });
 
   it('does NOT set filterable attributes on an index that declares none (users)', async () => {

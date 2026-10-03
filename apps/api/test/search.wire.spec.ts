@@ -336,6 +336,25 @@ describe('Meilisearch wire (pinned server image)', () => {
       orderDate: '2026-09-12T00:00:00.000Z',
       createdAt: '2026-09-12T10:30:00.000Z',
     });
+    // Dates and status are display-only (searchable attributes pinned in reindex.ts): a date token like
+    // "2026" or "10" — both in the fixture's ISO dates — matches no purchase.
+    for (const token of ['2026', '10', 'ORDERED']) {
+      const dated = await search.search({
+        q: token,
+        entities: ['purchases'],
+        limit: 5,
+      });
+      expect(dated.purchases?.total).toBe(0);
+    }
+    expect(
+      (await client.index('purchases').getSearchableAttributes()) ?? [],
+    ).toEqual([
+      'reference',
+      'supplierName',
+      'invoiceNumbers',
+      'lineDescriptions',
+    ]);
+
     const supplier = await search.search({
       q: 'Gómez',
       entities: ['suppliers'],
