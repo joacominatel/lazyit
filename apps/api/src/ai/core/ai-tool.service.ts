@@ -36,6 +36,7 @@ import {
 } from './action-log.service';
 import { mapToolError } from './error-mapper';
 import {
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
   inputHashOf,
   mergeRefs,
   requiresStepUp,
@@ -96,6 +97,9 @@ interface ApprovalProvenance {
  * identity, credentials, configuration and outbound integrations (security.md §6.2 T3/T4, INV-AI-15) —
  * always wait for the user, and so does any write in a turn that read other-authored content: injected
  * text never chains an unattended write (security.md §6.1, §6.2).
+ *
+ * Also never automatic (#1478; ADR-0099 §11, UX decision D11): a tool registered `neverAutoApprove` (every
+ * purchase change), and a preview that generates assets or changes money (`AI_NEVER_AUTO_APPROVE_WARNINGS`).
  */
 function autoEligible(
   toolClass: string,
@@ -103,11 +107,17 @@ function autoEligible(
     AiActionPreview,
     'elevated' | 'stepUpRequired' | 'warnings' | 'untrustedSources'
   >,
+  tool: RegisteredAiTool | undefined,
 ): boolean {
   return (
     toolClass === 'write' &&
+    tool !== undefined &&
+    tool.descriptor.neverAutoApprove !== true &&
     !preview.elevated &&
     !requiresStepUp(preview) &&
+    !preview.warnings.some((w) =>
+      (AI_NEVER_AUTO_APPROVE_WARNINGS as readonly string[]).includes(w),
+    ) &&
     preview.untrustedSources.length === 0
   );
 }
@@ -436,14 +446,16 @@ export class AiToolService {
           addedWarnings: added,
         });
       }
+      const registered = this.registry.get(row.toolName);
       if (
         auto &&
         (fresh?.ok !== true ||
-          !autoEligible(row.toolClass, storedPreview) ||
-          !autoEligible(row.toolClass, fresh.preview))
+          !autoEligible(row.toolClass, storedPreview, registered) ||
+          !autoEligible(row.toolClass, fresh.preview, registered))
       ) {
-        // Never automatic: an elevated action, or a write whose stored or fresh preview needs a step-up
-        // (or whose fresh preview cannot be built), stays pending and the runtime shows the user its card.
+        // Never automatic: an elevated action, a tool that is never auto-approved, or a write whose stored or
+        // fresh preview needs a step-up, creates assets or changes money (or whose fresh preview cannot be
+        // built), stays pending and the runtime shows the user its card.
         throw new ConflictException(
           decisionError(
             'AUTO_APPROVE_NOT_ELIGIBLE',

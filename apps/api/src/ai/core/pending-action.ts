@@ -46,8 +46,7 @@ export interface AiPendingAction {
 
 /** What `propose` answers: the stored pending action, or the tool result to hand the model instead. */
 export type AiProposal =
-  | { ok: true; action: AiPendingAction }
-  | { ok: false; result: AiToolResult };
+  { ok: true; action: AiPendingAction } | { ok: false; result: AiToolResult };
 
 /** What the caller of `approve` has verified before calling it (synthesis §4.4; security.md §6.2). */
 export interface AiApproveOptions {
@@ -88,6 +87,16 @@ export const AI_STEP_UP_WARNINGS: readonly AiPreviewWarningCode[] = [
   'PRIVILEGE_GRANT',
   'CREDENTIAL_DELIVERY',
   'CRITICAL_APPLICATION',
+];
+
+/**
+ * Preview warnings whose action is never approved automatically, whatever the tool (#1478; ADR-0099 §11,
+ * UX decision D11): a change that generates assets or sets or changes money always waits for the user's
+ * card. They need no step-up, and the web also leaves such a page out of "Approve all".
+ */
+export const AI_NEVER_AUTO_APPROVE_WARNINGS: readonly AiPreviewWarningCode[] = [
+  'CREATES_ASSETS',
+  'CHANGES_MONEY',
 ];
 
 /**
