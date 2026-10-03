@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useCallback, useRef, useState } from "react";
+import { CameraViewfinder } from "@/components/camera-viewfinder";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,10 +94,7 @@ export default function AssetScanner() {
           target node; the library injects the <video> here. */}
       {showViewfinder ? (
         <div className="space-y-3">
-          <div
-            id={READER_ID}
-            className="overflow-hidden rounded-lg border bg-muted [&_video]:w-full"
-          />
+          <CameraViewfinder readerId={READER_ID} className="rounded-lg border" />
           <p className="text-center text-sm text-muted-foreground">
             {status === "starting" ? t("starting") : t("permissionHint")}
           </p>

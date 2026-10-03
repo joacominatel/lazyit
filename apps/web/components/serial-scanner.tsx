@@ -4,6 +4,7 @@ import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import { CameraViewfinder } from "@/components/camera-viewfinder";
 import { Button } from "@/components/ui/button";
 import { useCameraScanner } from "@/lib/hooks/use-camera-scanner";
 import { type LastScan, scanStep } from "@/lib/utils/scanned-serials";
@@ -11,9 +12,10 @@ import { type LastScan, scanStep } from "@/lib/utils/scanned-serials";
 /**
  * Scan serial numbers with the camera into a serials box (ADR-0099 Phase 1b, UX proposal §6, #1476) — the
  * `/assets/scan` camera (`useCameraScanner`) reading the barcodes on hardware boxes (Code 128 / 39, EAN, UPC,
- * QR…). It scans continuously: each new code goes to `onScan` with a short tick (and a vibration where the
- * phone has one), a code held in front of the camera stays silent however long it stays there, and a code
- * already in the box is reported (once it comes back into view), never added twice. *Done* closes it; the box stays editable throughout.
+ * QR…) in a wide box. It scans continuously: each new code goes to `onScan` with a short tick (and a
+ * vibration where the phone has one), a code held in front of the camera stays silent however long it stays
+ * there, and a code already in the box is reported (once it comes back into view), never added twice.
+ * *Done* closes it; the box stays editable throughout.
  *
  * Without a camera, without permission or outside HTTPS it says so and the box is typed as before.
  */
@@ -75,7 +77,7 @@ export function SerialScanner({
   return (
     <div className="space-y-2 rounded-md border p-2">
       {live ? (
-        <div id={readerId} className="overflow-hidden rounded-md bg-muted [&_video]:w-full" />
+        <CameraViewfinder readerId={readerId} className="rounded-md" />
       ) : (
         <p className="rounded-md border border-dashed px-3 py-3 text-center text-sm text-muted-foreground">
           {status === "unsupported" ? t("unsupported") : t("error")}
