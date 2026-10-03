@@ -467,6 +467,8 @@
     "subtitle": "Point your camera at an asset's QR label to open it.",
     "starting": "Starting camera…",
     "permissionHint": "Allow camera access when prompted. Scanning needs a secure (HTTPS) connection.",
+    "hint": "Hold the QR label steady inside the square — it opens as soon as it's read.",
+    "found": "Code read — opening…",
     "unsupported": "Camera scanning isn't supported on this device or browser. Enter an asset tag instead.",
     "error": "Couldn't start the camera. Check that you granted permission and are on HTTPS, or enter an asset tag below.",
     "manualLabel": "Asset tag",

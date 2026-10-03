@@ -467,6 +467,8 @@
     "subtitle": "Apunta la cámara a la etiqueta QR de un activo para abrirlo.",
     "starting": "Iniciando la cámara…",
     "permissionHint": "Permite el acceso a la cámara cuando se solicite. El escaneo requiere una conexión segura (HTTPS).",
+    "hint": "Mantén la etiqueta QR quieta dentro del cuadrado: se abre apenas se lee.",
+    "found": "Código leído: abriendo…",
     "unsupported": "El escaneo con cámara no es compatible con este dispositivo o navegador. Ingresa una etiqueta de activo.",
     "error": "No se pudo iniciar la cámara. Verifica que otorgaste permiso y que usas HTTPS, o ingresa una etiqueta de activo abajo.",
     "manualLabel": "Etiqueta de activo",

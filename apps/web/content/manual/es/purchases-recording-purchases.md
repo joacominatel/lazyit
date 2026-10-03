@@ -161,11 +161,17 @@ muestra entonces como **Recibida de más**.
 ### Escanear números de serie
 
 En la puerta del depósito, con el teléfono, **Escanear** junto a los números de serie abre la cámara en
-el mismo formulario. Apúntala al código de barras del número de serie de cada caja — se leen los códigos
-de barras habituales Code 128 y Code 39, EAN/UPC y códigos QR — y cada código nuevo se agrega en su propia
-línea con una pequeña señal (y una vibración en los teléfonos que la tienen). Un código que ya está en la
-lista no se agrega dos veces; te lo avisa. Elige **Listo** para cerrar la cámara; la lista sigue siendo
-editable, así que puedes corregir o quitar una línea a mano.
+el mismo formulario. Mantén el código de barras del número de serie de cada caja quieto dentro del
+recuadro ancho — se leen Code 128, Code 39, Code 93, EAN-13/EAN-8, UPC-A/UPC-E e ITF, y también códigos
+QR y Data Matrix — y cada código nuevo se agrega en su propia línea con un check verde (y una vibración
+corta en los teléfonos que la tienen). Un código que ya está en la lista no se agrega dos veces; te lo
+avisa. Elige **Listo** para cerrar la cámara; la lista sigue siendo editable, así que puedes corregir o
+quitar una línea a mano.
+
+Si después de unos segundos no lee nada, aparece una sugerencia: mantén el código plano y quieto, a la
+distancia en la que se ve nítido — la cámara de una notebook no enfoca de cerca, así que no lo pegues al
+lente — y agrega luz. En una caja con varios códigos (serie, modelo, EAN) se lee el que esté dentro del
+recuadro: deja solo el del número de serie. Y un código que no se lee siempre se puede escribir.
 
 La cámara necesita el permiso del navegador y una conexión segura (HTTPS). Sin cámara, o si niegas el
 acceso, el formulario lo dice y escribes o pegas los números de serie como siempre.

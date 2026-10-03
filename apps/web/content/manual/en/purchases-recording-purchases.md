@@ -158,10 +158,16 @@ as **Over-received**.
 ### Scanning serial numbers
 
 At the warehouse door, with a phone, **Scan** next to the serial numbers opens the camera right in the
-form. Point it at the serial-number barcode on each box — the usual Code 128 and Code 39 barcodes, EAN/UPC
-and QR codes are read — and each new code is added on its own line with a short tick (and a vibration on
-phones that have one). A code already in the list is not added twice; you are told instead. Choose
-**Done** to close the camera; the list stays editable, so you can fix or remove a line by hand.
+form. Hold the serial-number barcode of each box steady inside the wide box — Code 128, Code 39, Code 93,
+EAN-13/EAN-8, UPC-A/UPC-E and ITF barcodes are read, and QR and Data Matrix codes too — and each new code
+is added on its own line with a green check (and a short vibration on phones that have one). A code
+already in the list is not added twice; you are told instead. Choose **Done** to close the camera; the list
+stays editable, so you can fix or remove a line by hand.
+
+If nothing is read after a few seconds, a tip appears: hold the barcode flat and still, at the distance
+where it looks sharp — a laptop webcam doesn't focus up close, so not right against the lens — and add
+light. A box with several barcodes (serial, model, EAN) reads whichever is in the box: keep only the
+serial in it. And a code that won't read can always be typed.
 
 The camera needs your browser's permission and a secure (HTTPS) connection. Without a camera, or if you
 deny access, the form says so and you type or paste the serials as before.

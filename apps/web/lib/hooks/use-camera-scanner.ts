@@ -2,17 +2,20 @@
 
 import type { Html5Qrcode } from "html5-qrcode";
 import { useEffect, useRef, useState } from "react";
+import {
+  type CameraScanMode,
+  cameraScanConfig,
+  feedbackOnRead,
+  msUntilFeedbackChange,
+  SCAN_FORMATS,
+  type ScanFeedback,
+  type ScanFeedbackState,
+  scanFeedback,
+  startFeedback,
+} from "@/lib/utils/camera-scan";
 
 /** Where the camera is: starting, reading, refused/failed, or not available at all on this device. */
 export type CameraScanStatus = "starting" | "scanning" | "error" | "unsupported";
-
-/**
- * What to read:
- *   - `qr`       — QR codes in a square box (the asset label lookup, #875);
- *   - `barcodes` — QR plus the 1D and 2D codes printed on hardware boxes (Code 128 / 39 / 93, EAN, UPC, ITF,
- *     Data Matrix) in a wide box, for serial numbers (#1476).
- */
-export type CameraScanMode = "qr" | "barcodes";
 
 /** The part of an `Html5Qrcode` instance a teardown touches. */
 export interface StoppableScanner {
@@ -43,13 +46,19 @@ export function stopQuietly(instance: StoppableScanner, { clear = false }: { cle
 
 /**
  * The device camera through `html5-qrcode` (#875) — one cross-browser decoder, so it works on mobile Safari
- * and desktop Firefox where the native `BarcodeDetector` is not available. The library is loaded only when
- * the scanner mounts, and the camera stops when it unmounts.
+ * and desktop Firefox where the native `BarcodeDetector` is not available (Chrome on macOS has it, and the
+ * library alternates it with its own decoder). The library is loaded only when the scanner mounts, and the
+ * camera stops when it unmounts. The camera, formats and scan box come from `cameraScanConfig` (#1506).
  *
- * `readerId` is the DOM node the library mounts its `<video>` into: render it while the status is
- * `starting` or `scanning`. `onDecode` runs for every read — the library reports the same code on every
- * frame it sees it, so a caller that keeps scanning de-duplicates. Its `stop` argument ends the session
- * early (a one-shot lookup that already has its answer).
+ * `readerId` is the DOM node the library mounts its `<video>` into: render it — inside a `CameraViewfinder`,
+ * which lays it out at the decode width — while the status is `starting` or `scanning`. `onDecode` runs for
+ * every read — the library reports the same code on every frame it sees it, so a caller that keeps scanning
+ * de-duplicates. Its `stop` argument ends the session early (a one-shot lookup that already has its answer);
+ * it returns `true` when it took the read (a new serial, the asset to open), which flashes the success
+ * feedback and gives a short vibration where the device has one.
+ *
+ * `feedback` is what the viewfinder shows while scanning (`null` otherwise): reading, a just-taken read, or
+ * a tip once nothing has been seen for a few seconds.
  *
  * Progressive enhancement: the camera needs permission and a secure (HTTPS) context. Without the API the
  * status is `unsupported`; a refusal, a missing camera or an insecure origin is `error`. Callers always keep
@@ -57,13 +66,15 @@ export function stopQuietly(instance: StoppableScanner, { clear = false }: { cle
  */
 export function useCameraScanner(
   readerId: string,
-  onDecode: (text: string, stop: () => void) => void,
+  onDecode: (text: string, stop: () => void) => boolean | void,
   mode: CameraScanMode = "qr",
-): CameraScanStatus {
+): { status: CameraScanStatus; feedback: ScanFeedback | null } {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   // The latest callback, so a parent re-render never restarts the camera.
   const onDecodeRef = useRef(onDecode);
   const [status, setStatus] = useState<CameraScanStatus>("starting");
+  // The feedback state and the time it was last evaluated at — time only moves on a read or a timer.
+  const [clock, setClock] = useState<{ state: ScanFeedbackState; now: number } | null>(null);
 
   useEffect(() => {
     onDecodeRef.current = onDecode;
@@ -80,46 +91,27 @@ export function useCameraScanner(
       }
       const { Html5Qrcode, Html5QrcodeSupportedFormats: F } = await import("html5-qrcode");
       if (cancelled) return;
-      const instance = new Html5Qrcode(
-        readerId,
-        mode === "barcodes"
-          ? {
-              verbose: false,
-              formatsToSupport: [
-                F.QR_CODE,
-                F.CODE_128,
-                F.CODE_39,
-                F.CODE_93,
-                F.EAN_13,
-                F.EAN_8,
-                F.UPC_A,
-                F.UPC_E,
-                F.ITF,
-                F.DATA_MATRIX,
-              ],
-              useBarCodeDetectorIfSupported: true,
-            }
-          : undefined,
-      );
+      const instance = new Html5Qrcode(readerId, {
+        verbose: false,
+        formatsToSupport: SCAN_FORMATS.map((name) => F[name]),
+        useBarCodeDetectorIfSupported: true,
+      });
       scannerRef.current = instance;
       try {
         await instance.start(
+          // Ignored by the library when `videoConstraints` is given, but required.
           { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: (viewfinderWidth, viewfinderHeight) => {
-              if (mode === "barcodes") {
-                // A wide, short box: a 1D barcode is read across its bars.
-                return {
-                  width: Math.floor(viewfinderWidth * 0.9),
-                  height: Math.floor(Math.min(viewfinderHeight * 0.5, viewfinderWidth * 0.45)),
-                };
-              }
-              const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
-              return { width: edge, height: edge };
-            },
+          cameraScanConfig(mode),
+          (decodedText) => {
+            const taken = onDecodeRef.current(decodedText, () => void stopQuietly(instance)) === true;
+            if (taken) navigator.vibrate?.(40);
+            const at = Date.now();
+            setClock((prev) => {
+              if (!prev) return prev;
+              const state = feedbackOnRead(prev.state, at, taken);
+              return state === prev.state ? prev : { state, now: at };
+            });
           },
-          (decodedText) => onDecodeRef.current(decodedText, () => void stopQuietly(instance)),
           undefined,
         );
         if (cancelled) {
@@ -127,6 +119,8 @@ export function useCameraScanner(
           return;
         }
         setStatus("scanning");
+        const at = Date.now();
+        setClock({ state: startFeedback(at), now: at });
       } catch {
         // Permission denied, no camera, or an insecure (non-HTTPS) origin — all land here.
         setStatus("error");
@@ -141,5 +135,17 @@ export function useCameraScanner(
     };
   }, [readerId, mode]);
 
-  return status;
+  // Re-evaluate the feedback when it changes on its own: the success flash ends, or the tip is due.
+  useEffect(() => {
+    if (!clock) return;
+    const wait = msUntilFeedbackChange(clock.state, clock.now);
+    if (wait === null) return;
+    const timer = setTimeout(() => setClock((prev) => prev && { ...prev, now: Date.now() }), wait);
+    return () => clearTimeout(timer);
+  }, [clock]);
+
+  return {
+    status,
+    feedback: status === "scanning" && clock ? scanFeedback(clock.state, clock.now) : null,
+  };
 }
