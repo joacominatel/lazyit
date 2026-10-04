@@ -46,6 +46,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { labelFits, labelPatch, planUpload } from "@/lib/utils/document-label";
+import { formatBytes } from "@/lib/utils/format";
 
 /** The DOM id of a document row's "edit type" pencil — where focus returns when its editor closes. */
 const pencilId = (attachmentId: string) => `doc-label-edit-${attachmentId}`;
@@ -55,15 +56,6 @@ const LABEL_RECENT_KEY = "attachment.label";
 
 /** The `accept` attribute for the asset-document picker — the ADR-0082 §3 allowlist (server sniffs too). */
 const ACCEPT = ASSET_ATTACHMENT_MIME_TYPES.join(",");
-
-/** Compact, locale-free byte-size label (KB/MB) — small enough not to warrant a shared util yet. */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
-  const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
-}
 
 /**
  * Documents section on the asset detail page (ADR-0082): upload (button + drag-drop), list (name,
