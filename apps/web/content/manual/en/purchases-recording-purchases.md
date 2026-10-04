@@ -346,17 +346,20 @@ There are three ways in:
 
 - On a purchase, **Read this document** on a PDF or image in its **Documents** (up to 10 MB — a little less
   for images with some providers — and 20 pages).
-- On **New purchase**, **New purchase from a document**: pick the file, and lazyit creates a **draft**
-  purchase named after the file, attaches the file and reads it. Saving the review fills in the purchase
-  and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop before saving, the
-  draft keeps the document and you can fill it in by hand.
+- On **New purchase**, **New purchase from a document**: pick the file — or **drop it** on *New purchase* or
+  on the **Purchases** list — and lazyit creates a **draft** purchase named after the file, attaches the
+  file and reads it. A card shows each step as it completes: creating the purchase, attaching the document,
+  opening the review. One document at a time: drop several and the first is used. Saving the review fills
+  in the purchase and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop
+  before saving, the draft keeps the document and you can fill it in by hand.
 - On a purchase, **Ask AI to fill** on a document opens the [AI assistant](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document)
   — in a new chat if the open one has messages — with a message asking it to read that document and fill in
   the purchase. Send it, answer the few
   questions it asks, and approve the card it proposes — there is no review screen, and nothing is saved
   until you approve. It is shown only where *Read this document* is, and when you can use the assistant.
 
-Reading takes up to two minutes. If it fails, nothing was filled and the document stays attached — the
+Reading takes up to two minutes; meanwhile a line sweeps over the document (if your system asks for reduced
+motion, the screen just says it is reading). If it fails, nothing was filled and the document stays attached — the
 screen says why (the provider was busy, the file has too many pages, the daily budget is spent…).
 
 ### Reviewing the draft
