@@ -751,13 +751,24 @@
     "invalidValue": "This value can't be saved as it is.",
     "newFromDocument": {
       "title": "Have the invoice or quote?",
-      "description": "Pick a PDF or image (up to {max} MB): lazyit creates a draft purchase holding the file and sends the file to your AI provider to read. Nothing read from it is saved until you review it.",
+      "description": "Pick a PDF or image (up to {max} MB), or drop it on this page: lazyit creates a draft purchase holding the file and sends the file to your AI provider to read. Nothing read from it is saved until you review it.",
       "action": "New purchase from a document",
       "wrongType": "{name} can't be read: choose a PDF or an image.",
       "tooLarge": "{name} is larger than {max} MB.",
       "uploadError": "The purchase was created, but the file couldn't be attached.",
       "createError": "Couldn't start the purchase",
-      "renameError": "The file is attached, but the purchase's name couldn't be set from it. The review still reads it; its reference shows as a replacement."
+      "renameError": "The file is attached, but the purchase's name couldn't be set from it. The review still reads it; its reference shows as a replacement.",
+      "dropTitle": "Drop the invoice or quote to start a purchase",
+      "dropDescription": "A PDF or an image, up to {max} MB. lazyit creates a draft purchase holding the file and sends the file to your AI provider to read. Nothing read from it is saved until you review it.",
+      "oneAtATime": "Only one document is read at a time, so {name} was used.",
+      "startingFrom": "Starting a purchase from {name}",
+      "steps": {
+        "create": "Creating the purchase",
+        "created": "Purchase created",
+        "attach": "Attaching the document",
+        "attached": "Document attached",
+        "open": "Opening the review"
+      }
     },
     "saveFix": "Fix the marked values to save",
     "savedPart": "Saved"
