@@ -3,14 +3,14 @@ title: "Purchases — CEO inputs and decisions"
 tags: [purchases, decisions, ceo]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-04
 ---
 
 # Purchases — CEO inputs and decisions
 
 > The CEO's inputs to the design, the package approved on 2026-10-01, the four decisions taken after
-> acceptance (2026-10-01 and 2026-10-02) and the confirmations of the decisions taken while building
-> (2026-10-02), with the CEO's words quoted verbatim. Where a later decision
+> acceptance (2026-10-01 and 2026-10-02), the confirmations of the decisions taken while building
+> (2026-10-02) and dropping a document to start a purchase (2026-10-03), with the CEO's words quoted verbatim. Where a later decision
 > replaces part of an earlier one, the earlier text is kept as approved and marked *superseded* or
 > *refined*. The decision record built from this note is
 > [[0099-purchases-scope-model-and-optionality|ADR-0099]], with the money widening in
@@ -162,6 +162,7 @@ per-line count stays correct under concurrency because it is derived from linked
 | D-C | ADR-0099 §5, [[0100-money-as-64-bit-minor-units|ADR-0100]] §5, [[purchase-order]], [[asset]] |
 | D-D and its CTO application | ADR-0099 governing principle, §2, §4, §6, [[supplier]], [[purchase-order]], [[purchase-order-line]] |
 | The confirmations and the stock-receipt reason (§5 below) | ADR-0099 *CEO confirmations (2026-10-02)*, [[0100-money-as-64-bit-minor-units\|ADR-0100]] §5, [[consumable-movement]], [[purchase-order-line]], [[INVARIANTS]] INV-PO-1 |
+| Dropping a document to start a purchase (§6 below) | §6 below, [[purchases/ux-proposal]] (*Built differently*), the Manual's *Purchases & suppliers* page |
 
 ## 5. CEO confirmations (2026-10-02)
 
@@ -195,3 +196,28 @@ follow `purchaseOrder:read`. Movements recorded earlier keep the fixed reason.
 | Extraction providers, limits, PDFs in a new tab | "Sí, como está (Recomendado)" |
 | The Spanish register (the Manual's AI pages in *voseo*, the rest in *tú*) | "Dejarlo como está" |
 | The items planned but not built | "Un unico issues y sub-issues de ese" (one issue, with sub-issues of it) — #1495, sub-issues #1496–#1503 |
+
+## 6. Drop a document to start a purchase (2026-10-03, #1516)
+
+After seeing a promo video in which the invoice is dropped on *New purchase*, the CEO asked for it as a
+feature.
+
+CEO, verbatim: "me gusta la feature de tirar la factura en el new purchase y que ya empiece a cargar con una
+buena animacion... No estaria mal agregarlo" (I like dropping the invoice on New purchase and having it start
+loading right away with a good animation… it wouldn't hurt to add it).
+
+| Question | CEO, verbatim |
+| --- | --- |
+| Where the drop is accepted | "New purchase y la lista de Compras" (New purchase and the Purchases list) |
+| The motion | "Soltar + escaneo al leer" (drop + a scan while reading) |
+
+**As built.** Dropping a PDF or image on *New purchase* or the Purchases list is the same as picking it with
+*New purchase from a document*, and goes through the same pipeline: a `DRAFT` purchase named after the file,
+the file attached, the review opened with `?read=1`, which reads it at once. Dropping is therefore consent
+to the read, exactly like picking — the drop target repeats that the file goes to the AI provider. The drop
+target exists only where the button would (`purchaseOrder:write` and extraction available); one document is
+read at a time (several dropped → the first, said once); wrong-type and too-large files are refused with
+the button's messages. A card with the document's name and size shows the steps — creating the purchase,
+attaching the document, opening the review — and the review sweeps a line over the document (the image, or
+the PDF card) while it is read. The motion is CSS only and stops under `prefers-reduced-motion`: no sweep,
+no landing movement, the text says what is happening. No API, contract or CSP change.
