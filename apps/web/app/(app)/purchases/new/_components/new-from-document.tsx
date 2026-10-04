@@ -8,11 +8,7 @@ import { Button } from "@/components/ui/button";
 import { toWholeMb } from "@/lib/purchases/start-from-document";
 import { DocumentDropStage, useDocumentStart } from "../../_components/document-start";
 
-/**
- * *New purchase from a document* (ADR-0099 §11, #1477): offered only while extraction is available to this
- * person; the form below is the way in otherwise. Picking a file, or dropping one on the page (#1516), creates a
- * DRAFT purchase named after it, attaches it and opens the review that reads it.
- */
+/** Absent unless extraction is available to this person; the form below is the way in otherwise (ADR-0099 §11). */
 export function NewFromDocument() {
   const t = useTranslations("purchases.extraction.newFromDocument");
   const documentStart = useDocumentStart();
