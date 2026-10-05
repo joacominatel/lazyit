@@ -141,7 +141,7 @@ Snapshot of the security review. Updated each sweep. Method:
    them as a link `href`. This is the SEC-008 / SEC-051 class on a field the `isSafeApplicationUrl` guard
    never covered. **✅ Closed the same day**: writes refuse the browser-interpreted schemes, on the raw
    and the decoded value. This is a denylist rather than http(s)-only, so the SSH and console links
-   ADR-0070 defines keep working. The modal renders an unsafe legacy URL as plain text. In the same
+   ADR-0070 defines keep working. The modal runs the same denylist at render and shows an unsafe legacy URL as plain text. In the same
    batch, `AssetModel.specs` took the SEC-072 structural write bound (#1329, not a finding).
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
@@ -182,7 +182,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 ## Top findings
 
 0. **SEC-086 ✅ Closed.** Born closed (fixed 2026-10-05, #1327): infra shortcut writes refuse executable
-   URL schemes, and the node modal links only to safe ones. No data change: a stored unsafe shortcut
+   URL schemes, and the node modal applies the same denylist at render. No data change: a stored unsafe shortcut
    still reads, shows as plain text, and has to be fixed or removed the next time the shortcuts are
    saved.
 0. **SEC-085 ✅ Closed.** Born closed (fixed 2026-09-26): User responses and embedded asset owners go

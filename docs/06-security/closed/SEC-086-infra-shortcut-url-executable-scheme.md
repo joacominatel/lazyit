@@ -60,8 +60,9 @@ the href at render time so an unsafe legacy value renders as plain text instead 
 
 ## Prevention
 
-Every stored URL that reaches an `href` goes through a scheme guard on write and an allow-list at render,
-as `Application.url` and `Supplier.website` already do.
+Every stored URL that reaches an `href` goes through a scheme guard on write and again at render, as
+`Application.url` and `Supplier.website` already do. Here both checks are the same executable-scheme
+denylist, because shortcuts must keep `ssh://` and console links.
 
 ## References
 
@@ -92,7 +93,7 @@ Manual are binding, and they define SSH and console shortcuts.
 
 **Status**: fixed
 **Fixed in**: commit `fa59637e` (`fix(shared): refuse executable schemes in infra shortcut URLs on write (#1327)`)
-and commit `48cbbf2f` (`fix(web): render unsafe legacy shortcut URLs as plain text in the node modal (#1327)`)
+and commits `48cbbf2f` / `111346d9` (the node modal render and editor guard)
 **Fixed by**: lazyit-remediator
 **Date**: 2026-10-05
 
@@ -104,11 +105,11 @@ and commit `48cbbf2f` (`fix(web): render unsafe legacy shortcut URLs as plain te
 - `packages/shared/src/schemas/infra.ts`: new `InfraShortcutWriteSchema` (the read shape plus the
   scheme refinement). `CreateInfraNodeSchema` and `UpdateInfraNodeSchema` take shortcuts through it.
   `InfraShortcutSchema` and `InfraNodeSchema` (reads) are unchanged.
-- `apps/web/app/(app)/assets/diagram/_components/shortcut-href.ts`: `shortcutHref(url)` returns `null`
-  for an executable scheme.
-- `apps/web/app/(app)/assets/diagram/_components/node-detail-modal.tsx`: `ShortcutsSection` renders a
-  link only when `shortcutHref` returns one, and the label as plain text otherwise. `ShortcutsEditor`
-  validates against `InfraShortcutWriteSchema`, so the error shows before the round-trip.
+- `apps/web/app/(app)/assets/diagram/_components/node-detail-modal.tsx`: `ShortcutsSection` renders the
+  label as plain text, not a link, when `hasBrowserInterpretedScheme` flags the URL (the same denylist,
+  not an allow-list). `ShortcutsEditor` validates against `InfraShortcutWriteSchema`, marks an offending
+  URL field invalid, and names the problem in its error (`panel.shortcutUnsafeScheme`, en + es).
+- `apps/web/content/manual/{en,es}/assets-topology-diagram.md`: one sentence on refused links.
 - `docs/03-decisions/0070-infra-topology-graph.md` (a "Decisions while building" note) and
   `docs/02-domain/entities/infra-node.md`: why this is a denylist and not http(s)-only.
 
@@ -124,13 +125,12 @@ and commit `48cbbf2f` (`fix(web): render unsafe legacy shortcut URLs as plain te
   - Flags disguised executable schemes: control-char prefix, LF inside the scheme, `&#58;`, `&colon;`,
     `%6A`.
   - Leaves web, SSH, console and scheme-less values alone.
-- `apps/web/app/(app)/assets/diagram/_components/shortcut-href.test.ts`: links web, SSH and console
-  shortcuts, and returns `null` for legacy executable-scheme URLs.
 
 ### Verification
 Charter validation on the branch:
 - Shared build, and `tsc --noEmit` for shared, api, web and agent: all clean.
-- `bun test`: shared 2401 pass / 0 fail; web 2039 pass / 0 fail.
+- `bun test`: shared 2401 pass / 0 fail; web 2037 pass / 0 fail.
+- `check:message-parity` and `check:manual-parity` OK.
 - api jest under node: 296 suites, 6624 tests, all pass.
 - `next build` succeeds.
 - Agent `bun test`: 560 pass. The 2 failures are the pwsh-dependent `install-ps1` cases ("no pwsh on this
@@ -142,8 +142,8 @@ The validation is write-only, and no migration is needed.
 - The node modal shows that shortcut's label as plain text, with the URL in its tooltip, instead of
   a link.
 - A `PATCH` that leaves out `shortcuts` is unaffected.
-- Saving the shortcuts editor re-sends the whole array, so it shows the invalid-shortcut error until
-  that row is fixed or removed.
+- Saving the shortcuts editor re-sends the whole array, so the editor marks that row and refuses to
+  save until it is fixed or removed.
 - Existing `ssh://`, `rdp://` and other non-web links keep working and stay editable.
 
 ### Residual risk
