@@ -96,8 +96,8 @@ a move may let more people read something, the app asks before saving:
   plainly that this **may** let more people read it.
 
 **Cancel** leaves everything where it was; confirming saves the move. There is no prompt when the
-source is public, when both places are restricted by exactly the same folders, or when the folder does
-not actually change. Moving a document out of a restricted folder is allowed on purpose — drafting a
+source is public, when the destination keeps every restriction the source had (the same folders, or
+those plus more — which can only narrow who reads it), or when the folder does not actually change. Moving a document out of a restricted folder is allowed on purpose — drafting a
 write-up in a restricted folder and publishing it once it is cleaned up is a normal workflow — the
 prompt is there so it is never done by accident.
 

@@ -100,8 +100,9 @@ guardar:
   reglas, así que indica claramente que esto **puede** permitir que más personas lo lean.
 
 **Cancelar** deja todo donde estaba; confirmar guarda el movimiento. No hay aviso cuando el origen es
-público, cuando ambos lugares están restringidos exactamente por las mismas carpetas, o cuando la
-carpeta no cambia en realidad. Sacar un documento de una carpeta restringida está permitido a
+público, cuando el destino conserva todas las restricciones que tenía el origen (las mismas carpetas,
+o esas y alguna más — lo que solo puede reducir quién lo lee), o cuando la carpeta no cambia en
+realidad. Sacar un documento de una carpeta restringida está permitido a
 propósito — redactar un informe en una carpeta restringida y publicarlo una vez depurado es un flujo
 normal —; el aviso existe para que nunca ocurra por accidente.
 
