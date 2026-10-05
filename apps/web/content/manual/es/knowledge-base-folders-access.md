@@ -85,6 +85,32 @@ primer nivel, solo queda su *propia* regla. Un movimiento nunca concede acceso q
 conocimiento no permitiera ya, pero sí puede devolver una carpeta a su regla propia, así que revisa el
 destino antes de mover una carpeta que dependía de la restricción de su padre.
 
+### Los movimientos que cambian quién puede leer piden confirmación
+
+La carpeta principal de un artículo **es** su regla de acceso, así que cambiar de carpeta cambia quién
+puede leerlo. Cuando un movimiento puede permitir que más personas lean algo, la app pregunta antes de
+guardar:
+
+- **De una carpeta restringida a una pública** — cambiar la **Categoría** de un artículo a una carpeta
+  sin ninguna restricción avisa de que **todos los que pueden leer la Base de conocimiento podrán leer
+  este artículo**. Mover una carpeta desde debajo de un padre restringido a un lugar sin restricción
+  avisa lo mismo sobre sus artículos (las subcarpetas con reglas propias siguen restringidas por ellas).
+- **Entre dos lugares restringidos de forma distinta** — el artículo, o los artículos de la carpeta
+  movida, pasarán a seguir las reglas del destino. La app no puede decirte *a quién* dejan entrar esas
+  reglas, así que indica claramente que esto **puede** permitir que más personas lo lean.
+
+**Cancelar** deja todo donde estaba; confirmar guarda el movimiento. No hay aviso cuando el origen es
+público, cuando el destino conserva todas las restricciones que tenía el origen (las mismas carpetas,
+o esas y alguna más — lo que solo puede reducir quién lo lee), o cuando la carpeta no cambia en
+realidad. Sacar un documento de una carpeta restringida está permitido a
+propósito — redactar un informe en una carpeta restringida y publicarlo una vez depurado es un flujo
+normal —; el aviso existe para que nunca ocurra por accidente.
+
+> [!NOTE]
+> El aviso depende de que el servidor le indique a la app qué carpetas están restringidas. Con un
+> servidor anterior a esta función, la app no puede saberlo, así que mueve sin preguntar en lugar de
+> adivinar.
+
 ## Qué significa "restringido" para quien lee
 
 Cuando una carpeta está restringida, un artículo dentro de ella solo es legible si se cumplen **todas**

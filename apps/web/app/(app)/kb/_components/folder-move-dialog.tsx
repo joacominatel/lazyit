@@ -25,6 +25,13 @@ import { useUpdateArticleCategory } from "@/lib/api/hooks/use-article-categories
 import { notifyError } from "@/lib/api/notify-error";
 import { folderMutationErrorKind } from "@/lib/utils/folder-mutation-error";
 import type { FolderPathOption } from "@/lib/utils/folder-tree";
+import {
+  classifyFolderMove,
+  type ConfirmableMoveAudienceChange,
+  type FolderAccessShape,
+  needsMoveConfirmation,
+} from "@/lib/utils/kb-move-audience";
+import { MoveAudienceConfirmDialog } from "./move-audience-confirm-dialog";
 
 /**
  * The Select value standing for "no parent". Radix `SelectItem` rejects an empty string value, so the
@@ -44,6 +51,13 @@ const ROOT_VALUE = "__root__";
  * lives in the API's DFS guard (ADR-0059 §1) and re-deriving it here would create a second, drifting
  * copy of it; instead an attempted cycle comes back as a 400 and is reported as its own sentence.
  * The only id removed is the folder itself, which the Select could not meaningfully offer.
+ *
+ * ADR-0060 §9 (#1529): re-parenting changes what the folder's whole subtree inherits, so a move that
+ * may let more people read its articles — out from under a restricted ancestor, or under differently
+ * restricted ones — waits on the shared {@link MoveAudienceConfirmDialog}. The verdict is
+ * `classifyFolderMove`, the same helper family every article move uses. An `unknown` verdict (a
+ * folder without the `hasAccessRules` flag — an older server) moves without asking: the client cannot
+ * tell, so it neither claims the move is safe nor raises a dialog asserting a change it cannot see.
  */
 export function FolderMoveDialog({
   open,
@@ -52,6 +66,7 @@ export function FolderMoveDialog({
   folderName,
   currentParentId,
   options,
+  folders,
   onMoved,
 }: {
   open: boolean;
@@ -62,6 +77,8 @@ export function FolderMoveDialog({
   currentParentId: string | null;
   /** Every candidate destination (the folder itself already excluded), path-labelled and sorted. */
   options: FolderPathOption[];
+  /** The full live folder list, for the audience-change verdict (ADR-0060 §9). */
+  folders: readonly FolderAccessShape[];
   /** Called with the new parent id (`null` = root) so the tree can reveal the moved folder. */
   onMoved?: (newParentId: string | null) => void;
 }) {
@@ -73,14 +90,30 @@ export function FolderMoveDialog({
   // effect, and a reopen can never show a stale destination or a stale error.
   const [value, setValue] = useState<string>(currentParentId ?? ROOT_VALUE);
   const [error, setError] = useState<string | null>(null);
+  const [pendingChange, setPendingChange] =
+    useState<ConfirmableMoveAudienceChange | null>(null);
+
+  const nextParentId = value === ROOT_VALUE ? null : value;
+  const destinationLabel =
+    nextParentId === null
+      ? t("moveAudience.topLevel")
+      : (options.find((option) => option.id === nextParentId)?.label ?? "");
 
   function handleMove() {
-    const nextParentId = value === ROOT_VALUE ? null : value;
     if (nextParentId === currentParentId) {
       setError(t("folders.move.unchanged"));
       return;
     }
     setError(null);
+    const change = classifyFolderMove(folderId, nextParentId, folders);
+    if (needsMoveConfirmation(change)) {
+      setPendingChange(change);
+      return;
+    }
+    submitMove();
+  }
+
+  function submitMove() {
     update.mutate(
       { id: folderId, data: { parentId: nextParentId } },
       {
@@ -168,6 +201,18 @@ export function FolderMoveDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <MoveAudienceConfirmDialog
+        change={pendingChange}
+        subject="folder"
+        name={folderName}
+        destination={destinationLabel}
+        onConfirm={() => {
+          setPendingChange(null);
+          submitMove();
+        }}
+        onCancel={() => setPendingChange(null)}
+      />
     </Dialog>
   );
 }
