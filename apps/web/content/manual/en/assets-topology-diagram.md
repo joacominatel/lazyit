@@ -322,7 +322,9 @@ A few things on the **General** tab worth calling out:
   simply drops from the list.
 - **Shortcuts** — quick links (SSH, web UI, console) that open in a new tab. With the manage
   permission you edit them inline: each shortcut is a label + URL pair you can change, add or remove,
-  then **Save** the list (lazyit checks each URL is valid before saving).
+  then **Save** the list (lazyit checks each URL is valid before saving). Links a browser would run
+  as code (such as `javascript:` or `data:`) are refused, and an old one saved before this check shows
+  as plain text instead of a link.
 - **Form factor** — for a node reported by an agent, what the machine says it physically is, read
   from its firmware: *laptop*, *desktop*, *server*, *virtual machine* or *container*. It's shown, not
   editable — the agent rewrites it on every check-in, so a machine that's re-imaged or gets a new
