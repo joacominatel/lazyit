@@ -59,6 +59,7 @@ interface LocalPerson {
   isActive: boolean;
   role?: string;
   directoryOffboardedAt: Date | null;
+  directoryReenabledAt?: Date | null;
   firstName: string;
   lastName: string;
   directoryAttrs: unknown;
@@ -196,6 +197,7 @@ function makeService(opts: {
   return {
     service,
     fetchEntries,
+    userFindMany,
     userUpdate,
     txUserUpdate,
     txUserUpdateMany,
@@ -348,11 +350,12 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     const result = await service.reconcile();
     expect(result.counts.offboarded).toBe(1);
     const { where, data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
-    // Only a row still active and unstamped is written: an admin edit mid-sweep wins.
+    // Only a row still active, unstamped and not re-enabled by hand is written: an admin edit mid-sweep wins.
     expect(where).toEqual({
       id: 'u2',
       isActive: true,
       directoryOffboardedAt: null,
+      directoryReenabledAt: null,
       deletedAt: null,
     });
     expect(data.isActive).toBe(false);
@@ -488,6 +491,162 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       expect(txUserUpdateMany).not.toHaveBeenCalled();
       const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
       expect(data).not.toHaveProperty('isActive');
+    });
+  });
+
+  describe('a manual re-enable sticks while the person stays absent (#1522)', () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const reenabledAt = new Date('2026-10-01T00:00:00.000Z');
+    const reenabledAfterSyncOffboard: LocalPerson = {
+      id: 'u5',
+      directorySourceId: 'G5',
+      isActive: true,
+      directoryOffboardedAt: new Date('2026-09-01T00:00:00.000Z'),
+      directoryReenabledAt: reenabledAt,
+      firstName: 'Sync',
+      lastName: 'Offboarded',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+    const reenabledAfterManualDeactivation: LocalPerson = {
+      id: 'u6',
+      directorySourceId: 'G6',
+      isActive: true,
+      directoryOffboardedAt: null,
+      directoryReenabledAt: reenabledAt,
+      firstName: 'Hand',
+      lastName: 'Deactivated',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+
+    it.each([
+      ['offboarded by the sync', reenabledAfterSyncOffboard],
+      ['deactivated by hand', reenabledAfterManualDeactivation],
+    ])(
+      're-enabled after being %s, still absent past grace → stays active: nothing written',
+      async (_history, person) => {
+        const {
+          service,
+          userUpdate,
+          txUserUpdate,
+          txUserUpdateMany,
+          historyRecord,
+        } = makeService({ graceDays: 7, localPeople: [person], entries: [] });
+        const result = await service.reconcile();
+        expect(result.counts.offboarded).toBe(0);
+        expect(userUpdate).not.toHaveBeenCalled();
+        expect(txUserUpdate).not.toHaveBeenCalled();
+        expect(txUserUpdateMany).not.toHaveBeenCalled();
+        expect(historyRecord).not.toHaveBeenCalled();
+      },
+    );
+
+    it('a sync-offboarded person re-enabled before the mark existed still stays active (the stamp holds)', async () => {
+      const { service, txUserUpdateMany } = makeService({
+        graceDays: 7,
+        localPeople: [
+          { ...reenabledAfterSyncOffboard, directoryReenabledAt: null },
+        ],
+        entries: [],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.offboarded).toBe(0);
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('reappears → the refresh clears the mark silently (no history, no reactivation write)', async () => {
+      const { service, userUpdate, txUserUpdate, historyRecord } = makeService({
+        localPeople: [reenabledAfterManualDeactivation],
+        entries: [makeEntry('G6', { givenName: 'Hand', sn: 'Deactivated' })],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.updated).toBe(0);
+      expect(result.counts.skipped).toBe(1);
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data.directoryReenabledAt).toBeNull();
+      expect(data).not.toHaveProperty('isActive');
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
+    });
+
+    it('re-enabled after a sync offboard, then reappears → the refresh clears both the mark and the stamp, so a later absence past grace offboards them', async () => {
+      const {
+        service,
+        fetchEntries,
+        userFindMany,
+        userUpdate,
+        txUserUpdateMany,
+        historyRecord,
+      } = makeService({
+        graceDays: 7,
+        localPeople: [reenabledAfterSyncOffboard],
+        entries: [makeEntry('G5', { givenName: 'Sync', sn: 'Offboarded' })],
+      });
+
+      const back = await service.reconcile();
+      expect(back.counts.updated).toBe(0);
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data.directoryReenabledAt).toBeNull();
+      expect(data.directoryOffboardedAt).toBeNull();
+      expect(data).not.toHaveProperty('isActive');
+
+      // The next load sees what that refresh wrote; then they leave AD for good.
+      userFindMany.mockResolvedValueOnce([
+        {
+          ...reenabledAfterSyncOffboard,
+          directoryOffboardedAt: null,
+          directoryReenabledAt: null,
+        },
+      ]);
+      fetchEntries.mockResolvedValueOnce([]);
+      const gone = await service.reconcile();
+      expect(gone.counts.offboarded).toBe(1);
+      expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('a legacy stamp-only row (re-enabled before the mark existed) heals on reappearance: the stamp is cleared', async () => {
+      const { service, userUpdate, txUserUpdateMany } = makeService({
+        localPeople: [
+          { ...reenabledAfterSyncOffboard, directoryReenabledAt: null },
+        ],
+        entries: [makeEntry('G5', { givenName: 'Sync', sn: 'Offboarded' })],
+      });
+      await service.reconcile();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data.directoryOffboardedAt).toBeNull();
+      expect(data).not.toHaveProperty('directoryReenabledAt');
+    });
+
+    it('a matched person who was never re-enabled by hand → the refresh does not write the mark', async () => {
+      const { service, userUpdate } = makeService({
+        localPeople: [
+          { ...reenabledAfterManualDeactivation, directoryReenabledAt: null },
+        ],
+        entries: [makeEntry('G6', { givenName: 'Hand', sn: 'Deactivated' })],
+      });
+      await service.reconcile();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data).not.toHaveProperty('directoryReenabledAt');
+    });
+
+    it('a deactivate-then-re-enable landing mid-sweep wins: the offboard requires no mark, matches 0 rows, writes nothing', async () => {
+      const { service, txUserUpdateMany, historyRecord } = makeService({
+        graceDays: 7,
+        // The snapshot predates the admin's edits: active, unstamped, unmarked.
+        localPeople: [
+          { ...reenabledAfterManualDeactivation, directoryReenabledAt: null },
+        ],
+        entries: [],
+        conditionalWriteCount: 0,
+      });
+      const result = await service.reconcile();
+      const { where } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
+      expect(where.directoryReenabledAt).toBeNull();
+      expect(result.counts.offboarded).toBe(0);
+      expect(result.counts.skipped).toBe(1);
+      expect(historyRecord).not.toHaveBeenCalled();
     });
   });
 

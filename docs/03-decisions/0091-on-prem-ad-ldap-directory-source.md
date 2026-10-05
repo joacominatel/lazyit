@@ -109,6 +109,19 @@ uniques.
   deactivates them again after the grace period: a person an admin deactivated by hand and later re-enabled
   is active and unstamped, so the next sweep offboards them if they are still absent past grace (only a
   re-enabled sync-offboarded person, who keeps the stamp, is left alone).
+  *Amended 2026-10-05 (#1522, CEO decision "the admin decides"):* the last sentence above no longer holds.
+  A manual re-enable now sticks whatever the person's history, mirroring the rule that the sync never
+  undoes a manual deactivation. `PATCH /users/:id` (inactive→active) stamps a new nullable
+  `User.directoryReenabledAt`; an active→inactive flip clears it. The sweep never offboards a person who
+  carries it (nothing written), and the conditional offboard also requires `directoryReenabledAt: null`,
+  so a re-enable landing mid-sweep wins. A re-enabled sync-offboarded person also keeps the stamp while
+  absent. When the person reappears in the directory, the refresh silently clears the mark and, on an
+  active person, any leftover stamp (no history row, no reactivation write), so a later absence past grace
+  offboards them as usual. That also heals a stamp-only active row left by a re-enable before this change
+  the next time the person is listed. Additive
+  migration `20261005120000_user_directory_reenabled_at`, no backfill: existing rows read `NULL`. A
+  hand-deactivated person who was re-enabled before this update carries no mark, so if they are still
+  absent past grace the next sweep offboards them once; an admin re-enables them again and that one sticks.
 
 ### Hard invariants (enforced in code, asserted by a jest test)
 

@@ -79,11 +79,11 @@ what happened:
 - **Offboarded** — people **deactivated** because they had been missing from the directory past the grace
   window. This is a **soft deactivation** (they become inactive, keeping their history), never a hard delete.
   If a person reappears in a later sync, lazyit reactivates them automatically. A person an admin deactivated
-  stays inactive even if they reappear in the directory; only an admin can reactivate them. While a person is
-  missing from the directory, the sync deactivates them again after the grace period, even if an admin
-  reactivated them after deactivating them by hand. On an instance with **local accounts**, a person who had
-  a login is signed out on every device when the sync offboards them, and must sign in again once it
-  reactivates them.
+  stays inactive even if they reappear in the directory; only an admin can reactivate them. Likewise, a person
+  an admin reactivates stays active even while they are still missing from the directory: the sync leaves
+  them alone until they reappear, and only offboards them again if they later go missing past the grace
+  window. On an instance with **local accounts**, a person who had a login is signed out on every device when
+  the sync offboards them, and must sign in again once it reactivates them.
 - **Skipped** — entries left untouched (for example an entry that can't be identified, or one whose email
   collides with a real login account).
 - **The last active admin is never offboarded by the sync.** If the only remaining active administrator is

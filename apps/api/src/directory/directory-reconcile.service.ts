@@ -31,6 +31,7 @@ interface LocalAdPerson {
   // Read-only: the offboard sweep needs it for the last-admin skip. The reconcile NEVER writes `role`.
   role: string;
   directoryOffboardedAt: Date | null;
+  directoryReenabledAt: Date | null;
   firstName: string;
   lastName: string;
   directoryAttrs: Prisma.JsonValue | null;
@@ -136,6 +137,7 @@ export class DirectoryReconcileService {
           isActive: true,
           role: true,
           directoryOffboardedAt: true,
+          directoryReenabledAt: true,
           firstName: true,
           lastName: true,
           directoryAttrs: true,
@@ -192,6 +194,11 @@ export class DirectoryReconcileService {
         if (!p.directorySourceId || seenGuids.has(p.directorySourceId))
           continue;
         if (p.directoryOffboardedAt != null) continue; // already offboarded by us
+        // An admin re-enabled them; that holds while they stay absent (#1522).
+        if (p.directoryReenabledAt != null) {
+          counts.skipped += 1;
+          continue;
+        }
         // Inactive and unstamped = deactivated by hand; stamping it would auto-reactivate them (#1311).
         if (!p.isActive) {
           counts.skipped += 1;
@@ -259,11 +266,12 @@ export class DirectoryReconcileService {
 
   /**
    * Refresh a MATCHED person. FIXED ALLOWLIST (mass-assignment-proof): only firstName/lastName (when
-   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), and a re-activation (isActive=true +
-   * clear directoryOffboardedAt) IFF WE previously offboarded them. NEVER role/externalId/passwordHash/
-   * directoryOnly/sessionEpoch — a reactivated person signs in again (their sessions died at the
-   * offboard). A UserHistory row is written ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a
-   * steady directory doesn't spam the audit log; the count follows the same rule (idempotent re-run).
+   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), clearing directoryReenabledAt and a
+   * leftover stamp on an active person, and a re-activation (isActive=true + clear directoryOffboardedAt)
+   * IFF WE previously offboarded them. NEVER role/externalId/passwordHash/directoryOnly/sessionEpoch — a
+   * reactivated person signs in again (their sessions died at the offboard). A UserHistory row is written
+   * ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a steady directory doesn't spam the audit
+   * log; the count follows the same rule (idempotent re-run).
    */
   private async refreshMatched(
     person: LocalAdPerson,
@@ -282,6 +290,14 @@ export class DirectoryReconcileService {
     const changedFields: string[] = [];
     const data: Prisma.UserUpdateInput = {
       directoryAttrs: directoryAttrs as Prisma.InputJsonValue,
+      // Back in the directory, so a manual re-enable no longer needs shielding from the sweep (#1522).
+      ...(person.directoryReenabledAt != null
+        ? { directoryReenabledAt: null }
+        : {}),
+      // An admin already re-enabled them; a leftover stamp would shield a later absence from the sweep.
+      ...(person.isActive && person.directoryOffboardedAt != null
+        ? { directoryOffboardedAt: null }
+        : {}),
     };
     if (firstName && firstName !== person.firstName) {
       data.firstName = firstName;
@@ -295,7 +311,7 @@ export class DirectoryReconcileService {
       changedFields.push('directoryAttrs');
     }
     // Reappeared after WE offboarded them → undo our own soft offboard (never touch a manual deactivation).
-    const reactivate = person.directoryOffboardedAt != null;
+    const reactivate = person.directoryOffboardedAt != null && !person.isActive;
 
     if (changedFields.length === 0 && !reactivate) {
       // Only the lastSeenAt heartbeat moved — persist it silently (no history, no "updated" count).
@@ -419,6 +435,7 @@ export class DirectoryReconcileService {
           id: person.id,
           isActive: true,
           directoryOffboardedAt: null,
+          directoryReenabledAt: null,
           deletedAt: null,
         },
         data: {
