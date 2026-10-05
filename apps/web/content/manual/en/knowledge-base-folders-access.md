@@ -82,6 +82,29 @@ to the top level and only its *own* rule remains. A move never grants access the
 not already allow, but it can widen a folder back to its own rule, so check the destination before
 moving a folder that was relying on a parent's restriction.
 
+### Moves that change who can read ask first
+
+An article's home folder **is** its access rule, so changing the folder changes who can read it. When
+a move may let more people read something, the app asks before saving:
+
+- **Out of a restricted folder into a public one** — changing an article's **Category** to a folder
+  that nothing restricts warns that **everyone who can read the Knowledge Base will be able to read
+  this article**. Moving a folder out from under a restricted parent to a place nothing restricts
+  warns the same about its articles (sub-folders with rules of their own stay restricted by them).
+- **Between two differently restricted places** — the article, or the moved folder's articles, will
+  follow the destination's rules instead. The app cannot tell you *who* those rules let in, so it says
+  plainly that this **may** let more people read it.
+
+**Cancel** leaves everything where it was; confirming saves the move. There is no prompt when the
+source is public, when both places are restricted by exactly the same folders, or when the folder does
+not actually change. Moving a document out of a restricted folder is allowed on purpose — drafting a
+write-up in a restricted folder and publishing it once it is cleaned up is a normal workflow — the
+prompt is there so it is never done by accident.
+
+> [!NOTE]
+> The prompt relies on the server telling the app which folders are restricted. Against a server that
+> predates this, the app cannot tell, so it moves without asking rather than guess.
+
 ## What restricted means for readers
 
 When a folder is restricted, an article inside it is only readable if **all** of these hold:
