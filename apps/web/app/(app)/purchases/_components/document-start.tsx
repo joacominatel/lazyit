@@ -14,11 +14,10 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useCan } from "@/lib/hooks/use-permissions";
 import {
   canStartFromDocument,
-  firstFile,
+  pickFile,
   START_STEPS,
   type StartStep,
   startFromDocument,
-  startRefusal,
   toWholeMb,
 } from "@/lib/purchases/start-from-document";
 import { runExclusive } from "@/lib/purchases/submit-guard";
@@ -62,14 +61,14 @@ export function useDocumentStart(): DocumentStart | null {
 
   function start(files: ArrayLike<File> | null | undefined) {
     void runExclusive(lock, async () => {
-      const { file, extra } = firstFile(files);
-      if (!file) return;
-      if (extra) toast.info(t("oneAtATime", { name: file.name }));
-      const refusal = startRefusal(caps, file);
-      if (refusal) {
-        toast.error(t(refusal.key, refusal.values));
+      const pick = pickFile(caps, files);
+      if (pick.kind === "none") return;
+      if (pick.kind === "refuse") {
+        toast.error(t(pick.refusal.key, pick.refusal.values));
         return;
       }
+      const { file } = pick;
+      if (pick.several) toast.info(t("oneAtATime", { name: file.name }));
       setStarted({ name: file.name, size: file.size, step: "create" });
       return startFromDocument(file, {
         create: (reference) => create.mutateAsync({ status: "DRAFT", reference }),

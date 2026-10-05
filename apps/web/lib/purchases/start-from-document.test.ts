@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { PurchaseExtractionStatus } from "@lazyit/shared";
 import {
   canStartFromDocument,
-  firstFile,
+  pickFile,
   type StartEffects,
   startFromDocument,
   startRefusal,
@@ -129,12 +129,31 @@ describe("canStartFromDocument — where the button and the drop targets appear"
   });
 });
 
-describe("firstFile — several files dropped at once", () => {
-  test("the first is read and the others are said to be left out", () => {
-    expect(firstFile(["a.pdf", "b.pdf"])).toEqual({ file: "a.pdf", extra: true });
-    expect(firstFile(["a.pdf"])).toEqual({ file: "a.pdf", extra: false });
-    expect(firstFile([])).toEqual({ file: null, extra: false });
-    expect(firstFile(null)).toEqual({ file: null, extra: false });
+describe("pickFile — the file a drop starts from", () => {
+  const notes = { name: "notes.txt", type: "text/plain", size: 10 };
+  const invoice = { name: "invoice.pdf", type: "application/pdf", size: 10 };
+  const quote = { name: "quote.pdf", type: "application/pdf", size: 10 };
+  const huge = { name: "huge.pdf", type: "application/pdf", size: 11 * 1024 * 1024 };
+
+  test("of several, the first one that can be read starts, and the notice says which", () => {
+    expect(pickFile(STATUS, [notes, invoice])).toEqual({ kind: "start", file: invoice, several: true });
+    expect(pickFile(STATUS, [invoice, quote])).toEqual({ kind: "start", file: invoice, several: true });
+  });
+
+  test("one readable file starts without the notice", () => {
+    expect(pickFile(STATUS, [invoice])).toEqual({ kind: "start", file: invoice, several: false });
+  });
+
+  test("when none can be read, the first one's refusal is shown and nothing starts", () => {
+    expect(pickFile(STATUS, [notes, huge])).toEqual({
+      kind: "refuse",
+      refusal: { key: "wrongType", values: { name: "notes.txt" } },
+    });
+  });
+
+  test("nothing dropped, nothing to do", () => {
+    expect(pickFile(STATUS, [])).toEqual({ kind: "none" });
+    expect(pickFile(STATUS, null)).toEqual({ kind: "none" });
   });
 });
 

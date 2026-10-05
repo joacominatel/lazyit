@@ -17,11 +17,6 @@ export function canStartFromDocument(
   return canWrite && status?.available === true;
 }
 
-export function firstFile<T>(files: ArrayLike<T> | null | undefined): { file: T | null; extra: boolean } {
-  const count = files?.length ?? 0;
-  return { file: count > 0 ? files![0]! : null, extra: count > 1 };
-}
-
 type StartRefusal =
   | { key: "wrongType"; values: { name: string } }
   | { key: "tooLarge"; values: { name: string; max: number } };
@@ -36,6 +31,22 @@ export function startRefusal(
     return { key: "tooLarge", values: { name: file.name, max: toWholeMb(maxBytesFor(status, file.type)) } };
   }
   return null;
+}
+
+export type FilePick<F> =
+  | { kind: "start"; file: F; several: boolean }
+  | { kind: "refuse"; refusal: StartRefusal }
+  | { kind: "none" };
+
+export function pickFile<F extends { name: string; type: string; size: number }>(
+  status: Parameters<typeof startRefusal>[0],
+  files: ArrayLike<F> | null | undefined,
+): FilePick<F> {
+  const list = Array.from(files ?? []);
+  if (list.length === 0) return { kind: "none" };
+  const file = list.find((candidate) => startRefusal(status, candidate) === null);
+  if (file) return { kind: "start", file, several: list.length > 1 };
+  return { kind: "refuse", refusal: startRefusal(status, list[0]!)! };
 }
 
 export interface StartEffects<F> {
