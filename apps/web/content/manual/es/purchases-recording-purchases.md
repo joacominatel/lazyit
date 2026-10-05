@@ -360,7 +360,7 @@ Hay tres formas de empezar:
 - En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo — o lo **sueltas** sobre
   *Nueva compra* o sobre la lista de **Compras** — y lazyit crea una compra en **borrador** con el nombre del
   archivo, lo adjunta y lo lee. Una tarjeta muestra cada paso a medida que se completa: crear la compra,
-  adjuntar el documento, abrir la revisión. Un documento a la vez: si sueltas varios, se usa el primero.
+  adjuntar el documento, abrir la revisión. Un documento a la vez: si sueltas varios, se usa el primero que lazyit puede leer.
   Guardar la revisión completa la compra y la **marca como pedida** (viene marcado — desmárcalo para dejarla
   en borrador). Si lo dejas antes de guardar, el borrador conserva el documento y puedes completarlo a mano.
 - En una compra, **Pedirle a la IA que la complete** sobre un documento abre el [asistente de IA](/help/ai-assistant-using-the-chat#completar-una-compra-a-partir-de-un-documento)

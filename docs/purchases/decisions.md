@@ -216,8 +216,8 @@ loading right away with a good animation… it wouldn't hurt to add it).
 the file attached, the review opened with `?read=1`, which reads it at once. Dropping is therefore consent
 to the read, exactly like picking — the drop target repeats that the file goes to the AI provider. The drop
 target exists only where the button would (`purchaseOrder:write` and extraction available); one document is
-read at a time (several dropped → the first, said once); wrong-type and too-large files are refused with
-the button's messages. A card with the document's name and size shows the steps — creating the purchase,
+read at a time (several dropped → the first one that can be read, said once); wrong-type and too-large files
+are refused with the button's messages, the first file's when none can be read. A card with the document's name and size shows the steps — creating the purchase,
 attaching the document, opening the review — and the review sweeps a line over the document (the image, or
 the PDF card) while it is read. The motion is CSS only and stops under `prefers-reduced-motion`: no sweep,
 no landing movement, the text says what is happening. No API, contract or CSP change.

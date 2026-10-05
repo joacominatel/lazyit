@@ -349,7 +349,7 @@ There are three ways in:
 - On **New purchase**, **New purchase from a document**: pick the file — or **drop it** on *New purchase* or
   on the **Purchases** list — and lazyit creates a **draft** purchase named after the file, attaches the
   file and reads it. A card shows each step as it completes: creating the purchase, attaching the document,
-  opening the review. One document at a time: drop several and the first is used. Saving the review fills
+  opening the review. One document at a time: drop several and the first one lazyit can read is used. Saving the review fills
   in the purchase and **marks it as ordered** (ticked for you — untick it to keep it a draft). If you stop
   before saving, the draft keeps the document and you can fill it in by hand.
 - On a purchase, **Ask AI to fill** on a document opens the [AI assistant](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document)
