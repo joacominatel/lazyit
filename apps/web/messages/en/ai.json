@@ -264,6 +264,7 @@
     "asset": "Asset",
     "assetAssignment": "Assignment",
     "assetModel": "Model",
+    "assetStatusLabel": "Custom status",
     "location": "Location",
     "category": "Category",
     "application": "Application",
@@ -444,6 +445,10 @@
     "location_update": "Update a location",
     "location_archive": "Archive a location",
     "location_restore": "Restore a location",
+    "asset_status_label_create": "Create a custom status",
+    "asset_status_label_update": "Update a custom status",
+    "asset_status_label_archive": "Archive a custom status",
+    "asset_status_label_restore": "Restore a custom status",
     "asset_tag_scheme_get": "Read the asset tag scheme",
     "asset_tag_scheme_update": "Change the asset tag scheme",
     "purchase_search": "Search purchases",
@@ -481,12 +486,14 @@
     "categoryId": "Category",
     "checkedInFrom": "Returned by",
     "checkedOutTo": "Assigned to",
+    "color": "Color",
     "company": "Company",
     "content": "Content",
     "costPerSeat": "Cost per seat",
     "credential": "Credential",
     "criticalApplicationAccess": "Access to critical applications",
     "currentStock": "Current stock",
+    "customStatus": "Custom status",
     "dataSent": "Data sent",
     "dataSentToNewHost": "Data sent to the new host",
     "defaultHeadersSentToNewHost": "Default headers sent to the new host",
@@ -523,6 +530,7 @@
     "manufacturer": "Manufacturer",
     "minStock": "Minimum stock",
     "model": "Model",
+    "moveAssetsTo": "Move its assets to",
     "name": "Name",
     "notes": "Notes",
     "order": "Sort order",
@@ -940,6 +948,18 @@
     },
     "location_restore": {
       "summary": "Restored the location {location}."
+    },
+    "asset_status_label_create": {
+      "summary": "Created the custom status {name} ({kind, select, OPERATIONAL {operational} IN_MAINTENANCE {in maintenance} IN_STORAGE {in storage} RETIRED {retired} LOST {lost} other {unknown}})."
+    },
+    "asset_status_label_update": {
+      "summary": "Updated the custom status {name}."
+    },
+    "asset_status_label_archive": {
+      "summary": "Archived the custom status {name}{moved, plural, =0 {.} one {; moved # asset to {target}.} other {; moved # assets to {target}.}}"
+    },
+    "asset_status_label_restore": {
+      "summary": "Restored the custom status {name}."
     },
     "taxonomy": {
       "categoryKind": "{kind, select, assetCategory {asset category} applicationCategory {application category} other {consumable category}}",
