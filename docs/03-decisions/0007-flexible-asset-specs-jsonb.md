@@ -64,3 +64,4 @@ to existing assets.
 - **Model defaults UI (delivered):** Settings → Taxonomies → Asset models uses the same key/value
   editor for `AssetModel.specs`. Selecting a model in the asset create form copies those defaults
   into the editable asset specs rows; user-entered asset values still win.
+  **Amended 2026-10-05 (#1329):** `CreateAssetModelSchema` / `UpdateAssetModelSchema` carry the same `ASSET_SPECS_MAX_*` write bound; `AssetModelSchema` reads stay unbounded.
