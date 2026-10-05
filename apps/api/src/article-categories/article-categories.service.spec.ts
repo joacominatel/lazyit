@@ -125,7 +125,9 @@ describe('ArticleCategoriesService', () => {
     articleCategory.create.mockResolvedValue(created);
 
     await expect(service.create(dto)).resolves.toEqual(created);
-    expect(articleCategory.create).toHaveBeenCalledWith({ data: dto });
+    expect(articleCategory.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: dto }),
+    );
     // No parentId → the parent-usable check is skipped entirely.
     expect(articleCategory.findFirst).not.toHaveBeenCalled();
   });
@@ -141,7 +143,9 @@ describe('ArticleCategoriesService', () => {
       where: { id: 'p1' },
       select: { id: true },
     });
-    expect(articleCategory.create).toHaveBeenCalledWith({ data: dto });
+    expect(articleCategory.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: dto }),
+    );
   });
 
   it('rejects (400) creating a folder under a non-existent parent', async () => {
@@ -331,10 +335,12 @@ describe('ArticleCategoriesService', () => {
 
     await service.update('c1', { name: 'Networks' });
 
-    expect(articleCategory.update).toHaveBeenCalledWith({
-      where: { id: 'c1' },
-      data: { name: 'Networks' },
-    });
+    expect(articleCategory.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1' },
+        data: { name: 'Networks' },
+      }),
+    );
   });
 
   it('moves a folder to the root (parentId: null) without a parent/cycle check', async () => {
@@ -345,10 +351,12 @@ describe('ArticleCategoriesService', () => {
 
     // findFirst is only the existence (findOne) call; no parent-usable / cycle walk for a root move.
     expect(articleCategory.findFirst).toHaveBeenCalledTimes(1);
-    expect(articleCategory.update).toHaveBeenCalledWith({
-      where: { id: 'c1' },
-      data: { parentId: null },
-    });
+    expect(articleCategory.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1' },
+        data: { parentId: null },
+      }),
+    );
   });
 
   describe('folder cycle guard (ADR-0059 §1)', () => {
@@ -429,10 +437,12 @@ describe('ArticleCategoriesService', () => {
 
       await service.setAccessRules('c1', rules);
 
-      expect(articleCategory.update).toHaveBeenCalledWith({
-        where: { id: 'c1' },
-        data: { accessRules: rules },
-      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'c1' },
+          data: { accessRules: rules },
+        }),
+      );
     });
 
     it('clears the restriction (null → Prisma.DbNull, makes the folder PUBLIC again)', async () => {
@@ -445,10 +455,12 @@ describe('ArticleCategoriesService', () => {
       await service.setAccessRules('c1', null);
 
       // null clears the jsonb column via the Prisma.DbNull sentinel (writes SQL NULL).
-      expect(articleCategory.update).toHaveBeenCalledWith({
-        where: { id: 'c1' },
-        data: { accessRules: 'DbNull' },
-      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'c1' },
+          data: { accessRules: 'DbNull' },
+        }),
+      );
     });
 
     it('404s when the folder is missing or soft-deleted', async () => {
@@ -699,6 +711,88 @@ describe('ArticleCategoriesService', () => {
       await service.removeCascade('root');
 
       expect(search.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Write responses (#1301): the routes are `category:write` / `category:delete`, which MEMBER holds,
+  // so whatever a write returns must be the public shape — never the folder's raw `accessRules`.
+  // ---------------------------------------------------------------------------
+
+  describe('write responses never carry accessRules (#1301)', () => {
+    const STORED_ROW = {
+      id: 'c1',
+      name: 'Payroll',
+      description: null,
+      icon: null,
+      order: null,
+      parentId: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-02T00:00:00Z'),
+      deletedAt: null as Date | null,
+      accessRules: [{ kind: 'users', userIds: ['u-hr-1', 'u-hr-2'] }],
+    };
+
+    // Answers like Prisma: projected to `select` when one is passed, the whole row when not.
+    const rowFor =
+      (row: Record<string, unknown>) =>
+      ({ select }: { select?: Record<string, boolean> } = {}) =>
+        Promise.resolve(
+          select
+            ? Object.fromEntries(
+                Object.entries(row).filter(([key]) => select[key]),
+              )
+            : row,
+        );
+
+    beforeEach(() => {
+      articleCategory.findFirst.mockImplementation(rowFor(STORED_ROW));
+      articleCategory.create.mockImplementation(rowFor(STORED_ROW));
+      articleCategory.update.mockImplementation(rowFor(STORED_ROW));
+      article.count.mockResolvedValue(0);
+      articleCategory.count.mockResolvedValue(0);
+    });
+
+    it('create returns the folder without accessRules', async () => {
+      const created = await service.create({ name: 'Payroll' });
+      expect(created).toMatchObject({ id: 'c1', name: 'Payroll' });
+      expect(created).not.toHaveProperty('accessRules');
+    });
+
+    it('update returns the folder without accessRules', async () => {
+      const updated = await service.update('c1', { name: 'Payroll' });
+      expect(updated).toMatchObject({ id: 'c1', name: 'Payroll' });
+      expect(updated).not.toHaveProperty('accessRules');
+    });
+
+    it('remove returns the folder without accessRules', async () => {
+      const removed = await service.remove('c1');
+      expect(removed).toMatchObject({ id: 'c1' });
+      expect(removed).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of a soft-deleted folder returns it without accessRules', async () => {
+      articleCategory.findFirst.mockImplementation(
+        rowFor({ ...STORED_ROW, deletedAt: new Date('2026-01-03T00:00:00Z') }),
+      );
+      const restored = await service.restore('c1');
+      expect(restored).toMatchObject({ id: 'c1' });
+      expect(restored).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of an already-live folder returns it without accessRules', async () => {
+      const restored = await service.restore('c1');
+      expect(restored).toMatchObject({ id: 'c1', deletedAt: null });
+      expect(restored).not.toHaveProperty('accessRules');
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('setAccessRules stores the rules but does not echo them back', async () => {
+      const saved = await service.setAccessRules('c1', [
+        { kind: 'role', role: 'MEMBER' },
+      ]);
+      expect(saved).toMatchObject({ id: 'c1' });
+      expect(saved).not.toHaveProperty('accessRules');
     });
   });
 });

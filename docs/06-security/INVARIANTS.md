@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-03
+updated: 2026-10-05
 ---
 
 # Security invariants — auth & authorization
@@ -485,6 +485,9 @@ laundering access to a folder they cannot see.
   caller holding `settings:manage` (the web rule-editor) — the SAME gate that WRITES the rules. The
   permission is resolved DB-first via `PermissionResolverService` (human role → RolePermission matrix,
   ADMIN full; service account → direct grants); anonymous / no principal fails closed (SEC-#554).
+  Every folder write (`create`, `update`, `remove`, `restore`, `setAccessRules`) returns the same public
+  select and never the rules, so `category:write` / `category:delete` cannot read them by writing
+  (SEC-087, #1301).
 - DB / storage — the rule set is a zod-validated jsonb `accessRules` column on `ArticleCategory`
   (`FolderAccessRulesSchema` in `@lazyit/shared`, a CLOSED `users`/`role`/`appGrant`/`assetAssignment`
   vocabulary), set via `PUT /article-categories/:id/access-rules` (`settings:manage`, ADMIN-only). The
@@ -494,7 +497,8 @@ laundering access to a folder they cannot see.
   revoked-grant/released-assignment drops access, malformed-fails-closed), `articles.service.spec.ts`
   (folder-hidden → 404, no-escalation alias AND link, reverse-lookup folder pin), `search.service.spec.ts`
   (restricted hit excluded for a non-matching caller — the leak is closed), `article-categories.service.spec.ts`
-  (accessRules omitted for non-admins, returned for `settings:manage`), `folder.test.ts` (the closed
+  (accessRules omitted for non-admins, returned for `settings:manage`, and absent from every write
+  response), `folder.test.ts` (the closed
   rule vocabulary).
 - Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
 

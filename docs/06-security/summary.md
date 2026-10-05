@@ -144,6 +144,13 @@ Snapshot of the security review. Updated each sweep. Method:
    ADR-0070 defines keep working. The modal runs the same denylist at render and shows an unsafe legacy URL as plain text. In the same
    batch, `AssetModel.specs` took the SEC-072 structural write bound (#1329, not a finding).
 
+16. **2026-10-05 — KB folder write responses (born closed, #1301).**
+   [[SEC-087-kb-folder-writes-return-access-rules\|SEC-087]] (**Medium**): the five folder writes returned
+   unselected Prisma rows, so any `category:write` holder, MEMBER included, read a folder's raw
+   `accessRules` (user ids, role, application, asset) by renaming it. Affects v1.0.0 through v2.0.0.
+   **✅ Closed the same day**: every write selects through `CATEGORY_PUBLIC_SELECT`. A runtime response
+   serializer, which would close the class across the API, is the approved follow-up.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -181,6 +188,9 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 ## Top findings
 
+0. **SEC-087 ✅ Closed.** Born closed (fixed 2026-10-05, #1301): KB folder create, update, delete,
+   restore and access-rules responses use the public folder select, so `accessRules` reaches only a
+   `settings:manage` reader, through the GET. No data change.
 0. **SEC-086 ✅ Closed.** Born closed (fixed 2026-10-05, #1327): infra shortcut writes refuse executable
    URL schemes, and the node modal applies the same denylist at render. No data change: a stored unsafe shortcut
    still reads, shows as plain text, and has to be fixed or removed the next time the shortcuts are
