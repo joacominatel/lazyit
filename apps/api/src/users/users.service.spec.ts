@@ -1231,6 +1231,53 @@ describe('UsersService', () => {
     });
   });
 
+  // A sync-offboarded person re-enabled by an admin keeps the stamp; a later manual deactivation must drop it.
+  describe('manual deactivation vs. the directory offboard stamp (#1311)', () => {
+    type UpdateCall = [{ data: Record<string, unknown> }];
+
+    it('clears directoryOffboardedAt when an active user is deactivated by hand', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false });
+
+      const [[arg]] = user.update.mock.calls as UpdateCall[];
+      expect(arg.data).toMatchObject({
+        isActive: false,
+        directoryOffboardedAt: null,
+      });
+    });
+
+    it('leaves the stamp alone on a reactivation or a profile edit', async () => {
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { isActive: true });
+
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        lastName: 'Lovelace',
+        deletedAt: null,
+      });
+      await service.update('uuid-1', { lastName: 'Byron' });
+
+      for (const [arg] of user.update.mock.calls as UpdateCall[]) {
+        expect(arg.data).not.toHaveProperty('directoryOffboardedAt');
+      }
+    });
+  });
+
   // Issue #1375: an activation flip used to change silently — no UserHistory row, so it never reached
   // the recent_activity view (Reports → Users). Every route (web UI, API, AI tool call) lands here.
   describe('activation + identifier audit (issue #1375)', () => {
