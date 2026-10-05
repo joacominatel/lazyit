@@ -18,12 +18,7 @@ import {
   UserPlusIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
-import {
-  type AssetListItem,
-  type AssetStatus,
-  AssetStatusSchema,
-  type BatchResult,
-} from "@lazyit/shared";
+import { type AssetListItem, type BatchResult } from "@lazyit/shared";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -116,6 +111,8 @@ import {
   ASSET_FILTER_DEFAULTS as FILTER_DEFAULTS,
   ASSET_LIST_OPTIONS,
   deriveAssetFilters,
+  statusFilterChoice,
+  statusFilterPatch,
 } from "./assets-list-query";
 import { downloadAssetsExport } from "./assets-csv";
 import {
@@ -137,6 +134,19 @@ import {
   AssetStatusBadge,
   useAssetStatusLabel,
 } from "./asset-status-badge";
+import {
+  batchStatusFields,
+  choiceOf,
+  labelOfChoice,
+  sameChoice,
+  type StatusChoice,
+  updateStatusFields,
+} from "./asset-status-options";
+import {
+  AssetStatusMenuOptions,
+  AssetStatusSelect,
+  useAssetStatusOptions,
+} from "./asset-status-picker";
 import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
@@ -206,13 +216,23 @@ export function AssetsListView() {
     setQ,
     toggleSort,
     setFilter,
+    setFilters,
     setLimit,
     setOffset,
     clearFilters,
     filtersActive,
   } = useListParams(ASSET_LIST_OPTIONS);
 
-  const statusFilter = filters.status as AssetStatus | "ALL";
+  // The status filter is one picker over two URL params (ADR-0101): `status` (a built-in status, every
+  // custom one of that kind included) or `statusLabel` (one custom status). See `statusFilterPatch`.
+  const statusGroups = useAssetStatusOptions();
+  const statusFilter = statusFilterChoice(
+    filters,
+    (id) => statusGroups.find((g) => g.labels.some((l) => l.id === id))?.status,
+  );
+  const statusFilterLabel = statusFilter
+    ? labelOfChoice(statusFilter, statusGroups)
+    : null;
   const categoryFilter = filters.category;
   // The EXACT model filter (#943, deep-linked from the asset detail page's Model link) — distinct
   // from `categoryFilter` above. No picker for it (URL-only); the chip is its sole surface + clear.
@@ -334,15 +354,15 @@ export function AssetsListView() {
   }
 
   /** Change one asset's status from the row kebab (reversible — no confirm, matching the batch flow). */
-  function handleChangeStatus(asset: AssetListItem, status: AssetStatus) {
-    if (status === asset.status) return;
+  function handleChangeStatus(asset: AssetListItem, choice: StatusChoice) {
+    if (sameChoice(choice, choiceOf(asset))) return;
+    const name =
+      labelOfChoice(choice, statusGroups)?.name ?? statusLabel(choice.status);
     updateAsset.mutate(
-      { id: asset.id, data: { status } },
+      { id: asset.id, data: updateStatusFields(choice) },
       {
         onSuccess: () =>
-          toast.success(
-            t("statusChangedToast", { status: statusLabel(status) }),
-          ),
+          toast.success(t("statusChangedToast", { status: name })),
         onError: (err) => notifyError(err, t("statusChangeError")),
       },
     );
@@ -409,7 +429,8 @@ export function AssetsListView() {
     return (
       <AssetRowActions
         assetId={asset.id}
-        currentStatus={asset.status}
+        currentStatus={choiceOf(asset)}
+        currentLabel={asset.statusLabel}
         hasOwner={owned}
         onEdit={
           canWrite ? () => router.push(`/assets/${asset.id}/edit`) : undefined
@@ -421,7 +442,7 @@ export function AssetsListView() {
         onUnassign={canWrite ? () => setUnassigning(asset) : undefined}
         onChangeStatus={
           canWrite
-            ? (status) => handleChangeStatus(asset, status)
+            ? (choice) => handleChangeStatus(asset, choice)
             : undefined
         }
         onDelete={
@@ -601,12 +622,14 @@ export function AssetsListView() {
           },
         ]
       : []),
-    ...(statusFilter !== "ALL"
+    ...(statusFilter
       ? [
           {
             key: "status",
-            label: t("chips.status", { value: statusLabel(statusFilter) }),
-            onClear: () => setFilter("status", FILTER_DEFAULTS.status),
+            label: t("chips.status", {
+              value: statusFilterLabel?.name ?? statusLabel(statusFilter.status),
+            }),
+            onClear: () => setFilters(statusFilterPatch(null)),
           },
         ]
       : []),
@@ -796,22 +819,13 @@ export function AssetsListView() {
               placeholder={t("searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
-            <Select
+            <AssetStatusSelect
               value={statusFilter}
-              onValueChange={(value) => setFilter("status", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allStatuses")}</SelectItem>
-                {AssetStatusSchema.options.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {statusLabel(status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(choice) => setFilters(statusFilterPatch(choice))}
+              groups={statusGroups}
+              allLabel={t("filters.allStatuses")}
+              className="lg:w-56"
+            />
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="justify-start lg:w-auto">
@@ -1030,7 +1044,12 @@ export function AssetsListView() {
                     ) : null}
                   </span>
                 }
-                badge={<AssetStatusBadge status={asset.status} />}
+                badge={
+                  <AssetStatusBadge
+                    status={asset.status}
+                    label={asset.statusLabel}
+                  />
+                }
                 selectable={selectable}
                 selected={selection.isSelected(asset.id)}
                 onSelectedChange={(on) => selection.setSelected(asset.id, on)}
@@ -1199,7 +1218,10 @@ export function AssetsListView() {
                 ),
                 status: (
                   <TableCell key="status">
-                    <AssetStatusBadge status={asset.status} />
+                    <AssetStatusBadge
+                      status={asset.status}
+                      label={asset.statusLabel}
+                    />
                   </TableCell>
                 ),
                 owners: (
@@ -1373,25 +1395,24 @@ export function AssetsListView() {
                           <ChevronDownIcon />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {AssetStatusSchema.options.map((status) => (
-                          <DropdownMenuItem
-                            key={status}
-                            onSelect={() =>
-                              runBatch(
-                                () =>
-                                  batchStatus.mutateAsync({
-                                    ids: selection.selectedIds,
-                                    status,
-                                  }),
-                                { entityKey: "asset", verb: "updated" },
-                                t("batchStatusError"),
-                              )
-                            }
-                          >
-                            {statusLabel(status)}
-                          </DropdownMenuItem>
-                        ))}
+                      <DropdownMenuContent
+                        align="end"
+                        className="max-h-80 overflow-y-auto"
+                      >
+                        <AssetStatusMenuOptions
+                          groups={statusGroups}
+                          onSelect={(choice) =>
+                            runBatch(
+                              () =>
+                                batchStatus.mutateAsync({
+                                  ids: selection.selectedIds,
+                                  ...batchStatusFields(choice),
+                                }),
+                              { entityKey: "asset", verb: "updated" },
+                              t("batchStatusError"),
+                            )
+                          }
+                        />
                       </DropdownMenuContent>
                     </DropdownMenu>
                     <Button

@@ -10,7 +10,6 @@ import {
   UserMinusIcon,
   UserPlusIcon,
 } from "@heroicons/react/24/outline";
-import { type AssetStatus, AssetStatusSchema } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -18,23 +17,25 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useAssetStatusLabel } from "./asset-status-badge";
+import type { StatusChoice, StatusLabelOption } from "./asset-status-options";
+import {
+  AssetStatusMenuOptions,
+  useAssetStatusOptions,
+} from "./asset-status-picker";
 
 /**
  * Assets-local row kebab — the expanded menu for an active (non-archived) asset row, kept out of the
  * shared `RowActions` (resource-table.tsx) so the generic one stays lean (#695, row-actions sub-wave).
  *
  * Items, in order: Open in new tab · Edit · Clone · — · Assign/Remove assignment (the inverse of the
- * row's colored quick button) · Change status (a submenu of every {@link AssetStatusSchema} option,
- * the current one checked) · — · Delete. Every group is INDEPENDENTLY GATED on the caller's
+ * row's colored quick button) · Change status (a submenu of the grouped status options — every built-in
+ * status and its custom statuses, ADR-0101 — the current one checked) · — · Delete. Every group is INDEPENDENTLY GATED on the caller's
  * permissions, mirroring the shared `RowActions` contract:
  *  - `onEdit`/`onClone` and `onAssign`/`onUnassign`/`onChangeStatus` → `can('asset:write')`
  *  - `onDelete` → `can('asset:delete')`
@@ -48,6 +49,7 @@ import { useAssetStatusLabel } from "./asset-status-badge";
 export function AssetRowActions({
   assetId,
   currentStatus,
+  currentLabel,
   hasOwner,
   onEdit,
   onClone,
@@ -57,8 +59,10 @@ export function AssetRowActions({
   onDelete,
 }: {
   assetId: string;
-  /** Current lifecycle status — the checked option in the "Change status" submenu. */
-  currentStatus: AssetStatus;
+  /** Current status (built-in + custom) — the checked option in the "Change status" submenu. */
+  currentStatus: StatusChoice;
+  /** The asset's inline custom status, so it has an option even when the list cannot be read. */
+  currentLabel?: StatusLabelOption | null;
   /** True when the asset has at least one active owner — toggles Assign vs Remove assignment. */
   hasOwner: boolean;
   /** Edit (gate on `asset:write`). */
@@ -70,13 +74,13 @@ export function AssetRowActions({
   /** Open the Unassign confirm (gate on `asset:write`). Shown only when `hasOwner`. */
   onUnassign?: () => void;
   /** Set a new status (gate on `asset:write`). Reversible, so no confirm — matches the batch flow. */
-  onChangeStatus?: (status: AssetStatus) => void;
+  onChangeStatus?: (choice: StatusChoice) => void;
   /** Open the Delete confirm (gate on `asset:delete`). */
   onDelete?: () => void;
 }) {
   const t = useTranslations("assets.rowActions");
   const tShared = useTranslations("shared");
-  const statusLabel = useAssetStatusLabel();
+  const statusGroups = useAssetStatusOptions(currentLabel);
 
   const canWrite =
     onEdit != null ||
@@ -135,17 +139,12 @@ export function AssetRowActions({
               <TagIcon />
               {t("changeStatus")}
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup
+            <DropdownMenuSubContent className="max-h-80 overflow-y-auto">
+              <AssetStatusMenuOptions
+                groups={statusGroups}
                 value={currentStatus}
-                onValueChange={(value) => onChangeStatus(value as AssetStatus)}
-              >
-                {AssetStatusSchema.options.map((status) => (
-                  <DropdownMenuRadioItem key={status} value={status}>
-                    {statusLabel(status)}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
+                onSelect={onChangeStatus}
+              />
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         ) : null}

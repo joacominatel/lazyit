@@ -10,7 +10,6 @@ import {
   type Asset,
   type AssetModel,
   type AssetStatus,
-  AssetStatusSchema,
   cloneAssetDefaults,
   CreateAssetSchema,
   type SpecsWarning,
@@ -44,13 +43,6 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
@@ -62,7 +54,14 @@ import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
 import { parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
-import { useAssetStatusLabel } from "./asset-status-badge";
+import {
+  createStatusFields,
+  updateStatusFields,
+} from "./asset-status-options";
+import {
+  AssetStatusSelect,
+  useAssetStatusOptions,
+} from "./asset-status-picker";
 import {
   type CustomFieldError,
   type CustomFieldRow,
@@ -77,6 +76,9 @@ const FORM_ID = "asset-form";
 type AssetFormValues = {
   name: string;
   status: AssetStatus;
+  // The custom status (ADR-0101) the status picker sets alongside `status` (its kind). `null` on edit =
+  // a bare built-in status (clears a custom one); absent on create.
+  statusLabelId?: string | null;
   modelId?: string;
   locationId?: string;
   serial?: string;
@@ -107,6 +109,7 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
     return {
       name: asset.name,
       status: asset.status,
+      statusLabelId: asset.statusLabelId ?? null,
       modelId: asset.modelId ?? undefined,
       locationId: asset.locationId ?? undefined,
       serial: asset.serial ?? undefined,
@@ -122,6 +125,9 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
     return {
       name: d.name ?? "",
       status: d.status ?? "OPERATIONAL",
+      // A clone keeps the source's custom status with its built-in one (the shared sanitizer predates
+      // custom statuses and copies `status` only).
+      statusLabelId: cloneSource.statusLabelId ?? undefined,
       modelId: d.modelId,
       locationId: d.locationId,
       // serial/assetTag are cleared by the sanitizer → render empty.
@@ -208,7 +214,6 @@ export function AssetForm({
   const locale = useLocale();
   const t = useTranslations("assets.form");
   const tc = useTranslations("common");
-  const statusLabel = useAssetStatusLabel();
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const assignUser = useAssignUser();
@@ -295,6 +300,13 @@ export function AssetForm({
   const { data: assetModels } = useAssetModels();
   // `useWatch` (not `form.watch`) so the React Compiler can subscribe safely.
   const selectedModelId = useWatch({ control: form.control, name: "modelId" });
+  // The custom status the picker shows next to the built-in `status` (ADR-0101). The edited/cloned
+  // asset's own custom status is passed as an extra option, so it shows even when the list of custom
+  // statuses cannot be read.
+  const statusLabelId = useWatch({ control: form.control, name: "statusLabelId" });
+  const statusGroups = useAssetStatusOptions(
+    (asset ?? cloneSource)?.statusLabel ?? null,
+  );
   // Company values already in use, with how often and how recently (ADR-0076, ADR-0099 §7) — the
   // operator can still type a brand-new value.
   const companyText = useWatch({ control: form.control, name: "company" }) ?? "";
@@ -381,9 +393,13 @@ export function AssetForm({
           ? null
           : Math.trunc(Number(months));
 
+      const statusChoice = {
+        status: values.status,
+        labelId: values.statusLabelId ?? null,
+      };
       const payload = {
         name: values.name,
-        status: values.status,
+        ...createStatusFields(statusChoice),
         serial: values.serial,
         assetTag: values.assetTag,
         modelId: values.modelId,
@@ -402,7 +418,14 @@ export function AssetForm({
 
       if (asset) {
         updateAsset.mutate(
-          { id: asset.id, data: { ...payload, purchaseCurrency: payload.purchaseCurrency ?? null } },
+          {
+            id: asset.id,
+            data: {
+              ...payload,
+              ...updateStatusFields(statusChoice),
+              purchaseCurrency: payload.purchaseCurrency ?? null,
+            },
+          },
           {
             onSuccess: (updated) => {
               rememberCompany(values.company);
@@ -448,6 +471,7 @@ export function AssetForm({
               form.reset({
                 name: "",
                 status: values.status,
+                statusLabelId: values.statusLabelId,
                 modelId: values.modelId,
                 locationId: values.locationId,
                 company: values.company,
@@ -510,18 +534,23 @@ export function AssetForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="status">{t("status")}</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger id="status" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AssetStatusSchema.options.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* One picker for both fields (ADR-0101): a custom status sets its id and its kind as
+                    the built-in status; a bare built-in status clears the custom one. */}
+                <AssetStatusSelect
+                  id="status"
+                  value={{ status: field.value, labelId: statusLabelId ?? null }}
+                  onChange={(choice) => {
+                    if (!choice) return;
+                    field.onChange(choice.status);
+                    form.setValue(
+                      "statusLabelId",
+                      choice.labelId ?? (isEdit ? null : undefined),
+                      { shouldDirty: true },
+                    );
+                  }}
+                  groups={statusGroups}
+                  invalid={fieldState.invalid}
+                />
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
