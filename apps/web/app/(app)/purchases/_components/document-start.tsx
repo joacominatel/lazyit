@@ -23,6 +23,13 @@ import {
 } from "@/lib/purchases/start-from-document";
 import { runExclusive } from "@/lib/purchases/submit-guard";
 import { cn } from "@/lib/utils";
+import {
+  FILE_DRAG_STALE_MS,
+  type FileDragInput,
+  isFileDragging,
+  NO_FILE_DRAG,
+  nextFileDrag,
+} from "@/lib/utils/file-drag";
 import { formatBytes } from "@/lib/utils/format";
 
 export interface StartedDocument {
@@ -86,29 +93,32 @@ function useWindowFileDrag(onDrop: (files: FileList) => void): boolean {
   const dropped = useEffectEvent(onDrop);
 
   useEffect(() => {
-    // Enter and leave fire for every element crossed; counting them keeps the target steady.
-    let depth = 0;
+    let state = NO_FILE_DRAG;
+    let silence: ReturnType<typeof setTimeout> | undefined;
     const isFileDrag = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
-    function enter(event: DragEvent) {
-      if (!isFileDrag(event)) return;
-      depth += 1;
-      setDragging(true);
+
+    function check() {
+      const on = isFileDragging(state, performance.now());
+      setDragging(on);
+      clearTimeout(silence);
+      if (on) silence = setTimeout(check, FILE_DRAG_STALE_MS);
     }
+    function feed(kind: FileDragInput["kind"], event: DragEvent) {
+      state = nextFileDrag(state, { kind, files: isFileDrag(event), at: performance.now() });
+      check();
+    }
+    const enter = (event: DragEvent) => feed("enter", event);
+    const leave = (event: DragEvent) => feed("leave", event);
     function over(event: DragEvent) {
       if (!isFileDrag(event)) return;
       event.preventDefault();
       event.dataTransfer!.dropEffect = "copy";
-    }
-    function leave(event: DragEvent) {
-      if (!isFileDrag(event)) return;
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setDragging(false);
+      feed("over", event);
     }
     function drop(event: DragEvent) {
       if (!isFileDrag(event)) return;
       event.preventDefault();
-      depth = 0;
-      setDragging(false);
+      feed("drop", event);
       dropped(event.dataTransfer!.files);
     }
     window.addEventListener("dragenter", enter);
@@ -116,6 +126,7 @@ function useWindowFileDrag(onDrop: (files: FileList) => void): boolean {
     window.addEventListener("dragleave", leave);
     window.addEventListener("drop", drop);
     return () => {
+      clearTimeout(silence);
       window.removeEventListener("dragenter", enter);
       window.removeEventListener("dragover", over);
       window.removeEventListener("dragleave", leave);
