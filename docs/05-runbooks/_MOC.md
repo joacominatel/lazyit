@@ -49,7 +49,7 @@ Operational procedures: deploy, backups, recovery, on-call, troubleshooting.
   non-human API credential): the token is shown **once**, scoping by direct permission grants, rotation
   and revocation. [[0048-service-accounts]].
 - **[[backups]]** — backups & disaster recovery: the full DR inventory (app DB + Zitadel DB +
-  `.env.prod`/masterkey, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` alongside; Meili/Caddy
+  `.env.prod`/masterkey, with the low-DR `SMTP_SECRET_KEY` / `AI_SECRET_KEY` / `DIRECTORY_SECRET_KEY` alongside; Meili/Caddy
   rebuildable), the opt-in backup sidecar (cron + `pg_dump` for
   both DBs, retention, optional offsite), and the correct restore order (env → zitadel → app → up →
   reindex) with targeted volume removal instead of the destructive `down -v`.

@@ -69,8 +69,9 @@ afectado.
 
 Si actualizas con `git pull` seguido de `./infra/start.sh`, el script detecta tu instalación existente
 y, antes de levantar el stack, **añade cualquier clave que falte y sea segura de generar** — hoy la
-clave de la contraseña del correo (`SMTP_SECRET_KEY`) y la clave de almacenamiento de la clave del
-proveedor de IA (`AI_SECRET_KEY`). Cada una solo protege un secreto que lazyit se niega a guardar
+clave de la contraseña del correo (`SMTP_SECRET_KEY`), la clave de almacenamiento de la clave del
+proveedor de IA (`AI_SECRET_KEY`) y la clave de la contraseña de conexión del directorio
+(`DIRECTORY_SECRET_KEY`). Cada una solo protege un secreto que lazyit se niega a guardar
 mientras la clave falta, así que una nueva no puede dejarte sin acceso a nada. Funciona tanto si inicias
 sesión con cuentas integradas como con un proveedor de identidad.
 

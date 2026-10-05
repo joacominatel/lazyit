@@ -118,6 +118,7 @@ AUTH_SECRET=""
 WORKFLOW_SECRET_KEY=""
 SMTP_SECRET_KEY=""                # instance SMTP password at-rest key (ADR-0079); own axis, never reuse another key
 AI_SECRET_KEY=""                  # AI provider API key at-rest key (ADR-0097); optional, own axis, never reuse another key
+DIRECTORY_SECRET_KEY=""           # LDAP bind password at-rest key (ADR-0091); optional, own axis, never reuse another key
 SESSION_SIGNING_SECRET=""         # local-mode HMAC session key (ADR-0086); generated always, written in local mode
 ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
@@ -143,8 +144,9 @@ WHAT IT DOES
   random secrets (chmod 600), and brings the prod stack up. Then it points you at the
   in-app /setup wizard to create the first ADMIN. It is idempotent and non-destructive:
   if an install already exists it skips generation and just brings the stack up — after
-  appending any key this release added that is safe to generate (today SMTP_SECRET_KEY and
-  AI_SECRET_KEY; backup first, existing lines never touched, key names printed, never values).
+  appending any key this release added that is safe to generate (today SMTP_SECRET_KEY,
+  AI_SECRET_KEY and DIRECTORY_SECRET_KEY; backup first, existing lines never touched, key names
+  printed, never values).
 
 OPTIONS
   --reconfigure                  Re-run the network-mode / host / ports questions on an EXISTING
@@ -408,6 +410,19 @@ generate_secrets() {
   fi
   ok "AI_SECRET_KEY generated (exactly 64 hex chars — verified)"
 
+  # DIRECTORY_SECRET_KEY — AES-256-GCM master key for the LDAP BIND PASSWORD at rest (Settings -> Instance
+  # -> Directory sync, ADR-0091). Its OWN key axis, like SMTP_SECRET_KEY and AI_SECRET_KEY, and OPTIONAL at
+  # boot the same way: without it the API runs unchanged and only saving a bind password 409s — and that
+  # 409 rejects the WHOLE directory save, not just the password (issue #1271). The example ships it
+  # COMMENTED (so infra/update.sh never stops an instance that does not sync a directory); a guided install
+  # still mints it so enabling directory sync later needs no hand-edit. NOT a DR linchpin: losing it costs
+  # one re-typed bind password. See docs/05-runbooks/backups.md.
+  DIRECTORY_SECRET_KEY=$(openssl rand -hex 32)
+  if [ "${#DIRECTORY_SECRET_KEY}" -ne 64 ]; then
+    die "internal error: generated DIRECTORY_SECRET_KEY is ${#DIRECTORY_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length makes every LDAP bind password save fail with a 409)."
+  fi
+  ok "DIRECTORY_SECRET_KEY generated (exactly 64 hex chars — verified)"
+
   # SESSION_SIGNING_SECRET — HMAC key the API signs/verifies the first-party local session token with
   # (ADR-0086 §4). Required ONLY in local mode; the boot-config refine demands >= 32 chars and fails loud
   # at boot otherwise (mirrors WORKFLOW_SECRET_KEY). openssl rand -hex 32 -> 64 hex chars. Generated in
@@ -460,6 +475,10 @@ render_env_file() {
   # And for AI_SECRET_KEY (ADR-0097): the example ships it commented (the loop activates that line), while a
   # .env.prod written before it has no line at all (appended after the loop).
   _saw_ai_key=0
+
+  # And for DIRECTORY_SECRET_KEY (ADR-0091, issue #1271): same shape as AI_SECRET_KEY — commented in the
+  # example (the loop activates that line), no line at all in a .env.prod written before it (appended below).
+  _saw_dir_key=0
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
@@ -551,6 +570,12 @@ render_env_file() {
       "# AI_SECRET_KEY="*|AI_SECRET_KEY=*)
         _saw_ai_key=1
         printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp" ;;
+      # DIRECTORY_SECRET_KEY (ADR-0091) — written ACTIVE even though the example ships it commented. On
+      #     --reconfigure the value comes from load_existing_env: an already-present key is PRESERVED
+      #     verbatim (it decrypts the stored LDAP bind password) and one is minted only when absent.
+      "# DIRECTORY_SECRET_KEY="*|DIRECTORY_SECRET_KEY=*)
+        _saw_dir_key=1
+        printf 'DIRECTORY_SECRET_KEY=%s\n' "$DIRECTORY_SECRET_KEY" >>"$_tmp" ;;
       *) printf '%s\n' "$line" >>"$_tmp" ;;
     esac
   done <"$_template"
@@ -579,6 +604,17 @@ render_env_file() {
     printf '# AES-256-GCM master key for the provider API key stored in Settings -> AI. Its OWN key axis;\n' >>"$_tmp"
     printf '# optional at boot. Losing it costs only a re-entered API key (not a DR linchpin).\n' >>"$_tmp"
     printf 'AI_SECRET_KEY=%s\n' "$AI_SECRET_KEY" >>"$_tmp"
+  fi
+
+  # A template with no DIRECTORY_SECRET_KEY line (a .env.prod predating issue #1271): append the key now,
+  # with the value load_existing_env resolved — a preserved hand-added key, or a fresh one. Never regenerated.
+  if [ "$_saw_dir_key" -eq 0 ]; then
+    {
+      printf '\n# --- LDAP bind password at-rest key (ADR-0091) — added by start.sh ---\n'
+      printf '# AES-256-GCM master key for the bind password stored in Settings -> Instance -> Directory sync.\n'
+      printf '# Its OWN key axis; optional at boot. Losing it costs only a re-typed bind password (not a DR linchpin).\n'
+      printf 'DIRECTORY_SECRET_KEY=%s\n' "$DIRECTORY_SECRET_KEY"
+    } >>"$_tmp"
   fi
 
   # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
@@ -669,6 +705,15 @@ render_env_file() {
   else
     [ "${#_aik}" -eq 64 ] || die "render check failed: AI_SECRET_KEY in the file is ${#_aik} chars, not 64 (32 hex bytes)."
   fi
+  # DIRECTORY_SECRET_KEY: same rule again — exactly 64 hex on a fresh render (ours), merely present on
+  # --reconfigure (an operator's hand-added key may be base64 of 32 bytes or a 32-char raw string, both of
+  # which resolveDirectorySecretKey accepts — asserting 64 would refuse to reconfigure a working install).
+  _dsk=$(grep -E '^DIRECTORY_SECRET_KEY=' "$_tmp" | head -n1 | cut -d= -f2-)
+  if [ "$RECONFIGURE" -eq 1 ]; then
+    [ -n "$_dsk" ] || die "render check failed: DIRECTORY_SECRET_KEY is missing/empty in the rendered file."
+  else
+    [ "${#_dsk}" -eq 64 ] || die "render check failed: DIRECTORY_SECRET_KEY in the file is ${#_dsk} chars, not 64 (32 hex bytes)."
+  fi
   if [ "$PG_MODE" = "internal" ]; then
     _du=$(grep -E '^DATABASE_URL=' "$_tmp" | head -n1 | cut -d= -f2-)
     case "$_du" in
@@ -676,7 +721,7 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY present, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY + DIRECTORY_SECRET_KEY present, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
@@ -736,6 +781,7 @@ load_existing_env() {
   SESSION_SIGNING_SECRET=$(_read_env SESSION_SIGNING_SECRET)
   SMTP_SECRET_KEY=$(_read_env SMTP_SECRET_KEY)
   AI_SECRET_KEY=$(_read_env AI_SECRET_KEY)
+  DIRECTORY_SECRET_KEY=$(_read_env DIRECTORY_SECRET_KEY)
 
   # Postgres topology from the DATABASE_URL host (internal `@db:5432` vs an external/managed URL).
   case "$DATABASE_URL_VAL" in
@@ -779,6 +825,19 @@ load_existing_env() {
     info "AI_SECRET_KEY was absent from $ENV_FILE — a fresh 64-hex key was generated (optional; only needed to store an AI provider API key). Nothing was encrypted under it, so nothing is lost."
   fi
 
+  # DIRECTORY_SECRET_KEY (ADR-0091, issue #1271) — the same rule: present => PRESERVED verbatim, whatever
+  # its encoding (it decrypts the stored LDAP bind password); absent => the API refused every bind-password
+  # save (409) while it was unset, so nothing can be encrypted under it and a fresh key is free.
+  if [ -n "$DIRECTORY_SECRET_KEY" ]; then
+    ok "DIRECTORY_SECRET_KEY found in $ENV_FILE — PRESERVED verbatim (never regenerated; it decrypts the stored LDAP bind password)"
+  else
+    DIRECTORY_SECRET_KEY=$(openssl rand -hex 32)
+    if [ "${#DIRECTORY_SECRET_KEY}" -ne 64 ]; then
+      die "internal error: generated DIRECTORY_SECRET_KEY is ${#DIRECTORY_SECRET_KEY} chars, expected exactly 64 (32 hex bytes)."
+    fi
+    info "DIRECTORY_SECRET_KEY was absent from $ENV_FILE — a fresh 64-hex key was generated (optional; only needed to store an LDAP bind password). Nothing was encrypted under it, so nothing is lost."
+  fi
+
   ok "preserved secrets loaded (WORKFLOW_SECRET_KEY, AUTH_SECRET, SESSION_SIGNING_SECRET, MEILI_MASTER_KEY, DB creds) — none regenerated"
   info "existing topology: AUTH_MODE=local, Postgres=${PG_MODE}"
 }
@@ -788,14 +847,18 @@ load_existing_env() {
 #
 # Appends to $ENV_FILE every key that is ALL of:
 #   (1) defined in this checkout's $ENV_EXAMPLE (an active line, or a commented `# KEY=` placeholder for
-#       an optional key such as AI_SECRET_KEY — either way this release knows the key),
+#       an optional key such as AI_SECRET_KEY or DIRECTORY_SECRET_KEY — either way this release knows it),
 #   (2) MISSING from $ENV_FILE (no ACTIVE `KEY=` line — a present line of any value is never touched), and
 #   (3) on SAFE_GENERATABLE_KEYS below.
 #
 # The allowlist is the safety gate. A key belongs on it ONLY if a random fresh value can never orphan data
 # or identity on an install that lacks it: each of today's keys is an at-rest key for a secret the API
 # REFUSES to store (409) while the key is unset, so a missing key proves nothing was ever encrypted under
-# it. Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, ZITADEL_MASTERKEY, AUTH_SECRET,
+# it. (The API reads each one only from its process env, which compose fills from $ENV_FILE via env_file
+# — compose.yaml's api `environment:` block names none of them, and the shell env never reaches the
+# container. An operator who set one somewhere else can only have done it in their own compose overlay,
+# and there it still wins: an overlay's `environment:` outranks env_file, and an overlay's env_file is
+# merged AFTER $ENV_FILE. So appending can never swap the key the API actually decrypts with.) Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, ZITADEL_MASTERKEY, AUTH_SECRET,
 # SESSION_SIGNING_SECRET, the DB passwords, MEILI_MASTER_KEY — are NEVER generated here: they are only
 # REPORTED, with the manual instruction, exactly like every other missing key.
 #
@@ -804,7 +867,7 @@ load_existing_env() {
 # taken first; the result is written through a mode-600 temp + atomic mv, so the file stays 600. Only KEY
 # NAMES are printed, never values. Idempotent: a second run finds nothing missing and writes nothing.
 # =============================================================================
-SAFE_GENERATABLE_KEYS="SMTP_SECRET_KEY AI_SECRET_KEY"
+SAFE_GENERATABLE_KEYS="SMTP_SECRET_KEY AI_SECRET_KEY DIRECTORY_SECRET_KEY"
 
 add_missing_safe_keys() {
   step "Checking $ENV_FILE for keys this release added"

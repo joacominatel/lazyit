@@ -24,7 +24,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` and `AI_SECRET_KEY` (both optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` (all optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
 | 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
 | 4 | Meilisearch index | `meili_data_v1_53_2` volume (named per server version) | No (rebuildable) | Nothing to do: on boot the API rebuilds any empty/missing index from the database; `reindex:all` forces a full rebuild ([[0035-search-architecture]]). |
@@ -87,6 +87,25 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > before that still holds it until the dump itself is pruned (`BACKUP_RETENTION_DAYS`, or your off-host
 > copy's own retention). Restoring an old dump brings those transcripts back until the next retention
 > sweep. Keep backup retention in line with what your organization expects of AI transcripts.
+
+> [!info] `DIRECTORY_SECRET_KEY` — the LDAP bind password's at-rest key: OPTIONAL and low-DR, like `SMTP_SECRET_KEY` (ADR-0091)
+> When an admin configures directory sync (Settings → Instance → Directory sync), the read-only LDAP
+> **bind password** is stored encrypted (AES-256-GCM) under `DIRECTORY_SECRET_KEY` — its own key axis,
+> separate from `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `WORKFLOW_SECRET_KEY`. **Back it up alongside
+> them**, in the same off-host copy of `.env.prod`. A DB restore **without the matching key** leaves the
+> stored bind password undecryptable: the scheduled sync and *Sync now* fail to bind until an admin
+> re-types the password — the imported people and their history live in the app DB (item #2) and are
+> untouched. The key is **optional** (unset ⇒ the app boots unchanged; only saving a connection *with* a
+> bind password 409s, and that rejects the whole save), so it is not a DR linchpin.
+>
+> A guided install **generates this key** (`infra/start.sh`, issue #1271), and `./infra/start.sh
+> --reconfigure` and a re-run of `./infra/start.sh` on an existing install that lacks it add it; all of
+> them **preserve a present key verbatim**, whatever encoding it uses. Nothing can have been encrypted
+> under a key that was never set, so adding one orphans nothing. **Never regenerate a key that is
+> already in the file**: the stored bind password becomes undecryptable and must be re-typed. The same
+> restore caveat as above applies — a `.env.prod` backup older than the key, restored onto a database
+> holding a bind password encrypted under it, gets a fresh key from `start.sh` and the password must be
+> re-entered — so refresh the off-host copy whenever `start.sh` reports it added a key.
 
 > [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
 > [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB

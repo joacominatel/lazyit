@@ -63,9 +63,11 @@ El editor tiene estos campos:
   `givenName`, `sn`, `mail`, `sAMAccountName`). Deja un campo en blanco para omitirlo.
 
 > La contraseña de conexión se guarda **cifrada en reposo**. Guardar una contraseña requiere que la clave de
-> servidor `DIRECTORY_SECRET_KEY` esté configurada; si no lo está, lazyit guarda el resto de la
-> configuración y te pide configurar la clave primero. Consulta la configuración de entorno de tu
-> despliegue.
+> servidor `DIRECTORY_SECRET_KEY` esté configurada. Si no lo está, **se rechaza el guardado completo**: no se
+> almacena nada, ni siquiera los demás campos, y lazyit te pide configurar la clave primero. Una instalación
+> guiada crea esa clave por ti, y volver a ejecutar el script de arranque en un despliegue más antiguo la
+> añade; si no, tu administrador debe añadirla a la configuración de entorno del servidor y reiniciar la
+> API. Mientras tanto, puedes guardar el resto de los ajustes dejando **Contraseña de conexión** en blanco.
 
 ## Ejecutar una sincronización y leer el resultado
 
