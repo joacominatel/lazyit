@@ -295,29 +295,41 @@ export class DirectoryReconcileService {
       changedFields.push('directoryAttrs');
     }
     // Reappeared after WE offboarded them → undo our own soft offboard (never touch a manual deactivation).
-    if (person.directoryOffboardedAt != null) {
-      data.isActive = true;
-      data.directoryOffboardedAt = null;
-      changedFields.push('reactivated');
-    }
+    const reactivate = person.directoryOffboardedAt != null;
 
-    if (changedFields.length === 0) {
+    if (changedFields.length === 0 && !reactivate) {
       // Only the lastSeenAt heartbeat moved — persist it silently (no history, no "updated" count).
       await this.prisma.user.update({ where: { id: person.id }, data });
       counts.skipped += 1;
       return;
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const recorded = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: person.id }, data });
+      if (reactivate) {
+        // Conditional on our stamp still being there: an admin edit mid-sweep wins (#1311).
+        const { count } = await tx.user.updateMany({
+          where: {
+            id: person.id,
+            isActive: false,
+            directoryOffboardedAt: { not: null },
+            deletedAt: null,
+          },
+          data: { isActive: true, directoryOffboardedAt: null },
+        });
+        if (count === 1) changedFields.push('reactivated');
+      }
+      if (changedFields.length === 0) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', fields: changedFields },
         actor,
       });
+      return true;
     });
-    counts.updated += 1;
+    if (recorded) counts.updated += 1;
+    else counts.skipped += 1;
   }
 
   /**

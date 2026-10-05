@@ -621,29 +621,52 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(historyRecord).not.toHaveBeenCalled();
   });
 
+  const syncOffboarded: LocalPerson = {
+    id: 'u2',
+    directorySourceId: 'G2',
+    isActive: false,
+    directoryOffboardedAt: new Date('2020-01-01T00:00:00.000Z'),
+    firstName: 'Back',
+    lastName: 'Again',
+    directoryAttrs: { lastSeenAt: '2020-01-01T00:00:00.000Z' },
+  };
+
   it('REAPPEARED after our offboard → reactivates WITHOUT touching sessionEpoch (the person signs in again)', async () => {
-    const { service, txUserUpdate, historyRecord } = makeService({
-      localPeople: [
-        {
-          id: 'u2',
-          directorySourceId: 'G2',
-          isActive: false,
-          directoryOffboardedAt: new Date('2020-01-01T00:00:00.000Z'),
-          firstName: 'Back',
-          lastName: 'Again',
-          directoryAttrs: { lastSeenAt: '2020-01-01T00:00:00.000Z' },
-        },
-      ],
-      entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
-    });
+    const { service, txUserUpdate, txUserUpdateMany, historyRecord } =
+      makeService({
+        localPeople: [syncOffboarded],
+        entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
+      });
     const result = await service.reconcile();
     expect(result.counts.updated).toBe(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
-    expect(data.isActive).toBe(true);
-    expect(data.directoryOffboardedAt).toBeNull();
-    assertNoForbiddenKeys(data);
+    const { where, data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
+    // Only a row still carrying our stamp is reactivated: an admin edit mid-sweep wins.
+    expect(where).toEqual({
+      id: 'u2',
+      isActive: false,
+      directoryOffboardedAt: { not: null },
+      deletedAt: null,
+    });
+    expect(data).toEqual({ isActive: true, directoryOffboardedAt: null });
+    assertNoForbiddenKeys(nthCall<[UpdateArg]>(txUserUpdate, 0)[0].data);
     const event = nthCall<[unknown, HistoryEvent]>(historyRecord, 0)[1];
     expect(event.payload.fields).toContain('reactivated');
+  });
+
+  it('an admin edit lands mid-sweep (the conditional reactivation matches 0 rows) → stays as the admin left it, no history', async () => {
+    const { service, txUserUpdate, historyRecord } = makeService({
+      localPeople: [syncOffboarded],
+      entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
+      conditionalWriteCount: 0,
+    });
+    const result = await service.reconcile();
+    expect(result.counts.updated).toBe(0);
+    expect(result.counts.skipped).toBe(1);
+    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    expect(data).not.toHaveProperty('isActive');
+    expect(data).not.toHaveProperty('directoryOffboardedAt');
+    assertNoForbiddenKeys(data);
+    expect(historyRecord).not.toHaveBeenCalled();
   });
 
   it('DISAPPEARED within grace → NOT offboarded (a single dropped run cannot mass-deactivate)', async () => {
