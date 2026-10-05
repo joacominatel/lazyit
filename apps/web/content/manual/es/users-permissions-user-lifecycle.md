@@ -41,10 +41,34 @@ aparece — gestiona la credencial en tu proveedor.
 **Punto de partida (opcional).** Puedes asignar un activo y conceder acceso a una aplicación desde el
 mismo formulario de creación, para que la persona empiece con lo que necesita.
 
+## La página de una persona
+
+Al abrir un usuario ves su ficha, organizada como la página de un activo.
+
+- **La tarjeta de resumen** arriba: nombre, estado, rol, y el correo (con un botón para copiarlo), el
+  nombre de usuario y el legajo. Debajo, los **datos clave** cuentan los **activos en posesión**, el
+  **acceso a aplicaciones** y los **artículos** que escribió; elige un contador para abrir su pestaña.
+  Al lado figura su responsable.
+- **Requiere atención**: aparecen avisos solo cuando hay algo que hacer: accesos que vencen en los
+  próximos 30 días, accesos que ya vencieron y están por revocarse, y activos cuya recepción la persona
+  todavía no confirmó.
+- **Pestañas**: **Activos** (cada uno con su etiqueta, modelo, categoría, estado y si se confirmó la
+  recepción), **Accesos** (primero los vencidos y los que vencen pronto), **Artículos**,
+  **Consumibles** e **Historial**, una sola lista de los activos que devolvió y los accesos que perdió,
+  del más reciente al más antiguo. Cada pestaña aparece solo para quienes pueden ver lo que contiene.
+  La pestaña abierta queda en la dirección de la página, así un enlace compartido abre en la misma
+  pestaña.
+- **La columna lateral** tiene el **Perfil**: rol (editable con *Gestionar usuarios*), responsable,
+  legajo, nombre de usuario, correo y fechas. Para una persona de directorio también ofrece crear su
+  cuenta de acceso.
+
+El encabezado deja a mano **Restablecer contraseña** y **Editar**. **Clonar** y **Dar de baja** están en
+el menú **⋯** al lado, con Dar de baja separado para que no se elija por error.
+
 ## Clonar un usuario
 
 Para incorporar a alguien que replica a un colega ("el mismo acceso que Ana"), abre un usuario y elige
-**Clonar**. Eliges un correo nuevo y único y un rol, y luego seleccionas cuáles de los **activos** y del
+**Clonar** en el menú **⋯**. Eliges un correo nuevo y único y un rol, y luego seleccionas cuáles de los **activos** y del
 **acceso a aplicaciones** del origen se trasladan.
 
 Por defecto, el acceso clonado **solo se registra** — es contabilidad, sin efecto externo. Hay un
@@ -97,7 +121,7 @@ y elegir la otra opción.
 
 ## Dar de baja a un usuario
 
-Cuando alguien se va, ábrelo y elige **Dar de baja**. lazyit muestra el impacto completo de antemano —
+Cuando alguien se va, ábrelo y elige **Dar de baja** en el menú **⋯**. lazyit muestra el impacto completo de antemano —
 los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego, al confirmar:
 
 - **revoca** el acceso activo a aplicaciones de la persona,
@@ -141,11 +165,11 @@ que la hoja puede listar, indica cuántos más hay en lugar de omitirlos en sile
 
 ## Consumibles en la página de una persona
 
-La página de una persona tiene una sección **Consumibles entregados** con lo que se le entregó, del más
+La página de una persona tiene una pestaña **Consumibles** con lo que se le entregó, del más
 reciente al más antiguo. **Solo pendientes** muestra solo los ítems retornables que siguen afuera, y un
 filtro de fechas la acota según cuándo se entregaron. Con permiso para registrar movimientos de stock
 puedes **Entregar consumible** a esa persona o registrar una devolución con **Devolver…** desde aquí. Quienes no
-pueden ver a otros usuarios no ven esta sección.
+pueden ver a otros usuarios no ven esta pestaña.
 
 ## Encontrar usuarios por rol
 

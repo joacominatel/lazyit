@@ -10,7 +10,7 @@ order: 1
 La pertenencia en lazyit **no** es un campo que sobrescribes — es un registro de quién tuvo un activo
 y cuándo. Eso es lo que mantiene al activo como el registro principal: las personas rotan, los activos
 permanecen y el rastro completo de pertenencia se conserva automáticamente. Los responsables se
-gestionan desde la página de detalle del activo, en **Responsables**.
+gestionan desde la página de detalle del activo, en el panel **Responsables** de su columna lateral.
 
 ## Asignar un responsable
 
@@ -81,8 +81,8 @@ atajos respetan tus permisos: solo ves las acciones que tienes permitido ejecuta
 
 Cada activo lleva un **registro de actividad de solo adición** — una línea de tiempo de eventos
 discretos, del más reciente al más antiguo. El registro es inmutable: las entradas se escriben, nunca
-se editan ni se borran. Lo encuentras en la página de detalle del activo bajo **Actividad**, y las
-entradas específicas de pertenencia bajo **Historial de pertenencia**.
+se editan ni se borran. Lo encuentras en la página de detalle del activo en la pestaña **Actividad**, con las
+entradas específicas de pertenencia bajo **Historial de responsables** en la misma pestaña.
 
 Los eventos registrados incluyen:
 
