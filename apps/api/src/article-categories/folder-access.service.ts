@@ -181,6 +181,25 @@ export class FolderAccessService {
   }
 
   /**
+   * The ids of every LIVE folder that carries a restriction (ADR-0060 §3) — i.e. the folders that are
+   * NOT public under §2. Caller-independent by construction: this is a property of the FOLDER, not of
+   * whoever is asking, and it is the only folder-access fact exposed to an ordinary `category:read`
+   * reader (the #1299 carve-out — a derived existence flag, never the rule content).
+   *
+   * It reuses {@link loadFolders} / `resolveRules`, so "restricted" has exactly ONE definition in the
+   * codebase — the same `isPublic` the read evaluator itself uses, including its fail-closed handling
+   * of a malformed stored value (an unparseable rule is restricted, never silently public). Pass the
+   * request-scoped {@link FolderTreeCache} and it shares the tree load with
+   * {@link visibleFolderIds} — no extra query.
+   */
+  async restrictedFolderIds(
+    cache?: FolderTreeCache,
+  ): Promise<ReadonlySet<string>> {
+    const folders = await this.loadFolders(cache);
+    return new Set(folders.filter((f) => !f.isPublic).map((f) => f.id));
+  }
+
+  /**
    * Does the caller match this restricted folder's OWN rule set (OR semantics — any rule lets them in)?
    * Pure in-memory over the pre-resolved live-join context. Never called for a PUBLIC folder.
    */
