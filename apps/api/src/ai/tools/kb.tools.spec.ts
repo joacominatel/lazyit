@@ -1329,10 +1329,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           }),
         ]),
       );
-      // A member cannot see folder rules (#554): the audience is stated as unknown, never guessed.
+      // A member cannot see folder rules (#554), but the derived `hasAccessRules` flag (#1299) says the
+      // folder carries none: the audience is stated as everyone, without reading the rules.
       expect(
         String(preview.changes.find((c) => c.field === 'audience')?.after),
-      ).toMatch(/^Unknown to you/);
+      ).toMatch(/^Everyone/);
       expect(prisma.article.create).not.toHaveBeenCalled();
 
       const approved = await tools.approve(proposal.action.id, chat(member));
@@ -1554,12 +1555,12 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         },
         {
           field: 'audience',
-          after:
-            'Team: Unknown to you: folder access rules are shown only to settings:manage holders',
+          // A member cannot read the rules (#554); the derived flag (#1299) still says one exists.
+          after: 'Team: Restricted by folder access rules',
           // #1384: the same sentence as codes the web localizes.
           afterSentences: [
             { code: 'kb.audience.folder', params: { folder: 'Team' } },
-            { code: 'kb.audience.unknown', params: {} },
+            { code: 'kb.audience.restrictedByRules', params: {} },
           ],
           valueKind: 'text',
         },
