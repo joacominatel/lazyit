@@ -23,10 +23,13 @@ import type { DerivedListState } from "@/lib/hooks/list-params-url";
  * the model's category); `owner` maps to `assignedToUserId` (a User uuid, "" = unset); `ownership`
  * (Has/None) maps to the server `ownership` filter (#824); `warranty` ("ALL" | "expiring90d" |
  * "expired") maps to the server `warranty` filter (#955, deep-linked from the dashboard tile);
- * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view via the URL. `statusLabel` maps to
+ * the server's `statusLabelId` — ONE custom status (ADR-0101) — while `status` keeps filtering the built-in
+ * status, which includes every custom status of that kind.
  */
 export const ASSET_FILTER_DEFAULTS = {
   status: "ALL",
+  statusLabel: "ALL",
   category: "ALL",
   model: "ALL",
   location: "ALL",
@@ -72,6 +75,7 @@ export function deriveAssetFilters(
   return {
     q: q || undefined,
     status: filters.status === "ALL" ? undefined : (filters.status as AssetStatus),
+    statusLabelId: statusLabelFilterId(filters.statusLabel),
     categoryId: filters.category === "ALL" ? undefined : filters.category,
     modelId: filters.model === "ALL" ? undefined : filters.model,
     locationId: filters.location === "ALL" ? undefined : filters.location,
@@ -89,4 +93,49 @@ export function deriveAssetFilters(
     offset,
     deleted: archived ? "only" : undefined,
   };
+}
+
+/** A cuid as zod's `z.cuid()` (and so the API's `statusLabelId` param) accepts it. */
+const CUID = /^[cC][^\s-]{8,}$/;
+
+/**
+ * The `statusLabel` URL value → the `statusLabelId` the API filters by. A custom status id is not an
+ * enum, so `filterValidators` cannot guard it; a garbage or stale value (which the API would 400) is
+ * dropped here instead, like the enum filters drop theirs.
+ */
+export function statusLabelFilterId(value: string | undefined): string | undefined {
+  return value && value !== "ALL" && CUID.test(value) ? value : undefined;
+}
+
+/**
+ * The status filter is ONE picker over two URL params (ADR-0101): a built-in status sets `status` (every
+ * asset in it, labelled or not), a custom status sets `statusLabel`. Picking one clears the other, so the
+ * two never narrow each other by accident. `null` clears both.
+ */
+export function statusFilterPatch(
+  choice: { status: AssetStatus; labelId: string | null } | null,
+): { status: string; statusLabel: string } {
+  if (!choice) {
+    return { status: ASSET_FILTER_DEFAULTS.status, statusLabel: ASSET_FILTER_DEFAULTS.statusLabel };
+  }
+  return choice.labelId
+    ? { status: ASSET_FILTER_DEFAULTS.status, statusLabel: choice.labelId }
+    : { status: choice.status, statusLabel: ASSET_FILTER_DEFAULTS.statusLabel };
+}
+
+/**
+ * The picker's current choice from the URL filters: a custom status wins (its kind is resolved by the
+ * picker from the options), then a built-in status, else none.
+ */
+export function statusFilterChoice(
+  filters: { status?: string; statusLabel?: string },
+  labelKind: (id: string) => AssetStatus | undefined,
+): { status: AssetStatus; labelId: string | null } | null {
+  const labelId = statusLabelFilterId(filters.statusLabel);
+  if (labelId) {
+    const kind = labelKind(labelId);
+    if (kind) return { status: kind, labelId };
+  }
+  const parsed = AssetStatusSchema.safeParse(filters.status);
+  return parsed.success ? { status: parsed.data, labelId: null } : null;
 }

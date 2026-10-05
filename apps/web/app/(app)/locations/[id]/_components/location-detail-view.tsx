@@ -243,7 +243,10 @@ export function LocationDetailView({ id }: { id: string }) {
                   )}
                 </TableCell>
                 <TableCell>
-                  <AssetStatusBadge status={asset.status} />
+                  <AssetStatusBadge
+                    status={asset.status}
+                    label={asset.statusLabel}
+                  />
                 </TableCell>
                 <TableCell>
                   <StackedOwnerAvatars assignments={asset.activeAssignments} />

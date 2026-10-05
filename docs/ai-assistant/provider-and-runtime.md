@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-05
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -719,6 +719,9 @@ Rules [C]:
     stop, and propose the next batch once the person has decided, until done, never proposing the same
     change twice; and prefer a tool that proposes many similar changes as one card (described in words,
     never by name);
+  - custom asset statuses (#1524, `AI_PROMPT_VERSION` 7, every channel — a primer change): an asset always
+    has a built-in status, and an optional team-defined custom status maps to one and sets it
+    ([[0101-custom-asset-statuses]]); the tool descriptions carry the detail;
   - the principal block: display name, kind, role, sorted permission list, channel, locale;
   - an optional admin-authored `instructions` text from `AiSettings`.
 - **Provider-native web search (#1389; ADR-0097 decision 3 as amended 2026-09-24).** Frozen like the

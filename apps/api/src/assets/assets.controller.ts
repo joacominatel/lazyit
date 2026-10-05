@@ -117,6 +117,14 @@ export class AssetsController {
     name: 'status',
     required: false,
     enum: [...AssetStatusSchema.options],
+    description:
+      'The BUILT-IN status: matches every asset in it, whatever its custom status (ADR-0101).',
+  })
+  @ApiQuery({
+    name: 'statusLabelId',
+    required: false,
+    description:
+      'One custom status (ADR-0101): the assets carrying exactly this label. Invalid cuid → 400.',
   })
   @ApiQuery({
     name: 'q',
@@ -237,6 +245,7 @@ export class AssetsController {
     @Query('purchaseOrderId') purchaseOrderId?: string,
     @Query('purchaseLinked') purchaseLinked?: string,
     @CurrentPrincipal() principal?: Principal,
+    @Query('statusLabelId') statusLabelId?: string,
   ) {
     const pageQuery = parsePageQuery({
       limit,
@@ -255,6 +264,7 @@ export class AssetsController {
         modelId,
         locationId,
         status,
+        statusLabelId,
         company,
         q,
         assignedToUserId,
@@ -298,6 +308,7 @@ export class AssetsController {
     modelId?: string;
     locationId?: string;
     status?: string;
+    statusLabelId?: string;
     company?: string;
     q?: string;
     assignedToUserId?: string;
@@ -341,6 +352,7 @@ export class AssetsController {
       modelId: parseCuidQuery(raw.modelId, 'modelId'),
       locationId: parseCuidQuery(raw.locationId, 'locationId'),
       status: parsedStatus,
+      statusLabelId: parseCuidQuery(raw.statusLabelId, 'statusLabelId'),
       company: raw.company?.trim() || undefined,
       q: raw.q,
       assignedToUserId: parseUuidQuery(
@@ -383,6 +395,7 @@ export class AssetsController {
     required: false,
     enum: [...AssetStatusSchema.options],
   })
+  @ApiQuery({ name: 'statusLabelId', required: false })
   @ApiQuery({ name: 'q', required: false })
   @ApiQuery({ name: 'assignedToUserId', required: false })
   @ApiQuery({ name: 'ownership', required: false, enum: ['HAS', 'NONE'] })
@@ -414,12 +427,14 @@ export class AssetsController {
     @Query('deleted') deleted?: string,
     @CurrentUser() user?: User,
     @CurrentPrincipal() principal?: Principal,
+    @Query('statusLabelId') statusLabelId?: string,
   ): StreamableFile {
     const filters = this.parseAssetFilters({
       categoryId,
       modelId,
       locationId,
       status,
+      statusLabelId,
       company,
       q,
       assignedToUserId,
@@ -696,7 +711,11 @@ export class AssetsController {
     @Body() dto: BatchAssetStatusDto,
     @CurrentPrincipal() principal?: Principal,
   ) {
-    return this.assets.batchSetStatus(dto.ids, dto.status, principal);
+    return this.assets.batchSetStatus(
+      dto.ids,
+      { status: dto.status, statusLabelId: dto.statusLabelId },
+      principal,
+    );
   }
 
   // Bulk receive (ADR-0089 Part A, #1029) — a STATIC `batch/*` route so it never collides with the

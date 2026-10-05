@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AssetStatusSchema } from "./asset";
+import { ASSET_STATUS_REQUIRED_MESSAGE, AssetStatusSchema } from "./asset";
 
 /**
  * Batch (bulk) mutation contracts for multi-select actions (ADR-0030 amendment, 2026-06-01). Each
@@ -33,11 +33,23 @@ export const BatchIdsSchema = z.strictObject({
   ids: CuidBatchIdsSchema,
 });
 
-/** Bulk asset status-change payload: the target ids plus the new status to set on each. */
-export const BatchAssetStatusSchema = z.strictObject({
-  ids: CuidBatchIdsSchema,
-  status: AssetStatusSchema,
-});
+/**
+ * Bulk asset status-change payload: the target ids plus the new status to set on each — a built-in
+ * `status`, a CUSTOM status (`statusLabelId`, ADR-0101: sets the label and its kind), or both (they must
+ * agree, else 400). A built-in `status` alone clears the custom status of every asset it changes.
+ * `statusLabelId: null` with a `status` asks for the BARE built-in status: an asset already in that status
+ * but carrying a custom one is changed too (its custom status is cleared), not skipped.
+ */
+export const BatchAssetStatusSchema = z
+  .strictObject({
+    ids: CuidBatchIdsSchema,
+    status: AssetStatusSchema.optional(),
+    statusLabelId: z.cuid().nullable().optional(),
+  })
+  .refine((v) => v.status !== undefined || typeof v.statusLabelId === "string", {
+    message: ASSET_STATUS_REQUIRED_MESSAGE,
+    path: ["status"],
+  });
 
 /** Bulk access-grant revoke payload: the grant ids plus an optional shared revoke note. */
 export const BatchRevokeGrantsSchema = z.strictObject({

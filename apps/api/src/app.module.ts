@@ -10,6 +10,7 @@ import { LocalAuthModule } from './auth/local/local-auth.module';
 import { UsersModule } from './users/users.module';
 import { LocationsModule } from './locations/locations.module';
 import { AssetCategoriesModule } from './asset-categories/asset-categories.module';
+import { AssetStatusLabelsModule } from './asset-status-labels/asset-status-labels.module';
 import { AssetModelsModule } from './asset-models/asset-models.module';
 import { AssetsModule } from './assets/assets.module';
 import { AssetTagSchemeModule } from './asset-tag-scheme/asset-tag-scheme.module';
@@ -81,6 +82,7 @@ import { buildLoggerParams } from './logging/logging.config';
     UsersModule,
     LocationsModule,
     AssetCategoriesModule,
+    AssetStatusLabelsModule,
     AssetModelsModule,
     AssetsModule,
     // Configurable asset-tag scheme (ADR-0063, #363): the first instance-config entity. Hosts

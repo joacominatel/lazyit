@@ -95,6 +95,8 @@ const SA_PRINCIPAL = {
 const EXPECTED_INCLUDE = {
   model: { include: { category: true } },
   location: true,
+  // The custom status as its compact ref (ADR-0101).
+  statusLabel: { select: { id: true, name: true, kind: true, color: true } },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -111,6 +113,9 @@ const EXPECTED_LIST_SELECT = {
   serial: true,
   assetTag: true,
   status: true,
+  // The custom status (ADR-0101): its id and compact ref.
+  statusLabelId: true,
+  statusLabel: { select: { id: true, name: true, kind: true, color: true } },
   notes: true,
   company: true,
   purchaseDate: true,
@@ -1562,7 +1567,9 @@ describe('AssetsService', () => {
       .mockResolvedValueOnce([{ id: 'a1' }]); // single batched re-index read after commit (#596)
     tx.update.mockResolvedValue({});
 
-    const result = await service.batchSetStatus(['a1', 'a2', 'a3'], 'RETIRED');
+    const result = await service.batchSetStatus(['a1', 'a2', 'a3'], {
+      status: 'RETIRED',
+    });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.update).toHaveBeenCalledTimes(1);
@@ -1601,7 +1608,7 @@ describe('AssetsService', () => {
       .mockResolvedValueOnce([{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }]); // ONE batched re-index read
     tx.update.mockResolvedValue({});
 
-    await service.batchSetStatus(['a1', 'a2', 'a3'], 'RETIRED');
+    await service.batchSetStatus(['a1', 'a2', 'a3'], { status: 'RETIRED' });
 
     // Exactly two findMany: the gather + ONE re-index read (never one per succeeded id).
     expect(asset.findMany).toHaveBeenCalledTimes(2);
@@ -1654,6 +1661,9 @@ describe('AssetsService', () => {
       select: {
         id: true,
         status: true,
+        // The custom status, so a status edit keeps or clears it and history names it (ADR-0101).
+        statusLabelId: true,
+        statusLabel: { select: { id: true, name: true } },
         locationId: true,
         modelId: true,
         specs: true,

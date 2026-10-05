@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AssetSchema, AssetStatusSchema } from "./asset";
+import { ASSET_STATUS_REQUIRED_MESSAGE, AssetSchema, AssetStatusSchema } from "./asset";
 import { int4, money, optionalText } from "./primitives";
 import { currencyLabel } from "./purchase-order";
 
@@ -38,12 +38,16 @@ export const RECEIVE_ASSETS_MAX_QUANTITY = 200;
  * `purchaseOrderLineId` receives the units AGAINST a purchase line ("From purchase") — the line must be a
  * live `ASSET` line of a live purchase (400 otherwise) and the caller must also hold `purchaseOrder:write`
  * (403 otherwise). Receiving past the line's pending count is allowed and flagged in the result.
+ *
+ * Custom statuses (ADR-0101): `statusLabelId` receives every unit into that live custom status (and its
+ * built-in kind); `status` becomes optional when it is given. Both at once must agree (400 otherwise).
  */
 export const ReceiveAssetsSchema = z
   .strictObject({
     modelId: z.cuid(),
     quantity: int4({ min: 1, max: RECEIVE_ASSETS_MAX_QUANTITY }),
-    status: AssetStatusSchema,
+    status: AssetStatusSchema.optional(),
+    statusLabelId: z.cuid().optional(),
     locationId: z.cuid().optional(),
     company: optionalText(200),
     purchaseDate: z.iso.datetime().optional(),
@@ -64,7 +68,11 @@ export const ReceiveAssetsSchema = z
       message: "serials must be empty or contain exactly `quantity` entries",
       path: ["serials"],
     },
-  );
+  )
+  .refine((v) => v.status !== undefined || v.statusLabelId !== undefined, {
+    message: ASSET_STATUS_REQUIRED_MESSAGE,
+    path: ["status"],
+  });
 
 /**
  * The bulk-receive result envelope (ADR-0089 A2). `created` are the assets that landed (full Asset wire
