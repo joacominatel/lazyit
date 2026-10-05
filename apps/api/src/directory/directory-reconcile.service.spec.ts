@@ -186,6 +186,7 @@ function makeService(opts: {
   );
   return {
     service,
+    fetchEntries,
     userUpdate,
     txUserUpdate,
     usersCreate,
@@ -368,27 +369,68 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
   });
 
-  it('offboarding an ALREADY-INACTIVE person does not bump sessionEpoch (revoked at deactivation)', async () => {
+  // ADR-0091 / #1311: a manual deactivation is never auto-reactivated, so the sweep must not stamp it.
+  describe('a manual deactivation is never auto-reactivated (#1311)', () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { service, txUserUpdate } = makeService({
-      graceDays: 7,
-      localPeople: [
-        {
-          id: 'u4',
-          directorySourceId: 'G4',
-          isActive: false, // deactivated by hand before AD dropped them
-          directoryOffboardedAt: null,
-          firstName: 'Manually',
-          lastName: 'Deactivated',
-          directoryAttrs: { lastSeenAt: stale },
-        },
-      ],
-      entries: [],
+    const manuallyDeactivated: LocalPerson = {
+      id: 'u4',
+      directorySourceId: 'G4',
+      isActive: false,
+      directoryOffboardedAt: null,
+      firstName: 'Manually',
+      lastName: 'Deactivated',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+
+    it('absent past grace → not offboarded: nothing written, counted as skipped', async () => {
+      const { service, userUpdate, txUserUpdate, historyRecord } = makeService({
+        graceDays: 7,
+        localPeople: [manuallyDeactivated],
+        entries: [],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.offboarded).toBe(0);
+      expect(result.counts.skipped).toBe(1);
+      expect(userUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
     });
-    const result = await service.reconcile();
-    expect(result.counts.offboarded).toBe(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
-    assertNoForbiddenKeys(data);
+
+    it('reappears → stays inactive (the refresh never writes isActive or the offboard stamp)', async () => {
+      const { service, userUpdate, txUserUpdate } = makeService({
+        localPeople: [manuallyDeactivated],
+        entries: [
+          makeEntry('G4', { givenName: 'Manually', sn: 'Deactivated' }),
+        ],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.updated).toBe(0);
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data).not.toHaveProperty('isActive');
+      expect(data).not.toHaveProperty('directoryOffboardedAt');
+    });
+
+    it('inactive for both reasons — deactivated by hand, then gone from AD past grace — stays inactive when AD lists them again', async () => {
+      const { service, fetchEntries, userUpdate, txUserUpdate } = makeService({
+        graceDays: 7,
+        localPeople: [manuallyDeactivated],
+        entries: [],
+      });
+
+      const gone = await service.reconcile();
+      expect(gone.counts.offboarded).toBe(0);
+      expect(txUserUpdate).not.toHaveBeenCalled();
+
+      fetchEntries.mockResolvedValueOnce([
+        makeEntry('G4', { givenName: 'Manually', sn: 'Deactivated' }),
+      ]);
+      const back = await service.reconcile();
+      expect(back.counts.updated).toBe(0);
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data).not.toHaveProperty('isActive');
+    });
   });
 
   // SEC-021: the offboard sweep must never deactivate the last active ADMIN — that locks the instance with
@@ -480,7 +522,8 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
 
       const result = await service.reconcile();
 
-      expect(result.counts.offboarded).toBe(2);
+      expect(result.counts.offboarded).toBe(1);
+      expect(result.counts.skipped).toBe(1);
       expect(hasAnotherActiveAdmin).not.toHaveBeenCalled();
     });
   });

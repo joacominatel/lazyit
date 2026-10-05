@@ -192,6 +192,11 @@ export class DirectoryReconcileService {
         if (!p.directorySourceId || seenGuids.has(p.directorySourceId))
           continue;
         if (p.directoryOffboardedAt != null) continue; // already offboarded by us
+        // Inactive and unstamped = deactivated by hand; stamping it would auto-reactivate them (#1311).
+        if (!p.isActive) {
+          counts.skipped += 1;
+          continue;
+        }
         const lastSeen = lastSeenMs(p.directoryAttrs);
         if (lastSeen != null && lastSeen > cutoff) {
           // Still within grace — leave as-is; a later run offboards it if it stays gone.
@@ -203,7 +208,6 @@ export class DirectoryReconcileService {
         // is written, so the next run re-evaluates and offboards them once another active ADMIN exists —
         // warn, and carry on with the rest of the sweep. Same predicate as the PATCH /users guard.
         if (
-          p.isActive &&
           p.role === 'ADMIN' &&
           !(await this.users.hasAnotherActiveAdmin(p.id))
         ) {
@@ -388,7 +392,7 @@ export class DirectoryReconcileService {
    * An ACTIVE person also has `sessionEpoch` bumped (#1308, ADR-0086 §8), matching the manual deactivation
    * path: the guard already refuses the inactive row, but refreshMatched's automatic reactivation would
    * otherwise revive every token minted before — including a "keep me signed in" token with no time-based
-   * expiry. An already-inactive person was revoked when they were deactivated, so there is nothing to bump.
+   * expiry. The sweep never sends an already-inactive person here (#1311).
    */
   private async offboard(
     person: LocalAdPerson,
@@ -402,13 +406,9 @@ export class DirectoryReconcileService {
         data: {
           isActive: false,
           directoryOffboardedAt: at,
+          sessionEpoch: { increment: 1 },
           // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
-          ...(person.isActive
-            ? {
-                sessionEpoch: { increment: 1 },
-                mcpCredentialEpoch: { increment: 1 },
-              }
-            : {}),
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
       await this.history.record(tx, {
