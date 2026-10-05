@@ -1,4 +1,9 @@
-import { NotFoundException, type INestApplication } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  type INestApplication,
+} from '@nestjs/common';
 import { APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -57,6 +62,8 @@ import { AssetCategoriesService } from '../../asset-categories/asset-categories.
 import { AssetHistoryService } from '../../asset-history/asset-history.service';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetModelsService } from '../../asset-models/asset-models.service';
+import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
+import { AssetStatusLabelsService } from '../../asset-status-labels/asset-status-labels.service';
 import { AssetsController } from '../../assets/assets.controller';
 import { AssetsService } from '../../assets/assets.service';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
@@ -184,6 +191,13 @@ const M = {
   pro14: cid('tmodelpro14'),
   retired: cid('tmodelretired'),
 };
+/** Custom asset statuses (ADR-0101). */
+const S = {
+  repair: cid('tlabelrepair'),
+  bench: cid('tlabelbench'),
+  loaner: cid('tlabelloaner'),
+  old: cid('tlabelold'),
+};
 const L = {
   hq: cid('tlochq'),
   floor2: cid('tlocfloor2'),
@@ -201,6 +215,7 @@ let locations: Row[];
 let assets: Row[];
 let applications: Row[];
 let consumables: Row[];
+let statusLabels: Row[];
 
 const base = (id: string, extra: Row = {}): Row => ({
   id,
@@ -292,7 +307,116 @@ function resetStore() {
     { id: cid('tapp3'), name: 'VPN', categoryId: null },
   ];
   consumables = [{ id: cid('tcons1'), name: 'Toner 26A', categoryId: C.toner }];
+  statusLabels = [
+    base(S.repair, {
+      name: 'In repair at vendor',
+      kind: 'IN_MAINTENANCE',
+      color: '#F59E0B',
+      order: null,
+      description: INJECTION,
+    }),
+    base(S.bench, {
+      name: 'On the bench',
+      kind: 'IN_MAINTENANCE',
+      color: null,
+      order: 1,
+    }),
+    base(S.loaner, {
+      name: 'Loaner pool',
+      kind: 'IN_STORAGE',
+      color: null,
+      order: null,
+    }),
+    base(S.old, {
+      name: 'Old status',
+      kind: 'RETIRED',
+      color: null,
+      order: null,
+      deletedAt: ARCHIVED_AT,
+    }),
+  ];
+  // Two assets carry "In repair at vendor".
+  assets[0].statusLabelId = S.repair;
+  assets[1].statusLabelId = S.repair;
 }
+
+/** The custom-status service with the route's rules: kind guard (409), reassign on delete (400). */
+const statusLabelCount = (id: string) =>
+  assets.filter((a) => live(a) && a.statusLabelId === id).length;
+const statusLabelsService = {
+  findAll: jest.fn((deleted: string = 'active') =>
+    Promise.resolve(
+      statusLabels
+        .filter((l) => (deleted === 'only' ? l.deletedAt !== null : live(l)))
+        .map((l) => ({ ...l, assetCount: statusLabelCount(String(l.id)) })),
+    ),
+  ),
+  findOne: jest.fn((id: string) => {
+    const row = statusLabels.find((l) => l.id === id);
+    if (!live(row))
+      throw new NotFoundException(`Custom status ${id} not found`);
+    return Promise.resolve({ ...row, assetCount: statusLabelCount(id) });
+  }),
+  create: jest.fn((dto: Row) => {
+    if (statusLabels.some((l) => live(l) && l.name === dto.name)) {
+      throw new ConflictException('duplicate name');
+    }
+    const row = base(cid(`tnewlabel${statusLabels.length}`), {
+      color: null,
+      order: null,
+      ...dto,
+    });
+    statusLabels.push(row);
+    return Promise.resolve({ ...row });
+  }),
+  update: jest.fn((id: string, dto: Row) => {
+    const row = statusLabels.find((l) => l.id === id);
+    if (!live(row))
+      throw new NotFoundException(`Custom status ${id} not found`);
+    if (
+      dto.kind !== undefined &&
+      dto.kind !== row.kind &&
+      statusLabelCount(id) > 0
+    ) {
+      throw new ConflictException('in use');
+    }
+    Object.assign(row, dto);
+    bump(row);
+    return Promise.resolve({ ...row });
+  }),
+  remove: jest.fn(
+    (
+      id: string,
+      target: { reassignLabelId?: string; reassignStatus?: string },
+    ) => {
+      const row = statusLabels.find((l) => l.id === id);
+      if (!live(row))
+        throw new NotFoundException(`Custom status ${id} not found`);
+      const carriers = assets.filter((a) => a.statusLabelId === id);
+      if (
+        carriers.length > 0 &&
+        !target.reassignLabelId &&
+        !target.reassignStatus
+      ) {
+        throw new BadRequestException('choose where they go');
+      }
+      for (const a of carriers)
+        a.statusLabelId = target.reassignLabelId ?? null;
+      row.deletedAt = new Date('2026-09-10T00:00:00.000Z');
+      bump(row);
+      return Promise.resolve({ ...row, movedAssetCount: carriers.length });
+    },
+  ),
+  restore: jest.fn((id: string) => {
+    const row = statusLabels.find((l) => l.id === id);
+    if (!row) throw new NotFoundException(`Custom status ${id} not found`);
+    if (row.deletedAt !== null) {
+      row.deletedAt = null;
+      bump(row);
+    }
+    return Promise.resolve({ ...row });
+  }),
+};
 
 const bump = (row: Row) => {
   row.updatedAt = new Date((row.updatedAt as Date).getTime() + 1000);
@@ -451,6 +575,8 @@ const assetsService = {
           (a) =>
             live(a) &&
             (!filters.modelId || a.modelId === filters.modelId) &&
+            (!filters.statusLabelId ||
+              a.statusLabelId === filters.statusLabelId) &&
             (!filters.locationId || a.locationId === filters.locationId) &&
             (!filters.categoryId ||
               models.find((m) => m.id === a.modelId)?.categoryId ===
@@ -487,6 +613,7 @@ const writes = () =>
     consumableCategories,
     modelLife,
     locationLife,
+    statusLabelsService,
   ].reduce(
     (n, s) =>
       n +
@@ -646,6 +773,7 @@ const events = (invocationId: string) =>
 
 const CONTROLLERS = {
   assetCategories: AssetCategoriesController,
+  statusLabels: AssetStatusLabelsController,
   applicationCategories: ApplicationCategoriesController,
   models: AssetModelsController,
   locations: LocationsController,
@@ -739,6 +867,56 @@ const ROUTES: RouteCase[] = [
     url: `/locations/${L.old}/restore`,
     shape: { params: { id: L.old } },
   },
+  // Custom asset statuses (ADR-0101): the category permissions.
+  {
+    controller: 'statusLabels',
+    method: 'create',
+    verb: 'post',
+    url: '/asset-status-labels',
+    shape: { body: { name: 'Shipped back', kind: 'IN_MAINTENANCE' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'create',
+    verb: 'post',
+    url: '/asset-status-labels',
+    shape: { body: { name: 'Bad colour', kind: 'LOST', color: 'red' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'update',
+    verb: 'patch',
+    url: `/asset-status-labels/${S.loaner}`,
+    shape: { params: { id: S.loaner }, body: { kind: 'OPERATIONAL' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'update',
+    verb: 'patch',
+    url: `/asset-status-labels/${S.repair}`,
+    shape: { params: { id: S.repair }, body: { kind: 'RETIRED' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-status-labels/${S.repair}?reassignStatus=RETIRED`,
+    shape: { params: { id: S.repair }, query: { reassignStatus: 'RETIRED' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-status-labels/${S.repair}?reassignStatus=GONE`,
+    shape: { params: { id: S.repair }, query: { reassignStatus: 'GONE' } },
+  },
+  {
+    controller: 'statusLabels',
+    method: 'restore',
+    verb: 'post',
+    url: `/asset-status-labels/${S.old}/restore`,
+    shape: { params: { id: S.old } },
+  },
 ];
 
 describe('taxonomy toolset (#1390)', () => {
@@ -753,6 +931,7 @@ describe('taxonomy toolset (#1390)', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [
         AssetCategoriesController,
+        AssetStatusLabelsController,
         ApplicationCategoriesController,
         ConsumableCategoriesController,
         AssetModelsController,
@@ -785,6 +964,7 @@ describe('taxonomy toolset (#1390)', () => {
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: AssetCategoriesService, useValue: assetCategories },
+        { provide: AssetStatusLabelsService, useValue: statusLabelsService },
         {
           provide: ApplicationCategoriesService,
           useValue: applicationCategories,
@@ -1632,6 +1812,261 @@ describe('taxonomy toolset (#1390)', () => {
         ok: true,
         data: { items: [{ id: C.saas, name: 'SaaS', order: 1 }] },
       });
+    });
+  });
+
+  // ─── Custom asset statuses (ADR-0101) ───────────────────────────────────────────────────────────
+
+  describe('custom asset statuses', () => {
+    it('reference_lookup lists them with their built-in kind and live asset count', async () => {
+      const result = await tools.invoke(
+        'reference_lookup',
+        { kind: 'assetStatusLabel' },
+        chat(actor('VIEWER')),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          kind: 'assetStatusLabel',
+          total: 3,
+          items: [
+            {
+              id: S.repair,
+              name: 'In repair at vendor',
+              kind: 'IN_MAINTENANCE',
+              color: '#F59E0B',
+              assetCount: 2,
+            },
+            { id: S.bench, kind: 'IN_MAINTENANCE', assetCount: 0 },
+            { id: S.loaner, kind: 'IN_STORAGE', assetCount: 0 },
+          ],
+        },
+      });
+      const full = await tools.invoke(
+        'reference_lookup',
+        { kind: 'assetStatusLabel', id: S.repair, detail: 'full' },
+        chat(actor('VIEWER')),
+      );
+      expect(full).toMatchObject({
+        ok: true,
+        data: {
+          item: {
+            id: S.repair,
+            description: `<untrusted_content>${INJECTION}</untrusted_content>`,
+          },
+        },
+      });
+    });
+
+    it('asset_status_label_create shows the name and kind, then creates it (MEMBER)', async () => {
+      const action = await propose(
+        'asset_status_label_create',
+        { name: 'Shipped back', kind: 'IN_MAINTENANCE', color: '#112233' },
+        actor('MEMBER'),
+      );
+      expect(action.preview).toMatchObject({
+        changes: [
+          { field: 'name', after: 'Shipped back' },
+          { field: 'kind', after: 'IN_MAINTENANCE' },
+          { field: 'color', after: '#112233' },
+        ],
+      });
+      expect(writes()).toBe(0);
+      const approved = await tools.approve(action.id, chat(actor('MEMBER')));
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: {
+          summary:
+            'Created the custom status <untrusted_content>Shipped back</untrusted_content> (in maintenance).',
+          entityRefs: [
+            { type: 'assetStatusLabel', op: 'created', label: 'Shipped back' },
+          ],
+        },
+      });
+      expect(statusLabelsService.create).toHaveBeenCalledWith({
+        name: 'Shipped back',
+        kind: 'IN_MAINTENANCE',
+        color: '#112233',
+      });
+    });
+
+    it('asset_status_label_create refuses a live duplicate name and a bad colour before any card', async () => {
+      expect(
+        await refused('asset_status_label_create', {
+          name: 'Loaner pool',
+          kind: 'IN_STORAGE',
+        }),
+      ).toMatchObject({ code: 'CONFLICT' });
+      expect(
+        await refused('asset_status_label_create', {
+          name: 'X',
+          kind: 'LOST',
+          color: 'red',
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
+    });
+
+    it('asset_status_label_update renames by name with a version precondition', async () => {
+      const action = await propose('asset_status_label_update', {
+        status: 'in repair at vendor',
+        name: 'At the vendor',
+        color: null,
+      });
+      expect(action.preview).toMatchObject({
+        target: { type: 'assetStatusLabel', id: S.repair },
+        changes: [
+          {
+            field: 'name',
+            before: 'In repair at vendor',
+            after: 'At the vendor',
+          },
+          { field: 'color', before: '#F59E0B', after: null },
+        ],
+        precondition: { updatedAt: T0.toISOString() },
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(statusLabelsService.update).toHaveBeenCalledWith(S.repair, {
+        name: 'At the vendor',
+        color: null,
+      });
+    });
+
+    it('asset_status_label_update refuses a kind change while assets carry it; allows it when unused', async () => {
+      expect(
+        await refused('asset_status_label_update', {
+          status: S.repair,
+          kind: 'RETIRED',
+        }),
+      ).toMatchObject({ code: 'CONFLICT' });
+      const action = await propose('asset_status_label_update', {
+        status: 'Loaner pool',
+        kind: 'OPERATIONAL',
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(statusLabelsService.update).toHaveBeenCalledWith(S.loaner, {
+        kind: 'OPERATIONAL',
+      });
+    });
+
+    it('asset_status_label_archive needs a target while assets carry it', async () => {
+      expect(
+        await refused('asset_status_label_archive', { status: S.repair }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(
+        await refused('asset_status_label_archive', {
+          status: S.repair,
+          moveTo: S.repair,
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(
+        await refused('asset_status_label_archive', {
+          status: S.repair,
+          moveTo: S.bench,
+          moveToStatus: 'RETIRED',
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
+    });
+
+    it('asset_status_label_archive shows the assets that move and where, then moves and archives', async () => {
+      const action = await propose('asset_status_label_archive', {
+        status: 'In repair at vendor',
+        moveTo: 'On the bench',
+      });
+      expect(action.preview).toMatchObject({
+        target: { type: 'assetStatusLabel', id: S.repair, op: 'archived' },
+        warnings: ['SOFT_DELETE'],
+        changes: [
+          { field: 'archived', before: false, after: true },
+          {
+            field: 'moveAssetsTo',
+            after: {
+              type: 'assetStatusLabel',
+              id: S.bench,
+              label: 'On the bench',
+            },
+            valueKind: 'entity',
+          },
+        ],
+        impacted: [{ type: 'asset', count: 2 }],
+      });
+      const approved = await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: {
+          summary:
+            'Archived the custom status <untrusted_content>In repair at vendor</untrusted_content>; moved 2 assets to <untrusted_content>On the bench (IN_MAINTENANCE)</untrusted_content>.',
+          data: { movedAssetCount: 2 },
+        },
+      });
+      expect(statusLabelsService.remove).toHaveBeenCalledWith(
+        S.repair,
+        { reassignLabelId: S.bench },
+        expect.anything(),
+      );
+    });
+
+    it('asset_status_label_archive moves to a bare built-in status; an unused one needs no target', async () => {
+      const action = await propose('asset_status_label_archive', {
+        status: S.repair,
+        moveToStatus: 'RETIRED',
+      });
+      expect(action.preview!.changes).toContainEqual(
+        expect.objectContaining({ field: 'moveAssetsTo', after: 'RETIRED' }),
+      );
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(statusLabelsService.remove).toHaveBeenCalledWith(
+        S.repair,
+        { reassignStatus: 'RETIRED' },
+        expect.anything(),
+      );
+
+      const unused = await propose('asset_status_label_archive', {
+        status: 'Loaner pool',
+      });
+      expect(unused.preview!.changes).toEqual([
+        { field: 'archived', before: false, after: true, valueKind: 'boolean' },
+      ]);
+    });
+
+    it('asset_status_label_archive is a category:delete write: a MEMBER is refused', async () => {
+      expect(
+        await refused(
+          'asset_status_label_archive',
+          { status: S.loaner },
+          actor('MEMBER'),
+        ),
+      ).toMatchObject({ code: 'FORBIDDEN' });
+    });
+
+    it('asset_status_label_restore finds the archived one by name (ADMIN) and restores it', async () => {
+      const action = await propose('asset_status_label_restore', {
+        status: 'old status',
+      });
+      expect(action.preview).toMatchObject({
+        target: { type: 'assetStatusLabel', id: S.old, op: 'restored' },
+        changes: [{ field: 'archived', before: true, after: false }],
+      });
+      const approved = await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: {
+          summary:
+            'Restored the custom status <untrusted_content>Old status</untrusted_content>.',
+        },
+      });
+      expect(statusLabels[3].deletedAt).toBeNull();
+    });
+
+    it('asset_status_label_restore needs the archived list, which is ADMIN-only', async () => {
+      const result = await tools.invoke(
+        'asset_status_label_restore',
+        { status: S.old },
+        headless(actor('SA taxonomy writer')),
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+      expect(statusLabelsService.restore).not.toHaveBeenCalled();
     });
   });
 });

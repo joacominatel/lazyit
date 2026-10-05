@@ -264,6 +264,7 @@
     "asset": "Activo",
     "assetAssignment": "Asignación",
     "assetModel": "Modelo",
+    "assetStatusLabel": "Estado personalizado",
     "location": "Ubicación",
     "category": "Categoría",
     "application": "Aplicación",
@@ -444,6 +445,10 @@
     "location_update": "Actualizar una ubicación",
     "location_archive": "Archivar una ubicación",
     "location_restore": "Restaurar una ubicación",
+    "asset_status_label_create": "Crear un estado personalizado",
+    "asset_status_label_update": "Actualizar un estado personalizado",
+    "asset_status_label_archive": "Archivar un estado personalizado",
+    "asset_status_label_restore": "Restaurar un estado personalizado",
     "asset_tag_scheme_get": "Leer el esquema de etiquetas de activos",
     "asset_tag_scheme_update": "Cambiar el esquema de etiquetas de activos",
     "purchase_search": "Buscar compras",
@@ -481,12 +486,14 @@
     "categoryId": "Categoría",
     "checkedInFrom": "Devuelto por",
     "checkedOutTo": "Asignado a",
+    "color": "Color",
     "company": "Empresa",
     "content": "Contenido",
     "costPerSeat": "Costo por licencia",
     "credential": "Credencial",
     "criticalApplicationAccess": "Acceso a aplicaciones críticas",
     "currentStock": "Stock actual",
+    "customStatus": "Estado personalizado",
     "dataSent": "Datos enviados",
     "dataSentToNewHost": "Datos enviados al nuevo host",
     "defaultHeadersSentToNewHost": "Encabezados por defecto enviados al nuevo host",
@@ -523,6 +530,7 @@
     "manufacturer": "Fabricante",
     "minStock": "Stock mínimo",
     "model": "Modelo",
+    "moveAssetsTo": "Mover sus activos a",
     "name": "Nombre",
     "notes": "Notas",
     "order": "Orden",
@@ -940,6 +948,18 @@
     },
     "location_restore": {
       "summary": "Se restauró la ubicación {location}."
+    },
+    "asset_status_label_create": {
+      "summary": "Se creó el estado personalizado {name} ({kind, select, OPERATIONAL {operativo} IN_MAINTENANCE {en mantenimiento} IN_STORAGE {en depósito} RETIRED {retirado} LOST {perdido} other {desconocido}})."
+    },
+    "asset_status_label_update": {
+      "summary": "Se actualizó el estado personalizado {name}."
+    },
+    "asset_status_label_archive": {
+      "summary": "Se archivó el estado personalizado {name}{moved, plural, =0 {.} one {; se movió # activo a {target}.} other {; se movieron # activos a {target}.}}"
+    },
+    "asset_status_label_restore": {
+      "summary": "Se restauró el estado personalizado {name}."
     },
     "taxonomy": {
       "categoryKind": "{kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}}",

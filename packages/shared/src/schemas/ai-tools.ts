@@ -72,6 +72,8 @@ export const AI_ENTITY_TYPES = [
   "assetModel",
   "location",
   "category",
+  /** A custom asset status (ADR-0101, #1524): a taxonomy row with no page of its own. */
+  "assetStatusLabel",
   "application",
   "accessGrant",
   "accessRequest",

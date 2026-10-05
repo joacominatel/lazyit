@@ -156,7 +156,10 @@ export function ProfileView() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <AssetStatusBadge status={asset.status} />
+                  <AssetStatusBadge
+                    status={asset.status}
+                    label={asset.statusLabel}
+                  />
                   <Button variant="ghost" size="sm" asChild>
                     <Link href={`/assets/${asset.id}`}>
                       {t("assets.view")}

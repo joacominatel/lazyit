@@ -72,7 +72,9 @@ export function UserAssetsTab({
                     >
                       {asset?.name ?? t("assetFallback")}
                     </Link>
-                    {asset ? <AssetStatusBadge status={asset.status} /> : null}
+                    {asset ? (
+                      <AssetStatusBadge status={asset.status} label={asset.statusLabel} />
+                    ) : null}
                   </div>
                   <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                     {asset?.assetTag ? (

@@ -5,6 +5,7 @@ import { ApplicationCategoriesController } from '../../application-categories/ap
 import { ArticleCategoriesController } from '../../article-categories/article-categories.controller';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
+import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
 import { LocationsController } from '../../locations/locations.controller';
 import {
@@ -301,6 +302,31 @@ export function resolveAssetCategory(
   });
 }
 
+/**
+ * A CUSTOM asset status (ADR-0101) by id or exact name, through `AssetStatusLabelsController.findAll` (live,
+ * unpaged) — with its row, whose `kind` is the built-in status it sets. Always reads the list (a custom
+ * status is taxonomy every `asset:*` caller may read with `category:read`), so a preview and a run both know
+ * the kind and can refuse a status that disagrees before the route does.
+ */
+export async function resolveStatusLabel(
+  rt: AiToolRuntime,
+  reference: string,
+): Promise<{ resolved: AiResolvedReference; row: Row }> {
+  const rows = new Map<string, Row>();
+  const resolved = await rt.resolve({
+    type: 'assetStatusLabel',
+    reference,
+    lookup: async (ref) =>
+      asRows(await rt.call(AssetStatusLabelsController, 'findAll'))
+        .filter((l) => l.id === ref || sameText(l.name, ref))
+        .map((l) => {
+          rows.set(String(l.id), l);
+          return { id: String(l.id), label: String(l.name) };
+        }),
+  });
+  return { resolved, row: rows.get(resolved.id)! };
+}
+
 /** The `{ type, id, label }` value a card renders for an entity-valued change. */
 export const entityValue = (r: AiResolvedReference) => ({
   type: r.type,
@@ -343,6 +369,7 @@ const REFERENCE_KINDS = [
   'assetModel',
   'location',
   'assetCategory',
+  'assetStatusLabel',
   'applicationCategory',
   'consumableCategory',
   'articleFolder',
@@ -353,6 +380,14 @@ const MODEL_FIELDS = ['id', 'name', 'manufacturer', 'sku', 'categoryId'];
 const LOCATION_FIELDS = ['id', 'name', 'type', 'parentId', 'address', 'floor'];
 const CATEGORY_FIELDS = ['id', 'name'];
 const FOLDER_FIELDS = ['id', 'name', 'parentId', 'order', 'articleCount'];
+const STATUS_LABEL_FIELDS = [
+  'id',
+  'name',
+  'kind',
+  'color',
+  'order',
+  'assetCount',
+];
 
 /** One row of a kind, concise or full. Free text other people wrote is wrapped; access rules never leave. */
 function projectReference(kind: ReferenceKind, row: Row, full: boolean): Row {
@@ -381,6 +416,12 @@ function projectReference(kind: ReferenceKind, row: Row, full: boolean): Row {
       if (full) out.description = untrusted(str(row.description));
       return out;
     }
+    case 'assetStatusLabel': {
+      // A custom status: an operator-defined name over the built-in status `kind` (ADR-0101).
+      const out = pick(row, STATUS_LABEL_FIELDS);
+      if (full) out.description = untrusted(str(row.description));
+      return out;
+    }
     case 'assetCategory': {
       const out = pick(row, CATEGORY_FIELDS);
       if (full) {
@@ -406,6 +447,8 @@ async function listTaxonomy(
   switch (kind) {
     case 'assetCategory':
       return asRows(await rt.call(AssetCategoriesController, 'findAll'));
+    case 'assetStatusLabel':
+      return asRows(await rt.call(AssetStatusLabelsController, 'findAll'));
     case 'applicationCategory':
       return asRows(await rt.call(ApplicationCategoriesController, 'findAll'));
     case 'consumableCategory':
@@ -428,6 +471,10 @@ async function getReference(
       return asRow(await rt.call(LocationsController, 'findOne', params));
     case 'assetCategory':
       return asRow(await rt.call(AssetCategoriesController, 'findOne', params));
+    case 'assetStatusLabel':
+      return asRow(
+        await rt.call(AssetStatusLabelsController, 'findOne', params),
+      );
     case 'applicationCategory':
       return asRow(
         await rt.call(ApplicationCategoriesController, 'findOne', params),
@@ -448,10 +495,14 @@ const referenceLookup = defineTool({
   title: 'Look up reference data',
   description:
     'Find the reference data assets and other records hang off: asset models, locations, asset / ' +
-    'application / consumable categories and knowledge-base folders. Give `id` for one record, or ' +
-    '`query` (a name fragment) to list matches, or neither to list them all. Use it to find the model ' +
-    'or location to use before creating or updating an asset. `detail: "full"` on an asset category ' +
-    "also returns its attribute dictionary (`specsSchema`, advisory hints for its assets' attributes).",
+    'application / consumable categories, custom asset statuses and knowledge-base folders. Give `id` ' +
+    'for one record, or `query` (a name fragment) to list matches, or neither to list them all. Use it ' +
+    'to find the model or location to use before creating or updating an asset. `detail: "full"` on an ' +
+    "asset category also returns its attribute dictionary (`specsSchema`, advisory hints for its assets' " +
+    'attributes). Kind "assetStatusLabel" lists the CUSTOM asset statuses: names the team defined, each ' +
+    'mapped to one built-in status (`kind`: OPERATIONAL, IN_MAINTENANCE, IN_STORAGE, RETIRED, LOST or ' +
+    'UNKNOWN), with how many live assets carry it (`assetCount`). The built-in status drives every rule; ' +
+    'a custom status only names it more precisely, and setting one on an asset sets its built-in status.',
   domain: 'reference',
   class: 'read',
   idempotent: true,
@@ -473,6 +524,8 @@ const referenceLookup = defineTool({
     bind(LocationsController, 'findOne'),
     bind(AssetCategoriesController, 'findAll'),
     bind(AssetCategoriesController, 'findOne'),
+    bind(AssetStatusLabelsController, 'findAll'),
+    bind(AssetStatusLabelsController, 'findOne'),
     bind(ApplicationCategoriesController, 'findAll'),
     bind(ApplicationCategoriesController, 'findOne'),
     bind(ConsumableCategoriesController, 'findAll'),

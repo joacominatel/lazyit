@@ -1054,14 +1054,15 @@
   },
   "taxonomies": {
     "title": "Taxonomías",
-    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian.",
+    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian y tus estados de activo personalizados.",
     "tablistAria": "Tipo de taxonomía",
     "tabs": {
       "asset": "Categorías de activo",
       "application": "Categorías de aplicación",
       "consumable": "Categorías de consumible",
       "article": "Categorías de artículo",
-      "models": "Modelos de activo"
+      "models": "Modelos de activo",
+      "statuses": "Estados"
     },
     "kindLabel": {
       "asset": "categoría de activo",
@@ -1228,6 +1229,72 @@
         "updateError": "No se pudo actualizar el modelo de activo",
         "created": "Modelo de activo creado",
         "createError": "No se pudo crear el modelo de activo"
+      }
+    },
+    "statuses": {
+      "intro": "Los estados personalizados son nombres opcionales para los seis estados predefinidos: por ejemplo \"En reparación en el proveedor\" o \"En el banco de trabajo\" para En mantenimiento, o \"Pool de préstamo\" para En depósito. Cada uno corresponde a un único estado predefinido, que es el que siguen leyendo el panel, los filtros, las importaciones y todas las demás reglas. Los activos pueden quedarse con un estado predefinido sin nombre propio.",
+      "newButton": "Nuevo estado personalizado",
+      "loadError": "No se pudieron cargar los estados personalizados",
+      "builtIn": "Estado predefinido",
+      "add": "Agregar",
+      "addTo": "Agregar un estado personalizado en {status}",
+      "empty": "Todavía no hay estados personalizados. Agrega uno bajo el estado predefinido que nombra.",
+      "archivedEmpty": "No hay estados personalizados archivados.",
+      "archiveAction": "Archivar",
+      "assetsLink": "{count, plural, one {# activo} other {# activos}} con {name}",
+      "columns": {
+        "name": "Nombre",
+        "description": "Descripción",
+        "order": "Orden",
+        "assets": "Activos",
+        "kind": "Estado predefinido",
+        "archived": "Archivado"
+      },
+      "toast": {
+        "created": "Se creó el estado personalizado {name}",
+        "createError": "No se pudo crear el estado personalizado",
+        "updated": "Se actualizó el estado personalizado {name}",
+        "updateError": "No se pudo actualizar el estado personalizado",
+        "restored": "Se restauró el estado personalizado {name}",
+        "restoreError": "No se pudo restaurar el estado personalizado"
+      },
+      "form": {
+        "newTitle": "Nuevo estado personalizado",
+        "editTitle": "Editar estado personalizado",
+        "description": "Un nombre que tu equipo usa para uno de los estados predefinidos. Solo el nombre es obligatorio.",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "p. ej. En reparación en el proveedor",
+        "kindLabel": "Estado predefinido",
+        "kindHelp": "Los activos con este estado personalizado toman este estado predefinido, que es el que usan todas las reglas y reportes.",
+        "kindLocked": "Bloqueado: {count, plural, one {# activo usa} other {# activos usan}} este estado personalizado. Muévelos primero a otro estado, o crea un estado personalizado nuevo.",
+        "colorLabel": "Color",
+        "colorDefault": "El color del estado predefinido",
+        "colorHelp": "Se muestra como el punto junto al nombre. Elige uno o escribe un valor #RRGGBB; déjalo vacío para usar el color del estado predefinido.",
+        "descriptionLabel": "Descripción",
+        "descriptionPlaceholder": "Opcional: cuándo usar este estado.",
+        "orderLabel": "Orden",
+        "orderPlaceholder": "Opcional: los menores van primero dentro de su estado predefinido",
+        "save": "Guardar cambios",
+        "create": "Crear estado personalizado",
+        "errors": {
+          "nameRequired": "El nombre es obligatorio.",
+          "colorInvalid": "Usa un color #RRGGBB, por ejemplo #2563EB.",
+          "orderInvalid": "El orden debe ser un número entero de 0 a 100000."
+        }
+      },
+      "archive": {
+        "title": "¿Archivar {name}?",
+        "inUseDescription": "{count, plural, one {# activo tiene} other {# activos tienen}} este estado personalizado. Elige a dónde {count, plural, one {va} other {van}}: otro estado personalizado o un estado predefinido. Cada movimiento queda registrado en el historial del activo.",
+        "unusedDescription": "Ningún activo usa este estado personalizado. Puedes restaurarlo más tarde desde la lista de archivados.",
+        "destinationLabel": "Mover los activos a",
+        "destinationPlaceholder": "Elige un estado",
+        "destinationHelp": "Obligatorio mientras haya activos con este estado personalizado.",
+        "destinationSummary": "{count, plural, one {# activo pasa} other {# activos pasan}} a {target}.",
+        "confirm": "Archivar",
+        "confirmMove": "Mover y archivar",
+        "toast": "Se archivó el estado personalizado {name}",
+        "toastMoved": "Se archivó {name} y se {count, plural, one {movió # activo} other {movieron # activos}} a {target}",
+        "error": "No se pudo archivar el estado personalizado"
       }
     }
   }

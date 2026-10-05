@@ -36,6 +36,7 @@ export * from "./schemas/asset-model";
 export * from "./schemas/asset-model-list";
 export * from "./schemas/asset-receive";
 export * from "./schemas/asset-specs-dictionary";
+export * from "./schemas/asset-status-label";
 export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
 export * from "./schemas/attachment";

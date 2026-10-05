@@ -607,7 +607,13 @@ export class PurchaseReceivingService {
     const body: ReceiveAssets = {
       modelId,
       quantity,
-      status: data.status ?? 'IN_STORAGE',
+      // A custom status (ADR-0101) carries its own built-in status; IN_STORAGE is the default without one.
+      ...(data.statusLabelId !== undefined
+        ? {
+            statusLabelId: data.statusLabelId,
+            ...(data.status !== undefined ? { status: data.status } : {}),
+          }
+        : { status: data.status ?? 'IN_STORAGE' }),
       purchaseOrderLineId: lineId,
       ...(locationId ? { locationId } : {}),
       ...(company ? { company } : {}),

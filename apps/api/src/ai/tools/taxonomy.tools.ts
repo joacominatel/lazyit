@@ -5,7 +5,12 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import {
+  ASSET_STATUS_LABEL_DESCRIPTION_MAX,
+  ASSET_STATUS_LABEL_NAME_MAX,
+  ASSET_STATUS_LABEL_ORDER_MAX,
   AssetSpecsDictionarySchema,
+  AssetStatusLabelColorSchema,
+  AssetStatusSchema,
   LocationTypeSchema,
   type AiActionPreview,
   type AiEntityRef,
@@ -15,6 +20,7 @@ import { ApplicationCategoriesController } from '../../application-categories/ap
 import { ApplicationsController } from '../../applications/applications.controller';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
+import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
 import { ConsumablesController } from '../../consumables/consumables.controller';
@@ -43,6 +49,7 @@ import {
   resolveAssetCategory,
   resolveLocation,
   resolveModel,
+  resolveStatusLabel,
   sameText,
   str,
   untrustedJson,
@@ -52,7 +59,8 @@ import {
 /**
  * The TAXONOMY toolset (#1390): managing the reference data assets, applications and consumables hang
  * off — the asset / application / consumable categories (one set of tools with a `kind`, since the three
- * share the `category:*` permissions), asset models and locations. Creating a model or a location is in
+ * share the `category:*` permissions), asset models, locations and the custom asset statuses (ADR-0101,
+ * also under `category:*`). Creating a model or a location is in
  * `reference.tools.ts` (W2-5), reading all of them is `reference_lookup`; this file adds the rest of the
  * lifecycle the routes allow: create (categories), update / rename, archive and restore.
  *
@@ -1431,6 +1439,437 @@ const locationRestore = defineTool({
   },
 });
 
+// ─── custom asset statuses: create / update / archive / restore (ADR-0101) ──────────────────────────
+
+/**
+ * What a custom status IS, said once for every tool that manages one: the model reads it before it
+ * proposes a custom status, so the four tools explain the concept the same way.
+ */
+const CUSTOM_STATUS_CONCEPT =
+  'A custom asset status is a name the team defines (e.g. "In repair at vendor", "Loaner pool") mapped ' +
+  'to exactly ONE built-in status — its kind: OPERATIONAL, IN_MAINTENANCE, IN_STORAGE, RETIRED, LOST or ' +
+  'UNKNOWN. The built-in status drives every rule and report; the custom status only names it more ' +
+  'precisely. Setting a custom status on an asset sets its built-in status to the kind. They are optional: ' +
+  'an asset may keep a bare built-in status.';
+
+const statusLabelReference = referenceString(
+  'The custom status: its id or exact name (see reference_lookup kind "assetStatusLabel").',
+);
+const statusLabelName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(ASSET_STATUS_LABEL_NAME_MAX)
+  .describe('The custom status name, unique among live custom statuses.');
+const statusLabelKind = AssetStatusSchema.describe(
+  'The built-in status this custom status maps to (its kind).',
+);
+const statusLabelColor = AssetStatusLabelColorSchema.describe(
+  'Badge colour as #RRGGBB, e.g. #F59E0B.',
+);
+const statusLabelDescription = z
+  .string()
+  .trim()
+  .min(1)
+  .max(ASSET_STATUS_LABEL_DESCRIPTION_MAX);
+const statusLabelOrder = z
+  .number()
+  .int()
+  .min(0)
+  .max(ASSET_STATUS_LABEL_ORDER_MAX)
+  .describe(
+    'Sort position among the custom statuses of its kind, lower first.',
+  );
+
+const statusLabelRef = (row: Row, op: AiEntityRef['op']): AiEntityRef => ({
+  type: 'assetStatusLabel',
+  id: String(row.id),
+  op,
+  label: String(row.name),
+});
+
+const STATUS_LABEL_RESULT_FIELDS = [
+  'id',
+  'kind',
+  'color',
+  'order',
+  'assetCount',
+  'movedAssetCount',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+];
+
+/** A custom status as a tool returns it; the operator-written name and description are wrapped. */
+function statusLabelResult(row: Row): Row {
+  const out = pick(row, STATUS_LABEL_RESULT_FIELDS);
+  out.name = untrusted(str(row.name));
+  if (row.description !== undefined) {
+    out.description = untrusted(str(row.description));
+  }
+  return out;
+}
+
+const liveStatusLabels = async (rt: AiToolRuntime): Promise<Row[]> =>
+  asRows(await rt.call(AssetStatusLabelsController, 'findAll'));
+
+/** 409 for a name a LIVE custom status (other than `exceptId`) already has — the route's own rule. */
+async function assertStatusLabelNameFree(
+  rt: AiToolRuntime,
+  name: string,
+  exceptId?: string,
+): Promise<void> {
+  const clash = (await liveStatusLabels(rt)).find(
+    (l) => l.id !== exceptId && l.name === name,
+  );
+  if (clash) {
+    throw new ConflictException(
+      `A custom status named "${name}" already exists (${String(clash.id)}).`,
+    );
+  }
+}
+
+const assetStatusLabelCreate = defineTool({
+  name: 'asset_status_label_create',
+  title: 'Create a custom asset status',
+  description:
+    `${CUSTOM_STATUS_CONCEPT} Create one: a name and the built-in status (kind) it maps to, optionally a ` +
+    'badge colour, a description and a sort order. Check with reference_lookup kind "assetStatusLabel" ' +
+    'that it does not exist yet — a live custom status with the same name is refused.',
+  domain: 'reference',
+  class: 'write',
+  input: z.strictObject({
+    name: statusLabelName,
+    kind: statusLabelKind,
+    color: statusLabelColor.optional(),
+    description: statusLabelDescription.optional(),
+    order: statusLabelOrder.optional(),
+  }),
+  bindings: [
+    bind(AssetStatusLabelsController, 'create'),
+    bind(AssetStatusLabelsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const created = asRow(
+      await rt.call(AssetStatusLabelsController, 'create', { body: input }),
+    );
+    return {
+      data: statusLabelResult(created),
+      ...summaryPhrase(
+        phrase('asset_status_label_create.summary', {
+          name: String(untrusted(str(created.name))),
+          kind: String(created.kind),
+        }),
+      ),
+      entityRefs: [statusLabelRef(created, 'created')],
+    };
+  },
+  async preview(input, rt) {
+    // A card is never shown for a create the route would refuse.
+    await assertStatusLabelNameFree(rt, input.name);
+    const changes: Change[] = [
+      { field: 'name', after: input.name, valueKind: 'text' },
+      { field: 'kind', after: input.kind, valueKind: 'text' },
+    ];
+    for (const field of ['color', 'description'] as const) {
+      if (input[field] !== undefined) {
+        changes.push({ field, after: input[field], valueKind: 'text' });
+      }
+    }
+    if (input.order !== undefined) {
+      changes.push({ field: 'order', after: input.order, valueKind: 'number' });
+    }
+    return previewOf({ changes, warnings: [] });
+  },
+});
+
+const STATUS_LABEL_SCALARS = [
+  { field: 'name' },
+  { field: 'kind' },
+  { field: 'color' },
+  { field: 'description' },
+  { field: 'order', kind: 'number' as const },
+];
+
+const assetStatusLabelUpdate = defineTool({
+  name: 'asset_status_label_update',
+  title: 'Update a custom asset status',
+  description:
+    `${CUSTOM_STATUS_CONCEPT} Rename a custom status (by id or exact name), or change its colour, ` +
+    'description or sort order (null clears those three). Its kind (the built-in status) can change only ' +
+    'while NO asset carries it — otherwise the change is refused, because those assets would silently ' +
+    'change status: move them to another status first (asset_update_batch), or create a new custom status.',
+  domain: 'reference',
+  class: 'write',
+  destructive: true,
+  input: z.strictObject({
+    status: statusLabelReference,
+    name: statusLabelName.optional().describe('The new name.'),
+    kind: statusLabelKind.optional(),
+    color: statusLabelColor.nullable().optional(),
+    description: statusLabelDescription.nullable().optional(),
+    order: statusLabelOrder.nullable().optional(),
+  }),
+  bindings: [
+    bind(AssetStatusLabelsController, 'update'),
+    bind(AssetStatusLabelsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const { status, ...body } = input;
+    if (Object.values(body).every((v) => v === undefined)) {
+      nothingToChange('the custom status');
+    }
+    const { resolved } = await resolveStatusLabel(rt, status);
+    const updated = asRow(
+      await rt.call(AssetStatusLabelsController, 'update', {
+        params: { id: resolved.id },
+        body,
+      }),
+    );
+    return {
+      data: statusLabelResult(updated),
+      ...summaryPhrase(
+        phrase('asset_status_label_update.summary', {
+          name: String(untrusted(str(updated.name))),
+        }),
+      ),
+      entityRefs: [statusLabelRef(updated, 'updated')],
+    };
+  },
+  async preview(input, rt) {
+    const { status, ...fields } = input;
+    const { row } = await resolveStatusLabel(rt, status);
+    const changes = diff(row, STATUS_LABEL_SCALARS, fields);
+    if (changes.length === 0) nothingToChange(String(row.name));
+    if (input.name !== undefined && input.name !== row.name) {
+      await assertStatusLabelNameFree(rt, input.name, String(row.id));
+    }
+    const carriers = typeof row.assetCount === 'number' ? row.assetCount : 0;
+    if (input.kind !== undefined && input.kind !== row.kind && carriers > 0) {
+      throw new ConflictException(
+        `${carriers} asset(s) carry the custom status "${String(row.name)}", so its built-in status cannot ` +
+          `change from ${String(row.kind)} to ${input.kind}. Move them to another status first, or create ` +
+          'a new custom status.',
+      );
+    }
+    const target = statusLabelRef(row, 'updated');
+    return previewOf({
+      target,
+      changes,
+      warnings: [],
+      precondition: preconditionOf(target, row),
+    });
+  },
+});
+
+/** Where an archive moves the assets of the custom status: another custom status, or a built-in one. */
+async function archiveTarget(
+  rt: AiToolRuntime,
+  input: { moveTo?: string; moveToStatus?: string },
+  archivedId: string,
+): Promise<{
+  query: Record<string, string>;
+  card: Change['after'];
+  label: string;
+} | null> {
+  if (input.moveTo !== undefined) {
+    const { resolved, row } = await resolveStatusLabel(rt, input.moveTo);
+    if (resolved.id === archivedId) {
+      throw new BadRequestException(
+        'moveTo must be another custom status, not the one being archived.',
+      );
+    }
+    return {
+      query: { reassignLabelId: resolved.id },
+      card: entityValue(resolved),
+      label: `${String(row.name)} (${String(row.kind)})`,
+    };
+  }
+  if (input.moveToStatus !== undefined) {
+    return {
+      query: { reassignStatus: input.moveToStatus },
+      card: input.moveToStatus,
+      label: input.moveToStatus,
+    };
+  }
+  return null;
+}
+
+const assetStatusLabelArchive = defineTool({
+  name: 'asset_status_label_archive',
+  title: 'Archive a custom asset status',
+  description:
+    `${CUSTOM_STATUS_CONCEPT} Archive (soft-delete) a custom status by id or exact name. When assets carry ` +
+    'it, say where they go — exactly one of `moveTo` (another custom status) or `moveToStatus` (a bare ' +
+    'built-in status): they move there, each with a status history entry, in the same step. The approval ' +
+    'card shows how many assets move and where — ask the person where they should go when it is not clear. ' +
+    'An administrator can restore it later (asset_status_label_restore); it comes back with no assets.',
+  domain: 'reference',
+  class: 'write',
+  destructive: true,
+  input: z
+    .strictObject({
+      status: statusLabelReference,
+      moveTo: referenceString(
+        'Move its assets to this OTHER custom status (id or exact name); their built-in status becomes its kind.',
+      ).optional(),
+      moveToStatus: AssetStatusSchema.optional().describe(
+        'Move its assets to this bare built-in status (no custom status).',
+      ),
+    })
+    .refine((v) => v.moveTo === undefined || v.moveToStatus === undefined, {
+      message: 'Give moveTo or moveToStatus, not both',
+      path: ['moveTo'],
+    }),
+  bindings: [
+    bind(AssetStatusLabelsController, 'remove'),
+    bind(AssetStatusLabelsController, 'findAll'),
+    bind(AssetsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const { resolved } = await resolveStatusLabel(rt, input.status);
+    const target = await archiveTarget(rt, input, resolved.id);
+    const archived = asRow(
+      await rt.call(AssetStatusLabelsController, 'remove', {
+        params: { id: resolved.id },
+        query: target?.query ?? {},
+      }),
+    );
+    const moved =
+      typeof archived.movedAssetCount === 'number'
+        ? archived.movedAssetCount
+        : 0;
+    return {
+      data: statusLabelResult(archived),
+      ...summaryPhrase(
+        phrase('asset_status_label_archive.summary', {
+          name: String(untrusted(str(archived.name))),
+          moved,
+          target: target ? String(untrusted(target.label)) : '',
+        }),
+      ),
+      entityRefs: [statusLabelRef(archived, 'archived')],
+    };
+  },
+  async preview(input, rt) {
+    const { resolved, row } = await resolveStatusLabel(rt, input.status);
+    const target = await archiveTarget(rt, input, resolved.id);
+    const carriers = typeof row.assetCount === 'number' ? row.assetCount : 0;
+    if (carriers > 0 && target === null) {
+      throw new BadRequestException(
+        `${carriers} asset(s) carry the custom status "${String(row.name)}": say where they go with moveTo ` +
+          '(another custom status) or moveToStatus (a built-in status), then propose again.',
+      );
+    }
+    const impact: Impact = { impacted: [], unknown: [] };
+    collect(
+      impact,
+      'assets',
+      await counted(async () =>
+        impactOf(
+          'asset',
+          await rt.call(AssetsController, 'findAll', {
+            query: { statusLabelId: resolved.id, limit: '5' },
+          }),
+          (a) => str(a.assetTag) ?? undefined,
+        ),
+      ),
+    );
+    const changes = archiveChanges(impact);
+    if (target && carriers > 0) {
+      changes.push({
+        field: 'moveAssetsTo',
+        after: target.card,
+        valueKind:
+          typeof target.card === 'object' && target.card !== null
+            ? 'entity'
+            : 'text',
+      });
+    }
+    const ref = statusLabelRef(row, 'archived');
+    return previewOf({
+      target: ref,
+      changes,
+      warnings: ['SOFT_DELETE'],
+      impacted: impact.impacted,
+      precondition: preconditionOf(ref, row),
+    });
+  },
+});
+
+/** An ARCHIVED custom status by id or exact name, through the list's `deleted=only` slice (ADMIN only). */
+async function archivedStatusLabel(
+  rt: AiToolRuntime,
+  reference: string,
+): Promise<Row> {
+  const rows = new Map<string, Row>();
+  const resolved = await rt.resolve({
+    type: 'assetStatusLabel',
+    reference,
+    lookup: async (ref) =>
+      asRows(
+        await rt.call(AssetStatusLabelsController, 'findAll', {
+          query: { deleted: 'only' },
+        }),
+      )
+        .filter((l) => l.id === ref || sameText(l.name, ref))
+        .map((l) => {
+          rows.set(String(l.id), l);
+          return { id: String(l.id), label: String(l.name) };
+        }),
+  });
+  return rows.get(resolved.id)!;
+}
+
+const assetStatusLabelRestore = defineTool({
+  name: 'asset_status_label_restore',
+  title: 'Restore an archived custom asset status',
+  description:
+    'Bring an archived custom asset status back, by id or exact name. It returns with no assets (archiving ' +
+    'moved them off it). Refused when a live custom status took its name meanwhile. Administrators only.',
+  domain: 'reference',
+  class: 'write',
+  idempotent: true,
+  input: z.strictObject({
+    status: referenceString(
+      'The archived custom status: its id or exact name.',
+    ),
+  }),
+  bindings: [
+    bind(AssetStatusLabelsController, 'restore'),
+    bind(AssetStatusLabelsController, 'findAll'),
+  ],
+  async run(input, rt) {
+    const current = await archivedStatusLabel(rt, input.status);
+    const restored = asRow(
+      await rt.call(AssetStatusLabelsController, 'restore', {
+        params: { id: String(current.id) },
+      }),
+    );
+    return {
+      data: statusLabelResult(restored),
+      ...summaryPhrase(
+        phrase('asset_status_label_restore.summary', {
+          name: String(untrusted(str(restored.name))),
+        }),
+      ),
+      entityRefs: [statusLabelRef(restored, 'restored')],
+    };
+  },
+  async preview(input, rt) {
+    const current = await archivedStatusLabel(rt, input.status);
+    const target = statusLabelRef(current, 'restored');
+    return previewOf({
+      target,
+      changes: [
+        { field: 'archived', before: true, after: false, valueKind: 'boolean' },
+      ],
+      warnings: [],
+      precondition: preconditionOf(target, current),
+    });
+  },
+});
+
 export const taxonomyToolset: AiToolset = {
   domain: 'reference',
   tools: [
@@ -1443,6 +1882,10 @@ export const taxonomyToolset: AiToolset = {
     locationUpdate,
     locationArchive,
     locationRestore,
+    assetStatusLabelCreate,
+    assetStatusLabelUpdate,
+    assetStatusLabelArchive,
+    assetStatusLabelRestore,
   ],
   unexposed: [],
 };

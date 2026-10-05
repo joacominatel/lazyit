@@ -108,3 +108,4 @@ tells you what it costs you.
 | 0098 | Consumable deliveries — an optional target on an OUT movement, returnable items and returns | accepted |
 | 0099 | Purchases — scope, model, and optionality | accepted |
 | 0100 | Money as 64-bit integer minor units | accepted |
+| 0101 | Custom asset statuses — operator-named labels mapped to the built-in AssetStatus | accepted |

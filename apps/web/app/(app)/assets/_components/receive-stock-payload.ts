@@ -15,6 +15,7 @@
 
 import { formatMoney, parseMoneyInput } from "@/lib/utils/money";
 import { type AssetStatus, type PurchaseOrderLine, warrantyEndFrom } from "@lazyit/shared";
+import { createStatusFields } from "./asset-status-options";
 
 /**
  * The dialog's raw local state. Everything is a string because it comes straight from inputs; the
@@ -25,6 +26,8 @@ export type ReceiveStockFormValues = {
   modelId: string;
   quantity: string;
   status: AssetStatus;
+  /** The custom status (ADR-0101) every unit is received into; absent or "" = the bare `status`. */
+  statusLabelId?: string;
   locationId: string;
   company: string;
   purchaseDate: string;
@@ -32,6 +35,11 @@ export type ReceiveStockFormValues = {
   notes: string;
   serials: string;
 };
+
+/** The status fields of either receive: the built-in status, plus the custom status when one is chosen. */
+function receiveStatusFields(values: Pick<ReceiveStockFormValues, "status" | "statusLabelId">) {
+  return createStatusFields({ status: values.status, labelId: values.statusLabelId || null });
+}
 
 /** Split the serials textarea into trimmed, non-empty lines (one serial per unit). */
 export function parseSerials(raw: string): string[] {
@@ -51,6 +59,7 @@ export function parseSerials(raw: string): string[] {
  *   set"). A refused amount becomes `NaN`, which the schema rejects — never a silent "not set". The
  *   dialog refuses it inline before getting here.
  * - `serials` is omitted entirely when the paste is empty.
+ * - A custom status sends its `statusLabelId` alongside its kind as `status` (they agree).
  */
 export function buildReceivePayload(
   values: ReceiveStockFormValues,
@@ -63,7 +72,7 @@ export function buildReceivePayload(
   return {
     modelId: values.modelId,
     quantity: Number(values.quantity),
-    status: values.status,
+    ...receiveStatusFields(values),
     ...(values.locationId ? { locationId: values.locationId } : {}),
     ...(company ? { company } : {}),
     ...(values.purchaseDate
@@ -170,7 +179,7 @@ export function buildReceiveFromLinePayload(
   return {
     quantity: effectiveQuantity(values.quantity, values.serials),
     ...(serials.length > 0 ? { serials } : {}),
-    status: values.status,
+    ...receiveStatusFields(values),
     ...(values.modelId ? { modelId: values.modelId } : {}),
     ...(values.locationId === prefill.locationId ? {} : { locationId: values.locationId || null }),
     company: company || null,

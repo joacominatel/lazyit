@@ -142,3 +142,23 @@ describe("parseSerials", () => {
     expect(parseSerials("\n  \n")).toEqual([]);
   });
 });
+
+describe("buildReceivePayload — custom statuses (ADR-0101)", () => {
+  const LABEL = "clh1label000000000000000";
+
+  test("a bare built-in status sends no statusLabelId", () => {
+    const payload = buildReceivePayload(BLANK, "en");
+    expect(payload.status).toBe("OPERATIONAL");
+    expect("statusLabelId" in payload).toBe(false);
+    expect("statusLabelId" in buildReceivePayload({ ...BLANK, statusLabelId: "" }, "en")).toBe(false);
+  });
+
+  test("a custom status sends its id with its kind, and the payload stays valid", () => {
+    const payload = buildReceivePayload(
+      { ...BLANK, status: "IN_STORAGE", statusLabelId: LABEL },
+      "en",
+    );
+    expect(payload).toMatchObject({ status: "IN_STORAGE", statusLabelId: LABEL });
+    expect(ReceiveAssetsSchema.safeParse(payload).success).toBe(true);
+  });
+});

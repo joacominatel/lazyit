@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-05
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -175,6 +175,8 @@ Legend:
 | asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` (built, W2-5) |
 | asset / application / consumable categories | create / update / delete | category:write / delete | W / D | v1 `category_create` / `category_update` / `category_archive` (built, #1390) |
 | asset / application / consumable categories | restore | category:delete | W | not exposed: no route lists archived categories, so a card could not name or version the target (#1390) |
+| asset-status-labels (custom asset statuses, ADR-0101) | list / get | category:read | R | v1 `reference_lookup` kind `assetStatusLabel` (built, #1524) |
+| asset-status-labels | create / update; delete (with reassign) / restore | category:write; category:delete | W / D | v1 `asset_status_label_create` / `_update` / `_archive` / `_restore` (built, #1524) |
 | article categories (KB folders) | create / rename; delete / restore | category:write / delete | W / D | `kb_folder_create` / `kb_folder_rename` (#1378); delete and restore v1.1 |
 | article-categories | `PUT :id/access-rules` | settings:manage | W | v1.1, `elevated` (authz config) |
 | locations | list / get | location:read | R | v1 `reference_lookup` (built, W2-5) |
@@ -339,7 +341,7 @@ Legend:
   permissions, classes and previews. This muddies MCP annotations, list filtering and the approval card.
 - **B3. Chosen:**
   - **Reads are consolidated into task-shaped tools.** For example, `asset_get` returns the detail,
-    active assignment, recent history and linked articles; `reference_lookup` covers six taxonomy
+    active assignment, recent history and linked articles; `reference_lookup` covers seven taxonomy
     lists.
   - **Every write executes exactly one controller handler.** A write tool may *select* between two
     handlers that share a permission (e.g. publish vs unpublish). One permission, one class and one
@@ -459,15 +461,15 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
 | 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations/Suppliers/Consumables `findAll` (for `optionsFrom`; suppliers and consumables since #1478) | open (self; `ai:use`) | navigate | — |
-| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
+| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, assetStatusLabel (#1524), applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the seven controllers (14 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
 | 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
 | 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
 | 7 | `asset_search` ✅ built (W2-5) | AssetsController.findAll / .findMine | asset:read / self | read | — |
 | 8 | `asset_get` ✅ built (W2-5) | AssetsController.findOne (+findAssignments, findHistory, findArticles facets; findAll for tag/serial) | asset:read (+article:read facet) | read | — |
-| 9 | `asset_create` ✅ built (W2-5; status defaults to `IN_STORAGE`, #1386) | AssetsController.create (+model/location lookups) | asset:write | write | asset created |
-| 9a | `asset_create_batch` ✅ built (#1387, added to the v1 cut) | AssetsController.create per row (+AssetsController.findAll for duplicates, model/location lookups, AssetCategoriesController.findAll) | asset:write | write | one asset created per row |
-| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups) | asset:write | write·D | asset updated |
-| 10a | `asset_update_batch` ✅ built (#1409, added to the v1 cut) | AssetsController.update per row (+findOne / findAll per asset reference, model/location lookups) | asset:write | write·D | one asset updated per row |
+| 9 | `asset_create` ✅ built (W2-5; status defaults to `IN_STORAGE`, #1386, unless a `customStatus` is given, #1524) | AssetsController.create (+model/location lookups, AssetStatusLabelsController.findAll) | asset:write | write | asset created |
+| 9a | `asset_create_batch` ✅ built (#1387, added to the v1 cut) | AssetsController.create per row (+AssetsController.findAll for duplicates, model/location lookups, AssetCategoriesController.findAll, AssetStatusLabelsController.findAll) | asset:write | write | one asset created per row |
+| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups incl. AssetStatusLabelsController.findAll) | asset:write | write·D | asset updated |
+| 10a | `asset_update_batch` ✅ built (#1409, added to the v1 cut) | AssetsController.update per row (+findOne / findAll per asset reference, model/location/custom-status lookups) | asset:write | write·D | one asset updated per row |
 | 11 | `asset_archive` ✅ built (W2-5) | AssetsController.remove | asset:delete | write·D | asset archived |
 | 12 | `asset_restore` ✅ built (W2-5) | AssetsController.restore (+findAll `deleted=only`) | asset:delete | write | asset restored |
 | 13 | `asset_check_out` ✅ built (W2-5) | AssetAssignmentsController.create (+AssetsController.findOne / findAll, UsersController.findAll / me) | asset:write | write | assetAssignment created (parent asset), asset updated, user updated |
@@ -483,6 +485,10 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
 | 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
+| 16l | `asset_status_label_create` ✅ built (#1524) | AssetStatusLabelsController.create (+findAll) | category:write | write | assetStatusLabel created |
+| 16m | `asset_status_label_update` ✅ built (#1524; rename, colour, description, order; kind only while unused) | AssetStatusLabelsController.update (+findAll) | category:write | write·D | assetStatusLabel updated |
+| 16n | `asset_status_label_archive` ✅ built (#1524; `moveTo` / `moveToStatus` when in use) | AssetStatusLabelsController.remove (+findAll; AssetsController.findAll for the impact) | category:delete | write·D | assetStatusLabel archived |
+| 16o | `asset_status_label_restore` ✅ built (#1524) | AssetStatusLabelsController.restore (+findAll `deleted=only`) | category:delete | write (idempotent) | assetStatusLabel restored |
 | 16j | `asset_tag_scheme_get` ✅ built (#1394) | AssetTagSchemeController.summary (primary, since #1428) | asset:write, human-only | read | — |
 | 16k | `asset_tag_scheme_update` ✅ built (#1394; only on an explicit request to change the general scheme) | AssetTagSchemeController.update (primary), .get, .previewNextTag | settings:manage, human-only | elevated·D (`INSTANCE_CONFIGURATION`) | assetTagScheme updated |
 | 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
@@ -1033,7 +1039,7 @@ Accounts holding the route's permission.
   create, are the taxonomy tools (#1390).
 
 **Taxonomy tools as built (#1390).** `taxonomy.tools.ts` (domain `reference`) adds the rest of the
-lifecycle of the reference data assets, applications and consumables hang off — nine tools, all `write`,
+lifecycle of the reference data assets, applications and consumables hang off — nine tools (thirteen with the four custom-status tools of #1524), all `write`,
 none `elevated`, none with a step-up warning (they grant no access or privilege); humans and Service
 Accounts holding the route's permission are admitted, exactly as over HTTP.
 - **Categories are one tool per verb with a `kind`** (`assetCategory` · `applicationCategory` ·
@@ -1083,12 +1089,32 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   and soft warnings in the asset form and never blocks a write. `reference_lookup` returns it with
   `detail: "full"` (wrapped as untrusted); `category_create` / `category_update` set or replace it — a
   non-destructive change (no stored attribute is touched). Application and consumable categories expose
-  their `order`. Nothing else is taxonomy configuration: location types are a fixed enum; the asset tag
+  their `order`. Custom asset statuses are taxonomy too (#1524, above). Nothing else is taxonomy
+  configuration: location types are a fixed enum; the asset tag
   scheme is instance configuration (its own tools, #1394 — see below; its backfill stays unexposed); KB folder
   access rules are authorization configuration (`elevated`, after v1).
 - **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
   names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
   recorded for the KB tools).
+- **Custom asset statuses (#1524, [[0101-custom-asset-statuses]]).** Four more tools in the same file, under
+  the category permissions: `asset_status_label_create`, `asset_status_label_update`·D,
+  `asset_status_label_archive`·D and `asset_status_label_restore` (idempotent). Every description opens with
+  the concept — a team-defined name mapped to exactly one built-in status (its *kind*); the built-in status
+  drives every rule; setting a custom status sets it. A custom status is named by id or exact name from its
+  unpaged route list (entity type `assetStatusLabel`). Refused before a card: a live duplicate name
+  (`CONFLICT`), a kind change while live assets carry it (`CONFLICT`; archived carriers are refused by the
+  route), an archive in use without a destination, a destination equal to the archived one, or both
+  `moveTo` and `moveToStatus` (`INVALID_INPUT`). The archive card shows the assets that move (count + up to
+  five, through `GET /assets?statusLabelId=`) and a `moveAssetsTo` row (an entity for a custom status, the
+  status code otherwise); the route moves them and archives in one transaction and returns
+  `movedAssetCount`, which the summary names. Restore resolves through `deleted=only` (ADMIN by role — the
+  same parity gap as the other restores). On the asset side, `asset_create` / `asset_create_batch` /
+  `asset_update` / `asset_update_batch` take a `customStatus` reference (`null` clears it on an update) and
+  send `statusLabelId`; a `status` of another kind is refused before a card; a custom status suppresses the
+  `IN_STORAGE` default; the update card shows the custom status before → after (or "None (built-in status
+  only)") and the built-in status it implies, and a `status` alone that clears a custom status shows that
+  too. `asset_get` / `asset_search` return `customStatus` (`{ id, name, kind }`), and `asset_search` filters
+  by `statusLabelId`.
 
 **Asset tag scheme tools as built (#1394).** CEO decision (2026-09-24, #1394, verbatim): *"na que solo
 pueda leerlo, la idea es seguir el tag de la instancia, si puede modifcar el de activos, pero no el de

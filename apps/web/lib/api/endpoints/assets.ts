@@ -56,6 +56,8 @@ export interface AssetFilters {
   modelId?: string;
   locationId?: string;
   status?: AssetStatus;
+  /** One custom status (ADR-0101). `status` still filters the built-in status, every custom one included. */
+  statusLabelId?: string;
   /** Exact-match grouping filter on the free-text company value (ADR-0076). */
   company?: string;
   /** Restrict to assets currently assigned (live) to this user (a User uuid). Server-side filter. */
@@ -96,7 +98,7 @@ export interface PurchaseAssetFilter {
  */
 /**
  * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
- * `q`, `categoryId`, `modelId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`,
+ * `q`, `categoryId`, `modelId`, `locationId`, `status`, `statusLabelId`, `company`, `assignedToUserId`, `ownership`,
  * `warranty`, `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the
  * list and can never drift from it.
  */
@@ -109,6 +111,7 @@ function appendAssetFilterParams(
   if (filters.modelId) params.set("modelId", filters.modelId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.statusLabelId) params.set("statusLabelId", filters.statusLabelId);
   if (filters.company) params.set("company", filters.company);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
@@ -233,14 +236,14 @@ export function batchRestoreAssets(ids: BatchIds["ids"]): Promise<BatchResult> {
   });
 }
 
-/** Bulk set the status of many assets (one CHANGED history event per item). */
-export function batchSetAssetStatus(
-  ids: BatchAssetStatus["ids"],
-  status: BatchAssetStatus["status"],
-): Promise<BatchResult> {
+/**
+ * Bulk set the status of many assets (one STATUS_CHANGED history event per changed item). The body names
+ * a built-in `status`, a custom status (`statusLabelId`, ADR-0101), or both (they must agree).
+ */
+export function batchSetAssetStatus(body: BatchAssetStatus): Promise<BatchResult> {
   return apiFetch<BatchResult>(`${BASE}/batch/status`, {
     method: "POST",
-    body: { ids, status },
+    body,
   });
 }
 

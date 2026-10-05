@@ -16,7 +16,7 @@ import {
 import {
   type AssetAssignmentWithUser,
   type AssetStatus,
-  AssetStatusSchema,
+  type AssetStatusLabelRef,
   type AssetWithRelations,
   WARRANTY_EXPIRING_WITHIN_DAYS,
 } from "@lazyit/shared";
@@ -60,8 +60,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -83,6 +81,16 @@ import {
   AssetStatusBadge,
   useAssetStatusLabel,
 } from "../../_components/asset-status-badge";
+import {
+  labelOfChoice,
+  sameChoice,
+  type StatusChoice,
+  updateStatusFields,
+} from "../../_components/asset-status-options";
+import {
+  AssetStatusMenuOptions,
+  useAssetStatusOptions,
+} from "../../_components/asset-status-picker";
 import { AssignUserDialog } from "../../_components/assign-user-dialog";
 import { AcknowledgeAssignmentDialog } from "../../_components/acknowledge-assignment-dialog";
 
@@ -96,26 +104,31 @@ function ownerName(assignment: AssetAssignmentWithUser): string {
  * Quick status change straight from the detail header (issue #951) — the status badge doubles as a
  * dropdown so an operator flips OPERATIONAL → IN_MAINTENANCE without entering Edit. Rides the SAME
  * `useUpdateAsset` PATCH the form/list use, so the server still emits the `STATUS_CHANGED`
- * AssetHistory event. Only rendered when the caller holds `asset:write` (the parent gates it).
+ * AssetHistory event. Only rendered when the caller holds `asset:write` (the parent gates it). The
+ * options are grouped by built-in status with the custom statuses under each (ADR-0101).
  */
 function AssetStatusMenu({
   assetId,
   status,
+  label,
 }: {
   assetId: string;
   status: AssetStatus;
+  label: AssetStatusLabelRef | null;
 }) {
   const t = useTranslations("assets.detail");
   const statusLabel = useAssetStatusLabel();
   const updateAsset = useUpdateAsset();
+  const groups = useAssetStatusOptions(label);
+  const current: StatusChoice = { status, labelId: label?.id ?? null };
 
-  function handleChange(next: AssetStatus) {
-    if (next === status) return;
+  function handleChange(next: StatusChoice) {
+    if (sameChoice(next, current)) return;
+    const name = labelOfChoice(next, groups)?.name ?? statusLabel(next.status);
     updateAsset.mutate(
-      { id: assetId, data: { status: next } },
+      { id: assetId, data: updateStatusFields(next) },
       {
-        onSuccess: () =>
-          toast.success(t("statusChangedToast", { status: statusLabel(next) })),
+        onSuccess: () => toast.success(t("statusChangedToast", { status: name })),
         onError: (error) => notifyError(error, t("statusChangeError")),
       },
     );
@@ -130,24 +143,19 @@ function AssetStatusMenu({
           aria-label={t("changeStatusLabel")}
           className="inline-flex items-center gap-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
         >
-          <AssetStatusBadge status={status} />
+          <AssetStatusBadge status={status} label={label} showKind />
           <ChevronDownIcon
             className="size-3.5 text-muted-foreground"
             aria-hidden
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuRadioGroup
-          value={status}
-          onValueChange={(value) => handleChange(value as AssetStatus)}
-        >
-          {AssetStatusSchema.options.map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
-              {statusLabel(option)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+        <AssetStatusMenuOptions
+          groups={groups}
+          value={current}
+          onSelect={handleChange}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -318,9 +326,17 @@ export function AssetDetailView({ id }: { id: string }) {
             badge={
               <span className="inline-flex flex-wrap items-center gap-2">
                 {canWrite ? (
-                  <AssetStatusMenu assetId={asset.id} status={asset.status} />
+                  <AssetStatusMenu
+                    assetId={asset.id}
+                    status={asset.status}
+                    label={asset.statusLabel ?? null}
+                  />
                 ) : (
-                  <AssetStatusBadge status={asset.status} />
+                  <AssetStatusBadge
+                    status={asset.status}
+                    label={asset.statusLabel}
+                    showKind
+                  />
                 )}
                 {topologyNodeId ? (
                   <Badge variant="secondary" className="gap-1">
