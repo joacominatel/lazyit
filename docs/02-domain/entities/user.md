@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-10-05
 ---
 
 # User
@@ -153,7 +153,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
 | `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
 | `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
-| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
+| `directoryOffboardedAt` | `datetime?` | Set when an **active** AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). The offboard also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The stamp means *the sync* deactivated them, so it is the only deactivation the sync ever undoes: a person who is already inactive (deactivated by hand) is never stamped and stays inactive when they reappear, and a manual deactivation clears any stamp left from an earlier sync offboard (#1311). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
