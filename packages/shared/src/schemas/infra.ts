@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hasBrowserInterpretedScheme } from "./application";
 import { requireAtLeastOneKey } from "./primitives";
 import { ArticleListItemSchema } from "./article-list";
 // One-way only: `agent-policy` is a LEAF and never imports this file back (see its own note on why).
@@ -67,13 +68,25 @@ export const INFRA_SHORTCUTS_MAX = 20;
 /**
  * A quick-access link on a node: `{ label, url }` (SSH/web UI/console). `url` is URL-validated so a
  * bad link is a clean 400, not a broken anchor on the canvas. The node's `shortcuts` is an array of
- * these (nullable = none).
+ * these (nullable = none). This is the READ shape; writes go through {@link InfraShortcutWriteSchema}.
  */
 export const InfraShortcutSchema = z.strictObject({
   label: z.string().trim().min(1).max(120),
   url: z.url().max(2000),
 });
 export const InfraShortcutsSchema = z.array(InfraShortcutSchema).max(INFRA_SHORTCUTS_MAX);
+
+/**
+ * The create/update shape: also refuses an executable scheme (`javascript:`, `data:`, …), which would be
+ * a stored XSS sink in the link href (SEC-086). A denylist, not http(s)-only, so SSH and console links
+ * stay valid (ADR-0070). Reads keep {@link InfraShortcutSchema}, so a legacy row still loads.
+ */
+export const InfraShortcutWriteSchema = InfraShortcutSchema.extend({
+  url: InfraShortcutSchema.shape.url.refine((url) => !hasBrowserInterpretedScheme(url), {
+    message: "url must not use an executable scheme such as javascript:, data:, vbscript: or file:",
+  }),
+});
+const InfraShortcutsWriteSchema = z.array(InfraShortcutWriteSchema).max(INFRA_SHORTCUTS_MAX);
 
 /**
  * Loose per-kind attributes (ADR-0007 posture — same as Asset.specs): any JSON object is accepted,
@@ -208,7 +221,7 @@ export const CreateInfraNodeSchema = z.strictObject({
   assetId: z.cuid().optional(),
   // Format-validated (ADR-0090, #847): a malformed IP is a clean 400 here, never a persisted label.
   ipAddress: IpAddressSchema.optional(),
-  shortcuts: InfraShortcutsSchema.optional(),
+  shortcuts: InfraShortcutsWriteSchema.optional(),
   specs: InfraSpecsSchema.optional(),
   x: z.number().optional(),
   y: z.number().optional(),
@@ -229,7 +242,7 @@ export const UpdateInfraNodeSchema = requireAtLeastOneKey(
       assetId: z.cuid().nullable(),
       // Format-validated (ADR-0090, #847); `null` clears the IP (stamped MANUAL server-side).
       ipAddress: IpAddressSchema.nullable(),
-      shortcuts: InfraShortcutsSchema.nullable(),
+      shortcuts: InfraShortcutsWriteSchema.nullable(),
       specs: InfraSpecsSchema.nullable(),
       x: z.number(),
       y: z.number(),
