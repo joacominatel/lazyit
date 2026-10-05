@@ -48,11 +48,17 @@ import { notifyError } from "@/lib/api/notify-error";
 import { useBeforeUnloadGuard } from "@/lib/hooks/use-before-unload-guard";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { folderPathLabel } from "@/lib/utils/folder-tree";
+import {
+  classifyArticleMove,
+  type ConfirmableMoveAudienceChange,
+  needsMoveConfirmation,
+} from "@/lib/utils/kb-move-audience";
 import type { MarkdownImport } from "@/lib/utils/kb-markdown-import";
 import type { KbNewPrefill } from "@/lib/utils/kb-wiki-link-prefill";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { useArticleDraft } from "../_lib/use-article-draft";
 import { MarkdownImportDropzone } from "./markdown-import-dropzone";
+import { MoveAudienceConfirmDialog } from "./move-audience-confirm-dialog";
 
 const FORM_ID = "article-form";
 
@@ -234,36 +240,64 @@ export function ArticleForm({
     applyImport(result);
   };
 
+  // ── Folder-move audience confirmation (ADR-0060 §9, #1529) ───────────────────────────────────
+  // Changing the home folder IS changing who can read the article. When the move leaves a
+  // restricted folder for a public one, or for one restricted by different folders, the save waits
+  // on an explicit confirmation; Cancel drops the save and leaves the form as it is. `unknown` (a
+  // folder without the `hasAccessRules` flag — an older server) saves straight away: the client
+  // cannot know, so it neither claims the move is safe nor raises a dialog asserting a change.
+  const [pendingMove, setPendingMove] = useState<{
+    change: ConfirmableMoveAudienceChange;
+    values: ArticleFormValues;
+  } | null>(null);
+
+  const saveEdit = (existing: Article, values: ArticleFormValues) => {
+    updateArticle.mutate(
+      {
+        id: existing.id,
+        data: {
+          title: values.title,
+          categoryId: values.categoryId,
+          content: values.content,
+          excerpt: values.excerpt,
+        },
+      },
+      {
+        onSuccess: (updated) => {
+          // Clear the dirty flag FIRST (issue #942): a saved form must never trip the
+          // beforeunload/leave-confirm guard, even for however brief a window the in-app
+          // navigation below takes.
+          form.reset(values);
+          draft.clearDraft();
+          toast.success(t("form.toast.saved"));
+          router.push(`/kb/${updated.slug}`);
+        },
+        onError: (error) => notifyError(error, t("form.toast.saveError")),
+      },
+    );
+  };
+
+  const confirmMove = () => {
+    if (article && pendingMove) saveEdit(article, pendingMove.values);
+    setPendingMove(null);
+  };
+
   const onSubmit = form.handleSubmit((values) => {
     if (!isAuthenticated) {
       toast.error(t("form.toast.signInRequired"));
       return;
     }
     if (article) {
-      updateArticle.mutate(
-        {
-          id: article.id,
-          data: {
-            title: values.title,
-            categoryId: values.categoryId,
-            content: values.content,
-            excerpt: values.excerpt,
-          },
-        },
-        {
-          onSuccess: (updated) => {
-            // Clear the dirty flag FIRST (issue #942): a saved form must never trip the
-            // beforeunload/leave-confirm guard, even for however brief a window the in-app
-            // navigation below takes.
-            form.reset(values);
-            draft.clearDraft();
-            toast.success(t("form.toast.saved"));
-            router.push(`/kb/${updated.slug}`);
-          },
-          onError: (error) =>
-            notifyError(error, t("form.toast.saveError")),
-        },
+      const change = classifyArticleMove(
+        article.categoryId,
+        values.categoryId,
+        categories ?? [],
       );
+      if (needsMoveConfirmation(change)) {
+        setPendingMove({ change, values });
+        return;
+      }
+      saveEdit(article, values);
     } else {
       createArticle.mutate(
         {
@@ -327,6 +361,13 @@ export function ArticleForm({
         ),
     [categories, folderById],
   );
+
+  const pendingMoveFolder = pendingMove
+    ? folderById.get(pendingMove.values.categoryId)
+    : undefined;
+  const pendingMoveDestination = pendingMoveFolder
+    ? folderPathLabel(pendingMoveFolder, folderById)
+    : "";
 
   const formBody = (
     <>
@@ -575,6 +616,16 @@ export function ArticleForm({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ADR-0060 §9 (#1529): a home-folder change that may widen the article's audience asks first. */}
+      <MoveAudienceConfirmDialog
+        change={pendingMove?.change ?? null}
+        subject="article"
+        name={pendingMove?.values.title ?? ""}
+        destination={pendingMoveDestination}
+        onConfirm={confirmMove}
+        onCancel={() => setPendingMove(null)}
+      />
 
       {/* #1106: importing a .md over already-typed content asks first (never a silent clobber). */}
       <AlertDialog

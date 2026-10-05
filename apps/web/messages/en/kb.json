@@ -396,5 +396,31 @@
       "saved": "Access rules saved",
       "saveError": "Could not save access rules"
     }
+  },
+  "moveAudience": {
+    "cancel": "Cancel",
+    "confirmWidens": "Move and widen access",
+    "confirmChanges": "Move and change access",
+    "topLevel": "the top level",
+    "article": {
+      "widens": {
+        "title": "Make this article readable by everyone?",
+        "description": "“{name}” is leaving a restricted folder for {destination}, which nothing restricts. Everyone who can read the knowledge base will be able to read this article."
+      },
+      "changes": {
+        "title": "Change who can read this article?",
+        "description": "“{name}” is moving to {destination}, which is restricted by different access rules. The article will follow that folder's rules instead, and this may let more people read it."
+      }
+    },
+    "folder": {
+      "widens": {
+        "title": "Make this folder's articles readable by everyone?",
+        "description": "“{name}” is leaving a restricted parent for {destination}, where nothing restricts it. Everyone who can read the knowledge base will be able to read its articles. Sub-folders with access rules of their own stay restricted by those rules."
+      },
+      "changes": {
+        "title": "Change who can read this folder's articles?",
+        "description": "“{name}” is moving to {destination}, which inherits different access rules. The articles in it and in its sub-folders will follow the new location's rules, and this may let more people read them."
+      }
+    }
   }
 }
