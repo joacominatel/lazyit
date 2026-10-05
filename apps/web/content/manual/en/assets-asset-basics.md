@@ -71,6 +71,26 @@ the status badge itself is a dropdown, and in the list the row's **⋯** menu ha
 option. You can also set the status of several assets at once from the list: select them and pick one
 under **Set status** in the selection bar.
 
+### Custom statuses
+
+If your administrators have defined **custom statuses** (Settings → Taxonomies → **Statuses**, see
+[Custom asset statuses](/help/configuration-taxonomies#custom-asset-statuses)), every status picker —
+the asset form, the detail page's status dropdown, the row's **Change status**, **Set status** for a
+selection and **Receive stock** — lists them under the built-in status they belong to: the plain
+built-in status first, then its custom statuses, indented, each with its colored dot. They are
+optional; with none defined, the pickers show just the six built-in statuses.
+
+Choosing a custom status also sets its built-in status, which is what every rule keeps using — an
+asset in *Loaner pool* counts as *In storage* on the dashboard and in reports. Choosing a plain
+built-in status removes a custom one. An asset with a custom status shows its name in the status
+badge; the built-in status appears next to it on the detail page and in the quick view, and when you
+hover the badge in the list. Changes between custom statuses are recorded in the activity log too,
+naming both — for example *Loaner pool (In storage) → On the bench (In maintenance)*.
+
+**Set status** on a selection with a plain built-in status changes the assets that are in another
+status; an asset already in that built-in status keeps its custom status. To remove the custom status
+of a single asset, choose the plain built-in status from its own status dropdown or edit form.
+
 ## Serial and asset tag
 
 These are two different things, and both are optional:
@@ -181,7 +201,9 @@ unexpected field). These hints are advisory only — you can always save.
 ## Finding assets in the list
 
 The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
-**Filters** button that opens a small panel for the rest. The search box matches an asset's name,
+**Filters** button that opens a small panel for the rest. The **Status** dropdown also lists any
+custom statuses under their built-in status: choosing a built-in status shows every asset in it,
+whatever its custom status, while choosing a custom status shows only the assets that have it. The search box matches an asset's name,
 serial, asset tag, and its model's name or manufacturer — so searching a model like "ThinkPad" or
 "Pro 14" finds every asset carrying it, even though the model isn't in the name.
 

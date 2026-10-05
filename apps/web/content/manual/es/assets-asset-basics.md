@@ -73,6 +73,30 @@ detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el
 tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
 la lista: selecciónalos y elige uno en **Definir estado** de la barra de selección.
 
+### Estados personalizados
+
+Si los administradores definieron **estados personalizados** (Configuración → Taxonomías →
+**Estados**, consulta [Estados de activo
+personalizados](/help/configuration-taxonomies#estados-de-activo-personalizados)), cada selector de
+estado — el formulario del activo, el desplegable de estado de la página de detalle, **Cambiar estado**
+de la fila, **Definir estado** para una selección y **Recibir stock** — los muestra bajo el estado
+predefinido al que pertenecen: primero el estado predefinido solo, después sus estados personalizados,
+con sangría y su punto de color. Son opcionales; si no hay ninguno, los selectores muestran solo los
+seis estados predefinidos.
+
+Elegir un estado personalizado también fija su estado predefinido, que es el que siguen usando todas
+las reglas — un activo en *Pool de préstamo* cuenta como *En depósito* en el panel y en los informes.
+Elegir un estado predefinido solo quita el personalizado. Un activo con estado personalizado muestra su
+nombre en la etiqueta de estado; el estado predefinido aparece a su lado en la página de detalle y en
+la vista rápida, y al pasar el cursor sobre la etiqueta en la lista. Los cambios entre estados
+personalizados también quedan en la actividad, con ambos nombres — por ejemplo *Pool de préstamo (En
+depósito) → En el banco de trabajo (En mantenimiento)*.
+
+**Definir estado** sobre una selección con un estado predefinido solo cambia los activos que están en
+otro estado; un activo que ya está en ese estado predefinido conserva su estado personalizado. Para
+quitar el estado personalizado de un activo, elige el estado predefinido solo en su propio desplegable
+de estado o en su formulario de edición.
+
 ## Serie y etiqueta de activo
 
 Son dos cosas distintas, y ambas son opcionales:
@@ -193,7 +217,10 @@ o un campo inesperado). Estas sugerencias son solo orientativas — siempre pod�
 ## Encontrar activos en la lista
 
 La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
-herramientas, y además un botón **Filtros** que abre un panel con el resto. El buscador coincide
+herramientas, y además un botón **Filtros** que abre un panel con el resto. El desplegable de
+**Estado** también muestra los estados personalizados bajo su estado predefinido: elegir un estado
+predefinido muestra todos los activos que están en él, tengan o no un estado personalizado, y elegir
+un estado personalizado muestra solo los activos que lo tienen. El buscador coincide
 con el nombre del activo, número de serie, etiqueta de activo, y el nombre o fabricante de su
 modelo — así que buscar un modelo como "ThinkPad" o "Pro 14" encuentra todos los activos que lo
 llevan, aunque el modelo no esté en el nombre.
