@@ -83,7 +83,8 @@ ejecución** y un recuento de lo ocurrido:
   Es una **desactivación suave** (pasan a inactivas, conservando su historial), nunca un borrado definitivo.
   Si una persona vuelve a aparecer en una sincronización posterior, lazyit la reactiva automáticamente. Una
   persona que un administrador desactivó sigue inactiva aunque vuelva a aparecer en el directorio; solo un
-  administrador puede reactivarla. En
+  administrador puede reactivarla. Mientras una persona falte en el directorio, la sincronización la vuelve a
+  desactivar pasado el margen, aunque un administrador la haya reactivado después de desactivarla a mano. En
   una instancia con **cuentas locales**, a una persona con inicio de sesión se le cierran las sesiones en
   todos sus dispositivos cuando la sincronización la da de baja, y debe volver a iniciar sesión cuando la
   reactiva.
