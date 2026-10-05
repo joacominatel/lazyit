@@ -34,6 +34,9 @@ export const SOFT_DELETABLE_MODELS: ReadonlySet<string> = new Set([
   // a deleted category kept showing in the list (#321). `Consumable` itself stays OUT on purpose: its
   // service filters `deletedAt` explicitly (`deletedWhere`) to support the ADMIN archived-view slice.
   'ConsumableCategory',
+  // Custom asset statuses (ADR-0101): taxonomy rows that soft-delete like the categories, so reads hide an
+  // archived one by default; the archived list and restore use the includeSoftDeleted escape hatch.
+  'AssetStatusLabel',
   // Service accounts soft-delete = revoke (ADR-0048): the read filter hides revoked accounts from the
   // management list/detail by default; the guard + restore use the includeSoftDeleted escape hatch.
   'ServiceAccount',
