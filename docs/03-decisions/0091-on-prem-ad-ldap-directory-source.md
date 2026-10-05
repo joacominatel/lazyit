@@ -103,6 +103,12 @@ uniques.
   had reversed, so that deactivation is not undone either. Rows stamped before this fix on a person who
   was already inactive cannot be told apart from a genuine sync offboard (the row records no origin, and
   activation flips were not audited before #1375), so on reappearance they still reactivate once.
+  Both the offboard and the reactivation are conditional writes on the state the sweep loaded (active and
+  unstamped, or inactive and stamped), so an admin edit landing mid-sweep wins: a 0-row match writes
+  nothing, bumps no epoch, and counts as `skipped`. While a person is missing from the directory, the sync
+  deactivates them again after the grace period: a person an admin deactivated by hand and later re-enabled
+  is active and unstamped, so the next sweep offboards them if they are still absent past grace (only a
+  re-enabled sync-offboarded person, who keeps the stamp, is left alone).
 
 ### Hard invariants (enforced in code, asserted by a jest test)
 
