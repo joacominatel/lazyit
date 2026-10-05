@@ -92,10 +92,9 @@ la vista rápida, y al pasar el cursor sobre la etiqueta en la lista. Los cambio
 personalizados también quedan en la actividad, con ambos nombres — por ejemplo *Pool de préstamo (En
 depósito) → En el banco de trabajo (En mantenimiento)*.
 
-**Definir estado** sobre una selección con un estado predefinido solo cambia los activos que están en
-otro estado; un activo que ya está en ese estado predefinido conserva su estado personalizado. Para
-quitar el estado personalizado de un activo, elige el estado predefinido solo en su propio desplegable
-de estado o en su formulario de edición.
+Elegir un estado predefinido solo — desde el desplegable de estado de un activo, su formulario de
+edición o **Definir estado** sobre una selección — quita el estado personalizado que tuvieran esos
+activos.
 
 ## Serie y etiqueta de activo
 

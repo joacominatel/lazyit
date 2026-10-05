@@ -150,13 +150,15 @@ export function updateStatusFields(choice: StatusChoice): {
 
 /**
  * The status fields of the bulk status action (`POST /assets/batch/status`): a custom status sends its id
- * (the API derives the kind), a built-in status the status alone. The batch contract has no
- * `statusLabelId: null`, so a built-in status keeps the custom status of an asset already in that status.
+ * (the API derives the kind), a built-in status the status plus `statusLabelId: null` — the BARE status, so
+ * an asset already in that status but carrying a custom one has its custom status cleared, not skipped.
  */
 export function batchStatusFields(
   choice: StatusChoice,
-): { status: AssetStatus } | { statusLabelId: string } {
-  return choice.labelId ? { statusLabelId: choice.labelId } : { status: choice.status };
+): { status: AssetStatus; statusLabelId: null } | { statusLabelId: string } {
+  return choice.labelId
+    ? { statusLabelId: choice.labelId }
+    : { status: choice.status, statusLabelId: null };
 }
 
 /** A custom status colour safe to paint (`#RRGGBB`), or null. The read shape is a free string. */

@@ -87,9 +87,8 @@ badge; the built-in status appears next to it on the detail page and in the quic
 hover the badge in the list. Changes between custom statuses are recorded in the activity log too,
 naming both — for example *Loaner pool (In storage) → On the bench (In maintenance)*.
 
-**Set status** on a selection with a plain built-in status changes the assets that are in another
-status; an asset already in that built-in status keeps its custom status. To remove the custom status
-of a single asset, choose the plain built-in status from its own status dropdown or edit form.
+Choosing a plain built-in status — from an asset's status dropdown, its edit form, or **Set status** on a
+selection — removes any custom status those assets had.
 
 ## Serial and asset tag
 

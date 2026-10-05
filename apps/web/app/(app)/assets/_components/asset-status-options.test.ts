@@ -120,9 +120,9 @@ describe("wire fields", () => {
     expect(updateStatusFields(bare)).toEqual({ status: "IN_STORAGE", statusLabelId: null });
   });
 
-  test("batch: one key — the custom status id, or the built-in status", () => {
+  test("batch: the custom status id, or the bare built-in status (clears a custom one)", () => {
     expect(batchStatusFields(custom)).toEqual({ statusLabelId: loaner.id });
-    expect(batchStatusFields(bare)).toEqual({ status: "IN_STORAGE" });
+    expect(batchStatusFields(bare)).toEqual({ status: "IN_STORAGE", statusLabelId: null });
   });
 });
 
