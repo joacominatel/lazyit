@@ -44,6 +44,9 @@ const YES_NO = "enum:YesNo" as const;
 const ACCESS = `{hasLevel, select, yes {"{level}" access} other {access}}`;
 const ACCESS_PARAMS = { hasLevel: YES_NO, level: "text" } as const;
 
+/** A built-in asset status in words (`kind` is an `AssetStatus` code): `in storage`, `lost`… */
+const ASSET_STATUS_WORD = `{kind, select, OPERATIONAL {operational} IN_MAINTENANCE {in maintenance} IN_STORAGE {in storage} RETIRED {retired} LOST {lost} other {unknown}}`;
+
 /** A workflow trigger as a label: `on access granted` / `on access revoked`. */
 const TRIGGER_LABEL = `{trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}}`;
 /** The rest of "every time someone is granted access to Jira", after "every". */
@@ -386,6 +389,24 @@ export const AI_SENTENCES = {
   "location_restore.summary": {
     en: "Restored the location {location}.",
     params: { location: "text" },
+  },
+  /* ─── Custom asset statuses (taxonomy.tools.ts, ADR-0101) ───────────────────────────────────── */
+  "asset_status_label_create.summary": {
+    en: `Created the custom status {name} (${ASSET_STATUS_WORD}).`,
+    params: { name: "text", kind: "enum:AssetStatus" },
+  },
+  "asset_status_label_update.summary": {
+    en: "Updated the custom status {name}.",
+    params: { name: "text" },
+  },
+  /** `target` is the custom status or built-in status the assets moved to (only read when `moved` > 0). */
+  "asset_status_label_archive.summary": {
+    en: "Archived the custom status {name}{moved, plural, =0 {.} one {; moved # asset to {target}.} other {; moved # assets to {target}.}}",
+    params: { name: "text", moved: "number", target: "text" },
+  },
+  "asset_status_label_restore.summary": {
+    en: "Restored the custom status {name}.",
+    params: { name: "text" },
   },
   /** A category card's `kind` row. */
   "taxonomy.categoryKind": {

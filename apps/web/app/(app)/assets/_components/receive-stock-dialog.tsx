@@ -8,8 +8,6 @@ import {
   QrCodeIcon,
 } from "@heroicons/react/24/outline";
 import {
-  type AssetStatus,
-  AssetStatusSchema,
   type PendingPurchaseLine,
   type PurchaseOrderDetail,
   type PurchaseOrderLine,
@@ -56,13 +54,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useReceiveAssets } from "@/lib/api/hooks/use-asset-receive";
@@ -77,6 +68,8 @@ import { appendSerial } from "@/lib/utils/scanned-serials";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { usePurchaseTitle } from "../../purchases/_components/purchase-display";
 import { useAssetStatusLabel } from "./asset-status-badge";
+import { labelOfChoice } from "./asset-status-options";
+import { AssetStatusSelect, useAssetStatusOptions } from "./asset-status-picker";
 import {
   buildReceiveFromLinePayload,
   buildReceivePayload,
@@ -162,6 +155,7 @@ export function ReceiveStockDialog({
   const tl = useTranslations("assets.receive.line");
   const tc = useTranslations("common");
   const statusLabel = useAssetStatusLabel();
+  const statusGroups = useAssetStatusOptions();
   const titleOf = usePurchaseTitle();
   const { date } = useFormatters();
   const receive = useReceiveAssets();
@@ -479,18 +473,15 @@ export function ReceiveStockDialog({
       {target ? null : quantityField}
       <Field>
         <FieldLabel htmlFor="receive-status">{t("status")}</FieldLabel>
-        <Select value={values.status} onValueChange={(value) => patch({ status: value as AssetStatus })}>
-          <SelectTrigger id="receive-status" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {AssetStatusSchema.options.map((option) => (
-              <SelectItem key={option} value={option}>
-                {statusLabel(option)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Every unit lands in this status; a custom status (ADR-0101) brings its built-in kind. */}
+        <AssetStatusSelect
+          id="receive-status"
+          value={{ status: values.status, labelId: values.statusLabelId || null }}
+          onChange={(choice) => {
+            if (choice) patch({ status: choice.status, statusLabelId: choice.labelId ?? "" });
+          }}
+          groups={statusGroups}
+        />
       </Field>
       <Field>
         <FieldLabel htmlFor="receive-location">{t("location")}</FieldLabel>
@@ -697,7 +688,14 @@ export function ReceiveStockDialog({
         label: t("model"),
         value: chosenModel ? `${chosenModel.manufacturer} ${chosenModel.name}` : modelLoading ? "…" : none,
       },
-      { label: t("status"), value: statusLabel(shown.status) },
+      {
+        label: t("status"),
+        value:
+          labelOfChoice(
+            { status: shown.status, labelId: shown.statusLabelId || null },
+            statusGroups,
+          )?.name ?? statusLabel(shown.status),
+      },
       { label: t("company"), value: shown.company || none },
       {
         label: t("purchaseDate"),

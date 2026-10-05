@@ -104,6 +104,13 @@ describe("the receive-from-line body", () => {
     expect(ReceiveFromLineSchema.safeParse(body).success).toBe(true);
   });
 
+  test("a custom status (ADR-0101) rides along with its kind", () => {
+    const label = "clh1label000000000000000";
+    const body = buildReceiveFromLinePayload({ ...prefill, statusLabelId: label }, "en", fromPurchase);
+    expect(body).toMatchObject({ status: "IN_STORAGE", statusLabelId: label });
+    expect(ReceiveFromLineSchema.safeParse(body).success).toBe(true);
+  });
+
   test("a field the operator cleared is null — the units get no value, the purchase's is not brought back", () => {
     const body = buildReceiveFromLinePayload(
       { ...prefill, locationId: "", company: "  ", purchaseDate: "", warrantyEnd: "", purchaseCost: "" },

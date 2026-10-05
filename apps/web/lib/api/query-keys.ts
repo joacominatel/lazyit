@@ -118,3 +118,20 @@ export const suggestionKeys = {
 export function invalidateSuggestions(queryClient: QueryClient): Promise<void> {
   return queryClient.invalidateQueries({ queryKey: suggestionKeys.all });
 }
+
+/**
+ * Query keys for custom asset statuses (ADR-0101, #1524). Hook-free here, like `suggestionKeys`, because
+ * BOTH directions invalidate the other: a custom-status write (rename, archive-with-move) changes the
+ * assets that inline it, and an asset write changes a custom status's `assetCount`. `archived()` is the
+ * ADMIN-only `deleted=only` list, under the same `all` prefix.
+ */
+export const assetStatusLabelKeys = {
+  all: ["asset-status-labels"] as const,
+  lists: () => [...assetStatusLabelKeys.all, "list"] as const,
+  archived: () => [...assetStatusLabelKeys.all, "archived"] as const,
+};
+
+/** Refresh the custom statuses (their `assetCount` moves with every asset status write). */
+export function invalidateAssetStatusLabels(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: assetStatusLabelKeys.all });
+}

@@ -48,6 +48,10 @@ function ownRoute(ref: { type: string; id: string; slug?: string }): string | nu
       return `/purchases/${seg(ref.id)}`;
     case "supplier":
       return `/purchases/suppliers/${seg(ref.id)}`;
+    case "assetStatusLabel":
+      // A custom asset status (ADR-0101) has no page of its own: it is managed on the Statuses tab of
+      // Settings → Taxonomies, which the tab param opens directly.
+      return "/settings/taxonomies?tab=statuses";
     default:
       return null;
   }

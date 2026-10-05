@@ -33,6 +33,13 @@ describe("entityHref", () => {
     expect(entityHref(ref({ type: "assetTagScheme", id: "" }))).toBeNull();
   });
 
+  test("a custom asset status opens the Statuses tab of Settings → Taxonomies (ADR-0101)", () => {
+    expect(entityHref(ref({ type: "assetStatusLabel", id: "clabel1" }))).toBe(
+      "/settings/taxonomies?tab=statuses",
+    );
+    expect(entityHref(ref({ type: "assetStatusLabel", id: "" }))).toBeNull();
+  });
+
   test("routes articles by slug, and none without one", () => {
     expect(entityHref(ref({ type: "article", id: "a1", slug: "vpn-setup" }))).toBe("/kb/vpn-setup");
     expect(entityHref(ref({ type: "article", id: "a1" }))).toBeNull();

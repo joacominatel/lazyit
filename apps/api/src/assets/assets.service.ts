@@ -8,6 +8,7 @@ import {
 import type {
   AssetInventoryCsvItem,
   AssetStatus,
+  BatchAssetStatus,
   AssetWarrantyFilter,
   BatchResult,
   CreateAsset,
@@ -17,6 +18,7 @@ import type {
   UpdateAsset,
 } from '@lazyit/shared';
 import {
+  ASSET_STATUS_REQUIRED_MESSAGE,
   applyAssetModelSpecsDefaults,
   assetInventoryCsvHeader,
   assetInventoryCsvRow,
@@ -51,6 +53,12 @@ import {
   isOverReceived,
   loadReceivableLine,
 } from '../purchase-orders/purchase-order-line-receipt';
+import {
+  ASSET_STATUS_LABEL_REF_SELECT,
+  lockLiveStatusLabel,
+  statusChangedPayload,
+  type LiveStatusLabel,
+} from '../asset-status-labels/asset-status-label-lock';
 
 /**
  * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
@@ -95,7 +103,10 @@ const ASSET_PLAIN_FIELDS_SELECT = {
   salvageValue: true,
   purchaseCurrency: true,
 } as const satisfies Record<
-  Exclude<keyof UpdateAsset, 'status' | 'locationId' | 'modelId' | 'specs'>,
+  Exclude<
+    keyof UpdateAsset,
+    'status' | 'statusLabelId' | 'locationId' | 'modelId' | 'specs'
+  >,
   true
 >;
 
@@ -126,7 +137,10 @@ export interface AssetFilters {
   /** Filter to assets carrying this exact AssetModel (#943) — deep-linked from the asset detail page. */
   modelId?: string;
   locationId?: string;
+  /** The BUILT-IN status: matches every asset in it, whatever its custom status (ADR-0101). */
   status?: AssetStatus;
+  /** One custom status (ADR-0101): the assets carrying exactly this label. */
+  statusLabelId?: string;
   /** Exact-match grouping filter over the free-text `company` column (ADR-0076). */
   company?: string;
   /** Case-insensitive substring over name / serial / assetTag (OR). */
@@ -215,6 +229,8 @@ const ASSET_TIEBREAKER = { id: 'desc' } as const;
 const ASSET_RELATIONS = {
   model: { include: { category: true } },
   location: true,
+  // The custom status (ADR-0101) as its compact ref. Never an archived label: a delete moves its assets.
+  statusLabel: { select: ASSET_STATUS_LABEL_REF_SELECT },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -253,6 +269,9 @@ const ASSET_LIST_SELECT = {
   serial: true,
   assetTag: true,
   status: true,
+  // The custom status (ADR-0101): the id and its compact ref for the Status column's badge.
+  statusLabelId: true,
+  statusLabel: { select: ASSET_STATUS_LABEL_REF_SELECT },
   notes: true,
   company: true,
   purchaseDate: true,
@@ -435,6 +454,105 @@ export class AssetsService {
     }
   }
 
+  /**
+   * The LIVE custom status a write names, locked `FOR SHARE` for the rest of the transaction (ADR-0101) — a
+   * concurrent kind change or delete of the label waits for this write, or this write waits for it and then
+   * reads the new kind / finds it archived. 400 when the label is missing or archived. Write-only.
+   */
+  private async liveStatusLabel(
+    tx: Prisma.TransactionClient,
+    statusLabelId: string,
+  ): Promise<LiveStatusLabel> {
+    const label = await lockLiveStatusLabel(tx, statusLabelId, 'share');
+    if (!label) {
+      throw new BadRequestException(
+        `Custom status ${statusLabelId} not found (missing or archived)`,
+      );
+    }
+    return label;
+  }
+
+  /** 400 when a body names both a built-in `status` and a custom status of another kind (ADR-0101). */
+  private assertStatusAgrees(
+    status: AssetStatus | undefined,
+    label: LiveStatusLabel,
+  ): void {
+    if (status !== undefined && status !== label.kind) {
+      throw new BadRequestException(
+        `status ${status} does not match the custom status "${label.name}", which maps to ${label.kind}. Send the custom status alone, or with its own status.`,
+      );
+    }
+  }
+
+  /**
+   * The `status` / `statusLabelId` a CREATE writes (ADR-0101): a custom status sets both (its `kind` is the
+   * status); a built-in status alone writes no label. Keeps the invariant `statusLabelId ⇒ status == kind`.
+   */
+  private async createStatus(
+    tx: Prisma.TransactionClient,
+    status: AssetStatus | undefined,
+    statusLabelId: string | undefined,
+  ): Promise<{ status: AssetStatus; statusLabelId?: string }> {
+    if (statusLabelId === undefined) {
+      // The create schema refuses a body with neither; an internal caller is held to the same rule.
+      if (status === undefined) {
+        throw new BadRequestException(ASSET_STATUS_REQUIRED_MESSAGE);
+      }
+      return { status };
+    }
+    const label = await this.liveStatusLabel(tx, statusLabelId);
+    this.assertStatusAgrees(status, label);
+    return { status: label.kind, statusLabelId: label.id };
+  }
+
+  /**
+   * The `status` / `statusLabelId` an UPDATE writes, and the custom status the asset ends with (ADR-0101):
+   *   - `statusLabelId: "<id>"` → the label and its kind (a disagreeing `status` is a 400);
+   *   - `statusLabelId: null` → no label; the built-in status is kept (or set, if `status` is also given);
+   *   - `status` alone → kept label when the status does not change (the label maps to it, by the
+   *     invariant), cleared when it does;
+   *   - neither → nothing.
+   */
+  private async updateStatus(
+    tx: Prisma.TransactionClient,
+    before: {
+      status: AssetStatus;
+      statusLabelId?: string | null;
+      statusLabel?: { id: string; name: string } | null;
+    },
+    status: AssetStatus | undefined,
+    statusLabelId: string | null | undefined,
+  ): Promise<{
+    write: { status?: AssetStatus; statusLabelId?: string | null };
+    toLabel: { id: string; name: string } | null;
+  }> {
+    const current = before.statusLabel ?? null;
+    if (statusLabelId === null) {
+      return {
+        write: { statusLabelId: null, ...(status ? { status } : {}) },
+        toLabel: null,
+      };
+    }
+    if (statusLabelId !== undefined) {
+      const label = await this.liveStatusLabel(tx, statusLabelId);
+      this.assertStatusAgrees(status, label);
+      return {
+        write: { status: label.kind, statusLabelId: label.id },
+        toLabel: label,
+      };
+    }
+    if (status === undefined) return { write: {}, toLabel: current };
+    if (status === before.status)
+      return { write: { status }, toLabel: current };
+    return {
+      write: {
+        status,
+        ...(before.statusLabelId ? { statusLabelId: null } : {}),
+      },
+      toLabel: null,
+    };
+  }
+
   /** Whether the principal holds `permission` (fail-closed for no principal). */
   private holds(
     principal: Principal | undefined,
@@ -534,6 +652,7 @@ export class AssetsService {
     modelId,
     locationId,
     status,
+    statusLabelId,
     company,
     q,
     assignedToUserId,
@@ -576,6 +695,9 @@ export class AssetsService {
         : {}),
       ...(serials && serials.length > 0 ? { serial: { in: serials } } : {}),
       ...(status ? { status } : {}),
+      // One custom status (ADR-0101). `status` filters by the built-in status, so it already includes
+      // every custom status of that kind; both together AND-combine.
+      ...(statusLabelId ? { statusLabelId } : {}),
       // Warranty window (#955): `expiring90d` mirrors the dashboard tile's (now, now + N days]
       // look-ahead (assets whose warranty hasn't lapsed but ends soon); `expired` = warranty end
       // already past. `now` is read per-call so the window tracks the request time.
@@ -811,6 +933,13 @@ export class AssetsService {
       try {
         const asset = await this.prisma.$transaction(async (tx) => {
           let resolvedSpecs = specs;
+          // A custom status sets its kind as the status; a missing or archived one is a 400 (ADR-0101).
+          const { status, statusLabelId, ...fields } = rest;
+          const statusWrite = await this.createStatus(
+            tx,
+            status,
+            statusLabelId,
+          );
           // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
           await this.assertLocationLive(tx, rest.locationId);
           if (rest.modelId) {
@@ -831,7 +960,8 @@ export class AssetsService {
           // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
           const created = await tx.asset.create({
             data: {
-              ...assetMoneyToDb(rest),
+              ...assetMoneyToDb(fields),
+              ...statusWrite,
               ...(options?.purchaseOrderLineId !== undefined
                 ? { purchaseOrderLineId: options.purchaseOrderLineId }
                 : {}),
@@ -925,6 +1055,20 @@ export class AssetsService {
       throw new BadRequestException(`AssetModel ${data.modelId} not found`);
     }
     await this.assertLocationLive(this.prisma, data.locationId);
+    // ONE upfront custom-status check too (ADR-0101): a missing or archived label, or a status of another
+    // kind, is a single 400. Each unit's create() re-checks it under its own lock.
+    if (data.statusLabelId !== undefined) {
+      const label = await this.prisma.assetStatusLabel.findFirst({
+        where: { id: data.statusLabelId, deletedAt: null },
+        select: ASSET_STATUS_LABEL_REF_SELECT,
+      });
+      if (!label) {
+        throw new BadRequestException(
+          `Custom status ${data.statusLabelId} not found (missing or archived)`,
+        );
+      }
+      this.assertStatusAgrees(data.status, label);
+    }
 
     // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
     // it as the shared `Asset[]` (ISO strings) nor annotate this method's return as ReceiveAssetsResult,
@@ -940,7 +1084,10 @@ export class AssetsService {
       // already-minor-units purchaseCost is forwarded untouched (#954).
       const unit: CreateAsset = {
         name: `${model.name} #${i + 1}`,
-        status: data.status,
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.statusLabelId !== undefined
+          ? { statusLabelId: data.statusLabelId }
+          : {}),
         modelId: data.modelId,
         ...(data.locationId !== undefined
           ? { locationId: data.locationId }
@@ -1049,6 +1196,8 @@ export class AssetsService {
       select: {
         id: true,
         status: true,
+        statusLabelId: true,
+        statusLabel: { select: { id: true, name: true } },
         locationId: true,
         modelId: true,
         specs: true,
@@ -1058,8 +1207,15 @@ export class AssetsService {
     if (!before) {
       throw new NotFoundException(`Asset ${id} not found`);
     }
-    const { specs, ...rest } = data;
+    const { specs, status, statusLabelId, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // The custom status and the built-in status move together (ADR-0101, invariant in updateStatus).
+      const statusChange = await this.updateStatus(
+        tx,
+        before,
+        status,
+        statusLabelId,
+      );
       // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
       if (rest.locationId !== before.locationId) {
         await this.assertLocationLive(tx, rest.locationId);
@@ -1071,12 +1227,16 @@ export class AssetsService {
         where: { id },
         data: {
           ...assetMoneyToDb(rest),
+          ...statusChange.write,
           ...(specs !== undefined
             ? { specs: specs as Prisma.InputJsonValue }
             : {}),
         },
       });
-      const events = this.changeEvents(before, row, actor);
+      const events = this.changeEvents(before, row, actor, {
+        from: before.statusLabel ?? null,
+        to: statusChange.toLabel,
+      });
       // Plain-field edits (#1382, ADR-0033 amendment): ONE `UPDATED` row per PATCH naming the plain fields
       // that actually changed — names only, never values. A PATCH that also moves a discrete dimension
       // writes both: its discrete row(s) above, and this row listing ONLY the plain fields. Every path (UI,
@@ -1281,43 +1441,99 @@ export class AssetsService {
   }
 
   /**
-   * Bulk status-change (ADMIN). For each live id whose status DIFFERS from the target: set the new
-   * status + emit a `STATUS_CHANGED` history event ({ from, to }) — identical to the single-item
-   * update path — inside one `$transaction`. An id already at the target status is skipped (no event,
-   * matching the no-op semantics of `update`). Missing/soft-deleted ids are skipped as not found.
+   * Bulk status-change (ADMIN). The target is a built-in `status`, a custom status (`statusLabelId`,
+   * ADR-0101 — sets the label and its kind), or both (they must agree, 400 otherwise); a missing or archived
+   * custom status is a 400. For each live id whose (status, custom status) DIFFERS from the target: write it
+   * + emit a `STATUS_CHANGED` history event — identical to the single-item update path, so a built-in
+   * status alone keeps nothing of a custom status of another kind — inside one `$transaction`. An id already
+   * there is skipped (a built-in status alone counts as "there" when the asset already has that status,
+   * whatever its custom status, matching `update`). Missing/soft-deleted ids are skipped as not found.
    * Re-indexes each changed row after the commit.
    */
   async batchSetStatus(
     ids: string[],
-    status: AssetStatus,
+    target: Pick<BatchAssetStatus, 'status' | 'statusLabelId'>,
     principal?: Principal,
   ): Promise<BatchResult> {
     const actor = this.actor.resolveActor(principal);
+    let label: LiveStatusLabel | null = null;
+    // `statusLabelId: null` = the bare built-in status: an asset in that status but carrying a custom one
+    // is changed (its custom status cleared), not skipped as already in state.
+    const bare = target.statusLabelId === null;
+    if (typeof target.statusLabelId === 'string') {
+      label = await this.prisma.assetStatusLabel.findFirst({
+        where: { id: target.statusLabelId, deletedAt: null },
+        select: ASSET_STATUS_LABEL_REF_SELECT,
+      });
+      if (!label) {
+        throw new BadRequestException(
+          `Custom status ${target.statusLabelId} not found (missing or archived)`,
+        );
+      }
+      this.assertStatusAgrees(target.status, label);
+    }
+    const status = label?.kind ?? target.status;
+    if (status === undefined) {
+      throw new BadRequestException(ASSET_STATUS_REQUIRED_MESSAGE);
+    }
     const live = await this.prisma.asset.findMany({
       where: { id: { in: ids } },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        statusLabelId: true,
+        statusLabel: { select: { id: true, name: true } },
+      },
     });
-    const current = new Map(live.map((a) => [a.id, a.status]));
+    const current = new Map(live.map((a) => [a.id, a]));
     const succeeded: string[] = [];
     const skipped: { id: string; reason: string }[] = [];
     for (const id of ids) {
-      if (!current.has(id)) skipped.push({ id, reason: 'not_found' });
-      else if (current.get(id) === status)
+      const asset = current.get(id);
+      if (!asset) skipped.push({ id, reason: 'not_found' });
+      else if (
+        asset.status === status &&
+        (label === null
+          ? !bare || asset.statusLabelId === null
+          : asset.statusLabelId === label.id)
+      )
         skipped.push({ id, reason: 'already_in_state' });
       else succeeded.push(id);
     }
 
     if (succeeded.length > 0) {
       await this.prisma.$transaction(async (tx) => {
+        // Re-check the custom status under its lock: archived or re-kinded since the read above → 400.
+        if (label) {
+          const locked = await this.liveStatusLabel(tx, label.id);
+          if (locked.kind !== label.kind) {
+            throw new ConflictException(
+              `The custom status "${locked.name}" changed while the batch ran; retry`,
+            );
+          }
+        }
         for (const id of succeeded) {
-          await tx.asset.update({ where: { id }, data: { status } });
+          const asset = current.get(id)!;
+          await tx.asset.update({
+            where: { id },
+            data: {
+              status,
+              ...(label
+                ? { statusLabelId: label.id }
+                : asset.statusLabelId
+                  ? { statusLabelId: null }
+                  : {}),
+            },
+          });
           await this.history.record(tx, {
             assetId: id,
             eventType: 'STATUS_CHANGED',
-            payload: {
-              from: current.get(id),
-              to: status,
-            },
+            payload: statusChangedPayload(
+              asset.status,
+              status,
+              asset.statusLabel,
+              label,
+            ),
             actor,
           });
         }
@@ -1384,7 +1600,11 @@ export class AssetsService {
     };
   }
 
-  /** One discrete history event per field that actually changed in an update (ADR-0033). */
+  /**
+   * One discrete history event per field that actually changed in an update (ADR-0033). `STATUS_CHANGED`
+   * also fires when only the custom status changes (same built-in status, ADR-0101); its payload names the
+   * custom statuses (`fromLabel` / `toLabel`) whenever either side has one.
+   */
   private changeEvents(
     before: Pick<
       Prisma.AssetGetPayload<{
@@ -1396,9 +1616,13 @@ export class AssetsService {
         };
       }>,
       'status' | 'locationId' | 'modelId' | 'specs'
-    >,
+    > & { statusLabelId?: string | null },
     updated: { id: string } & typeof before,
     actor?: ActorAttribution,
+    labels?: {
+      from: { id: string; name: string } | null;
+      to: { id: string; name: string } | null;
+    },
   ): RecordAssetEvent[] {
     const events: RecordAssetEvent[] = [];
     const change = (
@@ -1412,8 +1636,21 @@ export class AssetsService {
         payload: { from, to } as Prisma.InputJsonValue,
         actor,
       });
-    if (before.status !== updated.status) {
-      change('STATUS_CHANGED', before.status, updated.status);
+    if (
+      before.status !== updated.status ||
+      (before.statusLabelId ?? null) !== (updated.statusLabelId ?? null)
+    ) {
+      events.push({
+        assetId: updated.id,
+        eventType: 'STATUS_CHANGED',
+        payload: statusChangedPayload(
+          before.status,
+          updated.status,
+          labels?.from,
+          labels?.to,
+        ),
+        actor,
+      });
     }
     if (before.locationId !== updated.locationId) {
       change('LOCATION_CHANGED', before.locationId, updated.locationId);
