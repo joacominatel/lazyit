@@ -93,11 +93,7 @@ export function isSafeApplicationUrl(value: string): boolean {
   return hasSafeScheme(value) && hasSafeScheme(decodeSchemeEncodings(value));
 }
 
-/**
- * True when `value` carries a {@link BROWSER_INTERPRETED_SCHEMES} scheme, on the raw value or on its
- * character-reference / percent-decoded form. The denylist half of {@link isSafeApplicationUrl}, for
- * fields that must keep non-web schemes such as `ssh://` (InfraShortcut.url, SEC-086).
- */
+/** The denylist half of isSafeApplicationUrl, for fields that keep ssh:// (SEC-086). */
 export function hasBrowserInterpretedScheme(value: string): boolean {
   return [value, decodeSchemeEncodings(value)].some((candidate) => {
     const scheme = SCHEME_PREFIX.exec(normalizeForScheme(candidate))?.[1]?.toLowerCase();

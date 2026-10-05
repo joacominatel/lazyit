@@ -76,11 +76,7 @@ export const InfraShortcutSchema = z.strictObject({
 });
 export const InfraShortcutsSchema = z.array(InfraShortcutSchema).max(INFRA_SHORTCUTS_MAX);
 
-/**
- * The create/update shape: also refuses an executable scheme (`javascript:`, `data:`, …), which would be
- * a stored XSS sink in the link href (SEC-086). A denylist, not http(s)-only, so SSH and console links
- * stay valid (ADR-0070). Reads keep {@link InfraShortcutSchema}, so a legacy row still loads.
- */
+/** Write shape: denylist, not http(s)-only, so SSH/console links survive (SEC-086, ADR-0070). */
 export const InfraShortcutWriteSchema = InfraShortcutSchema.extend({
   url: InfraShortcutSchema.shape.url.refine((url) => !hasBrowserInterpretedScheme(url), {
     message: "url must not use an executable scheme such as javascript:, data:, vbscript: or file:",
