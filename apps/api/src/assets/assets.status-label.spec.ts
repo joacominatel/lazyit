@@ -408,6 +408,31 @@ describe('AssetsService — custom statuses in bulk (ADR-0101)', () => {
     });
   });
 
+  it('batch status to a BARE built-in status (statusLabelId: null) clears the label of an asset already in it', async () => {
+    const { service, prisma, tx, events } = setup();
+    prisma.asset.findMany.mockResolvedValueOnce(rows).mockResolvedValue([]);
+
+    const result = await service.batchSetStatus(
+      ['a1', 'a2', 'a3'],
+      { status: 'IN_MAINTENANCE', statusLabelId: null },
+      ACTOR,
+    );
+
+    // a1 and a3 are already IN_MAINTENANCE but carry a label: changed (cleared), not skipped.
+    expect(result.succeeded).toEqual(['a1', 'a2', 'a3']);
+    expect(result.skipped).toEqual([]);
+    expect(tx.asset.update).toHaveBeenCalledWith({
+      where: { id: 'a3' },
+      data: { status: 'IN_MAINTENANCE', statusLabelId: null },
+    });
+    expect(events().map((e) => e.payload)).toContainEqual({
+      from: 'IN_MAINTENANCE',
+      to: 'IN_MAINTENANCE',
+      fromLabel: { id: OTHER.id, name: OTHER.name },
+      toLabel: null,
+    });
+  });
+
   it('batch status refuses an archived custom status and a disagreeing status up front', async () => {
     const { service, labels, prisma } = setup();
     await expect(

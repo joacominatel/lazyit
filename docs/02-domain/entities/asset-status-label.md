@@ -35,7 +35,10 @@ location types stay a fixed enum ([[0017-location-type-enum]]).
   - a missing or archived label is a `400`;
   - a `PATCH` with `status` alone keeps the label when the status does not change (the label maps to it) and
     clears it when it does;
-  - `statusLabelId: null` clears the label and keeps the built-in status.
+  - `statusLabelId: null` clears the label and keeps the built-in status;
+  - on bulk status, `status` + `statusLabelId: null` asks for the **bare** built-in status: an asset already in
+    that status but carrying a label is changed (label cleared, `STATUS_CHANGED` recorded), not skipped. A
+    `status` alone keeps the old behavior (an asset already in that status is skipped, label and all).
 - `name` is unique among **live** labels — a raw-SQL partial unique index `asset_status_labels_name_active_key`
   `WHERE "deletedAt" IS NULL`, case-sensitive like the category names; a duplicate is a `409`
   ([[0041-soft-delete-reuse-and-restore]]).

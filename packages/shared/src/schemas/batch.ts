@@ -37,14 +37,16 @@ export const BatchIdsSchema = z.strictObject({
  * Bulk asset status-change payload: the target ids plus the new status to set on each — a built-in
  * `status`, a CUSTOM status (`statusLabelId`, ADR-0101: sets the label and its kind), or both (they must
  * agree, else 400). A built-in `status` alone clears the custom status of every asset it changes.
+ * `statusLabelId: null` with a `status` asks for the BARE built-in status: an asset already in that status
+ * but carrying a custom one is changed too (its custom status is cleared), not skipped.
  */
 export const BatchAssetStatusSchema = z
   .strictObject({
     ids: CuidBatchIdsSchema,
     status: AssetStatusSchema.optional(),
-    statusLabelId: z.cuid().optional(),
+    statusLabelId: z.cuid().nullable().optional(),
   })
-  .refine((v) => v.status !== undefined || v.statusLabelId !== undefined, {
+  .refine((v) => v.status !== undefined || typeof v.statusLabelId === "string", {
     message: ASSET_STATUS_REQUIRED_MESSAGE,
     path: ["status"],
   });

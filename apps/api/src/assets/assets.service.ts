@@ -1457,7 +1457,10 @@ export class AssetsService {
   ): Promise<BatchResult> {
     const actor = this.actor.resolveActor(principal);
     let label: LiveStatusLabel | null = null;
-    if (target.statusLabelId !== undefined) {
+    // `statusLabelId: null` = the bare built-in status: an asset in that status but carrying a custom one
+    // is changed (its custom status cleared), not skipped as already in state.
+    const bare = target.statusLabelId === null;
+    if (typeof target.statusLabelId === 'string') {
       label = await this.prisma.assetStatusLabel.findFirst({
         where: { id: target.statusLabelId, deletedAt: null },
         select: ASSET_STATUS_LABEL_REF_SELECT,
@@ -1490,7 +1493,9 @@ export class AssetsService {
       if (!asset) skipped.push({ id, reason: 'not_found' });
       else if (
         asset.status === status &&
-        (label === null || (asset.statusLabelId ?? null) === label.id)
+        (label === null
+          ? !bare || asset.statusLabelId === null
+          : asset.statusLabelId === label.id)
       )
         skipped.push({ id, reason: 'already_in_state' });
       else succeeded.push(id);

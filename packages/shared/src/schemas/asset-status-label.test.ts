@@ -216,6 +216,11 @@ describe("Batch status and receiving take a custom status", () => {
     expect(BatchAssetStatusSchema.safeParse({ ids, status: "LOST" }).success).toBe(true);
     expect(BatchAssetStatusSchema.safeParse({ ids, statusLabelId: LABEL_ID }).success).toBe(true);
     expect(BatchAssetStatusSchema.safeParse({ ids }).success).toBe(false);
+    // null = the bare built-in status: needs a status alongside it.
+    expect(
+      BatchAssetStatusSchema.safeParse({ ids, status: "LOST", statusLabelId: null }).success,
+    ).toBe(true);
+    expect(BatchAssetStatusSchema.safeParse({ ids, statusLabelId: null }).success).toBe(false);
   });
 
   test("bulk receive: status or statusLabelId", () => {
