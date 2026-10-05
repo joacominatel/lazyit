@@ -266,11 +266,12 @@ export class DirectoryReconcileService {
 
   /**
    * Refresh a MATCHED person. FIXED ALLOWLIST (mass-assignment-proof): only firstName/lastName (when
-   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), clearing directoryReenabledAt, and a
-   * re-activation (isActive=true + clear directoryOffboardedAt) IFF WE previously offboarded them. NEVER
-   * role/externalId/passwordHash/directoryOnly/sessionEpoch — a reactivated person signs in again (their
-   * sessions died at the offboard). A UserHistory row is written ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a
-   * steady directory doesn't spam the audit log; the count follows the same rule (idempotent re-run).
+   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), clearing directoryReenabledAt and a
+   * leftover stamp on an active person, and a re-activation (isActive=true + clear directoryOffboardedAt)
+   * IFF WE previously offboarded them. NEVER role/externalId/passwordHash/directoryOnly/sessionEpoch — a
+   * reactivated person signs in again (their sessions died at the offboard). A UserHistory row is written
+   * ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a steady directory doesn't spam the audit
+   * log; the count follows the same rule (idempotent re-run).
    */
   private async refreshMatched(
     person: LocalAdPerson,
@@ -293,6 +294,10 @@ export class DirectoryReconcileService {
       ...(person.directoryReenabledAt != null
         ? { directoryReenabledAt: null }
         : {}),
+      // An admin already re-enabled them; a leftover stamp would shield a later absence from the sweep.
+      ...(person.isActive && person.directoryOffboardedAt != null
+        ? { directoryOffboardedAt: null }
+        : {}),
     };
     if (firstName && firstName !== person.firstName) {
       data.firstName = firstName;
@@ -306,7 +311,7 @@ export class DirectoryReconcileService {
       changedFields.push('directoryAttrs');
     }
     // Reappeared after WE offboarded them → undo our own soft offboard (never touch a manual deactivation).
-    const reactivate = person.directoryOffboardedAt != null;
+    const reactivate = person.directoryOffboardedAt != null && !person.isActive;
 
     if (changedFields.length === 0 && !reactivate) {
       // Only the lastSeenAt heartbeat moved — persist it silently (no history, no "updated" count).
