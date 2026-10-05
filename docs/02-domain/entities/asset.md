@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-05
 ---
 
 # Asset
@@ -20,6 +20,8 @@ concrete instance of a generic [[asset-model]].
 
 - **is an instance of** an optional [[asset-model]] (`modelId`, nullable FK, `onDelete: SetNull`).
 - **lives at** an optional [[location]] (`locationId`, nullable FK, `onDelete: SetNull`).
+- **may carry** an optional custom status, an [[asset-status-label]] (`statusLabelId`, nullable FK,
+  `onDelete: SetNull`) — an operator-defined name over its built-in `status` ([[0101-custom-asset-statuses]]).
 - **is owned via** N [[asset-assignment]] records — 🟢 ownership over time (concurrent, multi-owner).
 - **has** N [[asset-history]] entries — 🟢 implemented; see `GET /assets/:id/history`.
 - **receives** N consumable **deliveries**: `OUT` [[consumable-movement]]s whose `targetAssetId` is this
@@ -40,7 +42,18 @@ concrete instance of a generic [[asset-model]].
   this field as a snapshot. Asset-provided specs override matching model keys, so an individual unit
   can diverge immediately.
 - `status` is a **required** enum (`AssetStatus`), **no default** — every asset is classified
-  (consistent with [[location]]`.type`).
+  (consistent with [[location]]`.type`). It is the status **every rule reads** (dashboard, filters, the
+  stock default, imports, the reporting agent, the AI).
+- **Custom statuses (optional — [[0101-custom-asset-statuses]], #1524).** An asset may also carry a custom
+  status ([[asset-status-label]]): a team-defined name mapped to exactly one built-in status, its `kind`.
+  Invariant, enforced on every write path: `statusLabelId != null ⇒ status == label.kind`. A create names
+  `status`, `statusLabelId`, or both (they must agree — else `400`; neither is a `400`); a label sets `status`
+  to its kind; a missing or archived label is a `400`. On `PATCH`, `statusLabelId: "<id>"` sets the label
+  and its kind, `statusLabelId: null` clears the label and keeps the status, and `status` alone keeps the
+  label when the status does not change and clears it when it does. The bulk status change and bulk receive
+  take `statusLabelId` the same way. A label's kind is frozen while any asset carries it, and archiving a
+  label in use moves its assets (live and archived) elsewhere first — so an asset never points at an
+  archived label. Existing assets read `statusLabelId = null`.
 - `serial` and `assetTag` are each unique **among live rows** when present (a live duplicate returns
   `409`); a soft-deleted value is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]).
 - **`id` vs `assetTag` — two different identities.** `id` is the internal `cuid()` primary key
@@ -182,7 +195,8 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `name` | `string` | required (e.g. "SW-CORE-01"); naming convention is the user's, not enforced. |
 | `serial` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted serial is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). |
 | `assetTag` | `string?` | Optional human-facing company label (the physical sticker; distinct from the internal `id`). Same live-only PARTIAL unique index as `serial` ([[0041-soft-delete-reuse-and-restore]]). **Auto-assigned** on create when the opt-in `AssetTagScheme` is enabled and no explicit value is supplied ([[0063-configurable-asset-tag-scheme]]); OFF by default. |
-| `status` | `AssetStatus` | required enum, **no default**. |
+| `status` | `AssetStatus` | required enum, **no default**. The status every rule reads; equals the label's `kind` when `statusLabelId` is set. |
+| `statusLabelId` | `cuid?` | optional FK → [[asset-status-label]], `onDelete: SetNull`, indexed ([[0101-custom-asset-statuses]]). `null` = a bare built-in status. Reads inline `statusLabel` (`{ id, name, kind, color }`) on the list, the detail and `/assets/mine`; writes return the id only. |
 | `specs` | `jsonb?` | per-unit type-specific attributes; any JSON object within the structural write bound (see the notes above). The web edits this via a **custom-fields editor** (a list of `{ name, value }` string rows). On create, selecting a model with default specs pre-fills those rows; the operator can change them before saving. Detail renders specs as a label-cased key/value list, not raw JSON. |
 | `notes` | `string?` | optional. |
 | `company` | `string?` | optional **grouping** label (Snipe-IT-style) to group/filter/report assets — **NOT** per-record scoping ([[0076-asset-company-grouping-field]]; Modo B rejected, #841). Anyone with `asset:read` sees ALL assets regardless of company. Free-text + smart entry over already-used values (`GET /suggestions/company`, with use counts; `GET /assets/companies` feeds the list filter); no Company entity. Mirrors `notes` (optional trimmed string, max 200). |
@@ -199,7 +213,8 @@ Prisma model `Asset` → table `assets`. Validation schemas (`AssetSchema`, `Cre
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
 
-`AssetStatus` values: `OPERATIONAL`, `IN_MAINTENANCE`, `IN_STORAGE`, `RETIRED`, `LOST`, `UNKNOWN`.
+`AssetStatus` values: `OPERATIONAL`, `IN_MAINTENANCE`, `IN_STORAGE`, `RETIRED`, `LOST`, `UNKNOWN`. Teams name
+finer states with custom statuses mapped to these ([[asset-status-label]]); the enum itself does not change.
 
 ### Depreciation — `currentBookValue` (#954)
 
@@ -222,10 +237,12 @@ three stored fields are echoed on create/update.
 `apps/api/src/assets/` (`AssetsModule`):
 
 - `GET /assets` — **expanded** list (`AssetWithRelations[]`, excludes soft-deleted, newest first)
-  with optional filters **`?categoryId=&modelId=&locationId=&status=&company=&q=&assignedToUserId=&warranty=`**:
+  with optional filters **`?categoryId=&modelId=&locationId=&status=&statusLabelId=&company=&q=&assignedToUserId=&warranty=`**:
   `categoryId` matches the asset's **model's** category, `modelId` matches the asset's **exact**
   model (#943 — distinct from `categoryId`; deep-linked from the asset detail page's Model link),
-  `status` is validated against the enum (invalid → `400`), `company` is an exact-match grouping
+  `status` is validated against the enum (invalid → `400`) and matches the **built-in** status — so it
+  includes every custom status of that kind; `statusLabelId` (a cuid, invalid → `400`; #1524) narrows to the
+  assets carrying exactly that [[asset-status-label]] (the CSV export takes it too), `company` is an exact-match grouping
   filter over the free-text `company` column ([[0076-asset-company-grouping-field]]; a grouping
   facet, not an access boundary), `q` is a case-insensitive substring over `name` / `serial` /
   `assetTag` **plus the related model's `name` / `manufacturer`** (#943), `assignedToUserId`
@@ -276,13 +293,16 @@ three stored fields are echoed on create/update.
   model or location, are not checked. Each write
   takes an **optional `X-User-Id`** header (the actor) and emits an [[asset-history]] event
   (`CREATED` / `STATUS_CHANGED` / … / `DELETED`) transactionally ([[0033-asset-history-event-model]]).
+  `STATUS_CHANGED` also fires when only the custom status changes, and names the custom statuses
+  (`fromLabel` / `toLabel`) when either side has one ([[0101-custom-asset-statuses]]).
   A `PATCH` that changes plain fields (name, serial, tag, notes, company, dates, cost, useful life,
   salvage value) also writes **one** `UPDATED { fields }` row naming them — names only, never values; a
   no-op edit writes nothing (ADR-0033 amendment 2026-09-25, #1382).
 - `POST /assets/batch/receive` — **bulk receive** (ADR-0089 Part A, #1029): mint `quantity` assets from
   one [[asset-model]] in a single action (`asset:write` — ADMIN or MEMBER; creating assets is that verb,
   no new permission). Body `{ modelId, quantity (1..200), status, locationId?, company?, purchaseDate?,
-  purchaseCost?, notes?, serials? }` (`serials` must be empty **or** exactly `quantity` long → else
+  purchaseCost?, notes?, serials? }` — `status` may be replaced (or accompanied) by `statusLabelId`, a custom
+  status checked once up front (#1524) — (`serials` must be empty **or** exactly `quantity` long → else
   `400`). It **loops the single-asset create** — each unit is its own transaction with its own
   **independent asset-tag-counter commit** ([[0063-configurable-asset-tag-scheme]]), so **partial
   success is the correct outcome**: the response is `{ created: Asset[], failed: { index, error }[] }`
@@ -315,9 +335,9 @@ three stored fields are echoed on create/update.
   **corroborated** serial. Read it before changing anything on this page's `serial` /
   `assets_serial_active_key` behaviour or the agent's `specs` write path.
 
-Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-assignment]] ·
+Related: [[asset-model]] · [[location]] · [[asset-category]] · [[asset-status-label]] · [[asset-assignment]] ·
 [[asset-history]] · [[asset-centric]] · [[0007-flexible-asset-specs-jsonb]] ·
 [[0018-api-documentation-swagger]] · [[0033-asset-history-event-model]] ·
 [[0063-configurable-asset-tag-scheme]] · [[0089-bulk-receiving-and-checkout-acknowledgement]] ·
 [[0093-chassis-routing-and-asset-adoption]] · [[0099-purchases-scope-model-and-optionality]] ·
-[[0100-money-as-64-bit-minor-units]] · [[purchase-order-line]]
+[[0100-money-as-64-bit-minor-units]] · [[0101-custom-asset-statuses]] · [[purchase-order-line]]

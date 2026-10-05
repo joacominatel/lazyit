@@ -3,7 +3,7 @@ title: "ADR-0033: AssetHistory event model"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-09-25
+updated: 2026-10-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -120,6 +120,23 @@ in the domain history (only [[ai-action-log]]).
 reads the asset branch generically (`action = 'updated'`, summary "Asset updated"), so Reports shows the
 row with its actor as soon as it is written. **Upgrade-safety:** existing history is untouched; plain
 edits made before the update have no row and none is backfilled — new rows only from now.
+
+## Amendment — 2026-10-05: `STATUS_CHANGED` names the custom status (#1524)
+
+**CEO decision, 2026-10-05**, recorded in [[0101-custom-asset-statuses]]. Assets may now carry an
+operator-defined custom status mapped to one built-in status. Two additive changes to `STATUS_CHANGED`:
+
+- **It also fires when only the custom status changes** (same built-in status, e.g. "In repair at vendor" →
+  "On the bench", both `IN_MAINTENANCE`), on every path: a PATCH, a bulk status change, and a custom status
+  deleted with its assets moved elsewhere (one row per moved asset, live or archived, in the delete's
+  transaction).
+- **Payload.** `{ from, to }` keep the built-in values, as always. When either side carries a custom status
+  the payload adds `fromLabel` and `toLabel`, each `{ id, name }` or `null`. A change between two bare
+  built-in statuses keeps the exact `{ from, to }` shape.
+
+**No migration; upgrade-safe.** Existing rows are untouched and readers treat an absent `fromLabel` /
+`toLabel` as "no custom status". The label `name` is a snapshot at write time — a later rename does not
+rewrite history.
 
 Related: [[asset-history]] · [[asset]] · [[asset-assignment]] · [[user]] ·
 [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[0022-draft-visibility-auth-shim]] ·
