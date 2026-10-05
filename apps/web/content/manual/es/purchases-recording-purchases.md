@@ -357,17 +357,20 @@ Hay tres formas de empezar:
 
 - En una compra, **Leer este documento** sobre un PDF o una imagen de sus **Documentos** (hasta 10 MB —
   algo menos para imágenes con algunos proveedores — y 20 páginas).
-- En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo, y lazyit crea una compra en
-  **borrador** con el nombre del archivo, lo adjunta y lo lee. Guardar la revisión completa la compra y la
-  **marca como pedida** (viene marcado — desmárcalo para dejarla en borrador). Si lo dejas antes de guardar,
-  el borrador conserva el documento y puedes completarlo a mano.
+- En **Nueva compra**, **Nueva compra desde un documento**: eliges el archivo — o lo **sueltas** sobre
+  *Nueva compra* o sobre la lista de **Compras** — y lazyit crea una compra en **borrador** con el nombre del
+  archivo, lo adjunta y lo lee. Una tarjeta muestra cada paso a medida que se completa: crear la compra,
+  adjuntar el documento, abrir la revisión. Un documento a la vez: si sueltas varios, se usa el primero que lazyit puede leer.
+  Guardar la revisión completa la compra y la **marca como pedida** (viene marcado — desmárcalo para dejarla
+  en borrador). Si lo dejas antes de guardar, el borrador conserva el documento y puedes completarlo a mano.
 - En una compra, **Pedirle a la IA que la complete** sobre un documento abre el [asistente de IA](/help/ai-assistant-using-the-chat#completar-una-compra-a-partir-de-un-documento)
   — en un chat nuevo si el abierto ya tiene mensajes — con un mensaje que le pide leer ese documento y
   completar la compra. Envíalo, responde las pocas
   preguntas que hace y aprueba la tarjeta que propone — no hay pantalla de revisión, y no se guarda nada
   hasta que apruebas. Solo aparece donde está *Leer este documento*, y cuando puedes usar el asistente.
 
-La lectura tarda hasta dos minutos. Si falla, no se completó nada y el documento sigue adjunto: la pantalla
+La lectura tarda hasta dos minutos; mientras tanto, una línea recorre el documento (si tu sistema pide
+reducir el movimiento, la pantalla solo dice que está leyendo). Si falla, no se completó nada y el documento sigue adjunto: la pantalla
 dice por qué (el proveedor estaba ocupado, el archivo tiene demasiadas páginas, se agotó el presupuesto
 diario…).
 

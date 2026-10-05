@@ -51,6 +51,7 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
+import { DocumentDropStage, useDocumentStart } from "./document-start";
 import {
   MoneyTotals,
   PurchaseStatusBadge,
@@ -95,6 +96,7 @@ export function PurchasesListView() {
   const { isAdmin } = usePermissions();
   const canWrite = useCan("purchaseOrder:write");
   const canDelete = useCan("purchaseOrder:delete");
+  const documentStart = useDocumentStart();
   const {
     q,
     sort,
@@ -422,6 +424,8 @@ export function PurchasesListView() {
           {t("list.archiveNote")}
         </DeleteConfirmDialog>
       ) : null}
+
+      {documentStart ? <DocumentDropStage start={documentStart} /> : null}
     </div>
   );
 }

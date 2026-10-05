@@ -3,7 +3,7 @@ title: "Purchases — Map of Content"
 tags: [purchases, moc, index, research]
 status: draft
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Purchases — Map of Content
@@ -50,6 +50,7 @@ ADR-0099 records what each build settled, phase by phase; the PRs are into the e
 | CEO confirmations; stock receipts name the reference | [[0099-purchases-scope-model-and-optionality#CEO confirmations (2026-10-02)\|CEO confirmations (2026-10-02)]] | #1494 |
 | Merge duplicate suppliers | [[0099-purchases-scope-model-and-optionality#Merge duplicate suppliers (2026-10-03, #1496)\|Merge duplicate suppliers]] | #1496 |
 | Purchases and suppliers in global search | [[0035-search-architecture#Amendment (2026-10-03) — purchases and suppliers, gated per caller (issue #1499)\|ADR-0035 amendment]] | #1499 |
+| Drop a document on *New purchase* or the list to start a purchase | [[purchases/decisions#6. Drop a document to start a purchase (2026-10-03, #1516)\|Decisions §6]] | #1516 |
 
 **Planned in ADR-0099 §13 or the UX proposal §7 but not built** (tracked as #1495, with sub-issues
 #1496–#1503; merging suppliers has since shipped, #1496): *Receive delivery* across lines, the dashboard *Pending deliveries* tile, the supplier history with yearly totals per currency label, *Suggest purchases*, mapping a custom

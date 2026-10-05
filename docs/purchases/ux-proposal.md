@@ -3,7 +3,7 @@ title: "Purchases — UX proposal"
 tags: [purchases, research, ux, design]
 status: draft
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-04
 ---
 
 # Purchases in lazyit: UX proposal
@@ -39,6 +39,10 @@ updated: 2026-10-03
 >   chip, the dashboard *Pending deliveries* tile, purchases in global search, *Suggest
 >   purchases*, *Map a custom field to suppliers*, the warranty replacement action, the XLSX export, and
 >   proposing a new line price to linked assets. Tracked as #1495.
+> - Starting from a document (§3.b): there is no drop zone with a *Fill from this document* button. Picking
+>   a file with *New purchase from a document*, or dropping one anywhere on *New purchase* or the Purchases
+>   list (2026-10-03, #1516), creates a draft purchase holding it and opens the review, which reads it at once
+>   ([[purchases/decisions]] §6).
 > - *Merge suppliers* (§4.3) shipped later (2026-10-03, #1496): ADMIN, from the duplicate's page, with a
 >   preview; it fills the empty fields of the supplier that stays and archives the duplicate. Suppliers have no
 >   log, so it logs on each moved purchase rather than "on both".

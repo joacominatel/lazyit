@@ -16,7 +16,15 @@ import { previewKind } from "@/lib/purchases/extraction";
  * NOT framed: the web CSP keeps `frame-src 'none'` (ADR-0099, Phase 2 web), so it is a document card whose
  * *Open in a new tab* opens it in the browser's own viewer, beside the review.
  */
-export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string; attachment: Attachment }) {
+export function DocumentPreview({
+  purchaseId,
+  attachment,
+  reading = false,
+}: {
+  purchaseId: string;
+  attachment: Attachment;
+  reading?: boolean;
+}) {
   const t = useTranslations("purchases.extraction.preview");
   const preview = previewKind(attachment.mimeType);
   const [url, setUrl] = useState<string | null>(null);
@@ -66,38 +74,49 @@ export function DocumentPreview({ purchaseId, attachment }: { purchaseId: string
           </a>
         ) : null}
       </div>
-      <div
-        className={
-          preview?.kind === "image"
-            ? "flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border bg-muted/30"
-            : "flex items-start justify-center rounded-lg border bg-muted/30"
-        }
-      >
-        {!preview ? (
-          <p className="p-6 text-sm text-muted-foreground">{t("none")}</p>
-        ) : failed ? (
-          <p className="p-6 text-sm text-muted-foreground">{t("error")}</p>
-        ) : preview.kind === "pdf" ? (
-          <div className="flex w-full flex-col items-center gap-3 p-8 text-center">
-            <DocumentIcon className="size-10 text-muted-foreground" aria-hidden />
-            <p className="text-sm text-muted-foreground">{t("pdfHelp")}</p>
-            <Button asChild={url !== null} disabled={url === null} size="sm">
-              {url ? (
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <ArrowTopRightOnSquareIcon />
-                  {t("openTab")}
-                </a>
-              ) : (
-                <span>{t("openTab")}</span>
-              )}
-            </Button>
+      <div className={preview?.kind === "image" ? "relative flex min-h-0 flex-1 flex-col" : "relative"}>
+        <div
+          className={
+            preview?.kind === "image"
+              ? "flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-lg border bg-muted/30"
+              : "flex items-start justify-center rounded-lg border bg-muted/30"
+          }
+        >
+          {!preview ? (
+            <p className="p-6 text-sm text-muted-foreground">{t("none")}</p>
+          ) : failed ? (
+            <p className="p-6 text-sm text-muted-foreground">{t("error")}</p>
+          ) : preview.kind === "pdf" ? (
+            <div className="flex w-full flex-col items-center gap-3 p-8 text-center">
+              <DocumentIcon className="size-10 text-muted-foreground" aria-hidden />
+              <p className="text-sm text-muted-foreground">{t("pdfHelp")}</p>
+              <Button asChild={url !== null} disabled={url === null} size="sm">
+                {url ? (
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <ArrowTopRightOnSquareIcon />
+                    {t("openTab")}
+                  </a>
+                ) : (
+                  <span>{t("openTab")}</span>
+                )}
+              </Button>
+            </div>
+          ) : !url ? (
+            <Skeleton className="h-full min-h-[60vh] w-full" />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element -- a blob: URL of an authenticated download
+            <img src={url} alt={attachment.originalName} className="h-auto max-w-full" />
+          )}
+        </div>
+        {reading && preview ? (
+          <div
+            aria-hidden
+            data-scan
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg motion-reduce:hidden"
+          >
+            <div className="animate-doc-scan" />
           </div>
-        ) : !url ? (
-          <Skeleton className="h-full min-h-[60vh] w-full" />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- a blob: URL of an authenticated download
-          <img src={url} alt={attachment.originalName} className="h-auto max-w-full" />
-        )}
+        ) : null}
       </div>
     </section>
   );

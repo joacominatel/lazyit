@@ -139,28 +139,42 @@ describe("the extraction review", () => {
   });
 });
 
+function renderPreview(mimeType: string, reading = false): string {
+  return renderToStaticMarkup(
+    <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases, common }}>
+      <DocumentPreview
+        purchaseId="ckpurchase000000000000000"
+        reading={reading}
+        attachment={{
+          id: "ckattachment0000000000000",
+          entityType: "PURCHASE_ORDER",
+          entityId: "ckpurchase000000000000000",
+          sha256: "0".repeat(64),
+          byteSize: 1000,
+          mimeType,
+          originalName: "factura.pdf",
+          uploadedById: null,
+          label: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-01T00:00:00.000Z",
+        }}
+      />
+    </NextIntlClientProvider>,
+  );
+}
+
 describe("the document preview", () => {
+  test("while the AI reads, a scan sweeps the document, never under reduced motion (#1516)", () => {
+    for (const type of ["application/pdf", "image/png"]) {
+      const html = renderPreview(type, true);
+      expect(html).toMatch(/data-scan="true"[^>]*class="[^"]*motion-reduce:hidden/);
+      expect(html).toContain("animate-doc-scan");
+      expect(renderPreview(type, false)).not.toContain("animate-doc-scan");
+    }
+  });
+
   test("a PDF is never framed (the CSP keeps frame-src 'none'): a card that opens it in a new tab", () => {
-    const html = renderToStaticMarkup(
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ purchases, common }}>
-        <DocumentPreview
-          purchaseId="ckpurchase000000000000000"
-          attachment={{
-            id: "ckattachment0000000000000",
-            entityType: "PURCHASE_ORDER",
-            entityId: "ckpurchase000000000000000",
-            sha256: "0".repeat(64),
-            byteSize: 1000,
-            mimeType: "application/pdf",
-            originalName: "factura.pdf",
-            uploadedById: null,
-            label: null,
-            createdAt: "2026-03-01T00:00:00.000Z",
-            updatedAt: "2026-03-01T00:00:00.000Z",
-          }}
-        />
-      </NextIntlClientProvider>,
-    );
+    const html = renderPreview("application/pdf");
     expect(html).not.toMatch(/<(iframe|object|embed)\b/);
     expect(html).toContain(esc(x.preview.pdfHelp));
     expect(html).toContain(esc(x.preview.openTab));

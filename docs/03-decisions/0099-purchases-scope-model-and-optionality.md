@@ -3,7 +3,7 @@ title: "ADR-0099: Purchases — scope, model, and optionality"
 tags: [adr, purchases, assets, suppliers, money, currency, permissions, ai-assistant, data-model]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -1439,6 +1439,14 @@ What the build settled under that answer (CTO decisions):
   preview, confirm; the page then opens the supplier that stays. The near-duplicate hints do not offer the merge
   yet. Each moved purchase's activity reads *Supplier X merged into Y*.
 
+## Decisions while building (drop a document to start, #1516)
+
+The §11 entry point *New purchase from a document* also takes a file **dropped** on *New purchase* or the
+Purchases list (the CEO's request of 2026-10-03, [[purchases/decisions]] §6). Dropping is the same as picking:
+the same gate (`purchaseOrder:write` and the extraction status `available`), the same client checks, and the same
+pipeline — a `DRAFT` holder purchase, the file attached, the review opened with `?read=1`. Nothing in §11 or in
+[[#Decisions while building (Phase 2 web, #1477)|Phase 2 web]] changes. Web only: no API, contract or CSP change.
+
 ## Related
 
 [[purchases/_MOC]] · [[purchases/decisions]] · [[supplier]] · [[purchase-order]] ·
@@ -1448,4 +1456,4 @@ What the build settled under that answer (CTO decisions):
 [[0082-attachments-storage]] · [[0004-asset-centric-design]] · [[0006-soft-delete-and-auditing]] ·
 [[0032-soft-delete-middleware]] · [[0033-asset-history-event-model]] · [[0041-soft-delete-reuse-and-restore]] ·
 [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
-[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1507 · #1508
+[[vision]] · #1465 · #1466 · #1494 · #1495 · #1496 · #1507 · #1508 · #1516

@@ -751,13 +751,24 @@
     "invalidValue": "Este valor no se puede guardar así.",
     "newFromDocument": {
       "title": "¿Tienes la factura o el presupuesto?",
-      "description": "Elige un PDF o una imagen (hasta {max} MB): lazyit crea una compra en borrador con el archivo y lo envía a tu proveedor de IA para leerlo. No se guarda nada de lo leído hasta que lo revisas.",
+      "description": "Elige un PDF o una imagen (hasta {max} MB), o suéltalo en esta página: lazyit crea una compra en borrador con el archivo y lo envía a tu proveedor de IA para leerlo. No se guarda nada de lo leído hasta que lo revisas.",
       "action": "Nueva compra desde un documento",
       "wrongType": "{name} no se puede leer: elige un PDF o una imagen.",
       "tooLarge": "{name} pesa más de {max} MB.",
       "uploadError": "La compra se creó, pero no se pudo adjuntar el archivo.",
       "createError": "No se pudo empezar la compra",
-      "renameError": "El archivo quedó adjunto, pero no se pudo poner su nombre a la compra. La revisión lo lee igual; su referencia aparece como un reemplazo."
+      "renameError": "El archivo quedó adjunto, pero no se pudo poner su nombre a la compra. La revisión lo lee igual; su referencia aparece como un reemplazo.",
+      "dropTitle": "Suelta la factura o el presupuesto para empezar una compra",
+      "dropDescription": "Un PDF o una imagen, hasta {max} MB. lazyit crea una compra en borrador con el archivo y lo envía a tu proveedor de IA para leerlo. No se guarda nada de lo leído hasta que lo revisas.",
+      "oneAtATime": "Se lee un documento a la vez, así que se usó {name}.",
+      "startingFrom": "Empezando una compra desde {name}",
+      "steps": {
+        "create": "Creando la compra",
+        "created": "Compra creada",
+        "attach": "Adjuntando el documento",
+        "attached": "Documento adjunto",
+        "open": "Abriendo la revisión"
+      }
     },
     "saveFix": "Corrige los valores marcados para guardar",
     "savedPart": "Guardado"

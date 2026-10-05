@@ -212,7 +212,7 @@ export function ExtractionReviewView({
               : "lg:sticky lg:top-4 lg:self-start"
           }
         >
-          <DocumentPreview purchaseId={purchaseId} attachment={attachment} />
+          <DocumentPreview purchaseId={purchaseId} attachment={attachment} reading={extract.isPending} />
         </div>
         <div className="min-w-0">
           {review && draft ? (

@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-05
 ---
 
 # Code Conventions
@@ -118,7 +118,9 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
     traps `position: sticky` descendants in a containing block) · `animate-pulse-soft` (the ONE
     calm attention heartbeat — danger dots only) · `animate-shimmer` (skeleton sweep, composed
     at call sites — never edit `ui/skeleton.tsx`) · `animate-check-draw` (success-check; the
-    only `--ease-spring` use). All collapse to instant under `prefers-reduced-motion` via the
+    only `--ease-spring` use) · `animate-doc-scan` (a line sweeping a document while the AI reads
+    it — a loading loop; its call site also hides it with `motion-reduce:hidden`, and it rests off
+    the box so a collapsed run leaves nothing behind). All collapse to instant under `prefers-reduced-motion` via the
     single consolidated block in globals.css. Easing/duration tokens: `--ease-out-quad` /
     `--ease-spring` / `--dur-fast|base|slow`. `app/(app)/template.tsx` gives every route a
     free `fade-in` cross-route settle (opacity only — sticky-safe).
