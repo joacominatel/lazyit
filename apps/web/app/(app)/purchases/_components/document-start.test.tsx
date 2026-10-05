@@ -53,15 +53,24 @@ describe("the drop target (#1516)", () => {
   test("once a file is taken, the page shows its card instead of the target", () => {
     const html = stage({ name: "Factura A 0003.pdf", size: 1000, step: "create" });
     expect(html).toContain('data-state="starting"');
-    expect(html).toContain('role="status"');
     expect(html).not.toContain(esc(x.dropTitle));
+  });
+
+  test("a live region is there before anything starts, outside the hidden overlay, and says each step", () => {
+    const live = /^<p role="status" class="sr-only">(.*?)<\/p><div aria-hidden="true"/;
+    expect(stage(null)).toMatch(/^<p role="status" class="sr-only"><\/p><div aria-hidden="true"/);
+    expect(stage({ name: "Factura A 0003.pdf", size: 1000, step: "create" }).match(live)?.[1]).toBe(
+      "<span>Starting a purchase from Factura A 0003.pdf.</span> <span>Creating the purchase</span>",
+    );
+    expect(stage({ name: "Factura A 0003.pdf", size: 1000, step: "attach" }).match(live)?.[1]).toContain(
+      "<span>Attaching the document</span>",
+    );
   });
 });
 
 describe("the landing card", () => {
   test("shows the document's name and size", () => {
     const html = card("create");
-    expect(html).toContain('aria-label="Starting a purchase from Factura A 0003.pdf"');
     expect(html).toContain("Factura A 0003.pdf");
     expect(html).toContain("1.2 MB");
   });

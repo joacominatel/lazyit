@@ -164,33 +164,43 @@ export function DropOverlay({
   const shown = targeting || started !== null;
 
   return (
-    <div
-      aria-hidden={started ? undefined : true}
-      data-state={started ? "starting" : targeting ? "dragging" : "idle"}
-      className={cn(
-        "fixed inset-0 z-50 flex items-center justify-center bg-background/85 p-4 sm:p-8 motion-safe:transition-opacity motion-safe:duration-150",
-        shown ? "opacity-100" : "pointer-events-none opacity-0",
-      )}
-    >
-      {started ? (
-        <DocumentStartCard started={started} />
-      ) : (
-        <div
-          className={cn(
-            "flex size-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-foreground/30 p-6 text-center motion-safe:transition-transform motion-safe:duration-200",
-            targeting ? "scale-100" : "motion-safe:scale-[0.98]",
-          )}
-        >
-          <span className="flex size-12 items-center justify-center rounded-xl bg-pillar-inventory/10">
-            <DocumentArrowUpIcon className="size-6 text-pillar-inventory" aria-hidden />
-          </span>
-          <p className="text-section">{t("dropTitle")}</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {t("dropDescription", { max: toWholeMb(status.maxBytes) })}
-          </p>
-        </div>
-      )}
-    </div>
+    <>
+      {/* Mounted before anything starts: a live region inserted with its text is often not announced. */}
+      <p role="status" className="sr-only">
+        {started ? (
+          <>
+            <span>{t("startingFrom", { name: started.name })}.</span> <span>{t(`steps.${started.step}`)}</span>
+          </>
+        ) : null}
+      </p>
+      <div
+        aria-hidden
+        data-state={started ? "starting" : targeting ? "dragging" : "idle"}
+        className={cn(
+          "fixed inset-0 z-50 flex items-center justify-center bg-background/85 p-4 sm:p-8 motion-safe:transition-opacity motion-safe:duration-150",
+          shown ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+      >
+        {started ? (
+          <DocumentStartCard started={started} />
+        ) : (
+          <div
+            className={cn(
+              "flex size-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-foreground/30 p-6 text-center motion-safe:transition-transform motion-safe:duration-200",
+              targeting ? "scale-100" : "motion-safe:scale-[0.98]",
+            )}
+          >
+            <span className="flex size-12 items-center justify-center rounded-xl bg-pillar-inventory/10">
+              <DocumentArrowUpIcon className="size-6 text-pillar-inventory" aria-hidden />
+            </span>
+            <p className="text-section">{t("dropTitle")}</p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {t("dropDescription", { max: toWholeMb(status.maxBytes) })}
+            </p>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -199,11 +209,7 @@ export function DocumentStartCard({ started }: { started: StartedDocument }) {
   const at = START_STEPS.indexOf(started.step);
 
   return (
-    <div
-      role="status"
-      aria-label={t("startingFrom", { name: started.name })}
-      className="w-full max-w-sm rounded-xl border bg-card p-5 text-card-foreground shadow-e3 motion-safe:animate-rise-in"
-    >
+    <div className="w-full max-w-sm rounded-xl border bg-card p-5 text-card-foreground shadow-e3 motion-safe:animate-rise-in">
       <div className="flex items-center gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-pillar-inventory/10">
           <DocumentIcon className="size-6 text-pillar-inventory" aria-hidden />
