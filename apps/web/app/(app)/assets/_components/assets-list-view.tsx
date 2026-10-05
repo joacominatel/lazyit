@@ -113,6 +113,7 @@ import {
   deriveAssetFilters,
   statusFilterChoice,
   statusFilterPatch,
+  statusLabelFilterId,
 } from "./assets-list-query";
 import { downloadAssetsExport } from "./assets-csv";
 import {
@@ -233,6 +234,9 @@ export function AssetsListView() {
   const statusFilterLabel = statusFilter
     ? labelOfChoice(statusFilter, statusGroups)
     : null;
+  // A custom-status filter still applies while its name is loading (or unreadable without
+  // `category:read`): its chip stays, so it can always be seen and cleared.
+  const statusLabelFilter = statusLabelFilterId(filters.statusLabel);
   const categoryFilter = filters.category;
   // The EXACT model filter (#943, deep-linked from the asset detail page's Model link) — distinct
   // from `categoryFilter` above. No picker for it (URL-only); the chip is its sole surface + clear.
@@ -622,12 +626,16 @@ export function AssetsListView() {
           },
         ]
       : []),
-    ...(statusFilter
+    ...(statusFilter || statusLabelFilter
       ? [
           {
             key: "status",
             label: t("chips.status", {
-              value: statusFilterLabel?.name ?? statusLabel(statusFilter.status),
+              value:
+                statusFilterLabel?.name ??
+                (statusLabelFilter || !statusFilter
+                  ? "…"
+                  : statusLabel(statusFilter.status)),
             }),
             onClear: () => setFilters(statusFilterPatch(null)),
           },
