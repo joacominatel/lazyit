@@ -628,6 +628,13 @@ model Asset {
   serial       String?
   assetTag     String?
   status       AssetStatus
+  // Optional CUSTOM status (ADR-0101, #1524): an operator-defined name mapped to one built-in AssetStatus
+  // (`AssetStatusLabel.kind`). `status` above stays the source of truth for every rule — the label only
+  // names it. Invariant, enforced in AssetsService on every write: statusLabelId != null ⇒ status ==
+  // label.kind. NULL = a bare built-in status (every asset that predates custom statuses). SetNull: a
+  // label is only ever soft-deleted (after its assets are moved off it), so the FK action never fires.
+  statusLabelId String?
+  statusLabel   AssetStatusLabel? @relation(fields: [statusLabelId], references: [id], onDelete: SetNull)
   // Per-unit type-specific attributes (jsonb). Validated in the app (zod), not the DB.
   // See docs/03-decisions/0007-flexible-asset-specs-jsonb.md
   specs        Json?
@@ -680,9 +687,38 @@ model Asset {
   @@index([modelId])
   @@index([locationId])
   @@index([status])
+  @@index([statusLabelId])
   // Serves the derived per-line received count (ADR-0099 §3).
   @@index([purchaseOrderLineId])
   @@map("assets")
+}
+
+/// A CUSTOM asset status (ADR-0101, #1524): an operator-defined name ("In repair at vendor", "Loaner pool")
+/// mapped to exactly one built-in AssetStatus (`kind`). Optional configuration — no asset ever needs one.
+/// ALL logic (dashboard, filters, defaults, imports, the AI) reads `Asset.status`; the label is a display
+/// name over it. `kind` cannot change while an asset references the label (409), and deleting a label in
+/// use moves its assets to another live label or to a bare built-in status first, in one transaction.
+/// See docs/02-domain/entities/asset-status-label.md
+model AssetStatusLabel {
+  id          String      @id @default(cuid())
+  // Unique among LIVE rows only: a PARTIAL unique index WHERE "deletedAt" IS NULL (raw SQL in the
+  // migration, ADR-0041 — the same case-sensitive rule as the category names). No `@unique`.
+  name        String
+  // The built-in status this label maps to. Asset.status always equals it for every asset carrying it.
+  kind        AssetStatus
+  // Optional "#RRGGBB" badge colour, validated on write in @lazyit/shared. NULL = the kind's colour.
+  color       String?
+  description String?
+  // Optional sort position within its kind, lower first. NULL sorts after any number.
+  order       Int?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  assets Asset[]
+
+  @@index([kind])
+  @@map("asset_status_labels")
 }
 
 enum AssetStatus {
