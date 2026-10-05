@@ -1278,6 +1278,62 @@ describe('UsersService', () => {
     });
   });
 
+  // An admin's re-enable must hold against the directory sweep while the person stays absent from AD.
+  describe('manual re-enable vs. the directory sweep (#1522)', () => {
+    type UpdateCall = [{ data: Record<string, unknown> }];
+
+    it('marks directoryReenabledAt when an inactive user is re-enabled by hand', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: false,
+        directoryReenabledAt: null,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: true });
+
+      await service.update('uuid-1', { isActive: true });
+
+      const [[arg]] = user.update.mock.calls as UpdateCall[];
+      expect(arg.data.isActive).toBe(true);
+      expect(arg.data.directoryReenabledAt).toBeInstanceOf(Date);
+    });
+
+    it('clears the mark when an active user is deactivated by hand', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        directoryReenabledAt: new Date('2026-01-01T00:00:00.000Z'),
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1', isActive: false });
+
+      await service.update('uuid-1', { isActive: false });
+
+      const [[arg]] = user.update.mock.calls as UpdateCall[];
+      expect(arg.data).toMatchObject({
+        isActive: false,
+        directoryReenabledAt: null,
+      });
+    });
+
+    it('does not write the mark on a no-op activation or a profile edit', async () => {
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        lastName: 'Lovelace',
+        deletedAt: null,
+      });
+
+      await service.update('uuid-1', { isActive: true });
+      await service.update('uuid-1', { lastName: 'Byron' });
+
+      for (const [arg] of user.update.mock.calls as UpdateCall[]) {
+        expect(arg.data).not.toHaveProperty('directoryReenabledAt');
+      }
+    });
+  });
+
   // Issue #1375: an activation flip used to change silently — no UserHistory row, so it never reached
   // the recent_activity view (Reports → Users). Every route (web UI, API, AI tool call) lands here.
   describe('activation + identifier audit (issue #1375)', () => {

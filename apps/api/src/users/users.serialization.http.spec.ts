@@ -47,6 +47,7 @@ const FORBIDDEN = [
   'notificationEmailOptOutTypes',
   'directorySourceId',
   'directoryOffboardedAt',
+  'directoryReenabledAt',
   'managerId',
   'managerName',
 ] as const;
@@ -68,6 +69,7 @@ const ROW = {
   directorySource: null,
   directorySourceId: 'guid-1',
   directoryOffboardedAt: null,
+  directoryReenabledAt: new Date('2026-01-03T00:00:00Z'),
   passwordHash: '$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA',
   passwordUpdatedAt: new Date('2026-01-01T00:00:00Z'),
   sessionEpoch: 7,
