@@ -90,9 +90,12 @@ model User {
   //   - `directoryOffboardedAt` timestamps a SOFT offboard: a person that DISAPPEARED from AD past the
   //     grace threshold is flagged (isActive=false + this stamp), NEVER hard-deleted (ADR-0006). Cleared
   //     if the person reappears in a later sync.
+  //   - `directoryReenabledAt` marks an admin's manual re-enable (#1522): the sweep never offboards that
+  //     person while they stay absent. Cleared when they reappear or on a manual deactivation.
   directorySource      String?
   directorySourceId    String?
   directoryOffboardedAt DateTime?
+  directoryReenabledAt DateTime?
 
   // Local (first-party) auth credentials — ADR-0086, AUTH_MODE=local. ALL nullable/defaulted (additive,
   // no backfill): OIDC-linked users and directoryOnly rows never carry one. The SCHEMA only STORES these;
