@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-10-05
 ---
 
 # Security summary
@@ -135,6 +135,15 @@ Snapshot of the security review. Updated each sweep. Method:
    `master`). **✅ Closed the same day**: the wire shape is built from the `PUBLIC_USER_SELECT` allowlist,
    which is pinned to `UserSchema`. A client-level Prisma `omit` is an escalated follow-up.
 
+15. **2026-10-05 — Infra shortcut URL scheme guard (born closed, #1327).**
+   [[SEC-086-infra-shortcut-url-executable-scheme\|SEC-086]] (**Low**): `InfraShortcutSchema.url` was
+   `z.url()`, which accepts `javascript:`, `data:` and `vbscript:` URLs, and the node detail modal rendered
+   them as a link `href`. This is the SEC-008 / SEC-051 class on a field the `isSafeApplicationUrl` guard
+   never covered. **✅ Closed the same day**: writes refuse the browser-interpreted schemes, on the raw
+   and the decoded value. This is a denylist rather than http(s)-only, so the SSH and console links
+   ADR-0070 defines keep working. The modal renders an unsafe legacy URL as plain text. In the same
+   batch, `AssetModel.specs` took the SEC-072 structural write bound (#1329, not a finding).
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -172,6 +181,10 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 
 ## Top findings
 
+0. **SEC-086 ✅ Closed.** Born closed (fixed 2026-10-05, #1327): infra shortcut writes refuse executable
+   URL schemes, and the node modal links only to safe ones. No data change: a stored unsafe shortcut
+   still reads, shows as plain text, and has to be fixed or removed the next time the shortcuts are
+   saved.
 0. **SEC-085 ✅ Closed.** Born closed (fixed 2026-09-26): User responses and embedded asset owners go
    through the `PUBLIC_USER_SELECT` allowlist, so credential columns and epochs never leave the API. No
    data change. Released instances (v1.3.0–v1.11.0) exposed hashes until they upgrade, so local-mode
