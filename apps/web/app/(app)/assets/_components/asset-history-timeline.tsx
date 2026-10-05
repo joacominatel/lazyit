@@ -18,6 +18,7 @@ import {
   formatChangedFields,
   parseUpdatedPayload,
 } from "./asset-history-updated";
+import { parseStatusChange, type StatusChangeSide } from "./asset-history-status";
 
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
@@ -159,6 +160,7 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
   const tForm = useTranslations("assets.form");
+  const tStatus = useTranslations("assets.status");
   const { dateTime, relative } = useFormatters();
   const canReadPurchases = useCan("purchaseOrder:read");
 
@@ -182,6 +184,12 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     if (!id) return t("someone");
     const user = userById.get(id);
     return user ? `${user.firstName} ${user.lastName}` : t("aUser");
+  }
+
+  /** One side of a status change: the built-in status by name, with its custom status when it had one. */
+  function statusSideText(side: StatusChangeSide): string {
+    const status = side.status ? tStatus(side.status) : side.raw;
+    return side.label ? t("statusWithLabel", { label: side.label, status }) : status;
   }
 
   /**
@@ -267,9 +275,15 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     const payload = event.payload ?? {};
     switch (event.eventType) {
       case "STATUS_CHANGED": {
-        const from = asString(payload.from);
-        const to = asString(payload.to);
-        return from && to ? t("statusChange", { from, to }) : null;
+        // Custom statuses (ADR-0101): a side with one reads "Loaner pool (In storage)"; a label-only change
+        // (same built-in status) is a STATUS_CHANGED too. Old events have no label keys.
+        const change = parseStatusChange(payload);
+        return change
+          ? t("statusChange", {
+              from: statusSideText(change.from),
+              to: statusSideText(change.to),
+            })
+          : null;
       }
       case "ASSIGNED":
         return t("assignedTo", { name: userName(asString(payload.userId)) });

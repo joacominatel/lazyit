@@ -322,6 +322,7 @@
       "assignedTo": "a {name}",
       "releasedFrom": "de {name}",
       "statusChange": "{from} → {to}",
+      "statusWithLabel": "{label} ({status})",
       "events": {
         "created": "Creado",
         "updated": "Actualizado",
