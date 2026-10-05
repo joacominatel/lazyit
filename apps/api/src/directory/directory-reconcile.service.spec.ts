@@ -78,6 +78,10 @@ type HistoryEvent = {
   actor: Record<string, unknown>;
 };
 type UpdateArg = { data: Record<string, unknown> };
+type UpdateManyArg = {
+  where: Record<string, unknown>;
+  data: Record<string, unknown>;
+};
 
 /** Read the i-th recorded call of a jest mock as a typed argument tuple (keeps reads lint-safe). */
 function nthCall<T extends unknown[]>(mock: jest.Mock, i: number): T {
@@ -108,6 +112,8 @@ function makeService(opts: {
   attributeMap?: Record<string, string>;
   /** The UsersService last-admin predicate's answer (default: another active ADMIN exists). */
   anotherActiveAdmin?: boolean;
+  /** Rows the conditional offboard / reactivation write matches (0 = an admin edit landed mid-sweep). */
+  conditionalWriteCount?: number;
 }) {
   const attributeMap = opts.attributeMap ?? {
     firstName: 'givenName',
@@ -116,12 +122,15 @@ function makeService(opts: {
   };
   const userUpdate = jest.fn().mockResolvedValue({});
   const txUserUpdate = jest.fn().mockResolvedValue({});
+  const txUserUpdateMany = jest
+    .fn()
+    .mockResolvedValue({ count: opts.conditionalWriteCount ?? 1 });
   const userFindMany = jest.fn().mockResolvedValue(opts.localPeople);
   const userFindFirst = jest
     .fn()
     .mockResolvedValue(opts.emailTaken ? { id: 'existing-login-user' } : null);
   const $transaction = jest.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
-    cb({ user: { update: txUserUpdate } }),
+    cb({ user: { update: txUserUpdate, updateMany: txUserUpdateMany } }),
   );
   const prisma = {
     user: {
@@ -186,8 +195,10 @@ function makeService(opts: {
   );
   return {
     service,
+    fetchEntries,
     userUpdate,
     txUserUpdate,
+    txUserUpdateMany,
     usersCreate,
     hasAnotherActiveAdmin,
     historyRecord,
@@ -319,7 +330,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
 
   it('DISAPPEARED past grace → SOFT offboard (isActive=false + directoryOffboardedAt), never hard-delete', async () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { service, txUserUpdate, historyRecord } = makeService({
+    const { service, txUserUpdateMany, historyRecord } = makeService({
       graceDays: 7,
       localPeople: [
         {
@@ -336,7 +347,14 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     });
     const result = await service.reconcile();
     expect(result.counts.offboarded).toBe(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    const { where, data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
+    // Only a row still active and unstamped is written: an admin edit mid-sweep wins.
+    expect(where).toEqual({
+      id: 'u2',
+      isActive: true,
+      directoryOffboardedAt: null,
+      deletedAt: null,
+    });
     expect(data.isActive).toBe(false);
     expect(data.directoryOffboardedAt).toBeInstanceOf(Date);
     assertNoForbiddenKeys(data, FORBIDDEN_OFFBOARD_KEYS);
@@ -346,7 +364,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
 
   it('offboarding an ACTIVE person revokes their local sessions and MCP credentials (both epochs +1)', async () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { service, txUserUpdate } = makeService({
+    const { service, txUserUpdateMany } = makeService({
       graceDays: 7,
       localPeople: [
         {
@@ -362,33 +380,115 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       entries: [],
     });
     await service.reconcile();
-    expect(txUserUpdate).toHaveBeenCalledTimes(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+    const { data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
     expect(data.sessionEpoch).toEqual({ increment: 1 });
     expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
   });
 
-  it('offboarding an ALREADY-INACTIVE person does not bump sessionEpoch (revoked at deactivation)', async () => {
+  it('an admin edit lands mid-sweep (the conditional offboard matches 0 rows) → no history, counted as skipped', async () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { service, txUserUpdate } = makeService({
-      graceDays: 7,
-      localPeople: [
-        {
-          id: 'u4',
-          directorySourceId: 'G4',
-          isActive: false, // deactivated by hand before AD dropped them
-          directoryOffboardedAt: null,
-          firstName: 'Manually',
-          lastName: 'Deactivated',
-          directoryAttrs: { lastSeenAt: stale },
-        },
-      ],
-      entries: [],
-    });
+    const { service, txUserUpdate, txUserUpdateMany, historyRecord } =
+      makeService({
+        graceDays: 7,
+        localPeople: [
+          {
+            id: 'u2',
+            directorySourceId: 'G2',
+            isActive: true,
+            directoryOffboardedAt: null,
+            firstName: 'Gone',
+            lastName: 'Person',
+            directoryAttrs: { lastSeenAt: stale },
+          },
+        ],
+        entries: [],
+        conditionalWriteCount: 0,
+      });
     const result = await service.reconcile();
-    expect(result.counts.offboarded).toBe(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
-    assertNoForbiddenKeys(data);
+    expect(result.counts.offboarded).toBe(0);
+    expect(result.counts.skipped).toBe(1);
+    // The epoch bump rides the same conditional write, so a 0-row match bumps nothing.
+    expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+    expect(txUserUpdate).not.toHaveBeenCalled();
+    expect(historyRecord).not.toHaveBeenCalled();
+  });
+
+  describe('a manual deactivation is never auto-reactivated (#1311)', () => {
+    const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const manuallyDeactivated: LocalPerson = {
+      id: 'u4',
+      directorySourceId: 'G4',
+      isActive: false,
+      directoryOffboardedAt: null,
+      firstName: 'Manually',
+      lastName: 'Deactivated',
+      directoryAttrs: { lastSeenAt: stale },
+    };
+
+    it('absent past grace → not offboarded: nothing written, counted as skipped', async () => {
+      const {
+        service,
+        userUpdate,
+        txUserUpdate,
+        txUserUpdateMany,
+        historyRecord,
+      } = makeService({
+        graceDays: 7,
+        localPeople: [manuallyDeactivated],
+        entries: [],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.offboarded).toBe(0);
+      expect(result.counts.skipped).toBe(1);
+      expect(userUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+      expect(historyRecord).not.toHaveBeenCalled();
+    });
+
+    it('reappears → stays inactive (the refresh never writes isActive or the offboard stamp)', async () => {
+      const { service, userUpdate, txUserUpdate } = makeService({
+        localPeople: [manuallyDeactivated],
+        entries: [
+          makeEntry('G4', { givenName: 'Manually', sn: 'Deactivated' }),
+        ],
+      });
+      const result = await service.reconcile();
+      expect(result.counts.updated).toBe(0);
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data).not.toHaveProperty('isActive');
+      expect(data).not.toHaveProperty('directoryOffboardedAt');
+    });
+
+    it('inactive for both reasons — deactivated by hand, then gone from AD past grace — stays inactive when AD lists them again', async () => {
+      const {
+        service,
+        fetchEntries,
+        userUpdate,
+        txUserUpdate,
+        txUserUpdateMany,
+      } = makeService({
+        graceDays: 7,
+        localPeople: [manuallyDeactivated],
+        entries: [],
+      });
+
+      const gone = await service.reconcile();
+      expect(gone.counts.offboarded).toBe(0);
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+
+      fetchEntries.mockResolvedValueOnce([
+        makeEntry('G4', { givenName: 'Manually', sn: 'Deactivated' }),
+      ]);
+      const back = await service.reconcile();
+      expect(back.counts.updated).toBe(0);
+      expect(txUserUpdate).not.toHaveBeenCalled();
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
+      const { data } = nthCall<[UpdateArg]>(userUpdate, 0)[0];
+      expect(data).not.toHaveProperty('isActive');
+    });
   });
 
   // SEC-021: the offboard sweep must never deactivate the last active ADMIN — that locks the instance with
@@ -423,13 +523,17 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
-      const { service, txUserUpdate, historyRecord, hasAnotherActiveAdmin } =
-        makeService({
-          graceDays: 7,
-          localPeople: [goneAdmin, goneMember],
-          entries: [],
-          anotherActiveAdmin: false,
-        });
+      const {
+        service,
+        txUserUpdateMany,
+        historyRecord,
+        hasAnotherActiveAdmin,
+      } = makeService({
+        graceDays: 7,
+        localPeople: [goneAdmin, goneMember],
+        entries: [],
+        anotherActiveAdmin: false,
+      });
 
       const result = await service.reconcile();
 
@@ -438,10 +542,10 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       expect(result.counts.offboarded).toBe(1);
       expect(result.counts.skipped).toBe(1);
       // Only the member is written; the admin row is untouched (no isActive flip, no history).
-      expect(txUserUpdate).toHaveBeenCalledTimes(1);
-      expect(
-        nthCall<[{ where: { id: string } }]>(txUserUpdate, 0)[0].where.id,
-      ).toBe('u-member');
+      expect(txUserUpdateMany).toHaveBeenCalledTimes(1);
+      expect(nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0].where.id).toBe(
+        'u-member',
+      );
       expect(historyRecord).toHaveBeenCalledTimes(1);
       const warned = warn.mock.calls.map((c) => String(c[0]));
       expect(
@@ -456,7 +560,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     });
 
     it('offboards an ADMIN normally when another active ADMIN remains', async () => {
-      const { service, txUserUpdate } = makeService({
+      const { service, txUserUpdateMany } = makeService({
         graceDays: 7,
         localPeople: [goneAdmin],
         entries: [],
@@ -466,7 +570,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       const result = await service.reconcile();
 
       expect(result.counts.offboarded).toBe(1);
-      const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+      const { data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
       expect(data.isActive).toBe(false);
     });
 
@@ -480,14 +584,21 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
 
       const result = await service.reconcile();
 
-      expect(result.counts.offboarded).toBe(2);
+      expect(result.counts.offboarded).toBe(1);
+      expect(result.counts.skipped).toBe(1);
       expect(hasAnotherActiveAdmin).not.toHaveBeenCalled();
     });
   });
 
   it('an already-offboarded person still absent → no write at all (repeated runs never bump again)', async () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { service, userUpdate, txUserUpdate, historyRecord } = makeService({
+    const {
+      service,
+      userUpdate,
+      txUserUpdate,
+      txUserUpdateMany,
+      historyRecord,
+    } = makeService({
       graceDays: 7,
       localPeople: [
         {
@@ -506,37 +617,61 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(result.counts.offboarded).toBe(0);
     expect(userUpdate).not.toHaveBeenCalled();
     expect(txUserUpdate).not.toHaveBeenCalled();
+    expect(txUserUpdateMany).not.toHaveBeenCalled();
     expect(historyRecord).not.toHaveBeenCalled();
   });
 
+  const syncOffboarded: LocalPerson = {
+    id: 'u2',
+    directorySourceId: 'G2',
+    isActive: false,
+    directoryOffboardedAt: new Date('2020-01-01T00:00:00.000Z'),
+    firstName: 'Back',
+    lastName: 'Again',
+    directoryAttrs: { lastSeenAt: '2020-01-01T00:00:00.000Z' },
+  };
+
   it('REAPPEARED after our offboard → reactivates WITHOUT touching sessionEpoch (the person signs in again)', async () => {
-    const { service, txUserUpdate, historyRecord } = makeService({
-      localPeople: [
-        {
-          id: 'u2',
-          directorySourceId: 'G2',
-          isActive: false,
-          directoryOffboardedAt: new Date('2020-01-01T00:00:00.000Z'),
-          firstName: 'Back',
-          lastName: 'Again',
-          directoryAttrs: { lastSeenAt: '2020-01-01T00:00:00.000Z' },
-        },
-      ],
-      entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
-    });
+    const { service, txUserUpdate, txUserUpdateMany, historyRecord } =
+      makeService({
+        localPeople: [syncOffboarded],
+        entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
+      });
     const result = await service.reconcile();
     expect(result.counts.updated).toBe(1);
-    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
-    expect(data.isActive).toBe(true);
-    expect(data.directoryOffboardedAt).toBeNull();
-    assertNoForbiddenKeys(data);
+    const { where, data } = nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0];
+    // Only a row still carrying our stamp is reactivated: an admin edit mid-sweep wins.
+    expect(where).toEqual({
+      id: 'u2',
+      isActive: false,
+      directoryOffboardedAt: { not: null },
+      deletedAt: null,
+    });
+    expect(data).toEqual({ isActive: true, directoryOffboardedAt: null });
+    assertNoForbiddenKeys(nthCall<[UpdateArg]>(txUserUpdate, 0)[0].data);
     const event = nthCall<[unknown, HistoryEvent]>(historyRecord, 0)[1];
     expect(event.payload.fields).toContain('reactivated');
   });
 
+  it('an admin edit lands mid-sweep (the conditional reactivation matches 0 rows) → stays as the admin left it, no history', async () => {
+    const { service, txUserUpdate, historyRecord } = makeService({
+      localPeople: [syncOffboarded],
+      entries: [makeEntry('G2', { givenName: 'Back', sn: 'Again' })],
+      conditionalWriteCount: 0,
+    });
+    const result = await service.reconcile();
+    expect(result.counts.updated).toBe(0);
+    expect(result.counts.skipped).toBe(1);
+    const { data } = nthCall<[UpdateArg]>(txUserUpdate, 0)[0];
+    expect(data).not.toHaveProperty('isActive');
+    expect(data).not.toHaveProperty('directoryOffboardedAt');
+    assertNoForbiddenKeys(data);
+    expect(historyRecord).not.toHaveBeenCalled();
+  });
+
   it('DISAPPEARED within grace → NOT offboarded (a single dropped run cannot mass-deactivate)', async () => {
     const recent = new Date().toISOString();
-    const { service, txUserUpdate } = makeService({
+    const { service, txUserUpdateMany } = makeService({
       graceDays: 7,
       localPeople: [
         {
@@ -554,7 +689,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     const result = await service.reconcile();
     expect(result.counts.offboarded).toBe(0);
     expect(result.counts.skipped).toBe(1);
-    expect(txUserUpdate).not.toHaveBeenCalled();
+    expect(txUserUpdateMany).not.toHaveBeenCalled();
   });
 
   it('email collision with a live user → placeholder email + emailConflict flag (never auto-merge)', async () => {

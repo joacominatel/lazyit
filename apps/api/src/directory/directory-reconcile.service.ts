@@ -192,6 +192,11 @@ export class DirectoryReconcileService {
         if (!p.directorySourceId || seenGuids.has(p.directorySourceId))
           continue;
         if (p.directoryOffboardedAt != null) continue; // already offboarded by us
+        // Inactive and unstamped = deactivated by hand; stamping it would auto-reactivate them (#1311).
+        if (!p.isActive) {
+          counts.skipped += 1;
+          continue;
+        }
         const lastSeen = lastSeenMs(p.directoryAttrs);
         if (lastSeen != null && lastSeen > cutoff) {
           // Still within grace — leave as-is; a later run offboards it if it stays gone.
@@ -203,7 +208,6 @@ export class DirectoryReconcileService {
         // is written, so the next run re-evaluates and offboards them once another active ADMIN exists —
         // warn, and carry on with the rest of the sweep. Same predicate as the PATCH /users guard.
         if (
-          p.isActive &&
           p.role === 'ADMIN' &&
           !(await this.users.hasAnotherActiveAdmin(p.id))
         ) {
@@ -291,29 +295,41 @@ export class DirectoryReconcileService {
       changedFields.push('directoryAttrs');
     }
     // Reappeared after WE offboarded them → undo our own soft offboard (never touch a manual deactivation).
-    if (person.directoryOffboardedAt != null) {
-      data.isActive = true;
-      data.directoryOffboardedAt = null;
-      changedFields.push('reactivated');
-    }
+    const reactivate = person.directoryOffboardedAt != null;
 
-    if (changedFields.length === 0) {
+    if (changedFields.length === 0 && !reactivate) {
       // Only the lastSeenAt heartbeat moved — persist it silently (no history, no "updated" count).
       await this.prisma.user.update({ where: { id: person.id }, data });
       counts.skipped += 1;
       return;
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const recorded = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: person.id }, data });
+      if (reactivate) {
+        // Conditional on our stamp still being there: an admin edit mid-sweep wins (#1311).
+        const { count } = await tx.user.updateMany({
+          where: {
+            id: person.id,
+            isActive: false,
+            directoryOffboardedAt: { not: null },
+            deletedAt: null,
+          },
+          data: { isActive: true, directoryOffboardedAt: null },
+        });
+        if (count === 1) changedFields.push('reactivated');
+      }
+      if (changedFields.length === 0) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', fields: changedFields },
         actor,
       });
+      return true;
     });
-    counts.updated += 1;
+    if (recorded) counts.updated += 1;
+    else counts.skipped += 1;
   }
 
   /**
@@ -388,7 +404,7 @@ export class DirectoryReconcileService {
    * An ACTIVE person also has `sessionEpoch` bumped (#1308, ADR-0086 §8), matching the manual deactivation
    * path: the guard already refuses the inactive row, but refreshMatched's automatic reactivation would
    * otherwise revive every token minted before — including a "keep me signed in" token with no time-based
-   * expiry. An already-inactive person was revoked when they were deactivated, so there is nothing to bump.
+   * expiry. The sweep never sends an already-inactive person here (#1311).
    */
   private async offboard(
     person: LocalAdPerson,
@@ -396,29 +412,34 @@ export class DirectoryReconcileService {
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: person.id },
+    const offboarded = await this.prisma.$transaction(async (tx) => {
+      // Conditional on the row still matching the sweep's snapshot: an admin edit mid-sweep wins (#1311).
+      const { count } = await tx.user.updateMany({
+        where: {
+          id: person.id,
+          isActive: true,
+          directoryOffboardedAt: null,
+          deletedAt: null,
+        },
         data: {
           isActive: false,
           directoryOffboardedAt: at,
+          sessionEpoch: { increment: 1 },
           // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
-          ...(person.isActive
-            ? {
-                sessionEpoch: { increment: 1 },
-                mcpCredentialEpoch: { increment: 1 },
-              }
-            : {}),
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (count !== 1) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', reason: 'offboarded' },
         actor,
       });
+      return true;
     });
-    counts.offboarded += 1;
+    if (offboarded) counts.offboarded += 1;
+    else counts.skipped += 1;
   }
 
   /** True when a LIVE (non-deleted) user already owns this email (the citext live-unique index would trip). */

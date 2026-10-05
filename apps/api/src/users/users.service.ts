@@ -1055,6 +1055,8 @@ export class UsersService {
           ? {
               sessionEpoch: { increment: 1 },
               mcpCredentialEpoch: { increment: 1 },
+              // A stale sync stamp would let the directory sync undo this deactivation (#1311).
+              directoryOffboardedAt: null,
             }
           : {}),
       },
