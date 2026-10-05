@@ -2,7 +2,7 @@
 id: SEC-087
 title: KB folder writes return the raw accessRules, so any category:write or category:delete holder reads a folder's access rules by writing to it
 severity: medium
-status: open
+status: closed
 cwe: CWE-213
 discovered: 2026-10-05
 module: article-categories
@@ -100,3 +100,37 @@ and re-reads it through the gated GET, so `setAccessRules` can drop the rules to
   (Broken Object Property Level Authorization).
 - [[0060-kb-folder-access-control]] §3, [[INVARIANTS]] INV-9, [[folder]], [[article-category]], #554,
   #1301.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `dfe925e6` (`fix(api): return the public folder shape from every KB folder write (#1301)`)
+**Fixed by**: lazyit-remediator
+**Date**: 2026-10-05
+
+### Changes
+- `apps/api/src/article-categories/article-categories.service.ts`: `create`, `update`, `remove`,
+  `restore` (the `findFirst` and the `update`) and `setAccessRules` select through
+  `CATEGORY_PUBLIC_SELECT`. The response matches `ArticleCategorySchema`, which never listed
+  `accessRules`.
+- `apps/api/src/ai/tools/kb.tools.spec.ts` (`190fd397`): three exact-argument assertions on the folder
+  `create` / `update` calls now match the arguments they check and allow the added `select`.
+
+### Tests added
+- `apps/api/src/article-categories/article-categories.service.spec.ts`::"write responses never carry
+  accessRules (#1301)": create, update, remove, restore of a soft-deleted folder, restore of an
+  already-live folder, and setAccessRules. Prisma is mocked to project to `select` like the real
+  client and to return the whole row otherwise. All six fail without the fix (`accessRules` is in the
+  returned object) and pass with it.
+
+### Verification
+With the original service restored over the fix, the spec reports `Tests: 6 failed, 32 passed`. With
+the fix: the full API Jest run under Node passes (296 suites, 6630 tests); `tsc --noEmit` passes for
+shared, api, web and agent; changed-files eslint in `apps/api` reports nothing.
+
+### Residual risk
+- The class remains elsewhere: the API has no runtime response serializer, so any `select`-less Prisma
+  return on a write path ships every column. A response serializer is the approved follow-up, outside
+  #1301.
+- Released instances (v1.0.0 through v2.0.0) disclose the rules on folder writes until they upgrade. No
+  data change is needed; the rules themselves were never modified by this path.
