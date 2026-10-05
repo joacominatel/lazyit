@@ -27,7 +27,7 @@ import type {
 import {
   InfraNodeKindSchema,
   InfraNodeStatusSchema,
-  InfraShortcutSchema,
+  InfraShortcutWriteSchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -106,6 +106,7 @@ import {
 import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
 import { nodeSectionKey } from "./node-detail-keys";
+import { shortcutHref } from "./shortcut-href";
 import { planNodeDetailTabs, type NodeDetailTabId } from "./node-detail-tabs";
 
 const STATUS_OPTIONS = InfraNodeStatusSchema.options;
@@ -1123,7 +1124,7 @@ function RelinkToCuratedControl({
  * Editable shortcuts list (issue #764, manager-only). Each row is a `{ label, url }` pair of inputs
  * plus a remove button; an "Add shortcut" row appends a blank pair. The WHOLE array is saved in one
  * `shortcuts: [...]` patch (the API replaces it wholesale), validated client-side against the shared
- * `InfraShortcutSchema` so a bad URL is caught before the round-trip (the server validates too). A
+ * `InfraShortcutWriteSchema` so a bad URL is caught before the round-trip (the server validates too). A
  * draft is committed on the explicit Save button — local edits never auto-fire a patch per keystroke.
  */
 function ShortcutsEditor({
@@ -1151,7 +1152,7 @@ function ShortcutsEditor({
 
   function save() {
     // Validate the whole array against the shared schema (same rules the API enforces) before patching.
-    const parsed = InfraShortcutSchema.array().safeParse(
+    const parsed = InfraShortcutWriteSchema.array().safeParse(
       rows.map((row) => ({ label: row.label.trim(), url: row.url.trim() })),
     );
     if (!parsed.success) {
@@ -1525,7 +1526,7 @@ function SecretsEditor({
   );
 }
 
-/** Quick-access links (SSH/web UI/console). Each opens in a new tab; URLs were validated on write. */
+/** Quick-access links (SSH/web UI/console). Each opens in a new tab; an unsafe legacy URL is plain text. */
 function ShortcutsSection({
   shortcuts,
 }: {
@@ -1541,20 +1542,28 @@ function ShortcutsSection({
         </p>
       ) : (
         <ul className="flex flex-wrap gap-2">
-          {list.map((shortcut) => (
-            <li key={`${shortcut.label}:${shortcut.url}`}>
-              <Button variant="outline" size="sm" asChild>
-                <a
-                  href={shortcut.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {shortcut.label}
-                  <ArrowTopRightOnSquareIcon />
-                </a>
-              </Button>
-            </li>
-          ))}
+          {list.map((shortcut) => {
+            const href = shortcutHref(shortcut.url);
+            return (
+              <li key={`${shortcut.label}:${shortcut.url}`}>
+                {href === null ? (
+                  <span
+                    className="text-sm text-muted-foreground"
+                    title={shortcut.url}
+                  >
+                    {shortcut.label}
+                  </span>
+                ) : (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={href} target="_blank" rel="noopener noreferrer">
+                      {shortcut.label}
+                      <ArrowTopRightOnSquareIcon />
+                    </a>
+                  </Button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </Section>
