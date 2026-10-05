@@ -162,7 +162,7 @@ per-line count stays correct under concurrency because it is derived from linked
 | D-C | ADR-0099 §5, [[0100-money-as-64-bit-minor-units|ADR-0100]] §5, [[purchase-order]], [[asset]] |
 | D-D and its CTO application | ADR-0099 governing principle, §2, §4, §6, [[supplier]], [[purchase-order]], [[purchase-order-line]] |
 | The confirmations and the stock-receipt reason (§5 below) | ADR-0099 *CEO confirmations (2026-10-02)*, [[0100-money-as-64-bit-minor-units\|ADR-0100]] §5, [[consumable-movement]], [[purchase-order-line]], [[INVARIANTS]] INV-PO-1 |
-| Dropping a document to start a purchase (§6 below) | §6 below, [[purchases/ux-proposal]] (*Built differently*), the Manual's *Purchases & suppliers* page |
+| Dropping a document to start a purchase (§6 below) | §6 below, ADR-0099 *Decisions while building (drop a document to start, #1516)*, [[purchases/ux-proposal]] (*Built differently*), the Manual's *Purchases & suppliers* page |
 
 ## 5. CEO confirmations (2026-10-02)
 
