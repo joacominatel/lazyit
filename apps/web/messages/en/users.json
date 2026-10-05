@@ -148,7 +148,9 @@
       "empty": "Holds no assets right now.",
       "assetFallback": "Asset",
       "assignedOn": "Assigned {date}",
-      "view": "View"
+      "openInList": "Open in the asset list",
+      "acknowledged": "Acknowledged",
+      "awaitingAcknowledgement": "Awaiting acknowledgement"
     },
     "access": {
       "title": "Application access",
@@ -157,19 +159,47 @@
       "expired": "Expired",
       "granted": "Granted {date}",
       "expiresSuffix": " · expires {date}",
-      "noteSuffix": " · {note}",
-      "view": "View"
+      "expiresIn": "Expires in {count, plural, one {# day} other {# days}}"
     },
     "articles": {
       "title": "Authored articles",
       "empty": "Has not authored any knowledge base articles."
     },
-    "ownershipHistory": {
-      "title": "Ownership history",
-      "assetFallback": "Asset"
+    "moreActions": "More actions",
+    "copyEmail": "Copy email",
+    "tabs": {
+      "label": "Person sections",
+      "assets": "Assets",
+      "access": "Access",
+      "articles": "Articles",
+      "consumables": "Consumables",
+      "history": "History"
     },
-    "accessHistory": {
-      "title": "Access history",
+    "facts": {
+      "assets": "Assets held",
+      "access": "Application access",
+      "articles": "Articles",
+      "openTab": "Open the {tab} tab",
+      "assetsNone": "Holds nothing right now",
+      "assetsCount": "{count, plural, one {# asset} other {# assets}}",
+      "assetsMore": "{names} and {count} more",
+      "accessAttention": "{expired} expired · {expiring} expiring soon",
+      "accessCalm": "Nothing expiring soon",
+      "articlesSplit": "{published} published · {drafts, plural, one {# draft} other {# drafts}}",
+      "articlesNone": "None written yet"
+    },
+    "attention": {
+      "label": "Needs attention",
+      "expiredGrants": "{count, plural, one {# access grant has expired and will be revoked shortly} other {# access grants have expired and will be revoked shortly}}",
+      "expiringGrants": "{count, plural, one {# access grant expires} other {# access grants expire}} within {days} days",
+      "unacknowledged": "{count, plural, one {# asset not yet acknowledged} other {# assets not yet acknowledged}}"
+    },
+    "history": {
+      "title": "History",
+      "empty": "No released assets or revoked access yet.",
+      "kindAsset": "Asset",
+      "kindAccess": "Access",
+      "assetFallback": "Asset",
       "applicationFallback": "Application"
     }
   },

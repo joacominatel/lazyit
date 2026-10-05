@@ -38,9 +38,31 @@ your IdP.
 **Head start (optional).** You can assign one asset and grant one application access right from the
 create form, so the new person starts with what they need.
 
+## A person's page
+
+Opening a user shows their record, laid out like an asset's page.
+
+- **The summary card** at the top: name, status, role, and the email (with a copy button), username
+  and employee number. Under it, **key facts** count the **assets held**, the **application access**
+  and the **articles** they wrote; select a count to open its tab. The manager sits beside them.
+- **Needs attention** items appear only when something needs follow-up: access that expires within the
+  next 30 days, access that has expired and is about to be revoked, and assets the person hasn't
+  acknowledged receiving yet.
+- **Tabs**: **Assets** (each with its asset tag, model, category, status and whether receipt was
+  acknowledged), **Access** (expired and soon-to-expire access listed first), **Articles**,
+  **Consumables**, and **History**, one list of the assets they returned and the access they lost,
+  most recent first. Each tab only appears to people allowed to see what it lists. The open tab is
+  kept in the page address, so a shared link opens on the same tab.
+- **The side column** holds the **Profile**: role (editable with *Manage users*), manager, employee
+  number, username, email and dates. For a directory person it also offers to create their sign-in
+  account.
+
+The header keeps **Reset password** and **Edit** in sight. **Clone** and **Offboard** are in the **⋯**
+menu next to them, with Offboard set apart so it isn't clicked by mistake.
+
 ## Clone a user
 
-To onboard someone who mirrors a colleague ("same access as Ana"), open a user and choose **Clone**.
+To onboard someone who mirrors a colleague ("same access as Ana"), open a user and choose **Clone** from the **⋯** menu.
 You pick a fresh, unique email and a role, then choose which of the source's **assets** and
 **application access** carry over.
 
@@ -91,7 +113,7 @@ option.
 
 ## Offboard a user
 
-When someone leaves, open them and choose **Offboard**. lazyit shows the full impact up front — the
+When someone leaves, open them and choose **Offboard** from the **⋯** menu. lazyit shows the full impact up front — the
 **assets to return** and the **application access to revoke** — and then, on confirm:
 
 - **revokes** the person's active application access,
@@ -135,10 +157,10 @@ how many more there are rather than leaving them out silently.
 
 ## Consumables on a person's page
 
-A person's page has a **Consumables delivered** section listing what was delivered to them, newest
+A person's page has a **Consumables** tab listing what was delivered to them, newest
 first. **Outstanding only** shows just the returnable items still out, and a date filter narrows it by
 when they were delivered. With permission to record stock movements you can **Deliver consumable** to
-them or record a **Return…** from here. People who cannot view other users do not see this section.
+them or record a **Return…** from here. People who cannot view other users do not see this tab.
 
 ## Find users by role
 

@@ -148,7 +148,9 @@
       "empty": "No tiene activos en este momento.",
       "assetFallback": "Activo",
       "assignedOn": "Asignado {date}",
-      "view": "Ver"
+      "openInList": "Abrir en el listado de activos",
+      "acknowledged": "Confirmado",
+      "awaitingAcknowledgement": "Pendiente de confirmación"
     },
     "access": {
       "title": "Acceso a aplicaciones",
@@ -157,19 +159,47 @@
       "expired": "Expirado",
       "granted": "Otorgado {date}",
       "expiresSuffix": " · expira {date}",
-      "noteSuffix": " · {note}",
-      "view": "Ver"
+      "expiresIn": "Vence en {count, plural, one {# día} other {# días}}"
     },
     "articles": {
       "title": "Artículos creados",
       "empty": "No ha creado artículos en la base de conocimiento."
     },
-    "ownershipHistory": {
-      "title": "Historial de posesión",
-      "assetFallback": "Activo"
+    "moreActions": "Más acciones",
+    "copyEmail": "Copiar correo",
+    "tabs": {
+      "label": "Secciones de la persona",
+      "assets": "Activos",
+      "access": "Accesos",
+      "articles": "Artículos",
+      "consumables": "Consumibles",
+      "history": "Historial"
     },
-    "accessHistory": {
-      "title": "Historial de accesos",
+    "facts": {
+      "assets": "Activos en posesión",
+      "access": "Acceso a aplicaciones",
+      "articles": "Artículos",
+      "openTab": "Abrir la pestaña {tab}",
+      "assetsNone": "No tiene activos en este momento",
+      "assetsCount": "{count, plural, one {# activo} other {# activos}}",
+      "assetsMore": "{names} y {count} más",
+      "accessAttention": "{expired} vencidos · {expiring} por vencer",
+      "accessCalm": "Nada por vencer",
+      "articlesSplit": "{published} publicados · {drafts, plural, one {# borrador} other {# borradores}}",
+      "articlesNone": "Todavía no escribió ninguno"
+    },
+    "attention": {
+      "label": "Requiere atención",
+      "expiredGrants": "{count, plural, one {# acceso venció y se revocará en breve} other {# accesos vencieron y se revocarán en breve}}",
+      "expiringGrants": "{count, plural, one {# acceso vence} other {# accesos vencen}} en los próximos {days} días",
+      "unacknowledged": "{count, plural, one {# activo sin confirmar la recepción} other {# activos sin confirmar la recepción}}"
+    },
+    "history": {
+      "title": "Historial",
+      "empty": "Todavía no devolvió activos ni perdió accesos.",
+      "kindAsset": "Activo",
+      "kindAccess": "Acceso",
+      "assetFallback": "Activo",
       "applicationFallback": "Aplicación"
     }
   },

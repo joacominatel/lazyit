@@ -89,13 +89,16 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   else. Everything outside that module stays heroicons.
 - **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
   ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
-  unnamed search/filter inputs). Three shared primitives now own them:
+  unnamed search/filter inputs). Shared primitives now own them:
   - `components/page-header.tsx` — `PageHeader` ({ `title`, `subtitle?`, `breadcrumb?`,
     `actions?`, `badge?` }). The **only** sanctioned page title; the scale is fixed inside it.
     Never hand-roll an `<h1 className="text-2xl/3xl …">` page title — compose this.
   - `components/breadcrumb.tsx` — `Breadcrumb` (route-driven via `usePathname`; pass explicit
     `items` on detail pages to surface a record's real name). Rendered once at the app-shell
     layout level; it **replaces** per-page "Back to X" buttons.
+  - `components/record-page.tsx` — the record-page frame for detail pages (`RecordHero`,
+    `RecordAttention`, `RecordFacts`, `RecordLayout`, `useRecordTab`), used by `assets/[id]` and
+    `users/[id]`. Layout rules: [[ledger-design-language]] §4b.
   - `components/search-input.tsx` — `SearchInput` ({ `value`, `onChange`, optional
     `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
     Carries an accessible name by default — list filters must name their search box.
