@@ -485,6 +485,7 @@
     "shortcutAdd": "Agregar acceso directo",
     "shortcutRemove": "Quitar acceso directo",
     "shortcutInvalid": "Cada acceso directo necesita una etiqueta y una URL válida.",
+    "shortcutUnsafeScheme": "Este tipo de enlace no se puede guardar (javascript:, data:, …). Usá una URL http(s), ssh, rdp o de consola.",
     "shortcutsSavedToast": "Accesos directos actualizados.",
     "impactShow": "Mostrar radio de afectación",
     "impactHide": "Ocultar radio de afectación",

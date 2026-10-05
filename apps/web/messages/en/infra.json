@@ -485,6 +485,7 @@
     "shortcutAdd": "Add shortcut",
     "shortcutRemove": "Remove shortcut",
     "shortcutInvalid": "Each shortcut needs a label and a valid URL.",
+    "shortcutUnsafeScheme": "This link type can't be saved (javascript:, data:, …). Use an http(s), ssh, rdp or console URL.",
     "shortcutsSavedToast": "Shortcuts updated.",
     "impactShow": "Show blast radius",
     "impactHide": "Hide blast radius",

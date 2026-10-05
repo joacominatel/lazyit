@@ -25,6 +25,7 @@ import type {
   InfraShortcut,
 } from "@lazyit/shared";
 import {
+  hasBrowserInterpretedScheme,
   InfraNodeKindSchema,
   InfraNodeStatusSchema,
   InfraShortcutWriteSchema,
@@ -106,7 +107,6 @@ import {
 import { NodeChangesTab } from "./node-changes-tab";
 import { NodeEdgesManager } from "./node-edges-manager";
 import { nodeSectionKey } from "./node-detail-keys";
-import { shortcutHref } from "./shortcut-href";
 import { planNodeDetailTabs, type NodeDetailTabId } from "./node-detail-tabs";
 
 const STATUS_OPTIONS = InfraNodeStatusSchema.options;
@@ -1156,7 +1156,8 @@ function ShortcutsEditor({
       rows.map((row) => ({ label: row.label.trim(), url: row.url.trim() })),
     );
     if (!parsed.success) {
-      setError(t("panel.shortcutInvalid"));
+      const unsafe = rows.some((row) => hasBrowserInterpretedScheme(row.url));
+      setError(t(unsafe ? "panel.shortcutUnsafeScheme" : "panel.shortcutInvalid"));
       return;
     }
     updateNode.mutate(
@@ -1188,6 +1189,7 @@ function ShortcutsEditor({
               />
               <Input
                 aria-label={t("panel.shortcutUrlPlaceholder")}
+                aria-invalid={hasBrowserInterpretedScheme(row.url) || undefined}
                 value={row.url}
                 placeholder={t("panel.shortcutUrlPlaceholder")}
                 disabled={updateNode.isPending}
@@ -1543,10 +1545,11 @@ function ShortcutsSection({
       ) : (
         <ul className="flex flex-wrap gap-2">
           {list.map((shortcut) => {
-            const href = shortcutHref(shortcut.url);
+            // Rows stored before SEC-086 can still hold javascript:/data: URLs.
+            const unsafe = hasBrowserInterpretedScheme(shortcut.url);
             return (
               <li key={`${shortcut.label}:${shortcut.url}`}>
-                {href === null ? (
+                {unsafe ? (
                   <span
                     className="text-sm text-muted-foreground"
                     title={shortcut.url}
@@ -1555,7 +1558,7 @@ function ShortcutsSection({
                   </span>
                 ) : (
                   <Button variant="outline" size="sm" asChild>
-                    <a href={href} target="_blank" rel="noopener noreferrer">
+                    <a href={shortcut.url} target="_blank" rel="noopener noreferrer">
                       {shortcut.label}
                       <ArrowTopRightOnSquareIcon />
                     </a>
