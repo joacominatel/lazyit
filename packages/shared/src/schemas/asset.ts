@@ -21,6 +21,19 @@ export const AssetStatusSchema = z.enum([
 ]);
 
 /**
+ * The compact CUSTOM status an asset read inlines (ADR-0101, #1524): an operator-defined name mapped to one
+ * built-in {@link AssetStatusSchema} value (`kind`). Defined here rather than in `asset-status-label.ts` so
+ * the asset schemas can reference it without an import cycle; that module re-exports it.
+ */
+export const AssetStatusLabelRefSchema = z.object({
+  id: z.cuid(),
+  name: z.string(),
+  kind: AssetStatusSchema,
+  // "#RRGGBB", or null for "use the kind's own colour".
+  color: z.string().nullable(),
+});
+
+/**
  * Look-ahead window (days) for the "warranty expiring soon" surfaces (#955): both the dashboard
  * "Needs attention" tile and the assets list's `warranty=expiring90d` filter compute the same
  * `(now, now + N days]` window from this one constant, so the tile's count and the pre-filtered list
@@ -132,6 +145,12 @@ export const AssetSchema = z.object({
   serial: z.string().nullable(),
   assetTag: z.string().nullable(),
   status: AssetStatusSchema,
+  // The asset's optional CUSTOM status (ADR-0101, #1524). `status` above always equals the label's `kind`
+  // and drives every rule; the label only names it. `null` = a bare built-in status (every asset that
+  // predates custom statuses). `.nullish()` per the new-read-field rule. `statusLabel` is the inlined label
+  // on the list and detail reads; the write responses carry the id only.
+  statusLabelId: z.cuid().nullish(),
+  statusLabel: AssetStatusLabelRefSchema.nullish(),
   specs: AssetSpecsSchema.nullable(),
   notes: z.string().nullable(),
   // Optional GROUPING attribute (ADR-0076, #857) — a Snipe-IT-style "Company" to group/filter/report
@@ -164,15 +183,23 @@ export const AssetSchema = z.object({
   deletedAt: z.iso.datetime().nullable(),
 });
 
+/** The message of the create-time "a status is required" refinement (one source for every schema). */
+export const ASSET_STATUS_REQUIRED_MESSAGE = "Give a status or a custom status (statusLabelId)";
+
 /**
- * Payload to create an Asset. `status` is required (no default — every asset is classified,
- * consistent with Location.type). `serial`/`assetTag` are unique when present; FKs are optional.
+ * Payload to create an Asset. Every asset is classified (no default, consistent with Location.type): the
+ * body names its built-in `status`, its CUSTOM status (`statusLabelId`, ADR-0101), or both. With a custom
+ * status the API derives `status` from the label's `kind`; when both are given and disagree the API
+ * answers 400 (only the API knows the label's kind). `serial`/`assetTag` are unique when present; FKs are
+ * optional.
  */
 export const CreateAssetSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
   serial: z.string().trim().min(1).max(200).optional(),
   assetTag: z.string().trim().min(1).max(200).optional(),
-  status: AssetStatusSchema,
+  status: AssetStatusSchema.optional(),
+  // A live custom status (ADR-0101); a missing or archived one is a 400.
+  statusLabelId: z.cuid().optional(),
   specs: AssetSpecsWriteSchema.optional(),
   notes: optionalText(2000),
   // Optional grouping value (ADR-0076). Mirrors `notes` — optional free text, empty coerced to absent.
@@ -188,9 +215,19 @@ export const CreateAssetSchema = z.strictObject({
   purchaseCurrency: currencyLabel(),
   modelId: z.cuid().optional(),
   locationId: z.cuid().optional(),
+}).refine((v) => v.status !== undefined || v.statusLabelId !== undefined, {
+  message: ASSET_STATUS_REQUIRED_MESSAGE,
+  path: ["status"],
 });
 
-/** Partial update; any subset of the editable fields (an empty body is rejected). */
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected).
+ *
+ * Status semantics (ADR-0101): `statusLabelId: "<id>"` sets the custom status AND its built-in `status`
+ * (a `status` that disagrees with the label's kind is a 400); `statusLabelId: null` clears the custom
+ * status and keeps the built-in one (or sets `status` if also given); `status` alone keeps the current
+ * custom status when it maps to that same status and clears it otherwise.
+ */
 export const UpdateAssetSchema = requireAtLeastOneKey(
   z
     .strictObject({
@@ -198,6 +235,8 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       serial: z.string().trim().min(1).max(200),
       assetTag: z.string().trim().min(1).max(200),
       status: AssetStatusSchema,
+      // The custom status (ADR-0101): an id sets it (and its kind as `status`), `null` clears it.
+      statusLabelId: z.cuid().nullable(),
       specs: AssetSpecsWriteSchema,
       notes: z.string().trim().min(1).max(2000),
       // Optional grouping value (ADR-0076) — mirrors `notes` in the partial update shape.
@@ -218,6 +257,7 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
 );
 
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
+export type AssetStatusLabelRef = z.infer<typeof AssetStatusLabelRefSchema>;
 export type AssetWarrantyFilter = z.infer<typeof AssetWarrantyFilterSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type CreateAsset = z.infer<typeof CreateAssetSchema>;

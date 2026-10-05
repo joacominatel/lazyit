@@ -194,7 +194,8 @@ export const UnlinkAssetsResultSchema = z.object({
  * prefilled from the purchase; every field here is an OVERRIDE for this receive only (`null` = leave it
  * empty on the units):
  *   - model ← the line's asset model (required: a line with none needs `modelId` here, else 400);
- *   - status ← `IN_STORAGE`; location ← the purchase's delivery location; company ← the purchase's;
+ *   - status ← `IN_STORAGE`, or the kind of `statusLabelId` (a live CUSTOM status, ADR-0101) when given;
+ *     location ← the purchase's delivery location; company ← the purchase's;
  *   - purchase date ← the invoice date, else today; warranty end ← that date + the line's warranty months;
  *   - cost ← the line's unit price, with the purchase's currency label.
  * `quantity` defaults to the serials given, else to every pending unit. Receiving past the pending count is
@@ -205,6 +206,7 @@ export const ReceiveFromLineSchema = z
     quantity: int4({ min: 1, max: RECEIVE_ASSETS_MAX_QUANTITY }).optional(),
     serials: z.array(z.string().trim().min(1).max(200)).max(RECEIVE_ASSETS_MAX_QUANTITY).optional(),
     status: AssetStatusSchema.optional(),
+    statusLabelId: z.cuid().optional(),
     modelId: z.cuid().optional(),
     locationId: z.cuid().nullable().optional(),
     company: z.string().trim().min(1).max(200).nullable().optional(),
