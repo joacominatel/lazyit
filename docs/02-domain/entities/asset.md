@@ -146,7 +146,8 @@ concrete instance of a generic [[asset-model]].
 > over-bound non-scalar entry (only writable through the API) is fixed with a `PATCH` that replaces
 > `specs`. The server-side
 > `SPECS_CHANGED` diff (`jsonDeepEqual`) is iterative, so it compares any stored depth exactly.
-> The bound covers `Asset.specs` only; [[asset-model]]`.specs` is still unbounded.
+> [[asset-model]]`.specs` carries the same write bound (#1329), since its defaults are merged into a
+> new asset's specs; `AssetModelSchema` reads stay unbounded too.
 
 > [!note] Expanded read shape (reads only)
 > `GET /assets` and `GET /assets/:id` return an **`AssetWithRelations`**: the asset plus its `model`

@@ -57,11 +57,16 @@ function decodeSchemeEncodings(value: string): string {
     .replace(/%([0-9a-f]{2})/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 
+// Browsers strip TAB/LF/CR anywhere and ignore leading control chars before reading the scheme.
+function normalizeForScheme(value: string): string {
+  return value.replace(/[\t\n\r]/g, "").replace(/^[^a-zA-Z0-9]+/, "");
+}
+
+const SCHEME_PREFIX = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
+
 function hasSafeScheme(value: string): boolean {
-  const normalized = value
-    .replace(/[\t\n\r]/g, "")
-    .replace(/^[^a-zA-Z0-9]+/, "");
-  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalized);
+  const normalized = normalizeForScheme(value);
+  const match = SCHEME_PREFIX.exec(normalized);
   if (!match) return true; // scheme-less host/path, e.g. vpn.corp.local
   const scheme = match[1]!.toLowerCase();
   if (scheme === "http" || scheme === "https") return true;
@@ -86,6 +91,14 @@ function hasSafeScheme(value: string): boolean {
  */
 export function isSafeApplicationUrl(value: string): boolean {
   return hasSafeScheme(value) && hasSafeScheme(decodeSchemeEncodings(value));
+}
+
+/** The denylist half of isSafeApplicationUrl, for fields that keep ssh:// (SEC-086). */
+export function hasBrowserInterpretedScheme(value: string): boolean {
+  return [value, decodeSchemeEncodings(value)].some((candidate) => {
+    const scheme = SCHEME_PREFIX.exec(normalizeForScheme(candidate))?.[1]?.toLowerCase();
+    return scheme !== undefined && BROWSER_INTERPRETED_SCHEMES.has(scheme);
+  });
 }
 
 const ApplicationUrlSchema = z

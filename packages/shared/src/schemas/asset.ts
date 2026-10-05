@@ -119,7 +119,8 @@ function specsBoundViolation(
   return null;
 }
 
-const AssetSpecsWriteSchema = AssetSpecsSchema.superRefine((specs, ctx) => {
+/** Also bounds `AssetModel.specs`, whose defaults are merged into a new asset's specs (#1329). */
+export const AssetSpecsWriteSchema = AssetSpecsSchema.superRefine((specs, ctx) => {
   const violation = specsBoundViolation(specs);
   if (violation) ctx.addIssue({ code: "custom", path: violation.path, message: violation.message });
 });
