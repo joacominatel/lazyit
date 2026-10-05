@@ -91,12 +91,10 @@ describe("classifyArticleMove", () => {
     );
   });
 
-  test("a different restricted set is confirmed even when it only adds a folder", () => {
-    // {secure} → {secure, secure-narrow}. One bit per folder cannot tell the user which way an
-    // audience moves in general, so every different set is confirmed alike.
-    expect(classifyArticleMove("secure-child", "secure-narrow", FOLDERS)).toBe(
-      "changes-restriction",
-    );
+  test("a destination that keeps every source restriction and adds one only narrows", () => {
+    // {secure} → {secure, secure-narrow}: every rule on the path must be passed (ADR-0060 §1), so
+    // adding a restricting folder can only shrink the audience.
+    expect(classifyArticleMove("secure-child", "secure-narrow", FOLDERS)).toBe("none");
   });
 
   test("the same restricting chain on both sides needs nothing", () => {

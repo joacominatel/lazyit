@@ -11,8 +11,9 @@ import type { Folder } from "@lazyit/shared";
  *
  * The only signal is the derived `hasAccessRules` bit on each folder read (#1299). One bit per folder
  * says WHICH folders restrict, never WHO they let in, so two restricted paths can only be compared as
- * sets of restricting folders: identical sets mean the same audience; different sets mean a different
- * audience, in a direction the bit cannot tell.
+ * sets of restricting folders. Every rule on a path must be passed (ADR-0060 §1), so a destination that
+ * keeps every source restriction (the same set, or more) can only keep or narrow the audience; any
+ * other restricted destination changes it in a direction the bit cannot tell.
  *
  * PRESENTATION ONLY. The server enforces access (INV-9) and decides the move (§9 refuses a blind
  * destination). Nothing here grants or refuses anything; it only chooses whether to ask first.
@@ -20,11 +21,11 @@ import type { Folder } from "@lazyit/shared";
 
 /** The verdict for a move, from the moved articles' point of view. */
 export type MoveAudienceChange =
-  /** No folder change, a public source, or the same restricting folders on both sides. */
+  /** No folder change, a public source, or a destination that keeps every source restriction. */
   | "none"
   /** Restricted before, nothing restricts after: everyone who can read the KB will read it. */
   | "widens-to-public"
-  /** Restricted on both sides by a different set of folders: the audience changes, maybe widening. */
+  /** Restricted on both sides, but the destination drops a source restriction: maybe widening. */
   | "changes-restriction"
   /** A folder on either path is missing, or lacks the flag (an older server): no verdict. */
   | "unknown";
@@ -149,8 +150,9 @@ function compareRestriction(
 ): MoveAudienceChange {
   if (before.size === 0) return "none";
   if (after.size === 0) return "widens-to-public";
-  if (before.size === after.size && [...before].every((id) => after.has(id))) {
-    return "none";
-  }
+  // Every rule on the path must be passed (ADR-0060 §1: an ancestor narrows its whole subtree), so a
+  // destination that keeps EVERY source restriction — the same set, or that set plus more — can only
+  // keep or narrow the audience. Nothing to confirm.
+  if ([...before].every((id) => after.has(id))) return "none";
   return "changes-restriction";
 }
