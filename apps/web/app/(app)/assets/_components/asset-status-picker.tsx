@@ -83,6 +83,7 @@ export function AssetStatusSelect({
   onChange,
   groups,
   allLabel,
+  placeholder,
   disabled,
   invalid,
   className,
@@ -93,6 +94,8 @@ export function AssetStatusSelect({
   groups: readonly StatusOptionGroup[];
   /** When set, a first option with this text stands for "no status filter" (`null`). */
   allLabel?: string;
+  /** Shown while nothing is chosen (no `allLabel`, `value` null). */
+  placeholder?: string;
   disabled?: boolean;
   invalid?: boolean;
   className?: string;
@@ -104,6 +107,8 @@ export function AssetStatusSelect({
     trigger = <OptionText status={value.status} label={selected} withKind />;
   } else if (allLabel) {
     trigger = allLabel;
+  } else if (placeholder) {
+    trigger = <span className="text-muted-foreground">{placeholder}</span>;
   }
   return (
     <Select

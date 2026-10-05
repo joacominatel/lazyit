@@ -1054,14 +1054,15 @@
   },
   "taxonomies": {
     "title": "Taxonomies",
-    "subtitle": "Manage the categories that classify records, plus the asset models assets reference.",
+    "subtitle": "Manage the categories that classify records, plus the asset models assets reference and your custom asset statuses.",
     "tablistAria": "Taxonomy kind",
     "tabs": {
       "asset": "Asset categories",
       "application": "Application categories",
       "consumable": "Consumable categories",
       "article": "Article categories",
-      "models": "Asset models"
+      "models": "Asset models",
+      "statuses": "Statuses"
     },
     "kindLabel": {
       "asset": "asset category",
@@ -1228,6 +1229,72 @@
         "updateError": "Couldn't update asset model",
         "created": "Asset model created",
         "createError": "Couldn't create asset model"
+      }
+    },
+    "statuses": {
+      "intro": "Custom statuses are optional names for the six built-in statuses — for example \"In repair at vendor\" or \"On the bench\" for In maintenance, or \"Loaner pool\" for In storage. Each one maps to exactly one built-in status, which is what the dashboard, filters, imports and every other rule keep reading. Assets can keep a plain built-in status.",
+      "newButton": "New custom status",
+      "loadError": "Couldn't load the custom statuses",
+      "builtIn": "Built-in status",
+      "add": "Add",
+      "addTo": "Add a custom status under {status}",
+      "empty": "No custom statuses yet. Add one under the built-in status it names.",
+      "archivedEmpty": "No archived custom statuses.",
+      "archiveAction": "Archive",
+      "assetsLink": "{count, plural, one {# asset} other {# assets}} with {name}",
+      "columns": {
+        "name": "Name",
+        "description": "Description",
+        "order": "Order",
+        "assets": "Assets",
+        "kind": "Built-in status",
+        "archived": "Archived"
+      },
+      "toast": {
+        "created": "Created the custom status {name}",
+        "createError": "Couldn't create the custom status",
+        "updated": "Updated the custom status {name}",
+        "updateError": "Couldn't update the custom status",
+        "restored": "Restored the custom status {name}",
+        "restoreError": "Couldn't restore the custom status"
+      },
+      "form": {
+        "newTitle": "New custom status",
+        "editTitle": "Edit custom status",
+        "description": "A name your team uses for one of the built-in statuses. Only the name is required.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. In repair at vendor",
+        "kindLabel": "Built-in status",
+        "kindHelp": "Assets given this custom status take this built-in status, which drives every rule and report.",
+        "kindLocked": "Locked: {count, plural, one {# asset uses} other {# assets use}} this custom status. Move them to another status first, or create a new custom status.",
+        "colorLabel": "Color",
+        "colorDefault": "The built-in status color",
+        "colorHelp": "Shown as the dot next to the name. Pick one or type a #RRGGBB value; leave it empty to use the built-in status color.",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Optional — when to use this status.",
+        "orderLabel": "Order",
+        "orderPlaceholder": "Optional — lower sorts first within its built-in status",
+        "save": "Save changes",
+        "create": "Create custom status",
+        "errors": {
+          "nameRequired": "Name is required.",
+          "colorInvalid": "Use a #RRGGBB color, for example #2563EB.",
+          "orderInvalid": "Order must be a whole number from 0 to 100000."
+        }
+      },
+      "archive": {
+        "title": "Archive {name}?",
+        "inUseDescription": "{count, plural, one {# asset has} other {# assets have}} this custom status. Choose where {count, plural, one {it goes} other {they go}}: another custom status or a plain built-in status. Each move is recorded in the asset's history.",
+        "unusedDescription": "No asset uses this custom status. You can restore it later from the archived list.",
+        "destinationLabel": "Move the assets to",
+        "destinationPlaceholder": "Choose a status",
+        "destinationHelp": "Required while assets use this custom status.",
+        "destinationSummary": "{count, plural, one {# asset moves} other {# assets move}} to {target}.",
+        "confirm": "Archive",
+        "confirmMove": "Move and archive",
+        "toast": "Archived the custom status {name}",
+        "toastMoved": "Archived {name} and moved {count, plural, one {# asset} other {# assets}} to {target}",
+        "error": "Couldn't archive the custom status"
       }
     }
   }
