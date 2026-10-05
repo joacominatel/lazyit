@@ -369,7 +369,6 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(data.mcpCredentialEpoch).toEqual({ increment: 1 });
   });
 
-  // ADR-0091 / #1311: a manual deactivation is never auto-reactivated, so the sweep must not stamp it.
   describe('a manual deactivation is never auto-reactivated (#1311)', () => {
     const stale = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const manuallyDeactivated: LocalPerson = {
