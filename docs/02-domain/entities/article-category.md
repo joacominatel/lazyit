@@ -3,7 +3,7 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-10-05
 ---
 
 # ArticleCategory
@@ -100,7 +100,10 @@ cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` AD
 `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and
 `PUT /:id/access-rules` (#404, `settings:manage` ADMIN-only — set/clear the folder's access rules;
 body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
-the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
+the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). **No write returns
+`accessRules`** — create, update, delete, restore and the access-rules `PUT` all answer with the public
+folder shape (#1301), so holding `category:write` or `category:delete` never reveals a folder's rules;
+the rule editor re-reads them through the `settings:manage`-gated GET.
 
 The list read shape carries a **computed `articleCount`** (`.nullish()`, ADR-0092 #1106) — a filtered
 Prisma `_count` of that folder's **live** articles scoped to the caller's visibility (folder-access
