@@ -400,9 +400,15 @@ export class DirectoryReconcileService {
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: person.id },
+    const offboarded = await this.prisma.$transaction(async (tx) => {
+      // Conditional on the row still matching the sweep's snapshot: an admin edit mid-sweep wins (#1311).
+      const { count } = await tx.user.updateMany({
+        where: {
+          id: person.id,
+          isActive: true,
+          directoryOffboardedAt: null,
+          deletedAt: null,
+        },
         data: {
           isActive: false,
           directoryOffboardedAt: at,
@@ -411,14 +417,17 @@ export class DirectoryReconcileService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (count !== 1) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', reason: 'offboarded' },
         actor,
       });
+      return true;
     });
-    counts.offboarded += 1;
+    if (offboarded) counts.offboarded += 1;
+    else counts.skipped += 1;
   }
 
   /** True when a LIVE (non-deleted) user already owns this email (the citext live-unique index would trip). */
