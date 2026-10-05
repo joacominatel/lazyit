@@ -5,12 +5,14 @@ import type { PurchaseExtractionStatus } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { DrawnCheck } from "@/components/drawn-check";
 import { uploadAttachment } from "@/lib/api/endpoints/attachments";
 import { updatePurchaseOrder } from "@/lib/api/endpoints/purchase-orders";
 import { useCreatePurchaseOrder, useExtractionStatus } from "@/lib/api/hooks/use-purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
+import { useMounted } from "@/lib/hooks/use-mounted";
 import { useCan } from "@/lib/hooks/use-permissions";
 import {
   canStartFromDocument,
@@ -138,22 +140,40 @@ function useWindowFileDrag(onDrop: (files: FileList) => void): boolean {
 
 /** The whole page as a drop target while a file is dragged over it, then the card of the document being started. */
 export function DocumentDropStage({ start }: { start: DocumentStart }) {
-  const t = useTranslations("purchases.extraction.newFromDocument");
   const dragging = useWindowFileDrag(start.start);
-  const targeting = dragging && start.started === null;
-  const shown = targeting || start.started !== null;
+  const mounted = useMounted();
+  // The route wrapper's fade-in is a stacking context; from inside it the overlay would sit under the assistant panel.
+  if (!mounted) return null;
+  return createPortal(
+    <DropOverlay status={start.status} started={start.started} dragging={dragging} />,
+    document.body,
+  );
+}
+
+export function DropOverlay({
+  status,
+  started,
+  dragging,
+}: {
+  status: PurchaseExtractionStatus;
+  started: StartedDocument | null;
+  dragging: boolean;
+}) {
+  const t = useTranslations("purchases.extraction.newFromDocument");
+  const targeting = dragging && started === null;
+  const shown = targeting || started !== null;
 
   return (
     <div
-      aria-hidden={start.started ? undefined : true}
-      data-state={start.started ? "starting" : targeting ? "dragging" : "idle"}
+      aria-hidden={started ? undefined : true}
+      data-state={started ? "starting" : targeting ? "dragging" : "idle"}
       className={cn(
         "fixed inset-0 z-50 flex items-center justify-center bg-background/85 p-4 sm:p-8 motion-safe:transition-opacity motion-safe:duration-150",
         shown ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
-      {start.started ? (
-        <DocumentStartCard started={start.started} />
+      {started ? (
+        <DocumentStartCard started={started} />
       ) : (
         <div
           className={cn(
@@ -166,7 +186,7 @@ export function DocumentDropStage({ start }: { start: DocumentStart }) {
           </span>
           <p className="text-section">{t("dropTitle")}</p>
           <p className="max-w-md text-sm text-muted-foreground">
-            {t("dropDescription", { max: toWholeMb(start.status.maxBytes) })}
+            {t("dropDescription", { max: toWholeMb(status.maxBytes) })}
           </p>
         </div>
       )}

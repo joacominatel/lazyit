@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import purchases from "@/messages/en/purchases.json";
-import { DocumentDropStage, DocumentStartCard, type StartedDocument } from "./document-start";
+import { DocumentDropStage, DocumentStartCard, DropOverlay, type StartedDocument } from "./document-start";
 
 const STATUS: PurchaseExtractionStatus = {
   available: true,
@@ -27,7 +27,7 @@ function render(node: ReactNode): string {
 }
 
 function stage(started: StartedDocument | null): string {
-  return render(<DocumentDropStage start={{ status: STATUS, started, start: () => {} }} />);
+  return render(<DropOverlay status={STATUS} started={started} dragging={false} />);
 }
 
 const card = (step: StartedDocument["step"]) =>
@@ -44,6 +44,10 @@ describe("the drop target (#1516)", () => {
   test("stays out of the way until a file is dragged over the page", () => {
     const html = stage(null);
     expect(html).toMatch(/aria-hidden="true"[^>]*data-state="idle"[^>]*class="[^"]*pointer-events-none[^"]*opacity-0/);
+  });
+
+  test("is portalled to the body after mount, so nothing renders on the server", () => {
+    expect(render(<DocumentDropStage start={{ status: STATUS, started: null, start: () => {} }} />)).toBe("");
   });
 
   test("once a file is taken, the page shows its card instead of the target", () => {
