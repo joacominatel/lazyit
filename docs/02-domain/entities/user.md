@@ -383,7 +383,12 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
-"who can access what" for one person and cross-linking user ⇄ asset / application. See
+"who can access what" for one person and cross-linking user ⇄ asset / application. It is a record page
+(#1525, [[ledger-design-language]] §4b): counters for held assets, access and articles open their tab,
+and an attention row flags access expiring within 30 days (the dashboard's default window), expired
+access awaiting the sweeper, and unacknowledged assets. The held assets' labels come from
+`GET /assets?assignedToUserId=` (complete at any inventory size); released-asset names resolve from a
+catalog page only when the History tab opens. Grants are read only with `accessGrant:read`. See
 [[0020-frontend-data-layer]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] ·

@@ -55,6 +55,31 @@ de Activos (y la pantalla vacía de Activos ofrece un enlace *Importar desde CSV
 al asistente de [importación masiva](/help/assets-bulk-import). El botón aparece solo si tienes permiso
 para ejecutar una importación.
 
+## La página del activo
+
+Al abrir un activo ves su ficha en tres partes.
+
+- **La tarjeta de resumen** arriba: el nombre y el estado del activo, su etiqueta de activo (con un
+  botón para copiarla), el modelo, la categoría y la empresa. Debajo, una fila de **datos clave**
+  responde de un vistazo las preguntas de siempre: quién lo tiene, dónde está, cómo está la **garantía**
+  (vigente, por vencer en los próximos 90 días o vencida, con una barra que muestra cuánto del período
+  de garantía ya pasó) y cuánto vale hoy.
+- **Requiere atención**: aparecen avisos en la tarjeta solo cuando hay algo que hacer: una garantía
+  que vence en los próximos 90 días o que ya venció, un responsable que todavía no confirmó la
+  recepción, o un responsable cuya cuenta fue desactivada.
+- **Pestañas** con el resto: **Resumen** (los detalles, agrupados en identificación y ciclo de vida,
+  más la compra y los campos personalizados), **Actividad** (el registro de actividad y los
+  responsables anteriores), **Documentos** y los **Consumibles** entregados al activo (visible para
+  quienes pueden ver consumibles). La pestaña abierta queda en la dirección de la página, así un
+  enlace que compartas abre en la misma pestaña.
+- **La columna lateral** mantiene a la vista a los **Responsables** actuales y los artículos
+  relacionados de la base de conocimiento mientras recorres las pestañas. En pantallas angostas pasa
+  debajo de las pestañas.
+
+El encabezado deja a mano las acciones de todos los días, **Imprimir etiqueta** y **Editar**.
+**Clonar**, **Ver en la topología** y **Eliminar** están en el menú **⋯** al lado, con la eliminación
+separada del resto.
+
 ## Estado
 
 Cada activo se **clasifica con un estado** — no hay valor por defecto, así que eliges uno al
@@ -288,7 +313,7 @@ de serie, fabricante y compra y garantía que hayas activado.
 ## Dónde se compró
 
 Si el activo está vinculado a una [compra](/help/purchases-recording-purchases), su página muestra un panel
-**Compra** justo después de *Detalles*: la compra y su proveedor, la referencia, las fechas y los números
+**Compra** en la pestaña **Resumen**, justo después de *Detalles*: la compra y su proveedor, la referencia, las fechas y los números
 de factura, el contacto de soporte del proveedor y los documentos de la compra para descargar. Se muestra
 **solo a quienes pueden ver compras**; los demás siguen viendo el costo y las fechas propios del activo en
 *Detalles*, como antes. El panel marca **Distinto de la compra** cuando el costo del activo no es el precio
@@ -301,8 +326,8 @@ sin vincular ofrece ahí **Vincular a una compra**. Ver
 Si un activo respalda un nodo del [Diagrama de infraestructura](/help/assets-topology-diagram) —por
 ejemplo un host, un NAS o un switch que pusiste en el mapa—, su página de detalle muestra una
 insignia **En la topología** junto al estado, y el mismo indicador aparece como un pequeño ícono de
-compartir al lado del nombre del activo en la lista. Un botón **Ver en la topología** en la página de
-detalle salta directo al mapa, vuela hasta ese nodo y le da un breve resaltado para que reconozcas
+compartir al lado del nombre del activo en la lista. **Ver en la topología**, en el menú **⋯** de la página de
+detalle, salta directo al mapa, vuela hasta ese nodo y le da un breve resaltado para que reconozcas
 cuál es de un vistazo. (Solo ves esto si tenés permiso para ver la topología.) El enlace inverso
 también existe: el panel de detalle de un nodo enlaza su *nombre de inventario* de vuelta a este
 activo, así te movés entre un activo y su nodo en cualquier dirección.
@@ -310,7 +335,7 @@ activo, así te movés entre un activo y su nodo en cualquier dirección.
 ## Documentos
 
 Un activo puede llevar **documentos** — PDFs de garantía, recibos de compra, fotos de daños —
-guardados en el propio registro del activo en lugar de dispersos por unidades y chats. La sección
+guardados en el propio registro del activo en lugar de dispersos por unidades y chats. La pestaña
 **Documentos** de la página de detalle los lista con su nombre, tamaño y fecha de subida.
 
 - **Sube** con el botón, o **arrastra y suelta** archivos sobre la sección. Los tipos admitidos son
@@ -333,9 +358,9 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos
   personalizados) se escribe en la actividad.
-- **Clonar** abre un nuevo activo precargado a partir de este, con la serie y la etiqueta de activo
+- **Clonar** (en el menú **⋯**) abre un nuevo activo precargado a partir de este, con la serie y la etiqueta de activo
   vacías para que la copia tenga las suyas — útil para registrar un lote de unidades idénticas.
-- **Desactivar** un activo es un borrado lógico: el registro se oculta de la lista normal pero nunca se
+- **Desactivar** un activo (**Eliminar** en el menú **⋯**) es un borrado lógico: el registro se oculta de la lista normal pero nunca se
   destruye, así su historial se conserva. Un administrador puede **restaurar** los activos desactivados,
   lo que además recupera la serie y la etiqueta liberadas (salvo que un activo vigente haya tomado el
   valor mientras tanto). lazyit nunca borra datos de activos de forma definitiva.

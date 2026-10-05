@@ -3,7 +3,7 @@ title: "The Ledger — design language reference (frontend refactor)"
 tags: [frontend, design-system, reference, web, refactor]
 status: draft
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-10-05
 ---
 
 # The Ledger — design language reference
@@ -112,6 +112,26 @@ Fonts: rebind `--font-sans` → Hanken, `--font-mono`/`--font-geist-mono` → Co
 - **Tabular data in Commit Mono** with `tabular-nums`: IDs, serials, timestamps, counts, money.
 - **Rule dividers** (hairline / perforation) instead of heavy cards/banding. Cards only when truly
   the right affordance (impeccable: "cards are the lazy answer").
+
+## 4b. Record pages (detail layout)
+
+The asset and user detail pages (#1525) share one frame, built from `components/record-page.tsx`.
+Use it for any detail page whose record has a handful of headline facts and several secondary
+sections.
+
+- **Summary card** (`RecordHero`): the `PageHeader` row (title, status, an identity line with the
+  copyable identifier, actions), then the attention row, then the key-facts strip.
+- **Attention row** (`RecordAttention` / `AttentionItem`): only the things that need follow-up, most
+  severe first, each derived from data already on the page (danger · warning · neutral tints, text on
+  the `-text` tokens for AA). Empty → not rendered; a record with nothing to do keeps a calm header.
+- **Key facts** (`RecordFacts` / `RecordFact`): four hairline-divided cells answering the questions the
+  page is opened for. Counters may be buttons that open their tab; values that are data use mono.
+- **Body** (`RecordLayout`): tabbed main content beside a 20rem side column for properties and the
+  primary relationships; one column below `xl`. Tabs that list something the viewer cannot read are
+  not rendered. The tab lives in `?tab=` through `useRecordTab`, written with `history.replaceState`
+  so switching never re-runs the server prefetch.
+- **Actions**: the everyday ones stay visible (one primary fill), the rest go in a `⋯` menu with
+  destructive items last, behind a separator.
 
 ## 5. Do / Don't (register translation)
 

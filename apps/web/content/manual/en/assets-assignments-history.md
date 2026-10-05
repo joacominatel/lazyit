@@ -9,8 +9,8 @@ order: 1
 
 Ownership in lazyit is **not** a field you overwrite — it is a record of who held an asset and when.
 This is what keeps the asset the first-class citizen: people rotate, assets persist, and the full
-ownership trail is kept automatically. You manage owners from an asset's detail page, under
-**Owners**.
+ownership trail is kept automatically. You manage owners from an asset's detail page, in the
+**Owners** panel of its side column.
 
 ## Assigning an owner
 
@@ -79,7 +79,8 @@ permissions: you only see the actions you're allowed to run.
 
 Every asset carries an **append-only activity log** — a timeline of discrete events, newest first.
 The log is immutable: entries are written, never edited or deleted. You'll find it on the asset detail
-page under **Activity**, and the ownership-specific entries under **Ownership history**.
+page in the **Activity** tab, with the ownership-specific entries under **Ownership history** in the
+same tab.
 
 Recorded events include:
 

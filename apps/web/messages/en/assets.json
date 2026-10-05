@@ -363,6 +363,44 @@
         "purchaseUnlinked": "Unlinked from its purchase — its purchase values stay as they were",
         "openPurchase": "Open purchase"
       }
+    },
+    "moreActions": "More actions",
+    "customFieldsCount": "{count, plural, one {# field} other {# fields}}",
+    "groups": {
+      "identification": "Identification",
+      "lifecycle": "Lifecycle"
+    },
+    "tabs": {
+      "label": "Asset sections",
+      "overview": "Overview",
+      "activity": "Activity",
+      "documents": "Documents",
+      "consumables": "Consumables"
+    },
+    "facts": {
+      "owner": "Owner",
+      "unassigned": "Unassigned",
+      "since": "since {date}",
+      "moreOwners": "{count, plural, one {and # more owner} other {and # more owners}}",
+      "location": "Location",
+      "noLocation": "No location",
+      "warranty": "Warranty",
+      "noWarranty": "Not recorded",
+      "warrantyActive": "Active",
+      "warrantyExpiring": "Ends soon",
+      "warrantyExpired": "Expired",
+      "daysLeft": "{count, plural, one {# day left} other {# days left}}",
+      "expiredAgo": "{count, plural, =0 {today} one {# day ago} other {# days ago}}",
+      "valueOf": "of {cost}",
+      "noValue": "No purchase cost"
+    },
+    "attention": {
+      "label": "Needs attention",
+      "warrantyExpiring": "Warranty ends in {count, plural, one {# day} other {# days}}",
+      "warrantyExpired": "{count, plural, =0 {Warranty expired today} one {Warranty expired # day ago} other {Warranty expired # days ago}}",
+      "deactivatedOwner": "Still assigned to {name}, whose account is deactivated",
+      "awaitingAck": "{name} hasn't acknowledged receipt yet",
+      "awaitingAckMany": "{count} owners haven't acknowledged receipt yet"
     }
   },
   "rowActions": {

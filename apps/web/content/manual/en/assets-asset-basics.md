@@ -53,6 +53,27 @@ Assets screen offers an *Import from CSV* link), taking you straight to the guid
 [bulk import](/help/assets-bulk-import) wizard. The button appears only if you have permission to run
 an import.
 
+## The asset's page
+
+Opening an asset shows its record in three parts.
+
+- **The summary card** at the top: the asset's name and status, its asset tag (with a copy button),
+  model, category and company. Under it, a row of **key facts** answers the usual questions at a
+  glance: who holds it, where it is, how the **warranty** stands (active, ending within 90 days, or
+  expired, with a bar showing how much of the warranty period has passed) and what it is worth today.
+- **Needs attention** items appear in the card only when something needs follow-up: a warranty that
+  ends within 90 days or has already expired, an owner who hasn't acknowledged receipt yet, or an
+  owner whose account has been deactivated.
+- **Tabs** hold the rest: **Overview** (the details, grouped into identification and lifecycle, plus
+  the purchase and the custom fields), **Activity** (the activity log and the previous owners),
+  **Documents**, and **Consumables** delivered to the asset (shown to people who can view
+  consumables). The open tab is kept in the page address, so a link you share opens on the same tab.
+- **The side column** keeps the current **Owners** and the related knowledge base articles in view
+  while you move between tabs. On a narrow screen it moves below the tabs.
+
+The header keeps the everyday actions in sight, **Print label** and **Edit**. **Clone**, **View in
+topology** and **Delete** are in the **⋯** menu next to them, with the delete action set apart.
+
 ## Status
 
 Every asset is **classified by a status** — there is no default, so you choose one when you register
@@ -266,7 +287,7 @@ purchase & warranty columns you have turned on.
 ## Where it was bought
 
 If the asset is linked to a [purchase](/help/purchases-recording-purchases), its page shows a **Purchase**
-panel right after *Details*: the purchase and its supplier, the reference, dates and invoice numbers, the
+panel in the **Overview** tab, right after *Details*: the purchase and its supplier, the reference, dates and invoice numbers, the
 supplier's support contact, and the purchase's documents to download. It is shown **only to people who
 can view purchases**; everyone else keeps seeing the asset's own cost and dates in *Details*, as before.
 The panel marks **Differs from purchase** when the asset's cost is not the price on its purchase, and
@@ -279,7 +300,7 @@ offers **Link to purchase** there instead. See
 If an asset backs a node on the [Infrastructure diagram](/help/assets-topology-diagram) — for
 example a host, a NAS or a switch you've placed on the map — its detail page shows an **On topology**
 badge next to the status, and the same marker appears as a small share glyph beside the asset's name
-in the list. A **View in topology** button on the detail page jumps straight to the map, flying to
+in the list. **View in topology**, in the detail page's **⋯** menu, jumps straight to the map, flying to
 that node and giving it a brief highlight so you can spot which one it is at a glance. (You only see
 these when you have permission to view the topology.) The reverse link exists too: a node's details
 panel links its *inventory name* back to this asset, so you can move between an asset and its node in
@@ -288,7 +309,7 @@ either direction.
 ## Documents
 
 An asset can carry **documents** — warranty PDFs, purchase receipts, damage photos — kept on the
-asset record instead of scattered across drives and chat threads. The **Documents** section on the
+asset record instead of scattered across drives and chat threads. The **Documents** tab on the
 asset's detail page lists them with their name, size and upload date.
 
 - **Upload** with the button, or **drag and drop** files onto the section. Supported types are
@@ -309,9 +330,9 @@ asset's detail page lists them with their name, size and upload date.
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom
   fields) is written to the activity log.
-- **Clone** opens a new asset pre-filled from this one, with the serial and asset tag cleared so the
+- **Clone** (in the **⋯** menu) opens a new asset pre-filled from this one, with the serial and asset tag cleared so the
   copy gets its own — handy for registering a batch of identical units.
-- **Deactivating** an asset is a soft delete: the record is hidden from the normal list but never
+- **Deactivating** an asset (**Delete** in the **⋯** menu) is a soft delete: the record is hidden from the normal list but never
   destroyed, so its history is preserved. Deactivated assets can be **restored** by an administrator,
   which also reclaims their freed serial and asset tag (unless a live asset has taken the value
   meanwhile). lazyit never hard-deletes asset data.

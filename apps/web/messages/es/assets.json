@@ -363,6 +363,44 @@
         "purchaseUnlinked": "Se desvinculó de su compra; sus valores de compra se mantienen",
         "openPurchase": "Abrir compra"
       }
+    },
+    "moreActions": "Más acciones",
+    "customFieldsCount": "{count, plural, one {# campo} other {# campos}}",
+    "groups": {
+      "identification": "Identificación",
+      "lifecycle": "Ciclo de vida"
+    },
+    "tabs": {
+      "label": "Secciones del activo",
+      "overview": "Resumen",
+      "activity": "Actividad",
+      "documents": "Documentos",
+      "consumables": "Consumibles"
+    },
+    "facts": {
+      "owner": "Responsable",
+      "unassigned": "Sin asignar",
+      "since": "desde el {date}",
+      "moreOwners": "{count, plural, one {y # responsable más} other {y # responsables más}}",
+      "location": "Ubicación",
+      "noLocation": "Sin ubicación",
+      "warranty": "Garantía",
+      "noWarranty": "Sin registrar",
+      "warrantyActive": "Vigente",
+      "warrantyExpiring": "Vence pronto",
+      "warrantyExpired": "Vencida",
+      "daysLeft": "{count, plural, one {queda # día} other {quedan # días}}",
+      "expiredAgo": "{count, plural, =0 {hoy} one {hace # día} other {hace # días}}",
+      "valueOf": "de {cost}",
+      "noValue": "Sin costo de compra"
+    },
+    "attention": {
+      "label": "Requiere atención",
+      "warrantyExpiring": "La garantía vence en {count, plural, one {# día} other {# días}}",
+      "warrantyExpired": "{count, plural, =0 {La garantía venció hoy} one {La garantía venció hace # día} other {La garantía venció hace # días}}",
+      "deactivatedOwner": "Sigue asignado a {name}, cuya cuenta está desactivada",
+      "awaitingAck": "{name} todavía no confirmó la recepción",
+      "awaitingAckMany": "{count} responsables todavía no confirmaron la recepción"
     }
   },
   "rowActions": {
