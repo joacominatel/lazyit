@@ -1,8 +1,6 @@
 import type { PurchaseExtractionStatus } from "@lazyit/shared";
 import { fileProblem, maxBytesFor, referenceFromFileName } from "./extraction";
 
-// The one pipeline behind the New purchase button and a document dropped on New purchase or the list (#1516).
-
 export const START_STEPS = ["create", "attach", "open"] as const;
 export type StartStep = (typeof START_STEPS)[number];
 

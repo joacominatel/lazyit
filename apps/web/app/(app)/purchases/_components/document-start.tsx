@@ -138,7 +138,6 @@ function useWindowFileDrag(onDrop: (files: FileList) => void): boolean {
   return dragging;
 }
 
-/** The whole page as a drop target while a file is dragged over it, then the card of the document being started. */
 export function DocumentDropStage({ start }: { start: DocumentStart }) {
   const dragging = useWindowFileDrag(start.start);
   const mounted = useMounted();
