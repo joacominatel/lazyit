@@ -179,7 +179,10 @@ export class ArticleCategoriesService {
     if (data.parentId !== undefined) {
       await this.assertParentUsable(data.parentId);
     }
-    return this.prisma.articleCategory.create({ data });
+    return this.prisma.articleCategory.create({
+      data,
+      select: CATEGORY_PUBLIC_SELECT,
+    });
   }
 
   /**
@@ -194,7 +197,11 @@ export class ArticleCategoriesService {
       await this.assertParentUsable(data.parentId);
       await this.assertNoFolderCycle(id, data.parentId);
     }
-    return this.prisma.articleCategory.update({ where: { id }, data });
+    return this.prisma.articleCategory.update({
+      where: { id },
+      data,
+      select: CATEGORY_PUBLIC_SELECT,
+    });
   }
 
   /**
@@ -225,6 +232,7 @@ export class ArticleCategoriesService {
     return this.prisma.articleCategory.update({
       where: { id },
       data: { deletedAt: new Date() },
+      select: CATEGORY_PUBLIC_SELECT,
     });
   }
 
@@ -329,6 +337,7 @@ export class ArticleCategoriesService {
   async restore(id: string) {
     const category = await this.prisma.articleCategory.findFirst({
       where: { id },
+      select: CATEGORY_PUBLIC_SELECT,
       includeSoftDeleted: true,
     } as Prisma.ArticleCategoryFindFirstArgs);
     if (!category) {
@@ -340,6 +349,7 @@ export class ArticleCategoriesService {
     return this.prisma.articleCategory.update({
       where: { id },
       data: { deletedAt: null },
+      select: CATEGORY_PUBLIC_SELECT,
     });
   }
 
@@ -368,6 +378,8 @@ export class ArticleCategoriesService {
             ? Prisma.DbNull
             : (accessRules as unknown as Prisma.InputJsonValue),
       },
+      // No write echoes the rules (#1301); the editor re-reads them through the gated GET.
+      select: CATEGORY_PUBLIC_SELECT,
     });
   }
 
