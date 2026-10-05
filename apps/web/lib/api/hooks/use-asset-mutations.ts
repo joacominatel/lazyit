@@ -76,13 +76,9 @@ export function useBatchRestoreAssets() {
 export function useBatchSetAssetStatus() {
   const invalidate = useInvalidateAssets();
   return useMutation({
-    mutationFn: ({
-      ids,
-      status,
-    }: {
-      ids: string[];
-      status: BatchAssetStatus["status"];
-    }) => batchSetAssetStatus(ids, status),
+    // The target is a built-in `status` or a custom status (`statusLabelId`, ADR-0101) — see
+    // `batchStatusFields` in the assets status picker.
+    mutationFn: (body: BatchAssetStatus) => batchSetAssetStatus(body),
     onSuccess: invalidate,
   });
 }
