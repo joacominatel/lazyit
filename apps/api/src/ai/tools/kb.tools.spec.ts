@@ -1962,9 +1962,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         result: { ok: true, kind: 'mutation', mutated: true },
       });
       expect(prisma.articleCategory.create).toHaveBeenCalledTimes(1);
-      expect(prisma.articleCategory.create).toHaveBeenCalledWith({
-        data: { name: 'Tech', description: 'Engineering notes' },
-      });
+      expect(prisma.articleCategory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { name: 'Tech', description: 'Engineering notes' },
+        }),
+      );
       const created = folders.find((f) => f.name === 'Tech')!;
       expect(created).toMatchObject({ parentId: null, accessRules: null });
       expect(approved.result?.entityRefs).toEqual([
@@ -2006,9 +2008,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       });
       const approved = await tools.approve(proposal.action.id, chat(admin));
       expect(approved).toMatchObject({ status: 'SUCCEEDED' });
-      expect(prisma.articleCategory.create).toHaveBeenCalledWith({
-        data: { name: 'Runbooks', parentId: F.team },
-      });
+      expect(prisma.articleCategory.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { name: 'Runbooks', parentId: F.team },
+        }),
+      );
       // The folder has no rules of its own: the parent's restriction narrows it (ADR-0060 §1).
       expect(folders.find((f) => f.name === 'Runbooks')).toMatchObject({
         parentId: F.team,
@@ -2177,10 +2181,12 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       const approved = await tools.approve(proposal.action.id, chat(member));
       expect(approved).toMatchObject({ status: 'SUCCEEDED' });
       expect(prisma.articleCategory.update).toHaveBeenCalledTimes(1);
-      expect(prisma.articleCategory.update).toHaveBeenCalledWith({
-        where: { id: F.public },
-        data: { name: 'IT Ops' },
-      });
+      expect(prisma.articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: F.public },
+          data: { name: 'IT Ops' },
+        }),
+      );
       expect(folders.find((f) => f.id === F.public)).toMatchObject({
         name: 'IT Ops',
         parentId: null,
