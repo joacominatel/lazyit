@@ -150,7 +150,9 @@ function AssetStatusMenu({
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+      {/* Sized to its labels, not to the badge that opens it — the base content matches the trigger's
+          width, which truncated every status name to a few letters. */}
+      <DropdownMenuContent align="start" className="max-h-80 w-auto min-w-56 overflow-y-auto">
         <AssetStatusMenuOptions
           groups={groups}
           value={current}

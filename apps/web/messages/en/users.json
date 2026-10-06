@@ -451,13 +451,28 @@
   },
   "offboarding": {
     "title": "Offboard {name}",
+    "restorable": "Can be restored",
+    "onConfirm": "What happens on confirm",
     "doneTitle": "{name} archived",
     "doneSubtitle": "Access revoked, assets released — history is safe.",
     "impact": {
-      "releasesLabel": "Releases",
-      "assets": "{count, plural, =1 {asset} other {assets}}",
-      "revokesLabel": "Revokes",
-      "grants": "{count, plural, =1 {access grant} other {access grants}}"
+      "assets": {
+        "verb": "Released",
+        "label": "{count, plural, =1 {asset to return} other {assets to return}}"
+      },
+      "access": {
+        "verb": "Revoked",
+        "label": "{count, plural, =1 {access grant} other {access grants}}"
+      },
+      "consumables": {
+        "verb": "Outstanding",
+        "label": "{count, plural, =1 {consumable to ask back} other {consumables to ask back}}"
+      },
+      "account": {
+        "verb": "Archived",
+        "value": "The account",
+        "label": "history kept"
+      }
     },
     "assetFallback": "Asset",
     "applicationFallback": "Application",
@@ -482,25 +497,18 @@
     "emptyNote": "This person holds no assets, has no active access and received no consumables. The act is still valid as a record of their departure.",
     "handoverNote": "Handover note",
     "handoverPlaceholder": "A short note printed on the return act…",
-    "handoverHelp": "Saved for next time — this note pre-fills every act.",
-    "printedAct": "Printed act",
+    "handoverHelp": "Saved as a template — this note pre-fills every act.",
     "companyName": "Company name",
     "companyPlaceholder": "Printed on the act letterhead",
-    "listAssets": "List assets to return",
-    "listAccess": "List access revoked",
-    "printedActHelp": "These apply to the printed act — this summary always shows the full impact.",
-    "signatures": "Signatures",
-    "signatureEmployee": "Employee",
-    "signatureIt": "IT",
-    "signatureHelp": "Signed on paper at handover — print the act below.",
+    "printedActHelp": "Choose which sections the printed act lists. The lists on the left always show the full impact.",
     "printAct": "Print act",
-    "confirm": "Confirm offboarding",
+    "confirm": "Offboard {name}",
     "toast": {
       "archived": "User archived — access revoked, history is safe.",
       "error": "Couldn't offboard user"
     },
-    "listConsumables": "List consumables",
     "consumables": {
+      "title": "Consumables",
       "toReturnTitle": "Consumables to return",
       "deliveredTitle": "Consumables delivered",
       "outstandingLine": "{outstanding} of {quantity} {unit} outstanding · delivered {date}",
@@ -513,7 +521,23 @@
       "moreToReturn": "…and {count, plural, =1 {# more outstanding delivery} other {# more outstanding deliveries}} not listed here — check the person's page.",
       "moreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed here.",
       "unavailable": "Consumables are not shown — you don't have permission to view them.",
-      "help": "Offboarding doesn't move stock. Record returns from the person's page as items come back. Untick a row to leave it off the printed act."
+      "help": "Offboarding doesn't move stock — this is what to ask back. Record each return from the person's page as it comes back. Untick a row to leave it off the printed act."
+    },
+    "reassurance": "The account is archived, not deleted. You can restore it from Users.",
+    "actPanel": {
+      "title": "Handover act",
+      "optional": "optional",
+      "previewLabel": "Preview of the printed act",
+      "more": "+{count} more",
+      "unavailable": "Available once the data loads."
+    },
+    "customize": {
+      "title": "Customize act",
+      "summary": "Company, note, what to list",
+      "include": "List on the act",
+      "assets": "Assets",
+      "access": "Access",
+      "consumables": "Consumables"
     }
   },
   "act": {

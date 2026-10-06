@@ -127,7 +127,8 @@ sections.
 - **Key facts** (`RecordFacts` / `RecordFact`): four hairline-divided cells answering the questions the
   page is opened for. Counters may be buttons that open their tab; values that are data use mono.
 - **Body** (`RecordLayout`): tabbed main content beside a 20rem side column for properties and the
-  primary relationships; one column below `xl`. Tabs that list something the viewer cannot read are
+  primary relationships; one column below `xl`. On wide screens the side column drops by the tab bar's
+  height so its first panel lines up with the open tab's first panel (#1531). Tabs that list something the viewer cannot read are
   not rendered. The tab lives in `?tab=` through `useRecordTab`, written with `history.replaceState`
   so switching never re-runs the server prefetch.
 - **Actions**: the everyday ones stay visible (one primary fill), the rest go in a `⋯` menu with

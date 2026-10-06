@@ -121,8 +121,12 @@ y elegir la otra opción.
 
 ## Dar de baja a un usuario
 
-Cuando alguien se va, ábrelo y elige **Dar de baja** en el menú **⋯**. lazyit muestra el impacto completo de antemano —
-los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego, al confirmar:
+Cuando alguien se va, ábrelo y elige **Dar de baja** en el menú **⋯**. Se abre un panel ancho con el
+impacto completo de antemano: cuatro recuadros cuentan los **activos que se liberan**, los **accesos que se
+revocan**, los **consumibles pendientes** y la **cuenta que se archiva** (su historial se conserva). Debajo,
+la columna izquierda lista lo que pasa al confirmar — los activos a devolver, el acceso a aplicaciones a
+revocar (con su nivel de acceso y una marca **Crítica** en las aplicaciones críticas) y los consumibles
+entregados — y la columna derecha contiene el acta de entrega opcional. Al confirmar, lazyit:
 
 - **revoca** el acceso activo a aplicaciones de la persona,
 - **quita** el acceso de la persona a cada [bóveda de secretos](/help/secret-manager-vaults-members) a
@@ -145,10 +149,21 @@ el texto plano, así que no puede volver a cifrarlos en tu nombre. Es un aviso, 
 (Quién quitó el acceso a la bóveda de quién, y cuándo, queda registrado en la auditoría del Gestor de
 Secretos.)
 
-**Nada se destruye.** La persona y su historial se conservan para el registro. Puedes completar una nota
-de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas de firma) para firmar en
-papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
-constancia de su salida.
+**Nada se destruye.** La persona y su historial se conservan para el registro — el pie del panel lo
+recuerda, y el botón nombra a la persona que estás dando de baja. Dar de baja es válido incluso cuando la
+persona no tiene nada — sigue valiendo como constancia de su salida.
+
+**El acta de entrega.** La columna derecha muestra una vista previa en vivo del **acta de baja** impresa:
+el nombre de la empresa y la fecha, la persona, las secciones que va a listar, tu nota de entrega y las dos
+líneas de firma (Empleado y TI). Se actualiza a medida que cambias la configuración. Abre **Personalizar
+acta** para fijar el nombre de la empresa, editar la nota de entrega (se guarda como plantilla y se completa
+sola en cada acta) y elegir qué lista el acta con los chips **Activos**, **Accesos** y **Consumibles**. Esta
+configuración se conserva para la próxima vez. Elige **Imprimir acta** para abrir el acta en una pestaña
+nueva y firmarla en papel en la entrega.
+
+Si el panel no puede cargar los activos, accesos o consumibles de la persona, lo indica en lugar de mostrar
+listas vacías, los recuadros muestran "—" y el acta no se puede imprimir hasta que pulses **Reintentar** y
+cargue.
 
 **Los consumibles que recibió.** La hoja de baja también lista los
 [consumibles entregados](/help/consumables-stock-movements) a la persona, en dos grupos:
@@ -159,8 +174,8 @@ constancia de su salida.
 
 La baja **no mueve stock** ni cierra ninguna entrega: registra cada devolución desde la página de la
 persona a medida que el ítem vuelve. Por defecto, todo lo listado se imprime en el acta de baja.
-Desmarca una fila para dejarla fuera, o desactiva **Listar consumibles** en *Acta impresa* para dejar
-fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
+Desmarca una fila para dejarla fuera, o desactiva el chip **Consumibles** en **Personalizar acta** para
+dejar fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
 que la hoja puede listar, indica cuántos más hay en lugar de omitirlos en silencio.
 
 ## Consumibles en la página de una persona

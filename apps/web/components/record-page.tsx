@@ -170,7 +170,14 @@ export function RecordFact({
   return <div className={cell}>{body}</div>;
 }
 
-/** The body grid: the main column and, on wide screens, a fixed-width properties column beside it. */
+/**
+ * The body grid: the main column and, on wide screens, a fixed-width properties column beside it.
+ *
+ * The main column opens with the tab bar, so on wide screens the side column drops by exactly that
+ * much — the `TabsList` (h-9) + the `Tabs` gap (gap-2) + the `TabsContent` top padding (pt-2) = 3.25rem
+ * — and its first panel lines up with the first panel of the open tab (#1531). Keep the three in step if
+ * any of them changes. Stacked below `xl`, the offset is dropped.
+ */
 export function RecordLayout({
   main,
   aside,
@@ -181,7 +188,7 @@ export function RecordLayout({
   return (
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
       <div className="min-w-0 space-y-4">{main}</div>
-      <aside className="min-w-0 space-y-4">{aside}</aside>
+      <aside className="min-w-0 space-y-4 xl:pt-13">{aside}</aside>
     </div>
   );
 }

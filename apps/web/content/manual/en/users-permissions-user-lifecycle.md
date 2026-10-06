@@ -113,8 +113,12 @@ option.
 
 ## Offboard a user
 
-When someone leaves, open them and choose **Offboard** from the **⋯** menu. lazyit shows the full impact up front — the
-**assets to return** and the **application access to revoke** — and then, on confirm:
+When someone leaves, open them and choose **Offboard** from the **⋯** menu. A wide panel opens with the full
+impact up front: four tiles count the **assets released**, the **access revoked**, the **consumables still
+out** and the **account archived** (its history is kept). Below them, the left column lists what happens on
+confirm — the assets to return, the application access to revoke (with its access level, and a
+**Critical** mark on critical applications) and the consumables delivered — and the right column holds the
+optional handover act. On confirm, lazyit:
 
 - **revokes** the person's active application access,
 - **removes** the person's access to every [Secret vault](/help/secret-manager-vaults-members) they
@@ -136,10 +140,19 @@ values themselves should be changed. lazyit **cannot rotate them for you** — i
 never sees the plaintext, so it can't re-encrypt on your behalf. This is a prompt, not an automatic
 action. (Who removed whose vault access, and when, is recorded in the Secret Manager's audit trail.)
 
-**Nothing is destroyed.** The person and their history are preserved for the record. You can fill in a
-handover note and print a **return act** (with company name and signature lines) to sign on paper at
-hand-off. Offboarding is valid even when the person holds nothing — it still stands as a record of
-their departure.
+**Nothing is destroyed.** The person and their history are preserved for the record — the panel's footer
+says so, and the button names the person you are offboarding. Offboarding is valid even when the person
+holds nothing — it still stands as a record of their departure.
+
+**The handover act.** The right column shows a live preview of the printed **return act**: the company
+name and date, the person, the sections it will list, your handover note and the two signature lines
+(Employee and IT). It updates as you change the settings. Open **Customize act** to set the company name,
+edit the handover note (saved as a template that pre-fills every act) and choose what the act lists with
+the **Assets**, **Access** and **Consumables** chips. These settings are kept for next time. Choose
+**Print act** to open the act in a new tab and sign it on paper at hand-off.
+
+If the panel can't load the person's assets, access or consumables, it says so instead of showing empty
+lists, the tiles show "—", and the act can't be printed until you **Retry** and it loads.
 
 **Consumables they received.** The offboarding sheet also lists the
 [consumables delivered](/help/consumables-stock-movements) to the person, in two groups:
@@ -151,8 +164,8 @@ their departure.
 
 Offboarding **does not move stock** and closes no delivery: record each return from the person's page
 as the item comes back. By default everything listed is printed on the return act. Untick a row to
-leave it off, or turn off **List consumables** under *Printed act* to leave the whole section off; the
-act then prints exactly what you kept. If the person received more than the sheet can list, it says
+leave it off, or turn off the **Consumables** chip under **Customize act** to leave the whole section off;
+the act then prints exactly what you kept. If the person received more than the sheet can list, it says
 how many more there are rather than leaving them out silently.
 
 ## Consumables on a person's page
