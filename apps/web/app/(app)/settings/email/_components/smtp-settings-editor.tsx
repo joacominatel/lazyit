@@ -16,7 +16,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Controller, type Resolver, useForm } from "react-hook-form";
 import { toast } from "sonner";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { RequestIdNote } from "@/components/request-id-note";
 import {
@@ -192,14 +191,6 @@ export function SmtpSettingsEditor() {
       <PageHeader
         title={t("title")}
         subtitle={t("subtitle")}
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tSettings("hub.title"), href: "/settings" },
-              { label: t("title") },
-            ]}
-          />
-        }
         badge={
           data ? <SettingsStatus state={data.enabled ? "on" : "off"} /> : null
         }
@@ -270,8 +261,10 @@ export function SmtpSettingsEditor() {
                 </SettingsSaveBar>
               }
             >
-              <div className="grid gap-4 sm:grid-cols-4">
-                {textField("host", "smtp-host", { className: "sm:col-span-2" })}
+              {/* Port only ever holds five digits, so it gets a fixed narrow track and the Security select
+                  the room its option labels need ("STARTTLS (recommended, port 587)"). */}
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_6rem_minmax(0,1fr)]">
+                {textField("host", "smtp-host")}
 
                 <Controller
                   control={control}
