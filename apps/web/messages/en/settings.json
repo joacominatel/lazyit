@@ -3,6 +3,39 @@
     "title": "Admins only",
     "description": "Settings — instance configuration, taxonomy management and the role overview — is available to administrators. Ask an admin if you need a change here."
   },
+  "nav": {
+    "label": "Settings pages",
+    "overview": "Overview",
+    "groups": {
+      "inventory": "Inventory",
+      "access": "Access",
+      "integrations": "Integrations",
+      "system": "System"
+    },
+    "items": {
+      "taxonomies": "Taxonomies",
+      "locations": "Locations",
+      "assetTags": "Asset tags",
+      "imports": "Imports",
+      "roles": "Roles & permissions",
+      "serviceAccounts": "Service accounts",
+      "email": "Email",
+      "directory": "Directory (AD/LDAP)",
+      "agents": "Reporting agents",
+      "ai": "AI assistant",
+      "integrations": "Tasks",
+      "instance": "General & version"
+    }
+  },
+  "section": {
+    "status": {
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured"
+    },
+    "unsaved": "Unsaved changes",
+    "noChanges": "No changes"
+  },
   "hub": {
     "title": "Settings",
     "subtitle": "Instance configuration, taxonomy management, roles and service accounts — administrators only.",
@@ -14,12 +47,16 @@
       "title": "Locations",
       "description": "Manage the places your assets physically live — offices, datacenters, racks and storage."
     },
+    "assetTags": {
+      "title": "Asset tags",
+      "description": "Give new assets a running tag automatically, and tag the ones you already have."
+    },
     "imports": {
       "title": "Bulk import",
       "description": "Load an existing estate of assets from a CSV or JSON file — a guided, occasional admin action for a new instance."
     },
     "roles": {
-      "title": "Roles",
+      "title": "Roles & permissions",
       "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
     },
     "serviceAccounts": {
@@ -30,13 +67,21 @@
       "title": "Reporting agents",
       "description": "Set how every lazyit agent in this estate reports and what it collects, and review which discovered hosts are confirmed automatically."
     },
+    "email": {
+      "title": "Email",
+      "description": "Send notifications by email through your own SMTP relay."
+    },
+    "directory": {
+      "title": "Directory (AD/LDAP)",
+      "description": "Import people read-only from your Active Directory or LDAP."
+    },
     "integrations": {
       "title": "Integrations & workflows",
       "description": "The cross-application manual-task inbox for provisioning workflows. Per-app automation is configured on each application's Workflows tab."
     },
     "instance": {
-      "title": "Instance",
-      "description": "Review how this lazyit instance is configured — identity provider, setup state and runtime posture."
+      "title": "General & version",
+      "description": "Check the running version, update lazyit, and see how this instance is set up."
     },
     "ai": {
       "title": "AI assistant",

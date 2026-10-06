@@ -3,6 +3,39 @@
     "title": "Solo administradores",
     "description": "Configuración — configuración de la instancia, gestión de taxonomías y el resumen de roles — está disponible para administradores. Pídele a un administrador si necesitas un cambio aquí."
   },
+  "nav": {
+    "label": "Páginas de configuración",
+    "overview": "Resumen",
+    "groups": {
+      "inventory": "Inventario",
+      "access": "Acceso",
+      "integrations": "Integraciones",
+      "system": "Sistema"
+    },
+    "items": {
+      "taxonomies": "Taxonomías",
+      "locations": "Ubicaciones",
+      "assetTags": "Etiquetas de activos",
+      "imports": "Importaciones",
+      "roles": "Roles y permisos",
+      "serviceAccounts": "Cuentas de servicio",
+      "email": "Correo",
+      "directory": "Directorio AD/LDAP",
+      "agents": "Agentes de inventario",
+      "ai": "Asistente IA",
+      "integrations": "Tareas",
+      "instance": "General y versión"
+    }
+  },
+  "section": {
+    "status": {
+      "on": "Activado",
+      "off": "Desactivado",
+      "configured": "Configurado"
+    },
+    "unsaved": "Cambios sin guardar",
+    "noChanges": "Sin cambios"
+  },
   "hub": {
     "title": "Configuración",
     "subtitle": "Configuración de la instancia, gestión de taxonomías, roles y cuentas de servicio — solo administradores.",
@@ -14,12 +47,16 @@
       "title": "Ubicaciones",
       "description": "Gestiona los lugares donde residen físicamente tus activos — oficinas, centros de datos, racks y depósitos."
     },
+    "assetTags": {
+      "title": "Etiquetas de activos",
+      "description": "Asigna una etiqueta correlativa a los activos nuevos y etiqueta los que ya tienes."
+    },
     "imports": {
       "title": "Importación masiva",
       "description": "Carga un inventario de activos existente desde un archivo CSV o JSON — una acción de administrador guiada y ocasional para una instancia nueva."
     },
     "roles": {
-      "title": "Roles",
+      "title": "Roles y permisos",
       "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
     },
     "serviceAccounts": {
@@ -30,13 +67,21 @@
       "title": "Agentes de inventario",
       "description": "Define cómo informa y qué recolecta cada agente de lazyit de este parque, y revisa qué hosts descubiertos se confirman automáticamente."
     },
+    "email": {
+      "title": "Correo",
+      "description": "Envía las notificaciones también por correo, a través de tu propio relay SMTP."
+    },
+    "directory": {
+      "title": "Directorio AD/LDAP",
+      "description": "Importa personas de solo lectura desde tu Active Directory o LDAP."
+    },
     "integrations": {
       "title": "Integraciones y flujos",
       "description": "La bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento. La automatización por aplicación se configura en la pestaña Flujos de cada una."
     },
     "instance": {
-      "title": "Instancia",
-      "description": "Revisa cómo está configurada esta instancia de lazyit — proveedor de identidad, estado de configuración y postura de ejecución."
+      "title": "General y versión",
+      "description": "Revisa la versión en uso, actualiza lazyit y mira cómo está configurada esta instancia."
     },
     "ai": {
       "title": "Asistente de IA",
