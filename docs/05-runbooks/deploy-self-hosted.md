@@ -207,7 +207,7 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker
 > [!note] Version identity ([[0083-versioning-and-releases]])
 > The guided `infra/start.sh` exports `LAZYIT_VERSION=$(git describe --tags --always)` and
 > `LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)` before `up`, so the api/web images bake the running
-> version (shown on **Settings → Instance** and by `GET /instance/version`). When running the compose
+> version (shown on **Settings → General & version** and by `GET /instance/version`). When running the compose
 > command **by hand**, export both first — otherwise the build honestly reports `dev`/`unknown`:
 >
 > ```sh

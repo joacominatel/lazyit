@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-06
 ---
 
 # Code Conventions
@@ -99,6 +99,9 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   - `components/record-page.tsx` — the record-page frame for detail pages (`RecordHero`,
     `RecordAttention`, `RecordFacts`, `RecordLayout`, `useRecordTab`), used by `assets/[id]` and
     `users/[id]`. Layout rules: [[ledger-design-language]] §4b.
+  - `components/settings-section.tsx` — the Settings page primitives (`SettingsSection`,
+    `SettingsStatus`, `SettingRow`, `SettingLabel`, `SettingsSaveBar`), used by every `/settings/*`
+    form page. Text rules and frame: [[ledger-design-language]] §4c.
   - `components/search-input.tsx` — `SearchInput` ({ `value`, `onChange`, optional
     `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
     Carries an accessible name by default — list filters must name their search box.

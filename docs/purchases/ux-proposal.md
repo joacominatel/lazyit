@@ -149,7 +149,8 @@ Sidebar (switch ON, user holds purchaseOrder:read)
   persona question 6, and it keeps Settings → Taxonomies for classification only.
 - **Settings:** an *Instance settings → Purchases* card holds the on/off switch. It reuses the
   card and switch pattern of the asset-tag scheme and SMTP editors
-  (`apps/web/app/(app)/settings/instance/_components/*`). Document extraction gets its own switch
+  (`apps/web/app/(app)/settings/asset-tags/_components/*`, `settings/email/_components/*`; since
+  #1533 each settings subject is its own page built from `components/settings-section.tsx`). Document extraction gets its own switch
   in the *AI settings* view, OFF by default and with a disclosure (Phase 2).
 - **Roles:** the role editor gets a *Purchases* capability toggle under the Inventory group
   (*View purchases*, *Edit purchases*). Delete and restore are ADMIN-only, as elsewhere.
@@ -1232,7 +1233,7 @@ currency (D5).
 | Documents | Upload, drag-and-drop, list | `apps/web/app/(app)/assets/[id]/_components/asset-documents-panel.tsx` |
 | Detail layout | DetailPanel / DetailField | `apps/web/components/detail-panel.tsx`, `asset-detail-view.tsx` |
 | Empty states, callouts | EmptyState, Callout | `components/empty-state.tsx`, `components/callout.tsx` |
-| Instance switch | Settings card with switch | `apps/web/app/(app)/settings/instance/_components/asset-tag-scheme-editor.tsx`, `smtp-settings-editor.tsx` |
+| Instance switch | Settings card with switch | `apps/web/app/(app)/settings/asset-tags/_components/asset-tag-scheme-editor.tsx`, `settings/email/_components/smtp-settings-editor.tsx` |
 | Nav entry | NAV inventory section, permission-gated | `apps/web/components/sidebar-nav.tsx` |
 | AI questions | `request_input` form (repeat groups, option sources) | `components/ai/ai-input-card.tsx`; `packages/shared/src/schemas/ai-run.ts` (`AI_INPUT_OPTION_SOURCES` needs `suppliers`, `consumables`) |
 | AI approvals | Paged approval card, preview table | `components/ai/ai-approval-pager.tsx`, `ai-approval-card.tsx`, `ai-preview-table.tsx` |
