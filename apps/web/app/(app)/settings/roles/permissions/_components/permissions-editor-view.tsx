@@ -19,7 +19,6 @@ import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
@@ -58,7 +57,6 @@ const PILLAR_ORDER = [
 ] as const;
 
 /** Stable empty breadcrumb for the permissions editor PageHeader. */
-const BREADCRUMB = <Breadcrumb />;
 
 /** Parse the `?role=` deep-link to an editable role, defaulting to MEMBER for an absent/bad value. */
 function roleFromParam(value: string | null): EditableRole {
@@ -225,7 +223,6 @@ function PermissionsEditor() {
       <PageHeader
         title={t("roles.permissions.title")}
         subtitle={t("roles.permissions.subtitle")}
-        breadcrumb={BREADCRUMB}
       />
 
       <p className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">

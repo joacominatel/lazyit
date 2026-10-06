@@ -64,7 +64,8 @@ new chat to change them. Auto-approve can be switched at any time.
 
 ### The current page
 
-On a page about one item — an asset, a user, an application, a location, a consumable — the chat shows a
+On a page about one item — an asset, a user, an application, a location, a consumable, a purchase, a
+supplier — the chat shows a
 chip like **About: Asset on this page**, so the assistant knows what "this one" means. Only the page
 address and which record it is are sent, never what's on screen. Select **×** on the chip to leave it
 out of your next message.
@@ -105,7 +106,8 @@ date — the assistant shows a short **form** headed **The assistant asks**, ins
   under **More details**.
 - Some forms ask for a list, one **row** per item: use **Add a row** and the **trash** icon, within the
   number of rows the form asks for.
-- Lists of sites, categories, models or manufacturers come from lazyit and show only what you can see.
+- Lists of sites, categories, models, manufacturers, suppliers or consumables come from lazyit and show
+  only what you can see.
 
 | Button | What happens |
 | --- | --- |
@@ -121,6 +123,29 @@ continue. Answered forms stay in the conversation, read-only.
 > [!WARNING]
 > The assistant never asks for passwords, keys or other secrets in a form, and lazyit refuses a form that
 > does. Don't type secrets into a form's text fields either.
+
+## Filling a purchase from a document
+
+On a purchase that has an invoice, an order or a delivery note in its **Documents**, the assistant can
+fill the purchase for you: say *"here is this purchase order"*, or select **Ask AI to fill** on the
+document (see [Purchases](/help/purchases-recording-purchases#reading-a-document-with-ai)). That button
+opens the chat with the message written for you — read it and send it; nothing is sent before. If the chat
+you had open already has messages, the button starts a **new chat** for it (the other one stays in your
+history); an empty chat is reused, and anything you had typed in the box is kept after the message.
+
+1. The assistant **reads the document**. This needs **Document extraction** on in
+   [Settings → AI](/help/ai-assistant-setup#document-extraction), and sends the whole file to your AI
+   provider, as reading it from the purchase does. It counts against your daily AI budget.
+2. It asks what the document leaves **blank or ambiguous** in **one form** — which supplier (from your
+   list), the reference or the invoice number, a model per line, where the units go, whether they
+   already arrived.
+3. It proposes the purchase as **one card** (or a few, for an existing purchase). Nothing is saved until
+   you approve it.
+
+What a supplier wrote is treated as **data, never as instructions**. Once the assistant has read a
+document, every card in that chat shows **Based on content written by others**, and **nothing in that
+chat is approved automatically any more** — start a new chat to get auto-approve back. Purchase
+changes are never applied automatically anyway; see [Purchases](/help/ai-assistant-approvals#purchases).
 
 ## Links and opening pages
 

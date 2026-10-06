@@ -55,7 +55,9 @@ describe('search tools list without text (#1374)', () => {
         'consumable_search',
         'infra_node_search',
         'kb_search',
+        'purchase_search',
         'reference_lookup',
+        'supplier_search',
         'user_search',
       ].sort(),
     );

@@ -41,10 +41,34 @@ aparece — gestiona la credencial en tu proveedor.
 **Punto de partida (opcional).** Puedes asignar un activo y conceder acceso a una aplicación desde el
 mismo formulario de creación, para que la persona empiece con lo que necesita.
 
+## La página de una persona
+
+Al abrir un usuario ves su ficha, organizada como la página de un activo.
+
+- **La tarjeta de resumen** arriba: nombre, estado, rol, y el correo (con un botón para copiarlo), el
+  nombre de usuario y el legajo. Debajo, los **datos clave** cuentan los **activos en posesión**, el
+  **acceso a aplicaciones** y los **artículos** que escribió; elige un contador para abrir su pestaña.
+  Al lado figura su responsable.
+- **Requiere atención**: aparecen avisos solo cuando hay algo que hacer: accesos que vencen en los
+  próximos 30 días, accesos que ya vencieron y están por revocarse, y activos cuya recepción la persona
+  todavía no confirmó.
+- **Pestañas**: **Activos** (cada uno con su etiqueta, modelo, categoría, estado y si se confirmó la
+  recepción), **Accesos** (primero los vencidos y los que vencen pronto), **Artículos**,
+  **Consumibles** e **Historial**, una sola lista de los activos que devolvió y los accesos que perdió,
+  del más reciente al más antiguo. Cada pestaña aparece solo para quienes pueden ver lo que contiene.
+  La pestaña abierta queda en la dirección de la página, así un enlace compartido abre en la misma
+  pestaña.
+- **La columna lateral** tiene el **Perfil**: rol (editable con *Gestionar usuarios*), responsable,
+  legajo, nombre de usuario, correo y fechas. Para una persona de directorio también ofrece crear su
+  cuenta de acceso.
+
+El encabezado deja a mano **Restablecer contraseña** y **Editar**. **Clonar** y **Dar de baja** están en
+el menú **⋯** al lado, con Dar de baja separado para que no se elija por error.
+
 ## Clonar un usuario
 
 Para incorporar a alguien que replica a un colega ("el mismo acceso que Ana"), abre un usuario y elige
-**Clonar**. Eliges un correo nuevo y único y un rol, y luego seleccionas cuáles de los **activos** y del
+**Clonar** en el menú **⋯**. Eliges un correo nuevo y único y un rol, y luego seleccionas cuáles de los **activos** y del
 **acceso a aplicaciones** del origen se trasladan.
 
 Por defecto, el acceso clonado **solo se registra** — es contabilidad, sin efecto externo. Hay un
@@ -97,8 +121,12 @@ y elegir la otra opción.
 
 ## Dar de baja a un usuario
 
-Cuando alguien se va, ábrelo y elige **Dar de baja**. lazyit muestra el impacto completo de antemano —
-los **activos a devolver** y el **acceso a aplicaciones a revocar** — y luego, al confirmar:
+Cuando alguien se va, ábrelo y elige **Dar de baja** en el menú **⋯**. Se abre un panel ancho con el
+impacto completo de antemano: cuatro recuadros cuentan los **activos que se liberan**, los **accesos que se
+revocan**, los **consumibles pendientes** y la **cuenta que se archiva** (su historial se conserva). Debajo,
+la columna izquierda lista lo que pasa al confirmar — los activos a devolver, el acceso a aplicaciones a
+revocar (con su nivel de acceso y una marca **Crítica** en las aplicaciones críticas) y los consumibles
+entregados — y la columna derecha contiene el acta de entrega opcional. Al confirmar, lazyit:
 
 - **revoca** el acceso activo a aplicaciones de la persona,
 - **quita** el acceso de la persona a cada [bóveda de secretos](/help/secret-manager-vaults-members) a
@@ -121,10 +149,21 @@ el texto plano, así que no puede volver a cifrarlos en tu nombre. Es un aviso, 
 (Quién quitó el acceso a la bóveda de quién, y cuándo, queda registrado en la auditoría del Gestor de
 Secretos.)
 
-**Nada se destruye.** La persona y su historial se conservan para el registro. Puedes completar una nota
-de entrega e imprimir un **acta de baja** (con el nombre de la empresa y líneas de firma) para firmar en
-papel en la entrega. Dar de baja es válido incluso cuando la persona no tiene nada — sigue valiendo como
-constancia de su salida.
+**Nada se destruye.** La persona y su historial se conservan para el registro — el pie del panel lo
+recuerda, y el botón nombra a la persona que estás dando de baja. Dar de baja es válido incluso cuando la
+persona no tiene nada — sigue valiendo como constancia de su salida.
+
+**El acta de entrega.** La columna derecha muestra una vista previa en vivo del **acta de baja** impresa:
+el nombre de la empresa y la fecha, la persona, las secciones que va a listar, tu nota de entrega y las dos
+líneas de firma (Empleado y TI). Se actualiza a medida que cambias la configuración. Abre **Personalizar
+acta** para fijar el nombre de la empresa, editar la nota de entrega (se guarda como plantilla y se completa
+sola en cada acta) y elegir qué lista el acta con los chips **Activos**, **Accesos** y **Consumibles**. Esta
+configuración se conserva para la próxima vez. Elige **Imprimir acta** para abrir el acta en una pestaña
+nueva y firmarla en papel en la entrega.
+
+Si el panel no puede cargar los activos, accesos o consumibles de la persona, lo indica en lugar de mostrar
+listas vacías, los recuadros muestran "—" y el acta no se puede imprimir hasta que pulses **Reintentar** y
+cargue.
 
 **Los consumibles que recibió.** La hoja de baja también lista los
 [consumibles entregados](/help/consumables-stock-movements) a la persona, en dos grupos:
@@ -135,17 +174,17 @@ constancia de su salida.
 
 La baja **no mueve stock** ni cierra ninguna entrega: registra cada devolución desde la página de la
 persona a medida que el ítem vuelve. Por defecto, todo lo listado se imprime en el acta de baja.
-Desmarca una fila para dejarla fuera, o desactiva **Listar consumibles** en *Acta impresa* para dejar
-fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
+Desmarca una fila para dejarla fuera, o desactiva el chip **Consumibles** en **Personalizar acta** para
+dejar fuera toda la sección; el acta imprime exactamente lo que conservaste. Si la persona recibió más de lo
 que la hoja puede listar, indica cuántos más hay en lugar de omitirlos en silencio.
 
 ## Consumibles en la página de una persona
 
-La página de una persona tiene una sección **Consumibles entregados** con lo que se le entregó, del más
+La página de una persona tiene una pestaña **Consumibles** con lo que se le entregó, del más
 reciente al más antiguo. **Solo pendientes** muestra solo los ítems retornables que siguen afuera, y un
 filtro de fechas la acota según cuándo se entregaron. Con permiso para registrar movimientos de stock
 puedes **Entregar consumible** a esa persona o registrar una devolución con **Devolver…** desde aquí. Quienes no
-pueden ver a otros usuarios no ven esta sección.
+pueden ver a otros usuarios no ven esta pestaña.
 
 ## Encontrar usuarios por rol
 

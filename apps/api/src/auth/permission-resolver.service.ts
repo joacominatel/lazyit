@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PERMISSIONS, type Permission, type Role } from '@lazyit/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Principal } from './principal';
 
 /** The complete catalog as a Set — the ADMIN permission set (immutable/full, ADR-0046 / INV-8). */
 const ALL_PERMISSIONS: ReadonlySet<Permission> = new Set(PERMISSIONS);
@@ -99,6 +100,24 @@ export class PermissionResolverService {
     }
     const held = await this.resolve(role);
     return required.every((p) => held.has(p));
+  }
+
+  /**
+   * Whether a PRINCIPAL holds `permission` (ADR-0048): a service account by its direct grants, a human by
+   * their role's matrix, no principal never (fail-closed). For a decision a route decorator cannot make —
+   * an optional body field that needs a second permission, or columns of a response gated per caller.
+   */
+  async principalHas(
+    principal: Principal | undefined,
+    permission: Permission,
+  ): Promise<boolean> {
+    if (principal?.kind === 'service') {
+      return principal.permissions.has(permission);
+    }
+    if (principal?.kind === 'human') {
+      return (await this.resolve(principal.user.role)).has(permission);
+    }
+    return false;
   }
 
   /**

@@ -3,7 +3,7 @@ title: "ADR-0070: Infra topology graph — a generic visual CMDB of the server e
 tags: [adr, infra, topology, graph, cmdb, asset, agent, backend, frontend, shared]
 status: accepted
 created: 2026-06-23
-updated: 2026-09-09
+updated: 2026-10-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -535,6 +535,17 @@ create also needs the relevant `assets:*`). Confirming a PENDING node needs `inf
 > one capability toggle: `asset:delete` sits in `inventory.delete`, `infra:manage` in `infra.manage`
 > ([[0046-roles-permissions-v2]] capabilities). The remedy is to grant `inventory.delete` (or the raw
 > `asset:delete` in the fine-tune view), or to accept that those roles can no longer archive.
+
+## Decisions while building (shortcut URL scheme guard, #1327)
+
+- **Shortcut URLs refuse executable schemes; they are not limited to http(s)** (SEC-086, 2026-10-05).
+  `CreateInfraNodeSchema` / `UpdateInfraNodeSchema` take shortcuts through `InfraShortcutWriteSchema`,
+  which keeps `z.url()` and rejects the browser-interpreted schemes (`javascript`, `data`, `vbscript`,
+  `file`, …) on the raw and the decoded value. An http(s)-only rule would close the same hole but drop
+  the SSH and console links this ADR defines, and since the web saves the whole `shortcuts` array, a
+  node already holding an `ssh://` link could not have any shortcut edited again. Reads keep
+  `InfraShortcutSchema`, so a legacy row still loads; the node modal renders such a URL as plain text
+  instead of a link.
 
 ## Phasing
 

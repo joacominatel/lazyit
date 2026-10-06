@@ -37,6 +37,11 @@ una vez que el activo existe (ver [Asignaciones e historial](/help/assets-assign
 parte de la asignación falla por algún motivo, el activo igual se crea; solo se te pedirá asignar al
 responsable desde el activo.
 
+¿Es algo que una compra está esperando? Cuando una [compra](/help/purchases-recording-purchases) todavía
+espera unidades, el formulario se abre con un selector **Desde una compra**: elegir una línea abre
+[Recibir stock](/help/assets-bulk-receiving#recibir-contra-una-compra) para ella, así la unidad se crea ya
+vinculada a su compra, con los valores de la compra. Lo ves solo si puedes ver y editar compras.
+
 ¿Registras un lote de unidades parecidas? Usa **Crear y agregar otro** en lugar de **Crear activo**:
 guarda la actual y mantiene el formulario abierto con el **modelo, la ubicación, la empresa y el
 estado** conservados, borrando solo el nombre, la serie y la etiqueta para que escribas la siguiente
@@ -49,6 +54,31 @@ Si tienes una planilla entera de equipo por incorporar, no los cargues uno por u
 de Activos (y la pantalla vacía de Activos ofrece un enlace *Importar desde CSV*), llevándote directo
 al asistente de [importación masiva](/help/assets-bulk-import). El botón aparece solo si tienes permiso
 para ejecutar una importación.
+
+## La página del activo
+
+Al abrir un activo ves su ficha en tres partes.
+
+- **La tarjeta de resumen** arriba: el nombre y el estado del activo, su etiqueta de activo (con un
+  botón para copiarla), el modelo, la categoría y la empresa. Debajo, una fila de **datos clave**
+  responde de un vistazo las preguntas de siempre: quién lo tiene, dónde está, cómo está la **garantía**
+  (vigente, por vencer en los próximos 90 días o vencida, con una barra que muestra cuánto del período
+  de garantía ya pasó) y cuánto vale hoy.
+- **Requiere atención**: aparecen avisos en la tarjeta solo cuando hay algo que hacer: una garantía
+  que vence en los próximos 90 días o que ya venció, un responsable que todavía no confirmó la
+  recepción, o un responsable cuya cuenta fue desactivada.
+- **Pestañas** con el resto: **Resumen** (los detalles, agrupados en identificación y ciclo de vida,
+  más la compra y los campos personalizados), **Actividad** (el registro de actividad y los
+  responsables anteriores), **Documentos** y los **Consumibles** entregados al activo (visible para
+  quienes pueden ver consumibles). La pestaña abierta queda en la dirección de la página, así un
+  enlace que compartas abre en la misma pestaña.
+- **La columna lateral** mantiene a la vista a los **Responsables** actuales y los artículos
+  relacionados de la base de conocimiento mientras recorres las pestañas. En pantallas angostas pasa
+  debajo de las pestañas.
+
+El encabezado deja a mano las acciones de todos los días, **Imprimir etiqueta** y **Editar**.
+**Clonar**, **Ver en la topología** y **Eliminar** están en el menú **⋯** al lado, con la eliminación
+separada del resto.
 
 ## Estado
 
@@ -66,7 +96,30 @@ El estado aparece como una etiqueta de color en la lista y en la página de deta
 registrado en la actividad del activo. Puedes cambiarlo rápido sin abrir el editor: en la **página de
 detalle** la propia etiqueta de estado es un menú desplegable, y en la lista el menú **⋯** de la fila
 tiene la opción **Cambiar estado**. También puedes fijar el estado de varios activos a la vez desde
-la lista.
+la lista: selecciónalos y elige uno en **Definir estado** de la barra de selección.
+
+### Estados personalizados
+
+Si los administradores definieron **estados personalizados** (Configuración → Taxonomías →
+**Estados**, consulta [Estados de activo
+personalizados](/help/configuration-taxonomies#estados-de-activo-personalizados)), cada selector de
+estado — el formulario del activo, el desplegable de estado de la página de detalle, **Cambiar estado**
+de la fila, **Definir estado** para una selección y **Recibir stock** — los muestra bajo el estado
+predefinido al que pertenecen: primero el estado predefinido solo, después sus estados personalizados,
+con sangría y su punto de color. Son opcionales; si no hay ninguno, los selectores muestran solo los
+seis estados predefinidos.
+
+Elegir un estado personalizado también fija su estado predefinido, que es el que siguen usando todas
+las reglas — un activo en *Pool de préstamo* cuenta como *En depósito* en el panel y en los informes.
+Elegir un estado predefinido solo quita el personalizado. Un activo con estado personalizado muestra su
+nombre en la etiqueta de estado; el estado predefinido aparece a su lado en la página de detalle y en
+la vista rápida, y al pasar el cursor sobre la etiqueta en la lista. Los cambios entre estados
+personalizados también quedan en la actividad, con ambos nombres — por ejemplo *Pool de préstamo (En
+depósito) → En el banco de trabajo (En mantenimiento)*.
+
+Elegir un estado predefinido solo — desde el desplegable de estado de un activo, su formulario de
+edición o **Definir estado** sobre una selección — quita el estado personalizado que tuvieran esos
+activos.
 
 ## Serie y etiqueta de activo
 
@@ -94,10 +147,29 @@ un control de acceso. Empresa no oculta nada — cualquiera que pueda ver activo
 activos sin importar su empresa; fijarla solo te permite acotar la lista a una empresa cuando lo
 necesites.
 
-Es un campo de texto libre con **autocompletado**: a medida que escribes, lazyit te sugiere empresas
-que ya usaste en otros activos, así reutilizas la misma forma de escribirla en vez de crear casi
-duplicados — pero siempre puedes escribir un valor nuevo. No hay una pantalla aparte de "empresas"
-que administrar: una empresa existe simplemente porque al menos un activo la usa.
+Es un campo de texto libre con **sugerencias**, así reutilizas la misma forma de escribirla en vez de
+crear casi duplicados:
+
+- **Al hacer clic en el campo**, lazyit muestra las empresas que *tú* usaste más recientemente
+  (recordadas en este navegador) y luego las demás empresas en uso — las más usadas primero, con
+  cuántos registros usan cada una y cuándo se usó por última vez. También se sugieren las empresas
+  escritas en [compras](/help/purchases-recording-purchases), si puedes ver las compras.
+- **A medida que escribes**, primero aparecen las coincidencias más cercanas: una empresa que empieza
+  con lo que escribiste, luego una en la que alguna palabra empieza así, luego una que lo contiene — e
+  incluso una con un error de tipeo cercano.
+- **Con el teclado**, **↓** abre la lista, **↑**/**↓** se mueven por ella, **Enter** o **Tab** toman la
+  empresa resaltada y **Esc** cierra la lista y conserva lo que escribiste. Cuando la mejor coincidencia
+  completa lo que estás escribiendo, queda resaltada sola, así **Enter** o **Tab** terminan la palabra;
+  **Ctrl+Enter** (**⌘+Enter** en Mac) conserva tu texto exactamente como lo escribiste.
+
+Siempre puedes escribir un valor nuevo — nunca se te obliga a elegir una sugerencia. Si lo que
+escribiste es solo otra forma de escribir una empresa que ya está en uso (otras mayúsculas o acentos,
+puntuación, o un sufijo legal como "S.A." o "Inc."), un aviso debajo del campo lo indica y ofrece un
+botón para usar la forma existente. Es solo un aviso: si lo ignoras, tu valor se guarda tal como lo
+escribiste.
+
+No hay una pantalla aparte de "empresas" que administrar: una empresa existe simplemente porque al
+menos un activo la usa.
 
 En la página de detalle del activo la empresa se muestra cuando está fijada, y enlaza a la lista
 filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la lista (más abajo).
@@ -105,10 +177,13 @@ filtrada por esa empresa. Puedes filtrar y agregar una columna **Empresa** a la 
 ## Costo y amortización
 
 En **Compra y amortización** puedes, de forma opcional, registrar cuánto costó un activo y cuánto se
-espera que dure. Los tres campos son opcionales — déjalos en blanco para el equipo cuyo valor no
+espera que dure. Todos los campos son opcionales — déjalos en blanco para el equipo cuyo valor no
 lleves.
 
 - **Costo de compra** — lo que pagaste por la unidad.
+- **Moneda** — una etiqueta opcional para los importes, como la escribe tu equipo (`ARS`, `USD`,
+  `u$s`…). Sugiere las etiquetas ya en uso. lazyit nunca la convierte ni la interpreta; solo la muestra
+  delante del costo.
 - **Vida útil** — cuánto esperas usarla, **en meses** (por ejemplo `36` para tres años).
 - **Valor residual** — su valor estimado al final de esa vida útil. Por defecto **0** si se deja en
   blanco.
@@ -119,8 +194,32 @@ compra hasta el valor residual a lo largo de la vida útil, y luego se mantiene 
 Si defines un costo pero no una vida útil, el valor contable simplemente se queda en el costo de
 compra (no hay nada que amortizar). Los activos sin costo de compra no muestran ningún valor contable.
 
-Los importes son números simples — lazyit es de una sola organización y no asocia una moneda, así que
-introdúcelos y léelos en la moneda que use tu equipo.
+Un activo con costo pero sin etiqueta de moneda muestra su costo como **Sin moneda** — un estado visible
+propio, nunca una moneda por defecto. Los activos registrados antes de que existieran las etiquetas de
+moneda se ven así hasta que alguien les pone una. El valor contable lleva la misma etiqueta que el
+costo.
+
+### Escribir importes
+
+Escribe un importe como se escriben los números en el idioma en que usas lazyit:
+
+| Idioma | Se acepta | No se acepta |
+| --- | --- | --- |
+| Inglés | `1,234.56` · `1234.56` · `1500` | `1.234,56` |
+| Español | `1.234,56` · `1234,56` · `1500` | `1,234.56` |
+
+Usa como máximo **dos decimales**, y no incluyas signos de moneda ni el signo menos. lazyit nunca
+adivina: si un importe no se puede leer en el formato de tu idioma — `1,234.56` con lazyit en español,
+o un tercer decimal que muy probablemente es un separador de miles mal escrito — lo indica debajo del
+campo al salir de él, y el formulario no se guarda hasta que lo corrijas. Una vez leído, el importe se
+reescribe en la forma estándar (`1234,5` pasa a `1.234,50`), para que veas cómo se entendió. Hay una
+forma que se lee distinto según el idioma — un solo separador seguido de exactamente tres dígitos, como
+`1.150` en español o `1,150` en inglés. lazyit la lee como miles y lo indica debajo del campo, por
+ejemplo *Leído como 1150*.
+
+Los importes **se muestran como se ingresaron**, con los separadores de tu idioma: un importe entero no
+lleva decimales (`1.500` en español, `1,500` en inglés) y uno con centavos muestra dos (`1.234,56` /
+`1,234.56`).
 
 ## Campos personalizados
 
@@ -142,7 +241,10 @@ o un campo inesperado). Estas sugerencias son solo orientativas — siempre pod�
 ## Encontrar activos en la lista
 
 La lista de **Activos** tiene un buscador y un desplegable de **Estado** en la barra de
-herramientas, y además un botón **Filtros** que abre un panel con el resto. El buscador coincide
+herramientas, y además un botón **Filtros** que abre un panel con el resto. El desplegable de
+**Estado** también muestra los estados personalizados bajo su estado predefinido: elegir un estado
+predefinido muestra todos los activos que están en él, tengan o no un estado personalizado, y elegir
+un estado personalizado muestra solo los activos que lo tienen. El buscador coincide
 con el nombre del activo, número de serie, etiqueta de activo, y el nombre o fabricante de su
 modelo — así que buscar un modelo como "ThinkPad" o "Pro 14" encuentra todos los activos que lo
 llevan, aunque el modelo no esté en el nombre.
@@ -176,26 +278,56 @@ página que tienes delante. Ajusta primero el estado, la categoría, la ubicaci�
 responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
 garantía*) y exporta solo esa porción. El archivo lleva una fila por activo con su nombre, etiqueta de
 activo, número de serie, estado, categoría, fabricante, modelo, ubicación, empresa, fechas de compra y
-de garantía, responsables actuales, notas y las marcas de tiempo de creación/actualización, y es
-seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
+de garantía, responsables actuales, notas, las marcas de tiempo de creación/actualización, el **costo de
+compra** (como un número simple con punto decimal, para que una hoja de cálculo lo lea) y su etiqueta de
+**moneda** — y, solo si puedes ver [compras](/help/purchases-recording-purchases), el **proveedor**, la
+**referencia de compra** y los **números de factura** del activo, como últimas columnas. Sin ese permiso
+esas tres columnas no aparecen en el archivo. Es seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
 versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
 
 ### Elegir qué columnas mostrar
 
-El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla — etiqueta,
-modelo, categoría, ubicación, empresa, estado, responsables y actualizado. Desmarca las que no te interesan
-para reducir la tabla a lo que te importa. La columna **Nombre** y las acciones de fila siempre se
-mantienen. Tu elección se recuerda en este navegador, así que la tabla conserva la misma forma la
-próxima vez que entres. (Esto rige la tabla de escritorio; la vista de tarjetas en móvil siempre
-muestra el conjunto completo.)
+El botón **Columnas** (junto a *Filtros*) abre una lista de las columnas de la tabla, por grupos:
+
+- **Detalles** — etiqueta, número de serie, fabricante (del modelo del activo), modelo, categoría,
+  ubicación y empresa.
+- **Estado** — estado y responsables.
+- **Compra y garantía** — fecha de compra, fin de garantía y costo de compra.
+- **Actividad** — actualizado.
+
+Desmarca las que no te interesan para reducir la tabla, o marca otras para sumarlas. De entrada la tabla
+muestra etiqueta, modelo, categoría, ubicación, empresa, estado, responsables y actualizado; el **número de
+serie**, el **fabricante** y las columnas de **Compra y garantía** quedan apagadas hasta que las actives.
+La columna **Nombre** y las acciones de fila siempre se mantienen. Tu elección se recuerda en este
+navegador, así que la tabla conserva la misma forma la próxima vez que entres.
+
+El **costo de compra** muestra el monto tal como se cargó, con su etiqueta de moneda (por ejemplo
+*USD 1.500*). Un monto cargado sin etiqueta muestra **Sin moneda** al lado: lazyit nunca supone una moneda.
+Haz clic en el encabezado **Número de serie**, **Fecha de compra**, **Fin de garantía** o **Costo de
+compra** para ordenar toda la lista por esa columna; los costos se ordenan solo por el monto, sea cual sea
+su etiqueta. El **fabricante** no se puede ordenar.
+
+En el teléfono, las tarjetas de activos siempre muestran los datos habituales, más las columnas de número
+de serie, fabricante y compra y garantía que hayas activado.
+
+## Dónde se compró
+
+Si el activo está vinculado a una [compra](/help/purchases-recording-purchases), su página muestra un panel
+**Compra** en la pestaña **Resumen**, justo después de *Detalles*: la compra y su proveedor, la referencia, las fechas y los números
+de factura, el contacto de soporte del proveedor y los documentos de la compra para descargar. Se muestra
+**solo a quienes pueden ver compras**; los demás siguen viendo el costo y las fechas propios del activo en
+*Detalles*, como antes. El panel marca **Distinto de la compra** cuando el costo del activo no es el precio
+de su compra, y ofrece **Desvincular de la compra** a quienes pueden editar compras y activos. Un activo
+sin vincular ofrece ahí **Vincular a una compra**. Ver
+[Compras — El panel Compra del activo](/help/purchases-recording-purchases#el-panel-compra-del-activo).
 
 ## Activos en el mapa de topología
 
 Si un activo respalda un nodo del [Diagrama de infraestructura](/help/assets-topology-diagram) —por
 ejemplo un host, un NAS o un switch que pusiste en el mapa—, su página de detalle muestra una
 insignia **En la topología** junto al estado, y el mismo indicador aparece como un pequeño ícono de
-compartir al lado del nombre del activo en la lista. Un botón **Ver en la topología** en la página de
-detalle salta directo al mapa, vuela hasta ese nodo y le da un breve resaltado para que reconozcas
+compartir al lado del nombre del activo en la lista. **Ver en la topología**, en el menú **⋯** de la página de
+detalle, salta directo al mapa, vuela hasta ese nodo y le da un breve resaltado para que reconozcas
 cuál es de un vistazo. (Solo ves esto si tenés permiso para ver la topología.) El enlace inverso
 también existe: el panel de detalle de un nodo enlaza su *nombre de inventario* de vuelta a este
 activo, así te movés entre un activo y su nodo en cualquier dirección.
@@ -203,7 +335,7 @@ activo, así te movés entre un activo y su nodo en cualquier dirección.
 ## Documentos
 
 Un activo puede llevar **documentos** — PDFs de garantía, recibos de compra, fotos de daños —
-guardados en el propio registro del activo en lugar de dispersos por unidades y chats. La sección
+guardados en el propio registro del activo en lugar de dispersos por unidades y chats. La pestaña
 **Documentos** de la página de detalle los lista con su nombre, tamaño y fecha de subida.
 
 - **Sube** con el botón, o **arrastra y suelta** archivos sobre la sección. Los tipos admitidos son
@@ -214,6 +346,9 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
   capa de almacenamiento; se conserva el registro de quién lo subió.
 - Subir y eliminar requieren el permiso de escritura de activos; quien pueda ver el activo puede
   descargar.
+- **Tipo** — opcional, texto libre (*Factura*, *Garantía*, *Remito*…), sugerido a partir de los tipos ya
+  usados. Complétalo antes de subir, o ponlo, cámbialo o quítalo después con el lápiz del documento. Se
+  ve junto al nombre del archivo.
 
 > **Copias de seguridad.** Los adjuntos se guardan en el volumen de archivos del servidor, que
 > **aún no está cubierto por la copia de seguridad de la base de datos**. Hasta que llegue el
@@ -223,9 +358,9 @@ guardados en el propio registro del activo en lugar de dispersos por unidades y 
 
 - **Editar** actualiza el activo en su lugar; cada cambio relevante (estado, ubicación, modelo, campos
   personalizados) se escribe en la actividad.
-- **Clonar** abre un nuevo activo precargado a partir de este, con la serie y la etiqueta de activo
+- **Clonar** (en el menú **⋯**) abre un nuevo activo precargado a partir de este, con la serie y la etiqueta de activo
   vacías para que la copia tenga las suyas — útil para registrar un lote de unidades idénticas.
-- **Desactivar** un activo es un borrado lógico: el registro se oculta de la lista normal pero nunca se
+- **Desactivar** un activo (**Eliminar** en el menú **⋯**) es un borrado lógico: el registro se oculta de la lista normal pero nunca se
   destruye, así su historial se conserva. Un administrador puede **restaurar** los activos desactivados,
   lo que además recupera la serie y la etiqueta liberadas (salvo que un activo vigente haya tomado el
   valor mientras tanto). lazyit nunca borra datos de activos de forma definitiva.

@@ -31,6 +31,7 @@ interface LocalAdPerson {
   // Read-only: the offboard sweep needs it for the last-admin skip. The reconcile NEVER writes `role`.
   role: string;
   directoryOffboardedAt: Date | null;
+  directoryReenabledAt: Date | null;
   firstName: string;
   lastName: string;
   directoryAttrs: Prisma.JsonValue | null;
@@ -136,6 +137,7 @@ export class DirectoryReconcileService {
           isActive: true,
           role: true,
           directoryOffboardedAt: true,
+          directoryReenabledAt: true,
           firstName: true,
           lastName: true,
           directoryAttrs: true,
@@ -192,6 +194,16 @@ export class DirectoryReconcileService {
         if (!p.directorySourceId || seenGuids.has(p.directorySourceId))
           continue;
         if (p.directoryOffboardedAt != null) continue; // already offboarded by us
+        // An admin re-enabled them; that holds while they stay absent (#1522).
+        if (p.directoryReenabledAt != null) {
+          counts.skipped += 1;
+          continue;
+        }
+        // Inactive and unstamped = deactivated by hand; stamping it would auto-reactivate them (#1311).
+        if (!p.isActive) {
+          counts.skipped += 1;
+          continue;
+        }
         const lastSeen = lastSeenMs(p.directoryAttrs);
         if (lastSeen != null && lastSeen > cutoff) {
           // Still within grace — leave as-is; a later run offboards it if it stays gone.
@@ -203,7 +215,6 @@ export class DirectoryReconcileService {
         // is written, so the next run re-evaluates and offboards them once another active ADMIN exists —
         // warn, and carry on with the rest of the sweep. Same predicate as the PATCH /users guard.
         if (
-          p.isActive &&
           p.role === 'ADMIN' &&
           !(await this.users.hasAnotherActiveAdmin(p.id))
         ) {
@@ -255,11 +266,12 @@ export class DirectoryReconcileService {
 
   /**
    * Refresh a MATCHED person. FIXED ALLOWLIST (mass-assignment-proof): only firstName/lastName (when
-   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), and a re-activation (isActive=true +
-   * clear directoryOffboardedAt) IFF WE previously offboarded them. NEVER role/externalId/passwordHash/
-   * directoryOnly/sessionEpoch — a reactivated person signs in again (their sessions died at the
-   * offboard). A UserHistory row is written ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a
-   * steady directory doesn't spam the audit log; the count follows the same rule (idempotent re-run).
+   * mapped + changed), directoryAttrs (always — bumps lastSeenAt), clearing directoryReenabledAt and a
+   * leftover stamp on an active person, and a re-activation (isActive=true + clear directoryOffboardedAt)
+   * IFF WE previously offboarded them. NEVER role/externalId/passwordHash/directoryOnly/sessionEpoch — a
+   * reactivated person signs in again (their sessions died at the offboard). A UserHistory row is written
+   * ONLY on a MEANINGFUL change (not a bare lastSeenAt bump), so a steady directory doesn't spam the audit
+   * log; the count follows the same rule (idempotent re-run).
    */
   private async refreshMatched(
     person: LocalAdPerson,
@@ -278,6 +290,14 @@ export class DirectoryReconcileService {
     const changedFields: string[] = [];
     const data: Prisma.UserUpdateInput = {
       directoryAttrs: directoryAttrs as Prisma.InputJsonValue,
+      // Back in the directory, so a manual re-enable no longer needs shielding from the sweep (#1522).
+      ...(person.directoryReenabledAt != null
+        ? { directoryReenabledAt: null }
+        : {}),
+      // An admin already re-enabled them; a leftover stamp would shield a later absence from the sweep.
+      ...(person.isActive && person.directoryOffboardedAt != null
+        ? { directoryOffboardedAt: null }
+        : {}),
     };
     if (firstName && firstName !== person.firstName) {
       data.firstName = firstName;
@@ -291,29 +311,41 @@ export class DirectoryReconcileService {
       changedFields.push('directoryAttrs');
     }
     // Reappeared after WE offboarded them → undo our own soft offboard (never touch a manual deactivation).
-    if (person.directoryOffboardedAt != null) {
-      data.isActive = true;
-      data.directoryOffboardedAt = null;
-      changedFields.push('reactivated');
-    }
+    const reactivate = person.directoryOffboardedAt != null && !person.isActive;
 
-    if (changedFields.length === 0) {
+    if (changedFields.length === 0 && !reactivate) {
       // Only the lastSeenAt heartbeat moved — persist it silently (no history, no "updated" count).
       await this.prisma.user.update({ where: { id: person.id }, data });
       counts.skipped += 1;
       return;
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const recorded = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: person.id }, data });
+      if (reactivate) {
+        // Conditional on our stamp still being there: an admin edit mid-sweep wins (#1311).
+        const { count } = await tx.user.updateMany({
+          where: {
+            id: person.id,
+            isActive: false,
+            directoryOffboardedAt: { not: null },
+            deletedAt: null,
+          },
+          data: { isActive: true, directoryOffboardedAt: null },
+        });
+        if (count === 1) changedFields.push('reactivated');
+      }
+      if (changedFields.length === 0) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', fields: changedFields },
         actor,
       });
+      return true;
     });
-    counts.updated += 1;
+    if (recorded) counts.updated += 1;
+    else counts.skipped += 1;
   }
 
   /**
@@ -388,7 +420,7 @@ export class DirectoryReconcileService {
    * An ACTIVE person also has `sessionEpoch` bumped (#1308, ADR-0086 §8), matching the manual deactivation
    * path: the guard already refuses the inactive row, but refreshMatched's automatic reactivation would
    * otherwise revive every token minted before — including a "keep me signed in" token with no time-based
-   * expiry. An already-inactive person was revoked when they were deactivated, so there is nothing to bump.
+   * expiry. The sweep never sends an already-inactive person here (#1311).
    */
   private async offboard(
     person: LocalAdPerson,
@@ -396,29 +428,35 @@ export class DirectoryReconcileService {
     actor: ActorAttribution,
     counts: DirectorySyncCounts,
   ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: person.id },
+    const offboarded = await this.prisma.$transaction(async (tx) => {
+      // Conditional on the row still matching the sweep's snapshot: an admin edit mid-sweep wins (#1311).
+      const { count } = await tx.user.updateMany({
+        where: {
+          id: person.id,
+          isActive: true,
+          directoryOffboardedAt: null,
+          directoryReenabledAt: null,
+          deletedAt: null,
+        },
         data: {
           isActive: false,
           directoryOffboardedAt: at,
+          sessionEpoch: { increment: 1 },
           // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
-          ...(person.isActive
-            ? {
-                sessionEpoch: { increment: 1 },
-                mcpCredentialEpoch: { increment: 1 },
-              }
-            : {}),
+          mcpCredentialEpoch: { increment: 1 },
         },
       });
+      if (count !== 1) return false;
       await this.history.record(tx, {
         userId: person.id,
         eventType: 'UPDATED',
         payload: { action: 'directorySync', reason: 'offboarded' },
         actor,
       });
+      return true;
     });
-    counts.offboarded += 1;
+    if (offboarded) counts.offboarded += 1;
+    else counts.skipped += 1;
   }
 
   /** True when a LIVE (non-deleted) user already owns this email (the citext live-unique index would trip). */

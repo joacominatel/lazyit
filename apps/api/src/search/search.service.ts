@@ -10,6 +10,7 @@ import {
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
 import type { Principal } from '../auth/principal';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 /** The Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
@@ -20,9 +21,24 @@ export const SEARCH_INDEXES = [
   'applications',
   'infra', // topology nodes (ADR-0070 v1) — kind/status/state filterable (see reindex.ts)
   'consumables', // #873 — name/sku/description searchable; currentStock/unit for the lean hit preview
+  // #1499 (ADR-0099): served only to a caller holding `purchaseOrder:read` — the controller drops both
+  // for anyone else (search.controller.ts), so a VIEWER never sees a hit or a count.
+  'purchases',
+  'suppliers',
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
+
+/**
+ * The indexes that need `purchaseOrder:read` on top of `search:read` (#1499, ADR-0099 D-A / INV-PO-1): a
+ * VIEWER is denied purchases by default, and search must not be a side door to them — no hit, no count.
+ * Enforced twice: the controller drops them from the request, and {@link SearchService.search} drops them
+ * again for any caller, so a future direct caller of the service cannot get them ungated.
+ */
+export const PURCHASE_INDEXES: readonly SearchIndex[] = [
+  'purchases',
+  'suppliers',
+];
 
 /**
  * What each index is allowed to **return** in a hit — pinned to the shared `*HitSchema` (the wire
@@ -48,6 +64,18 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
   // returned so the palette renders a "12 units" preview from the lean hit (zero extra fetch). Keep in
   // lockstep with `ConsumableHitSchema` in @lazyit/shared.
   consumables: ['id', 'name', 'sku', 'description', 'currentStock', 'unit'],
+  // #1499: display fields only. `lineDescriptions` (purchases) and the contact names (suppliers) are
+  // searchable but never returned (SEC-061). Keep in lockstep with `PurchaseHitSchema` / `SupplierHitSchema`.
+  purchases: [
+    'id',
+    'reference',
+    'supplierName',
+    'invoiceNumbers',
+    'status',
+    'orderDate',
+    'createdAt',
+  ],
+  suppliers: ['id', 'name', 'taxId'],
 };
 
 /** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
@@ -132,6 +160,8 @@ export class SearchService {
     // ADR-0060 §5: the read-path folder-access evaluator, used to post-filter article hits so a
     // restricted article never surfaces to a non-matching caller (INV-9, the search-leak fix).
     private readonly folderAccess: FolderAccessService,
+    // #1499: the purchase-index gate's second layer (the controller is the first).
+    private readonly permissions: PermissionResolverService,
   ) {
     const host = process.env.MEILI_HOST;
     const apiKey = process.env.MEILI_MASTER_KEY;
@@ -174,6 +204,24 @@ export class SearchService {
   }
 
   /**
+   * {@link upsert} for several documents in ONE engine task (#1499 — a supplier rename re-projects every
+   * purchase that carries its name). Same contract: fire-and-forget, never throws, logs on failure, no-op
+   * when disabled or when there is nothing to write.
+   */
+  upsertMany(index: SearchIndex, docs: SearchDocument[]): void {
+    if (!this.client || docs.length === 0) return;
+    this.client
+      .index(index)
+      .addDocuments(docs, { primaryKey: 'id' })
+      .catch((err: unknown) => {
+        this.logger.error(
+          { err, index, ids: docs.map((doc) => doc.id), op: 'upsert' },
+          'Dropped Meilisearch sync: failed to index documents (rows stale until next write or reindex)',
+        );
+      });
+  }
+
+  /**
    * Remove a document from an index by id (e.g. on soft-delete). Fire-and-forget: returns
    * immediately, never throws, and logs (CRITICAL) on failure. No-op when disabled.
    */
@@ -209,8 +257,14 @@ export class SearchService {
     limit,
     principal,
   }: SearchArgs): Promise<SearchResults> {
-    const requested: SearchIndex[] =
+    const asked: SearchIndex[] =
       entities && entities.length > 0 ? entities : [...SEARCH_INDEXES];
+    // #1499 defense in depth: never query the purchase indexes for a principal without
+    // `purchaseOrder:read` (an absent principal fails closed), whatever the caller asked for.
+    const requested = await this.withoutUnreadablePurchases(asked, principal);
+    if (requested.length === 0) {
+      return {};
+    }
 
     if (!this.client) {
       return this.emptyResults(requested);
@@ -377,6 +431,20 @@ export class SearchService {
       hits: kept,
       total: Math.max(0, block.total - dropped),
     };
+  }
+
+  /** `indexes` minus the purchase indexes when `principal` lacks `purchaseOrder:read` (#1499). */
+  private async withoutUnreadablePurchases(
+    indexes: SearchIndex[],
+    principal: Principal | undefined,
+  ): Promise<SearchIndex[]> {
+    if (!indexes.some((index) => PURCHASE_INDEXES.includes(index))) {
+      return indexes;
+    }
+    if (await this.permissions.principalHas(principal, 'purchaseOrder:read')) {
+      return indexes;
+    }
+    return indexes.filter((index) => !PURCHASE_INDEXES.includes(index));
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

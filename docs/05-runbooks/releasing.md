@@ -34,7 +34,7 @@ Once `v1.0.0` exists on `master`, releases are cut by CI — you do not tag by h
 4. **Rebuild the production images on the host** (`docker compose ... up -d --build`). The
    version an instance reports comes from the tag: `git describe --tags` → build-arg
    `APP_VERSION`/`GIT_SHA` (baked by `infra/start.sh`/compose) → `GET /instance/version` →
-   **Settings → Instance**.
+   **Settings → General & version** (`/settings/instance`).
 
 > In `bun dev` the app **always reports `dev`** — there is no baked version in dev mode. A real
 > version only appears in a production image build.

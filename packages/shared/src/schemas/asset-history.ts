@@ -43,6 +43,14 @@ export const AssetHistoryEventTypeSchema = z.enum([
   // A RETURN against a returnable delivery made to this asset (ADR-0098): an IN linked via `returnOfId`.
   // Payload: the same keys plus `returnOfId` (the delivery movement id).
   "CONSUMABLE_RETURNED",
+  // The asset was linked to a purchase line (ADR-0099 §2, #1473) — by "link existing assets", or moved from
+  // another line. Payload { purchaseOrderId, purchaseOrderLineId, applied: string[] } plus
+  // { fromPurchaseOrderId, fromPurchaseOrderLineId } on a move. `applied` names the purchase values copied
+  // onto the asset in the same action. A unit GENERATED from a line records it on its CREATED event instead.
+  "PURCHASE_LINKED",
+  // The asset was unlinked from its purchase line. Payload { purchaseOrderId, purchaseOrderLineId }. The
+  // asset's purchase values are never cleared by an unlink.
+  "PURCHASE_UNLINKED",
 ]);
 
 /** Contextual data attached to an event (e.g. `{ from, to }`, `{ userId }`). Unvalidated jsonb. */

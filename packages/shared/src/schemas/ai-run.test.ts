@@ -340,6 +340,18 @@ describe("Requests", () => {
     expect(SendAiMessageSchema.safeParse({ text: "   " }).success).toBe(false);
   });
 
+  test("a purchase page carries the purchase as its context (#1478)", () => {
+    expect(
+      SendAiMessageSchema.safeParse({
+        text: "Here is this purchase order",
+        context: {
+          route: "/purchases/cpurchase00000000000000001",
+          entity: { type: "purchaseOrder", id: "cpurchase00000000000000001" },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
   test("the page context never carries page content", () => {
     expect(
       SendAiMessageSchema.safeParse({
@@ -448,6 +460,16 @@ describe("Input requests (#1388)", () => {
       (e) => e.type === "run.snapshot" && e.status === "AWAITING_INPUT",
     ) as Record<string, unknown>;
     expect(AiRunEventSchema.safeParse(older).success).toBe(true);
+  });
+
+  test("a select may take its options from the suppliers or the consumables (#1478)", () => {
+    for (const optionsFrom of ["suppliers", "consumables"]) {
+      const form = {
+        ...FORM,
+        fields: [{ ...FORM.fields[0]!, optionsFrom, options: [{ value: "c1", label: "Compumundo" }] }],
+      };
+      expect(AiInputFormSchema.safeParse(form).success).toBe(true);
+    }
   });
 
   test("the form contract caps fields and rows", () => {

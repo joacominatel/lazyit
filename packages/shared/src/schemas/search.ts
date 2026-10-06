@@ -20,6 +20,9 @@ export const SEARCH_ENTITIES = [
   "applications",
   "infra", // topology nodes (ADR-0070 v1 — kind/status/state filterable, label/ip/asset name searchable)
   "consumables", // #873 — name/sku/description searchable, currentStock/unit for the lean hit preview
+  // #1499 (ADR-0099) — only for a caller holding `purchaseOrder:read`; the API omits both otherwise.
+  "purchases",
+  "suppliers",
 ] as const;
 
 export const SearchEntitySchema = z.enum(SEARCH_ENTITIES);
@@ -92,6 +95,29 @@ export const ConsumableHitSchema = z.object({
   unit: z.string(),
 });
 
+// A purchase hit (#1499, ADR-0099). Display fields only: the reference, the supplier's name, the invoice
+// numbers, the STORED status (DRAFT / ORDERED / CANCELLED — the received states are derived on read and
+// not indexed) and the two dates the palette titles a purchase with (`orderDate`, else `createdAt`), as
+// ISO strings. The line descriptions are indexed so a purchase is found by what it bought, but never
+// returned (SEC-061); money and notes are never indexed.
+export const PurchaseHitSchema = z.object({
+  id: z.string(),
+  reference: z.string().nullable(),
+  supplierName: z.string().nullable(),
+  invoiceNumbers: z.string().nullable(),
+  status: z.string(),
+  orderDate: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+// A supplier hit (#1499). The name and tax ID; the contact names are indexed (found by "who sells it")
+// but not returned, and contact emails and phones are never indexed.
+export const SupplierHitSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  taxId: z.string().nullable(),
+});
+
 export type AssetHit = z.infer<typeof AssetHitSchema>;
 export type ArticleHit = z.infer<typeof ArticleHitSchema>;
 export type UserHit = z.infer<typeof UserHitSchema>;
@@ -99,6 +125,8 @@ export type LocationHit = z.infer<typeof LocationHitSchema>;
 export type ApplicationHit = z.infer<typeof ApplicationHitSchema>;
 export type InfraNodeHit = z.infer<typeof InfraNodeHitSchema>;
 export type ConsumableHit = z.infer<typeof ConsumableHitSchema>;
+export type PurchaseHit = z.infer<typeof PurchaseHitSchema>;
+export type SupplierHit = z.infer<typeof SupplierHitSchema>;
 
 /** One result block per entity: the hits for that index plus Meili's total estimate. */
 function entityResult<Hit extends z.ZodType>(hit: Hit) {
@@ -110,8 +138,8 @@ function entityResult<Hit extends z.ZodType>(hit: Hit) {
 
 /**
  * The `GET /search` response. Each entity key is **optional**: the endpoint returns only the
- * requested `entities` (all five when the param is omitted), so a scoped query yields a subset of
- * these keys.
+ * requested `entities` (all of them when the param is omitted) that the caller may read, so a scoped
+ * query — or a caller without `user:read` / `purchaseOrder:read` — yields a subset of these keys.
  *
  * `degraded` is the **outage signal** (issue #370): the API is fail-soft — when Meilisearch rejects a
  * read it still returns empty `{ hits, total }` blocks with HTTP 200 so the endpoint stays resilient,
@@ -128,6 +156,8 @@ export const SearchResultsSchema = z
     applications: entityResult(ApplicationHitSchema),
     infra: entityResult(InfraNodeHitSchema),
     consumables: entityResult(ConsumableHitSchema),
+    purchases: entityResult(PurchaseHitSchema),
+    suppliers: entityResult(SupplierHitSchema),
   })
   .partial()
   .extend({

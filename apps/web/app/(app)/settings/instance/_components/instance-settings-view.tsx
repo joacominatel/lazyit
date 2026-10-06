@@ -1,42 +1,25 @@
 "use client";
 
-import {
-  ArrowPathIcon,
-  ArrowTopRightOnSquareIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { IntegrationMode } from "@lazyit/shared";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { RequestIdNote } from "@/components/request-id-note";
+import { SettingsSection } from "@/components/settings-section";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useInstanceVersion } from "@/lib/api/hooks/use-instance-version";
 import { AdminGate } from "../../_components/admin-gate";
-import { AssetTagSchemeEditor } from "./asset-tag-scheme-editor";
-import { DirectorySettingsEditor } from "./directory-settings-editor";
-import { SmtpSettingsEditor } from "./smtp-settings-editor";
 import { UpdatePanel } from "./update-panel";
-
-/** Stable empty breadcrumb for the instance settings PageHeader. */
-const BREADCRUMB = <Breadcrumb />;
 
 /** A label / value row inside a panel; value can be text or a badge. */
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
+    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{children}</span>
     </div>
@@ -44,7 +27,9 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * Settings → Instance body (client). A READ-ONLY view of `GET /config/status`: whether the instance
+ * Settings → General & version body (client; the route stays `/settings/instance`). Since #1533 the
+ * page holds only the instance itself: the Version & updates panel and a READ-ONLY view of
+ * `GET /config/status` — email, directory and asset tags moved to their own Settings pages. The status: whether the instance
  * is configured (an ADMIN exists), the identity-provider posture, the admin count and the runtime
  * posture (dev vs production). Nothing here mutates config — operators change posture via env
  * (ADR-0043); this surface just makes the current state discoverable in-app.
@@ -55,6 +40,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 export function InstanceSettingsView() {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
+  // Explicit crumbs: the path-derived default would print the route segment ("Instance").
   const { data, isLoading, isError, error, refetch, isFetching } =
     useConfigStatus();
   // Version identity (ADR-0083) — its own tiny read; a failure degrades to an em dash, never the card.
@@ -76,11 +62,10 @@ export function InstanceSettingsView() {
 
   return (
     <AdminGate>
-      <div className="space-y-6">
+      <div className="max-w-3xl space-y-6">
         <PageHeader
           title={t("instance.title")}
           subtitle={t("instance.subtitle")}
-          breadcrumb={BREADCRUMB}
           actions={
             <Button
               variant="outline"
@@ -94,110 +79,76 @@ export function InstanceSettingsView() {
           }
         />
 
-        <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-          <div className="space-y-6">
-            {/* Version & updates — the FIRST card (ADR-0084 §5). */}
-            <UpdatePanel />
+        {/* Version & updates — the FIRST section (ADR-0084 §5). */}
+        <UpdatePanel />
 
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("instance.cardTitle")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="space-y-3">
-                    <Skeleton className="h-5 w-full" />
-                    <Skeleton className="h-5 w-full" />
-                    <Skeleton className="h-5 w-full" />
-                    <Skeleton className="h-5 w-full" />
-                  </div>
-                ) : isError ? (
-                  <div className="flex flex-col items-center gap-3 py-2 text-center">
-                    <p className="text-sm font-medium">
-                      {t("instance.loadError")}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {t("instance.loadErrorHint")}
-                    </p>
-                    <RequestIdNote requestId={requestId} />
-                    <Button variant="outline" onClick={() => refetch()}>
-                      <ArrowPathIcon />
-                      {tc("retry")}
-                    </Button>
-                  </div>
-                ) : data ? (
-                  <div className="divide-y">
-                    <InfoRow label={t("instance.rows.configured")}>
-                      {data.isConfigured ? (
-                        <StatusBadge tone="success" dot>
-                          {t("instance.configuredBadge")}
-                        </StatusBadge>
-                      ) : (
-                        <StatusBadge tone="warning" dot>
-                          {t("instance.setupPending")}
-                        </StatusBadge>
-                      )}
-                    </InfoRow>
-                    <InfoRow label={t("instance.rows.identityProvider")}>
-                      {identityProviderLabel[data.integrationMode]}
-                    </InfoRow>
-                    <InfoRow label={t("instance.rows.administrators")}>
-                      <span className="tabular-nums">{data.adminCount}</span>
-                    </InfoRow>
-                    <InfoRow label={t("instance.rows.runtimePosture")}>
-                      <StatusBadge tone={posture.tone} dot>
-                        {posture.label}
-                      </StatusBadge>
-                    </InfoRow>
-                    <InfoRow label={t("instance.rows.version")}>
-                      {version ? (
-                        <span className="font-mono text-xs">
-                          {version.current}
-                          {version.gitSha !== "unknown" &&
-                            !version.current.includes(version.gitSha) && (
-                              <span className="text-muted-foreground">
-                                {" "}
-                                ({version.gitSha})
-                              </span>
-                            )}
+        <SettingsSection
+          title={t("instance.cardTitle")}
+          summary={t("instance.cardSummary")}
+          help={<p>{t("instance.cardHelp")}</p>}
+        >
+          {isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-full" />
+              <Skeleton className="h-5 w-full" />
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center gap-3 py-2 text-center">
+              <p className="text-sm font-medium">{t("instance.loadError")}</p>
+              <p className="text-sm text-muted-foreground">
+                {t("instance.loadErrorHint")}
+              </p>
+              <RequestIdNote requestId={requestId} />
+              <Button variant="outline" onClick={() => refetch()}>
+                <ArrowPathIcon />
+                {tc("retry")}
+              </Button>
+            </div>
+          ) : data ? (
+            <div className="divide-y">
+              <InfoRow label={t("instance.rows.configured")}>
+                {data.isConfigured ? (
+                  <StatusBadge tone="success" dot>
+                    {t("instance.configuredBadge")}
+                  </StatusBadge>
+                ) : (
+                  <StatusBadge tone="warning" dot>
+                    {t("instance.setupPending")}
+                  </StatusBadge>
+                )}
+              </InfoRow>
+              <InfoRow label={t("instance.rows.identityProvider")}>
+                {identityProviderLabel[data.integrationMode]}
+              </InfoRow>
+              <InfoRow label={t("instance.rows.administrators")}>
+                <span className="font-mono tabular-nums">{data.adminCount}</span>
+              </InfoRow>
+              <InfoRow label={t("instance.rows.runtimePosture")}>
+                <StatusBadge tone={posture.tone} dot>
+                  {posture.label}
+                </StatusBadge>
+              </InfoRow>
+              <InfoRow label={t("instance.rows.version")}>
+                {version ? (
+                  <span className="font-mono text-xs">
+                    {version.current}
+                    {version.gitSha !== "unknown" &&
+                      !version.current.includes(version.gitSha) && (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          ({version.gitSha})
                         </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
                       )}
-                    </InfoRow>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <AssetTagSchemeEditor />
-          </div>
-
-          <div className="space-y-6">
-            <SmtpSettingsEditor />
-            <DirectorySettingsEditor />
-            {/* The reporting-agent policy editor moved to Settings → Reporting agents (#1174). This
-                signpost stays because the Manual, install.sh and install.ps1 all still name this page
-                as where the reporting cadence is set — an operator who follows those lands here, and
-                must find the way onward rather than an editor that is no longer on the page. */}
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("instance.agentsMoved.title")}</CardTitle>
-                <CardDescription>
-                  {t("instance.agentsMoved.body")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/settings/agents">
-                    {t("instance.agentsMoved.link")}
-                    <ArrowTopRightOnSquareIcon className="size-4" />
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </InfoRow>
+            </div>
+          ) : null}
+        </SettingsSection>
       </div>
     </AdminGate>
   );

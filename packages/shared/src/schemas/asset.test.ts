@@ -137,3 +137,78 @@ describe("Asset specs read shape stays tolerant", () => {
     expect(AssetSchema.safeParse(row).success).toBe(true);
   });
 });
+
+describe("Asset money fields are 64-bit minor units (ADR-0100)", () => {
+  const ABOVE_INT4 = 3_000_000_000;
+
+  test("create and update accept purchaseCost / salvageValue above the old int4 ceiling", () => {
+    const created = CreateAssetSchema.safeParse({
+      name: "Server",
+      status: "OPERATIONAL",
+      purchaseCost: ABOVE_INT4,
+      salvageValue: ABOVE_INT4,
+    });
+    expect(created.success).toBe(true);
+    expect(created.success && created.data.purchaseCost).toBe(ABOVE_INT4);
+    expect(
+      UpdateAssetSchema.safeParse({ purchaseCost: ABOVE_INT4, salvageValue: ABOVE_INT4 }).success,
+    ).toBe(true);
+  });
+
+  test("rejects an amount above Number.MAX_SAFE_INTEGER", () => {
+    const tooBig = Number.MAX_SAFE_INTEGER + 2;
+    expect(
+      CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL", purchaseCost: tooBig })
+        .success,
+    ).toBe(false);
+    expect(UpdateAssetSchema.safeParse({ salvageValue: tooBig }).success).toBe(false);
+  });
+
+  test("null and absent amounts are unchanged", () => {
+    expect(UpdateAssetSchema.safeParse({ purchaseCost: null, salvageValue: null }).success).toBe(true);
+    expect(CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL" }).success).toBe(true);
+  });
+});
+
+describe("Asset purchase currency label and purchase line (ADR-0099 §2, §5)", () => {
+  const legacyRow = {
+    id: "ckasset0000000000000000001",
+    name: "Legacy laptop",
+    serial: null,
+    assetTag: null,
+    status: "OPERATIONAL",
+    specs: null,
+    notes: null,
+    company: null,
+    purchaseDate: null,
+    warrantyEnd: null,
+    purchaseCost: 150000,
+    modelId: null,
+    locationId: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    deletedAt: null,
+  };
+
+  test("a row without the new keys (an older API) and a row with NULLs both read", () => {
+    expect(AssetSchema.safeParse(legacyRow).success).toBe(true);
+    expect(
+      AssetSchema.safeParse({ ...legacyRow, purchaseCurrency: null, purchaseOrderLineId: null }).success,
+    ).toBe(true);
+  });
+
+  test("create and update accept a free-text label; update can clear it", () => {
+    const created = CreateAssetSchema.parse({ name: "Server", status: "OPERATIONAL", purchaseCurrency: " u$s " });
+    expect(created.purchaseCurrency).toBe("u$s");
+    expect(UpdateAssetSchema.parse({ purchaseCurrency: null })).toEqual({ purchaseCurrency: null });
+    expect(UpdateAssetSchema.safeParse({ purchaseCurrency: "x".repeat(33) }).success).toBe(false);
+  });
+
+  test("purchaseOrderLineId is read-only: no write body accepts it", () => {
+    const line = "cklinepurchase00000000001";
+    expect(
+      CreateAssetSchema.safeParse({ name: "Server", status: "OPERATIONAL", purchaseOrderLineId: line }).success,
+    ).toBe(false);
+    expect(UpdateAssetSchema.safeParse({ purchaseOrderLineId: line }).success).toBe(false);
+  });
+});

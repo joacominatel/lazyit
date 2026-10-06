@@ -27,7 +27,10 @@ import {
   projectConsumable,
   projectInfraNode,
   projectLocation,
+  projectPurchaseOrder,
+  projectSupplier,
   projectUser,
+  PURCHASE_ORDER_SEARCH_SELECT,
 } from '../src/search/search.documents';
 
 const connectionString = process.env.DATABASE_URL;
@@ -46,33 +49,49 @@ const prisma = new PrismaClient({
 const meili = new Meilisearch({ host, apiKey: process.env.MEILI_MASTER_KEY });
 
 async function reindex(): Promise<void> {
-  const [assets, articles, users, locations, applications, infra, consumables] =
-    await Promise.all([
-      prisma.asset.findMany({ where: { deletedAt: null } }),
-      // Draft privacy (ADR-0022): only PUBLISHED articles are searchable.
-      prisma.article.findMany({
-        where: { deletedAt: null, status: 'PUBLISHED' },
-      }),
-      prisma.user.findMany({ where: { deletedAt: null } }),
-      prisma.location.findMany({ where: { deletedAt: null } }),
-      prisma.application.findMany({ where: { deletedAt: null } }),
-      // Infra topology nodes (ADR-0070 v1): soft-deleted nodes are off the map. Join the linked
-      // Asset's `name` for the searchable `assetName` (null when graph-only).
-      prisma.infraNode.findMany({
-        where: { deletedAt: null },
-        select: {
-          id: true,
-          label: true,
-          kind: true,
-          status: true,
-          state: true,
-          ipAddress: true,
-          asset: { select: { name: true } },
-        },
-      }),
-      // Consumables (#873): soft-deleted rows excluded, like every other index. Flat, no joins.
-      prisma.consumable.findMany({ where: { deletedAt: null } }),
-    ]);
+  const [
+    assets,
+    articles,
+    users,
+    locations,
+    applications,
+    infra,
+    consumables,
+    purchases,
+    suppliers,
+  ] = await Promise.all([
+    prisma.asset.findMany({ where: { deletedAt: null } }),
+    // Draft privacy (ADR-0022): only PUBLISHED articles are searchable.
+    prisma.article.findMany({
+      where: { deletedAt: null, status: 'PUBLISHED' },
+    }),
+    prisma.user.findMany({ where: { deletedAt: null } }),
+    prisma.location.findMany({ where: { deletedAt: null } }),
+    prisma.application.findMany({ where: { deletedAt: null } }),
+    // Infra topology nodes (ADR-0070 v1): soft-deleted nodes are off the map. Join the linked
+    // Asset's `name` for the searchable `assetName` (null when graph-only).
+    prisma.infraNode.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true,
+        label: true,
+        kind: true,
+        status: true,
+        state: true,
+        ipAddress: true,
+        asset: { select: { name: true } },
+      },
+    }),
+    // Consumables (#873): soft-deleted rows excluded, like every other index. Flat, no joins.
+    prisma.consumable.findMany({ where: { deletedAt: null } }),
+    // Purchases and suppliers (#1499): archived rows excluded; a purchase joins its supplier's name
+    // and its live lines' descriptions.
+    prisma.purchaseOrder.findMany({
+      where: { deletedAt: null },
+      select: PURCHASE_ORDER_SEARCH_SELECT,
+    }),
+    prisma.supplier.findMany({ where: { deletedAt: null } }),
+  ]);
 
   // `Meilisearch` structurally satisfies the small ReindexClient surface reindexIndex depends on.
   const client = meili as unknown as ReindexClient;
@@ -90,6 +109,8 @@ async function reindex(): Promise<void> {
   );
   await reindexIndex(client, 'infra', infra.map(projectInfraNode));
   await reindexIndex(client, 'consumables', consumables.map(projectConsumable));
+  await reindexIndex(client, 'purchases', purchases.map(projectPurchaseOrder));
+  await reindexIndex(client, 'suppliers', suppliers.map(projectSupplier));
 
   console.log('Reindex complete (full rebuild — stale documents evicted):');
   console.log(`  assets:       ${assets.length}`);
@@ -99,6 +120,8 @@ async function reindex(): Promise<void> {
   console.log(`  applications: ${applications.length}`);
   console.log(`  infra:        ${infra.length}`);
   console.log(`  consumables:  ${consumables.length}`);
+  console.log(`  purchases:    ${purchases.length}`);
+  console.log(`  suppliers:    ${suppliers.length}`);
 }
 
 reindex()

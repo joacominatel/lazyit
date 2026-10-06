@@ -1,4 +1,4 @@
-import type { Attachment } from "@lazyit/shared";
+import type { Attachment, UpdateAttachment } from "@lazyit/shared";
 import { apiFetch, apiFetchBlob } from "../client";
 
 /**
@@ -15,13 +15,21 @@ import { apiFetch, apiFetchBlob } from "../client";
  * through {@link apiFetchBlob} (Bearer → Blob → object URL), never a bare element `src`.
  */
 
-/** Which parent a set of attachments hangs off — selects the REST base path. */
-export type AttachmentParent = "asset" | "article";
+/**
+ * Which parent a set of attachments hangs off — selects the REST base path. `purchaseOrder` is a
+ * purchase's documents (ADR-0099 §10), gated by `purchaseOrder:read` / `:write`.
+ */
+export type AttachmentParent = "asset" | "article" | "purchaseOrder";
+
+const SEGMENT: Record<AttachmentParent, string> = {
+  asset: "assets",
+  article: "articles",
+  purchaseOrder: "purchase-orders",
+};
 
 /** The REST base for a parent's attachment collection (`/assets/:id/attachments`, …). */
 function base(parent: AttachmentParent, parentId: string): string {
-  const segment = parent === "asset" ? "assets" : "articles";
-  return `/${segment}/${encodeURIComponent(parentId)}/attachments`;
+  return `/${SEGMENT[parent]}/${encodeURIComponent(parentId)}/attachments`;
 }
 
 /**
@@ -50,17 +58,38 @@ export function listAttachments(
  * magic bytes (never the client MIME), enforces the allowlist + size cap, and returns the created
  * {@link Attachment}. Throws {@link import("../client").ApiError} on reject (413 too large, 415
  * unsupported type, 507 storage full, 404 parent gone) — the caller surfaces the message.
+ *
+ * `label` is the optional document type label of an asset or purchase document (#1476), sent as the
+ * multipart `label` field only when given; article images take none.
  */
 export function uploadAttachment(
   parent: AttachmentParent,
   parentId: string,
   file: File,
+  label?: string,
 ): Promise<Attachment> {
   const form = new FormData();
+  if (label !== undefined) form.set("label", label);
   form.set("file", file);
   return apiFetch<Attachment>(base(parent, parentId), {
     method: "POST",
     body: form,
+  });
+}
+
+/**
+ * Set or clear a document's type label (#1476) — `{ label: null }` clears it. Asset documents need
+ * `asset:write`, purchase documents `purchaseOrder:write`; only the label is editable, never the file.
+ */
+export function updateAttachmentLabel(
+  parent: Extract<AttachmentParent, "asset" | "purchaseOrder">,
+  parentId: string,
+  attachmentId: string,
+  data: UpdateAttachment,
+): Promise<Attachment> {
+  return apiFetch<Attachment>(`${base(parent, parentId)}/${encodeURIComponent(attachmentId)}`, {
+    method: "PATCH",
+    body: data,
   });
 }
 

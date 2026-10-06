@@ -11,6 +11,7 @@ import {
   CreateApplicationSchema,
   int4,
   MAX_PAGE_LIMIT,
+  money,
   type AiEntityRef,
   type AiPreviewWarningCode,
 } from '@lazyit/shared';
@@ -835,7 +836,7 @@ const applicationUpdateSet = z
     isCritical: z.boolean().optional(),
     notes: z.string().trim().min(1).max(2000).optional(),
     seatsPurchased: int4({ min: 0 }).nullable().optional(),
-    costPerSeat: int4({ min: 0 }).nullable().optional(),
+    costPerSeat: money().nullable().optional(),
     renewalDate: z.iso.datetime().nullable().optional(),
   })
   .refine((set) => Object.keys(set).length > 0, {

@@ -10,7 +10,7 @@ order: 1
 An **asset tag** is the company label you write on a physical sticker — `LZ-0001`, `IT-2026-0042`. By
 default you type each one by hand. lazyit can also assign them automatically from a running number, so
 every new asset gets a consistent, never-colliding tag. This is the **asset tag scheme**, configured
-under **Settings → Instance**.
+under **Settings → Asset tags**.
 
 > The scheme is **off until you turn it on**. With no scheme, asset creation is unchanged: the asset
 > tag is whatever you type, or nothing. Turning it on is a deliberate setting.
@@ -41,7 +41,7 @@ looks like a slow one.
 
 ## Turning it on
 
-Open **Settings → Instance → Asset tag scheme** and switch on **Auto-assign asset tags**. Set the
+Open **Settings → Asset tags** and switch on **Auto-assign** in the **Tag scheme** section. Set the
 prefix, suffix and number width you want, optionally a **Start at** number to seed the counter, then
 **Save scheme**. Configuring the scheme requires the *manage settings* permission.
 
@@ -117,10 +117,22 @@ the label and lazyit acts on what it reads:
 - any other code or text → it runs an asset **search** for that value, so a plain tag sticker still
   finds the unit.
 
-Scanning works in the browser — no app to install — on mobile Safari (iOS), Android Chrome and desktop
-Firefox. It needs **camera permission** and a **secure (HTTPS) connection**; allow the camera when your
-browser asks. If the camera isn't available or you deny access, the same screen offers a **manual
-entry** field — type an asset tag and it runs the same lookup.
+Hold the label steady inside the square. While it looks, the camera shows **Scanning…**; when it reads
+a code it flashes a green check (with a short vibration on phones that support it) and opens the result.
+Besides QR labels it reads Data Matrix and the common barcodes on tag stickers (Code 128, Code 39, EAN,
+UPC, ITF).
+
+If nothing is read after a few seconds, a tip appears. What usually helps:
+
+- **Sharpness first.** A laptop webcam doesn't focus up close: hold the label at the distance where it
+  looks sharp on screen (often 20–30 cm), not right against the lens. A phone focuses on its own.
+- **Light.** Face a window or a lamp; avoid glare on glossy labels.
+- **Flat and steady.** Keep the label flat, square to the camera, and still for a second.
+
+Scanning works in the browser — no app to install — on phones (Safari on iOS, Chrome on Android) and on
+computers with a webcam (Chrome, Safari, Firefox). It needs **camera permission** and a **secure (HTTPS)
+connection**; allow the camera when your browser asks. If the camera isn't available or you deny access,
+the same screen offers a **manual entry** field — type an asset tag and it runs the same lookup.
 
 ## What's next
 

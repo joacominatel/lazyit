@@ -3,7 +3,7 @@ title: Backups & Disaster Recovery
 tags: [runbook, database, backups, disaster-recovery]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-10-02
 ---
 
 # Runbook — backups & disaster recovery
@@ -24,13 +24,13 @@ right order. lazyit holds sensitive inventory/access data on a single host
 
 | # | Item | Where | Back up? | How to recover if lost |
 | - | --- | --- | --- | --- |
-| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY` and `AI_SECRET_KEY` (both optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
+| 1 | **`infra/env/.env.prod`** | host file (gitignored) | **YES — off-host, encrypted** | Irreplaceable. Holds the DB password, `WORKFLOW_SECRET_KEY` and (OIDC mode) `ZITADEL_MASTERKEY` — the unrotatable DR linchpins — plus `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` (all optional and low-DR — see below), OIDC secrets, and (local mode) `SESSION_SIGNING_SECRET` (low-DR, rotatable — see below). |
 | 2 | **App database** | `db` (Postgres 18, `db_data` volume) | **YES — `pg_dump`** | Restore from dump. In **local-auth mode** this also carries the user **password hashes** (argon2id `passwordHash`) — no separate auth store to back up. |
 | 3 | **Zitadel database** (OIDC mode only) | `zitadel_db` (Postgres 16, `zitadel_db_data` volume) | **YES — `pg_dump`**, when `AUTH_MODE=oidc` | Restore from dump **+ the same `ZITADEL_MASTERKEY`**. **Absent in local-auth mode** — there is no `zitadel_db`, and the backup sidecar's cron skips this dump (ADR-0086). |
 | 4 | Meilisearch index | `meili_data_v1_53_2` volume (named per server version) | No (rebuildable) | Nothing to do: on boot the API rebuilds any empty/missing index from the database; `reindex:all` forces a full rebuild ([[0035-search-architecture]]). |
 | 5 | Caddy TLS state | `caddy_data` / `caddy_config` volumes | No (re-issuable) | Caddy re-obtains certs from Let's Encrypt (or re-mints its internal CA) automatically. |
 | 6 | **Secret Manager vault values** | App database (rows in `secret_vaults` / `secret_items` / `vault_memberships` / `user_keypairs`) | Covered by item #2 (**no extra backup needed**) | Zero-knowledge: a DB restore brings back ciphertext + wrapped DEKs. Values are readable only by a surviving member's vault passphrase or off-host recovery key — the server cannot re-enter them, unlike `WORKFLOW_SECRET_KEY`. See below. |
-| 7 | **File attachments (blobs)** | `attachments_data` volume (asset documents + KB inline images, [[0082-attachments-storage]]) | ⚠ **NOT covered by any backup yet** — deferred to v1.1 **by decision** (see ADR-0082 "Deferred") | **Not recoverable today.** `pg_dump` captures only the `attachments` metadata rows (item #2), never the bytes. Until the sidecar tars the volume, copy it off-host manually if you care: `docker run --rm -v lazyit_attachments_data:/a -v "$PWD/backups":/b alpine tar czf /b/attachments-$(date +%F).tgz -C /a .` |
+| 7 | **File attachments (blobs)** | `attachments_data` volume (asset documents, **purchase documents** — invoices, orders, delivery notes — and KB inline images, [[0082-attachments-storage]]) | ⚠ **NOT covered by any backup yet** — deferred to v1.1 **by decision** (see ADR-0082 "Deferred"); the backup is tracked in #1467 | **Not recoverable today.** `pg_dump` captures only the `attachments` metadata rows (item #2), never the bytes. Until the sidecar tars the volume, copy it off-host manually if you care: `docker run --rm -v lazyit_attachments_data:/a -v "$PWD/backups":/b alpine tar czf /b/attachments-$(date +%F).tgz -C /a .` |
 
 > [!warning] `ZITADEL_MASTERKEY` is unrotatable and irreplaceable
 > It decrypts Zitadel's store. Losing it = losing all logins, even with a perfect DB dump. Keep a
@@ -46,7 +46,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > off-host with the *matching* DB dump. Never generate a fresh one on a restore.
 
 > [!warning] `SMTP_SECRET_KEY` is a *fourth* server-held master key — but OPTIONAL and trivially recoverable (ADR-0079)
-> The instance SMTP password (Settings → Instance → SMTP) is encrypted at rest (`SmtpSettings`,
+> The instance SMTP password (Settings → Email) is encrypted at rest (`SmtpSettings`,
 > AES-256-GCM) under `SMTP_SECRET_KEY` — its own key axis, SEPARATE from `WORKFLOW_SECRET_KEY` ("one key
 > per subsystem"). A DB restore **without the matching `SMTP_SECRET_KEY`** yields an **undecryptable SMTP
 > password**: outbound email stops until an admin re-enters the password in the UI. Unlike the three
@@ -88,9 +88,29 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > copy's own retention). Restoring an old dump brings those transcripts back until the next retention
 > sweep. Keep backup retention in line with what your organization expects of AI transcripts.
 
+> [!info] `DIRECTORY_SECRET_KEY` — the LDAP bind password's at-rest key: OPTIONAL and low-DR, like `SMTP_SECRET_KEY` (ADR-0091)
+> When an admin configures directory sync (Settings → Directory), the read-only LDAP
+> **bind password** is stored encrypted (AES-256-GCM) under `DIRECTORY_SECRET_KEY` — its own key axis,
+> separate from `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `WORKFLOW_SECRET_KEY`. **Back it up alongside
+> them**, in the same off-host copy of `.env.prod`. A DB restore **without the matching key** leaves the
+> stored bind password undecryptable: the scheduled sync and *Sync now* fail to bind until an admin
+> re-types the password — the imported people and their history live in the app DB (item #2) and are
+> untouched. The key is **optional** (unset ⇒ the app boots unchanged; only saving a connection *with* a
+> bind password 409s, and that rejects the whole save), so it is not a DR linchpin.
+>
+> A guided install **generates this key** (`infra/start.sh`, issue #1271), and `./infra/start.sh
+> --reconfigure` and a re-run of `./infra/start.sh` on an existing install that lacks it add it; all of
+> them **preserve a present key verbatim**, whatever encoding it uses. Nothing can have been encrypted
+> under a key that was never set, so adding one orphans nothing. **Never regenerate a key that is
+> already in the file**: the stored bind password becomes undecryptable and must be re-typed. The same
+> restore caveat as above applies — a `.env.prod` backup older than the key, restored onto a database
+> holding a bind password encrypted under it, gets a fresh key from `start.sh` and the password must be
+> re-entered — so refresh the off-host copy whenever `start.sh` reports it added a key.
+
 > [!warning] Attachments are NOT backed up yet (item #7) — an accepted, LOUD gap
 > [[0082-attachments-storage]] puts uploaded files (warranty PDFs, receipts, damage photos, KB
-> images) on the `attachments_data` **filesystem volume** — which **no `pg_dump` captures and the
+> images, and since Purchases the purchase documents — invoices, orders, delivery notes) on the
+> `attachments_data` **filesystem volume** — which **no `pg_dump` captures and the
 > backup sidecar does not tar yet**. A host disk loss today loses **every attachment** while the DB
 > restores cleanly: the `attachments` rows come back pointing at vanished blobs (they degrade to a
 > broken-file 404, never a crash — the soft-ref design). This is precisely the partial-backup
@@ -98,6 +118,12 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > explicitly deferred to v1.1 (extend the sidecar to `tar` the volume on the same `BACKUP_CRON` /
 > `BACKUP_RETENTION_DAYS` / `BACKUP_OFFSITE_CMD` knobs — ADR-0082 "Deferred"). Until that ships,
 > treat attachments as expendable or run the manual `tar` in row #7 alongside your dumps.
+>
+> **Purchase documents raise the stakes.** They are financial evidence, and
+> [[0099-purchases-scope-model-and-optionality|ADR-0099]] §12 asked for the attachments backup before or
+> alongside Purchases. It has **not** shipped: #1467 is open, deferred by the CEO. Until it does, the
+> purchase's documents panel tells operators the files are not in the backup — run the manual `tar` if you
+> keep invoices only in lazyit.
 
 > [!info] `SESSION_SIGNING_SECRET` (local-auth mode) is rotatable and LOW-DR — not a linchpin (ADR-0086)
 > In **local-auth mode** (`AUTH_MODE=local`) the API signs its first-party session tokens (HMAC) with

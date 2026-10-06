@@ -10,18 +10,20 @@ order: 3
 El **esquema de etiquetas de activos** asigna automáticamente una etiqueta correlativa a los activos
 nuevos — un prefijo, un número rellenado con ceros y un sufijo (por ejemplo `IT-0042-HW`). Está
 **desactivado hasta que lo activas**, y una etiqueta que escribas a mano en un activo siempre tiene
-prioridad. Se configura en **Configuración → Instancia** (solo administradores).
+prioridad. Se configura en **Configuración → Etiquetas de activos** (solo administradores; en el menú
+lateral de Configuración está bajo **Inventario**). El encabezado de la página muestra **Activado** o
+**Desactivado**.
 
 ## Diseñar el esquema
 
-El editor tiene cuatro campos y una **vista previa en vivo** que muestra la etiqueta que realmente
+La sección **Esquema de etiquetas** tiene cuatro campos y una **vista previa en vivo** que muestra la etiqueta que realmente
 recibiría el próximo activo a medida que escribes: ya trae aplicada la regla de saltar las existentes
 que se explica más abajo, así que si el número del contador está ocupado, la vista previa muestra el
 libre que se usaría en su lugar e indica cuántos omitió. Nunca reserva ese número, de modo que refleja
-el estado actual del parque en vez de prometer una etiqueta. Con el esquema desactivado, la tarjeta se
-titula **Forma de la etiqueta** y no muestra ningún número: solo tu prefijo y tu sufijo alrededor de
+el estado actual del parque en vez de prometer una etiqueta. Con el esquema desactivado, la vista previa
+se titula **Forma de la etiqueta** y no muestra ningún número: solo tu prefijo y tu sufijo alrededor de
 una ranura descrita (`IT-` y luego *4 dígitos*), porque no se asigna nada y cualquier número impreso
-ahí sería uno que el asignador nunca va a entregar. Si la consulta falla, la tarjeta lo dice y ofrece
+ahí sería uno que el asignador nunca va a entregar. Si la consulta falla, la vista previa lo dice y ofrece
 **Reintentar** en vez de esperar en silencio.
 
 - **Prefijo** — texto antes del número (p. ej. `IT-`). Opcional.
@@ -31,9 +33,11 @@ ahí sería uno que el asignador nunca va a entregar. Si la consulta falla, la t
 - **Empezar en** — opcional. Reinicia el contador para que la siguiente etiqueta empiece en este
   número. Déjalo en blanco para continuar la secuencia existente.
 
-Activa el esquema con el interruptor **Asignar etiquetas de activo automáticamente**. Mientras está
-activado, cualquier activo nuevo creado sin etiqueta recibe el siguiente número de forma automática.
-Mientras está desactivado, no se asigna nada.
+El **?** junto a cada etiqueta guarda la explicación del campo. Activa el esquema con el interruptor
+**Asignar automáticamente** del encabezado de la sección. Mientras está activado, cualquier activo nuevo
+creado sin etiqueta recibe el siguiente número de forma automática. Mientras está desactivado, no se
+asigna nada. El interruptor es parte del formulario: como los campos, se aplica al pulsar **Guardar
+esquema**.
 
 > El contador solo avanza **hacia adelante**. Los números pueden tener huecos — eso es esperado y
 > correcto. Una etiqueta que escribiste a mano nunca la sobrescribe la asignación automática.
@@ -54,8 +58,8 @@ automática — haz clic para aceptarla.
 ## Etiquetar los activos existentes (backfill)
 
 Activar el esquema etiqueta los activos **nuevos** de ahí en adelante; no etiqueta de forma retroactiva
-lo que ya tienes. Para etiquetar el parque existente, usa **Etiquetar activos existentes** (visible una
-vez activado el esquema). Abre un asistente:
+lo que ya tienes. Para etiquetar el parque existente, usa **Etiquetar activos existentes**, junto a
+**Guardar esquema** (visible mientras el interruptor **Asignar automáticamente** esté activado). Abre un asistente:
 
 1. **Elige qué etiquetar.** Dos modos:
    - **Solo sin etiqueta** (la opción por defecto y segura) — solo los activos que aún no tienen

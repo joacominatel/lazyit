@@ -18,10 +18,26 @@ describe("entityHref", () => {
     expect(entityHref(ref({ type: "infraNode", id: "n1" }))).toBe("/assets/diagram?node=n1&focus=1");
   });
 
+  test("purchases and suppliers open their pages; a purchase document its purchase's (#1478)", () => {
+    expect(entityHref(ref({ type: "purchaseOrder", id: "cpo1" }))).toBe("/purchases/cpo1");
+    expect(entityHref(ref({ type: "supplier", id: "csup1" }))).toBe("/purchases/suppliers/csup1");
+    expect(
+      entityHref(ref({ type: "purchaseDocument", id: "catt1", parent: { type: "purchaseOrder", id: "cpo1" } })),
+    ).toBe("/purchases/cpo1");
+    expect(entityHref(ref({ type: "purchaseDocument", id: "catt1" }))).toBeNull();
+  });
+
   test("the asset tag scheme opens the instance settings page, whatever its id (#1394)", () => {
-    expect(entityHref(ref({ type: "assetTagScheme", id: "singleton" }))).toBe("/settings/instance");
-    expect(entityHref(ref({ type: "assetTagScheme", id: "../x" }))).toBe("/settings/instance");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "singleton" }))).toBe("/settings/asset-tags");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "../x" }))).toBe("/settings/asset-tags");
     expect(entityHref(ref({ type: "assetTagScheme", id: "" }))).toBeNull();
+  });
+
+  test("a custom asset status opens the Statuses tab of Settings → Taxonomies (ADR-0101)", () => {
+    expect(entityHref(ref({ type: "assetStatusLabel", id: "clabel1" }))).toBe(
+      "/settings/taxonomies?tab=statuses",
+    );
+    expect(entityHref(ref({ type: "assetStatusLabel", id: "" }))).toBeNull();
   });
 
   test("routes articles by slug, and none without one", () => {

@@ -115,6 +115,19 @@ export const PERMISSION_META: Record<Permission, PermissionMeta> = {
     pillar: "inventory",
     tier: "delete",
   },
+  // Purchases (ADR-0099 §8) — purchases, their lines and documents, and suppliers. Separate toggles from
+  // "inventory" because `read` is VIEWER-denied by default (purchases carry prices and suppliers).
+  "purchaseOrder:read": { label: "View purchases & suppliers", pillar: "inventory", tier: "view" },
+  "purchaseOrder:write": {
+    label: "Record & edit purchases",
+    pillar: "inventory",
+    tier: "edit",
+  },
+  "purchaseOrder:delete": {
+    label: "Delete purchases & suppliers",
+    pillar: "inventory",
+    tier: "delete",
+  },
   "assetModel:read": { label: "View asset models", pillar: "inventory", tier: "view" },
   "assetModel:write": {
     label: "Add & edit asset models",
@@ -380,6 +393,9 @@ export const CAPABILITY_IDS = [
   "inventory.edit",
   "inventory.delete",
   "inventory.import",
+  "purchaseOrder.view",
+  "purchaseOrder.edit",
+  "purchaseOrder.delete",
   "infra.view",
   "infra.manage",
   // Access
@@ -493,6 +509,31 @@ export const CAPABILITIES: readonly Capability[] = [
       "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit.",
     pillar: "inventory",
     permissions: ["import:run"],
+  },
+  // Purchases (ADR-0099 §8) — on their own toggles, not bundled into "inventory": `view` is VIEWER-denied
+  // by default (prices, suppliers), so an admin decides it separately from viewing the inventory.
+  {
+    id: "purchaseOrder.view",
+    label: "View purchases & suppliers",
+    description:
+      "See purchases, their lines, prices and documents, and the supplier directory.",
+    pillar: "inventory",
+    permissions: ["purchaseOrder:read"],
+  },
+  {
+    id: "purchaseOrder.edit",
+    label: "Record & edit purchases",
+    description:
+      "Create and edit purchases, their lines and suppliers, receive units and link assets to a purchase.",
+    pillar: "inventory",
+    permissions: ["purchaseOrder:write"],
+  },
+  {
+    id: "purchaseOrder.delete",
+    label: "Delete purchases & suppliers",
+    description: "Archive and restore purchases and suppliers. Linked assets keep their link.",
+    pillar: "inventory",
+    permissions: ["purchaseOrder:delete"],
   },
   // The infra topology graph (ADR-0070) — `view` and `manage` as separate toggles. `manage` is
   // above-default tier (coarse, ⚠ admin-level); an asset-backed node create also needs `asset:write`.

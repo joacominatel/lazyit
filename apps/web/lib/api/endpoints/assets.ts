@@ -56,6 +56,8 @@ export interface AssetFilters {
   modelId?: string;
   locationId?: string;
   status?: AssetStatus;
+  /** One custom status (ADR-0101). `status` still filters the built-in status, every custom one included. */
+  statusLabelId?: string;
   /** Exact-match grouping filter on the free-text company value (ADR-0076). */
   company?: string;
   /** Restrict to assets currently assigned (live) to this user (a User uuid). Server-side filter. */
@@ -69,6 +71,22 @@ export interface AssetFilters {
   limit?: number;
   offset?: number;
   deleted?: "only";
+  /**
+   * Purchase provenance filters (#1476), list read only — the CSV export does not take them. The API
+   * refuses them (403) without `purchaseOrder:read`, and they reveal provenance (ADR-0099 D-A), so callers
+   * build them through `purchaseAssetFilter`, which drops them for a viewer without the permission.
+   */
+  purchase?: PurchaseAssetFilter;
+}
+
+/**
+ * The asset list's purchase filters, AND-combined by the API: the assets on one line, on any line of one
+ * purchase, or linked to some purchase (`true`) / to none (`false`).
+ */
+export interface PurchaseAssetFilter {
+  purchaseOrderLineId?: string;
+  purchaseOrderId?: string;
+  purchaseLinked?: boolean;
 }
 
 /**
@@ -80,7 +98,7 @@ export interface AssetFilters {
  */
 /**
  * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
- * `q`, `categoryId`, `modelId`, `locationId`, `status`, `company`, `assignedToUserId`, `ownership`,
+ * `q`, `categoryId`, `modelId`, `locationId`, `status`, `statusLabelId`, `company`, `assignedToUserId`, `ownership`,
  * `warranty`, `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the
  * list and can never drift from it.
  */
@@ -93,12 +111,34 @@ function appendAssetFilterParams(
   if (filters.modelId) params.set("modelId", filters.modelId);
   if (filters.locationId) params.set("locationId", filters.locationId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.statusLabelId) params.set("statusLabelId", filters.statusLabelId);
   if (filters.company) params.set("company", filters.company);
   if (filters.assignedToUserId)
     params.set("assignedToUserId", filters.assignedToUserId);
   if (filters.ownership) params.set("ownership", filters.ownership);
   if (filters.warranty) params.set("warranty", filters.warranty);
   if (filters.deleted) params.set("deleted", filters.deleted);
+}
+
+/**
+ * The query string of the list read: the shared filters, the purchase filters (list only), sort and the
+ * page window. Pure; exported for the test that pins which purchase params are ever sent.
+ */
+export function assetListSearchParams(filters: AssetFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  appendAssetFilterParams(params, filters);
+  const purchase = filters.purchase;
+  if (purchase?.purchaseOrderLineId) params.set("purchaseOrderLineId", purchase.purchaseOrderLineId);
+  if (purchase?.purchaseOrderId) params.set("purchaseOrderId", purchase.purchaseOrderId);
+  if (purchase?.purchaseLinked !== undefined) params.set("purchaseLinked", String(purchase.purchaseLinked));
+  if (filters.sort) {
+    params.set("sort", filters.sort);
+    if (filters.dir) params.set("dir", filters.dir);
+  }
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined)
+    params.set("offset", String(filters.offset));
+  return params;
 }
 
 export function getAssets(
@@ -109,16 +149,7 @@ export function getAssets(
   // Client callers omit it and `apiFetch` falls back to the session-token store, unchanged.
   token?: string,
 ): Promise<AssetListPage> {
-  const params = new URLSearchParams();
-  appendAssetFilterParams(params, filters);
-  if (filters.sort) {
-    params.set("sort", filters.sort);
-    if (filters.dir) params.set("dir", filters.dir);
-  }
-  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
-  if (filters.offset !== undefined)
-    params.set("offset", String(filters.offset));
-  const qs = params.toString();
+  const qs = assetListSearchParams(filters).toString();
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
 }
 
@@ -205,14 +236,14 @@ export function batchRestoreAssets(ids: BatchIds["ids"]): Promise<BatchResult> {
   });
 }
 
-/** Bulk set the status of many assets (one CHANGED history event per item). */
-export function batchSetAssetStatus(
-  ids: BatchAssetStatus["ids"],
-  status: BatchAssetStatus["status"],
-): Promise<BatchResult> {
+/**
+ * Bulk set the status of many assets (one STATUS_CHANGED history event per changed item). The body names
+ * a built-in `status`, a custom status (`statusLabelId`, ADR-0101), or both (they must agree).
+ */
+export function batchSetAssetStatus(body: BatchAssetStatus): Promise<BatchResult> {
   return apiFetch<BatchResult>(`${BASE}/batch/status`, {
     method: "POST",
-    body: { ids, status },
+    body,
   });
 }
 

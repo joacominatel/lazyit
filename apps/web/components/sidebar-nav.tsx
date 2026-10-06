@@ -13,6 +13,7 @@ import {
   ServerStackIcon,
   ShareIcon,
   ShieldCheckIcon,
+  ShoppingCartIcon,
   Squares2X2Icon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -92,7 +93,7 @@ const ACTIVE_ICON_BY_PILLAR: Record<Pillar | "default", string> = {
  * section, instead of a flat 7-item list (which contradicted the three-pillars
  * mental model and split Assets from Consumables).
  *
- *   Inventory → Assets, Consumables   (reunited)
+ *   Inventory → Assets, Consumables (reunited), Purchases
  *   Access    → Applications          (the route stays /applications; the
  *                                      section name "Access" is the pillar — this
  *                                      resolves the Access-vs-Applications split:
@@ -134,6 +135,15 @@ const NAV: NavSection[] = [
         permission: "infra:read",
       },
       { labelKey: "consumables", href: "/consumables", icon: CubeIcon },
+      // Purchases (ADR-0099 §1): purchases and suppliers, gated on `purchaseOrder:read` (ADMIN + MEMBER by
+      // default; VIEWER denied). No instance switch — the area is always there for those who may read it,
+      // and optional at entry. The API's guard is the real gate; this hides the link (fails closed).
+      {
+        labelKey: "purchases",
+        href: "/purchases",
+        icon: ShoppingCartIcon,
+        permission: "purchaseOrder:read",
+      },
       // The guided bulk Migrator (ADR-0069) is NOT in the primary nav: it is an occasional ADMIN action,
       // so it is surfaced from Settings (a "Bulk import" card, same `import:run` gate) — issue #639.
     ],

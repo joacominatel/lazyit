@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { PurchaseSearchSync } from './purchase-search.sync';
 import { SearchBootstrapService } from './search-bootstrap.service';
 import { SearchReconcileSweeper } from './search-reconcile.sweeper';
 import { SearchController } from './search.controller';
@@ -17,14 +18,22 @@ import { ArticleCategoriesModule } from '../article-categories/article-categorie
  * ADR-0035 amendment 2026-06-14) so a dropped fire-and-forget write self-heals on a timer without a
  * manual `reindex:all`. Cadence: `SEARCH_RECONCILE_INTERVAL_MS` (default hourly).
  *
+ * {@link PurchaseSearchSync} is the write-path sync for purchases and suppliers (#1499): a committed write
+ * names the record and the sync re-reads and re-projects it. Exported, so the purchases module injects it.
+ *
  * Imports {@link ArticleCategoriesModule} for the FolderAccessService — the ADR-0060 §5 article search
  * post-filter (INV-9) that drops a restricted article hit from a non-matching caller's results.
  */
 @Global()
 @Module({
   imports: [ArticleCategoriesModule],
-  providers: [SearchService, SearchBootstrapService, SearchReconcileSweeper],
-  exports: [SearchService],
+  providers: [
+    SearchService,
+    SearchBootstrapService,
+    SearchReconcileSweeper,
+    PurchaseSearchSync,
+  ],
+  exports: [SearchService, PurchaseSearchSync],
   controllers: [SearchController],
 })
 export class SearchModule {}

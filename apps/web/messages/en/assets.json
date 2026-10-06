@@ -28,7 +28,7 @@
     "batchRestoreError": "Couldn't restore the selected assets",
     "batchStatusError": "Couldn't update the selected assets",
     "batchDeleteError": "Couldn't delete the selected assets",
-    "setStatusPlaceholder": "Set status…",
+    "setStatus": "Set status",
     "restore": "Restore",
     "assign": "Assign",
     "unassign": "Unassign",
@@ -41,12 +41,17 @@
     "columns": {
       "name": "Name",
       "assetTag": "Asset tag",
+      "serial": "Serial",
+      "manufacturer": "Manufacturer",
       "model": "Model",
       "category": "Category",
       "location": "Location",
       "company": "Company",
       "status": "Status",
       "owners": "Owners",
+      "purchaseDate": "Purchase date",
+      "warrantyEnd": "Warranty end",
+      "purchaseCost": "Purchase cost",
       "updated": "Updated",
       "actions": "Actions"
     },
@@ -55,19 +60,26 @@
       "groups": {
         "details": "Details",
         "status": "Status",
+        "purchase": "Purchase & warranty",
         "activity": "Activity"
       },
       "columns": {
         "assetTag": "Asset tag",
+        "serial": "Serial",
+        "manufacturer": "Manufacturer",
         "model": "Model",
         "category": "Category",
         "location": "Location",
         "company": "Company",
         "status": "Status",
         "owners": "Owners",
+        "purchaseDate": "Purchase date",
+        "warrantyEnd": "Warranty end",
+        "purchaseCost": "Purchase cost",
         "updated": "Updated"
       }
     },
+    "noCurrency": "No currency",
     "filters": {
       "moreFilters": "Filters",
       "allStatuses": "All statuses",
@@ -100,7 +112,10 @@
       "owner": "Owner: {value}",
       "owners": "Owners: {value}",
       "warranty": "Warranty: {value}"
-    }
+    },
+    "linkToPurchase": "Link to purchase",
+    "createPurchase": "Create purchase",
+    "purchaseActions": "Purchase"
   },
   "empty": {
     "title": "Nothing tracked yet",
@@ -150,6 +165,9 @@
     },
     "purchaseCost": "Purchase cost",
     "purchaseCostPlaceholder": "e.g. 1200.00",
+    "purchaseCurrency": "Currency",
+    "purchaseCurrencyPlaceholder": "e.g. ARS, USD",
+    "purchaseCurrencyHelp": "Optional label for the amounts, as your team writes it. Never converted.",
     "usefulLifeMonths": "Useful life",
     "usefulLifeMonthsPlaceholder": "e.g. 36",
     "usefulLifeMonthsHelp": "In months. Drives straight-line depreciation.",
@@ -228,6 +246,7 @@
     "purchaseCost": "Purchase cost",
     "bookValue": "Book value",
     "bookValueHint": "Straight-line depreciated value as of today.",
+    "noCurrency": "No currency",
     "notes": "Notes",
     "customFieldsTitle": "Custom fields",
     "noCustomFields": "No custom fields recorded.",
@@ -303,6 +322,7 @@
       "assignedTo": "to {name}",
       "releasedFrom": "from {name}",
       "statusChange": "{from} → {to}",
+      "statusWithLabel": "{label} ({status})",
       "events": {
         "created": "Created",
         "updated": "Updated",
@@ -317,7 +337,9 @@
         "deleted": "Deleted",
         "restored": "Restored",
         "consumableDelivered": "Consumable delivered",
-        "consumableReturned": "Consumable returned"
+        "consumableReturned": "Consumable returned",
+        "purchaseLinked": "Purchase linked",
+        "purchaseUnlinked": "Purchase unlinked"
       },
       "details": {
         "created": "Asset created",
@@ -336,8 +358,49 @@
         "consumableReturned": "{quantity} {unit} of <link>{name}</link> returned",
         "consumableDeliveredFallback": "A consumable was delivered to this asset",
         "consumableReturnedFallback": "A consumable was returned from this asset",
-        "consumableUnitFallback": "units"
+        "consumableUnitFallback": "units",
+        "purchaseLinked": "Linked to a purchase",
+        "purchaseUnlinked": "Unlinked from its purchase — its purchase values stay as they were",
+        "openPurchase": "Open purchase"
       }
+    },
+    "moreActions": "More actions",
+    "customFieldsCount": "{count, plural, one {# field} other {# fields}}",
+    "groups": {
+      "identification": "Identification",
+      "lifecycle": "Lifecycle"
+    },
+    "tabs": {
+      "label": "Asset sections",
+      "overview": "Overview",
+      "activity": "Activity",
+      "documents": "Documents",
+      "consumables": "Consumables"
+    },
+    "facts": {
+      "owner": "Owner",
+      "unassigned": "Unassigned",
+      "since": "since {date}",
+      "moreOwners": "{count, plural, one {and # more owner} other {and # more owners}}",
+      "location": "Location",
+      "noLocation": "No location",
+      "warranty": "Warranty",
+      "noWarranty": "Not recorded",
+      "warrantyActive": "Active",
+      "warrantyExpiring": "Ends soon",
+      "warrantyExpired": "Expired",
+      "daysLeft": "{count, plural, one {# day left} other {# days left}}",
+      "expiredAgo": "{count, plural, =0 {today} one {# day ago} other {# days ago}}",
+      "valueOf": "of {cost}",
+      "noValue": "No purchase cost"
+    },
+    "attention": {
+      "label": "Needs attention",
+      "warrantyExpiring": "Warranty ends in {count, plural, one {# day} other {# days}}",
+      "warrantyExpired": "{count, plural, =0 {Warranty expired today} one {Warranty expired # day ago} other {Warranty expired # days ago}}",
+      "deactivatedOwner": "Still assigned to {name}, whose account is deactivated",
+      "awaitingAck": "{name} hasn't acknowledged receipt yet",
+      "awaitingAckMany": "{count} owners haven't acknowledged receipt yet"
     }
   },
   "rowActions": {
@@ -413,7 +476,36 @@
       "viewInventory": "View in inventory",
       "receiveMore": "Receive more",
       "done": "Done"
-    }
+    },
+    "line": {
+      "title": "Receive units",
+      "description": "{purchase} · {line} · {pending, plural, =0 {nothing pending} one {# unit pending} other {# units pending}}",
+      "fromPurchase": "From purchase",
+      "fromPurchaseHelp": "Optional — receive against a purchase line that is still waiting for units. Everything is filled in from the purchase.",
+      "modelMissing": "This line has no model yet. Pick or create one — it is saved on the line, and the units follow it.",
+      "modelSaveError": "Couldn't save the model on the line",
+      "quantityHelp": "{pending, plural, =0 {Nothing pending on this line} one {# unit pending} other {# units pending}}. Follows the serials you paste.",
+      "serialsHelp": "One serial per line. The quantity follows the serials; leave it blank to receive units without a serial.",
+      "overWarning": "This line expects {ordered} and would end up with {after}. Receiving more is allowed — the line will show as over-received.",
+      "overResult": "The line now has {received} received of {ordered} expected.",
+      "raise": "Raise the line to {quantity}",
+      "raisedToast": "Line raised to {quantity}",
+      "raiseError": "Couldn't change the line quantity",
+      "fromThePurchase": "From the purchase",
+      "change": "Change",
+      "costEach": "Cost per unit",
+      "costWithCurrency": "Purchase cost (each, {currency})",
+      "warrantyEnd": "Warranty end",
+      "dateFromInvoice": "The purchase's invoice date.",
+      "dateToday": "Today — the purchase has no invoice date yet.",
+      "dateFromInvoiceShort": "invoice date",
+      "dateTodayShort": "today",
+      "locationFromPurchase": "Location: where the purchase is delivered. The purchase's documents show on each unit.",
+      "noLocation": "No delivery location on the purchase. The purchase's documents show on each unit.",
+      "submit": "Receive {count, plural, one {# unit} other {# units}}",
+      "openPurchase": "Back to purchase"
+    },
+    "scan": "Scan"
   },
   "label": {
     "documentTitle": "Asset label — {tag}",
@@ -427,6 +519,8 @@
     "subtitle": "Point your camera at an asset's QR label to open it.",
     "starting": "Starting camera…",
     "permissionHint": "Allow camera access when prompted. Scanning needs a secure (HTTPS) connection.",
+    "hint": "Hold the QR label steady inside the square — it opens as soon as it's read.",
+    "found": "Code read — opening…",
     "unsupported": "Camera scanning isn't supported on this device or browser. Enter an asset tag instead.",
     "error": "Couldn't start the camera. Check that you granted permission and are on HTTPS, or enter an asset tag below.",
     "manualLabel": "Asset tag",

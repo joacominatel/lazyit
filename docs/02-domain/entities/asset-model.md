@@ -53,7 +53,7 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `manufacturer` | `string` | required (e.g. "Dell"). |
 | `sku` | `string?` | Optional. Unique among **live** rows only — a PARTIAL unique index `WHERE "deletedAt" IS NULL` (raw SQL; no `@unique`), so a soft-deleted sku is freed for reuse / restore ([[0041-soft-delete-reuse-and-restore]]). `null` on `PATCH` clears it (#1441). |
 | `description` | `string?` | optional; `null` on `PATCH` clears it (#1441). |
-| `specs` | `jsonb?` | model-level default specs (e.g. "ships with 16GB"). **Distinct from `Asset.specs`** (type-level vs per-unit). Any JSON object for now ([[0007-flexible-asset-specs-jsonb]]). |
+| `specs` | `jsonb?` | model-level default specs (e.g. "ships with 16GB"). **Distinct from `Asset.specs`** (type-level vs per-unit). Any JSON object within the `ASSET_SPECS_MAX_*` write bound shared with `Asset.specs` (#1329); reads stay unbounded so older rows still load ([[0007-flexible-asset-specs-jsonb]]). |
 | `categoryId` | `cuid?` | optional FK → [[asset-category]], `onDelete: SetNull`. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |

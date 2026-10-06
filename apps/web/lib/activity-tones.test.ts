@@ -37,3 +37,19 @@ describe("session_ended (issue #1420)", () => {
     expect(actionLabel("session_ended", translator(es.activity.action))).toBe("Sesión cerrada");
   });
 });
+
+// Issue #1475: an asset linked to / unlinked from a purchase line (ADR-0099, #1473) surfaces as the
+// `purchase_linked` / `purchase_unlinked` verbs — tinted and localized, not the generic fallback.
+describe("purchase link verbs (issue #1475)", () => {
+  test("linked reads as success, unlinked as info", () => {
+    expect(actionTone("purchase_linked")).toBe("success");
+    expect(actionTone("purchase_unlinked")).toBe("info");
+  });
+
+  test("both verbs are localized in en and es", () => {
+    expect(actionLabel("purchase_linked", translator(en.activity.action))).toBe("Purchase linked");
+    expect(actionLabel("purchase_unlinked", translator(en.activity.action))).toBe("Purchase unlinked");
+    expect(actionLabel("purchase_linked", translator(es.activity.action))).toBe("Compra vinculada");
+    expect(actionLabel("purchase_unlinked", translator(es.activity.action))).toBe("Compra desvinculada");
+  });
+});

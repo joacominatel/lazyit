@@ -33,6 +33,7 @@ export type AiToolDomain =
   | 'users'
   | 'activity'
   | 'infra'
+  | 'purchases'
   | 'platform'
   | 'interaction';
 
@@ -146,6 +147,12 @@ export interface AiToolDescriptor<
   idempotent?: boolean;
   /** Default: every channel; a `navigate` tool is chat-only. */
   channels?: readonly AiChannel[];
+  /**
+   * A chat write that is never approved automatically, whatever the conversation's auto-approve mode: the
+   * user decides its card every time (#1478 — every purchase change, ADR-0099 §11, UX decision D11). Core
+   * enforces it at approve time from the registered descriptor; the tool cannot be talked out of it.
+   */
+  neverAutoApprove?: boolean;
   /**
    * An interaction tool (#1388, `request_input`): its `run` only validates and builds a form; the chat
    * runtime then pauses the run `AWAITING_INPUT` and answers the call with the user's submission. Only a

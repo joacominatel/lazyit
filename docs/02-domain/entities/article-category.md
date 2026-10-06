@@ -3,7 +3,7 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-13
+updated: 2026-10-05
 ---
 
 # ArticleCategory
@@ -100,12 +100,24 @@ cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` AD
 `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]), and
 `PUT /:id/access-rules` (#404, `settings:manage` ADMIN-only — set/clear the folder's access rules;
 body `{ accessRules: <list> | null }`, [[0060-kb-folder-access-control]]). Bodies validated against
-the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).
+the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). **No write returns
+`accessRules`** — create, update, delete, restore and the access-rules `PUT` all answer with the public
+folder shape (#1301), so holding `category:write` or `category:delete` never reveals a folder's rules;
+the rule editor re-reads them through the `settings:manage`-gated GET.
 
 The list read shape carries a **computed `articleCount`** (`.nullish()`, ADR-0092 #1106) — a filtered
 Prisma `_count` of that folder's **live** articles scoped to the caller's visibility (folder-access
 rules + own drafts), so it never reveals a count a viewer couldn't reach; it is **not a stored column**
 (no migration) and the UI **hides the number when absent** (older API / a folder the caller can't read).
+
+Both read shapes also carry a **derived `hasAccessRules` boolean** (`.optional()`, #1299 —
+[[0060-kb-folder-access-control]] §3 amendment): whether the folder carries an access restriction,
+computed at read time from `accessRules`, **never stored** (no column, no migration). It is readable
+by **any** `category:read` caller (VIEWER included) while `accessRules` itself stays
+`settings:manage`-gated (#554) — one bit, never the rule kinds, the user list, the role, or a count.
+It is a fact about the **folder**, not about the reader (`true` is not "you cannot see this"), and it
+exists so the web can warn that moving an article into or out of a restricted folder changes who may
+read it. An **absent** value means *unknown* (an older API), never *public*.
 
 Related: [[article]] · [[folder]] · [[asset-category]] · [[shared-package]] ·
 [[0021-knowledge-base-design]] · [[0059-kb-folders-links-and-import]] ·

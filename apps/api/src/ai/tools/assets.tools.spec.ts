@@ -614,6 +614,56 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
       ]);
     });
 
+    it('carries the cost currency label with the cost (ADR-0099 §5, #1473)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Laptop ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 141250000,
+        purchaseCurrency: ' ARS ',
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'purchaseCurrency', after: 'ARS', valueKind: 'text' },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 141250000,
+        purchaseCurrency: 'ARS',
+      });
+    });
+
+    it('accepts purchaseCost and salvageValue above int4; the result reads back exactly (ADR-0100)', async () => {
+      const action = await propose('asset_create', {
+        name: 'Server ARS',
+        status: 'IN_STORAGE',
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const approved = await approve(action);
+      expect(approved).toMatchObject({
+        status: 'SUCCEEDED',
+        result: { ok: true, mutated: true },
+      });
+      expect(assetsService.create.mock.calls[0][0]).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      const tooBig = await h.tools.propose(
+        'asset_create',
+        {
+          name: 'X',
+          status: 'IN_STORAGE',
+          purchaseCost: Number.MAX_SAFE_INTEGER + 2,
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(tooBig).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+    });
+
     it('an ambiguous or unknown model fails the proposal; nothing is stored', async () => {
       state.models.set('c0000000000000000model3x', {
         ...state.models.get(M.latitude)!,
@@ -1114,6 +1164,61 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
   });
 
   describe('asset_update', () => {
+    it('sets and clears the cost currency label (#1473)', async () => {
+      const set = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      expect((await approve(set)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[0][1]).toMatchObject({
+        purchaseCost: 1500,
+        purchaseCurrency: 'USD',
+      });
+      const clear = await propose('asset_update', {
+        asset: A.server,
+        purchaseCurrency: null,
+      });
+      expect((await approve(clear)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[1][1]).toEqual({
+        purchaseCurrency: null,
+      });
+    });
+
+    it('accepts a purchaseCost above int4 and asset_get reads it back exactly (ADR-0100)', async () => {
+      const action = await propose('asset_update', {
+        asset: A.server,
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+      expect(action.preview?.changes).toEqual(
+        expect.arrayContaining([
+          {
+            field: 'purchaseCost',
+            before: null,
+            after: 3_000_000_000,
+            valueKind: 'number',
+          },
+        ]),
+      );
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      const [, body] = assetsService.update.mock.calls[0] as [string, Row];
+      expect(body).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+
+      const result = await h.tools.invoke(
+        'asset_get',
+        { asset: A.server },
+        ctx(actor('VIEWER')),
+      );
+      expect(data(result).asset).toMatchObject({
+        purchaseCost: 3_000_000_000,
+        salvageValue: 300_000_000,
+      });
+    });
+
     it('previews before → after with the version as precondition, and executes once', async () => {
       const action = await propose('asset_update', {
         asset: 'SN-LAPTOP-1',
@@ -2293,6 +2398,237 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         ok: false,
         result: { error: { code: 'INVALID_INPUT' } },
       });
+    });
+  });
+
+  // ─── Custom asset statuses (ADR-0101) ──────────────────────────────────────────────────────────
+
+  describe('custom asset statuses', () => {
+    const change = (action: AiPendingAction, field: string) =>
+      action.preview!.changes.find((c) => c.field === field);
+    const REPAIR = {
+      type: 'assetStatusLabel',
+      id: C.repair,
+      label: 'In repair at vendor',
+    };
+    /** The Server carries "In repair at vendor" (IN_MAINTENANCE) for the tests that need a label. */
+    const labelServer = () => {
+      const row = state.assets.get(A.server)!;
+      row.status = 'IN_MAINTENANCE';
+      row.statusLabelId = C.repair;
+    };
+
+    it('asset_get and asset_search show the custom status next to the built-in one', async () => {
+      labelServer();
+      const got = await h.tools.invoke(
+        'asset_get',
+        { asset: 'SRV-0001' },
+        ctx(actor('VIEWER')),
+      );
+      expect(data(got).asset).toMatchObject({
+        status: 'IN_MAINTENANCE',
+        customStatus: {
+          id: C.repair,
+          name: 'In repair at vendor',
+          kind: 'IN_MAINTENANCE',
+        },
+      });
+      const found = await h.tools.invoke(
+        'asset_search',
+        { statusLabelId: C.repair },
+        ctx(actor('VIEWER')),
+      );
+      expect(data(found)).toMatchObject({
+        total: 1,
+        items: [{ id: A.server, customStatus: { id: C.repair } }],
+      });
+      expect(assetsService.findPage.mock.calls.at(-1)?.[0]).toMatchObject({
+        statusLabelId: C.repair,
+      });
+    });
+
+    it('asset_create with a custom status: no default, the card shows its kind, the route gets the label', async () => {
+      const action = await propose('asset_create', {
+        name: 'Loaner 1',
+        customStatus: 'loaner pool',
+      });
+      expect(change(action, 'status')).toMatchObject({ after: 'IN_STORAGE' });
+      expect(change(action, 'defaultsApplied')).toBeUndefined();
+      expect(change(action, 'customStatus')).toMatchObject({
+        after: { type: 'assetStatusLabel', id: C.loaner, label: 'Loaner pool' },
+        valueKind: 'entity',
+      });
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls[0][0]).toEqual({
+        name: 'Loaner 1',
+        statusLabelId: C.loaner,
+      });
+    });
+
+    it('asset_create refuses a status of another kind than the custom status, and an unknown one', async () => {
+      const conflict = await h.tools.propose(
+        'asset_create',
+        { name: 'X', status: 'OPERATIONAL', customStatus: C.repair },
+        ctx(actor('MEMBER')),
+      );
+      expect(conflict).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+      const unknown = await h.tools.propose(
+        'asset_create',
+        { name: 'X', customStatus: 'Nope' },
+        ctx(actor('MEMBER')),
+      );
+      expect(unknown).toMatchObject({
+        ok: false,
+        result: { error: { code: 'NOT_FOUND' } },
+      });
+      expect(state.mutations).toBe(0);
+    });
+
+    it('asset_update sets a custom status: card shows the label and the status it implies', async () => {
+      const action = await propose('asset_update', {
+        asset: 'SRV-0001',
+        customStatus: 'In repair at vendor',
+      });
+      expect(action.preview!.changes).toEqual([
+        {
+          field: 'customStatus',
+          before: null,
+          after: REPAIR,
+          valueKind: 'entity',
+        },
+        {
+          field: 'status',
+          before: 'OPERATIONAL',
+          after: 'IN_MAINTENANCE',
+          valueKind: 'text',
+        },
+      ]);
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[0][1]).toEqual({
+        statusLabelId: C.repair,
+      });
+    });
+
+    it('asset_update with a built-in status alone shows that it clears the custom status', async () => {
+      labelServer();
+      const action = await propose('asset_update', {
+        asset: 'SRV-0001',
+        status: 'OPERATIONAL',
+      });
+      expect(action.preview!.changes).toEqual([
+        {
+          field: 'status',
+          before: 'IN_MAINTENANCE',
+          after: 'OPERATIONAL',
+          valueKind: 'text',
+        },
+        {
+          field: 'customStatus',
+          before: REPAIR,
+          after: 'None (built-in status only)',
+          valueKind: 'entity',
+        },
+      ]);
+    });
+
+    it('asset_update customStatus: null clears it; re-setting the same one is nothing to change', async () => {
+      labelServer();
+      const clear = await propose('asset_update', {
+        asset: 'SRV-0001',
+        customStatus: null,
+      });
+      expect(clear.preview!.changes).toEqual([
+        {
+          field: 'customStatus',
+          before: REPAIR,
+          after: 'None (built-in status only)',
+          valueKind: 'entity',
+        },
+      ]);
+      expect((await approve(clear)).status).toBe('SUCCEEDED');
+      expect(assetsService.update.mock.calls[0][1]).toEqual({
+        statusLabelId: null,
+      });
+
+      labelServer();
+      const same = await h.tools.propose(
+        'asset_update',
+        { asset: 'SRV-0001', customStatus: C.repair },
+        ctx(actor('MEMBER')),
+      );
+      expect(same).toMatchObject({
+        ok: false,
+        result: { error: { code: 'INVALID_INPUT' } },
+      });
+    });
+
+    it('asset_create_batch: a common custom status sets every row, no default flagged', async () => {
+      // A row whose own status disagrees with the custom status is refused before any card.
+      const conflict = await h.tools.propose(
+        'asset_create_batch',
+        {
+          rows: [{ name: 'Loaner A' }, { name: 'Loaner B', status: 'LOST' }],
+          common: { customStatus: 'Loaner pool' },
+        },
+        ctx(actor('MEMBER')),
+      );
+      expect(conflict).toMatchObject({
+        ok: false,
+        result: {
+          error: {
+            code: 'INVALID_INPUT',
+            message: expect.stringContaining(
+              'row 2: status LOST does not match the custom status "Loaner pool"',
+            ) as unknown,
+          },
+        },
+      });
+
+      const action = await propose('asset_create_batch', {
+        rows: [{ name: 'Loaner A' }, { name: 'Loaner B' }],
+        common: { customStatus: 'Loaner pool' },
+      });
+      expect(change(action, 'defaultsApplied')).toBeUndefined();
+      const rows = change(action, 'rows')!.after as Row[];
+      expect(rows[0]).toMatchObject({
+        status: 'IN_STORAGE',
+        customStatus: {
+          type: 'assetStatusLabel',
+          id: C.loaner,
+          label: 'Loaner pool',
+        },
+        valid: true,
+      });
+      expect(rows[0]).not.toHaveProperty('statusDefaulted');
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      expect(assetsService.create.mock.calls[0][0]).toEqual({
+        name: 'Loaner A',
+        status: 'IN_STORAGE',
+        statusLabelId: C.loaner,
+      });
+    });
+
+    it('asset_update_batch: sets a custom status on several assets', async () => {
+      const action = await propose('asset_update_batch', {
+        rows: [{ asset: 'SRV-0001' }, { asset: 'LT-0001' }],
+        common: { customStatus: 'In repair at vendor' },
+      });
+      const rows = action.preview!.changes.find((c) => c.field === 'rows')!
+        .after as Row[];
+      expect(rows[0]).toMatchObject({
+        customStatus: '— → In repair at vendor',
+        status: 'OPERATIONAL → IN_MAINTENANCE',
+        valid: true,
+      });
+      expect((await approve(action)).status).toBe('SUCCEEDED');
+      for (const [, body] of assetsService.update.mock.calls as Array<
+        [string, Row]
+      >) {
+        expect(body).toEqual({ statusLabelId: C.repair });
+      }
     });
   });
 });

@@ -56,8 +56,10 @@ you remove their access upstream.
 
 ## Managing existing people
 
-From a user's detail page you can edit their identity, change their role, reset their password (on the
-bundled sign-in), and offboard them when they leave. Offboarding archives the account rather than
+A user's detail page shows what the person holds, what they can access and what needs follow-up — see
+[A person's page](/help/users-permissions-user-lifecycle#a-persons-page). From it you can edit their
+identity, change their role, reset their password (on the bundled sign-in), and offboard them when they
+leave (in the **⋯** menu). Offboarding archives the account rather than
 deleting it, so the person's history — past assignments and activity — is preserved.
 
 ## Next steps

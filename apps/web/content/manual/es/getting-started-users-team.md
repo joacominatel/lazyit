@@ -61,8 +61,10 @@ aquí, salvo que le quites el acceso en el origen.
 
 ## Gestionar a las personas existentes
 
-Desde la página de detalle de un usuario puedes editar su identidad, cambiar su rol, restablecer su
-contraseña (en el inicio de sesión integrado) y darlo de baja cuando se va. La baja archiva la cuenta
+La página de detalle de un usuario muestra qué tiene la persona, a qué puede acceder y qué requiere
+atención — ver [La página de una persona](/help/users-permissions-user-lifecycle#la-página-de-una-persona).
+Desde ahí puedes editar su identidad, cambiar su rol, restablecer su contraseña (en el inicio de sesión
+integrado) y darlo de baja cuando se va (en el menú **⋯**). La baja archiva la cuenta
 en lugar de eliminarla, así que el historial de la persona — asignaciones y actividad pasadas — se
 conserva.
 

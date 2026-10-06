@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AssetSpecsWriteSchema } from "./asset";
 import { requireAtLeastOneKey } from "./primitives";
 
 /**
@@ -12,7 +13,9 @@ import { requireAtLeastOneKey } from "./primitives";
 // ModelSpecs stays an OPEN record on purpose. Per-category governance (ADR-0007 amendment, #851) is
 // ADVISORY and applies to Asset.specs (the per-unit values), surfaced as soft warnings/hints in the
 // UI via `validateSpecsAgainstDictionary` — never hard validation here. Model defaults are a template
-// copied into Asset.specs on create. See docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
+// copied into Asset.specs on create, so writes carry the same structural bound as Asset.specs (#1329);
+// the read shape stays unbounded so older rows still load. See
+// docs/03-decisions/0007-flexible-asset-specs-jsonb.md.
 const ModelSpecsSchema = z.record(z.string(), z.unknown());
 
 /** The full persisted AssetModel entity (API representation of the `asset_models` row). */
@@ -36,7 +39,7 @@ export const CreateAssetModelSchema = z.strictObject({
   manufacturer: z.string().trim().min(1).max(200),
   sku: z.string().trim().min(1).max(100).optional(),
   description: z.string().trim().min(1).max(2000).optional(),
-  specs: ModelSpecsSchema.optional(),
+  specs: AssetSpecsWriteSchema.optional(),
   categoryId: z.cuid().optional(),
 });
 
@@ -53,7 +56,7 @@ export const UpdateAssetModelSchema = requireAtLeastOneKey(
       manufacturer: z.string().trim().min(1).max(200),
       sku: z.string().trim().min(1).max(100).nullable(),
       description: z.string().trim().min(1).max(2000).nullable(),
-      specs: ModelSpecsSchema,
+      specs: AssetSpecsWriteSchema,
       categoryId: z.cuid().nullable(),
     })
     .partial(),

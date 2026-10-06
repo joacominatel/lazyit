@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { CategoryCombobox } from "@/components/category-combobox";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +29,7 @@ import {
   useCreateAssetModel,
   useUpdateAssetModel,
 } from "@/lib/api/hooks/use-asset-models";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { notifyError } from "@/lib/api/notify-error";
 import { categoryIdForPayload } from "./asset-model-category-payload";
 import { clearableTextForPayload } from "./asset-model-text-payload";
@@ -166,11 +168,14 @@ function AssetModelForm({
   const create = useCreateAssetModel();
   const update = useUpdateAssetModel();
   const { data: categories } = useAssetCategories();
+  const [, rememberManufacturer] = useRecentValues("assetModel.manufacturer");
   const isPending = create.isPending || update.isPending;
 
   const [values, setValues] = useState<FormState>(() =>
     toFormState(model, cloneSource),
   );
+  // Manufacturers already in use on models and purchase lines, with counts and last use (ADR-0099 §7).
+  const manufacturers = useSuggestions("manufacturer", values.manufacturer);
   const specsSource =
     model?.specs ??
     (cloneSource && !model ? cloneAssetModelDefaults(cloneSource).specs : undefined);
@@ -258,7 +263,8 @@ function AssetModelForm({
       update.mutate(
         { id: model.id, data: built.payload as never },
         {
-          onSuccess: () => {
+          onSuccess: (saved) => {
+            rememberManufacturer(saved.manufacturer);
             toast.success(t("taxonomies.models.toast.updated"));
             onClose();
           },
@@ -268,7 +274,8 @@ function AssetModelForm({
       );
     } else {
       create.mutate(built.payload as never, {
-        onSuccess: () => {
+        onSuccess: (saved) => {
+          rememberManufacturer(saved.manufacturer);
           toast.success(t("taxonomies.models.toast.created"));
           onClose();
         },
@@ -314,10 +321,12 @@ function AssetModelForm({
             <FieldLabel htmlFor="model-manufacturer">
               {t("taxonomies.models.form.manufacturerLabel")}
             </FieldLabel>
-            <Input
+            <SuggestInput
               id="model-manufacturer"
               value={values.manufacturer}
-              onChange={(e) => set("manufacturer", e.target.value)}
+              onValueChange={(value) => set("manufacturer", value)}
+              source={() => manufacturers}
+              recentKey="assetModel.manufacturer"
               placeholder={t("taxonomies.models.form.manufacturerPlaceholder")}
               maxLength={200}
               aria-invalid={error ? true : undefined}

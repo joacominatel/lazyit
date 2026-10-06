@@ -11,7 +11,7 @@ Una **etiqueta de activo** es la etiqueta de empresa que pegas en un sticker fí
 `IT-2026-0042`. Por defecto escribes cada una a mano. lazyit también puede asignarlas automáticamente
 a partir de un número correlativo, para que cada activo nuevo reciba una etiqueta consistente y sin
 colisiones. Esto es el **esquema de etiquetas de activos**, configurado en **Configuración →
-Instancia**.
+Etiquetas de activos**.
 
 > El esquema está **apagado hasta que lo enciendes**. Sin esquema, la creación de activos no cambia:
 > la etiqueta de activo es lo que escribes, o nada. Encenderlo es una acción de configuración
@@ -45,8 +45,8 @@ consulta fallida nunca parezca una consulta lenta.
 
 ## Encenderlo
 
-Abre **Configuración → Instancia → Esquema de etiquetas de activos** y activa **Asignar etiquetas
-automáticamente**. Fija el prefijo, el sufijo y el ancho de número que quieras, opcionalmente un número
+Abre **Configuración → Etiquetas de activos** y activa **Asignar automáticamente** en la sección
+**Esquema de etiquetas**. Fija el prefijo, el sufijo y el ancho de número que quieras, opcionalmente un número
 en **Empezar en** para sembrar el contador, y luego **Guardar esquema**. Configurar el esquema requiere
 el permiso de *gestionar configuración*.
 
@@ -124,11 +124,24 @@ manos. Apunta la cámara a la etiqueta y lazyit actúa según lo que lee:
 - cualquier otro código o texto → ejecuta una **búsqueda** de activos con ese valor, para que una
   etiqueta de texto simple también encuentre la unidad.
 
-El escaneo funciona en el navegador — sin instalar ninguna app — en Safari móvil (iOS), Android Chrome y
-Firefox de escritorio. Requiere **permiso de cámara** y una **conexión segura (HTTPS)**; permite la
-cámara cuando el navegador lo solicite. Si la cámara no está disponible o deniegas el acceso, la misma
-pantalla ofrece un campo de **entrada manual** — escribe una etiqueta de activo y ejecuta la misma
-búsqueda.
+Mantén la etiqueta quieta dentro del cuadrado. Mientras busca, la cámara muestra **Escaneando…**; cuando
+lee un código muestra un check verde (con una vibración corta en los teléfonos que la admiten) y abre el
+resultado. Además de las etiquetas QR lee Data Matrix y los códigos de barras habituales de las etiquetas
+adhesivas (Code 128, Code 39, EAN, UPC, ITF).
+
+Si después de unos segundos no lee nada, aparece una sugerencia. Lo que suele ayudar:
+
+- **Primero, nitidez.** La cámara de una notebook no enfoca de cerca: sostén la etiqueta a la distancia
+  en la que se ve nítida en pantalla (suele ser entre 20 y 30 cm), no pegada al lente. Un teléfono
+  enfoca solo.
+- **Luz.** Ponte frente a una ventana o una lámpara; evita reflejos en etiquetas brillantes.
+- **Plana y quieta.** Mantén la etiqueta plana, de frente a la cámara y quieta un segundo.
+
+El escaneo funciona en el navegador — sin instalar ninguna app — en teléfonos (Safari en iOS, Chrome en
+Android) y en computadoras con cámara web (Chrome, Safari, Firefox). Requiere **permiso de cámara** y una
+**conexión segura (HTTPS)**; permite la cámara cuando el navegador lo solicite. Si la cámara no está
+disponible o deniegas el acceso, la misma pantalla ofrece un campo de **entrada manual** — escribe una
+etiqueta de activo y ejecuta la misma búsqueda.
 
 ## Qué sigue
 

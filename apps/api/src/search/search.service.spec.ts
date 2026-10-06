@@ -3,6 +3,7 @@ import { getLoggerToken, PinoLogger } from 'nestjs-pino';
 import { Meilisearch } from 'meilisearch';
 import { SearchService } from './search.service';
 import { FolderAccessService } from '../article-categories/folder-access.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import type { VisibleFolders } from '../article-categories/folder-access.service';
 
 // Mock the Meili client with an explicit factory: jest can't transform the ESM `meilisearch`
@@ -47,6 +48,11 @@ function folderAccessMock(visible: VisibleFolders = 'ALL'): {
   return { visibleFolderIds: jest.fn().mockResolvedValue(visible) };
 }
 
+// The purchase-index gate (#1499): `principalHas` grants `purchaseOrder:read` unless a test revokes it.
+const permissionsMock = {
+  principalHas: jest.fn(),
+};
+
 async function buildService(
   logger: { info: jest.Mock; error: jest.Mock },
   folderAccess: { visibleFolderIds: jest.Mock } = folderAccessMock(),
@@ -56,6 +62,7 @@ async function buildService(
       SearchService,
       { provide: getLoggerToken(SearchService.name), useValue: logger },
       { provide: FolderAccessService, useValue: folderAccess },
+      { provide: PermissionResolverService, useValue: permissionsMock },
     ],
   }).compile();
   return moduleRef.get(SearchService);
@@ -63,6 +70,10 @@ async function buildService(
 
 describe('SearchService', () => {
   const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    permissionsMock.principalHas.mockResolvedValue(true);
+  });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -117,6 +128,8 @@ describe('SearchService', () => {
         'consumables',
         'infra',
         'locations',
+        'purchases',
+        'suppliers',
         'users',
       ]);
       expect(result.assets).toEqual({ hits: [], total: 0 });
@@ -546,6 +559,110 @@ describe('SearchService', () => {
       ]);
     });
 
+    it('purchase and supplier hits carry display fields only — never line descriptions or contact names (#1499, SEC-061)', async () => {
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await service.search({
+        q: 'thinkpad',
+        entities: ['purchases', 'suppliers'],
+        limit: 10,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        {
+          queries: Array<{ indexUid: string; attributesToRetrieve?: string[] }>;
+        },
+      ];
+      const byIndex = new Map(
+        params.queries.map((query) => [query.indexUid, query]),
+      );
+      expect(byIndex.get('purchases')?.attributesToRetrieve).toEqual([
+        'id',
+        'reference',
+        'supplierName',
+        'invoiceNumbers',
+        'status',
+        'orderDate',
+        'createdAt',
+      ]);
+      expect(byIndex.get('suppliers')?.attributesToRetrieve).toEqual([
+        'id',
+        'name',
+        'taxId',
+      ]);
+    });
+
+    it('drops the purchase indexes itself for a principal without purchaseOrder:read — defense in depth behind the controller (#1499)', async () => {
+      permissionsMock.principalHas.mockResolvedValue(false);
+      client.multiSearch.mockResolvedValue({ results: [] });
+      const viewer = { kind: 'human', user: { role: 'VIEWER' } } as never;
+
+      const all = await service.search({ q: 'x', limit: 5, principal: viewer });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string }> },
+      ];
+      const queried = params.queries.map((query) => query.indexUid);
+      expect(queried).not.toContain('purchases');
+      expect(queried).not.toContain('suppliers');
+      expect(all).not.toHaveProperty('purchases');
+      expect(permissionsMock.principalHas).toHaveBeenCalledWith(
+        viewer,
+        'purchaseOrder:read',
+      );
+
+      // Asking ONLY for them yields nothing at all — never re-expanded to "every index".
+      client.multiSearch.mockClear();
+      const only = await service.search({
+        q: 'x',
+        entities: ['purchases', 'suppliers'],
+        limit: 5,
+        principal: viewer,
+      });
+      expect(only).toEqual({});
+      expect(client.multiSearch).not.toHaveBeenCalled();
+    });
+
+    it('fails closed for a call with no principal at all', async () => {
+      permissionsMock.principalHas.mockImplementation((principal: unknown) =>
+        Promise.resolve(principal !== undefined),
+      );
+      client.multiSearch.mockResolvedValue({ results: [] });
+
+      await service.search({
+        q: 'x',
+        entities: ['purchases', 'assets'],
+        limit: 5,
+      });
+
+      const [params] = client.multiSearch.mock.calls[0] as [
+        { queries: Array<{ indexUid: string }> },
+      ];
+      expect(params.queries.map((query) => query.indexUid)).toEqual(['assets']);
+    });
+
+    it('upsertMany writes every document in one engine task, and skips an empty batch', () => {
+      const docs = [{ id: 'po1' }, { id: 'po2' }];
+      service.upsertMany('purchases', docs);
+      service.upsertMany('purchases', []);
+      expect(index.addDocuments).toHaveBeenCalledTimes(1);
+      expect(index.addDocuments).toHaveBeenCalledWith(docs, {
+        primaryKey: 'id',
+      });
+    });
+
+    it('upsertMany swallows a rejected addDocuments and logs every id (fire-and-forget)', async () => {
+      index.addDocuments.mockRejectedValueOnce(new Error('meili down'));
+
+      expect(() =>
+        service.upsertMany('purchases', [{ id: 'po1' }, { id: 'po2' }]),
+      ).not.toThrow();
+      await Promise.resolve();
+      await Promise.resolve();
+      const [meta] = logger.error.mock.calls[0] as [{ ids: string[] }];
+      expect(meta.ids).toEqual(['po1', 'po2']);
+    });
+
     it('search defaults to every index when entities is omitted', async () => {
       client.multiSearch.mockResolvedValue({ results: [] });
 
@@ -562,6 +679,8 @@ describe('SearchService', () => {
         'applications',
         'infra',
         'consumables',
+        'purchases',
+        'suppliers',
       ]);
     });
 
@@ -646,6 +765,8 @@ describe('SearchService', () => {
         'degraded',
         'infra',
         'locations',
+        'purchases',
+        'suppliers',
         'users',
       ]);
       expect(result.assets).toEqual({ hits: [], total: 0 });
@@ -675,7 +796,7 @@ describe('SearchService', () => {
             articles: { numberOfDocuments: 0 }, // empty -> needs rebuild
             users: { numberOfDocuments: 3 },
             infra: { numberOfDocuments: 4 },
-            // locations + applications + consumables absent from the map -> never created -> need rebuild
+            // locations + applications + consumables + purchases + suppliers absent -> never created -> rebuild
           },
         });
 
@@ -686,6 +807,8 @@ describe('SearchService', () => {
           'articles',
           'consumables',
           'locations',
+          'purchases',
+          'suppliers',
         ]);
       });
 
@@ -699,10 +822,32 @@ describe('SearchService', () => {
             applications: { numberOfDocuments: 1 },
             infra: { numberOfDocuments: 1 },
             consumables: { numberOfDocuments: 1 },
+            purchases: { numberOfDocuments: 1 },
+            suppliers: { numberOfDocuments: 1 },
           },
         });
 
         expect(await service.emptyOrMissingIndexes()).toEqual([]);
+      });
+
+      it('after an upgrade, reports exactly the two new purchase indexes (#1499) — the boot self-heal builds them', async () => {
+        // An instance that ran the previous release: the seven older indexes are populated.
+        client.getStats.mockResolvedValue({
+          indexes: {
+            assets: { numberOfDocuments: 1 },
+            articles: { numberOfDocuments: 1 },
+            users: { numberOfDocuments: 1 },
+            locations: { numberOfDocuments: 1 },
+            applications: { numberOfDocuments: 1 },
+            infra: { numberOfDocuments: 1 },
+            consumables: { numberOfDocuments: 1 },
+          },
+        });
+
+        expect(await service.emptyOrMissingIndexes()).toEqual([
+          'purchases',
+          'suppliers',
+        ]);
       });
     });
   });

@@ -25,10 +25,15 @@ para crear activos). Se abre un formulario breve.
 - **Estado** — el estado en el que arranca cada unidad (por ejemplo *Operativo* o *En almacén*).
 - **Ubicación**, **Empresa**, **Fecha de compra**, **Costo de compra**, **Notas** — datos compartidos
   opcionales aplicados a **cada** unidad. El costo de compra se ingresa por unidad, en unidades
-  mayores, igual que en el formulario de activo.
+  mayores y con el formato de números de tu idioma, y la empresa sugiere los valores ya en uso — ambos
+  igual que en el formulario de activo (ver [Conceptos de activos](/help/assets-asset-basics)).
 - **Números de serie** — opcional. Pega un número de serie por línea, en orden, y cada unidad recibe el
   suyo. Déjalo vacío para crear unidades sin número de serie, o pega **exactamente** tantas líneas como
   la cantidad — un conteo que no coincide se rechaza antes de crear nada.
+- **Escanear** — lee los números de serie con la cámara en lugar de escribirlos: cada código de barras al
+  que la apuntas se agrega en su propia línea, uno repetido no se agrega dos veces, y la **cantidad sigue**
+  a los números escaneados. Necesita permiso de cámara y HTTPS; sin ellos, escribe o pega como siempre. Ver
+  [Escanear números de serie](/help/purchases-recording-purchases#escanear-números-de-serie).
 
 Las etiquetas de activo automáticas siguen aplicando: si tu instancia usa un
 [esquema de etiquetas](/help/configuration-asset-tag-scheme), cada unidad se etiqueta automáticamente a
@@ -74,6 +79,27 @@ lote.
 
 Desde el resultado puedes ir directamente a los nuevos activos (el inventario filtrado por ese modelo),
 **recibir más** o cerrar.
+
+## Recibir contra una compra
+
+Si registras [compras](/help/purchases-recording-purchases), las unidades de una entrega se pueden recibir
+**contra su línea de compra**: quedan vinculadas a ella, cuentan como recibidas y toman los valores de la
+compra sin volver a escribirlos. Hay tres caminos:
+
+- **Desde una compra**, arriba de este formulario, lista las líneas que todavía esperan unidades. Elige
+  una y el formulario pasa a esa línea, completado desde la compra.
+- Cuando eliges un **modelo** que una compra abierta está esperando, una pista discreta bajo el modelo te
+  ofrece **recibir contra ella**.
+- En la propia compra, **Recibir** en la línea abre este mismo formulario ya completado.
+
+Contra una línea, los números de serie van primero y la **cantidad los sigue**; los valores de la compra
+se muestran como un resumen que puedes **Cambiar** solo para esta recepción. Los detalles están en
+[Compras — Recibir unidades](/help/purchases-recording-purchases#recibir-unidades). El formulario de
+**Nuevo activo** ofrece el mismo selector *Desde una compra*: elegir una línea abre este formulario para
+ella.
+
+Estas opciones aparecen solo si puedes ver y editar compras, y solo mientras alguna compra espera
+unidades.
 
 ## Cuándo usar la importación en su lugar
 

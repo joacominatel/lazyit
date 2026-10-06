@@ -53,6 +53,10 @@ const ACTION_TONE: Record<string, StatusTone> = {
   // A user ended one of their own sessions from the per-device list (issue #1420): a one-off account
   // action, like a password reset being sent — informational, nothing about the account changed.
   session_ended: "info",
+  // An asset linked to / unlinked from a purchase line (ADR-0099 §2, #1473): provenance attached (it began)
+  // or detached — informational, since an unlink never clears the asset's purchase values.
+  purchase_linked: "success",
+  purchase_unlinked: "info",
 };
 
 /** The {@link StatusBadge} tone for an activity action verb. Falls back to `neutral`. */

@@ -51,6 +51,24 @@
     "typeToSearch": "Escribe para buscar…",
     "loading": "Buscando…"
   },
+  "suggest": {
+    "listLabel": "Sugerencias",
+    "recent": "Recientes",
+    "mostUsed": "Más usados",
+    "others": "Usados antes",
+    "matches": "Coincidencias",
+    "uses": "{count, plural, one {# uso} other {# usos}}",
+    "usesSentence": "Usado {count, plural, one {una vez} other {# veces}}.",
+    "nearDuplicate": "Parece un valor existente: “{value}”.",
+    "useExisting": "Usar “{value}”"
+  },
+  "money": {
+    "invalid": "Ingresa un monto como {example}.",
+    "negative": "El monto no puede ser negativo.",
+    "decimals": "Usa como máximo dos decimales, como {example}.",
+    "tooLarge": "El monto es demasiado grande.",
+    "readAs": "Leído como {amount}."
+  },
   "quickView": {
     "trigger": "Vista rápida: {name}",
     "openRecord": "Abrir ficha completa",
@@ -85,7 +103,7 @@
       "type": "Tipo",
       "address": "Dirección",
       "floor": "Piso",
-      "vendor": "Proveedor",
+      "vendor": "Fabricante",
       "url": "URL",
       "kind": "Tipo",
       "linkedAsset": "Activo vinculado",
@@ -99,5 +117,18 @@
     "label": "Más sobre {topic}",
     "learnMore": "Más información en el Manual",
     "newTab": "(se abre en una pestaña nueva)"
+  },
+  "serialScanner": {
+    "starting": "Iniciando la cámara…",
+    "hint": "Mantén el código de barras del número de serie quieto dentro del recuadro. Cada código nuevo se agrega en su propia línea.",
+    "added": "Se agregó {code} · {count, plural, one {# escaneado} other {# escaneados}}",
+    "duplicate": "{code} ya está en la lista.",
+    "unsupported": "El escaneo con cámara no está disponible en este dispositivo o navegador. Escribe o pega los números de serie.",
+    "error": "No se pudo iniciar la cámara. Revisa que hayas dado permiso y que estés en HTTPS, o escribe los números de serie.",
+    "done": "Listo"
+  },
+  "cameraScanner": {
+    "scanning": "Escaneando…",
+    "tip": "¿Todavía no se lee nada? Mantén el código plano y quieto dentro del recuadro y acércalo o aléjalo hasta que se vea nítido: las cámaras de las notebooks no enfocan de cerca. Más luz ayuda. O escríbelo."
   }
 }

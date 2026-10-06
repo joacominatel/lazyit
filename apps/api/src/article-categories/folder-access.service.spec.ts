@@ -94,7 +94,11 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
     it('an SA sees PUBLIC folders but never a restricted one', async () => {
       wireFolders([
         { id: 'pub', parentId: null, accessRules: null },
-        { id: 'sec', parentId: null, accessRules: [{ kind: 'role', role: 'MEMBER' }] },
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'MEMBER' }],
+        },
       ]);
       const visible = await service.visibleFolderIds(sa());
       expect(folderVisible(visible, 'pub')).toBe(true);
@@ -121,7 +125,11 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
 
     it('role rule — only holders of that role match', async () => {
       wireFolders([
-        { id: 'sec', parentId: null, accessRules: [{ kind: 'role', role: 'MEMBER' }] },
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'MEMBER' }],
+        },
       ]);
       const member = await service.visibleFolderIds(human('u1', 'MEMBER'));
       expect(folderVisible(member, 'sec')).toBe(true);
@@ -181,7 +189,11 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
       // parent restricted to MEMBER; child is PUBLIC (no own rule). A VIEWER fails the parent, so the
       // child is hidden too — the child cannot widen the parent's restriction (no escalation).
       wireFolders([
-        { id: 'parent', parentId: null, accessRules: [{ kind: 'role', role: 'MEMBER' }] },
+        {
+          id: 'parent',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'MEMBER' }],
+        },
         { id: 'child', parentId: 'parent', accessRules: null },
       ]);
       const viewer = await service.visibleFolderIds(human('u1', 'VIEWER'));
@@ -198,24 +210,34 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
       // parent → MEMBER; child → additionally only user u-allowed. A MEMBER who is NOT u-allowed sees
       // the parent but NOT the child (the child narrows; effective = own ∩ ancestors).
       wireFolders([
-        { id: 'parent', parentId: null, accessRules: [{ kind: 'role', role: 'MEMBER' }] },
+        {
+          id: 'parent',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'MEMBER' }],
+        },
         {
           id: 'child',
           parentId: 'parent',
           accessRules: [{ kind: 'users', userIds: ['u-allowed'] }],
         },
       ]);
-      const otherMember = await service.visibleFolderIds(human('u-other', 'MEMBER'));
+      const otherMember = await service.visibleFolderIds(
+        human('u-other', 'MEMBER'),
+      );
       expect(folderVisible(otherMember, 'parent')).toBe(true);
       expect(folderVisible(otherMember, 'child')).toBe(false);
 
       // The allowed user must ALSO clear the ancestor: u-allowed as a VIEWER fails the MEMBER parent,
       // so even though they match the child's OWN rule, the child stays hidden (never widen).
-      const allowedButViewer = await service.visibleFolderIds(human('u-allowed', 'VIEWER'));
+      const allowedButViewer = await service.visibleFolderIds(
+        human('u-allowed', 'VIEWER'),
+      );
       expect(folderVisible(allowedButViewer, 'child')).toBe(false);
 
       // u-allowed as a MEMBER clears both → child visible.
-      const allowedMember = await service.visibleFolderIds(human('u-allowed', 'MEMBER'));
+      const allowedMember = await service.visibleFolderIds(
+        human('u-allowed', 'MEMBER'),
+      );
       expect(folderVisible(allowedMember, 'child')).toBe(true);
     });
   });
@@ -224,7 +246,11 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
     it('an anonymous caller sees only PUBLIC folders (matches no restriction)', async () => {
       wireFolders([
         { id: 'pub', parentId: null, accessRules: null },
-        { id: 'sec', parentId: null, accessRules: [{ kind: 'role', role: 'VIEWER' }] },
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'VIEWER' }],
+        },
       ]);
       const visible = await service.visibleFolderIds(undefined);
       expect(folderVisible(visible, 'pub')).toBe(true);
@@ -246,8 +272,14 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
 
       const cache = {};
       // Two resolutions in the SAME request (e.g. findOne + backlinks), sharing one cache.
-      const first = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
-      const second = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      const first = await service.visibleFolderIds(
+        human('u1', 'VIEWER'),
+        cache,
+      );
+      const second = await service.visibleFolderIds(
+        human('u1', 'VIEWER'),
+        cache,
+      );
 
       // The expensive full folder-tree scan runs exactly once for the whole request...
       expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
@@ -270,12 +302,18 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
 
       // First call: active grant → visible.
       wireGrants(['appFinance']);
-      const granted = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      const granted = await service.visibleFolderIds(
+        human('u1', 'VIEWER'),
+        cache,
+      );
       expect(folderVisible(granted, 'sec')).toBe(true);
 
       // Grant revoked between calls: the cached TREE is reused, but the live join is re-read → hidden.
       wireGrants([]);
-      const revoked = await service.visibleFolderIds(human('u1', 'VIEWER'), cache);
+      const revoked = await service.visibleFolderIds(
+        human('u1', 'VIEWER'),
+        cache,
+      );
       expect(folderVisible(revoked, 'sec')).toBe(false);
       // The tree was still loaded only once across both calls.
       expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
@@ -288,6 +326,67 @@ describe('FolderAccessService (ADR-0060 §4)', () => {
       await service.visibleFolderIds(human('u1', 'VIEWER'));
 
       expect(articleCategory.findMany).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('restrictedFolderIds — the derived existence flag (#1299, §3 carve-out)', () => {
+    it('reports a folder with a rule list as restricted and a null/empty one as public', async () => {
+      wireFolders([
+        { id: 'pub-null', parentId: null, accessRules: null },
+        { id: 'pub-empty', parentId: null, accessRules: [] },
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'ADMIN' }],
+        },
+      ]);
+
+      const restricted = await service.restrictedFolderIds();
+
+      // §2: no rule (null) and an empty rule list are both PUBLIC; a non-empty list restricts.
+      expect([...restricted]).toEqual(['sec']);
+    });
+
+    it('is caller-independent: the same set for an ADMIN and for a VIEWER who cannot read the folder', async () => {
+      wireFolders([
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'users', userIds: ['someone-else'] }],
+        },
+      ]);
+
+      // The flag is a property of the FOLDER, not of the reader: it never answers "can you see this".
+      // A VIEWER who fails the rule still learns only that a restriction EXISTS, never its content.
+      const visible = await service.visibleFolderIds(human('u1', 'VIEWER'));
+      expect(folderVisible(visible, 'sec')).toBe(false);
+      expect([...(await service.restrictedFolderIds())]).toEqual(['sec']);
+    });
+
+    it('a malformed stored value counts as restricted (fail closed, same as the evaluator)', async () => {
+      wireFolders([
+        { id: 'bad', parentId: null, accessRules: [{ kind: 'bogus' }] },
+      ]);
+
+      // The evaluator hides it from a non-admin; the flag must agree — an unparseable restriction is
+      // never reported as public.
+      expect([...(await service.restrictedFolderIds())]).toEqual(['bad']);
+    });
+
+    it('shares the request-scoped tree load with visibleFolderIds (no extra query)', async () => {
+      wireFolders([
+        {
+          id: 'sec',
+          parentId: null,
+          accessRules: [{ kind: 'role', role: 'MEMBER' }],
+        },
+      ]);
+      const cache = {};
+
+      await service.visibleFolderIds(human('u1', 'MEMBER'), cache);
+      await service.restrictedFolderIds(cache);
+
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -2,12 +2,14 @@
 
 import {
   BookOpenIcon,
+  BuildingStorefrontIcon,
   CpuChipIcon,
   CubeIcon,
   KeyIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
   ServerStackIcon,
+  ShoppingCartIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
 import { EyeIcon } from "@heroicons/react/16/solid";
@@ -22,6 +24,7 @@ import {
   type SearchEntity,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
+import { usePurchaseTitle } from "@/app/(app)/purchases/_components/purchase-display";
 import { useRouter } from "next/navigation";
 import {
   type ReactNode,
@@ -53,6 +56,14 @@ import { useAsset } from "@/lib/api/hooks/use-assets";
 import { useSearch } from "@/lib/api/hooks/use-search";
 import { useUser } from "@/lib/api/hooks/use-users";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { useMyPermissions } from "@/lib/hooks/use-permissions";
+import {
+  purchaseHitHref,
+  purchaseHitSecondary,
+  purchaseHitTitleSource,
+  supplierHitHref,
+  visibleSearchEntities,
+} from "@/lib/search/purchases";
 import { cn } from "@/lib/utils";
 
 type EntityFilter = SearchEntity | "all";
@@ -68,6 +79,8 @@ const ENTITY_ICON: Record<SearchEntity, typeof ServerStackIcon> = {
   applications: KeyIcon,
   infra: CpuChipIcon,
   consumables: CubeIcon,
+  purchases: ShoppingCartIcon,
+  suppliers: BuildingStorefrontIcon,
 };
 
 /** The lifted single-open Quick View state: which row's preview is open and whether it's pinned.
@@ -104,10 +117,15 @@ function quickViewReducer(
  * Navigation targets degrade gracefully where no detail page exists yet: Users → /users and
  * Locations → /locations (list); Applications → /applications/[id] is forward-compatible (the route
  * lands with the Access screen, sub-issue 2).
+ *
+ * Purchases and suppliers (#1499) come back only for a viewer holding `purchaseOrder:read` — the API
+ * omits both otherwise — and their filter chips are hidden without it.
  */
 export function GlobalSearch() {
   const t = useTranslations("shared");
   const router = useRouter();
+  const { can } = useMyPermissions();
+  const purchaseTitle = usePurchaseTitle();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [entity, setEntity] = useState<EntityFilter>("all");
@@ -240,7 +258,7 @@ export function GlobalSearch() {
               >
                 {t("search.all")}
               </FilterChip>
-              {SEARCH_ENTITIES.map((key) => (
+              {visibleSearchEntities(SEARCH_ENTITIES, can).map((key) => (
                 <FilterChip
                   key={key}
                   active={entity === key}
@@ -413,6 +431,24 @@ export function GlobalSearch() {
                         categoryName: null,
                         description: hit.description,
                       },
+                    })}
+                  />
+                  <ResultGroup
+                    entity="purchases"
+                    block={data?.purchases}
+                    onSelect={(hit) => go(purchaseHitHref(hit))}
+                    render={(hit) => ({
+                      primary: purchaseTitle(purchaseHitTitleSource(hit)),
+                      secondary: purchaseHitSecondary(hit),
+                    })}
+                  />
+                  <ResultGroup
+                    entity="suppliers"
+                    block={data?.suppliers}
+                    onSelect={(hit) => go(supplierHitHref(hit))}
+                    render={(hit) => ({
+                      primary: hit.name,
+                      secondary: hit.taxId ?? undefined,
                     })}
                   />
                   {totalHits === 0 &&

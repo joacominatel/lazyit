@@ -38,9 +38,31 @@ your IdP.
 **Head start (optional).** You can assign one asset and grant one application access right from the
 create form, so the new person starts with what they need.
 
+## A person's page
+
+Opening a user shows their record, laid out like an asset's page.
+
+- **The summary card** at the top: name, status, role, and the email (with a copy button), username
+  and employee number. Under it, **key facts** count the **assets held**, the **application access**
+  and the **articles** they wrote; select a count to open its tab. The manager sits beside them.
+- **Needs attention** items appear only when something needs follow-up: access that expires within the
+  next 30 days, access that has expired and is about to be revoked, and assets the person hasn't
+  acknowledged receiving yet.
+- **Tabs**: **Assets** (each with its asset tag, model, category, status and whether receipt was
+  acknowledged), **Access** (expired and soon-to-expire access listed first), **Articles**,
+  **Consumables**, and **History**, one list of the assets they returned and the access they lost,
+  most recent first. Each tab only appears to people allowed to see what it lists. The open tab is
+  kept in the page address, so a shared link opens on the same tab.
+- **The side column** holds the **Profile**: role (editable with *Manage users*), manager, employee
+  number, username, email and dates. For a directory person it also offers to create their sign-in
+  account.
+
+The header keeps **Reset password** and **Edit** in sight. **Clone** and **Offboard** are in the **⋯**
+menu next to them, with Offboard set apart so it isn't clicked by mistake.
+
 ## Clone a user
 
-To onboard someone who mirrors a colleague ("same access as Ana"), open a user and choose **Clone**.
+To onboard someone who mirrors a colleague ("same access as Ana"), open a user and choose **Clone** from the **⋯** menu.
 You pick a fresh, unique email and a role, then choose which of the source's **assets** and
 **application access** carry over.
 
@@ -91,8 +113,12 @@ option.
 
 ## Offboard a user
 
-When someone leaves, open them and choose **Offboard**. lazyit shows the full impact up front — the
-**assets to return** and the **application access to revoke** — and then, on confirm:
+When someone leaves, open them and choose **Offboard** from the **⋯** menu. A wide panel opens with the full
+impact up front: four tiles count the **assets released**, the **access revoked**, the **consumables still
+out** and the **account archived** (its history is kept). Below them, the left column lists what happens on
+confirm — the assets to return, the application access to revoke (with its access level, and a
+**Critical** mark on critical applications) and the consumables delivered — and the right column holds the
+optional handover act. On confirm, lazyit:
 
 - **revokes** the person's active application access,
 - **removes** the person's access to every [Secret vault](/help/secret-manager-vaults-members) they
@@ -114,10 +140,19 @@ values themselves should be changed. lazyit **cannot rotate them for you** — i
 never sees the plaintext, so it can't re-encrypt on your behalf. This is a prompt, not an automatic
 action. (Who removed whose vault access, and when, is recorded in the Secret Manager's audit trail.)
 
-**Nothing is destroyed.** The person and their history are preserved for the record. You can fill in a
-handover note and print a **return act** (with company name and signature lines) to sign on paper at
-hand-off. Offboarding is valid even when the person holds nothing — it still stands as a record of
-their departure.
+**Nothing is destroyed.** The person and their history are preserved for the record — the panel's footer
+says so, and the button names the person you are offboarding. Offboarding is valid even when the person
+holds nothing — it still stands as a record of their departure.
+
+**The handover act.** The right column shows a live preview of the printed **return act**: the company
+name and date, the person, the sections it will list, your handover note and the two signature lines
+(Employee and IT). It updates as you change the settings. Open **Customize act** to set the company name,
+edit the handover note (saved as a template that pre-fills every act) and choose what the act lists with
+the **Assets**, **Access** and **Consumables** chips. These settings are kept for next time. Choose
+**Print act** to open the act in a new tab and sign it on paper at hand-off.
+
+If the panel can't load the person's assets, access or consumables, it says so instead of showing empty
+lists, the tiles show "—", and the act can't be printed until you **Retry** and it loads.
 
 **Consumables they received.** The offboarding sheet also lists the
 [consumables delivered](/help/consumables-stock-movements) to the person, in two groups:
@@ -129,16 +164,16 @@ their departure.
 
 Offboarding **does not move stock** and closes no delivery: record each return from the person's page
 as the item comes back. By default everything listed is printed on the return act. Untick a row to
-leave it off, or turn off **List consumables** under *Printed act* to leave the whole section off; the
-act then prints exactly what you kept. If the person received more than the sheet can list, it says
+leave it off, or turn off the **Consumables** chip under **Customize act** to leave the whole section off;
+the act then prints exactly what you kept. If the person received more than the sheet can list, it says
 how many more there are rather than leaving them out silently.
 
 ## Consumables on a person's page
 
-A person's page has a **Consumables delivered** section listing what was delivered to them, newest
+A person's page has a **Consumables** tab listing what was delivered to them, newest
 first. **Outstanding only** shows just the returnable items still out, and a date filter narrows it by
 when they were delivered. With permission to record stock movements you can **Deliver consumable** to
-them or record a **Return…** from here. People who cannot view other users do not see this section.
+them or record a **Return…** from here. People who cannot view other users do not see this tab.
 
 ## Find users by role
 

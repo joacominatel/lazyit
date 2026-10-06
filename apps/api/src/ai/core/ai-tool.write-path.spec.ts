@@ -347,6 +347,18 @@ const writeToolset: AiToolset = {
     previewFixture('thing_revoke_critical', 'write', {
       warnings: ['EXTERNAL_DEPROVISIONING', 'CRITICAL_APPLICATION'],
     }),
+    // #1478 (ADR-0099 §11, D11): a write that generates assets or changes money, and a tool registered as
+    // never auto-approved (every purchase change) — ordinary write cards otherwise, no step-up.
+    previewFixture('thing_receive_units', 'write', {
+      warnings: ['CREATES_ASSETS'],
+    }),
+    previewFixture('thing_set_price', 'write', {
+      warnings: ['CHANGES_MONEY'],
+    }),
+    {
+      ...previewFixture('thing_purchase_note', 'write', {}),
+      neverAutoApprove: true,
+    },
     previewFixture('thing_unclassified', 'elevated', {
       warnings: [],
       elevated: true,
@@ -1804,6 +1816,36 @@ describe('AiToolService — the ledger-backed write path (INV-AI-3, INV-AI-10)',
         expect(updates).toBe(0);
         expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
         expect(events(action.id)).toEqual(['PROPOSED']);
+      },
+    );
+
+    it.each([
+      ['thing_receive_units', 'CREATES_ASSETS'],
+      ['thing_set_price', 'CHANGES_MONEY'],
+      ['thing_purchase_note', 'a tool registered neverAutoApprove'],
+    ])(
+      '%s (%s): never approved automatically (#1478, D11) — the card waits, with no step-up',
+      async (name) => {
+        autoOn();
+        const action = await proposeOk(name);
+        expect(action.preview?.stepUpRequired).toBe(false);
+        expect(action.preview?.elevated).toBe(false);
+        await expect(
+          tools.approve(action.id, chat(human(ID.member)), { auto: true }),
+        ).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'AUTO_APPROVE_NOT_ELIGIBLE' },
+        });
+        expect(updates).toBe(0);
+        expect(invocations.get(action.id)!.status).toBe('AWAITING_APPROVAL');
+        expect(events(action.id)).toEqual(['PROPOSED']);
+        // The user's own click still approves it, without a password.
+        const approved = await tools.approve(action.id, chat(human(ID.member)));
+        expect(approved).toMatchObject({
+          status: 'SUCCEEDED',
+          approvalMode: 'USER',
+        });
+        expect(updates).toBe(1);
       },
     );
 

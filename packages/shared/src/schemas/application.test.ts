@@ -2,9 +2,34 @@ import { describe, expect, test } from "bun:test";
 import {
   ApplicationSchema,
   CreateApplicationSchema,
+  hasBrowserInterpretedScheme,
   isSafeApplicationUrl,
   UpdateApplicationSchema,
 } from "./application";
+
+// SEC-086 — the denylist behind InfraShortcut.url, which must keep ssh:// and other non-web links.
+describe("hasBrowserInterpretedScheme (SEC-086)", () => {
+  test("flags executable schemes, however they are disguised", () => {
+    const bad = [
+      "javascript:alert(1)",
+      "JAVASCRIPT:alert(1)",
+      "\u0001javascript:alert(1)",
+      "java\nscript:alert(1)",
+      "javascript&#58;alert(1)",
+      "javascript&colon;alert(1)",
+      "%6Aavascript:alert(1)",
+      "data:text/html,x",
+      "vbscript:x",
+      "view-source:https://x",
+    ];
+    for (const url of bad) expect(hasBrowserInterpretedScheme(url)).toBe(true);
+  });
+
+  test("leaves web, SSH, console and scheme-less values alone", () => {
+    const ok = ["https://a.example", "ssh://root@h", "rdp://h", "vnc://h:5900", "vpn.corp.local", "jenkins:8080"];
+    for (const url of ok) expect(hasBrowserInterpretedScheme(url)).toBe(false);
+  });
+});
 
 // SEC-008 — Application.url must not accept an executable scheme (javascript:/data:/…) that would
 // become a stored XSS sink when rendered as a link href, while still allowing scheme-less internal
@@ -241,6 +266,17 @@ describe("Application seat/license tracking (#949)", () => {
     ).toBe(false);
     expect(
       CreateApplicationSchema.safeParse({ name: "X", costPerSeat: -100 })
+        .success,
+    ).toBe(false);
+  });
+
+  test("costPerSeat is 64-bit minor units (ADR-0100): above int4 accepted, above MAX_SAFE_INTEGER rejected", () => {
+    const create = CreateApplicationSchema.safeParse({ name: "X", costPerSeat: 3_000_000_000 });
+    expect(create.success).toBe(true);
+    expect(create.success && create.data.costPerSeat).toBe(3_000_000_000);
+    expect(UpdateApplicationSchema.safeParse({ costPerSeat: 3_000_000_000 }).success).toBe(true);
+    expect(
+      CreateApplicationSchema.safeParse({ name: "X", costPerSeat: Number.MAX_SAFE_INTEGER + 2 })
         .success,
     ).toBe(false);
   });

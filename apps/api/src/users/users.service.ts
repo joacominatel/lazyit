@@ -1055,8 +1055,13 @@ export class UsersService {
           ? {
               sessionEpoch: { increment: 1 },
               mcpCredentialEpoch: { increment: 1 },
+              // A stale sync stamp would let the directory sync undo this deactivation (#1311).
+              directoryOffboardedAt: null,
+              directoryReenabledAt: null,
             }
           : {}),
+        // The directory sync must not undo an admin's re-enable while the person stays absent (#1522).
+        ...(reactivating ? { directoryReenabledAt: new Date() } : {}),
       },
     });
 

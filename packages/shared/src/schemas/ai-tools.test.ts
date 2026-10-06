@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   AI_CHANNELS,
+  AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES,
+  AI_ENTITY_TYPES,
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
   AI_PREVIEW_WARNING_CODES,
   AI_TOOL_CLASSES,
   AiActionPreviewSchema,
@@ -9,6 +12,7 @@ import {
   AiToolManifestSchema,
   AiToolNameSchema,
   AiToolResultSchema,
+  aiPurchaseDocumentSourceRef,
 } from "./ai-tools";
 
 // The AI tool contract (ADR-0097 decision 3; synthesis §4.1, §4.3; R3, R4).
@@ -202,6 +206,55 @@ describe("Preview warning codes", () => {
       stepUpRequired: true,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe("Purchases in the AI contract (#1478)", () => {
+  test("purchases, suppliers and purchase documents are entity types", () => {
+    for (const type of ["purchaseOrder", "supplier", "purchaseDocument"]) {
+      expect(AI_ENTITY_TYPES).toContain(type);
+    }
+  });
+
+  test("a read purchase document is a ref to the attachment, on its purchase's page", () => {
+    const ref = aiPurchaseDocumentSourceRef("cpurchase00000000000000001", "cattach000000000000000001", "invoice.pdf");
+    expect(AiEntityRefSchema.parse(ref)).toEqual({
+      type: "purchaseDocument",
+      id: "cattach000000000000000001",
+      op: "navigate",
+      label: "invoice.pdf",
+      parent: { type: "purchaseOrder", id: "cpurchase00000000000000001" },
+    });
+    expect(aiPurchaseDocumentSourceRef("p", "a")).not.toHaveProperty("label");
+  });
+
+  test("a read purchase document marks the whole conversation untrusted", () => {
+    expect(AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES).toEqual(["purchaseDocument"]);
+  });
+
+  test("the money and asset-creation warnings parse on a write preview", () => {
+    expect(AI_PREVIEW_WARNING_CODES).toContain("CREATES_ASSETS");
+    expect(AI_PREVIEW_WARNING_CODES).toContain("CHANGES_MONEY");
+    // One source of truth for core (never auto-approved) and the web (left out of "Approve all").
+    expect([...AI_NEVER_AUTO_APPROVE_WARNINGS]).toEqual(["CREATES_ASSETS", "CHANGES_MONEY"]);
+    const parsed = AiActionPreviewSchema.safeParse({
+      toolName: "purchase_receive",
+      class: "write",
+      changes: [{ field: "quantity", after: 3, valueKind: "number" }],
+      warnings: ["CREATES_ASSETS", "CHANGES_MONEY"],
+      untrustedSources: [aiPurchaseDocumentSourceRef("p", "a")],
+      elevated: false,
+      stepUpRequired: false,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("an older reader drops a purchase ref it does not know instead of failing", () => {
+    const list = AiEntityRefListSchema.parse([
+      { type: "purchaseOrder", id: "p", op: "created" },
+      { type: "purchaseInvoiceFromTheFuture", id: "x", op: "created" },
+    ]);
+    expect(list).toEqual([{ type: "purchaseOrder", id: "p", op: "created" }]);
   });
 });
 

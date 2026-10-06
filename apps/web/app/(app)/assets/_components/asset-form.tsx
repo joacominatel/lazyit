@@ -10,7 +10,6 @@ import {
   type Asset,
   type AssetModel,
   type AssetStatus,
-  AssetStatusSchema,
   cloneAssetDefaults,
   CreateAssetSchema,
   type SpecsWarning,
@@ -18,7 +17,7 @@ import {
   validateSpecsAgainstDictionary,
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useReducer, useState } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
@@ -28,7 +27,10 @@ import { Callout } from "@/components/callout";
 import { CreatableField } from "@/components/creatable-field";
 import { CreateAssetModelDialog } from "@/components/create-asset-model-dialog";
 import { LocationCombobox } from "@/components/location-combobox";
+import { MoneyField, moneyInputText } from "@/components/money-input";
+import { SuggestInput, useRecentValues } from "@/components/suggest-input";
 import { UserCombobox } from "@/components/user-combobox";
+import { NewAssetFromPurchase } from "./new-asset-from-purchase";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -41,25 +43,25 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
 import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useAssetTagSchemeSummary } from "@/lib/api/hooks/use-asset-tag-scheme";
 import { autoTagHintFrom } from "./auto-tag-hint";
-import { useAssetCompanies } from "@/lib/api/hooks/use-assets";
+import { useSuggestions } from "@/lib/api/hooks/use-suggestions";
 import { useCreateAsset, useUpdateAsset } from "@/lib/api/hooks/use-asset-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { notifyError } from "@/lib/api/notify-error";
-import { majorToMinor, minorToMajor } from "@/lib/utils/money";
+import { parseMoneyInput } from "@/lib/utils/money";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
-import { useAssetStatusLabel } from "./asset-status-badge";
+import {
+  createStatusFields,
+  updateStatusFields,
+} from "./asset-status-options";
+import {
+  AssetStatusSelect,
+  useAssetStatusOptions,
+} from "./asset-status-picker";
 import {
   type CustomFieldError,
   type CustomFieldRow,
@@ -74,6 +76,9 @@ const FORM_ID = "asset-form";
 type AssetFormValues = {
   name: string;
   status: AssetStatus;
+  // The custom status (ADR-0101) the status picker sets alongside `status` (its kind). `null` on edit =
+  // a bare built-in status (clears a custom one); absent on create.
+  statusLabelId?: string | null;
   modelId?: string;
   locationId?: string;
   serial?: string;
@@ -104,6 +109,7 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
     return {
       name: asset.name,
       status: asset.status,
+      statusLabelId: asset.statusLabelId ?? null,
       modelId: asset.modelId ?? undefined,
       locationId: asset.locationId ?? undefined,
       serial: asset.serial ?? undefined,
@@ -119,6 +125,9 @@ function toFormValues(asset?: Asset, cloneSource?: Asset): AssetFormValues {
     return {
       name: d.name ?? "",
       status: d.status ?? "OPERATIONAL",
+      // A clone keeps the source's custom status with its built-in one (the shared sanitizer predates
+      // custom statuses and copies `status` only).
+      statusLabelId: cloneSource.statusLabelId ?? undefined,
       modelId: d.modelId,
       locationId: d.locationId,
       // serial/assetTag are cleared by the sanitizer → render empty.
@@ -202,9 +211,9 @@ export function AssetForm({
 }) {
   const isEdit = asset != null;
   const router = useRouter();
+  const locale = useLocale();
   const t = useTranslations("assets.form");
   const tc = useTranslations("common");
-  const statusLabel = useAssetStatusLabel();
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const assignUser = useAssignUser();
@@ -216,16 +225,14 @@ export function AssetForm({
   // head start. The custom-field rows already live outside RHF here, so this follows the house pattern.
   const [assignToUserId, setAssignToUserId] = useState("");
 
-  // Purchase cost + depreciation (#954) live OUTSIDE react-hook-form. They're edited in MAJOR units
-  // (with decimals), but the schema validates them as integer MINOR units and a `strictObject` would
-  // reject a half-typed "10." — so we hold the raw text here and convert to minor units once, on
-  // submit (same pattern as `assignToUserId` and the specs rows above). Seed from the edited asset,
-  // or the clone source's stored cost. Displayed value = the stored minor amount shown as major.
+  // Purchase cost + depreciation (#954) live OUTSIDE react-hook-form. They're typed in MAJOR units in
+  // the viewer's locale (#1470: "1.234,56" in es), but the schema validates integer MINOR units and a
+  // `strictObject` would reject the text — so we hold the raw text here and parse it once, on submit
+  // (same pattern as `assignToUserId` and the specs rows above). Seed from the edited asset, or the
+  // clone source's stored cost, in the display format.
   const moneySource = asset ?? cloneSource;
   const [purchaseCost, setPurchaseCost] = useState(() =>
-    moneySource?.purchaseCost != null
-      ? String(minorToMajor(moneySource.purchaseCost))
-      : "",
+    moneyInputText(moneySource?.purchaseCost, locale),
   );
   const [usefulLifeMonths, setUsefulLifeMonths] = useState(() =>
     moneySource?.usefulLifeMonths != null
@@ -233,10 +240,15 @@ export function AssetForm({
       : "",
   );
   const [salvageValue, setSalvageValue] = useState(() =>
-    moneySource?.salvageValue != null
-      ? String(minorToMajor(moneySource.salvageValue))
-      : "",
+    moneyInputText(moneySource?.salvageValue, locale),
   );
+  // The cost's optional currency LABEL (ADR-0099 §5): free text, never defaulted — an asset without one
+  // reads "No currency". It travels with the cost (clone copies both).
+  const [purchaseCurrency, setPurchaseCurrency] = useState(
+    () => moneySource?.purchaseCurrency ?? "",
+  );
+  const currencies = useSuggestions("currency", purchaseCurrency);
+  const [, rememberCurrency] = useRecentValues("currency");
 
   // Asset-tag scheme hint (ADR-0063, #363 · #1180 · #1315): on CREATE, when the org enabled an auto-tag
   // scheme, tell the operator which tag leaving this blank would assign. The field stays optional and an
@@ -248,9 +260,9 @@ export function AssetForm({
   // differ if someone else creates first. A failed read just hides the hint.
   const { data: tagSummary } = useAssetTagSchemeSummary({ enabled: !isEdit });
   const autoTagHint = autoTagHintFrom(tagSummary, isEdit);
-  // Distinct existing company values for the free-text autocomplete datalist (ADR-0076). A plain
-  // suggestion list — the operator can still type a brand-new value.
-  const { data: companies } = useAssetCompanies();
+  // Recent company values are this viewer's, kept per browser (the suggestions are read below, once the
+  // typed text is known).
+  const [, rememberCompany] = useRecentValues("asset.company");
 
   // Specs source: the edited asset's specs, or the clone source's (deep-copied by the sanitizer).
   const specsSource = asset?.specs ?? cloneSource?.specs;
@@ -288,6 +300,17 @@ export function AssetForm({
   const { data: assetModels } = useAssetModels();
   // `useWatch` (not `form.watch`) so the React Compiler can subscribe safely.
   const selectedModelId = useWatch({ control: form.control, name: "modelId" });
+  // The custom status the picker shows next to the built-in `status` (ADR-0101). The edited/cloned
+  // asset's own custom status is passed as an extra option, so it shows even when the list of custom
+  // statuses cannot be read.
+  const statusLabelId = useWatch({ control: form.control, name: "statusLabelId" });
+  const statusGroups = useAssetStatusOptions(
+    (asset ?? cloneSource)?.statusLabel ?? null,
+  );
+  // Company values already in use, with how often and how recently (ADR-0076, ADR-0099 §7) — the
+  // operator can still type a brand-new value.
+  const companyText = useWatch({ control: form.control, name: "company" }) ?? "";
+  const companies = useSuggestions("company", companyText);
   const categoryId =
     assetModels?.find((m) => m.id === selectedModelId)?.categoryId ?? null;
   const specsDictionary =
@@ -356,17 +379,27 @@ export function AssetForm({
       // send `{}` to actually clear them (an omitted key is a no-op in a PATCH).
       if (isEdit && specs === undefined && hadSpecs) specs = {};
 
-      // Convert the major-unit text to integer minor units (null when blank → omit on create /
-      // clear on patch). Non-negative is enforced by `min="0"` on the inputs + the server.
+      // Parse the money text in the viewer's locale to integer minor units (null when blank → omit on
+      // create / clear on patch). A refused amount already shows its reason inline on the field.
+      const cost = parseMoneyInput(purchaseCost, locale);
+      const salvage = parseMoneyInput(salvageValue, locale);
+      if (!cost.ok || !salvage.ok) {
+        scrollToFirstError(document.getElementById(FORM_ID));
+        return;
+      }
       const months = usefulLifeMonths.trim();
       const usefulLifeMonthsValue =
         months === "" || !Number.isFinite(Number(months))
           ? null
           : Math.trunc(Number(months));
 
+      const statusChoice = {
+        status: values.status,
+        labelId: values.statusLabelId ?? null,
+      };
       const payload = {
         name: values.name,
-        status: values.status,
+        ...createStatusFields(statusChoice),
         serial: values.serial,
         assetTag: values.assetTag,
         modelId: values.modelId,
@@ -375,17 +408,28 @@ export function AssetForm({
         purchaseDate: values.purchaseDate,
         warrantyEnd: values.warrantyEnd,
         notes: values.notes,
-        purchaseCost: majorToMinor(purchaseCost),
+        purchaseCost: cost.minor,
+        // Blank = "No currency": absent on create, cleared (null) on edit — see the update below.
+        purchaseCurrency: purchaseCurrency.trim() || undefined,
         usefulLifeMonths: usefulLifeMonthsValue,
-        salvageValue: majorToMinor(salvageValue),
+        salvageValue: salvage.minor,
         specs,
       };
 
       if (asset) {
         updateAsset.mutate(
-          { id: asset.id, data: payload },
+          {
+            id: asset.id,
+            data: {
+              ...payload,
+              ...updateStatusFields(statusChoice),
+              purchaseCurrency: payload.purchaseCurrency ?? null,
+            },
+          },
           {
             onSuccess: (updated) => {
+              rememberCompany(values.company);
+              rememberCurrency(purchaseCurrency);
               toast.success(t("savedToast"));
               router.push(`/assets/${updated.id}`);
             },
@@ -402,6 +446,8 @@ export function AssetForm({
           submitter.dataset.submitIntent === "add-another";
         createAsset.mutate(payload, {
           onSuccess: async (created) => {
+            rememberCompany(values.company);
+            rememberCurrency(purchaseCurrency);
             toast.success(t("createdToast"));
 
             // Best-effort owner assignment (mirrors /users/new head start, ADR-0064 §1): a failed
@@ -425,6 +471,7 @@ export function AssetForm({
               form.reset({
                 name: "",
                 status: values.status,
+                statusLabelId: values.statusLabelId,
                 modelId: values.modelId,
                 locationId: values.locationId,
                 company: values.company,
@@ -449,6 +496,8 @@ export function AssetForm({
 
   return (
     <form id={FORM_ID} onSubmit={onSubmit} noValidate className="space-y-6">
+      {/* A plain new asset (not an edit, not a clone) may be something a purchase is waiting for (#1475). */}
+      {!isEdit && !cloneSource ? <NewAssetFromPurchase modelId={selectedModelId ?? ""} /> : null}
       <FieldGroup>
         <Controller
           control={form.control}
@@ -485,18 +534,23 @@ export function AssetForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="status">{t("status")}</FieldLabel>
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger id="status" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AssetStatusSchema.options.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* One picker for both fields (ADR-0101): a custom status sets its id and its kind as
+                    the built-in status; a bare built-in status clears the custom one. */}
+                <AssetStatusSelect
+                  id="status"
+                  value={{ status: field.value, labelId: statusLabelId ?? null }}
+                  onChange={(choice) => {
+                    if (!choice) return;
+                    field.onChange(choice.status);
+                    form.setValue(
+                      "statusLabelId",
+                      choice.labelId ?? (isEdit ? null : undefined),
+                      { shouldDirty: true },
+                    );
+                  }}
+                  groups={statusGroups}
+                  invalid={fieldState.invalid}
+                />
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -576,26 +630,20 @@ export function AssetForm({
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
                 <FieldLabel htmlFor="company">{t("company")}</FieldLabel>
-                <Input
+                {/* Free text with suggestions over existing values (ADR-0076, #1470): the operator
+                    reuses a value or types a new one — no Company entity/picker. */}
+                <SuggestInput
                   id="company"
                   name={field.name}
                   ref={field.ref}
                   value={field.value ?? ""}
                   onBlur={field.onBlur}
-                  onChange={(event) =>
-                    field.onChange(event.target.value || undefined)
-                  }
-                  // Free-text + autocomplete over existing values (ADR-0076): a native datalist so the
-                  // operator reuses a value or types a new one — no Company entity/picker.
-                  list="asset-company-options"
+                  onValueChange={(value) => field.onChange(value || undefined)}
+                  source={() => companies}
+                  recentKey="asset.company"
                   placeholder={t("companyPlaceholder")}
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <datalist id="asset-company-options">
-                  {(companies ?? []).map((company) => (
-                    <option key={company} value={company} />
-                  ))}
-                </datalist>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -768,19 +816,27 @@ export function AssetForm({
         <FieldLegend>{t("purchaseGroup.title")}</FieldLegend>
         <FieldDescription>{t("purchaseGroup.description")}</FieldDescription>
         <FieldGroup>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MoneyField
+              id="purchaseCost"
+              label={t("purchaseCost")}
+              value={purchaseCost}
+              onValueChange={setPurchaseCost}
+              placeholder={t("purchaseCostPlaceholder")}
+            />
+
             <Field>
-              <FieldLabel htmlFor="purchaseCost">{t("purchaseCost")}</FieldLabel>
-              <Input
-                id="purchaseCost"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={purchaseCost}
-                onChange={(event) => setPurchaseCost(event.target.value)}
-                placeholder={t("purchaseCostPlaceholder")}
+              <FieldLabel htmlFor="purchaseCurrency">{t("purchaseCurrency")}</FieldLabel>
+              <SuggestInput
+                id="purchaseCurrency"
+                value={purchaseCurrency}
+                onValueChange={setPurchaseCurrency}
+                source={() => currencies}
+                recentKey="currency"
+                placeholder={t("purchaseCurrencyPlaceholder")}
+                maxLength={32}
               />
+              <FieldDescription>{t("purchaseCurrencyHelp")}</FieldDescription>
             </Field>
 
             <Field>
@@ -800,20 +856,14 @@ export function AssetForm({
               <FieldDescription>{t("usefulLifeMonthsHelp")}</FieldDescription>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="salvageValue">{t("salvageValue")}</FieldLabel>
-              <Input
-                id="salvageValue"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={salvageValue}
-                onChange={(event) => setSalvageValue(event.target.value)}
-                placeholder={t("salvageValuePlaceholder")}
-              />
-              <FieldDescription>{t("salvageValueHelp")}</FieldDescription>
-            </Field>
+            <MoneyField
+              id="salvageValue"
+              label={t("salvageValue")}
+              description={t("salvageValueHelp")}
+              value={salvageValue}
+              onValueChange={setSalvageValue}
+              placeholder={t("salvageValuePlaceholder")}
+            />
           </div>
         </FieldGroup>
       </FieldSet>

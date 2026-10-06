@@ -1,12 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type {
   AssetInventoryCsvItem,
   AssetStatus,
+  BatchAssetStatus,
   AssetWarrantyFilter,
   BatchResult,
   CreateAsset,
@@ -16,8 +18,9 @@ import type {
   UpdateAsset,
 } from '@lazyit/shared';
 import {
+  ASSET_STATUS_REQUIRED_MESSAGE,
   applyAssetModelSpecsDefaults,
-  ASSET_INVENTORY_CSV_HEADER,
+  assetInventoryCsvHeader,
   assetInventoryCsvRow,
   computeAssetBookValue,
   offsetOf,
@@ -33,6 +36,7 @@ import { PUBLIC_USER_SELECT } from '../users/public-user';
 import { ActorService, type ActorAttribution } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { jsonDeepEqual } from '../common/deep-equal';
+import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
 import {
   AssetHistoryService,
   type RecordAssetEvent,
@@ -43,6 +47,18 @@ import {
   AssetTagSchemeService,
   isUniqueTagCollision,
 } from '../asset-tag-scheme/asset-tag-scheme.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { recordPurchaseOrderEvent } from '../purchase-orders/purchase-order-events';
+import {
+  isOverReceived,
+  loadReceivableLine,
+} from '../purchase-orders/purchase-order-line-receipt';
+import {
+  ASSET_STATUS_LABEL_REF_SELECT,
+  lockLiveStatusLabel,
+  statusChangedPayload,
+  type LiveStatusLabel,
+} from '../asset-status-labels/asset-status-label-lock';
 
 /**
  * Merge migrator re-import provenance into a change-event payload (#1061). Both are plain jsonb objects;
@@ -85,8 +101,12 @@ const ASSET_PLAIN_FIELDS_SELECT = {
   purchaseCost: true,
   usefulLifeMonths: true,
   salvageValue: true,
+  purchaseCurrency: true,
 } as const satisfies Record<
-  Exclude<keyof UpdateAsset, 'status' | 'locationId' | 'modelId' | 'specs'>,
+  Exclude<
+    keyof UpdateAsset,
+    'status' | 'statusLabelId' | 'locationId' | 'modelId' | 'specs'
+  >,
   true
 >;
 
@@ -117,7 +137,10 @@ export interface AssetFilters {
   /** Filter to assets carrying this exact AssetModel (#943) — deep-linked from the asset detail page. */
   modelId?: string;
   locationId?: string;
+  /** The BUILT-IN status: matches every asset in it, whatever its custom status (ADR-0101). */
   status?: AssetStatus;
+  /** One custom status (ADR-0101): the assets carrying exactly this label. */
+  statusLabelId?: string;
   /** Exact-match grouping filter over the free-text `company` column (ADR-0076). */
   company?: string;
   /** Case-insensitive substring over name / serial / assetTag (OR). */
@@ -139,7 +162,30 @@ export interface AssetFilters {
   assetTags?: string[];
   /** Exact, case-sensitive serials (#1387): the assets holding any of them. */
   serials?: string[];
+  /**
+   * Purchase provenance filters (#1476). Only an object minted by
+   * {@link AssetsService.authorizePurchaseFilters} is accepted: `buildWhere` refuses any other (403).
+   */
+  purchase?: PurchaseFilters;
 }
+
+/**
+ * The asset list's purchase provenance filters (ADR-0099, #1476): the assets linked to one line, to any line
+ * of one purchase, and linked to some purchase (`true`) or to none (`false`), AND-combined. They reveal which
+ * assets came from which purchase (D-A), so they need `purchaseOrder:read` on top of `asset:read`.
+ */
+export interface PurchaseFilters {
+  purchaseOrderLineId?: string;
+  purchaseOrderId?: string;
+  purchaseLinked?: boolean;
+}
+
+/**
+ * The purchase filters that passed the permission check — the only ones `buildWhere` applies. A runtime
+ * brand rather than a type: any caller that reaches the list query (the list, the export, a future reader)
+ * cannot apply purchase filters it did not have authorized, whatever it passes.
+ */
+const AUTHORIZED_PURCHASE_FILTERS = new WeakSet<PurchaseFilters>();
 
 /**
  * Server-side sort allowlist for `GET /assets` (ADR-0030 amendment). Maps each PUBLIC `?sort=` key to
@@ -153,7 +199,29 @@ export const ASSET_SORT_ALLOWLIST = {
   status: 'status',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt',
+  // Plain asset columns behind the list's optional purchase & warranty columns (#1511).
+  purchaseDate: 'purchaseDate',
+  warrantyEnd: 'warrantyEnd',
+  purchaseCost: 'purchaseCost',
 } as const;
+
+/**
+ * The sort keys whose column is nullable and new with #1511: an asset with no purchase date, warranty end
+ * or cost sorts after every dated or priced one, in both directions, so "no value" never tops the list.
+ */
+const ASSET_NULLS_LAST_SORT_KEYS: ReadonlySet<string> = new Set([
+  'purchaseDate',
+  'warrantyEnd',
+  'purchaseCost',
+]);
+
+/**
+ * The unique key appended to EVERY list sort, allowlisted or default (ADR-0030 §9 — a contract rule, as
+ * `INFRA_NODE_TIEBREAKER` does for nodes). No sortable column is unique — received stock and imports share
+ * a `createdAt`, many assets share a status or have no warranty end — and under LIMIT/OFFSET a tie Postgres
+ * reorders between reads drops one row from the window and repeats another.
+ */
+const ASSET_TIEBREAKER = { id: 'desc' } as const;
 
 // Inline relations for the expanded reads (GET /assets, GET /assets/:id): the model (+ its
 // category, which lives on the model), the location, and the *active* owners (releasedAt = null)
@@ -161,6 +229,8 @@ export const ASSET_SORT_ALLOWLIST = {
 const ASSET_RELATIONS = {
   model: { include: { category: true } },
   location: true,
+  // The custom status (ADR-0101) as its compact ref. Never an archived label: a delete moves its assets.
+  statusLabel: { select: ASSET_STATUS_LABEL_REF_SELECT },
   assignments: {
     where: { releasedAt: null },
     orderBy: { assignedAt: 'desc' },
@@ -174,6 +244,21 @@ type AssetWithIncludes = Prisma.AssetGetPayload<{
   include: typeof ASSET_RELATIONS;
 }>;
 
+/**
+ * The linked purchase's provenance an inventory export carries — ONLY for a caller holding
+ * `purchaseOrder:read` (ADR-0099 §8). An archived purchase or supplier still names the asset's provenance:
+ * soft delete keeps every link (§9).
+ */
+const EXPORT_PURCHASE_SELECT = {
+  purchaseOrder: {
+    select: {
+      reference: true,
+      invoiceNumbers: true,
+      supplier: { select: { name: true } },
+    },
+  },
+} as const satisfies Prisma.PurchaseOrderLineSelect;
+
 // Lean projection for the LIST (GET /assets, paginated). Unlike the detail graph it (1) omits the
 // `specs` jsonb blob the table never renders and (2) trims each join (model+category, location,
 // active owners) to only the fields the list shows — not the full related rows. Keeps the full graph
@@ -184,10 +269,17 @@ const ASSET_LIST_SELECT = {
   serial: true,
   assetTag: true,
   status: true,
+  // The custom status (ADR-0101): the id and its compact ref for the Status column's badge.
+  statusLabelId: true,
+  statusLabel: { select: ASSET_STATUS_LABEL_REF_SELECT },
   notes: true,
   company: true,
   purchaseDate: true,
   warrantyEnd: true,
+  // The cost and its free-text currency label behind the list's optional Cost column (#1511) — the same
+  // `asset:read` values the detail read shows. A `bigint` column: toLeanListItem converts it for the wire.
+  purchaseCost: true,
+  purchaseCurrency: true,
   modelId: true,
   locationId: true,
   createdAt: true,
@@ -223,9 +315,33 @@ const ASSET_LIST_SELECT = {
   },
 } satisfies Prisma.AssetSelect;
 
+/** The export's projection for a caller holding `purchaseOrder:read`: the list's plus the linked purchase. */
+const EXPORT_SELECT_WITH_PURCHASE = {
+  ...ASSET_LIST_SELECT,
+  purchaseOrderLine: { select: EXPORT_PURCHASE_SELECT },
+} as const satisfies Prisma.AssetSelect;
+
+/** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
+type ExportRow = Prisma.AssetGetPayload<{
+  select: typeof ASSET_LIST_SELECT;
+}> &
+  Partial<
+    Pick<
+      Prisma.AssetGetPayload<{ select: typeof EXPORT_SELECT_WITH_PURCHASE }>,
+      'purchaseOrderLine'
+    >
+  >;
+
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }>;
+
+/** A lean list row; the `/assets/mine` self-read selects no cost columns (#1511). */
+type LeanListRow = Omit<
+  AssetWithLeanSelect,
+  'purchaseCost' | 'purchaseCurrency'
+> &
+  Partial<Pick<AssetWithLeanSelect, 'purchaseCost' | 'purchaseCurrency'>>;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -259,6 +375,10 @@ function warrantyWhere(warranty: AssetWarrantyFilter): Prisma.AssetWhereInput {
 const assetMineListSelect = (userId: string) =>
   ({
     ...ASSET_LIST_SELECT,
+    // The self-read carries no `asset:read` gate, so it leaves out the cost the directory list shows
+    // (#1511): a holder sees what they hold, not what it cost.
+    purchaseCost: false,
+    purchaseCurrency: false,
     assignments: {
       ...ASSET_LIST_SELECT.assignments,
       where: { releasedAt: null, userId },
@@ -273,7 +393,173 @@ export class AssetsService {
     private readonly history: AssetHistoryService,
     private readonly search: SearchService,
     private readonly tagScheme: AssetTagSchemeService,
+    private readonly permissions: PermissionResolverService,
   ) {}
+
+  /**
+   * Authorize the purchase filters for `principal` (#1476): 403 unless it holds `purchaseOrder:read` — the
+   * filters reveal provenance, which follows it (ADR-0099 §8, D-A), while a list read alone is `asset:read`.
+   * Returns the filters as the one object the list query will apply.
+   */
+  async authorizePurchaseFilters(
+    filters: PurchaseFilters,
+    principal?: Principal,
+  ): Promise<PurchaseFilters> {
+    if (!(await this.holds(principal, 'purchaseOrder:read'))) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const authorized = { ...filters };
+    AUTHORIZED_PURCHASE_FILTERS.add(authorized);
+    return authorized;
+  }
+
+  /**
+   * 400 unless the location a write names is LIVE. A soft-deleted location still passes the foreign key, so
+   * without this an asset could be created into, received into or moved to an archived location. Write-only:
+   * reads stay tolerant, and an update that leaves the location unchanged is not checked (a legacy row
+   * stays editable).
+   */
+  private async assertLocationLive(
+    client: Prisma.TransactionClient | PrismaService,
+    locationId: string | null | undefined,
+  ): Promise<void> {
+    if (!locationId) return;
+    const location = await client.location.findFirst({
+      where: { id: locationId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new BadRequestException(
+        `Location ${locationId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /** 400 unless the model a write names is LIVE — the same rule as {@link assertLocationLive}. */
+  private async assertModelLive(
+    client: Prisma.TransactionClient | PrismaService,
+    modelId: string | null | undefined,
+  ): Promise<void> {
+    if (!modelId) return;
+    const model = await client.assetModel.findFirst({
+      where: { id: modelId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!model) {
+      throw new BadRequestException(
+        `AssetModel ${modelId} not found (missing or archived)`,
+      );
+    }
+  }
+
+  /**
+   * The LIVE custom status a write names, locked `FOR SHARE` for the rest of the transaction (ADR-0101) — a
+   * concurrent kind change or delete of the label waits for this write, or this write waits for it and then
+   * reads the new kind / finds it archived. 400 when the label is missing or archived. Write-only.
+   */
+  private async liveStatusLabel(
+    tx: Prisma.TransactionClient,
+    statusLabelId: string,
+  ): Promise<LiveStatusLabel> {
+    const label = await lockLiveStatusLabel(tx, statusLabelId, 'share');
+    if (!label) {
+      throw new BadRequestException(
+        `Custom status ${statusLabelId} not found (missing or archived)`,
+      );
+    }
+    return label;
+  }
+
+  /** 400 when a body names both a built-in `status` and a custom status of another kind (ADR-0101). */
+  private assertStatusAgrees(
+    status: AssetStatus | undefined,
+    label: LiveStatusLabel,
+  ): void {
+    if (status !== undefined && status !== label.kind) {
+      throw new BadRequestException(
+        `status ${status} does not match the custom status "${label.name}", which maps to ${label.kind}. Send the custom status alone, or with its own status.`,
+      );
+    }
+  }
+
+  /**
+   * The `status` / `statusLabelId` a CREATE writes (ADR-0101): a custom status sets both (its `kind` is the
+   * status); a built-in status alone writes no label. Keeps the invariant `statusLabelId ⇒ status == kind`.
+   */
+  private async createStatus(
+    tx: Prisma.TransactionClient,
+    status: AssetStatus | undefined,
+    statusLabelId: string | undefined,
+  ): Promise<{ status: AssetStatus; statusLabelId?: string }> {
+    if (statusLabelId === undefined) {
+      // The create schema refuses a body with neither; an internal caller is held to the same rule.
+      if (status === undefined) {
+        throw new BadRequestException(ASSET_STATUS_REQUIRED_MESSAGE);
+      }
+      return { status };
+    }
+    const label = await this.liveStatusLabel(tx, statusLabelId);
+    this.assertStatusAgrees(status, label);
+    return { status: label.kind, statusLabelId: label.id };
+  }
+
+  /**
+   * The `status` / `statusLabelId` an UPDATE writes, and the custom status the asset ends with (ADR-0101):
+   *   - `statusLabelId: "<id>"` → the label and its kind (a disagreeing `status` is a 400);
+   *   - `statusLabelId: null` → no label; the built-in status is kept (or set, if `status` is also given);
+   *   - `status` alone → kept label when the status does not change (the label maps to it, by the
+   *     invariant), cleared when it does;
+   *   - neither → nothing.
+   */
+  private async updateStatus(
+    tx: Prisma.TransactionClient,
+    before: {
+      status: AssetStatus;
+      statusLabelId?: string | null;
+      statusLabel?: { id: string; name: string } | null;
+    },
+    status: AssetStatus | undefined,
+    statusLabelId: string | null | undefined,
+  ): Promise<{
+    write: { status?: AssetStatus; statusLabelId?: string | null };
+    toLabel: { id: string; name: string } | null;
+  }> {
+    const current = before.statusLabel ?? null;
+    if (statusLabelId === null) {
+      return {
+        write: { statusLabelId: null, ...(status ? { status } : {}) },
+        toLabel: null,
+      };
+    }
+    if (statusLabelId !== undefined) {
+      const label = await this.liveStatusLabel(tx, statusLabelId);
+      this.assertStatusAgrees(status, label);
+      return {
+        write: { status: label.kind, statusLabelId: label.id },
+        toLabel: label,
+      };
+    }
+    if (status === undefined) return { write: {}, toLabel: current };
+    if (status === before.status)
+      return { write: { status }, toLabel: current };
+    return {
+      write: {
+        status,
+        ...(before.statusLabelId ? { statusLabelId: null } : {}),
+      },
+      toLabel: null,
+    };
+  }
+
+  /** Whether the principal holds `permission` (fail-closed for no principal). */
+  private holds(
+    principal: Principal | undefined,
+    permission: Parameters<PermissionResolverService['principalHas']>[1],
+  ): Promise<boolean> {
+    return this.permissions.principalHas(principal, permission);
+  }
 
   /**
    * Rows per round-trip when STREAMING the full filtered inventory export (issue #872). Mirrors the
@@ -314,13 +600,24 @@ export class AssetsService {
     const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     // Server-side sort over the FULL result set (not page-local) via the per-resource allowlist
-    // (ADR-0030 amendment). No `sort` ⇒ undefined ⇒ the default `createdAt desc` order below.
-    const orderBy =
+    // (ADR-0030 amendment). No `sort` ⇒ the default `createdAt desc`; either way the unique `id` follows.
+    const sorted =
       resolveSortOrBadRequest<Prisma.AssetOrderByWithRelationInput>(
         page,
         ASSET_SORT_ALLOWLIST,
-      ) ??
-      ({ createdAt: 'desc' } satisfies Prisma.AssetOrderByWithRelationInput);
+      );
+    const primary: Prisma.AssetOrderByWithRelationInput =
+      sorted && page.sort && ASSET_NULLS_LAST_SORT_KEYS.has(page.sort)
+        ? {
+            [ASSET_SORT_ALLOWLIST[
+              page.sort as keyof typeof ASSET_SORT_ALLOWLIST
+            ]]: { sort: page.dir ?? 'asc', nulls: 'last' },
+          }
+        : (sorted ?? { createdAt: 'desc' });
+    const orderBy = [
+      primary,
+      ASSET_TIEBREAKER,
+    ] satisfies Prisma.AssetOrderByWithRelationInput[];
     // `includeSoftDeleted` is the ADR-0032 custom arg (stripped by the extension before Prisma sees
     // it); Prisma's generated args type carries it only as `undefined`, so spread it in via an opaque
     // object — keeping the `select` inference intact so the lean row type is preserved.
@@ -355,6 +652,7 @@ export class AssetsService {
     modelId,
     locationId,
     status,
+    statusLabelId,
     company,
     q,
     assignedToUserId,
@@ -362,8 +660,33 @@ export class AssetsService {
     warranty,
     assetTags,
     serials,
+    purchase: purchaseFilters,
   }: AssetFilters): Prisma.AssetWhereInput {
+    // Purchase provenance (#1476): applied only once authorized, whoever calls — defense in depth behind the
+    // list route's own check. AND-combined, so a contradictory pair simply matches nothing.
+    if (
+      purchaseFilters !== undefined &&
+      !AUTHORIZED_PURCHASE_FILTERS.has(purchaseFilters)
+    ) {
+      throw new ForbiddenException(
+        'Filtering assets by purchase needs purchaseOrder:read',
+      );
+    }
+    const { purchaseOrderLineId, purchaseOrderId, purchaseLinked } =
+      purchaseFilters ?? {};
+    const purchase: Prisma.AssetWhereInput[] = [
+      ...(purchaseOrderLineId ? [{ purchaseOrderLineId }] : []),
+      ...(purchaseOrderId ? [{ purchaseOrderLine: { purchaseOrderId } }] : []),
+      ...(purchaseLinked === undefined
+        ? []
+        : [
+            {
+              purchaseOrderLineId: purchaseLinked ? { not: null } : null,
+            },
+          ]),
+    ];
     return {
+      ...(purchase.length > 0 ? { AND: purchase } : {}),
       ...(locationId ? { locationId } : {}),
       // Exact-value lists (#1387, the AI batch create's duplicate check): which of these tags / serials
       // live assets already hold — one indexed `IN` per field instead of one substring search per value.
@@ -372,6 +695,9 @@ export class AssetsService {
         : {}),
       ...(serials && serials.length > 0 ? { serial: { in: serials } } : {}),
       ...(status ? { status } : {}),
+      // One custom status (ADR-0101). `status` filters by the built-in status, so it already includes
+      // every custom status of that kind; both together AND-combine.
+      ...(statusLabelId ? { statusLabelId } : {}),
       // Warranty window (#955): `expiring90d` mirrors the dashboard tile's (now, now + N days]
       // look-ahead (assets whose warranty hasn't lapsed but ends soon); `expired` = warranty end
       // already past. `now` is read per-call so the window tracks the request time.
@@ -447,11 +773,15 @@ export class AssetsService {
   async *streamInventoryCsvRows(
     filters: AssetFilters = {},
     deleted: DeletedFilter = 'active',
+    principal?: Principal,
   ): AsyncGenerator<string> {
+    // Purchase provenance columns (supplier, reference, invoice numbers) only for a caller holding
+    // `purchaseOrder:read` (ADR-0099 §8, CEO decision D-A); cost and currency are the asset's own fields.
+    const includePurchase = await this.holds(principal, 'purchaseOrder:read');
     // Leading provenance stamp (#909): names the build that wrote the file. The migrator strips it on
     // re-import and gates on major compatibility; other tools treat it as a leading `#` comment row.
     yield `${provenanceStampLine()}\n`;
-    yield `${ASSET_INVENTORY_CSV_HEADER}\n`;
+    yield `${assetInventoryCsvHeader({ includePurchase })}\n`;
 
     const where = {
       ...this.buildWhere(filters),
@@ -465,19 +795,50 @@ export class AssetsService {
 
     let skip = 0;
     for (;;) {
-      const rows = await this.prisma.asset.findMany({
+      const batch = {
         where,
         // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
         // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: AssetsService.EXPORT_BATCH_SIZE,
         skip,
-        select: ASSET_LIST_SELECT,
         ...escapeHatch,
-      });
+      } satisfies Prisma.AssetFindManyArgs;
+      // The list projection (with the asset's cost columns) and — ONLY for a caller holding
+      // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
+      // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
+      const rows: ExportRow[] = includePurchase
+        ? await this.prisma.asset.findMany({
+            ...batch,
+            select: EXPORT_SELECT_WITH_PURCHASE,
+          })
+        : await this.prisma.asset.findMany({
+            ...batch,
+            select: ASSET_LIST_SELECT,
+          });
       if (rows.length === 0) break;
       yield `${rows
-        .map((row) => assetInventoryCsvRow(this.toInventoryCsvItem(row)))
+        .map((row) =>
+          assetInventoryCsvRow(
+            {
+              ...this.toInventoryCsvItem(row),
+              purchaseCost:
+                row.purchaseCost == null ? null : Number(row.purchaseCost),
+              purchaseCurrency: row.purchaseCurrency ?? null,
+              purchase: row.purchaseOrderLine
+                ? {
+                    supplierName:
+                      row.purchaseOrderLine.purchaseOrder.supplier?.name ??
+                      null,
+                    reference: row.purchaseOrderLine.purchaseOrder.reference,
+                    invoiceNumbers:
+                      row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
+                  }
+                : null,
+            },
+            { includePurchase },
+          ),
+        )
         .join('\n')}\n`;
       skip += rows.length;
       // A short batch means the estate is exhausted — stop without an extra empty round-trip.
@@ -548,6 +909,11 @@ export class AssetsService {
     options?: {
       createdPayload?: Prisma.InputJsonValue;
       suppressSearch?: boolean;
+      /**
+       * Receive the unit against this purchase line (ADR-0099, #1473). Not a body field — `CreateAsset`
+       * never accepts it; only {@link receiveBatch} sets it, after validating the line.
+       */
+      purchaseOrderLineId?: string;
     },
   ) {
     const actor = this.actor.resolveActor(principal);
@@ -567,9 +933,18 @@ export class AssetsService {
       try {
         const asset = await this.prisma.$transaction(async (tx) => {
           let resolvedSpecs = specs;
+          // A custom status sets its kind as the status; a missing or archived one is a 400 (ADR-0101).
+          const { status, statusLabelId, ...fields } = rest;
+          const statusWrite = await this.createStatus(
+            tx,
+            status,
+            statusLabelId,
+          );
+          // A soft-deleted location or model passes the FK: refuse it explicitly (write-only, 400).
+          await this.assertLocationLive(tx, rest.locationId);
           if (rest.modelId) {
             const model = await tx.assetModel.findFirst({
-              where: { id: rest.modelId },
+              where: { id: rest.modelId, deletedAt: null },
               select: { specs: true },
             });
             if (!model) {
@@ -585,7 +960,11 @@ export class AssetsService {
           // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
           const created = await tx.asset.create({
             data: {
-              ...rest,
+              ...assetMoneyToDb(fields),
+              ...statusWrite,
+              ...(options?.purchaseOrderLineId !== undefined
+                ? { purchaseOrderLineId: options.purchaseOrderLineId }
+                : {}),
               ...(effectiveTag !== undefined ? { assetTag: effectiveTag } : {}),
               ...(resolvedSpecs !== undefined
                 ? { specs: resolvedSpecs as Prisma.InputJsonValue }
@@ -613,7 +992,7 @@ export class AssetsService {
         if (!options?.suppressSearch) {
           this.search.upsert('assets', projectAsset(asset));
         }
-        return asset;
+        return assetMoneyToWire(asset);
       } catch (err) {
         // Only an AUTO-allocated tag may advance-and-retry on a unique collision. An EXPLICIT tag
         // colliding is the caller's own duplicate → propagate the P2002 (the global filter → 409).
@@ -653,16 +1032,42 @@ export class AssetsService {
    *
    * The controller returns this envelope with HTTP 201 (NestJS `@Post` default), including an all-failed
    * batch (`created: []`) — `failed` is the honest partial signal (mirrors the import row-level FAILED).
+   *
+   * Against a purchase line (`purchaseOrderLineId`, ADR-0099 §4, #1473): the caller must also hold
+   * `purchaseOrder:write` (403) and the line must be a live `ASSET` line of a live purchase (400). Each unit
+   * is created already linked to the line, its CREATED history event carrying `{ source: 'purchase',
+   * purchaseOrderId, purchaseOrderLineId }`; the loop and the tag-counter semantics are untouched. After the
+   * loop ONE `UNITS_RECEIVED` row is appended to the purchase's log (not one per unit: the units are separate
+   * transactions, and each unit's own history already records its line). Over-receipt is allowed and
+   * reported as `overReceived` — derived from the live count after the loop, so a concurrent receive shows.
    */
   async receiveBatch(data: ReceiveAssets, principal?: Principal) {
-    // ONE upfront model lookup: a single friendly 400 instead of N identical per-unit failures, and the
-    // model name feeds each unit's default `name`. Mirrors create()'s model lookup (no deletedAt filter).
+    const line = data.purchaseOrderLineId
+      ? await this.receivableLine(data.purchaseOrderLineId, principal)
+      : null;
+    // ONE upfront model and location check: a single friendly 400 instead of N identical per-unit failures,
+    // and the model name feeds each unit's default `name`. Both must be LIVE, as in create().
     const model = await this.prisma.assetModel.findFirst({
-      where: { id: data.modelId },
+      where: { id: data.modelId, deletedAt: null },
       select: { name: true },
     });
     if (!model) {
       throw new BadRequestException(`AssetModel ${data.modelId} not found`);
+    }
+    await this.assertLocationLive(this.prisma, data.locationId);
+    // ONE upfront custom-status check too (ADR-0101): a missing or archived label, or a status of another
+    // kind, is a single 400. Each unit's create() re-checks it under its own lock.
+    if (data.statusLabelId !== undefined) {
+      const label = await this.prisma.assetStatusLabel.findFirst({
+        where: { id: data.statusLabelId, deletedAt: null },
+        select: ASSET_STATUS_LABEL_REF_SELECT,
+      });
+      if (!label) {
+        throw new BadRequestException(
+          `Custom status ${data.statusLabelId} not found (missing or archived)`,
+        );
+      }
+      this.assertStatusAgrees(data.status, label);
     }
 
     // create() returns a raw Prisma Asset row (Date fields). Let `created` INFER that type — do NOT type
@@ -679,7 +1084,10 @@ export class AssetsService {
       // already-minor-units purchaseCost is forwarded untouched (#954).
       const unit: CreateAsset = {
         name: `${model.name} #${i + 1}`,
-        status: data.status,
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.statusLabelId !== undefined
+          ? { statusLabelId: data.statusLabelId }
+          : {}),
         modelId: data.modelId,
         ...(data.locationId !== undefined
           ? { locationId: data.locationId }
@@ -691,6 +1099,12 @@ export class AssetsService {
         ...(data.purchaseCost != null
           ? { purchaseCost: data.purchaseCost }
           : {}),
+        ...(data.purchaseCurrency !== undefined
+          ? { purchaseCurrency: data.purchaseCurrency }
+          : {}),
+        ...(data.warrantyEnd !== undefined
+          ? { warrantyEnd: data.warrantyEnd }
+          : {}),
         ...(data.notes !== undefined ? { notes: data.notes } : {}),
         ...(data.serials?.[i] ? { serial: data.serials[i] } : {}),
       };
@@ -698,7 +1112,22 @@ export class AssetsService {
         // Each unit = its own tx + its own independent counter commit + its own CREATED history + search
         // upsert. A per-unit failure NEVER aborts the batch (partial success by design); the consumed tag
         // number has already advanced past this gap.
-        created.push(await this.create(unit, principal));
+        created.push(
+          await this.create(
+            unit,
+            principal,
+            line
+              ? {
+                  purchaseOrderLineId: line.id,
+                  createdPayload: {
+                    source: 'purchase',
+                    purchaseOrderId: line.purchaseOrderId,
+                    purchaseOrderLineId: line.id,
+                  },
+                }
+              : undefined,
+          ),
+        );
       } catch (err) {
         failed.push({
           index: i,
@@ -707,7 +1136,38 @@ export class AssetsService {
       }
     }
 
-    return { created, failed };
+    if (!line) return { created, failed };
+    const overReceived = await isOverReceived(this.prisma, line);
+    if (created.length > 0) {
+      await recordPurchaseOrderEvent(
+        this.prisma,
+        line.purchaseOrderId,
+        'UNITS_RECEIVED',
+        this.actor.resolveActor(principal),
+        {
+          lineId: line.id,
+          quantity: created.length,
+          assetIds: created.map((asset) => asset.id),
+          failed: failed.length,
+          overReceived,
+        },
+      );
+    }
+    return { created, failed, overReceived };
+  }
+
+  /**
+   * The purchase line a receive names, after the checks the asset route cannot express in its decorator:
+   * `purchaseOrder:write` on top of `asset:write` (linking a unit to a purchase is a purchase write), and a
+   * live `ASSET` line of a live purchase.
+   */
+  private async receivableLine(lineId: string, principal?: Principal) {
+    if (!(await this.holds(principal, 'purchaseOrder:write'))) {
+      throw new ForbiddenException(
+        'Receiving against a purchase line also needs purchaseOrder:write',
+      );
+    }
+    return loadReceivableLine(this.prisma, lineId);
   }
 
   /**
@@ -736,6 +1196,8 @@ export class AssetsService {
       select: {
         id: true,
         status: true,
+        statusLabelId: true,
+        statusLabel: { select: { id: true, name: true } },
         locationId: true,
         modelId: true,
         specs: true,
@@ -745,18 +1207,36 @@ export class AssetsService {
     if (!before) {
       throw new NotFoundException(`Asset ${id} not found`);
     }
-    const { specs, ...rest } = data;
+    const { specs, status, statusLabelId, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // The custom status and the built-in status move together (ADR-0101, invariant in updateStatus).
+      const statusChange = await this.updateStatus(
+        tx,
+        before,
+        status,
+        statusLabelId,
+      );
+      // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
+      if (rest.locationId !== before.locationId) {
+        await this.assertLocationLive(tx, rest.locationId);
+      }
+      if (rest.modelId !== before.modelId) {
+        await this.assertModelLive(tx, rest.modelId);
+      }
       const row = await tx.asset.update({
         where: { id },
         data: {
-          ...rest,
+          ...assetMoneyToDb(rest),
+          ...statusChange.write,
           ...(specs !== undefined
             ? { specs: specs as Prisma.InputJsonValue }
             : {}),
         },
       });
-      const events = this.changeEvents(before, row, actor);
+      const events = this.changeEvents(before, row, actor, {
+        from: before.statusLabel ?? null,
+        to: statusChange.toLabel,
+      });
       // Plain-field edits (#1382, ADR-0033 amendment): ONE `UPDATED` row per PATCH naming the plain fields
       // that actually changed — names only, never values. A PATCH that also moves a discrete dimension
       // writes both: its discrete row(s) above, and this row listing ONLY the plain fields. Every path (UI,
@@ -799,7 +1279,7 @@ export class AssetsService {
     if (!options?.suppressSearch) {
       this.search.upsert('assets', projectAsset(updated));
     }
-    return updated;
+    return assetMoneyToWire(updated);
   }
 
   /** Soft delete: set deletedAt (never hard-delete). Emits `DELETED` transactionally (ADR-0033). */
@@ -820,7 +1300,7 @@ export class AssetsService {
     });
     // Drop from the index so soft-deleted assets never surface in search (ADR-0035).
     this.search.remove('assets', id);
-    return deleted;
+    return assetMoneyToWire(deleted);
   }
 
   /**
@@ -961,43 +1441,99 @@ export class AssetsService {
   }
 
   /**
-   * Bulk status-change (ADMIN). For each live id whose status DIFFERS from the target: set the new
-   * status + emit a `STATUS_CHANGED` history event ({ from, to }) — identical to the single-item
-   * update path — inside one `$transaction`. An id already at the target status is skipped (no event,
-   * matching the no-op semantics of `update`). Missing/soft-deleted ids are skipped as not found.
+   * Bulk status-change (ADMIN). The target is a built-in `status`, a custom status (`statusLabelId`,
+   * ADR-0101 — sets the label and its kind), or both (they must agree, 400 otherwise); a missing or archived
+   * custom status is a 400. For each live id whose (status, custom status) DIFFERS from the target: write it
+   * + emit a `STATUS_CHANGED` history event — identical to the single-item update path, so a built-in
+   * status alone keeps nothing of a custom status of another kind — inside one `$transaction`. An id already
+   * there is skipped (a built-in status alone counts as "there" when the asset already has that status,
+   * whatever its custom status, matching `update`). Missing/soft-deleted ids are skipped as not found.
    * Re-indexes each changed row after the commit.
    */
   async batchSetStatus(
     ids: string[],
-    status: AssetStatus,
+    target: Pick<BatchAssetStatus, 'status' | 'statusLabelId'>,
     principal?: Principal,
   ): Promise<BatchResult> {
     const actor = this.actor.resolveActor(principal);
+    let label: LiveStatusLabel | null = null;
+    // `statusLabelId: null` = the bare built-in status: an asset in that status but carrying a custom one
+    // is changed (its custom status cleared), not skipped as already in state.
+    const bare = target.statusLabelId === null;
+    if (typeof target.statusLabelId === 'string') {
+      label = await this.prisma.assetStatusLabel.findFirst({
+        where: { id: target.statusLabelId, deletedAt: null },
+        select: ASSET_STATUS_LABEL_REF_SELECT,
+      });
+      if (!label) {
+        throw new BadRequestException(
+          `Custom status ${target.statusLabelId} not found (missing or archived)`,
+        );
+      }
+      this.assertStatusAgrees(target.status, label);
+    }
+    const status = label?.kind ?? target.status;
+    if (status === undefined) {
+      throw new BadRequestException(ASSET_STATUS_REQUIRED_MESSAGE);
+    }
     const live = await this.prisma.asset.findMany({
       where: { id: { in: ids } },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        statusLabelId: true,
+        statusLabel: { select: { id: true, name: true } },
+      },
     });
-    const current = new Map(live.map((a) => [a.id, a.status]));
+    const current = new Map(live.map((a) => [a.id, a]));
     const succeeded: string[] = [];
     const skipped: { id: string; reason: string }[] = [];
     for (const id of ids) {
-      if (!current.has(id)) skipped.push({ id, reason: 'not_found' });
-      else if (current.get(id) === status)
+      const asset = current.get(id);
+      if (!asset) skipped.push({ id, reason: 'not_found' });
+      else if (
+        asset.status === status &&
+        (label === null
+          ? !bare || asset.statusLabelId === null
+          : asset.statusLabelId === label.id)
+      )
         skipped.push({ id, reason: 'already_in_state' });
       else succeeded.push(id);
     }
 
     if (succeeded.length > 0) {
       await this.prisma.$transaction(async (tx) => {
+        // Re-check the custom status under its lock: archived or re-kinded since the read above → 400.
+        if (label) {
+          const locked = await this.liveStatusLabel(tx, label.id);
+          if (locked.kind !== label.kind) {
+            throw new ConflictException(
+              `The custom status "${locked.name}" changed while the batch ran; retry`,
+            );
+          }
+        }
         for (const id of succeeded) {
-          await tx.asset.update({ where: { id }, data: { status } });
+          const asset = current.get(id)!;
+          await tx.asset.update({
+            where: { id },
+            data: {
+              status,
+              ...(label
+                ? { statusLabelId: label.id }
+                : asset.statusLabelId
+                  ? { statusLabelId: null }
+                  : {}),
+            },
+          });
           await this.history.record(tx, {
             assetId: id,
             eventType: 'STATUS_CHANGED',
-            payload: {
-              from: current.get(id),
-              to: status,
-            },
+            payload: statusChangedPayload(
+              asset.status,
+              status,
+              asset.statusLabel,
+              label,
+            ),
             actor,
           });
         }
@@ -1031,7 +1567,7 @@ export class AssetsService {
    * `salvageValue` / `purchaseDate` via the shared pure util, never persisted.
    */
   private toExpanded(asset: AssetWithIncludes) {
-    const { assignments, ...rest } = asset;
+    const { assignments, ...rest } = assetMoneyToWire(asset);
     return {
       ...rest,
       activeAssignments: assignments,
@@ -1047,13 +1583,28 @@ export class AssetsService {
     };
   }
 
-  /** Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem). */
-  private toLeanListItem(asset: AssetWithLeanSelect) {
-    const { assignments, ...rest } = asset;
-    return { ...rest, activeAssignments: assignments };
+  /**
+   * Same `assignments` -> `activeAssignments` rename for the lean LIST row (AssetListItem), with the
+   * `bigint` cost as a wire number (ADR-0100) — absent on the self-read, which selects no cost.
+   */
+  private toLeanListItem(asset: LeanListRow) {
+    const { assignments, purchaseCost, ...rest } = asset;
+    return {
+      ...rest,
+      ...(purchaseCost === undefined
+        ? {}
+        : {
+            purchaseCost: purchaseCost === null ? null : Number(purchaseCost),
+          }),
+      activeAssignments: assignments,
+    };
   }
 
-  /** One discrete history event per field that actually changed in an update (ADR-0033). */
+  /**
+   * One discrete history event per field that actually changed in an update (ADR-0033). `STATUS_CHANGED`
+   * also fires when only the custom status changes (same built-in status, ADR-0101); its payload names the
+   * custom statuses (`fromLabel` / `toLabel`) whenever either side has one.
+   */
   private changeEvents(
     before: Pick<
       Prisma.AssetGetPayload<{
@@ -1065,9 +1616,13 @@ export class AssetsService {
         };
       }>,
       'status' | 'locationId' | 'modelId' | 'specs'
-    >,
+    > & { statusLabelId?: string | null },
     updated: { id: string } & typeof before,
     actor?: ActorAttribution,
+    labels?: {
+      from: { id: string; name: string } | null;
+      to: { id: string; name: string } | null;
+    },
   ): RecordAssetEvent[] {
     const events: RecordAssetEvent[] = [];
     const change = (
@@ -1081,8 +1636,21 @@ export class AssetsService {
         payload: { from, to } as Prisma.InputJsonValue,
         actor,
       });
-    if (before.status !== updated.status) {
-      change('STATUS_CHANGED', before.status, updated.status);
+    if (
+      before.status !== updated.status ||
+      (before.statusLabelId ?? null) !== (updated.statusLabelId ?? null)
+    ) {
+      events.push({
+        assetId: updated.id,
+        eventType: 'STATUS_CHANGED',
+        payload: statusChangedPayload(
+          before.status,
+          updated.status,
+          labels?.from,
+          labels?.to,
+        ),
+        actor,
+      });
     }
     if (before.locationId !== updated.locationId) {
       change('LOCATION_CHANGED', before.locationId, updated.locationId);

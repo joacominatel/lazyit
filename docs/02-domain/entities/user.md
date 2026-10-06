@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-10-05
 ---
 
 # User
@@ -153,7 +153,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
 | `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
 | `theme` | `string?` | Per-user colour theme (issue #1422) — `light` \| `dark` \| `system` (`ThemePreferenceSchema`); same null/tolerant-read rules as `locale`. |
-| `directoryOffboardedAt` | `datetime?` | Set when an AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). Offboarding a person who was active also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
+| `directoryOffboardedAt` | `datetime?` | Set when an **active** AD-sourced person **disappears** from the directory past the configurable grace threshold: a **soft** offboard (`isActive=false` + this stamp), **never** a hard delete (ADR-0006). The offboard also bumps `sessionEpoch`, revoking their local sessions (#1308). Cleared if the person reappears in a later sync, which reactivates them without restoring any session ([[0091-on-prem-ad-ldap-directory-source]]). The stamp means *the sync* deactivated them, so it is the only deactivation the sync ever undoes: a person who is already inactive (deactivated by hand) is never stamped and stays inactive when they reappear, and a manual deactivation clears any stamp left from an earlier sync offboard (#1311). The sync never offboards the **last active ADMIN**: that person is skipped with a warning until another active ADMIN exists (SEC-021). |
+| `directoryReenabledAt` | `datetime?` | Set when an admin re-enables a person by hand (`PATCH /users/:id`, inactive→active); cleared by a manual deactivation. While it is set, the directory sync never offboards the person, whatever their history, so an admin's re-enable holds while they stay missing from the directory (#1522, [[0091-on-prem-ad-ldap-directory-source]]). The sync clears it, and any leftover `directoryOffboardedAt` on the now-active person, when they reappear in the directory, so a later absence past grace offboards them as usual. Server-side only, never serialized (same posture as `directoryOffboardedAt`). `NULL` on every row that predates the column. |
 
 > [!note] Manager identity graph + clone-with-chosen-actions ([[0058-user-manager-and-clone-actions]])
 > The read `UserSchema` resolves the manager FK to a **redaction-safe descriptor** —
@@ -231,12 +232,12 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >
 > **AD/LDAP as a directory SOURCE** ([[0091-on-prem-ad-ldap-directory-source]], #839): besides the bulk
 > import, `directoryOnly` persons can be **reconciled read-only** from an on-prem AD/LDAP directory. A
-> singleton `DirectoryConnection` (Settings → Instance → Directory, `settings:manage`, off by default) binds
+> singleton `DirectoryConnection` (Settings → Directory, `settings:manage`, off by default) binds
 > read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
 > a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
 > `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
 > DISAPPEARED past a grace threshold → soft offboard (bumping `sessionEpoch` when the person was active,
-> #1308). **Hard invariants:** the sync never changes `role`, never sets `passwordHash`/`externalId`,
+> #1308), never of a person an admin deactivated or re-enabled by hand (#1311, #1522). **Hard invariants:** the sync never changes `role`, never sets `passwordHash`/`externalId`,
 > never flips `directoryOnly`→false, never grants a login, never hard-deletes, and writes `sessionEpoch`
 > only as that offboard's revoking increment. `provisionAccount`/`provisionLocalAccount` stay the ONLY
 > login-granting paths.
@@ -383,7 +384,12 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
-"who can access what" for one person and cross-linking user ⇄ asset / application. See
+"who can access what" for one person and cross-linking user ⇄ asset / application. It is a record page
+(#1525, [[ledger-design-language]] §4b): counters for held assets, access and articles open their tab,
+and an attention row flags access expiring within 30 days (the dashboard's default window), expired
+access awaiting the sweeper, and unacknowledged assets. The held assets' labels come from
+`GET /assets?assignedToUserId=` (complete at any inventory size); released-asset names resolve from a
+catalog page only when the History tab opens. Grants are read only with `accessGrant:read`. See
 [[0020-frontend-data-layer]].
 
 Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] ·

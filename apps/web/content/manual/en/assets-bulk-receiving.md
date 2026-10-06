@@ -22,11 +22,16 @@ to create assets). It opens a short form.
 - **Quantity** (required) — how many units to create, from 1 up to the per-request maximum.
 - **Status** — the state every unit starts in (for example *Operational* or *In storage*).
 - **Location**, **Company**, **Purchase date**, **Purchase cost**, **Notes** — optional shared
-  details applied to **every** unit. The purchase cost is entered per unit, in major units, exactly
-  like the asset form.
+  details applied to **every** unit. The purchase cost is entered per unit, in major units and in your
+  language's number format, and the company suggests values already in use — both exactly like the
+  asset form (see [Asset basics](/help/assets-asset-basics)).
 - **Serial numbers** — optional. Paste one serial per line, in order, and each unit gets the matching
   serial. Leave it blank to create serial-less units, or paste **exactly** as many lines as the
   quantity — a mismatched count is rejected before anything is created.
+- **Scan** — reads the serial numbers with the camera instead of typing them: each barcode you point it
+  at is added on its own line, a repeated one is not added twice, and the **quantity follows** the scanned
+  serials. It needs camera permission and HTTPS; without them, type or paste as usual. See
+  [Scanning serial numbers](/help/purchases-recording-purchases#scanning-serial-numbers).
 
 Auto asset tags still apply: if your instance uses an [asset-tag scheme](/help/configuration-asset-tag-scheme),
 each unit is tagged automatically as it is created.
@@ -67,6 +72,26 @@ see in the "created" count is ever rolled back by a later failure in the same ba
 
 From the result you can jump straight to the new assets (the inventory filtered to that model),
 **receive more**, or close.
+
+## Receiving against a purchase
+
+If you record [purchases](/help/purchases-recording-purchases), the units of a delivery can be received
+**against their purchase line** — they are then linked to it, count as received, and get the purchase's
+values without retyping them. There are three ways in:
+
+- **From purchase**, at the top of this form, lists the lines still waiting for units. Choose one and the
+  form switches to that line, filled in from the purchase.
+- When you choose a **model** that an open purchase is waiting for, a quiet hint under the model offers to
+  **receive against it**.
+- On the purchase itself, **Receive** on the line opens this same form already filled in.
+
+Against a line, the serial numbers come first and the **quantity follows them**; the purchase's values are
+shown as a summary you can **Change** for this receive only. The details are in
+[Purchases — Receiving units](/help/purchases-recording-purchases#receiving-units). The **New asset** form
+offers the same *From purchase* picker: choosing a line opens this form for it.
+
+These options appear only if you can view and edit purchases, and only while some purchase is waiting for
+units.
 
 ## When to use import instead
 

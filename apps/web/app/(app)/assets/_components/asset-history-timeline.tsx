@@ -12,11 +12,13 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useAssetHistory } from "@/lib/api/hooks/use-asset-history";
 import { useUserNames } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import {
   formatChangedFields,
   parseUpdatedPayload,
 } from "./asset-history-updated";
+import { parseStatusChange, type StatusChangeSide } from "./asset-history-status";
 
 /** Maps each event type to its label key under `assets.detail.timeline.events`. */
 const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
@@ -35,6 +37,9 @@ const EVENT_LABEL_KEY: Record<AssetHistoryEventType, string> = {
   // A consumable delivered to / returned from this asset (ADR-0098, #1364).
   CONSUMABLE_DELIVERED: "consumableDelivered",
   CONSUMABLE_RETURNED: "consumableReturned",
+  // Linked to / unlinked from a purchase line (ADR-0099 §2, #1473).
+  PURCHASE_LINKED: "purchaseLinked",
+  PURCHASE_UNLINKED: "purchaseUnlinked",
   DELETED: "deleted",
   RESTORED: "restored",
 };
@@ -83,6 +88,10 @@ const EVENT_BADGE: Record<AssetHistoryEventType, EventBadgeSpec> = {
   // is told apart by its label, the same way the text — not the colour — carries every badge's meaning.
   CONSUMABLE_DELIVERED: { kind: "categorical", dot: "bg-pillar-inventory" },
   CONSUMABLE_RETURNED: { kind: "categorical", dot: "bg-pillar-inventory" },
+  // Purchase link / unlink (ADR-0099 §2, #1473) — provenance changed, the asset itself did not; Purchases
+  // wears the inventory pillar (ux-proposal Appendix B), so the same neutral pill and hue.
+  PURCHASE_LINKED: { kind: "categorical", dot: "bg-pillar-inventory" },
+  PURCHASE_UNLINKED: { kind: "categorical", dot: "bg-pillar-inventory" },
 };
 
 /** The rail tick colour (ADR-0077): a semantic event lights its tick with its status tone;
@@ -151,7 +160,9 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   const t = useTranslations("assets.detail.timeline");
   const tc = useTranslations("common");
   const tForm = useTranslations("assets.form");
+  const tStatus = useTranslations("assets.status");
   const { dateTime, relative } = useFormatters();
+  const canReadPurchases = useCan("purchaseOrder:read");
 
   const events = useMemo(() => (data?.pages ?? []).flat(), [data]);
   // Resolve just the actors + `{userId}` payloads referenced by this asset's history (#961) — a
@@ -173,6 +184,12 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     if (!id) return t("someone");
     const user = userById.get(id);
     return user ? `${user.firstName} ${user.lastName}` : t("aUser");
+  }
+
+  /** One side of a status change: the built-in status by name, with its custom status when it had one. */
+  function statusSideText(side: StatusChangeSide): string {
+    const status = side.status ? tStatus(side.status) : side.raw;
+    return side.label ? t("statusWithLabel", { label: side.label, status }) : status;
   }
 
   /**
@@ -208,6 +225,27 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
   }
 
   /**
+   * The purchase link / unlink line (ADR-0099): a static sentence, with an "Open purchase" link only for a
+   * viewer holding `purchaseOrder:read` (D-A) and only when the payload carries a real id.
+   */
+  function purchaseDetail(
+    payload: Record<string, unknown>,
+    kind: "purchaseLinked" | "purchaseUnlinked",
+  ): ReactNode {
+    const purchaseOrderId = asString(payload.purchaseOrderId);
+    if (!canReadPurchases || !purchaseOrderId) return t(`details.${kind}`);
+    return (
+      <>
+        {t(`details.${kind}`)}
+        {" · "}
+        <Link href={`/purchases/${purchaseOrderId}`} className="font-medium hover:underline">
+          {t("details.openPurchase")}
+        </Link>
+      </>
+    );
+  }
+
+  /**
    * The UPDATED line (#1382): "Changed: Name, Notes" from the `{ fields }` payload (names only, never
    * values), labelled with the asset form's own field labels, an unknown name shown raw. A re-import row
    * (`source: 'import'`, #1061) adds "via re-import"; a legacy row with no `fields` keeps the neutral line.
@@ -237,9 +275,15 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
     const payload = event.payload ?? {};
     switch (event.eventType) {
       case "STATUS_CHANGED": {
-        const from = asString(payload.from);
-        const to = asString(payload.to);
-        return from && to ? t("statusChange", { from, to }) : null;
+        // Custom statuses (ADR-0101): a side with one reads "Loaner pool (In storage)"; a label-only change
+        // (same built-in status) is a STATUS_CHANGED too. Old events have no label keys.
+        const change = parseStatusChange(payload);
+        return change
+          ? t("statusChange", {
+              from: statusSideText(change.from),
+              to: statusSideText(change.to),
+            })
+          : null;
       }
       case "ASSIGNED":
         return t("assignedTo", { name: userName(asString(payload.userId)) });
@@ -268,6 +312,10 @@ export function AssetHistoryTimeline({ assetId }: { assetId: string }) {
         return consumableDetail(payload, "consumableDelivered");
       case "CONSUMABLE_RETURNED":
         return consumableDetail(payload, "consumableReturned");
+      case "PURCHASE_LINKED":
+        return purchaseDetail(payload, "purchaseLinked");
+      case "PURCHASE_UNLINKED":
+        return purchaseDetail(payload, "purchaseUnlinked");
       case "DELETED":
         return t("details.deleted");
       case "RESTORED":

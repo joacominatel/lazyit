@@ -49,8 +49,8 @@ import {
  * `ai.constants.ts`, then record the new version and hash here.
  */
 const PINNED = {
-  version: 6,
-  sha256: '53b0500e1b6d2aa0839bde554d254e2ee654fd2fad9909fd04e061009e10f121',
+  version: 7,
+  sha256: '1e5cf6f7dedc1324213ccaae6a397aa3cad17945bc18c00031b82ecd469b8a20',
 };
 
 const tools = (...classes: AiPromptTool['class'][]): AiPromptTool[] =>

@@ -11,12 +11,15 @@ import type { AiEntityType, AiPageContext } from "@lazyit/shared";
  * describes them.
  */
 
-const ENTITY_ROUTES: readonly { prefix: string; type: AiEntityType }[] = [
-  { prefix: "assets", type: "asset" },
-  { prefix: "users", type: "user" },
-  { prefix: "applications", type: "application" },
-  { prefix: "locations", type: "location" },
-  { prefix: "consumables", type: "consumable" },
+const ENTITY_ROUTES: readonly { prefix: readonly string[]; type: AiEntityType }[] = [
+  { prefix: ["assets"], type: "asset" },
+  { prefix: ["users"], type: "user" },
+  { prefix: ["applications"], type: "application" },
+  { prefix: ["locations"], type: "location" },
+  { prefix: ["consumables"], type: "consumable" },
+  // Purchases (#1478). The longer prefix first: a supplier's page sits inside the purchases area.
+  { prefix: ["purchases", "suppliers"], type: "supplier" },
+  { prefix: ["purchases"], type: "purchaseOrder" },
 ];
 
 /** Second segments that are pages of a collection, not an entity id. */
@@ -28,6 +31,8 @@ const RESERVED = new Set([
   "access-requests",
   "import",
   "imports",
+  "pending",
+  "suppliers",
 ]);
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
@@ -38,10 +43,11 @@ export function routeContext(pathname: string | null | undefined): AiPageContext
   const route = pathname.split(/[?#]/, 1)[0]!.slice(0, 2048);
   if (route.length === 0) return null;
 
-  const [first, second] = route.split("/").filter(Boolean);
-  const match = ENTITY_ROUTES.find((entry) => entry.prefix === first);
-  if (match && second && !RESERVED.has(second) && ID_PATTERN.test(second)) {
-    return { route, entity: { type: match.type, id: second } };
+  const segments = route.split("/").filter(Boolean);
+  for (const { prefix, type } of ENTITY_ROUTES) {
+    if (!prefix.every((part, i) => segments[i] === part)) continue;
+    const id = segments[prefix.length];
+    if (id && !RESERVED.has(id) && ID_PATTERN.test(id)) return { route, entity: { type, id } };
   }
   return { route };
 }

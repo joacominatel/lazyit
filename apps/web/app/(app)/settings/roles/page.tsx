@@ -9,7 +9,6 @@ import {
 import type { Role } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +17,6 @@ import { ROLE_ORDER, useRoleCounts } from "@/lib/hooks/use-role-counts";
 import { AdminGate } from "../_components/admin-gate";
 
 /** Stable empty breadcrumb for the roles page PageHeader. */
-const BREADCRUMB = <Breadcrumb />;
 
 /** Tone for each RBAC role (ADR-0040). ADMIN is emphasized with the `info` tone. The label/hint
  * display copy is translated at render via `settings.roles.meta.<role>`. */
@@ -49,7 +47,6 @@ export default function RolesPage() {
         <PageHeader
           title={t("roles.title")}
           subtitle={t("roles.subtitle")}
-          breadcrumb={BREADCRUMB}
           actions={
             <Link
               href="/users"

@@ -65,8 +65,12 @@ describe('ArticleCategoriesService', () => {
   let search: { remove: jest.Mock; upsert: jest.Mock };
   // FolderAccessService (ADR-0060 §4) — mocked. Drives the #1106 Phase-4 per-folder `articleCount`
   // authz null-out. Defaults to 'ALL' (ADMIN-equivalent, every count shown); the folder-hidden test
-  // overrides visibleFolderIds with an explicit Set.
-  let folderAccess: { visibleFolderIds: jest.Mock };
+  // overrides visibleFolderIds with an explicit Set. It also resolves the #1299 `hasAccessRules` flag
+  // (restrictedFolderIds) — the evaluator owns the one public-vs-restricted definition.
+  let folderAccess: {
+    visibleFolderIds: jest.Mock;
+    restrictedFolderIds: jest.Mock;
+  };
 
   beforeEach(async () => {
     articleCategory = {
@@ -104,7 +108,12 @@ describe('ArticleCategoriesService', () => {
 
     permissions = { hasAll: jest.fn().mockResolvedValue(false) };
     search = { remove: jest.fn(), upsert: jest.fn() };
-    folderAccess = { visibleFolderIds: jest.fn().mockResolvedValue('ALL') };
+    folderAccess = {
+      visibleFolderIds: jest.fn().mockResolvedValue('ALL'),
+      // The #1299 derived `hasAccessRules` flag. Defaults to "nothing is restricted" so the pre-#1299
+      // read tests assert `false`; the flag tests override it with an explicit Set.
+      restrictedFolderIds: jest.fn().mockResolvedValue(new Set<string>()),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -125,7 +134,9 @@ describe('ArticleCategoriesService', () => {
     articleCategory.create.mockResolvedValue(created);
 
     await expect(service.create(dto)).resolves.toEqual(created);
-    expect(articleCategory.create).toHaveBeenCalledWith({ data: dto });
+    expect(articleCategory.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: dto }),
+    );
     // No parentId → the parent-usable check is skipped entirely.
     expect(articleCategory.findFirst).not.toHaveBeenCalled();
   });
@@ -141,7 +152,9 @@ describe('ArticleCategoriesService', () => {
       where: { id: 'p1' },
       select: { id: true },
     });
-    expect(articleCategory.create).toHaveBeenCalledWith({ data: dto });
+    expect(articleCategory.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: dto }),
+    );
   });
 
   it('rejects (400) creating a folder under a non-existent parent', async () => {
@@ -210,8 +223,13 @@ describe('ArticleCategoriesService', () => {
     // Prisma's nested `_count.articles` is flattened to `articleCount`; the hidden folder's count is
     // dropped to null so it never reveals how many articles sit in a folder the list itself hides.
     expect(result).toEqual([
-      { id: 'c1', name: 'Public', articleCount: 3 },
-      { id: 'c2', name: 'Restricted', articleCount: null },
+      { id: 'c1', name: 'Public', articleCount: 3, hasAccessRules: false },
+      {
+        id: 'c2',
+        name: 'Restricted',
+        articleCount: null,
+        hasAccessRules: false,
+      },
     ]);
     // The nested count is filtered to LIVE (deletedAt: null) + PUBLISHED-or-own-DRAFT — exactly the
     // article list's visibility, so the number equals the rows the caller would find via the list.
@@ -226,13 +244,118 @@ describe('ArticleCategoriesService', () => {
     });
   });
 
+  describe('the derived hasAccessRules flag (#1299, ADR-0060 §3 carve-out)', () => {
+    it('findAll marks a restricted folder true and a public one false, WITHOUT leaking accessRules to a non-`settings:manage` caller', async () => {
+      // A VIEWER: no `settings:manage` (the default mock), so the rules themselves stay gated (#554).
+      permissions.hasAll.mockResolvedValue(false);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findMany.mockResolvedValue([
+        { id: 'c1', name: 'Public', _count: { articles: 1 } },
+        { id: 'c2', name: 'Runbooks', _count: { articles: 2 } },
+      ]);
+
+      const result = await service.findAll(VIEWER_PRINCIPAL);
+
+      expect(result).toEqual([
+        { id: 'c1', name: 'Public', articleCount: 1, hasAccessRules: false },
+        { id: 'c2', name: 'Runbooks', articleCount: 2, hasAccessRules: true },
+      ]);
+      // The whole point of the carve-out: the VIEWER learns THAT c2 is restricted and nothing else —
+      // no rule kinds, no user list, no role, no counts. `accessRules` is not even selected.
+      const call = (
+        articleCategory.findMany.mock.calls as Array<
+          [{ select: Record<string, unknown> }]
+        >
+      )[0][0];
+      expect(call.select).not.toHaveProperty('accessRules');
+      for (const row of result) {
+        expect(row).not.toHaveProperty('accessRules');
+      }
+    });
+
+    it('findAll shares ONE folder-tree load between the access check and the flag', async () => {
+      articleCategory.findMany.mockResolvedValue([]);
+
+      await service.findAll(VIEWER_PRINCIPAL);
+
+      // Both lookups receive the SAME request-scoped cache object, so the tree is read once (#599).
+      const treeArg = (
+        folderAccess.visibleFolderIds.mock.calls as Array<[unknown, unknown]>
+      )[0][1];
+      const flagArg = (
+        folderAccess.restrictedFolderIds.mock.calls as Array<[unknown]>
+      )[0][0];
+      expect(treeArg).toBeDefined();
+      expect(flagArg).toBe(treeArg);
+    });
+
+    it('findOne carries the flag for a restricted folder, still without accessRules for a non-admin', async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c2',
+        name: 'Runbooks',
+      });
+
+      const result = await service.findOne('c2', VIEWER_PRINCIPAL);
+
+      expect(result).toEqual({
+        id: 'c2',
+        name: 'Runbooks',
+        hasAccessRules: true,
+      });
+      expect(result).not.toHaveProperty('accessRules');
+    });
+
+    it('findOne reports a folder with no rule as not restricted', async () => {
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', name: 'Public' });
+
+      await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual({
+        id: 'c1',
+        name: 'Public',
+        hasAccessRules: false,
+      });
+    });
+
+    it('an internal (no-principal) findOne skips the flag and pays no folder-tree load', async () => {
+      articleCategory.findFirst.mockResolvedValue({ id: 'c1', name: 'Public' });
+
+      // The mutation guards call findOne(id) with no principal and discard the row — they must not
+      // pay for a flag nobody reads.
+      await expect(service.findOne('c1')).resolves.toEqual({
+        id: 'c1',
+        name: 'Public',
+      });
+      expect(folderAccess.restrictedFolderIds).not.toHaveBeenCalled();
+    });
+
+    it('a settings:manage caller gets BOTH the rules and the flag (the gate is unchanged)', async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.restrictedFolderIds.mockResolvedValue(new Set(['c2']));
+      articleCategory.findFirst.mockResolvedValue({
+        id: 'c2',
+        accessRules: [{ kind: 'role', role: 'ADMIN' }],
+      });
+
+      const result = await service.findOne('c2', ADMIN_PRINCIPAL);
+
+      expect(result).toEqual({
+        id: 'c2',
+        accessRules: [{ kind: 'role', role: 'ADMIN' }],
+        hasAccessRules: true,
+      });
+    });
+  });
+
   it('returns a category by id when it exists; OMITS accessRules for a non-admin (#554)', async () => {
     const found = { id: 'c1', name: 'Networking', deletedAt: null };
     articleCategory.findFirst.mockResolvedValue(found);
 
-    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual(
-      found,
-    );
+    await expect(service.findOne('c1', VIEWER_PRINCIPAL)).resolves.toEqual({
+      ...found,
+      hasAccessRules: false,
+    });
     const call = (
       articleCategory.findFirst.mock.calls as Array<
         [{ where: unknown; select: Record<string, unknown> }]
@@ -331,10 +454,12 @@ describe('ArticleCategoriesService', () => {
 
     await service.update('c1', { name: 'Networks' });
 
-    expect(articleCategory.update).toHaveBeenCalledWith({
-      where: { id: 'c1' },
-      data: { name: 'Networks' },
-    });
+    expect(articleCategory.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1' },
+        data: { name: 'Networks' },
+      }),
+    );
   });
 
   it('moves a folder to the root (parentId: null) without a parent/cycle check', async () => {
@@ -345,10 +470,12 @@ describe('ArticleCategoriesService', () => {
 
     // findFirst is only the existence (findOne) call; no parent-usable / cycle walk for a root move.
     expect(articleCategory.findFirst).toHaveBeenCalledTimes(1);
-    expect(articleCategory.update).toHaveBeenCalledWith({
-      where: { id: 'c1' },
-      data: { parentId: null },
-    });
+    expect(articleCategory.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'c1' },
+        data: { parentId: null },
+      }),
+    );
   });
 
   describe('folder cycle guard (ADR-0059 §1)', () => {
@@ -429,10 +556,12 @@ describe('ArticleCategoriesService', () => {
 
       await service.setAccessRules('c1', rules);
 
-      expect(articleCategory.update).toHaveBeenCalledWith({
-        where: { id: 'c1' },
-        data: { accessRules: rules },
-      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'c1' },
+          data: { accessRules: rules },
+        }),
+      );
     });
 
     it('clears the restriction (null → Prisma.DbNull, makes the folder PUBLIC again)', async () => {
@@ -445,10 +574,12 @@ describe('ArticleCategoriesService', () => {
       await service.setAccessRules('c1', null);
 
       // null clears the jsonb column via the Prisma.DbNull sentinel (writes SQL NULL).
-      expect(articleCategory.update).toHaveBeenCalledWith({
-        where: { id: 'c1' },
-        data: { accessRules: 'DbNull' },
-      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'c1' },
+          data: { accessRules: 'DbNull' },
+        }),
+      );
     });
 
     it('404s when the folder is missing or soft-deleted', async () => {
@@ -699,6 +830,88 @@ describe('ArticleCategoriesService', () => {
       await service.removeCascade('root');
 
       expect(search.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Write responses (#1301): the routes are `category:write` / `category:delete`, which MEMBER holds,
+  // so whatever a write returns must be the public shape — never the folder's raw `accessRules`.
+  // ---------------------------------------------------------------------------
+
+  describe('write responses never carry accessRules (#1301)', () => {
+    const STORED_ROW = {
+      id: 'c1',
+      name: 'Payroll',
+      description: null,
+      icon: null,
+      order: null,
+      parentId: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-02T00:00:00Z'),
+      deletedAt: null as Date | null,
+      accessRules: [{ kind: 'users', userIds: ['u-hr-1', 'u-hr-2'] }],
+    };
+
+    // Answers like Prisma: projected to `select` when one is passed, the whole row when not.
+    const rowFor =
+      (row: Record<string, unknown>) =>
+      ({ select }: { select?: Record<string, boolean> } = {}) =>
+        Promise.resolve(
+          select
+            ? Object.fromEntries(
+                Object.entries(row).filter(([key]) => select[key]),
+              )
+            : row,
+        );
+
+    beforeEach(() => {
+      articleCategory.findFirst.mockImplementation(rowFor(STORED_ROW));
+      articleCategory.create.mockImplementation(rowFor(STORED_ROW));
+      articleCategory.update.mockImplementation(rowFor(STORED_ROW));
+      article.count.mockResolvedValue(0);
+      articleCategory.count.mockResolvedValue(0);
+    });
+
+    it('create returns the folder without accessRules', async () => {
+      const created = await service.create({ name: 'Payroll' });
+      expect(created).toMatchObject({ id: 'c1', name: 'Payroll' });
+      expect(created).not.toHaveProperty('accessRules');
+    });
+
+    it('update returns the folder without accessRules', async () => {
+      const updated = await service.update('c1', { name: 'Payroll' });
+      expect(updated).toMatchObject({ id: 'c1', name: 'Payroll' });
+      expect(updated).not.toHaveProperty('accessRules');
+    });
+
+    it('remove returns the folder without accessRules', async () => {
+      const removed = await service.remove('c1');
+      expect(removed).toMatchObject({ id: 'c1' });
+      expect(removed).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of a soft-deleted folder returns it without accessRules', async () => {
+      articleCategory.findFirst.mockImplementation(
+        rowFor({ ...STORED_ROW, deletedAt: new Date('2026-01-03T00:00:00Z') }),
+      );
+      const restored = await service.restore('c1');
+      expect(restored).toMatchObject({ id: 'c1' });
+      expect(restored).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of an already-live folder returns it without accessRules', async () => {
+      const restored = await service.restore('c1');
+      expect(restored).toMatchObject({ id: 'c1', deletedAt: null });
+      expect(restored).not.toHaveProperty('accessRules');
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('setAccessRules stores the rules but does not echo them back', async () => {
+      const saved = await service.setAccessRules('c1', [
+        { kind: 'role', role: 'MEMBER' },
+      ]);
+      expect(saved).toMatchObject({ id: 'c1' });
+      expect(saved).not.toHaveProperty('accessRules');
     });
   });
 });

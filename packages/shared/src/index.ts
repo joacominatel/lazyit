@@ -36,6 +36,7 @@ export * from "./schemas/asset-model";
 export * from "./schemas/asset-model-list";
 export * from "./schemas/asset-receive";
 export * from "./schemas/asset-specs-dictionary";
+export * from "./schemas/asset-status-label";
 export * from "./schemas/asset-tag-backfill";
 export * from "./schemas/asset-tag-scheme";
 export * from "./schemas/attachment";
@@ -80,6 +81,12 @@ export * from "./schemas/pagination";
 export * from "./schemas/permission";
 export * from "./schemas/permission-meta";
 export * from "./schemas/primitives";
+// Purchases (ADR-0099, #1472): purchase orders, their lines and activity log, and suppliers.
+export * from "./schemas/purchase-order";
+// Purchases flows (ADR-0099, #1473): receive from a line, link / unlink assets, pending units, provenance.
+export * from "./schemas/purchase-receiving";
+// Purchases Phase 2 (ADR-0099 §11, #1477): document extraction — the human-reviewed draft and its status.
+export * from "./schemas/purchase-extraction";
 export * from "./schemas/recent-activity";
 export * from "./schemas/search";
 // Secret Manager — zero-knowledge vault wire shapes (ADR-0061, #366). PURE zod (base64 string blobs +
@@ -96,6 +103,9 @@ export * from "./schemas/service-account";
 export * from "./schemas/service-account-keypair";
 export * from "./schemas/service-account-vault-membership";
 export * from "./schemas/smtp";
+// Smart-entry suggestions (ADR-0099 §7): `GET /suggestions/:field`.
+export * from "./schemas/suggestion";
+export * from "./schemas/supplier";
 // Update awareness & guided update (ADR-0084, #904) — version-check cache + append-only UpdateRun wire.
 export * from "./schemas/update";
 export * from "./schemas/user";
@@ -105,6 +115,9 @@ export * from "./schemas/workflow";
 export * from "./utils/asset-depreciation";
 export * from "./utils/asset-inventory-csv";
 export * from "./utils/audit-log-csv";
+// Money totals grouped by free-text currency label, never summed across labels (ADR-0099 §5).
+export * from "./utils/money-totals";
+export * from "./utils/purchase-line-values";
 export * from "./utils/recent-activity-csv";
 export * from "./utils/semver";
 export * from "./utils/slug";

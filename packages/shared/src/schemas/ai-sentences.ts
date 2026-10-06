@@ -44,6 +44,9 @@ const YES_NO = "enum:YesNo" as const;
 const ACCESS = `{hasLevel, select, yes {"{level}" access} other {access}}`;
 const ACCESS_PARAMS = { hasLevel: YES_NO, level: "text" } as const;
 
+/** A built-in asset status in words (`kind` is an `AssetStatus` code): `in storage`, `lost`… */
+const ASSET_STATUS_WORD = `{kind, select, OPERATIONAL {operational} IN_MAINTENANCE {in maintenance} IN_STORAGE {in storage} RETIRED {retired} LOST {lost} other {unknown}}`;
+
 /** A workflow trigger as a label: `on access granted` / `on access revoked`. */
 const TRIGGER_LABEL = `{trigger, select, ACCESS_REVOKED {on access revoked} other {on access granted}}`;
 /** The rest of "every time someone is granted access to Jira", after "every". */
@@ -236,6 +239,112 @@ export const AI_SENTENCES = {
     },
   },
 
+  /* ─── Purchases (purchases.tools.ts, #1478) ─────────────────────────────────────────────────── */
+  "purchase_create.action": {
+    en: "Record a purchase{hasSupplier, select, yes { from {supplier}} other {}} with {lines, plural, =0 {no lines} one {# line} other {# lines}}.",
+    params: { hasSupplier: YES_NO, supplier: "text", lines: "number" },
+  },
+  "purchase_create.summary": {
+    en: "Recorded the purchase {purchase}.",
+    params: { purchase: "text" },
+  },
+  "purchase_update.action": {
+    en: "Change {count, plural, one {# field} other {# fields}} of the purchase {purchase}.",
+    params: { count: "number", purchase: "text" },
+  },
+  "purchase_update.summary": {
+    en: "Updated the purchase {purchase}.",
+    params: { purchase: "text" },
+  },
+  "purchase_line_add.action": {
+    en: `Add the line "{line}" to the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_add.summary": {
+    en: `Added the line "{line}" to the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_update.action": {
+    en: `Change the line "{line}" of the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_update.summary": {
+    en: `Updated the line "{line}" of the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_remove.action": {
+    en: `Remove the line "{line}" from the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_line_remove.summary": {
+    en: `Removed the line "{line}" from the purchase {purchase}.`,
+    params: { line: "text", purchase: "text" },
+  },
+  "purchase_link_assets.action": {
+    en: `Link {count, plural, one {# asset} other {# assets}} to the line "{line}" of the purchase {purchase}.`,
+    params: { count: "number", line: "text", purchase: "text" },
+  },
+  "purchase_link_assets.summary": {
+    en: `Linked {linked, plural, one {# asset} other {# assets}} to the line "{line}"{failed, plural, =0 {.} other {; # not linked.}}`,
+    params: { linked: "number", line: "text", failed: "number" },
+  },
+  "purchase_receive.action": {
+    en: `Receive {quantity, plural, one {# unit} other {# units}} of the line "{line}" of the purchase {purchase} as new assets.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_receive.summary": {
+    en: `Received {created, plural, one {# unit} other {# units}} of the line "{line}" as new assets{failed, plural, =0 {.} other {; # failed.}}`,
+    params: { created: "number", line: "text", failed: "number" },
+  },
+  "purchase_receive_stock.action": {
+    en: `Receive {quantity, plural, one {# unit} other {# units}} of the line "{line}" of the purchase {purchase} into stock.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_receive_stock.summary": {
+    en: `Received {quantity, plural, one {# unit} other {# units}} of the line "{line}" into stock.`,
+    params: { quantity: "number", line: "text" },
+  },
+  "purchase_cancel_remaining.action": {
+    en: `Cancel {quantity, plural, one {# pending unit} other {# pending units}} of the line "{line}" of the purchase {purchase}.`,
+    params: { quantity: "number", line: "text", purchase: "text" },
+  },
+  "purchase_cancel_remaining.summary": {
+    en: `Cancelled {quantity, plural, one {# pending unit} other {# pending units}} of the line "{line}".`,
+    params: { quantity: "number", line: "text" },
+  },
+  "purchase_apply_license.action": {
+    en: `Apply the license line "{line}" of the purchase {purchase} to {application}.`,
+    params: { line: "text", purchase: "text", application: "text" },
+  },
+  "purchase_apply_license.summary": {
+    en: `Applied the license line "{line}" to {application}.`,
+    params: { line: "text", application: "text" },
+  },
+  "purchase_create_from_assets.action": {
+    en: "Record a purchase from {count, plural, one {# selected asset} other {# selected assets}} and link them to it.",
+    params: { count: "number" },
+  },
+  "purchase_create_from_assets.summary": {
+    en: "Recorded the purchase {purchase} and linked {linked, plural, one {# asset} other {# assets}}{failed, plural, =0 {.} other {; # not linked.}}",
+    params: { purchase: "text", linked: "number", failed: "number" },
+  },
+  "supplier_create.action": {
+    en: `Add the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_create.summary": {
+    en: `Added the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_update.action": {
+    en: `Change the supplier "{name}".`,
+    params: { name: "text" },
+  },
+  "supplier_update.summary": {
+    en: `Updated the supplier "{name}".`,
+    params: { name: "text" },
+  },
+
   /* ─── Asset models and locations (reference.tools.ts, taxonomy.tools.ts) ────────────────────── */
   "asset_model_create.summary": {
     en: "Created the asset model {model}.",
@@ -280,6 +389,24 @@ export const AI_SENTENCES = {
   "location_restore.summary": {
     en: "Restored the location {location}.",
     params: { location: "text" },
+  },
+  /* ─── Custom asset statuses (taxonomy.tools.ts, ADR-0101) ───────────────────────────────────── */
+  "asset_status_label_create.summary": {
+    en: `Created the custom status {name} (${ASSET_STATUS_WORD}).`,
+    params: { name: "text", kind: "enum:AssetStatus" },
+  },
+  "asset_status_label_update.summary": {
+    en: "Updated the custom status {name}.",
+    params: { name: "text" },
+  },
+  /** `target` is the custom status or built-in status the assets moved to (only read when `moved` > 0). */
+  "asset_status_label_archive.summary": {
+    en: "Archived the custom status {name}{moved, plural, =0 {.} one {; moved # asset to {target}.} other {; moved # assets to {target}.}}",
+    params: { name: "text", moved: "number", target: "text" },
+  },
+  "asset_status_label_restore.summary": {
+    en: "Restored the custom status {name}.",
+    params: { name: "text" },
   },
   /** A category card's `kind` row. */
   "taxonomy.categoryKind": {

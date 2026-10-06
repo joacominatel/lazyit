@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-02
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -668,7 +668,9 @@ change behavior an operator would notice and are also listed in ADR-0097's to-co
 ### 9.2 Not built (v1)
 
 - Click-level UI driving; a full-page assistant route; approve-all; approve-with-edits; message edit,
-  regenerate or branching; attachments, images or voice.
+  regenerate or branching; attachments, images or voice. *(Purchase document extraction, #1477, is not a
+  chat attachment: a separate structured-output call over a document already attached to a purchase, with
+  no tools — [[ai-assistant/provider-and-runtime|provider]] §6.5, [[ai-assistant/security|security]] §6.12.)*
 - Summarization/compaction; streamed reasoning; embeddings/RAG; provider fallback chains; per-user or
   BYO keys; a model per channel; currency cost accounting; webhooks on headless completion.
 - A Valkey Streams event bus or a dedicated worker container (both wait for the ADR-0053 worker split);

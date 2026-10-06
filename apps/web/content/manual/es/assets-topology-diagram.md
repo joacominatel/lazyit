@@ -346,7 +346,8 @@ Algunas cosas de la pestaña **General** que vale la pena señalar:
 - **Accesos directos** — enlaces rápidos (SSH, interfaz web, consola) que se abren en una pestaña
   nueva. Con el permiso de gestión los editás ahí mismo: cada acceso directo es un par etiqueta + URL
   que podés cambiar, agregar o quitar, y luego **Guardás** la lista (lazyit verifica que cada URL sea
-  válida antes de guardar).
+  válida antes de guardar). Los enlaces que un navegador ejecutaría como código (como `javascript:` o
+  `data:`) se rechazan, y uno viejo guardado antes de este control se muestra como texto, sin enlace.
 - **Formato** — para un nodo reportado por un agente, lo que la máquina dice que es físicamente,
   leído de su firmware: *notebook*, *equipo de escritorio*, *servidor*, *máquina virtual* o
   *contenedor*. Se muestra, no se edita: el agente lo reescribe en cada reporte, así que una máquina

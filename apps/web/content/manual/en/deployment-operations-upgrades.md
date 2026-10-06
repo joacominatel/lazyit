@@ -39,7 +39,7 @@ one-shot **migrate** job applies every pending database migration **in order**. 
 **major** version in the range. A major always ships with a **⚠️ Upgrade actions** section in its release
 notes describing a manual step you must perform (a new required setting, a topology change). So jump freely
 across patch and minor releases, but **stop and read the Upgrade actions for each major you cross**. The
-running version is shown on **Settings → Instance**.
+running version is shown on **Settings → General & version**.
 
 ### Deprecated features
 
@@ -66,7 +66,8 @@ script can add for you (below); every other one you add by hand, then recreate t
 
 If you upgrade with `git pull` followed by `./infra/start.sh`, the script sees your existing install and,
 before bringing the stack up, **adds any missing key that is safe to generate** — today the email
-password key (`SMTP_SECRET_KEY`) and the AI provider key's storage key (`AI_SECRET_KEY`). Each only
+password key (`SMTP_SECRET_KEY`), the AI provider key's storage key (`AI_SECRET_KEY`) and the directory
+bind password key (`DIRECTORY_SECRET_KEY`). Each only
 protects a secret lazyit refuses to save while the key is missing, so a new one can't lock you out of
 anything. It works whether you sign in with built-in accounts or an identity provider.
 

@@ -7,11 +7,18 @@ import {
   updateApplication,
 } from "../endpoints/applications";
 import { applicationKeys } from "./use-applications";
+import { invalidateSuggestions } from "../query-keys";
 
-/** Application writes — each invalidates `applicationKeys.all` so the list and detail refetch. */
+/**
+ * Application writes — each invalidates `applicationKeys.all` so the list and detail refetch, and the
+ * smart-entry suggestions (a new publisher becomes a suggestion).
+ */
 function useInvalidateApplications() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+  return () => {
+    void invalidateSuggestions(queryClient);
+    return queryClient.invalidateQueries({ queryKey: applicationKeys.all });
+  };
 }
 
 export function useCreateApplication() {

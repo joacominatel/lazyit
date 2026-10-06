@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   AI_ENTITY_TYPES,
+  AI_INPUT_OPTION_SOURCES,
   AI_PREVIEW_WARNING_CODES,
   AI_RUN_ERROR_CODES,
   AI_TOOL_INVOCATION_STATUSES,
+  PURCHASE_ORDER_LINE_KINDS,
+  PurchaseLinkStateSchema,
 } from "@lazyit/shared";
 import { ApiError } from "@/lib/api/client";
 import en from "@/messages/en/ai.json";
 import es from "@/messages/es/ai.json";
+import { BULK_EXCLUSIONS } from "./approval-pages";
 import {
   DECISION_ERROR_KINDS,
   decisionErrorKind,
@@ -119,6 +123,19 @@ describe("covering sets — every code has copy in BOTH catalogs", () => {
       for (const kind of DECISION_ERROR_KINDS) {
         expect((catalog.approval.errors as Record<string, string>)[kind]).toBeString();
       }
+    });
+    test(`${locale}: "Approve all" exclusions and input option sources`, () => {
+      for (const reason of BULK_EXCLUSIONS) {
+        expect((catalog.pager.excluded as Record<string, string>)[reason]).toBeString();
+      }
+      for (const source of AI_INPUT_OPTION_SOURCES) {
+        expect((catalog.input.sources as Record<string, string>)[source]).toBeString();
+      }
+    });
+    test(`${locale}: purchase line kinds and link states in approval tables (#1478)`, () => {
+      const values = catalog.approval.table.values as Record<string, Record<string, string>>;
+      expect(Object.keys(values.kind!).sort()).toEqual([...PURCHASE_ORDER_LINE_KINDS].sort());
+      expect(Object.keys(values.linkState!).sort()).toEqual([...PurchaseLinkStateSchema.options].sort());
     });
     test(`${locale}: entity types and tool statuses`, () => {
       for (const type of [...AI_ENTITY_TYPES, "unknown"]) {

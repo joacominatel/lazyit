@@ -3,7 +3,7 @@ title: ConsumableMovement
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-10-02
 ---
 
 # ConsumableMovement
@@ -48,6 +48,10 @@ transaction).
   - `consumable_movements_return_only_on_in`
   - `consumable_movements_returnable_only_on_delivery`
 - Indexes on each target column and on `returnOfId`.
+- `purchaseOrderLineId?` — FK → [[purchase-order-line]], `onDelete: Restrict` (#1476). Set on an `IN`
+  posted by receiving a `CONSUMABLE` purchase line, **at insert only**; `NULL` on every other movement and
+  on every movement that predates it. DB **CHECK** `consumable_movements_purchase_line_only_on_in`. Indexed
+  (the line's received count sums over it).
 - `createdAt` only — append-only ([[0006-soft-delete-and-auditing]]); no `updatedAt` / `deletedAt`.
 
 ## Business rules
@@ -94,6 +98,30 @@ transaction).
     `location:read` (403 otherwise).
 - **Offboarding** moves no stock and closes no delivery. The offboarding sheet and the Return Act *list*
   the leaver's deliveries through this read.
+
+## Purchase receipts
+
+[[0099-purchases-scope-model-and-optionality]], #1476. `POST /purchase-orders/:id/lines/:lineId/receive-stock
+{ quantity, note? }` (`purchaseOrder:write` + `consumable:write`) receives a `CONSUMABLE` line into its
+consumable's stock.
+
+- It posts **one ordinary `IN`** through `ConsumablesService.createMovement` — the same guarded cache
+  update, int4 ceiling, actor attribution, low-stock check and search re-index as any other `IN`. Stock is
+  never written directly ([[0034-consumables-design]]).
+- The movement carries `purchaseOrderLineId`, `reason` = *Received from purchase* and the purchase's
+  reference (*Received from purchase OC-4512*; the fixed *Received from a purchase* when the purchase has no
+  reference) and the caller's `note` as `notes`. This ledger is read under `consumable:read`, which a VIEWER
+  holds, so every consumable reader sees the reference — a CEO-accepted exception to D-A for the reference
+  only (ADR-0099, *CEO confirmations (2026-10-02)*, #1494); the supplier and every other purchase detail
+  follow `purchaseOrder:read`. The reference is stored as written and rendered as text, cut to keep the
+  reason within its 500 characters. Movements recorded before 2026-10-02 keep the fixed reason. The opaque
+  line id is served like `Asset.purchaseOrderLineId`.
+- The purchase's `STOCK_RECEIVED` [[purchase-order-event]] commits in the movement's transaction.
+- The HTTP movement endpoint can never set the line: the column is reachable only through the in-process
+  `origin` argument of `createMovement`, which accepts a plain `IN` only (no target, not a return).
+- **A receipt is never undone on the line.** A mistaken receipt is corrected on the stock with an ordinary
+  movement (an `OUT` or an `ADJUSTMENT`), which carries no line; the line keeps counting what was received —
+  the same rule as a mistaken return ([[0098-consumable-delivery-targets]]).
 
 ## Frontend
 

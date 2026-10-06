@@ -270,6 +270,7 @@ export function FolderTree({
               canWrite={canWrite}
               canDelete={canDelete}
               moveOptions={moveOptions}
+              folders={folders}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
               nameById={nameById}
@@ -305,6 +306,7 @@ function FolderTreeNode({
   canWrite,
   canDelete,
   moveOptions,
+  folders,
   restrictedFolderIds,
   restrictedAncestorId,
   nameById,
@@ -323,6 +325,8 @@ function FolderTreeNode({
   canDelete?: boolean;
   /** Every folder as a path-labelled destination; this row removes itself before offering them. */
   moveOptions: FolderPathOption[];
+  /** The full live folder list — the move dialog's audience-change verdict reads it (#1529). */
+  folders: FolderWithRules[];
   restrictedFolderIds: Set<string>;
   restrictedAncestorId: (id: string) => string | null;
   nameById: Map<string, string>;
@@ -576,6 +580,7 @@ function FolderTreeNode({
           folderName={folder.name}
           currentParentId={folder.parentId}
           options={moveOptions.filter((option) => option.id !== folder.id)}
+          folders={folders}
           onMoved={(newParentId) => {
             if (newParentId) onExpand(newParentId);
           }}
@@ -618,6 +623,7 @@ function FolderTreeNode({
               canWrite={canWrite}
               canDelete={canDelete}
               moveOptions={moveOptions}
+              folders={folders}
               restrictedFolderIds={restrictedFolderIds}
               restrictedAncestorId={restrictedAncestorId}
               nameById={nameById}

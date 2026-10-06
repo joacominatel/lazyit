@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { int4, optionalText, requireAtLeastOneKey } from "./primitives";
+import { int4, money, optionalText, requireAtLeastOneKey } from "./primitives";
+import { currencyLabel, nullableCurrencyLabel } from "./purchase-order";
 
 /**
  * Asset — the first-class citizen: a single tracked thing, a concrete instance of an AssetModel
@@ -18,6 +19,19 @@ export const AssetStatusSchema = z.enum([
   "LOST",
   "UNKNOWN",
 ]);
+
+/**
+ * The compact CUSTOM status an asset read inlines (ADR-0101, #1524): an operator-defined name mapped to one
+ * built-in {@link AssetStatusSchema} value (`kind`). Defined here rather than in `asset-status-label.ts` so
+ * the asset schemas can reference it without an import cycle; that module re-exports it.
+ */
+export const AssetStatusLabelRefSchema = z.object({
+  id: z.cuid(),
+  name: z.string(),
+  kind: AssetStatusSchema,
+  // "#RRGGBB", or null for "use the kind's own colour".
+  color: z.string().nullable(),
+});
 
 /**
  * Look-ahead window (days) for the "warranty expiring soon" surfaces (#955): both the dashboard
@@ -118,7 +132,8 @@ function specsBoundViolation(
   return null;
 }
 
-const AssetSpecsWriteSchema = AssetSpecsSchema.superRefine((specs, ctx) => {
+/** Also bounds `AssetModel.specs`, whose defaults are merged into a new asset's specs (#1329). */
+export const AssetSpecsWriteSchema = AssetSpecsSchema.superRefine((specs, ctx) => {
   const violation = specsBoundViolation(specs);
   if (violation) ctx.addIssue({ code: "custom", path: violation.path, message: violation.message });
 });
@@ -130,6 +145,12 @@ export const AssetSchema = z.object({
   serial: z.string().nullable(),
   assetTag: z.string().nullable(),
   status: AssetStatusSchema,
+  // The asset's optional CUSTOM status (ADR-0101, #1524). `status` above always equals the label's `kind`
+  // and drives every rule; the label only names it. `null` = a bare built-in status (every asset that
+  // predates custom statuses). `.nullish()` per the new-read-field rule. `statusLabel` is the inlined label
+  // on the list and detail reads; the write responses carry the id only.
+  statusLabelId: z.cuid().nullish(),
+  statusLabel: AssetStatusLabelRefSchema.nullish(),
   specs: AssetSpecsSchema.nullable(),
   notes: z.string().nullable(),
   // Optional GROUPING attribute (ADR-0076, #857) — a Snipe-IT-style "Company" to group/filter/report
@@ -139,15 +160,22 @@ export const AssetSchema = z.object({
   company: z.string().nullable(),
   purchaseDate: z.iso.datetime().nullable(),
   warrantyEnd: z.iso.datetime().nullable(),
-  // Purchase cost + straight-line depreciation (#954). Money in INTEGER minor units (cents) of the
-  // instance's single currency — bounded to int4 like every other Int column. `.nullish()` (not
-  // required-nullable) on purpose: an optional key means existing web object-construction sites
-  // (Quick View mappers, fixtures) that build an Asset without these keys keep type-checking. The
+  // Purchase cost + straight-line depreciation (#954). Money in INTEGER minor units (cents) — `money()`:
+  // a 64-bit column, bounded on the wire to MONEY_MAX (ADR-0100). `.nullish()` (not required-nullable)
+  // on purpose: an optional key means existing web object-construction sites (Quick View mappers,
+  // fixtures) that build an Asset without these keys keep type-checking. The
   // COMPUTED `currentBookValue` lives on the detail read (AssetWithRelationsSchema), not here — it is
   // derived per-request via `computeAssetBookValue`, never a persisted column.
-  purchaseCost: int4({ min: 0 }).nullish(),
+  purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
-  salvageValue: int4({ min: 0 }).nullish(),
+  salvageValue: money().nullish(),
+  // Optional free-text currency LABEL of purchaseCost / salvageValue (ADR-0099 §5, CEO decision D-C): no ISO
+  // list, no conversion. `null` = "No currency" — every asset that predates Purchases. `.nullish()` per the
+  // new-read-field rule, so a consumer built against the older shape keeps compiling.
+  purchaseCurrency: z.string().nullish(),
+  // The purchase line this asset was bought on (ADR-0099 §2). READ-ONLY: no create/update body accepts it;
+  // linking and unlinking are their own audited actions (#1473). `null` = no purchase.
+  purchaseOrderLineId: z.cuid().nullish(),
   modelId: z.cuid().nullable(),
   locationId: z.cuid().nullable(),
   createdAt: z.iso.datetime(),
@@ -155,30 +183,51 @@ export const AssetSchema = z.object({
   deletedAt: z.iso.datetime().nullable(),
 });
 
+/** The message of the create-time "a status is required" refinement (one source for every schema). */
+export const ASSET_STATUS_REQUIRED_MESSAGE = "Give a status or a custom status (statusLabelId)";
+
 /**
- * Payload to create an Asset. `status` is required (no default — every asset is classified,
- * consistent with Location.type). `serial`/`assetTag` are unique when present; FKs are optional.
+ * Payload to create an Asset. Every asset is classified (no default, consistent with Location.type): the
+ * body names its built-in `status`, its CUSTOM status (`statusLabelId`, ADR-0101), or both. With a custom
+ * status the API derives `status` from the label's `kind`; when both are given and disagree the API
+ * answers 400 (only the API knows the label's kind). `serial`/`assetTag` are unique when present; FKs are
+ * optional.
  */
 export const CreateAssetSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
   serial: z.string().trim().min(1).max(200).optional(),
   assetTag: z.string().trim().min(1).max(200).optional(),
-  status: AssetStatusSchema,
+  status: AssetStatusSchema.optional(),
+  // A live custom status (ADR-0101); a missing or archived one is a 400.
+  statusLabelId: z.cuid().optional(),
   specs: AssetSpecsWriteSchema.optional(),
   notes: optionalText(2000),
   // Optional grouping value (ADR-0076). Mirrors `notes` — optional free text, empty coerced to absent.
   company: optionalText(200),
   purchaseDate: z.iso.datetime().optional(),
   warrantyEnd: z.iso.datetime().optional(),
-  // Purchase cost + straight-line depreciation (#954) — optional non-negative int4 minor units.
-  purchaseCost: int4({ min: 0 }).nullish(),
+  // Purchase cost + straight-line depreciation (#954) — optional non-negative minor units: `money()` for
+  // the two amounts (ADR-0100), `int4()` for the months.
+  purchaseCost: money().nullish(),
   usefulLifeMonths: int4({ min: 0 }).nullish(),
-  salvageValue: int4({ min: 0 }).nullish(),
+  salvageValue: money().nullish(),
+  // Currency label of the cost (ADR-0099 §5) — optional free text, blank coerced to absent.
+  purchaseCurrency: currencyLabel(),
   modelId: z.cuid().optional(),
   locationId: z.cuid().optional(),
+}).refine((v) => v.status !== undefined || v.statusLabelId !== undefined, {
+  message: ASSET_STATUS_REQUIRED_MESSAGE,
+  path: ["status"],
 });
 
-/** Partial update; any subset of the editable fields (an empty body is rejected). */
+/**
+ * Partial update; any subset of the editable fields (an empty body is rejected).
+ *
+ * Status semantics (ADR-0101): `statusLabelId: "<id>"` sets the custom status AND its built-in `status`
+ * (a `status` that disagrees with the label's kind is a 400); `statusLabelId: null` clears the custom
+ * status and keeps the built-in one (or sets `status` if also given); `status` alone keeps the current
+ * custom status when it maps to that same status and clears it otherwise.
+ */
 export const UpdateAssetSchema = requireAtLeastOneKey(
   z
     .strictObject({
@@ -186,6 +235,8 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       serial: z.string().trim().min(1).max(200),
       assetTag: z.string().trim().min(1).max(200),
       status: AssetStatusSchema,
+      // The custom status (ADR-0101): an id sets it (and its kind as `status`), `null` clears it.
+      statusLabelId: z.cuid().nullable(),
       specs: AssetSpecsWriteSchema,
       notes: z.string().trim().min(1).max(2000),
       // Optional grouping value (ADR-0076) — mirrors `notes` in the partial update shape.
@@ -194,9 +245,11 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
       warrantyEnd: z.iso.datetime(),
       // Purchase cost + straight-line depreciation (#954). `.nullable()` (inside `.partial()`) so a
       // PATCH can CLEAR a value back to unknown (`{ purchaseCost: null }`) as well as set it.
-      purchaseCost: int4({ min: 0 }).nullable(),
+      purchaseCost: money().nullable(),
       usefulLifeMonths: int4({ min: 0 }).nullable(),
-      salvageValue: int4({ min: 0 }).nullable(),
+      salvageValue: money().nullable(),
+      // Currency label of the cost (ADR-0099 §5); `null` clears it back to "No currency".
+      purchaseCurrency: nullableCurrencyLabel(),
       modelId: z.cuid(),
       locationId: z.cuid(),
     })
@@ -204,6 +257,7 @@ export const UpdateAssetSchema = requireAtLeastOneKey(
 );
 
 export type AssetStatus = z.infer<typeof AssetStatusSchema>;
+export type AssetStatusLabelRef = z.infer<typeof AssetStatusLabelRefSchema>;
 export type AssetWarrantyFilter = z.infer<typeof AssetWarrantyFilterSchema>;
 export type Asset = z.infer<typeof AssetSchema>;
 export type CreateAsset = z.infer<typeof CreateAssetSchema>;

@@ -8,8 +8,10 @@ order: 5
 # Sincronización de directorio AD / LDAP
 
 lazyit puede **importar personas desde tu Active Directory local (o cualquier directorio LDAP)** para que no
-tengas que cargar tu equipo en lazyit a mano. Apuntas lazyit a tu directorio en **Ajustes → Instancia →
-Sincronización de directorio AD / LDAP** (solo administradores). Está **desactivada hasta que la actives**.
+tengas que cargar tu equipo en lazyit a mano. Apuntas lazyit a tu directorio en **Configuración →
+Directorio AD/LDAP** (solo administradores; en el menú lateral de Configuración está bajo
+**Integraciones**). Está **desactivada hasta que la actives**, y el encabezado de la página muestra
+**Activado** o **Desactivado** para la sincronización programada.
 
 ## Qué hace — y qué deliberadamente no hace
 
@@ -30,18 +32,20 @@ con una insignia **Directorio** — el mismo tipo de persona sin acceso que crea
 
 ## Configurar la conexión
 
-El editor tiene estos campos:
+La sección **Conexión** tiene estos campos. Cada uno guarda su explicación larga tras el **?** junto a su
+etiqueta, y toda la sección se guarda junta con **Guardar configuración**:
 
-- **Activar sincronización programada** — el interruptor principal de la importación **automática y
-  periódica**. Mientras está desactivada, lazyit solo importa cuando pulsas **Sincronizar ahora** (ver más
-  abajo).
+- **Sincronización programada** — el interruptor del encabezado de la sección, el interruptor principal
+  de la importación **automática y periódica**. Mientras está desactivada, lazyit solo importa cuando
+  pulsas **Sincronizar ahora** (ver más abajo). Se aplica al guardar, como el resto de los campos.
 - **Host del directorio** y **Puerto** — la dirección de tu servidor de directorio (por ejemplo
   `dc01.corp.example.com`, puerto `636`).
 - **Seguridad del transporte** — cómo se protege la conexión:
   - **LDAPS** (recomendado, normalmente puerto `636`) — cifrado desde el primer byte.
   - **StartTLS** (normalmente puerto `389`) — conecta en texto plano y luego actualiza a TLS.
   - **Texto plano** (puerto `389`) — sin cifrado. La contraseña de conexión viaja en claro, así que úsalo
-    solo en un segmento interno de confianza.
+    solo en un segmento interno de confianza. La página repite esta advertencia bajo el campo mientras
+    Texto plano esté seleccionado.
 - **Verificar certificado TLS** — activado por defecto (seguro). Desactívalo solo si tu servidor usa un
   certificado autofirmado de confianza. No aplica a una conexión en texto plano.
 - **Base de búsqueda (base DN)** — el subárbol donde lazyit busca, por ejemplo
@@ -56,32 +60,39 @@ El editor tiene estos campos:
 - **Filtro de búsqueda** — el filtro LDAP que selecciona qué entradas importar, por ejemplo
   `(&(objectClass=user)(objectCategory=person))`. Se ejecuta **literalmente** — lazyit nunca sustituye nada
   en él por usuario.
-- **Margen de baja (días)** — cuántos días puede **faltar una persona en el directorio** antes de que lazyit
-  la **desactive** (ver más abajo). `0` la desactiva en la primera sincronización que ya no la encuentre.
+- **Margen de baja** — el número de *"Desactivar a una persona tras [7] días sin aparecer en el
+  directorio"*: cuántos días puede **faltar una persona en el directorio** antes de que lazyit la
+  **desactive** (ver más abajo). `0` la desactiva en la primera sincronización que ya no la encuentre.
 - **Mapeo de atributos** — qué atributo del directorio rellena cada campo de lazyit. Escribe el nombre del
   atributo del directorio junto a cada campo de lazyit (los nombres típicos de Active Directory son
   `givenName`, `sn`, `mail`, `sAMAccountName`). Deja un campo en blanco para omitirlo.
 
 > La contraseña de conexión se guarda **cifrada en reposo**. Guardar una contraseña requiere que la clave de
-> servidor `DIRECTORY_SECRET_KEY` esté configurada; si no lo está, lazyit guarda el resto de la
-> configuración y te pide configurar la clave primero. Consulta la configuración de entorno de tu
-> despliegue.
+> servidor `DIRECTORY_SECRET_KEY` esté configurada. Si no lo está, **se rechaza el guardado completo**: no se
+> almacena nada, ni siquiera los demás campos, y lazyit te pide configurar la clave primero. Una instalación
+> guiada crea esa clave por ti, y volver a ejecutar el script de arranque en un despliegue más antiguo la
+> añade; si no, tu administrador debe añadirla a la configuración de entorno del servidor y reiniciar la
+> API. Mientras tanto, puedes guardar el resto de los ajustes dejando **Contraseña de conexión** en blanco.
 
 ## Ejecutar una sincronización y leer el resultado
 
-Usa **Sincronizar ahora** para importar de inmediato con la configuración **guardada** — así que **guarda
+Usa **Sincronizar ahora**, en su propia sección debajo del formulario, para importar de inmediato con la configuración **guardada** — así que **guarda
 primero**, luego sincroniza. Sincronizar ahora funciona incluso con la sincronización programada
 desactivada, así que sirve también como **prueba de conexión**: si la conexión o la búsqueda fallan, lazyit
 muestra un error breve y sin datos sensibles (por ejemplo "bind failed" o "host unreachable").
 
-Después de cada ejecución — manual o programada — el panel muestra el **estado y la hora de la última
+Después de cada ejecución — manual o programada — esa sección muestra el **estado y la hora de la última
 ejecución** y un recuento de lo ocurrido:
 
 - **Creadas** — nuevas personas de directorio añadidas.
 - **Actualizadas** — personas existentes cuyos campos mapeados se refrescaron.
 - **Dadas de baja** — personas **desactivadas** porque habían faltado en el directorio más allá del margen.
   Es una **desactivación suave** (pasan a inactivas, conservando su historial), nunca un borrado definitivo.
-  Si una persona vuelve a aparecer en una sincronización posterior, lazyit la reactiva automáticamente. En
+  Si una persona vuelve a aparecer en una sincronización posterior, lazyit la reactiva automáticamente. Una
+  persona que un administrador desactivó sigue inactiva aunque vuelva a aparecer en el directorio; solo un
+  administrador puede reactivarla. Del mismo modo, una persona que un administrador reactiva sigue activa
+  aunque todavía falte en el directorio: la sincronización no la toca hasta que vuelve a aparecer, y solo la
+  da de baja otra vez si luego vuelve a faltar más allá del margen. En
   una instancia con **cuentas locales**, a una persona con inicio de sesión se le cierran las sesiones en
   todos sus dispositivos cuando la sincronización la da de baja, y debe volver a iniciar sesión cuando la
   reactiva.
@@ -96,7 +107,7 @@ ejecución** y un recuento de lo ocurrido:
 
 ## Revisar las personas importadas
 
-Debajo del editor, **Personas del directorio para revisar** muestra una vista previa de las importadas más
+Al final de la página, **Personas del directorio para revisar** muestra una vista previa de las importadas más
 recientemente. Cada una enlaza a su perfil, donde puedes editarla, **aprovisionar un inicio de sesión** o
 darla de baja. Usa **Ver todas en Usuarios** para abrir la lista completa y con búsqueda filtrada a las
 personas de directorio.

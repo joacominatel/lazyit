@@ -390,6 +390,7 @@
    - .animate-pulse-soft : ONE calm attention heartbeat — danger dots only.
    - .animate-shimmer  : skeleton sweep (composed onto Skeleton at call sites).
    - .animate-check-draw : success-check stroke draw (the single --ease-spring use).
+   - .animate-doc-scan : a line sweeping a document while the AI reads it (#1516) — loading only.
 --------------------------------------------------------------------------- */
 @layer utilities {
   @keyframes rise-in {
@@ -441,6 +442,21 @@
     }
     to {
       stroke-dashoffset: 0;
+    }
+  }
+
+  @keyframes doc-scan {
+    0% {
+      opacity: 1;
+      transform: translateY(-100%);
+    }
+    80% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0;
+      transform: none;
     }
   }
 
@@ -536,6 +552,19 @@
     stroke-dasharray: 100;
     stroke-dashoffset: 100;
     animation: check-draw var(--dur-slow) var(--ease-spring) forwards;
+  }
+
+  /* Rests above its box, so a collapsed (reduced-motion) run never leaves a line on the document. */
+  .animate-doc-scan {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 100%;
+    transform: translateY(-100%);
+    background:
+      linear-gradient(to top, color-mix(in oklab, var(--primary) 55%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, transparent 60%, var(--ai-glow));
+    animation: doc-scan 2.4s ease-in-out infinite;
   }
 }
 

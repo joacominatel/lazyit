@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
 import {
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
   AiActionPreviewSchema,
   AiApprovalModeSchema,
   AiToolInvocationStatusSchema,
@@ -46,8 +47,7 @@ export interface AiPendingAction {
 
 /** What `propose` answers: the stored pending action, or the tool result to hand the model instead. */
 export type AiProposal =
-  | { ok: true; action: AiPendingAction }
-  | { ok: false; result: AiToolResult };
+  { ok: true; action: AiPendingAction } | { ok: false; result: AiToolResult };
 
 /** What the caller of `approve` has verified before calling it (synthesis §4.4; security.md §6.2). */
 export interface AiApproveOptions {
@@ -89,6 +89,12 @@ export const AI_STEP_UP_WARNINGS: readonly AiPreviewWarningCode[] = [
   'CREDENTIAL_DELIVERY',
   'CRITICAL_APPLICATION',
 ];
+
+/**
+ * Preview warnings whose action is never approved automatically, whatever the tool (#1478): the shared list,
+ * so core and the web's "Approve all" read the same one.
+ */
+export { AI_NEVER_AUTO_APPROVE_WARNINGS };
 
 /**
  * Whether an action needs the password step-up: the tool asked, or its preview carries a listed warning.

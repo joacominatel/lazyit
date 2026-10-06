@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AI_DOCUMENT_EXTRACTION_DISCLOSURE,
   AI_SETTINGS_ERROR_CODES,
   AiSettingsErrorSchema,
   MCP_CLIENT_ALLOWLIST_CURATED_DEFAULTS,
@@ -587,5 +588,39 @@ describe("Provider-native web search settings (#1389)", () => {
         webSearchEnabled: true,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("Document extraction switch (ADR-0099 §11, #1477)", () => {
+  const readBase = {
+    ...baseUpdate,
+    apiKeySet: false,
+    keyConfigured: true,
+    disclosureAcknowledgedAt: null,
+    verifiedAt: null,
+    updatedAt: null,
+  };
+
+  test("off by default, and a read from an API that predates it parses (absent = off)", () => {
+    expect(AI_SETTINGS_DEFAULTS.documentExtractionEnabled).toBe(false);
+    expect(AiSettingsSchema.parse(readBase).documentExtractionEnabled ?? false).toBe(false);
+    expect(
+      AiSettingsSchema.parse({ ...readBase, documentExtractionEnabled: true }).documentExtractionEnabled,
+    ).toBe(true);
+  });
+
+  test("a write may omit it (omitted keeps the stored value) or set it", () => {
+    expect(UpdateAiSettingsSchema.parse(baseUpdate).documentExtractionEnabled).toBeUndefined();
+    expect(
+      UpdateAiSettingsSchema.parse({ ...baseUpdate, documentExtractionEnabled: true })
+        .documentExtractionEnabled,
+    ).toBe(true);
+    expect(
+      UpdateAiSettingsSchema.safeParse({ ...baseUpdate, documentExtractionEnabled: "yes" }).success,
+    ).toBe(false);
+  });
+
+  test("the disclosure says documents go to the provider", () => {
+    expect(AI_DOCUMENT_EXTRACTION_DISCLOSURE).toMatch(/sent to the configured AI provider/);
   });
 });

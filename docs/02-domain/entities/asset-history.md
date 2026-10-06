@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-25
+updated: 2026-10-05
 ---
 
 # AssetHistory
@@ -23,7 +23,10 @@ the "what changed, when, by whom?" trail that auditing requires ([[problem-space
 - `assetId` — FK → [[asset]], required, `onDelete: Restrict` (an asset with history can't be
   hard-deleted; soft delete bypasses it).
 - `eventType` — `AssetHistoryEventType` enum (below).
-- `payload` — optional jsonb; contextual data (e.g. `{ from, to }` on `STATUS_CHANGED`,
+- `payload` — optional jsonb; contextual data (e.g. `{ from, to }` on `STATUS_CHANGED` — the built-in
+  statuses — plus `fromLabel` / `toLabel` (`{ id, name }` or `null`) when either side carries a custom
+  status, [[asset-status-label]] / [[0101-custom-asset-statuses]]; older rows have no label keys, read as
+  "no custom status",
   `{ userId }` on **both `ASSIGNED` and `RELEASED`** — so a multi-owner asset's timeline can tell
   which owner was assigned/released), `{ fields: [...] }` on `UPDATED` (the plain field *names* that
   changed — never values). Unvalidated, same debt as `Asset.specs` ([[0007-flexible-asset-specs-jsonb]]).
@@ -59,14 +62,20 @@ confirm gate — [[0093-chassis-routing-and-asset-adoption]] §4, #1198; payload
 asset: a targeted `OUT` [[consumable-movement]] — [[0098-consumable-delivery-targets]], #1364; payload
 `{ consumableId, consumableName, movementId, quantity, unit }`) · `CONSUMABLE_RETURNED` (a return
 against a returnable delivery made to this asset: an `IN` linked by `returnOfId`; the same payload plus
-`{ returnOfId }`, the delivery movement id).
+`{ returnOfId }`, the delivery movement id) · `PURCHASE_LINKED` (the asset was linked to a
+[[purchase-order-line]] — [[0099-purchases-scope-model-and-optionality]], #1473; payload
+`{ purchaseOrderId, purchaseOrderLineId, applied }`, `applied` naming the purchase values copied in the
+same action, plus `{ fromPurchaseOrderId, fromPurchaseOrderLineId }` on a move) · `PURCHASE_UNLINKED`
+(unlinked from its line; payload `{ purchaseOrderId, purchaseOrderLineId }`; the asset's values are never
+cleared).
 
 ## Emission
 
 **Explicit service calls** (no interceptor), **transactional** with the change ([[0033-asset-history-event-model]]):
 
 - [[asset]] service — `CREATED` (create); per-field `STATUS_CHANGED` / `LOCATION_CHANGED` /
-  `MODEL_CHANGED` / `SPECS_CHANGED` (update diff, one event per changed field); `DELETED` (soft delete);
+  `MODEL_CHANGED` / `SPECS_CHANGED` (update diff, one event per changed field — `STATUS_CHANGED` also when
+  only the custom status changed, #1524); `DELETED` (soft delete);
   `UPDATED` — **one** row per PATCH whose plain fields (`name`, `serial`, `assetTag`, `notes`, `company`,
   `purchaseDate`, `warrantyEnd`, `purchaseCost`, `usefulLifeMonths`, `salvageValue`) actually changed,
   payload `{ fields }` with the names only, never the values (#1382). A no-op edit writes nothing. A PATCH
@@ -75,6 +84,9 @@ against a returnable delivery made to this asset: an `IN` linked by `returnOfId`
   goes through `PATCH /assets/:id`, so the row carries the actor and, via the AI, `aiInvocationId`. On a
   migrator re-import the row also carries `{ source, sessionId, rowIndex }`, and when nothing changed a
   provenance-only `UPDATED` marker is written instead ([[0069-migrator-import]] #1061).
+- [[asset-status-label]] service — `STATUS_CHANGED`, one row per asset moved when a custom status in use is
+  archived (to another custom status or a bare built-in status), live and archived assets alike, in the
+  archive's transaction ([[0101-custom-asset-statuses]]).
 - [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
   (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
 - [[consumable]] service — `CONSUMABLE_DELIVERED` (an `OUT` targeting this asset) and
@@ -89,6 +101,12 @@ against a returnable delivery made to this asset: an `IN` linked by `returnOfId`
   five-minute cadence would bury every human edit the row ever received. What *moved* is audited on the
   node instead ([[infra-node-fact-change]], #1143), one join away. Best-effort: a failed write logs and
   never fails the confirm (on the auto-confirm path it would fail a *report*).
+
+- Purchases receiving service — `PURCHASE_LINKED` / `PURCHASE_UNLINKED` (link, move and unlink), plus
+  `MODEL_CHANGED` `{ from, to }` when a link applies the line's model; written on the link's transaction
+  client with the same transaction's [[purchase-order-event]]. A unit **generated** from a line is born
+  linked: its `CREATED` row carries `{ source: 'purchase', purchaseOrderId, purchaseOrderLineId }` instead
+  (#1473).
 
 ## Endpoint
 
