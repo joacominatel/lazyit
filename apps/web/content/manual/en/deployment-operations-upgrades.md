@@ -39,7 +39,7 @@ one-shot **migrate** job applies every pending database migration **in order**. 
 **major** version in the range. A major always ships with a **⚠️ Upgrade actions** section in its release
 notes describing a manual step you must perform (a new required setting, a topology change). So jump freely
 across patch and minor releases, but **stop and read the Upgrade actions for each major you cross**. The
-running version is shown on **Settings → Instance**.
+running version is shown on **Settings → General & version**.
 
 ### Deprecated features
 

@@ -8,8 +8,9 @@ order: 5
 # AD / LDAP directory sync
 
 lazyit can **import people from your on-prem Active Directory (or any LDAP directory)** so you don't have
-to type your team into lazyit by hand. You point lazyit at your directory under **Settings → Instance →
-AD / LDAP directory sync** (administrators only). It is **off until you turn it on**.
+to type your team into lazyit by hand. You point lazyit at your directory under **Settings → Directory
+(AD/LDAP)** (administrators only; in the Settings side menu it sits under **Integrations**). It is **off
+until you turn it on**, and the page header shows **On** or **Off** for the scheduled sync.
 
 ## What it does — and what it deliberately does not
 
@@ -30,17 +31,19 @@ badge — the same kind of login-less person the bulk import creates.
 
 ## Configuring the connection
 
-The editor has these fields:
+The **Connection** section has these fields. Each one keeps its longer explanation behind the **?** next
+to its label, and the whole section is saved together with **Save settings**:
 
-- **Enable scheduled sync** — the master switch for the **automatic, periodic** import. While it is off,
-  lazyit only imports when you press **Sync now** (see below).
+- **Scheduled sync** — the switch in the section header, the master switch for the **automatic,
+  periodic** import. While it is off, lazyit only imports when you press **Sync now** (see below). It
+  takes effect when you save, like every other field here.
 - **Directory host** and **Port** — your directory server's address (for example `dc01.corp.example.com`,
   port `636`).
 - **Transport security** — how the connection is protected:
   - **LDAPS** (recommended, usually port `636`) — encrypted from the first byte.
   - **StartTLS** (usually port `389`) — connect in plaintext, then upgrade to TLS.
   - **Plaintext** (port `389`) — no encryption. The bind password travels in the clear, so use it only on a
-    trusted internal segment.
+    trusted internal segment. The page repeats this warning under the field while Plaintext is selected.
 - **Verify TLS certificate** — on by default (secure). Turn it off only if your server uses a self-signed
   certificate you trust. It does not apply to a plaintext connection.
 - **Search base (base DN)** — the subtree lazyit searches, for example
@@ -54,7 +57,8 @@ The editor has these fields:
 - **Search filter** — the LDAP filter that selects which entries to import, for example
   `(&(objectClass=user)(objectCategory=person))`. It is run **verbatim** — lazyit never substitutes anything
   into it per user.
-- **Offboard grace (days)** — how many days a person may be **missing from the directory** before lazyit
+- **Offboard grace** — the number in *"Deactivate a person after [7] days missing from the
+  directory"*: how many days a person may be **missing from the directory** before lazyit
   **deactivates** them (see below). `0` deactivates on the first sync that no longer finds them.
 - **Attribute mapping** — which directory attribute fills each lazyit field. Type the directory attribute
   name next to each lazyit field (typical Active Directory names are `givenName`, `sn`, `mail`,
@@ -69,12 +73,12 @@ The editor has these fields:
 
 ## Running a sync and reading the result
 
-Use **Sync now** to import immediately using the **currently saved** settings — so **save first**, then
+Use **Sync now**, in its own section below the form, to import immediately using the **currently saved** settings — so **save first**, then
 sync. Sync now works even while the scheduled sync is off, so it doubles as a **connection test**: if the
 bind or search fails, lazyit shows a short, non-secret error (for example "bind failed" or "host
 unreachable").
 
-After each run — manual or scheduled — the panel shows the **last run's status and time** and a count of
+After each run — manual or scheduled — that section shows the **last run's status and time** and a count of
 what happened:
 
 - **Created** — new directory people added.
@@ -97,7 +101,7 @@ what happened:
 
 ## Reviewing imported people
 
-Below the editor, **Directory people to review** previews the most recently imported people. Each one links
+At the bottom of the page, **Directory people to review** previews the most recently imported people. Each one links
 to their profile, where you can edit them, **provision a login**, or offboard them. Use **View all in
 Users** to open the full, searchable list filtered to directory people.
 

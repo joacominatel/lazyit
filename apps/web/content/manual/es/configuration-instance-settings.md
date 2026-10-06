@@ -12,43 +12,76 @@ accede desde la navegación principal y está limitada al rol **Administrador**:
 Lectores no la ven. Todo lo que un operador configura sobre la instancia vive aquí o se enlaza desde
 aquí.
 
-## Qué hay en Configuración
+## Cómo moverte
 
-La página de inicio de Configuración es una cuadrícula de tarjetas, cada una abre un subárea concreta:
+Cada página de Configuración lleva un **menú lateral** (en un teléfono o una ventana angosta se
+convierte en un selector de página arriba), agrupado según lo que estés haciendo. **Resumen**, arriba de
+todo, vuelve al inicio de Configuración, que muestra las mismas páginas como tarjetas y en los mismos
+grupos.
+
+**Inventario**
 
 - **Taxonomías** — gestiona las categorías que clasifican activos, aplicaciones, consumibles y
   artículos de la base de conocimiento, además de los modelos de activo que los activos referencian.
   Consulta [Taxonomías](/help/configuration-taxonomies).
 - **Ubicaciones** — el registro de los lugares donde físicamente residen tus activos (oficinas,
-  centros de datos, racks, almacenamiento). Es un registro de poco tráfico, por eso se ubica aquí en
-  Configuración y no en la navegación principal; la tarjeta enlaza a la página completa de Ubicaciones.
-- **Roles** — consulta quién tiene cada rol en el equipo. Es una vista de solo lectura; el rol de una
-  persona se cambia desde la sección Usuarios, y lo que cada rol puede hacer se ajusta en
-  [Permisos](/help/permissions).
+  centros de datos, racks, almacenamiento). Es un registro de poco tráfico, por eso se llega desde
+  Configuración y no desde la navegación principal; abre la página completa de Ubicaciones.
+- **Etiquetas de activos** — el esquema de etiquetas de activos y la herramienta que etiqueta los
+  activos existentes. Consulta [Esquema de etiquetas de activos](/help/configuration-asset-tag-scheme).
+- **Importaciones** — la importación masiva guiada (solo la ve quien puede ejecutar importaciones).
+  Consulta [Importación masiva](/help/assets-bulk-import).
+
+**Acceso**
+
+- **Roles y permisos** — consulta quién tiene cada rol en el equipo y ajusta lo que cada rol puede
+  hacer en [Permisos](/help/permissions). El rol de una persona se cambia desde la sección Usuarios.
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
+
+**Integraciones**
+
+- **Correo** — el correo saliente a través de tu relay SMTP. Consulta
+  [Correo y SMTP](/help/configuration-smtp-email).
+- **Directorio AD/LDAP** — importación de solo lectura de personas desde Active Directory o LDAP.
+  Consulta [Sincronización de directorio AD / LDAP](/help/configuration-directory-sync).
 - **Agentes de inventario** — la política que ejecuta cada agente de lazyit de este parque: cada
-  cuánto informan los hosts, qué recolectores se ejecutan y qué dejar afuera, más las reglas de
-  confirmación automática y los ámbitos que pueden sobrescribir el predeterminado. Antes estaba en la
-  página Instancia; ahora esa página enlaza a la sección. Ver
+  cuánto informan los hosts, qué recolectores se ejecutan y qué dejar afuera, más los ámbitos que
+  pueden sobrescribir el predeterminado y un enlace a las reglas de confirmación automática. Ver
   [Agente de reporte](/help/assets-topology-reporting-agent).
-- **Integraciones y flujos** — la bandeja de tareas manuales entre aplicaciones para los flujos de
-  aprovisionamiento. La automatización de cada aplicación se configura en su propia pestaña de Flujos.
-- **Instancia** — revisa cómo está configurada la instancia y gestiona el esquema de etiquetas de
-  activos.
-- **Asistente de IA** — el asistente de IA opcional (proveedor, modelo y clave, límites, búsqueda web) y
+- **Asistente IA** — el asistente de IA opcional (proveedor, modelo y clave, límites, búsqueda web) y
   el interruptor que permite que agentes de IA externos como Claude Code se conecten por MCP. Todo
   empieza desactivado. Mirá [Asistente de IA — configuración](/help/ai-assistant-setup).
+- **Tareas** — la bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento.
+  La automatización de cada aplicación se configura en su propia pestaña de Flujos.
 
-## La página Instancia
+**Sistema**
 
-La tarjeta **Instancia** abre una vista de estado de cómo está montada lazyit. La tarjeta superior es
-de **solo lectura**: refleja el estado actual, no lo cambia. Muestra:
+- **General y versión** — la versión en uso y las actualizaciones guiadas, y cómo está configurada
+  esta instancia.
+
+## Cómo se lee una página de Configuración
+
+Las páginas de Configuración mantienen el texto corto a propósito. Cada sección muestra un **título**,
+**una línea** que dice qué hace y, si lo tiene, su estado — **Activado**, **Desactivado** o
+**Configurado** — junto al título. La explicación larga de una sección o de un campo está tras el **?**
+que tiene al lado: pasa el puntero por encima, o haz clic o tócalo para dejarlo abierto (también enlaza
+a la página del Manual correspondiente cuando la hay). Un recuadro de aviso aparece solo cuando algo
+tiene un riesgo real.
+
+Los formularios se guardan con su botón **Guardar** al pie de la sección, que además indica si tienes
+cambios sin guardar. Un interruptor que va solo — como **Comprobar actualizaciones semanalmente** — se
+guarda en cuanto lo cambias.
+
+## General y versión
+
+**General y versión** (antes se llamaba *Instancia*) muestra cómo está montada lazyit. Su sección
+**Instancia** es de **solo lectura**: refleja el estado actual, no lo cambia. Muestra:
 
 - **Configurada** — si la configuración inicial está completa (existe un administrador). Una
   instalación nueva muestra *Configuración pendiente* hasta que se crea el primer administrador.
-- **Proveedor de identidad** — la postura de inicio de sesión: *Zitadel (incluido)* u *OIDC genérico
-  (el tuyo propio)*.
+- **Proveedor de identidad** — la postura de inicio de sesión: *Zitadel (incluido)*, *OIDC genérico
+  (el tuyo propio)* o *Cuentas locales*.
 - **Administradores** — cuántas cuentas de administrador tiene la instancia.
 - **Postura de ejecución** — *Desarrollo* o *Producción*.
 - **Versión** — la versión exacta que ejecuta esta instancia, fijada al construir sus imágenes. Un
@@ -59,15 +92,15 @@ de **solo lectura**: refleja el estado actual, no lo cambia. Muestra:
 
 > Estos valores los define el entorno en el que corre la instancia, no un formulario. Los operadores
 > cambian el proveedor de identidad y la postura de ejecución mediante variables de entorno al
-> desplegar (consulta [Autoalojamiento](/help/deployment-operations-self-hosting)); la página
-> Instancia hace que el estado resultante sea visible dentro de la aplicación. Usa **Actualizar** para
-> volver a leerlo.
+> desplegar (consulta [Autoalojamiento](/help/deployment-operations-self-hosting)); la página hace
+> que el estado resultante sea visible dentro de la aplicación. Usa **Actualizar** para volver a
+> leerlo.
 
 ## Versión y actualizaciones
 
-La primera tarjeta de la página Instancia es **Versión y actualizaciones**. Muestra la versión que
-ejecutas y, si te suscribes, si hay una versión más nueva disponible — y te da una forma *guiada* de
-actualizar.
+La primera sección de la página General y versión es **Versión y actualizaciones**. Muestra la versión
+que ejecutas y, si te suscribes, si hay una versión más nueva disponible — y te da una forma *guiada*
+de actualizar.
 
 ### Comprobar actualizaciones (opcional)
 
@@ -75,11 +108,11 @@ La comprobación de actualizaciones está **desactivada por defecto**. Activa **
 semanalmente** y lazyit, aproximadamente una vez por semana, hará una única consulta anónima a GitHub
 para ver si existe una versión más nueva. Es **sin baliza**: nunca sale del host ninguna información
 sobre tu instancia — es el mismo tipo de consulta que comprobar un espejo de software. Si la consulta
-está bloqueada (un host de egreso restringido o aislado), simplemente falla en silencio y la tarjeta
+está bloqueada (un host de egreso restringido o aislado), simplemente falla en silencio y la sección
 vuelve a mostrar tu versión actual. "No se pudo comprobar" nunca se interpreta como "actualizado".
 
 Cuando se ve por primera vez una versión más nueva, los administradores reciben una notificación al
-respecto (y un correo, si SMTP está configurado — consulta la tarjeta SMTP de esta página). Se te avisa
+respecto (y un correo, si el correo saliente está configurado — consulta [Correo y SMTP](/help/configuration-smtp-email)). Se te avisa
 **una vez por cada versión nueva**, no cada semana, para que el aviso siga siendo significativo.
 
 **Los agentes de reporte reciben una línea, no un correo propio.** Los agentes instalados se quedan
@@ -97,9 +130,10 @@ asunto — para que una corrección que conviene aplicar esta noche no se pierda
 rutinarias. Si una versión de la que ya te avisaron se publica *después* como corrección de seguridad,
 recibes un correo más para que no se te pase; tras eso deja de insistir.
 
-La tarjeta muestra tu **versión actual**, una insignia de estado (*Actualizado*, *N versiones por
-detrás*, *Comprobación desactivada*, *No se pudo comprobar* o la variante roja de *seguridad*), la
-**última versión** con un enlace a sus notas, y cuándo fue la **última comprobación**.
+La sección muestra una insignia de estado junto a su título (*Actualizado*, *N versiones por detrás*,
+*Comprobación desactivada*, *No se pudo comprobar* o la variante roja de *seguridad*), y luego tu
+**versión actual**, la **última versión** con un enlace a sus notas, y cuándo fue la **última
+comprobación**.
 
 ### Actualizar (guiado, no de un solo clic)
 
@@ -109,7 +143,7 @@ en el servidor. Es una decisión de seguridad: cualquier cosa capaz de actualiza
 necesitaría control con permisos de root sobre tu servidor, algo que la app está diseñada para no tener
 nunca.
 
-Cuando estás por detrás, la tarjeta muestra un único botón **Actualizar a vX.Y.Z**. Pulsarlo **no**
+Cuando estás por detrás, la sección muestra un único botón **Actualizar a vX.Y.Z**. Pulsarlo **no**
 actualiza nada — registra la solicitud y te muestra el comando exacto para ejecutar en el host:
 
 ```
@@ -127,15 +161,15 @@ Ejecuta ese comando en el servidor (por SSH). El script es cuidadoso y no destru
 4. **Compila la nueva versión mientras la actual sigue sirviendo**, luego cambia a ella (una breve
    interrupción de ~1 minuto) y confirma que la nueva versión está sana.
 
-Mientras una actualización se ejecuta, la tarjeta muestra la etapa real (respaldando, migrando,
+Mientras una actualización se ejecuta, la sección muestra la etapa real (respaldando, migrando,
 compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
 cuando la app vuelve.
 
 ### Cancelar una actualización solicitada
 
-Si pulsaste **Actualizar** pero aún no ejecutaste el comando en el host, la tarjeta muestra un botón
+Si pulsaste **Actualizar** pero aún no ejecutaste el comando en el host, la sección muestra un botón
 **Cancelar esta actualización** junto al comando. Cancelar descarta la solicitud pendiente para que la
-tarjeta vuelva a su estado normal de "comprobar actualizaciones" y puedas iniciar una nueva más tarde.
+sección vuelva a su estado normal de "comprobar actualizaciones" y puedas iniciar una nueva más tarde.
 Solo puedes cancelar mientras sigue *solicitada* — una vez que el script del host ya empezó (respaldando
 en adelante), el botón desaparece y esa actualización debe terminar o reconciliarse, porque
 interrumpirla a mitad podría dejar las bases de datos y los respaldos desincronizados. La solicitud
@@ -152,11 +186,13 @@ restauración exactos para que los ejecutes tú, y la versión anterior, sus im�
 conservan hasta que confirmes que la nueva versión está sana. El procedimiento completo está en el
 runbook de respaldos.
 
-## Esquema de etiquetas de activos
+## Correo, directorio y etiquetas de activos
 
-Debajo de estas tarjetas, la página Instancia aloja el editor del **esquema de etiquetas de activos** y
-su herramienta de backfill. Consulta
-[Esquema de etiquetas de activos](/help/configuration-asset-tag-scheme).
+Antes compartían la página Instancia y ahora cada uno tiene su propia página en Configuración:
+[Correo y SMTP](/help/configuration-smtp-email) (**Configuración → Correo**),
+[Sincronización de directorio AD / LDAP](/help/configuration-directory-sync) (**Configuración →
+Directorio AD/LDAP**) y [Esquema de etiquetas de activos](/help/configuration-asset-tag-scheme)
+(**Configuración → Etiquetas de activos**). No cambió nada de cómo funcionan — solo dónde están.
 
 ## Qué se configura en otro sitio
 
@@ -165,7 +201,7 @@ desde el **entorno** y no desde la interfaz, porque son cuestiones de despliegue
 gestiona:
 
 - **Proveedor de identidad y postura de ejecución** — variables de entorno (visibles en solo lectura
-  en la página Instancia).
+  en la página General y versión).
 - **Zona horaria de visualización** — la variable `NEXT_PUBLIC_DEFAULT_TIME_ZONE`. Consulta
   [Zona horaria y formatos](/help/configuration-time-zone-formats).
 - **Conexión del motor de búsqueda y reindexación** — entorno más un script de mantenimiento. Consulta

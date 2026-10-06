@@ -9,14 +9,17 @@ order: 4
 
 lazyit can send **outbound email** so a curated set of its notifications also lands in your team's inbox,
 not just the in-app **notification bell**. You point lazyit at your existing mail relay (SMTP) under
-**Settings → Instance → SMTP** (administrators only). It is **off until you turn it on**.
+**Settings → Email** (administrators only; in the Settings side menu it sits under **Integrations**). It
+is **off until you turn it on**, and the page header shows **On** or **Off**.
 
 ## Configuring the connection
 
-The SMTP editor has these fields:
+The **SMTP server** section has these fields. Each one keeps its longer explanation behind the **?**
+next to its label, and the whole section is saved together with **Save settings**:
 
-- **Enabled** — the master switch for outbound email. While it is off, lazyit never sends notification
-  emails (you can still send a test — see below).
+- **Enable outbound email** — the switch in the section header, the master switch for outbound email.
+  While it is off, lazyit never sends notification emails (you can still send a test — see below). Like
+  every other field here, it takes effect when you save.
 - **Host** and **Port** — your mail relay's address (e.g. `smtp.example.com`, port `587`).
 - **Security** — how the connection is protected:
   - **STARTTLS** (recommended, usually port `587`) — connect in plaintext, then upgrade to TLS.
@@ -27,8 +30,8 @@ The SMTP editor has these fields:
   is **configured** and never displays it again. Leave the field blank when editing to **keep** the
   stored password; type a new value only to change it.
 - **From address** and **From name** — the address (and optional display name) your emails are sent from.
-- **Reject unauthorized TLS certificates** — on by default (secure). Turn it off only if your relay uses a
-  self-signed certificate you trust.
+- **Verify TLS certificate** — on by default (secure). Turn it off only if your relay uses a self-signed
+  certificate you trust.
 
 > The password is stored **encrypted at rest**. Saving a password requires the server key
 > `SMTP_SECRET_KEY` to be set. If it isn't, the **whole save is rejected** — nothing is stored, not even
@@ -39,8 +42,9 @@ The SMTP editor has these fields:
 
 ## Sending a test email
 
-Use **Send test email** to confirm everything works before you rely on it. Enter a destination address
-and lazyit sends a real message using the **currently saved** settings — so **save first**, then test.
+Use the **Send a test** section, below the form, to confirm everything works before you rely on it.
+Enter a destination address and press **Send test**; lazyit sends a real message using the **currently
+saved** settings — so **save first**, then test.
 You do **not** need to enable outbound email to test. If the relay rejects the message, lazyit shows a
 short error (for example "connection refused" or "authentication failed") instead of failing silently.
 

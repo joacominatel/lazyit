@@ -11,7 +11,7 @@ Una **etiqueta de activo** es la etiqueta de empresa que pegas en un sticker fí
 `IT-2026-0042`. Por defecto escribes cada una a mano. lazyit también puede asignarlas automáticamente
 a partir de un número correlativo, para que cada activo nuevo reciba una etiqueta consistente y sin
 colisiones. Esto es el **esquema de etiquetas de activos**, configurado en **Configuración →
-Instancia**.
+Etiquetas de activos**.
 
 > El esquema está **apagado hasta que lo enciendes**. Sin esquema, la creación de activos no cambia:
 > la etiqueta de activo es lo que escribes, o nada. Encenderlo es una acción de configuración
@@ -45,8 +45,8 @@ consulta fallida nunca parezca una consulta lenta.
 
 ## Encenderlo
 
-Abre **Configuración → Instancia → Esquema de etiquetas de activos** y activa **Asignar etiquetas
-automáticamente**. Fija el prefijo, el sufijo y el ancho de número que quieras, opcionalmente un número
+Abre **Configuración → Etiquetas de activos** y activa **Asignar automáticamente** en la sección
+**Esquema de etiquetas**. Fija el prefijo, el sufijo y el ancho de número que quieras, opcionalmente un número
 en **Empezar en** para sembrar el contador, y luego **Guardar esquema**. Configurar el esquema requiere
 el permiso de *gestionar configuración*.
 

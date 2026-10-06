@@ -40,7 +40,7 @@ excepción** es una versión **mayor** dentro del rango. Una versión mayor siem
 **⚠️ Acciones de actualización** en sus notas de versión que describe un paso manual que debes realizar (un
 nuevo ajuste obligatorio, un cambio de topología). Así que salta con libertad entre versiones de parche y
 menores, pero **detente y lee las Acciones de actualización de cada versión mayor que cruces**. La versión
-en ejecución se muestra en **Configuración → Instancia**.
+en ejecución se muestra en **Configuración → General y versión**.
 
 ### Funciones obsoletas
 

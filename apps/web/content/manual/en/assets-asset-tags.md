@@ -10,7 +10,7 @@ order: 1
 An **asset tag** is the company label you write on a physical sticker — `LZ-0001`, `IT-2026-0042`. By
 default you type each one by hand. lazyit can also assign them automatically from a running number, so
 every new asset gets a consistent, never-colliding tag. This is the **asset tag scheme**, configured
-under **Settings → Instance**.
+under **Settings → Asset tags**.
 
 > The scheme is **off until you turn it on**. With no scheme, asset creation is unchanged: the asset
 > tag is whatever you type, or nothing. Turning it on is a deliberate setting.
@@ -41,7 +41,7 @@ looks like a slow one.
 
 ## Turning it on
 
-Open **Settings → Instance → Asset tag scheme** and switch on **Auto-assign asset tags**. Set the
+Open **Settings → Asset tags** and switch on **Auto-assign** in the **Tag scheme** section. Set the
 prefix, suffix and number width you want, optionally a **Start at** number to seed the counter, then
 **Save scheme**. Configuring the scheme requires the *manage settings* permission.
 
