@@ -267,7 +267,7 @@ export function OffboardingSheet({
               />
             </div>
 
-            <div className="grid flex-1 items-start gap-6 border-t px-5 pt-4 pb-6 md:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="grid flex-1 grid-cols-1 items-start gap-6 border-t px-5 pt-4 pb-6 md:grid-cols-[minmax(0,1fr)_20rem] [&>*]:min-w-0">
               {/* A failed read silently collapses the lists to empty, so we refuse to show the
                   asset/access/consumables groups (or the "nothing to return" empty state) on error —
                   that would under-report on an offboarding artifact. Surface the failure + a retry
