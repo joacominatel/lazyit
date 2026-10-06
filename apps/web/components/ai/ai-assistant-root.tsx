@@ -10,6 +10,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { usePathname } from "next/navigation";
 import { useAiChatAvailable } from "@/lib/api/hooks/use-ai-status";
 
 /**
@@ -32,6 +33,25 @@ export interface AiAssistantState {
   launcherRef: RefObject<HTMLButtonElement | null>;
   /** The panel's element id, for the launcher's `aria-controls`. */
   panelId: string;
+  /**
+   * A message an entry point prepared for the composer, waiting for the chat to take it (#1478 — "Ask AI to
+   * fill" on a purchase document). `seq` tells two equal texts apart. It is dropped when the panel closes or
+   * the page changes before the chat took it.
+   */
+  prefill: AiPrefill | null;
+  /**
+   * Opens the panel with `text` in the composer, ready to review and send. It is NEVER sent by itself: the
+   * person sends it (with the current page as context, like any message). A no-op while unavailable.
+   */
+  ask: (text: string) => void;
+  /** The composer took the prefill. */
+  clearPrefill: () => void;
+}
+
+/** A prepared message, from {@link AiAssistantState.ask}. */
+export interface AiPrefill {
+  text: string;
+  seq: number;
 }
 
 const OFF: AiAssistantState = {
@@ -41,6 +61,9 @@ const OFF: AiAssistantState = {
   toggle: () => {},
   launcherRef: { current: null },
   panelId: "",
+  prefill: null,
+  ask: () => {},
+  clearPrefill: () => {},
 };
 
 const AiAssistantContext = createContext<AiAssistantState>(OFF);
@@ -51,6 +74,23 @@ export function AiAssistantRoot({ children }: { children: React.ReactNode }) {
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
   const toggle = useCallback(() => setOpen((prev) => !prev), []);
+  const pathname = usePathname();
+  // The prepared message and the page it was prepared on.
+  const [prefill, setPrefill] = useState<(AiPrefill & { path: string | null }) | null>(null);
+  // Never reset, so every ask is a new one to the chat even after it took the last.
+  const askSeq = useRef(0);
+  const ask = useCallback(
+    (text: string) => {
+      askSeq.current += 1;
+      setPrefill({ text, seq: askSeq.current, path: pathname });
+      setOpen(true);
+    },
+    [pathname],
+  );
+  const clearPrefill = useCallback(() => setPrefill(null), []);
+  // Not taken yet and the panel closed, or the person moved to another page: the message is dropped, so it
+  // never lands later in a chat about something else.
+  if (prefill !== null && (!(available && open) || prefill.path !== pathname)) setPrefill(null);
 
   const state = useMemo<AiAssistantState>(
     () => ({
@@ -61,8 +101,11 @@ export function AiAssistantRoot({ children }: { children: React.ReactNode }) {
       toggle,
       launcherRef,
       panelId,
+      prefill: available && prefill !== null ? { text: prefill.text, seq: prefill.seq } : null,
+      ask: available ? ask : OFF.ask,
+      clearPrefill,
     }),
-    [available, open, toggle, panelId],
+    [available, open, toggle, panelId, prefill, ask, clearPrefill],
   );
 
   return <AiAssistantContext.Provider value={state}>{children}</AiAssistantContext.Provider>;

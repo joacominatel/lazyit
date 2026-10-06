@@ -3,7 +3,7 @@ title: "ADR-0083: Tag-driven semver versioning & release automation"
 tags: [adr, infra, releases, versioning, ci]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-02
+updated: 2026-09-28
 deciders: [Joaquín Minatel]
 ---
 
@@ -71,8 +71,8 @@ from the commit prefixes since the last tag and comments it on the PR:
 
 The CEO may **override** the suggestion with a `release:major`, `release:minor` or `release:patch`
 label on the promotion PR. On merge, `release.yml` reads **label-or-suggestion**, computes the next
-`vX.Y.Z` from the last tag, and creates the **annotated, signed tag + GitHub Release**. Absent a
-label, the suggestion stands.
+`vX.Y.Z` from the last tag, and creates the **annotated tag + GitHub Release** (unsigned — see
+*Tag trust* below). Absent a label, the suggestion stands.
 
 **MAJOR is never auto-detected.** Prefixes carry no breaking signal, so a major is always a human
 decision expressed by the label.
@@ -111,24 +111,51 @@ show the `git describe` form `v1.4.2-3-gabc1234` rather than lying about being a
 > This ADR defines **only the identity half** (`current` + `gitSha`). The "latest known" version,
 > the "N behind" comparison and any network check belong to [[0084-update-awareness-and-guided-update]].
 
-### Signed tags — SSH, verifiable, no registry machinery
+### Tag trust — ancestry on `master` over an authenticated transport; signatures when present
 
-Tags are **SSH-signed** (`git tag -s`) from v1.0.0 onward; consumers can `git verify-tag`. Because
-lazyit updates ride a git checkout (not a registry pull), SSH-signed git tags are the proportionate
-integrity control — near-zero cost, no key infrastructure. **Cosign / registry signing is rejected**
-(there is no registry to sign into — that would be machinery buying nothing here).
+*(Amended 2026-09-28, issue #1458. This section was "Signed tags — SSH, verifiable, no registry
+machinery", and said consumers verify tags with `git verify-tag`.)*
 
-**Implementation note (issue #905):** the signing key belongs to the release owner and never enters
-CI, so signing applies to **operator-cut tags** — the hand-seeded `v1.0.0` and any manually created
-tag. The tags `release.yml` cuts automatically on promotion are **annotated but unsigned** (tagger =
-the GitHub Actions identity). This is consistent with the paragraph below: the signer *is* the GitHub
-identity, and the mandatory control is MFA + branch protection on `master`, which gate exactly the
-event that triggers the automated tag.
+**How a consumer trusts a release tag.** A tag is a release when it is an **annotated `vX.Y.Z` tag**
+whose commit is **on `master`** (an ancestor of, or equal to, its tip), with both `master` and the tag
+**fetched from `origin` over an authenticated transport** — HTTPS with certificate verification, or
+SSH — at the moment of use. That is exactly the trust this ADR already names: only the gated
+dev→master promotion puts commits on `master`, and pushing to `master` or pushing a tag both require
+the GitHub identity, so the identity (MFA + branch protection) is the control and the transport's job
+is only to prove we are talking to GitHub. Plain `http://` and `git://` prove nothing and are refused.
+The guided updater ([[0084-update-awareness-and-guided-update]] §3 step 4, `infra/update.sh`) applies
+this rule. It is the bar this ADR always rested on, stated honestly: the signature requirement it
+replaces could never be met by an automated tag.
+
+**Signatures are verified when present, never required.** The signing key belongs to the release
+owner and never enters CI (issue #905), so signing applies only to **operator-cut tags** — the
+hand-seeded `v1.0.0` and any manually created tag. The tags `release.yml` cuts on promotion are
+**annotated but unsigned** (tagger = the GitHub Actions identity). A mandatory `git verify-tag` could
+therefore never pass on them — which is how #1458 happened: from v1.1.0 on, the updater stopped at
+its verify step on every automated release. When a tag *does* carry a signature, the updater checks
+it, and a **bad** signature is always a hard stop:
+
+- **SSH, with `gpg.ssh.allowedSignersFile` configured** — `git verify-tag` must pass. A bad signature,
+  or a signer the operator has not listed, stops the update: the operator configured that list.
+- **SSH, no allowed-signers file** (the usual host) — `git verify-tag` cannot run at all, so it proves
+  nothing either way. The updater instead checks the signature against the tag's content with
+  `ssh-keygen -Y check-novalidate`: a bad signature stops the update; a valid one is accepted with the
+  signer's identity unchecked (the ancestry rule already carries the trust). A missing verifier never
+  blocks an otherwise valid tag; a failed signature always does.
+- **OpenPGP / X.509** — `git verify-tag` must pass, except when the verifier cannot run (the signer's
+  key is not in the keyring, or `gpg`/`gpgsm` is not installed): a warning, then trusted on ancestry.
+
+SSH-signing the hand-cut tags stays the proportionate extra: near-zero cost, no key infrastructure.
+**Cosign / registry signing is rejected** (there is no registry to sign into — that would be
+machinery buying nothing here).
 
 **Organizational prerequisite (recorded, not built here):** the release identity must have **MFA +
 branch protection** on `master`. The real single point of failure in any release system is the
 GitHub identity, not the transport; signing raises the bar but the signer *is* that identity, so
-MFA + branch protection are the actual mandatory control.
+MFA + branch protection are the actual mandatory control — and the tag-trust rule above rests on
+exactly them. (At the time of this amendment `master` carries no GitHub branch-protection rule — see
+`.claude/charter.md` — so the control in force is the identity's MFA plus the promotion convention;
+adding the rule strengthens precisely this check.)
 
 ### Changelog — auto-generated GitHub Release notes, no committed file
 
@@ -162,8 +189,9 @@ Publishing versioned images is recorded as a deferred optimization (below), not 
   (a label) and a trustworthy MAJOR signal.
 - The version number becomes an **operator-meaningful contract** the future updater can trust —
   MAJOR ⇒ "not one-click-safe" — without any extra manifest.
-- Signed tags give a `git verify-tag` integrity anchor and a named, addressable rollback target
-  (previously "the previous version" was an unnamed git state).
+- Release tags give a named, addressable rollback target (previously "the previous version" was an
+  unnamed git state), trusted by their place on `master` over an authenticated fetch; the hand-cut ones
+  add a signature that is checked when present.
 - **New surface, small:** a `release.yml` workflow, two Dockerfile build-args, and one `GET
   /instance/version` endpoint. No schema change, no new runtime dependency, no registry.
 - **Accepted ceilings:**
@@ -171,9 +199,12 @@ Publishing versioned images is recorded as a deferred optimization (below), not 
     carries only `fix` commits would be *suggested* as a patch. Guarding against that is exactly why
     MAJOR is a human label, not an algorithm; the promoter is accountable for setting it.
   - Off-tag rebuilds report `vX.Y.Z-n-gsha` — intentionally honest, occasionally noisy.
-  - Restricted-egress instances cannot `git verify-tag` against a remote signer they can't reach —
-    the verification is best-effort and never blocks running the app (the updater ADR owns egress
-    behaviour).
+  - The tag-trust check needs a live fetch of `master` from `origin`, so a restricted-egress instance
+    cannot run the guided updater without reaching its git remote; it never blocks running the app
+    (the updater ADR owns egress behaviour).
+  - The trust is the GitHub identity, not a key an operator can pin. Automated tags carry no signature,
+    so there is no independent anchor for them; an operator can pin only the hand-cut, SSH-signed tags,
+    by configuring `gpg.ssh.allowedSignersFile`.
 
 ## Considered alternatives
 

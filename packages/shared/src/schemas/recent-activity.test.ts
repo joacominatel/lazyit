@@ -143,6 +143,9 @@ describe("RecentActivityActionSchema (allowlist of known verbs)", () => {
       // ADR-0098 (#1364) — the lowercased CONSUMABLE_DELIVERED / CONSUMABLE_RETURNED verbs.
       "consumable_delivered",
       "consumable_returned",
+      // ADR-0099 (#1473) — the lowercased PURCHASE_LINKED / PURCHASE_UNLINKED verbs.
+      "purchase_linked",
+      "purchase_unlinked",
       "granted",
       "revoked",
       "stock_in",

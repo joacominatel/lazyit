@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-09-28
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -126,7 +126,7 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 ```
 
 `--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
-`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
+`SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY`, `DIRECTORY_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
 only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
 env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
@@ -207,7 +207,7 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker
 > [!note] Version identity ([[0083-versioning-and-releases]])
 > The guided `infra/start.sh` exports `LAZYIT_VERSION=$(git describe --tags --always)` and
 > `LAZYIT_GIT_SHA=$(git rev-parse --short HEAD)` before `up`, so the api/web images bake the running
-> version (shown on **Settings → Instance** and by `GET /instance/version`). When running the compose
+> version (shown on **Settings → General & version** and by `GET /instance/version`). When running the compose
 > command **by hand**, export both first — otherwise the build honestly reports `dev`/`unknown`:
 >
 > ```sh
@@ -288,8 +288,12 @@ Instance** before and after.
 > `prisma migrate deploy`, which applies every pending migration **in sequence** ([[prisma-migrations]]), so
 > you never step through intermediate versions by hand. The **only** stop is a **major** in the range — apply
 > its *⚠️ Upgrade actions* before jumping past it. The guided **`infra/update.sh`**
-> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → `verify-tag` →
-> build → migrate → health-gate sequence and blocks one-click across a major.
+> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → release-tag check
+> (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must
+> not be bad) → build → migrate → health-gate sequence and blocks one-click across a major. **On v2.0.0 or
+> earlier, update to v2.1.0 by hand** (`git fetch --tags && git checkout v2.1.0 && ./infra/start.sh`,
+> after a backup): the `update.sh` you already have — the one that runs — stops at its old signature check
+> on every automated release tag (#1458); the fixed one works from v2.1.0 on ([[releasing]]).
 
 > [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
 > Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is
@@ -390,14 +394,35 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > same `grep -q` guard as above (`AI_SECRET_KEY=$(openssl rand -hex 32)`) and recreate the api container.
 > `AI_WORKER_CONCURRENCY` stays unset unless you want to change its default of **4** — nothing writes it.
 
+> **Upgrade note — `DIRECTORY_SECRET_KEY` is optional; `start.sh` adds it (ADR-0091, issue #1271).**
+> The on-prem AD/LDAP directory sync stores its read-only **bind password** encrypted at rest under this
+> key. It ships **commented** in `.env.prod.example`, like `AI_SECRET_KEY`, so `infra/update.sh` does
+> **not** stop on it and an instance that never syncs a directory needs no change. Without it the API
+> boots unchanged, but saving the directory connection **with a bind password** returns a clean **409
+> and stores nothing at all** — not even the other fields (the encrypt runs *before* the upsert, so the
+> whole save is rejected). A guided install generates the key; **re-running `./infra/start.sh` on the
+> existing install adds it for you** (any auth mode, backup first — see *Keys `start.sh` adds on an
+> existing install* below), as does `--reconfigure`. By hand:
+>
+> ```sh
+> grep -q '^DIRECTORY_SECRET_KEY=' infra/env/.env.prod \
+>   || echo "DIRECTORY_SECRET_KEY=$(openssl rand -hex 32)" >> infra/env/.env.prod   # 32 bytes -> 64 hex chars
+> docker compose -f compose.yaml -f infra/docker-compose.prod.yaml --profile prod \
+>   --env-file infra/env/.env.prod up -d api
+> ```
+>
+> The `grep -q` guard is the point: an **already-present** key — hex, base64 of 32 bytes or a 32-char raw
+> string, all of which the API accepts — must never be replaced; it decrypts the bind password already
+> stored. Not a DR linchpin: the worst case is one re-typed bind password ([[backups]]).
+
 > **Keys `start.sh` adds on an existing install (ADR-0047 amendment 2026-09-26).** When
 > `./infra/start.sh` finds an existing install (the `git pull` + `start.sh` upgrade path), it no longer
 > only brings the stack up: it first **appends** to `infra/env/.env.prod` every key that (1) this
 > checkout's `.env.prod.example` defines, (2) your file has no active line for, and (3) is on an explicit
 > allowlist of keys that are safe to generate at random for a populated install. Today the allowlist is
-> **`SMTP_SECRET_KEY`** and **`AI_SECRET_KEY`** (`openssl rand -hex 32` each). Both are at-rest keys for a
-> secret the API refuses to store while the key is unset, so a missing key proves nothing was ever
-> encrypted under it — a fresh one orphans nothing.
+> **`SMTP_SECRET_KEY`**, **`AI_SECRET_KEY`** and **`DIRECTORY_SECRET_KEY`** (`openssl rand -hex 32` each).
+> Each is an at-rest key for a secret the API refuses to store while the key is unset, so a missing key
+> proves nothing was ever encrypted under it — a fresh one orphans nothing.
 >
 > - A **backup** is written first: `infra/env/.env.prod.bak-<UTC timestamp>` (mode 600, gitignored). It
 >   holds your secrets — keep it private, delete it once satisfied.

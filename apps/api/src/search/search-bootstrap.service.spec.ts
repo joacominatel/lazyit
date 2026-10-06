@@ -32,6 +32,8 @@ function prismaMock() {
     application: { findMany: jest.fn().mockResolvedValue([]) },
     infraNode: { findMany: jest.fn().mockResolvedValue([]) },
     consumable: { findMany: jest.fn().mockResolvedValue([]) },
+    purchaseOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    supplier: { findMany: jest.fn().mockResolvedValue([]) },
   };
 }
 
@@ -162,12 +164,65 @@ describe('SearchBootstrapService', () => {
         'applications',
         'infra',
         'consumables',
+        'purchases',
+        'suppliers',
       ] satisfies SearchIndex[]);
 
       const healed = await build(search, prisma).selfHeal();
 
-      expect(healed).toHaveLength(7);
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
+      expect(healed).toHaveLength(9);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(9);
+    });
+
+    it('an upgraded instance builds only the new purchases and suppliers indexes, from live rows (#1499)', async () => {
+      // Every pre-existing index already has documents; the two new ones were never created.
+      search.emptyOrMissingIndexes.mockResolvedValue([
+        'purchases',
+        'suppliers',
+      ] satisfies SearchIndex[]);
+      prisma.purchaseOrder.findMany.mockResolvedValue([
+        {
+          id: 'po1',
+          reference: 'OC-4512',
+          status: 'ORDERED',
+          orderDate: null,
+          invoiceNumbers: null,
+          createdAt: new Date('2026-10-01T00:00:00.000Z'),
+          supplier: { name: 'Compumundo' },
+          lines: [{ description: 'ThinkPad T14' }],
+        },
+      ]);
+      prisma.supplier.findMany.mockResolvedValue([
+        {
+          id: 's1',
+          name: 'Compumundo',
+          taxId: null,
+          salesContactName: null,
+          supportContactName: null,
+        },
+      ]);
+
+      const healed = await build(search, prisma).selfHeal();
+
+      expect(healed).toEqual(['purchases', 'suppliers']);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(2);
+      // Archived rows are excluded; the purchase load joins the supplier name and the live lines.
+      expect(prisma.purchaseOrder.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { deletedAt: null } }),
+      );
+      expect(prisma.supplier.findMany).toHaveBeenCalledWith({
+        where: { deletedAt: null },
+      });
+      expect(search.rebuildIndex).toHaveBeenCalledWith('purchases', [
+        expect.objectContaining({
+          id: 'po1',
+          supplierName: 'Compumundo',
+          lineDescriptions: ['ThinkPad T14'],
+        }),
+      ]);
+      expect(search.rebuildIndex).toHaveBeenCalledWith('suppliers', [
+        expect.objectContaining({ id: 's1', name: 'Compumundo' }),
+      ]);
     });
 
     it('continues to the next index when one rebuild fails', async () => {
@@ -202,9 +257,11 @@ describe('SearchBootstrapService', () => {
         'applications',
         'infra',
         'consumables',
+        'purchases',
+        'suppliers',
       ]);
       expect(search.emptyOrMissingIndexes).not.toHaveBeenCalled();
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(9);
       expect(search.rebuildIndex).toHaveBeenCalledWith('assets', [
         { id: 'a1' },
       ]);
@@ -226,8 +283,10 @@ describe('SearchBootstrapService', () => {
         'applications',
         'infra',
         'consumables',
+        'purchases',
+        'suppliers',
       ]);
-      expect(search.rebuildIndex).toHaveBeenCalledTimes(7);
+      expect(search.rebuildIndex).toHaveBeenCalledTimes(9);
     });
   });
 

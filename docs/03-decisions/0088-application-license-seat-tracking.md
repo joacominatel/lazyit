@@ -3,7 +3,7 @@ title: "ADR-0088: License / seat tracking on Application (seats + cost + renewal
 tags: [adr, application, access, license, money]
 status: accepted
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-10-02
 deciders: [Joaquín Minatel]
 ---
 
@@ -55,7 +55,9 @@ as a DERIVED, distinct-user count — never a stored column.**
 - **Web surfaces:** the Access list shows a `used / purchased` cell (+ over-alloc warning + next
   renewal); the application detail adds a "License & seats" panel (`used / purchased` + warning, cost
   per seat, renewal date); the form adds the three inputs — cost entered in **major** units and
-  converted to minor via the existing `majorToMinor` (#954), never re-coerced server-side.
+  converted to minor via the existing `majorToMinor` (#954), never re-coerced server-side. *(2026-10-02,
+  #1470: `majorToMinor` is replaced by `parseMoneyInput`, which reads the amount in the viewer's locale
+  — [[0100-money-as-64-bit-minor-units]] §5.)*
 
 ## Consequences
 
@@ -77,6 +79,26 @@ as a DERIVED, distinct-user count — never a stored column.**
   ledger. Deriving it keeps a single source of truth ([[asset-centric]] / auditability posture).
 - **A raw active-grant count as "seats used"** — rejected: multi-grant over-reports the license
   ([[0023-access-management-design]]); DISTINCT user is the only correct count.
+
+## Amendment — money width, currency and purchases (ADR-0099 / ADR-0100, #1466, 2026-10-01)
+
+- **Width.** `costPerSeat` moves from `int4` to a 64-bit integer of minor units with the other money
+  columns ([[0100-money-as-64-bit-minor-units|ADR-0100]]). The representation is still one money
+  convention — integer minor units — only wider; the wire stays a JSON number. Built 2026-10-02
+  (#1469).
+- **Currency.** The "org's single currency" above no longer holds instance-wide:
+  [[0099-purchases-scope-model-and-optionality|ADR-0099]] gives each purchase an optional free-text
+  currency label and the asset's purchase cost an optional one. `costPerSeat` itself is unchanged and stays currency-less.
+- **PO numbers.** The deferred "PO numbers, vendor SKUs" now belong to Purchases: a purchase carries the
+  finance reference, and a `LICENSE` purchase line (Phase 2) links to an application and *proposes* a
+  seats/renewal update — it never changes `seatsPurchased` automatically. *Built in #1477 (2026-10-02): a
+  person applies it, through the applications write path; the line records the seats it added, and
+  `seatsPurchased` is never recomputed from lines — ADR-0099, decisions while building (Phase 2).*
+- **Label.** The application's `vendor` field is shown as **Publisher** (en) / **Fabricante** (es) from
+  Purchases Phase 1, so it is not confused with a purchase supplier. Label only; the column is unchanged.
+
+Built 2026-10-02: the width (#1469), the currency labels (#1472), the *Publisher* label (#1474) and
+`LICENSE` lines (#1477).
 
 ## Related
 

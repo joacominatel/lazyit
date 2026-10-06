@@ -2,7 +2,13 @@
 
 import {
   ArrowPathIcon,
+  CircleStackIcon,
+  CpuChipIcon,
+  CubeIcon,
   ExclamationTriangleIcon,
+  GlobeAltIcon,
+  ServerStackIcon,
+  Square3Stack3DIcon,
 } from "@heroicons/react/24/outline";
 import {
   AGENT_POLICY_DEFAULT,
@@ -18,35 +24,30 @@ import {
   type AgentPolicyOverride,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { type ComponentType, type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { Callout } from "@/components/callout";
+import { HelpTip } from "@/components/help-tip";
 import { RequestIdNote } from "@/components/request-id-note";
+import {
+  SettingLabel,
+  SettingRow,
+  SettingsSaveBar,
+  SettingsSection,
+} from "@/components/settings-section";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldDescription, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/api/client";
 import {
   useAgentPolicy,
   useSaveAgentPolicy,
 } from "@/lib/api/hooks/use-agent-policy";
 import { notifyError } from "@/lib/api/notify-error";
+import { cn } from "@/lib/utils";
 import { reseedAction } from "./agent-policy-reseed";
 
 /** The six collectors, in the order the policy schema declares them. */
@@ -58,6 +59,19 @@ const COLLECTORS: readonly (keyof AgentPolicyCollect)[] = [
   "containers",
   "hypervisor",
 ];
+
+/** One glyph per collector, for the checkbox grid (#1533). */
+const COLLECTOR_ICONS: Record<
+  keyof AgentPolicyCollect,
+  ComponentType<{ className?: string }>
+> = {
+  hardware: CpuChipIcon,
+  disks: CircleStackIcon,
+  nics: GlobeAltIcon,
+  software: CubeIcon,
+  containers: Square3Stack3DIcon,
+  hypervisor: ServerStackIcon,
+};
 
 /**
  * Each exclusion list and the collector that has to be ON for it to do anything.
@@ -166,7 +180,9 @@ function seedFrom(effective: {
 
 /**
  * Settings → Reporting agents: the instance-default policy editor (ADR-0074 §7 amendment, #1140;
- * moved out of Settings → Instance and given an information architecture by #1174).
+ * moved out of Settings → Instance and given an information architecture by #1174; condensed to the
+ * settings text rules by #1533 — the cadence reads as one sentence, the collectors are a checkbox
+ * grid, and the long explanations sit behind "?" tips).
  *
  * This is the surface that replaces SSH-ing to every host to edit the agent's config file. What it
  * saves is the INSTANCE DEFAULT layer; the per-service-account and per-node scopes exist in the API
@@ -200,7 +216,12 @@ function seedFrom(effective: {
  * case and the page says so, with reloading left as the operator's explicit choice. It does not make
  * the write safe: the PUT still replaces the whole instance layer and the last writer still wins.
  */
-export function AgentPolicyEditor() {
+export function AgentPolicyEditor({
+  context,
+}: {
+  /** Read-only policy context (the scopes ladder), rendered above the shared save bar. */
+  context?: ReactNode;
+}) {
   const t = useTranslations("settings.agentPolicy");
   const tc = useTranslations("common");
   const { data, isLoading, isError, error, refetch, isFetching } =
@@ -252,17 +273,7 @@ export function AgentPolicyEditor() {
     return (
       <div className="space-y-6">
         {[0, 1, 2].map((i) => (
-          <Card key={i}>
-            <CardHeader>
-              <CardTitle>
-                <Skeleton className="h-5 w-40" />
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-2/3" />
-            </CardContent>
-          </Card>
+          <Skeleton key={i} className="h-36 w-full rounded-xl" />
         ))}
       </div>
     );
@@ -270,19 +281,13 @@ export function AgentPolicyEditor() {
 
   if (isError) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("title")}</CardTitle>
-          <CardDescription>{t("loadFailed")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="outline" size="sm" onClick={() => void refetch()}>
-            <ArrowPathIcon className="size-4" />
-            {t("retry")}
-          </Button>
-          <RequestIdNote requestId={requestId} />
-        </CardContent>
-      </Card>
+      <SettingsSection title={t("title")} summary={t("loadFailed")}>
+        <Button variant="outline" size="sm" onClick={() => void refetch()}>
+          <ArrowPathIcon className="size-4" />
+          {t("retry")}
+        </Button>
+        <RequestIdNote requestId={requestId} />
+      </SettingsSection>
     );
   }
 
@@ -344,167 +349,188 @@ export function AgentPolicyEditor() {
     });
   };
 
+  const collectorsOn = COLLECTORS.filter((key) => form.collect[key]).length;
+
   return (
     <div className="space-y-6">
-      {/* ── Cadence ── the two numbers that constrain each other, side by side so the rule reads. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("cadence.title")}</CardTitle>
-          <CardDescription>{t("cadence.description")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 sm:grid-cols-2 sm:items-start">
-            <Field data-invalid={intervalError ? true : undefined}>
-              <FieldLabel htmlFor="agent-policy-interval">
-                {t("interval.label")}
-              </FieldLabel>
-              <Input
-                id="agent-policy-interval"
-                inputMode="numeric"
-                aria-invalid={intervalError ? true : undefined}
-                value={form.intervalMinutes}
-                onChange={(e) =>
-                  setForm({ ...form, intervalMinutes: e.target.value })
-                }
-              />
-              <FieldDescription>
-                {t("interval.help", { tick: AGENT_POLICY_TICK_SECONDS / 60 })}
-              </FieldDescription>
-              {intervalError ? <FieldError>{intervalError}</FieldError> : null}
-            </Field>
+      {/* ── Cadence ── the two numbers that constrain each other, read as one sentence (#1533). */}
+      <SettingsSection
+        title={t("cadence.title")}
+        help={
+          <>
+            <p>{t("cadence.description")}</p>
+            <p>{t("interval.help", { tick: AGENT_POLICY_TICK_SECONDS / 60 })}</p>
+            <p>{t("stale.help")}</p>
+          </>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>{t("cadence.sentence.before")}</span>
+          <Input
+            id="agent-policy-interval"
+            inputMode="numeric"
+            aria-label={t("interval.label")}
+            aria-invalid={intervalError ? true : undefined}
+            aria-describedby={intervalError ? "agent-policy-interval-error" : undefined}
+            className="w-16 text-center font-mono"
+            value={form.intervalMinutes}
+            onChange={(e) => setForm({ ...form, intervalMinutes: e.target.value })}
+          />
+          <span>{t("cadence.sentence.middle")}</span>
+          <Input
+            id="agent-policy-stale"
+            inputMode="numeric"
+            aria-label={t("stale.label")}
+            aria-invalid={staleError ? true : undefined}
+            aria-describedby={staleError ? "agent-policy-stale-error" : undefined}
+            className="w-16 text-center font-mono"
+            value={form.staleAfterMinutes}
+            onChange={(e) => setForm({ ...form, staleAfterMinutes: e.target.value })}
+          />
+          <span>{t("cadence.sentence.after")}</span>
+        </div>
+        {intervalError ? (
+          <p id="agent-policy-interval-error" className="text-sm text-destructive">
+            {intervalError}
+          </p>
+        ) : null}
+        {staleError ? (
+          <p id="agent-policy-stale-error" className="text-sm text-destructive">
+            {staleError}
+          </p>
+        ) : null}
+      </SettingsSection>
 
-            <Field data-invalid={staleError ? true : undefined}>
-              <FieldLabel htmlFor="agent-policy-stale">
-                {t("stale.label")}
-              </FieldLabel>
-              <Input
-                id="agent-policy-stale"
-                inputMode="numeric"
-                aria-invalid={staleError ? true : undefined}
-                value={form.staleAfterMinutes}
-                onChange={(e) =>
-                  setForm({ ...form, staleAfterMinutes: e.target.value })
-                }
-              />
-              <FieldDescription>{t("stale.help")}</FieldDescription>
-              {staleError ? <FieldError>{staleError}</FieldError> : null}
-            </Field>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── What is collected ── the five switches plus the cap that only the software one spends. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("collect.title")}</CardTitle>
-          <CardDescription>{t("collect.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="divide-y">
-            {COLLECTORS.map((key) => (
-              <div
+      {/* ── What is collected ── six like booleans as an icon checkbox grid, plus the cap that only
+          the software collector spends. */}
+      <SettingsSection
+        title={t("collect.title")}
+        summary={t("collect.summary", {
+          on: collectorsOn,
+          total: COLLECTORS.length,
+        })}
+        help={
+          <>
+            <p>{t("collect.description")}</p>
+            <p>{t("collect.veto")}</p>
+          </>
+        }
+      >
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {COLLECTORS.map((key) => {
+            const Icon = COLLECTOR_ICONS[key];
+            const on = form.collect[key];
+            return (
+              <label
                 key={key}
-                className="flex items-center justify-between gap-4 py-2.5"
+                htmlFor={`agent-collect-${key}`}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2.5 ring-1 transition-colors ring-inset",
+                  on
+                    ? "bg-primary/5 ring-primary/50"
+                    : "ring-foreground/10 hover:bg-muted/50",
+                )}
               >
-                <span className="text-sm">{t(`collect.${key}`)}</span>
-                <Switch
-                  checked={form.collect[key]}
+                <Icon
+                  className={cn(
+                    "size-[18px] shrink-0",
+                    on ? "text-primary" : "text-muted-foreground",
+                  )}
+                  aria-hidden
+                />
+                <span className="flex-1 text-sm font-medium">
+                  {t(`collect.${key}`)}
+                </span>
+                <Checkbox
+                  id={`agent-collect-${key}`}
+                  checked={on}
                   onCheckedChange={(checked) =>
                     setForm({
                       ...form,
-                      collect: { ...form.collect, [key]: checked },
+                      collect: { ...form.collect, [key]: checked === true },
                     })
                   }
-                  aria-label={t(`collect.${key}`)}
                 />
-              </div>
-            ))}
-          </div>
+              </label>
+            );
+          })}
+        </div>
 
-          <p className="text-sm text-muted-foreground">{t("collect.veto")}</p>
-
-          <Field
-            className="border-t pt-5"
-            data-invalid={softwareMaxError ? true : undefined}
+        <div className="border-t pt-4">
+          <SettingRow
+            label={t("softwareMax.label")}
+            htmlFor="agent-policy-software-max"
+            help={<p>{t("softwareMax.help")}</p>}
+            // The cap is spent inside the software collector, so it does nothing while that is off.
+            note={form.collect.software ? undefined : t("softwareMax.inert")}
           >
-            <FieldLabel htmlFor="agent-policy-software-max">
-              {t("softwareMax.label")}
-            </FieldLabel>
             <Input
               id="agent-policy-software-max"
               inputMode="numeric"
-              className="sm:max-w-48"
+              className="w-24 text-right font-mono"
               aria-invalid={softwareMaxError ? true : undefined}
+              aria-describedby={
+                softwareMaxError ? "agent-policy-software-max-error" : undefined
+              }
               value={form.softwareMax}
               onChange={(e) => setForm({ ...form, softwareMax: e.target.value })}
             />
-            <FieldDescription>{t("softwareMax.help")}</FieldDescription>
-            {/* The cap is spent inside the software collector, so it does nothing while that is off. */}
-            {form.collect.software ? null : (
-              <FieldDescription>{t("softwareMax.inert")}</FieldDescription>
-            )}
-            {softwareMaxError ? (
-              <FieldError>{softwareMaxError}</FieldError>
-            ) : null}
-          </Field>
-        </CardContent>
-      </Card>
+          </SettingRow>
+          {softwareMaxError ? (
+            <p
+              id="agent-policy-software-max-error"
+              className="mt-2 text-sm text-destructive"
+            >
+              {softwareMaxError}
+            </p>
+          ) : null}
+        </div>
+      </SettingsSection>
 
-      {/* ── Exclusions ── the most complex control on the page, and now the one with the most room. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("exclude.title")}</CardTitle>
-          <CardDescription>
-            {t("exclude.description", { max: AGENT_POLICY_GLOBS_MAX })}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <FieldGroup>
-            {EXCLUSIONS.map(({ key, collector }) => {
-              const count = toGlobs(form[key]).length;
-              return (
-                <Field
-                  key={key}
-                  data-invalid={globErrors[key] ? true : undefined}
+      {/* ── Exclusions ── the most complex control on the page; its syntax sits behind the "?". */}
+      <SettingsSection
+        title={t("exclude.title")}
+        summary={t("exclude.summary")}
+        help={<p>{t("exclude.description", { max: AGENT_POLICY_GLOBS_MAX })}</p>}
+      >
+        {EXCLUSIONS.map(({ key, collector }) => {
+          const count = toGlobs(form[key]).length;
+          return (
+            <Field key={key} data-invalid={globErrors[key] ? true : undefined}>
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                <SettingLabel
+                  htmlFor={`agent-policy-${key}`}
+                  help={<p>{t(`exclude.${key}.help`)}</p>}
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <FieldLabel htmlFor={`agent-policy-${key}`}>
-                      {t(`exclude.${key}.label`)}
-                    </FieldLabel>
-                    <span className="text-xs tabular-nums text-muted-foreground">
-                      {t("exclude.count", {
-                        count,
-                        max: AGENT_POLICY_GLOBS_MAX,
-                      })}
-                    </span>
-                  </div>
-                  <Input
-                    id={`agent-policy-${key}`}
-                    value={form[key]}
-                    placeholder={t(`exclude.${key}.placeholder`)}
-                    aria-invalid={globErrors[key] ? true : undefined}
-                    onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  />
-                  <FieldDescription>{t(`exclude.${key}.help`)}</FieldDescription>
-                  {/* The agent gates the collector before it applies the list — an inert list is
-                      saved faithfully and matched by nothing, which is worth saying here. */}
-                  {form.collect[collector] ? null : (
-                    <FieldDescription>
-                      {t(`exclude.${key}.inert`)}
-                    </FieldDescription>
-                  )}
-                  {globErrors[key] ? (
-                    <FieldError>{globErrors[key]}</FieldError>
-                  ) : null}
-                </Field>
-              );
-            })}
-          </FieldGroup>
-        </CardContent>
-      </Card>
+                  {t(`exclude.${key}.label`)}
+                </SettingLabel>
+                <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                  {t("exclude.count", { count, max: AGENT_POLICY_GLOBS_MAX })}
+                </span>
+              </div>
+              <Input
+                id={`agent-policy-${key}`}
+                value={form[key]}
+                placeholder={t(`exclude.${key}.placeholder`)}
+                className="font-mono text-sm"
+                aria-invalid={globErrors[key] ? true : undefined}
+                onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              />
+              {/* The agent gates the collector before it applies the list — an inert list is saved
+                  faithfully and matched by nothing, which is worth saying here. */}
+              {form.collect[collector] ? null : (
+                <FieldDescription>{t(`exclude.${key}.inert`)}</FieldDescription>
+              )}
+              {globErrors[key] ? <FieldError>{globErrors[key]}</FieldError> : null}
+            </Field>
+          );
+        })}
+      </SettingsSection>
 
-      {/* One action bar for all three groups: the PUT replaces the whole instance layer, so the
-          three cards are one edit and saving them separately would be a lie about the contract. */}
+      {context}
+
+      {/* One action bar for every group above: the PUT replaces the whole instance layer, so the
+          sections are one edit and saving them separately would be a lie about the contract. */}
       <div className="space-y-3">
         {/* A write from another scope, another tab or the API moved the revision under a dirty
             form. The edit is still here and still unsent; reloading is the operator's call. */}
@@ -520,35 +546,48 @@ export function AgentPolicyEditor() {
             </div>
           </Callout>
         ) : null}
-        <p className="text-sm text-muted-foreground">{t("propagation")}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={onSave} disabled={blocked || save.isPending}>
-            {save.isPending ? t("saving") : t("save")}
-          </Button>
-          {dirty ? (
-            <>
+        <div className="sticky bottom-4 z-10 rounded-xl bg-card ring-1 ring-foreground/10 shadow-e2">
+          <SettingsSaveBar
+            className="border-t-0"
+            note={
+              <>
+                <span>{t("propagationNote")}</span>
+                <HelpTip topic={t("propagationNote")}>
+                  <p>{t("propagation")}</p>
+                  <p>{t("rollout.body")}</p>
+                  <p>{t("rollout.legacy")}</p>
+                </HelpTip>
+              </>
+            }
+          >
+            {dirty ? (
+              <StatusBadge tone="warning" dot className="animate-fade-in">
+                {t("dirty")}
+              </StatusBadge>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+            >
+              <ArrowPathIcon className={isFetching ? "animate-spin" : undefined} />
+              {tc("refresh")}
+            </Button>
+            {dirty ? (
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={() => setForm(seeded)}
                 disabled={save.isPending}
               >
                 {t("discard")}
               </Button>
-              <StatusBadge tone="warning" dot className="animate-fade-in">
-                {t("dirty")}
-              </StatusBadge>
-            </>
-          ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            className="ms-auto"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-          >
-            <ArrowPathIcon className={isFetching ? "animate-spin" : undefined} />
-            {tc("refresh")}
-          </Button>
+            ) : null}
+            <Button size="sm" onClick={onSave} disabled={blocked || save.isPending}>
+              {save.isPending ? t("saving") : t("save")}
+            </Button>
+          </SettingsSaveBar>
         </div>
         <RequestIdNote requestId={requestId} />
       </div>

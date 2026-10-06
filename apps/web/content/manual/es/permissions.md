@@ -51,6 +51,8 @@ partida, no límites infranqueables.
 | **Ver** la mayoría de las áreas (activos, aplicaciones, consumibles, Base de Conocimiento, ubicaciones, modelos, categorías, panel, búsqueda) | Sí | Sí | Sí |
 | **Ver** el directorio de usuarios | Sí | Sí | No |
 | **Ver** quién-tiene-acceso-a-qué (concesiones de acceso) | Sí | Sí | No |
+| **Ver** compras y proveedores | Sí | Sí | No |
+| **Registrar y editar** compras y proveedores | Sí | Sí | No |
 | **Crear / editar** registros (activos, aplicaciones, consumibles, Base de Conocimiento, …) | Sí | Sí | No |
 | **Eliminar** registros | Sí | No | No |
 | **Conceder / revocar** acceso a aplicaciones | Sí | No | No |
@@ -64,8 +66,10 @@ partida, no límites infranqueables.
 
 Algunas notas sobre los valores por defecto:
 
-- **Dos vistas sensibles quedan ocultas para el Lector**: el directorio de usuarios y el registro de
-  concesiones de acceso (quién tiene acceso a qué). El Administrador y el Miembro las conservan.
+- **Tres vistas sensibles quedan ocultas para el Lector**: el directorio de usuarios, el registro de
+  concesiones de acceso (quién tiene acceso a qué) y las [compras y proveedores](/help/purchases-recording-purchases)
+  (llevan precios). El Administrador y el Miembro las conservan. Concederle una al Lector se la concede a
+  todos los lectores — los permisos son del rol, no de la persona.
 - **Algunas áreas son solo de administrador por defecto**: el historial de actividad de todo el
   parque, la campana de notificaciones y el Gestor de Secretos. Son las superficies más sensibles,
   por eso empiezan reservadas al administrador. Un administrador puede concederlas a Miembro o Lector

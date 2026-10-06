@@ -148,7 +148,9 @@
       "empty": "No tiene activos en este momento.",
       "assetFallback": "Activo",
       "assignedOn": "Asignado {date}",
-      "view": "Ver"
+      "openInList": "Abrir en el listado de activos",
+      "acknowledged": "Confirmado",
+      "awaitingAcknowledgement": "Pendiente de confirmación"
     },
     "access": {
       "title": "Acceso a aplicaciones",
@@ -157,19 +159,47 @@
       "expired": "Expirado",
       "granted": "Otorgado {date}",
       "expiresSuffix": " · expira {date}",
-      "noteSuffix": " · {note}",
-      "view": "Ver"
+      "expiresIn": "Vence en {count, plural, one {# día} other {# días}}"
     },
     "articles": {
       "title": "Artículos creados",
       "empty": "No ha creado artículos en la base de conocimiento."
     },
-    "ownershipHistory": {
-      "title": "Historial de posesión",
-      "assetFallback": "Activo"
+    "moreActions": "Más acciones",
+    "copyEmail": "Copiar correo",
+    "tabs": {
+      "label": "Secciones de la persona",
+      "assets": "Activos",
+      "access": "Accesos",
+      "articles": "Artículos",
+      "consumables": "Consumibles",
+      "history": "Historial"
     },
-    "accessHistory": {
-      "title": "Historial de accesos",
+    "facts": {
+      "assets": "Activos en posesión",
+      "access": "Acceso a aplicaciones",
+      "articles": "Artículos",
+      "openTab": "Abrir la pestaña {tab}",
+      "assetsNone": "No tiene activos en este momento",
+      "assetsCount": "{count, plural, one {# activo} other {# activos}}",
+      "assetsMore": "{names} y {count} más",
+      "accessAttention": "{expired} vencidos · {expiring} por vencer",
+      "accessCalm": "Nada por vencer",
+      "articlesSplit": "{published} publicados · {drafts, plural, one {# borrador} other {# borradores}}",
+      "articlesNone": "Todavía no escribió ninguno"
+    },
+    "attention": {
+      "label": "Requiere atención",
+      "expiredGrants": "{count, plural, one {# acceso venció y se revocará en breve} other {# accesos vencieron y se revocarán en breve}}",
+      "expiringGrants": "{count, plural, one {# acceso vence} other {# accesos vencen}} en los próximos {days} días",
+      "unacknowledged": "{count, plural, one {# activo sin confirmar la recepción} other {# activos sin confirmar la recepción}}"
+    },
+    "history": {
+      "title": "Historial",
+      "empty": "Todavía no devolvió activos ni perdió accesos.",
+      "kindAsset": "Activo",
+      "kindAccess": "Acceso",
+      "assetFallback": "Activo",
       "applicationFallback": "Aplicación"
     }
   },
@@ -376,7 +406,7 @@
         "title": "Enviar un enlace de restablecimiento por correo",
         "description": "{email} recibe un enlace de un solo uso y elige su propia contraseña — lazyit nunca la ve.",
         "unavailable": {
-          "smtp-not-configured": "El correo saliente no está configurado en esta instancia. Configúralo en Ajustes → Instancia → SMTP para usar esta opción.",
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia. Configúralo en Configuración → Correo para usar esta opción.",
           "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace que apunte a ella. Pide a tu administrador que configure la URL de la instancia y vuelve a intentarlo.",
           "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia."
         },
@@ -400,11 +430,11 @@
       },
       "errors": {
         "emailUnavailable": {
-          "smtp-not-configured": "El correo saliente no está configurado en esta instancia, así que no se pudo enviar el enlace. Configúralo en Ajustes → Instancia → SMTP, o genera una contraseña temporal en su lugar.",
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia, así que no se pudo enviar el enlace. Configúralo en Configuración → Correo, o genera una contraseña temporal en su lugar.",
           "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace de restablecimiento. Pide a tu administrador que configure la URL de la instancia, o genera una contraseña temporal en su lugar.",
           "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia. Genera una contraseña temporal en su lugar."
         },
-        "sendFailed": "No se pudo enviar el correo de restablecimiento. Revisa Ajustes → Instancia → SMTP e inténtalo de nuevo, o genera una contraseña temporal en su lugar.",
+        "sendFailed": "No se pudo enviar el correo de restablecimiento. Revisa Configuración → Correo e inténtalo de nuevo, o genera una contraseña temporal en su lugar.",
         "inactive": "Este usuario está inactivo, o no tiene cuenta de inicio de sesión, así que no hay contraseña que restablecer.",
         "managed": "La contraseña de esta cuenta la gestiona tu proveedor de identidad — lazyit no puede restablecerla.",
         "notFound": "Este usuario ya no existe.",
@@ -421,13 +451,28 @@
   },
   "offboarding": {
     "title": "Dar de baja a {name}",
+    "restorable": "Se puede restaurar",
+    "onConfirm": "Qué pasa al confirmar",
     "doneTitle": "{name} archivado",
     "doneSubtitle": "Acceso revocado, activos liberados — el historial está a salvo.",
     "impact": {
-      "releasesLabel": "Libera",
-      "assets": "{count, plural, =1 {activo} other {activos}}",
-      "revokesLabel": "Revoca",
-      "grants": "{count, plural, =1 {concesión de acceso} other {concesiones de acceso}}"
+      "assets": {
+        "verb": "Se liberan",
+        "label": "{count, plural, =1 {activo a devolver} other {activos a devolver}}"
+      },
+      "access": {
+        "verb": "Se revocan",
+        "label": "{count, plural, =1 {acceso} other {accesos}}"
+      },
+      "consumables": {
+        "verb": "Pendientes",
+        "label": "{count, plural, =1 {consumible a pedir} other {consumibles a pedir}}"
+      },
+      "account": {
+        "verb": "Se archiva",
+        "value": "La cuenta",
+        "label": "historial intacto"
+      }
     },
     "assetFallback": "Activo",
     "applicationFallback": "Aplicación",
@@ -452,25 +497,18 @@
     "emptyNote": "Esta persona no tiene activos en posesión, no tiene accesos activos y no recibió consumibles. El acta sigue siendo válida como registro de su baja.",
     "handoverNote": "Nota de entrega",
     "handoverPlaceholder": "Una nota breve que se imprime en el acta de devolución…",
-    "handoverHelp": "Guardada para la próxima vez — esta nota se completa por defecto en cada acta.",
-    "printedAct": "Acta impresa",
+    "handoverHelp": "Se guarda como plantilla — esta nota se completa sola en cada acta.",
     "companyName": "Nombre de la empresa",
     "companyPlaceholder": "Se imprime en el membrete del acta",
-    "listAssets": "Listar activos a devolver",
-    "listAccess": "Listar accesos revocados",
-    "printedActHelp": "Esto aplica al acta impresa — este resumen siempre muestra el impacto completo.",
-    "signatures": "Firmas",
-    "signatureEmployee": "Empleado",
-    "signatureIt": "TI",
-    "signatureHelp": "Se firma en papel en la entrega — imprime el acta abajo.",
+    "printedActHelp": "Elige qué secciones lista el acta impresa. Las listas de la izquierda siempre muestran el impacto completo.",
     "printAct": "Imprimir acta",
-    "confirm": "Confirmar la baja",
+    "confirm": "Dar de baja a {name}",
     "toast": {
       "archived": "Usuario archivado — acceso revocado, el historial está a salvo.",
       "error": "No se pudo dar de baja al usuario"
     },
-    "listConsumables": "Listar consumibles",
     "consumables": {
+      "title": "Consumibles",
       "toReturnTitle": "Consumibles a devolver",
       "deliveredTitle": "Consumibles entregados",
       "outstandingLine": "{outstanding} de {quantity} {unit} pendientes · entregado el {date}",
@@ -483,7 +521,23 @@
       "moreToReturn": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan aquí — revisa la página de la persona.",
       "moreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan aquí.",
       "unavailable": "No se muestran los consumibles: no tienes permiso para verlos.",
-      "help": "La baja no mueve stock. Registra las devoluciones desde la página de la persona a medida que se devuelven. Desmarca una fila para dejarla fuera del acta impresa."
+      "help": "La baja no mueve stock: esto es lo que hay que pedirle de vuelta. Registra cada devolución desde la página de la persona a medida que vuelve. Desmarca una fila para dejarla fuera del acta impresa."
+    },
+    "reassurance": "La cuenta se archiva, no se borra. Puedes restaurarla desde Usuarios.",
+    "actPanel": {
+      "title": "Acta de entrega",
+      "optional": "opcional",
+      "previewLabel": "Vista previa del acta impresa",
+      "more": "+{count} más",
+      "unavailable": "Disponible cuando carguen los datos."
+    },
+    "customize": {
+      "title": "Personalizar acta",
+      "summary": "Empresa, nota, qué listar",
+      "include": "Incluir en el acta",
+      "assets": "Activos",
+      "access": "Accesos",
+      "consumables": "Consumibles"
     }
   },
   "act": {

@@ -69,6 +69,23 @@ describe("AiApprovalPager", () => {
     expect(html).toContain(en.approval.untrustedTitle);
   });
 
+  test("a change that creates assets or changes money is left out of the bulk actions (#1478)", () => {
+    const preview = approval("x").preview;
+    for (const [locale, catalog] of [["en", en], ["es", es]] as const) {
+      const html = pager(
+        [
+          card("supplier"),
+          card("receive", null, { preview: { ...preview, warnings: ["CREATES_ASSETS", "CHANGES_MONEY"] } }),
+          card("price", null, { preview: { ...preview, warnings: ["CHANGES_MONEY"] } }),
+        ],
+        locale,
+      );
+      expect(html).toContain(catalog.pager.approveAll.replace("{count}", "1"));
+      expect(html).toContain(catalog.pager.excludedTitle);
+      expect(html).toContain(locale === "en" ? "2 create assets or change money" : "2 crean activos o cambian dinero");
+    }
+  });
+
   test("nothing eligible disables the bulk actions; all decided hides them", () => {
     const none = pager([card("w1", null, { elevated: true }), card("w2", null, { stepUpRequired: true })]);
     expect(none).toMatch(/<button[^>]*disabled=""[^>]*>Approve all \(0\)/);

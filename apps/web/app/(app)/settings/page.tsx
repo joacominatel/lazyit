@@ -4,14 +4,16 @@ import {
   ArrowUpTrayIcon,
   BoltIcon,
   ChevronRightIcon,
+  EnvelopeIcon,
+  HashtagIcon,
   KeyIcon,
   MapPinIcon,
   ServerStackIcon,
   SignalIcon,
   TagIcon,
+  UserGroupIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
-import type { Permission } from "@lazyit/shared";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ComponentType, ReactNode } from "react";
@@ -22,62 +24,27 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import { AdminGate } from "./_components/admin-gate";
+import {
+  SETTINGS_NAV,
+  type SettingsNavKey,
+  visibleSettingsNav,
+} from "./_lib/settings-nav";
 
-interface SettingsSection {
-  href: string;
-  /** The `hub` subkey holding this section's `title` / `description`. */
-  key:
-    | "taxonomies"
-    | "locations"
-    | "imports"
-    | "roles"
-    | "serviceAccounts"
-    | "agents"
-    | "instance"
-    | "integrations"
-    | "ai";
-  icon: ComponentType<{ className?: string }>;
-  /**
-   * Render only for callers holding this fine-grained permission (RBAC v2). The page itself is already
-   * AdminGate'd (`settings:manage`); a card may ALSO require a narrower grant — e.g. Bulk import needs
-   * `import:run` (the same gate the wizard + API enforce). Omitted → visible to anyone past AdminGate.
-   */
-  permission?: Permission;
-  /** The pointer-following glow that presents the AI assistant as new (#1405). */
-  glow?: boolean;
-}
-
-/**
- * The Settings index — the discoverable home for the admin surfaces: taxonomy management, the
- * Locations registry, the role overview, service accounts and instance config. Each card links into
- * its sub-area. Locations is reached from here (issue #312) rather than from a top-level sidebar
- * entry — it is a low-traffic registry, so it sits next to Taxonomies under Config. Its card links
- * out to the full /locations page (the route did not move).
- */
-const SECTIONS: SettingsSection[] = [
-  { href: "/settings/taxonomies", key: "taxonomies", icon: TagIcon },
-  { href: "/locations", key: "locations", icon: MapPinIcon },
-  // The guided bulk Migrator (ADR-0069) lives here, not the primary nav — an occasional admin action
-  // (issue #639). Same `import:run` gate as the wizard; the route stays /imports (no move).
-  { href: "/imports", key: "imports", icon: ArrowUpTrayIcon, permission: "import:run" },
-  { href: "/settings/roles", key: "roles", icon: UsersIcon },
-  {
-    href: "/settings/service-accounts",
-    key: "serviceAccounts",
-    icon: KeyIcon,
-  },
-  // Next to Service accounts on purpose (#1174): the "Add a server" wizard mints one service account
-  // per agent, so the credential and the policy it carries are the same subject two cards apart.
-  { href: "/settings/agents", key: "agents", icon: SignalIcon },
-  {
-    href: "/settings/integrations/tasks",
-    key: "integrations",
-    icon: BoltIcon,
-  },
-  { href: "/settings/instance", key: "instance", icon: ServerStackIcon },
-  // The opt-in AI assistant and external agents over MCP (ADR-0097) — off until an admin sets it up.
-  { href: "/settings/ai", key: "ai", icon: AiAssistantIcon, glow: true },
-];
+/** One glyph per destination; the list itself (and its gating) comes from `SETTINGS_NAV`. */
+const ICONS: Record<SettingsNavKey, ComponentType<{ className?: string }>> = {
+  taxonomies: TagIcon,
+  locations: MapPinIcon,
+  assetTags: HashtagIcon,
+  imports: ArrowUpTrayIcon,
+  roles: UsersIcon,
+  serviceAccounts: KeyIcon,
+  email: EnvelopeIcon,
+  directory: UserGroupIcon,
+  agents: SignalIcon,
+  ai: AiAssistantIcon,
+  integrations: BoltIcon,
+  instance: ServerStackIcon,
+};
 
 /** One hub card; `glow` adds the AI assistant's pointer-following gradient (`ai-glow`, #1405). */
 function HubCard({ glow, children }: { glow?: boolean; children: ReactNode }) {
@@ -94,46 +61,59 @@ function HubCard({ glow, children }: { glow?: boolean; children: ReactNode }) {
 
 // ponytail: skipped from the ADR-0067 server-prefetch rollout — a pure link hub with no list/record
 // read to prefetch (the only read is the client `useMyPermissions` per-card gate).
+/**
+ * The Settings hub — the overview of every admin surface, in the same groups as the side nav the
+ * pages below carry (#1533), both built from `SETTINGS_NAV`. Locations and Bulk import link out to
+ * their own routes, which did not move.
+ */
 export default function SettingsPage() {
   const t = useTranslations("settings");
   // Per-card gate (RBAC v2): hide a card the caller can't use even past AdminGate (e.g. Bulk import →
   // `import:run`). Fails closed — while the permission set loads, `can()` is false (issue #639).
   const { can } = useMyPermissions();
-  const sections = SECTIONS.filter((s) => !s.permission || can(s.permission));
+  const groups = visibleSettingsNav(SETTINGS_NAV, can);
   return (
     <AdminGate>
-      <div className="space-y-6">
-        <PageHeader
-          title={t("hub.title")}
-          subtitle={t("hub.subtitle")}
-        />
+      <div className="space-y-8">
+        <PageHeader title={t("hub.title")} subtitle={t("hub.subtitle")} />
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {sections.map(({ href, key, icon: Icon, glow }) => (
-            <Link
-              key={href}
-              href={href}
-              className="group rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <HubCard glow={glow}>
-                <CardContent className="flex h-full flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-foreground">
-                      <Icon className="size-5" />
-                    </div>
-                    <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="font-medium">{t(`hub.${key}.title`)}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {t(`hub.${key}.description`)}
-                    </p>
-                  </div>
-                </CardContent>
-              </HubCard>
-            </Link>
-          ))}
-        </div>
+        {groups.map((group) => (
+          <section key={group.key} className="space-y-3">
+            <h2 className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+              {t(`nav.groups.${group.key}`)}
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {group.items.map(({ href, key }) => {
+                const Icon = ICONS[key];
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="group rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {/* The AI assistant keeps its pointer-following glow (#1405). */}
+                    <HubCard glow={key === "ai"}>
+                      <CardContent className="flex h-full flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-foreground">
+                            <Icon className="size-5" />
+                          </div>
+                          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                        </div>
+                        <div className="space-y-1">
+                          <p className="font-medium">{t(`hub.${key}.title`)}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {t(`hub.${key}.description`)}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </HubCard>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </AdminGate>
   );

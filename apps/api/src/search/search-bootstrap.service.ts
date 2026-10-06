@@ -11,7 +11,10 @@ import {
   projectConsumable,
   projectInfraNode,
   projectLocation,
+  projectPurchaseOrder,
+  projectSupplier,
   projectUser,
+  PURCHASE_ORDER_SEARCH_SELECT,
   type SearchDocument,
 } from './search.documents';
 import {
@@ -249,6 +252,20 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
           where: { deletedAt: null },
         });
         return rows.map(projectConsumable);
+      }
+      case 'purchases': {
+        // #1499: archived purchases excluded; the supplier name and live line descriptions joined.
+        const rows = await this.prisma.purchaseOrder.findMany({
+          where: { deletedAt: null },
+          select: PURCHASE_ORDER_SEARCH_SELECT,
+        });
+        return rows.map(projectPurchaseOrder);
+      }
+      case 'suppliers': {
+        const rows = await this.prisma.supplier.findMany({
+          where: { deletedAt: null },
+        });
+        return rows.map(projectSupplier);
       }
     }
   }

@@ -8,7 +8,9 @@ import { getServerQueryClient } from "@/lib/api/server-query-client";
 import { InstanceSettingsView } from "./_components/instance-settings-view";
 
 /**
- * Settings → Instance (ADR-0067 server-prefetch route). A thin Server Component that prefetches the
+ * Settings → General & version (ADR-0067 server-prefetch route; the URL stays `/settings/instance`
+ * so existing links and the update notification keep landing here — #1533 moved email, directory and
+ * asset tags out to their own routes). A thin Server Component that prefetches the
  * read-only `GET /config/status` + `GET /instance/version` (ADR-0083) payloads so the client
  * {@link InstanceSettingsView} (`useConfigStatus` / `useInstanceVersion`) hydrates without a
  * skeleton → fetch waterfall. The prefetched key matches the hook exactly:

@@ -126,7 +126,7 @@ const TYPE_META: Record<
     href: () => "/assets/diagram",
   },
   // The weekly update-awareness nudge (ADR-0084 §2) — a newer release is out. Admin-broadcast, carries
-  // no entityId, so it deep-links by TYPE to Settings → Instance (the "Version & updates" card).
+  // no entityId, so it deep-links by TYPE to Settings → General & version (the "Version & updates" section).
   "update.available": {
     icon: ArrowUpCircleIcon,
     tone: "bg-pillar-access/10 text-pillar-access",

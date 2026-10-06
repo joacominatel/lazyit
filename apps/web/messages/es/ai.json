@@ -153,9 +153,12 @@
       "OUTBOUND_INTEGRATION": "Cambia una integración externa o adónde envía datos lazyit.",
       "CRITICAL_APPLICATION": "Afecta a una aplicación marcada como crítica.",
       "INSTANCE_CONFIGURATION": "Cambia la configuración de toda la instancia: se aplica a todos desde ahora.",
+      "CREATES_ASSETS": "Crea activos nuevos.",
+      "CHANGES_MONEY": "Fija o cambia un importe de dinero.",
       "unknown": "Verificación adicional: {code}"
     },
     "passwordRequired": "Requiere tu contraseña",
+    "individualOnly": "Nunca se aprueba automáticamente ni con Aprobar todos",
     "newWarning": "Nuevo",
     "changed": "Este cambio se actualizó después de proponerse. Revisá los puntos resaltados y decidí de nuevo.",
     "impacted": "También afecta a {count, plural, one {# {type}} other {# {type}}}",
@@ -183,7 +186,20 @@
       "willBeSkipped": "Omitida — no se aplica",
       "defaulted": "por defecto",
       "duplicateExisting": "{field} “{value}” ya pertenece a",
-      "duplicateRow": "{field} “{value}” también se usa en la fila {row}"
+      "duplicateRow": "{field} “{value}” también se usa en la fila {row}",
+      "values": {
+        "kind": {
+          "ASSET": "Activo",
+          "CONSUMABLE": "Consumible",
+          "LICENSE": "Licencia",
+          "OTHER": "Otro"
+        },
+        "linkState": {
+          "NONE": "Sin vincular",
+          "THIS_LINE": "Ya está en esta línea",
+          "OTHER_LINE": "En otra línea"
+        }
+      }
     },
     "cancelledNote": "Esta propuesta se canceló. No se modificó nada.",
     "errors": {
@@ -224,6 +240,7 @@
     "excluded": {
       "stepUp": "{count, plural, one {# necesita tu contraseña} other {# necesitan tu contraseña}}",
       "elevated": "{count, plural, one {# es un cambio sensible} other {# son cambios sensibles}}",
+      "assetsOrMoney": "{count, plural, one {# crea activos o cambia dinero} other {# crean activos o cambian dinero}}",
       "needsReview": "{count, plural, one {# necesita otra revisión} other {# necesitan otra revisión}}"
     },
     "bulkRunning": "{decision, select, approve {Aprobando} other {Rechazando}} {done} de {total}…",
@@ -247,6 +264,7 @@
     "asset": "Activo",
     "assetAssignment": "Asignación",
     "assetModel": "Modelo",
+    "assetStatusLabel": "Estado personalizado",
     "location": "Ubicación",
     "category": "Categoría",
     "application": "Aplicación",
@@ -263,6 +281,9 @@
     "assetTagScheme": "Esquema de etiquetas de activos",
     "webSearch": "Resultados de búsqueda web",
     "toolResult": "Contenido leído por el asistente",
+    "purchaseOrder": "Compra",
+    "supplier": "Proveedor",
+    "purchaseDocument": "Documento de compra",
     "unknown": "Elemento"
   },
   "errors": {
@@ -424,8 +445,33 @@
     "location_update": "Actualizar una ubicación",
     "location_archive": "Archivar una ubicación",
     "location_restore": "Restaurar una ubicación",
+    "asset_status_label_create": "Crear un estado personalizado",
+    "asset_status_label_update": "Actualizar un estado personalizado",
+    "asset_status_label_archive": "Archivar un estado personalizado",
+    "asset_status_label_restore": "Restaurar un estado personalizado",
     "asset_tag_scheme_get": "Leer el esquema de etiquetas de activos",
-    "asset_tag_scheme_update": "Cambiar el esquema de etiquetas de activos"
+    "asset_tag_scheme_update": "Cambiar el esquema de etiquetas de activos",
+    "purchase_search": "Buscar compras",
+    "purchase_get": "Ver una compra",
+    "purchase_events": "Leer la actividad de una compra",
+    "purchase_pending_lines": "Listar unidades por recibir",
+    "supplier_search": "Buscar proveedores",
+    "supplier_get": "Ver un proveedor",
+    "asset_purchase_get": "Ver la compra de un activo",
+    "purchase_document_read": "Leer un documento de compra",
+    "purchase_create": "Registrar una compra",
+    "purchase_update": "Actualizar una compra",
+    "purchase_line_add": "Agregar una línea de compra",
+    "purchase_line_update": "Actualizar una línea de compra",
+    "purchase_line_remove": "Quitar una línea de compra",
+    "supplier_create": "Agregar un proveedor",
+    "supplier_update": "Actualizar un proveedor",
+    "purchase_link_assets": "Vincular activos a una línea de compra",
+    "purchase_receive": "Recibir unidades como activos",
+    "purchase_receive_stock": "Recibir unidades en el stock",
+    "purchase_cancel_remaining": "Cancelar unidades pendientes",
+    "purchase_apply_license": "Aplicar una línea de licencia",
+    "purchase_create_from_assets": "Registrar una compra a partir de activos"
   },
   "fields": {
     "accessLevel": "Nivel de acceso",
@@ -440,12 +486,14 @@
     "categoryId": "Categoría",
     "checkedInFrom": "Devuelto por",
     "checkedOutTo": "Asignado a",
+    "color": "Color",
     "company": "Empresa",
     "content": "Contenido",
     "costPerSeat": "Costo por licencia",
     "credential": "Credencial",
     "criticalApplicationAccess": "Acceso a aplicaciones críticas",
     "currentStock": "Stock actual",
+    "customStatus": "Estado personalizado",
     "dataSent": "Datos enviados",
     "dataSentToNewHost": "Datos enviados al nuevo host",
     "defaultHeadersSentToNewHost": "Encabezados por defecto enviados al nuevo host",
@@ -482,6 +530,7 @@
     "manufacturer": "Fabricante",
     "minStock": "Stock mínimo",
     "model": "Modelo",
+    "moveAssetsTo": "Mover sus activos a",
     "name": "Nombre",
     "notes": "Notas",
     "order": "Orden",
@@ -531,11 +580,58 @@
     "username": "Nombre de usuario",
     "userStatus": "Estado del usuario",
     "validRows": "Filas a crear",
-    "vendor": "Proveedor",
+    "vendor": "Fabricante",
     "version": "Versión",
     "warrantyEnd": "Fin de la garantía",
     "whatItDoes": "Qué hace",
-    "workflow": "Flujo"
+    "workflow": "Flujo",
+    "supplier": "Proveedor",
+    "lines": "Líneas",
+    "unpricedLines": "Líneas sin precio",
+    "line": "Línea",
+    "suppliersWithThisName": "Proveedores con este nombre",
+    "apply": "Valores a copiar",
+    "assets": "Activos",
+    "received": "Recibidas",
+    "replacedValues": "Valores reemplazados",
+    "notFound": "No encontrados",
+    "overReceived": "Más de lo pedido",
+    "serials": "Números de serie",
+    "consumable": "Consumible",
+    "note": "Nota",
+    "cancelledQuantity": "Unidades canceladas",
+    "pendingQuantity": "Unidades pendientes",
+    "licenseWarnings": "Verificaciones de la licencia",
+    "total": "Total",
+    "lineTotal": "Total de la línea",
+    "unitPrice": "Precio unitario",
+    "reference": "Referencia",
+    "currency": "Moneda",
+    "orderDate": "Fecha de pedido",
+    "expectedDate": "Fecha esperada",
+    "deliveryLocationId": "Ubicación de entrega",
+    "invoiceNumbers": "Números de factura",
+    "invoiceDate": "Fecha de factura",
+    "manufacturerText": "Marca (como figura)",
+    "modelText": "Modelo (como figura)",
+    "assetModelId": "Modelo de activo",
+    "modelId": "Modelo de activo",
+    "consumableId": "Consumible",
+    "applicationId": "Aplicación",
+    "warrantyMonths": "Garantía (meses)",
+    "position": "Posición",
+    "taxId": "ID fiscal",
+    "website": "Sitio web",
+    "salesContactName": "Contacto comercial",
+    "salesContactEmail": "Email comercial",
+    "salesContactPhone": "Teléfono comercial",
+    "supportContactName": "Contacto de soporte",
+    "supportContactEmail": "Email de soporte",
+    "supportContactPhone": "Teléfono de soporte",
+    "linkState": "Situación actual",
+    "moves": "Se mueve desde otra línea",
+    "writes": "Valores que recibe",
+    "notLinkable": "Activos que quedan afuera"
   },
   "fieldPrefixes": {
     "input": "Entrada: {name}",
@@ -646,7 +742,9 @@
       "manufacturers": "fabricantes",
       "assetCategories": "categorías de activos",
       "locations": "ubicaciones",
-      "assetModels": "modelos de activo"
+      "assetModels": "modelos de activo",
+      "suppliers": "proveedores",
+      "consumables": "consumibles"
     },
     "yes": "Sí",
     "no": "No",
@@ -766,6 +864,58 @@
     "consumable_record_movement": {
       "summary": "Se registró {type, select, IN {una entrada de} OUT {una salida de} ADJUSTMENT {un ajuste de} other {{type}}} {quantity} en {consumable}{hasStock, select, yes {; ahora hay {stock} en stock.} other {.}}"
     },
+    "purchase_create": {
+      "action": "Registrar una compra{hasSupplier, select, yes { de {supplier}} other {}} con {lines, plural, =0 {ninguna línea} one {# línea} other {# líneas}}.",
+      "summary": "Se registró la compra {purchase}."
+    },
+    "purchase_update": {
+      "action": "Cambiar {count, plural, one {# campo} other {# campos}} de la compra {purchase}.",
+      "summary": "Se actualizó la compra {purchase}."
+    },
+    "purchase_line_add": {
+      "action": "Agregar la línea “{line}” a la compra {purchase}.",
+      "summary": "Se agregó la línea “{line}” a la compra {purchase}."
+    },
+    "purchase_line_update": {
+      "action": "Cambiar la línea “{line}” de la compra {purchase}.",
+      "summary": "Se actualizó la línea “{line}” de la compra {purchase}."
+    },
+    "purchase_line_remove": {
+      "action": "Quitar la línea “{line}” de la compra {purchase}.",
+      "summary": "Se quitó la línea “{line}” de la compra {purchase}."
+    },
+    "purchase_link_assets": {
+      "action": "Vincular {count, plural, one {# activo} other {# activos}} a la línea “{line}” de la compra {purchase}.",
+      "summary": "Se {linked, plural, one {vinculó # activo} other {vincularon # activos}} a la línea “{line}”{failed, plural, =0 {.} one {; # no se vinculó.} other {; # no se vincularon.}}"
+    },
+    "purchase_receive": {
+      "action": "Recibir {quantity, plural, one {# unidad} other {# unidades}} de la línea “{line}” de la compra {purchase} como activos nuevos.",
+      "summary": "Se {created, plural, one {recibió # unidad} other {recibieron # unidades}} de la línea “{line}” como activos nuevos{failed, plural, =0 {.} one {; # falló.} other {; # fallaron.}}"
+    },
+    "purchase_receive_stock": {
+      "action": "Recibir {quantity, plural, one {# unidad} other {# unidades}} de la línea “{line}” de la compra {purchase} en el stock.",
+      "summary": "Se {quantity, plural, one {recibió # unidad} other {recibieron # unidades}} de la línea “{line}” en el stock."
+    },
+    "purchase_cancel_remaining": {
+      "action": "Cancelar {quantity, plural, one {# unidad pendiente} other {# unidades pendientes}} de la línea “{line}” de la compra {purchase}.",
+      "summary": "Se {quantity, plural, one {canceló # unidad pendiente} other {cancelaron # unidades pendientes}} de la línea “{line}”."
+    },
+    "purchase_apply_license": {
+      "action": "Aplicar la línea de licencia “{line}” de la compra {purchase} a {application}.",
+      "summary": "Se aplicó la línea de licencia “{line}” a {application}."
+    },
+    "purchase_create_from_assets": {
+      "action": "Registrar una compra a partir de {count, plural, one {# activo seleccionado} other {# activos seleccionados}} y vincularlos a ella.",
+      "summary": "Se registró la compra {purchase} y se {linked, plural, one {vinculó # activo} other {vincularon # activos}}{failed, plural, =0 {.} one {; # no se vinculó.} other {; # no se vincularon.}}"
+    },
+    "supplier_create": {
+      "action": "Agregar el proveedor “{name}”.",
+      "summary": "Se agregó el proveedor “{name}”."
+    },
+    "supplier_update": {
+      "action": "Cambiar el proveedor “{name}”.",
+      "summary": "Se actualizó el proveedor “{name}”."
+    },
     "asset_model_create": {
       "summary": "Se creó el modelo de activo {model}."
     },
@@ -798,6 +948,18 @@
     },
     "location_restore": {
       "summary": "Se restauró la ubicación {location}."
+    },
+    "asset_status_label_create": {
+      "summary": "Se creó el estado personalizado {name} ({kind, select, OPERATIONAL {operativo} IN_MAINTENANCE {en mantenimiento} IN_STORAGE {en depósito} RETIRED {retirado} LOST {perdido} other {desconocido}})."
+    },
+    "asset_status_label_update": {
+      "summary": "Se actualizó el estado personalizado {name}."
+    },
+    "asset_status_label_archive": {
+      "summary": "Se archivó el estado personalizado {name}{moved, plural, =0 {.} one {; se movió # activo a {target}.} other {; se movieron # activos a {target}.}}"
+    },
+    "asset_status_label_restore": {
+      "summary": "Se restauró el estado personalizado {name}."
     },
     "taxonomy": {
       "categoryKind": "{kind, select, assetCategory {categoría de activos} applicationCategory {categoría de aplicaciones} other {categoría de consumibles}}",

@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Attachment } from "@lazyit/shared";
+import type { Attachment, UpdateAttachment } from "@lazyit/shared";
 import {
   type AttachmentParent,
   deleteAttachment,
   listAttachments,
+  updateAttachmentLabel,
   uploadAttachment,
 } from "../endpoints/attachments";
+import { invalidateSuggestions } from "../query-keys";
+import { purchaseOrderKeys } from "./use-purchase-orders";
 
 /**
  * React-Query hooks for the Attachment subsystem (ADR-0082). One set of hooks serves both parents
@@ -35,18 +38,54 @@ export function useAttachments(
   });
 }
 
-/** Upload a file onto a parent; invalidates the parent's list so the new row appears. */
+/**
+ * After an upload or delete: the parent's list, and for a purchase also its reads — the activity log
+ * records the document (ADR-0099) and linked assets list the same rows in their provenance.
+ */
+function useInvalidateParent(parent: AttachmentParent, parentId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: attachmentKeys.list(parent, parentId) });
+    if (parent === "purchaseOrder") void qc.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+  };
+}
+
+/**
+ * Upload a file onto a parent; invalidates the parent's list so the new row appears. Pass the file, or the
+ * file with its document type label (asset and purchase documents, #1476).
+ */
 export function useUploadAttachment(
   parent: AttachmentParent,
   parentId: string,
 ) {
+  const invalidate = useInvalidateParent(parent, parentId);
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => uploadAttachment(parent, parentId, file),
+    mutationFn: (input: File | { file: File; label?: string }) =>
+      input instanceof File
+        ? uploadAttachment(parent, parentId, input)
+        : uploadAttachment(parent, parentId, input.file, input.label),
+    onSuccess: (_attachment, input) => {
+      invalidate();
+      // A new label is a value smart entry should now suggest.
+      if (!(input instanceof File) && input.label) void invalidateSuggestions(qc);
+    },
+  });
+}
+
+/** Set or clear a document's type label (#1476); refreshes the list, the purchase reads and the suggestions. */
+export function useUpdateAttachmentLabel(
+  parent: Extract<AttachmentParent, "asset" | "purchaseOrder">,
+  parentId: string,
+) {
+  const invalidate = useInvalidateParent(parent, parentId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attachmentId, data }: { attachmentId: string; data: UpdateAttachment }) =>
+      updateAttachmentLabel(parent, parentId, attachmentId, data),
     onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: attachmentKeys.list(parent, parentId),
-      });
+      invalidate();
+      void invalidateSuggestions(qc);
     },
   });
 }
@@ -56,14 +95,10 @@ export function useDeleteAttachment(
   parent: AttachmentParent,
   parentId: string,
 ) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateParent(parent, parentId);
   return useMutation({
     mutationFn: (attachmentId: string): Promise<Attachment> =>
       deleteAttachment(parent, parentId, attachmentId),
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: attachmentKeys.list(parent, parentId),
-      });
-    },
+    onSuccess: invalidate,
   });
 }

@@ -7,12 +7,15 @@ import { z } from 'zod';
 import {
   AssetStatusSchema,
   AssetWarrantyFilterSchema,
+  CURRENCY_LABEL_MAX_LENGTH,
+  money as moneySchema,
   type AiActionPreview,
   type AiEntityRef,
 } from '@lazyit/shared';
 import { AssetAssignmentsController } from '../../asset-assignments/asset-assignments.controller';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
+import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ASSET_SORT_ALLOWLIST } from '../../assets/assets.service';
 import { AssetAttachmentsController } from '../../attachments/asset-attachments.controller';
@@ -57,6 +60,7 @@ import {
   referenceString,
   resolveLocation,
   resolveModel,
+  resolveStatusLabel,
   RESOLVE_PAGE,
   sameText,
   str,
@@ -108,12 +112,21 @@ function assetLabel(asset: Row): string {
   return code ? `${name} (${code})` : name;
 }
 
-/** The asset's own fields; the name and serial wrapped as untrusted unless an operator wrote them. */
+/**
+ * The asset's own fields; the name and serial wrapped as untrusted unless an operator wrote them. A row that
+ * carries the custom status (ADR-0101) gets `customStatus`: `{ id, name, kind }` from a read, `{ id }` from a
+ * write response (which carries the id only), or `null` for a bare built-in status.
+ */
 function assetCore(asset: Row, extra: readonly string[] = []): Row {
   const out = pick(asset, [...ASSET_CORE, ...extra]);
   if (agentWritten(asset) !== false) {
     if ('name' in out) out.name = untrusted(str(out.name));
     if ('serial' in out) out.serial = untrusted(str(out.serial));
+  }
+  if (asset.statusLabel) {
+    out.customStatus = pick(asset.statusLabel, ['id', 'name', 'kind']);
+  } else if ('statusLabelId' in asset) {
+    out.customStatus = asset.statusLabelId ? { id: asset.statusLabelId } : null;
   }
   return out;
 }
@@ -309,12 +322,9 @@ const assetReference = referenceString(
 const personReference = referenceString(
   'The person: their user id, email, exact full name, or "me" for yourself.',
 );
-const money = z
-  .number()
-  .int()
-  .min(0)
-  .max(2_147_483_647)
-  .describe('In minor units (cents) of the instance currency.');
+const money = moneySchema().describe(
+  'In minor units (cents), in the currency named by purchaseCurrency.',
+);
 const months = z.number().int().min(0).max(2_147_483_647);
 const dateTime = z.iso
   .datetime()
@@ -339,9 +349,48 @@ const editableFields = {
   notes: z.string().trim().min(1).max(2000),
   purchaseDate: dateTime,
   warrantyEnd: dateTime,
+  purchaseCurrency: z
+    .string()
+    .trim()
+    .min(1)
+    .max(CURRENCY_LABEL_MAX_LENGTH)
+    .describe(
+      'The currency label of the cost, free text as the team writes it (e.g. "USD", "ARS"). Never converted; set it together with purchaseCost.',
+    ),
   model: referenceString('The asset model: its id or exact name.'),
   location: referenceString('The location: its id or exact name.'),
+  customStatus: referenceString(
+    'A CUSTOM status (id or exact name, see reference_lookup kind "assetStatusLabel"): a team-defined name ' +
+      'mapped to one built-in status. Setting it also sets `status` to its kind — omit `status`, or give the ' +
+      'same one.',
+  ),
 };
+
+/**
+ * How the tools explain statuses (ADR-0101): the built-in status drives every rule; a custom status is a
+ * team-defined name over exactly one of them. Said in each asset write tool's description.
+ */
+const STATUS_CONCEPT =
+  '`status` is the built-in status (OPERATIONAL, IN_MAINTENANCE, IN_STORAGE, RETIRED, LOST, UNKNOWN) every ' +
+  'rule and report reads. A team may also define CUSTOM statuses — names mapped to one built-in status ' +
+  '(e.g. "In repair at vendor" → IN_MAINTENANCE); `customStatus` sets one, and with it the built-in status. ' +
+  'Custom statuses are optional.';
+
+/** The card's `after` for a custom status that is cleared (mirrors the model category's `NO_CATEGORY`). */
+const NO_CUSTOM_STATUS = 'None (built-in status only)';
+
+/** 400 when a `status` and a custom status of another kind are both given — the route would refuse it. */
+function assertStatusMatchesLabel(
+  status: string | undefined,
+  label: Row,
+): void {
+  if (status !== undefined && status !== label.kind) {
+    throw new BadRequestException(
+      `status ${status} does not match the custom status "${String(label.name)}", which maps to ` +
+        `${String(label.kind)}: give the custom status alone, or with its own status.`,
+    );
+  }
+}
 
 /** The route body's scalar fields (everything but the references and specs). */
 const SCALAR_FIELDS = [
@@ -354,6 +403,7 @@ const SCALAR_FIELDS = [
   'purchaseDate',
   'warrantyEnd',
   'purchaseCost',
+  'purchaseCurrency',
   'usefulLifeMonths',
   'salvageValue',
 ] as const;
@@ -428,7 +478,15 @@ const assetSearchInput = z
     query: searchText(
       'Substring of the name, serial, asset tag, or the model name or manufacturer.',
     ),
-    status: AssetStatusSchema.optional(),
+    status: AssetStatusSchema.optional().describe(
+      'The built-in status — matches every asset in it, whatever its custom status.',
+    ),
+    statusLabelId: z
+      .cuid()
+      .optional()
+      .describe(
+        'One custom status (see reference_lookup kind "assetStatusLabel"): only the assets carrying it.',
+      ),
     modelId: z
       .cuid()
       .optional()
@@ -482,8 +540,10 @@ const assetSearch = defineTool({
   name: 'asset_search',
   title: 'Search assets',
   description:
-    'List assets (laptops, servers, phones, licences…) with filters: text, status, model, category, ' +
-    'location, company, owner, warranty window. Omit `query` to list by the other filters alone. ' +
+    'List assets (laptops, servers, phones, licences…) with filters: text, status, custom status, model, ' +
+    'category, location, company, owner, warranty window. Omit `query` to list by the other filters alone. ' +
+    'Each asset shows its built-in `status` and, when it has one, its `customStatus` (a team-defined name ' +
+    'mapped to that built-in status). ' +
     '`mine: true` lists the assets checked out to you. ' +
     'Returns each asset with its model, location and current owners; paginate with offset.',
   domain: 'assets',
@@ -505,6 +565,7 @@ const assetSearch = defineTool({
             ...paging,
             q: input.query,
             status: input.status,
+            statusLabelId: input.statusLabelId,
             modelId: input.modelId,
             categoryId: input.categoryId,
             locationId: input.locationId,
@@ -552,8 +613,8 @@ const assetGet = defineTool({
   name: 'asset_get',
   title: 'Get an asset',
   description:
-    'Read one asset by id, asset tag or serial: its details, model, category, location, current owners ' +
-    'and notes. detail "full" adds its attributes (specs), its ownership history, its recent change ' +
+    'Read one asset by id, asset tag or serial: its details (with its built-in `status` and, when it has ' +
+    'one, its `customStatus`), model, category, location, current owners and notes. detail "full" adds its attributes (specs), its ownership history, its recent change ' +
     'history and the knowledge-base articles linked to it.',
   domain: 'assets',
   class: 'read',
@@ -577,6 +638,7 @@ const assetGet = defineTool({
       asset: {
         ...assetCore(row, [
           'purchaseCost',
+          'purchaseCurrency',
           'usefulLifeMonths',
           'salvageValue',
           'currentBookValue',
@@ -663,7 +725,8 @@ const assetCreate = defineTool({
   title: 'Create an asset',
   description:
     'Register ONE new asset (for several, use asset_create_batch). name is required; status defaults to ' +
-    `${DEFAULT_NEW_ASSET_STATUS}. Give its model and location by id or exact name (see reference_lookup); ` +
+    `${DEFAULT_NEW_ASSET_STATUS} unless a customStatus is given. ${STATUS_CONCEPT} ` +
+    'Give its model and location by id or exact name (see reference_lookup); ' +
     'a missing model or location can be created first with asset_model_create / location_create. Omit ' +
     'assetTag unless the person gives one: the instance tag scheme assigns it; never build one from a ' +
     'pattern. To give it to someone afterwards, use asset_check_out.',
@@ -681,10 +744,12 @@ const assetCreate = defineTool({
       purchaseDate: editableFields.purchaseDate.optional(),
       warrantyEnd: editableFields.warrantyEnd.optional(),
       purchaseCost: money.optional(),
+      purchaseCurrency: editableFields.purchaseCurrency.optional(),
       usefulLifeMonths: months.optional(),
       salvageValue: money.optional(),
       model: editableFields.model.optional(),
       location: editableFields.location.optional(),
+      customStatus: editableFields.customStatus.optional(),
       specs: flatSpecs.optional(),
     })
     .superRefine((input, ctx) => refuseReservedSpecKeys(input.specs, ctx)),
@@ -694,12 +759,24 @@ const assetCreate = defineTool({
     bind(AssetModelsController, 'findOne'),
     bind(LocationsController, 'findAll'),
     bind(LocationsController, 'findOne'),
+    bind(AssetStatusLabelsController, 'findAll'),
   ],
   async run(input, rt) {
+    // A custom status carries its own built-in status (the route derives it); the default applies without one.
     const body = scalarBody({
       ...input,
-      status: input.status ?? DEFAULT_NEW_ASSET_STATUS,
+      status:
+        input.status ??
+        (input.customStatus ? undefined : DEFAULT_NEW_ASSET_STATUS),
     });
+    if (input.customStatus) {
+      const { resolved, row } = await resolveStatusLabel(
+        rt,
+        input.customStatus,
+      );
+      assertStatusMatchesLabel(input.status, row);
+      body.statusLabelId = resolved.id;
+    }
     if (input.specs) body.specs = input.specs;
     if (input.model) {
       body.modelId = (await resolveModel(rt, input.model, false)).id;
@@ -717,12 +794,28 @@ const assetCreate = defineTool({
     };
   },
   async preview(input, rt) {
-    const { model, location, ...fields } = input;
-    const defaulted = fields.status === undefined;
+    const { model, location, customStatus, ...fields } = input;
+    const label = customStatus
+      ? await resolveStatusLabel(rt, customStatus)
+      : null;
+    if (label) assertStatusMatchesLabel(fields.status, label.row);
+    const defaulted = fields.status === undefined && label === null;
     const changes = createdFields(
-      { ...fields, status: fields.status ?? DEFAULT_NEW_ASSET_STATUS },
+      {
+        ...fields,
+        status:
+          fields.status ??
+          (label ? String(label.row.kind) : DEFAULT_NEW_ASSET_STATUS),
+      },
       { ...VALUE_KINDS, specs: 'text' },
     );
+    if (label) {
+      changes.push({
+        field: 'customStatus',
+        after: entityValue(label.resolved),
+        valueKind: 'entity',
+      });
+    }
     if (defaulted) {
       changes.push({
         field: 'defaultsApplied',
@@ -756,11 +849,13 @@ export const ASSET_BATCH_MAX_ROWS = 200;
 /** The values a batch may set once for every row (a row's own value wins). */
 const batchSharedFields = {
   status: defaultedStatus,
+  customStatus: editableFields.customStatus.optional(),
   company: editableFields.company.optional(),
   notes: editableFields.notes.optional(),
   purchaseDate: editableFields.purchaseDate.optional(),
   warrantyEnd: editableFields.warrantyEnd.optional(),
   purchaseCost: money.optional(),
+  purchaseCurrency: editableFields.purchaseCurrency.optional(),
   usefulLifeMonths: months.optional(),
   salvageValue: money.optional(),
   model: editableFields.model.optional(),
@@ -798,8 +893,8 @@ const assetCreateBatchInput = z.strictObject({
     .superRefine((shared, ctx) => refuseReservedSpecKeys(shared.specs, ctx))
     .optional()
     .describe(
-      'Values shared by every row (status, model, location, company, dates, cost, specs…); a row’s own ' +
-        'value overrides it, and specs are merged.',
+      'Values shared by every row (status or custom status, model, location, company, dates, cost, ' +
+        'specs…); a row’s own value overrides it, and specs are merged.',
     ),
 });
 
@@ -823,6 +918,8 @@ interface BatchRowPlan {
   serial: string | null;
   status: string;
   statusDefaulted: boolean;
+  /** The custom status (ADR-0101) the row sets, if any. */
+  customStatus: BatchReference | null;
   model: BatchReference | null;
   category: BatchReference | null;
   location: BatchReference | null;
@@ -874,6 +971,35 @@ const versionOf = (row: Row): string | null => {
   const value = iso(row.updatedAt);
   return typeof value === 'string' ? value : null;
 };
+
+/** A custom status a batch row names, with the built-in status (`kind`) it sets. */
+type BatchStatusLabel = BatchReference & { kind: string; name: string };
+
+/** A custom status by one spelling, resolved for a batch (a miss is that row's error, not the batch's). */
+function lookupStatusLabel(
+  rt: AiToolRuntime,
+  reference: string,
+): Promise<Lookup<BatchStatusLabel>> {
+  return lookup(async () => {
+    const { resolved, row } = await resolveStatusLabel(rt, reference);
+    return {
+      ref: entityValue(resolved),
+      updatedAt: versionOf(row),
+      kind: String(row.kind),
+      name: String(row.name),
+    };
+  }, ' — create it first (asset_status_label_create) or use an existing one (reference_lookup kind "assetStatusLabel")');
+}
+
+/** A row's error when its `status` and its custom status disagree, else `null`. */
+function statusLabelConflict(
+  status: string | undefined,
+  label: BatchStatusLabel,
+): string | null {
+  return status !== undefined && status !== label.kind
+    ? `status ${status} does not match the custom status "${label.name}" (${label.kind})`
+    : null;
+}
 
 const referenceKey = (reference: string): string =>
   reference.trim().toLowerCase();
@@ -930,7 +1056,14 @@ async function planBatch(
     Lookup<Row & { resolved: AiResolvedReference }>
   >();
   const locations = new Map<string, Lookup<BatchReference>>();
+  const statusLabels = new Map<string, Lookup<BatchStatusLabel>>();
   for (const row of rows) {
+    if (row.customStatus && !statusLabels.has(referenceKey(row.customStatus))) {
+      statusLabels.set(
+        referenceKey(row.customStatus),
+        await lookupStatusLabel(rt, row.customStatus),
+      );
+    }
     if (row.model && !models.has(referenceKey(row.model))) {
       const reference = row.model;
       models.set(
@@ -1068,8 +1201,22 @@ async function planBatch(
       else errors.push(found.error);
     }
 
-    const status = row.status ?? DEFAULT_NEW_ASSET_STATUS;
+    let customStatus: BatchStatusLabel | null = null;
+    if (row.customStatus) {
+      const found = statusLabels.get(referenceKey(row.customStatus))!;
+      if (found.ok) {
+        customStatus = found.value;
+        const conflict = statusLabelConflict(row.status, found.value);
+        if (conflict) errors.push(conflict);
+      } else {
+        errors.push(found.error);
+      }
+    }
+
+    // A custom status sets its built-in status (ADR-0101); the default applies only without either.
+    const status = row.status ?? customStatus?.kind ?? DEFAULT_NEW_ASSET_STATUS;
     const body = scalarBody({ ...row, status });
+    if (customStatus) body.statusLabelId = customStatus.ref.id;
     if (row.specs && Object.keys(row.specs).length > 0) body.specs = row.specs;
     if (model) body.modelId = model.ref.id;
     if (location) body.locationId = location.ref.id;
@@ -1080,7 +1227,9 @@ async function planBatch(
       assetTag: row.assetTag ?? null,
       serial: row.serial ?? null,
       status,
-      statusDefaulted: row.status === undefined,
+      statusDefaulted:
+        row.status === undefined && row.customStatus === undefined,
+      customStatus,
       model,
       category,
       location,
@@ -1101,6 +1250,7 @@ function batchRowView(plan: BatchRowPlan): Row {
     'purchaseDate',
     'warrantyEnd',
     'purchaseCost',
+    'purchaseCurrency',
     'usefulLifeMonths',
     'salvageValue',
     'specs',
@@ -1112,6 +1262,7 @@ function batchRowView(plan: BatchRowPlan): Row {
     serial,
     status,
     ...(statusDefaulted ? { statusDefaulted: true } : {}),
+    ...(plan.customStatus ? { customStatus: plan.customStatus.ref } : {}),
     model: plan.model?.ref ?? null,
     category: plan.category?.ref ?? null,
     location: plan.location?.ref ?? null,
@@ -1141,7 +1292,12 @@ function createBatchPrecondition(
   const refs: BatchReference[] = [];
   for (const plan of plans) {
     if (plan.skip) continue;
-    for (const r of [plan.model, plan.category, plan.location]) {
+    for (const r of [
+      plan.model,
+      plan.category,
+      plan.location,
+      plan.customStatus,
+    ]) {
       if (r?.updatedAt) refs.push(r);
     }
   }
@@ -1208,7 +1364,8 @@ const assetCreateBatch = defineTool({
   description:
     `Register several assets at once (up to ${ASSET_BATCH_MAX_ROWS}; e.g. rows pasted from a spreadsheet) as ONE ` +
     'proposal with one approval. Put shared values in `common` and per-asset values in `rows`; status ' +
-    `defaults to ${DEFAULT_NEW_ASSET_STATUS}. Every row is checked first: its model and location must ` +
+    `defaults to ${DEFAULT_NEW_ASSET_STATUS} unless a customStatus is given. ${STATUS_CONCEPT} ` +
+    'Every row is checked first: its model, location and custom status must ' +
     'exist (create a missing one first with asset_model_create / location_create), and a tag or serial ' +
     'an existing asset or another row already has is refused. A proposal with a refused row is not ' +
     "shown: fix the row, or mark it `skip: true` to create the others without it. Omit a row's " +
@@ -1228,6 +1385,7 @@ const assetCreateBatch = defineTool({
     bind(LocationsController, 'findAll'),
     bind(LocationsController, 'findOne'),
     bind(AssetCategoriesController, 'findAll'),
+    bind(AssetStatusLabelsController, 'findAll'),
   ],
   async run(input, rt) {
     const { rows: plans } = await planBatch(input, rt);
@@ -1383,10 +1541,22 @@ const assetUpdateInput = z
     purchaseDate: editableFields.purchaseDate.optional(),
     warrantyEnd: editableFields.warrantyEnd.optional(),
     purchaseCost: money.nullable().optional().describe('null clears it.'),
+    purchaseCurrency: editableFields.purchaseCurrency
+      .nullable()
+      .optional()
+      .describe('null clears it.'),
     usefulLifeMonths: months.nullable().optional().describe('null clears it.'),
     salvageValue: money.nullable().optional().describe('null clears it.'),
     model: editableFields.model.optional(),
     location: editableFields.location.optional(),
+    customStatus: editableFields.customStatus
+      .nullable()
+      .optional()
+      .describe(
+        'A CUSTOM status (id or exact name): sets it and its built-in status. null clears the custom ' +
+          'status and keeps the built-in one. A `status` alone keeps the custom status when it maps to that ' +
+          'same status and clears it otherwise.',
+      ),
     specs: z
       .record(
         z.string().trim().min(1).max(100),
@@ -1422,6 +1592,13 @@ async function updateBody(
   if (input.location) {
     body.locationId = (await resolveLocation(rt, input.location, false)).id;
   }
+  if (input.customStatus === null) {
+    body.statusLabelId = null;
+  } else if (input.customStatus !== undefined) {
+    const { resolved, row } = await resolveStatusLabel(rt, input.customStatus);
+    assertStatusMatchesLabel(input.status, row);
+    body.statusLabelId = resolved.id;
+  }
   if (input.specs) {
     // Own entries only, rebuilt with `fromEntries` (which defines each key as an own property), so no key
     // reaches a prototype.
@@ -1448,7 +1625,12 @@ type UpdateFields = Omit<AssetUpdateInput, 'asset'>;
 function updateChanges(
   input: UpdateFields,
   current: Row,
-  resolved: { model?: AiResolvedReference; location?: AiResolvedReference },
+  resolved: {
+    model?: AiResolvedReference;
+    location?: AiResolvedReference;
+    /** The custom status the input sets (`null` = cleared); absent when the input names none. */
+    customStatus?: { ref: AiResolvedReference; kind: string } | null;
+  },
 ): { changes: Change[]; warnings: string[] } {
   const changes: Change[] = [];
   for (const field of SCALAR_FIELDS) {
@@ -1491,6 +1673,7 @@ function updateChanges(
       });
     }
   }
+  customStatusChanges(input, current, resolved.customStatus, changes);
   const specs = asRow(current.specs);
   for (const [key, after] of Object.entries(input.specs ?? {})) {
     const before = Object.hasOwn(specs, key) ? (specs[key] ?? null) : null;
@@ -1500,13 +1683,66 @@ function updateChanges(
   return { changes, warnings: [] };
 }
 
+/**
+ * The custom-status rows of an update card (ADR-0101), after the scalar and reference rows: the `customStatus`
+ * before → after, and the `status` a custom status implies when the input gives none. A built-in `status`
+ * alone that changes the status also clears the custom status — shown, so the card never hides it.
+ */
+function customStatusChanges(
+  input: UpdateFields,
+  current: Row,
+  target: { ref: AiResolvedReference; kind: string } | null | undefined,
+  changes: Change[],
+): void {
+  const label = current.statusLabel ? asRow(current.statusLabel) : null;
+  const before = label
+    ? {
+        type: 'assetStatusLabel',
+        id: String(label.id),
+        label: String(label.name),
+      }
+    : null;
+  if (target === undefined) {
+    if (
+      before &&
+      input.status !== undefined &&
+      input.status !== current.status
+    ) {
+      changes.push({
+        field: 'customStatus',
+        before,
+        after: NO_CUSTOM_STATUS,
+        valueKind: 'entity',
+      });
+    }
+    return;
+  }
+  if ((before?.id ?? null) !== (target?.ref.id ?? null)) {
+    changes.push({
+      field: 'customStatus',
+      before,
+      after: target ? entityValue(target.ref) : NO_CUSTOM_STATUS,
+      valueKind: 'entity',
+    });
+  }
+  if (target && input.status === undefined && current.status !== target.kind) {
+    changes.push({
+      field: 'status',
+      before: current.status ?? null,
+      after: target.kind,
+      valueKind: 'text',
+    });
+  }
+}
+
 const assetUpdate = defineTool({
   name: 'asset_update',
   title: 'Update an asset',
   description:
     'Change ONE asset (by id, asset tag or serial; for several, use asset_update_batch): any of its name, ' +
-    'status, tag, serial, company, notes, ' +
+    'status, custom status, tag, serial, company, notes, ' +
     'dates, cost, model, location or attributes. Only the fields you give change; specs are merged. ' +
+    `${STATUS_CONCEPT} ` +
     'Ownership is not a field: use asset_check_out / asset_check_in.',
   domain: 'assets',
   class: 'write',
@@ -1521,6 +1757,7 @@ const assetUpdate = defineTool({
     bind(AssetModelsController, 'findOne'),
     bind(LocationsController, 'findAll'),
     bind(LocationsController, 'findOne'),
+    bind(AssetStatusLabelsController, 'findAll'),
   ],
   async run(input, rt) {
     const { id } = await resolveAsset(rt, input.asset, false);
@@ -1545,6 +1782,17 @@ const assetUpdate = defineTool({
         params: { id: resolved.id },
       }),
     );
+    let customStatus:
+      { ref: AiResolvedReference; kind: string } | null | undefined;
+    if (input.customStatus === null) customStatus = null;
+    else if (input.customStatus !== undefined) {
+      const { resolved: ref, row } = await resolveStatusLabel(
+        rt,
+        input.customStatus,
+      );
+      assertStatusMatchesLabel(input.status, row);
+      customStatus = { ref, kind: String(row.kind) };
+    }
     const { changes, warnings } = updateChanges(input, current, {
       model: input.model
         ? await resolveModel(rt, input.model, true)
@@ -1552,6 +1800,7 @@ const assetUpdate = defineTool({
       location: input.location
         ? await resolveLocation(rt, input.location, true)
         : undefined,
+      customStatus,
     });
     if (changes.length === 0) {
       throw new BadRequestException(
@@ -1583,11 +1832,16 @@ const assetUpdate = defineTool({
  */
 const updateBatchFields = {
   status: editableFields.status.optional(),
+  customStatus: assetUpdateInput.shape.customStatus,
   company: editableFields.company.optional(),
   notes: editableFields.notes.optional().describe('Replaces the notes.'),
   purchaseDate: editableFields.purchaseDate.optional(),
   warrantyEnd: editableFields.warrantyEnd.optional(),
   purchaseCost: money.nullable().optional().describe('null clears it.'),
+  purchaseCurrency: editableFields.purchaseCurrency
+    .nullable()
+    .optional()
+    .describe('null clears it.'),
   usefulLifeMonths: months.nullable().optional().describe('null clears it.'),
   salvageValue: money.nullable().optional().describe('null clears it.'),
   model: editableFields.model.optional(),
@@ -1625,8 +1879,8 @@ const assetUpdateBatchInput = z.strictObject({
     .superRefine((shared, ctx) => refuseReservedSpecKeys(shared.specs, ctx))
     .optional()
     .describe(
-      'Values set on every asset (status, location, model, company, dates, cost, specs…); a row’s own ' +
-        'value overrides it, and specs are merged.',
+      'Values set on every asset (status or custom status, location, model, company, dates, cost, ' +
+        'specs…); a row’s own value overrides it, and specs are merged.',
     ),
 });
 
@@ -1645,6 +1899,8 @@ interface UpdateRowPlan {
   updatedAt: string | null;
   model: BatchReference | null;
   location: BatchReference | null;
+  /** The custom status the row sets (ADR-0101); `null` when it sets none or clears it. */
+  customStatus: BatchStatusLabel | null;
   changes: Change[];
   warnings: string[];
   errors: string[];
@@ -1703,6 +1959,7 @@ async function planUpdateBatch(
         : ' — create the location first (location_create) or use an existing one',
     );
 
+  const statusLabels = new Map<string, Lookup<BatchStatusLabel>>();
   const seen = new Map<string, number>();
   const plans: UpdateRowPlan[] = [];
   for (const [index, row] of rows.entries()) {
@@ -1710,6 +1967,21 @@ async function planUpdateBatch(
     const skip = row.skip === true;
     const errors: string[] = [];
     const key = referenceKey(row.asset);
+    let customStatus: BatchStatusLabel | null = null;
+    if (row.customStatus) {
+      const k = referenceKey(row.customStatus);
+      if (!statusLabels.has(k)) {
+        statusLabels.set(k, await lookupStatusLabel(rt, row.customStatus));
+      }
+      const found = statusLabels.get(k)!;
+      if (found.ok) {
+        customStatus = found.value;
+        const conflict = statusLabelConflict(row.status, found.value);
+        if (conflict) errors.push(conflict);
+      } else {
+        errors.push(found.error);
+      }
+    }
     if (!assets.has(key)) {
       assets.set(
         key,
@@ -1751,6 +2023,7 @@ async function planUpdateBatch(
         updatedAt: null,
         model,
         location,
+        customStatus,
         changes: [],
         warnings: [],
         errors,
@@ -1771,6 +2044,16 @@ async function planUpdateBatch(
     const { changes, warnings } = updateChanges(row, current, {
       ...(model ? { model: resolvedOf(model) } : {}),
       ...(location ? { location: resolvedOf(location) } : {}),
+      ...(row.customStatus === null
+        ? { customStatus: null }
+        : customStatus
+          ? {
+              customStatus: {
+                ref: resolvedOf(customStatus),
+                kind: customStatus.kind,
+              },
+            }
+          : {}),
     });
     if (changes.length === 0 && errors.length === 0) {
       errors.push(
@@ -1780,6 +2063,8 @@ async function planUpdateBatch(
     const body = scalarBody(row);
     if (model) body.modelId = model.ref.id;
     if (location) body.locationId = location.ref.id;
+    if (row.customStatus === null) body.statusLabelId = null;
+    else if (customStatus) body.statusLabelId = customStatus.ref.id;
     if (row.specs) {
       const edits = new Map(Object.entries(row.specs));
       const kept = Object.entries(asRow(current.specs)).filter(
@@ -1796,6 +2081,7 @@ async function planUpdateBatch(
       updatedAt: versionOf(current),
       model,
       location,
+      customStatus,
       changes,
       warnings,
       errors,
@@ -1867,7 +2153,9 @@ function updateBatchPrecondition(
         updatedAt: plan.updatedAt,
       });
     }
-    for (const r of [plan.model, plan.location]) if (r?.updatedAt) refs.push(r);
+    for (const r of [plan.model, plan.location, plan.customStatus]) {
+      if (r?.updatedAt) refs.push(r);
+    }
   }
   return batchPrecondition(refs);
 }
@@ -1877,11 +2165,12 @@ const assetUpdateBatch = defineTool({
   title: 'Update several assets',
   description:
     `Change several existing assets at once (up to ${ASSET_BATCH_MAX_ROWS}) as ONE proposal with one ` +
-    'approval — e.g. move 25 laptops to storage, or set a status, model, location, company, dates or ' +
-    'attributes on many assets. Name each asset in `rows` (id, asset tag or serial) with its own values, ' +
+    'approval — e.g. move 25 laptops to storage, or set a status, custom status, model, location, company, ' +
+    `dates or attributes on many assets. ${STATUS_CONCEPT} ` +
+    'Name each asset in `rows` (id, asset tag or serial) with its own values, ' +
     'and put values every asset gets in `common`. Prefer it over separate asset_update calls when several ' +
-    'assets change. Every row is checked first, exactly as asset_update would: the asset and any model or ' +
-    'location must exist, and each row must change something. A proposal with a refused row is not ' +
+    'assets change. Every row is checked first, exactly as asset_update would: the asset and any model, ' +
+    'location or custom status must exist, and each row must change something. A proposal with a refused row is not ' +
     'shown: fix the row, or mark it `skip: true` to change the others without it. Tags and serials are ' +
     'changed one asset at a time with asset_update. The result lists what was changed and what was not.',
   domain: 'assets',
@@ -1900,6 +2189,7 @@ const assetUpdateBatch = defineTool({
     bind(AssetModelsController, 'findOne'),
     bind(LocationsController, 'findAll'),
     bind(LocationsController, 'findOne'),
+    bind(AssetStatusLabelsController, 'findAll'),
   ],
   async run(input, rt) {
     const plans = await planUpdateBatch(input, rt);
@@ -2574,7 +2864,7 @@ export const assetsToolset: AiToolset = {
     ),
     unexposed(
       AssetAttachmentsController,
-      ['list', 'remove'],
+      ['list', 'remove', 'updateLabel'],
       'Attachments: v1.1 (tools-and-execution.md §7).',
     ),
     unexposed(

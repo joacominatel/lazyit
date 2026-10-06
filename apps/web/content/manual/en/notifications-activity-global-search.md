@@ -8,7 +8,8 @@ subcategory: global-search
 # Global search
 
 Global search is the command palette that spans the whole product: one box that searches across
-assets, articles, users, locations, applications, topology nodes and consumables at once. It is
+assets, articles, users, locations, applications, topology nodes, consumables, purchases and
+suppliers at once. It is
 typo-tolerant and ranked, so a near-miss or a partial word still finds the record.
 
 ## Opening it
@@ -21,18 +22,24 @@ Start typing and results appear, grouped by kind. Move through them with the **�
 
 ## What it searches
 
-Seven kinds of records are indexed:
+Nine kinds of records are indexed:
 
 - **Assets** — by name, asset tag or serial.
 - **Articles** — Knowledge Base articles, including their body text, so a procedure inside an article
   is findable. Only published articles are searchable; drafts never appear.
 - **Users** — by name and email.
 - **Locations** — by name and address.
-- **Applications** — by name and vendor.
+- **Applications** — by name and publisher.
 - **Topology nodes** — servers, VMs, containers and the rest of the infrastructure map, by label, IP
   address or linked asset name.
 - **Consumables** — spare parts and stock items, by name, SKU or description. The preview shows how
   much is on hand, so "how many HDMI cables are left?" is answered right in the palette.
+- **Purchases** — by reference, invoice number, supplier or **what was bought**: a line's description
+  finds its purchase, so typing "ThinkPad" brings up the purchase that ordered them. A result shows the
+  purchase the way the Purchases list names it, with its supplier or invoice numbers beside it. Prices
+  and notes are never searched. Archived purchases do not appear.
+- **Suppliers** — by name, tax ID or the name of a sales or support contact. Contact emails and phone
+  numbers are not searched. Archived suppliers do not appear.
 
 Use the **filter chips** above the results to scope the search to a single kind, or leave it on
 **All** to search everything. Selecting a result navigates straight to that record.
@@ -59,6 +66,9 @@ Search results respect access control:
   default), so search never becomes a back door to enumerate names and emails.
 - **Articles** are filtered to the folders you can actually open, so a restricted article never
   surfaces to someone who could not otherwise read it.
+- **Purchases** and **Suppliers** appear only for someone allowed to view purchases (an Administrator
+  or a Member by default; see [Purchases & suppliers](/help/purchases-recording-purchases)). Anyone else
+  gets no purchase results, no counts, and no Purchases or Suppliers filter chips.
 
 So two people may get different results for the same query — by design.
 
@@ -70,8 +80,10 @@ rather than pretending there are no results. Retry once the service is back.
 
 ## Keeping the index fresh
 
-The search index updates automatically as records are created, edited and removed. Two situations
-call for a manual rebuild:
+The search index updates automatically as records are created, edited and removed. When an update of
+lazyit adds a new kind of record to search — Purchases and Suppliers, for example — the existing ones
+are indexed automatically the first time lazyit starts after the update; nothing needs to be run. Two
+situations call for a manual rebuild:
 
 - **After the first deploy**, to populate the index from the existing database.
 - **After the search service has been down**, to repair any drift (for example a deletion that did

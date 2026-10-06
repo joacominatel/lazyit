@@ -430,6 +430,67 @@ describe('ConsumablesService', () => {
     });
   });
 
+  it('a plain movement (the HTTP path) never carries a purchase line (#1476)', async () => {
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 5 });
+    tx.consumableMovement.create.mockResolvedValue({ id: 1 });
+    await service.createMovement('k1', { type: 'IN', quantity: 3 });
+    const calls = tx.consumableMovement.create.mock
+      .calls as CreateMovementCall[];
+    expect(calls[0][0].data).not.toHaveProperty('purchaseOrderLineId');
+  });
+
+  it('a purchase receipt (in-process origin) stamps the line on the IN and runs its hooks inside the transaction, in order', async () => {
+    tx.consumable.findFirst.mockResolvedValue({ currentStock: 5 });
+    tx.consumableMovement.create.mockResolvedValue({ id: 9 });
+    const order: string[] = [];
+    const beforeWrite = jest.fn((client: unknown) => {
+      order.push(client === tx ? 'before:tx' : 'before:other');
+      return Promise.resolve();
+    });
+    const afterWrite = jest.fn((client: unknown, movement: { id: number }) => {
+      order.push(client === tx ? `after:tx:${movement.id}` : 'after:other');
+      return Promise.resolve();
+    });
+    tx.consumable.update.mockImplementation(() => {
+      order.push('stock');
+      return Promise.resolve({});
+    });
+
+    await service.createMovement(
+      'k1',
+      { type: 'IN', quantity: 3 },
+      HUMAN_PRINCIPAL,
+      {
+        purchaseOrderLineId: 'clline000000000000000001',
+        beforeWrite,
+        afterWrite,
+      },
+    );
+
+    expect(order).toEqual(['before:tx', 'stock', 'after:tx:9']);
+    const calls = tx.consumableMovement.create.mock
+      .calls as CreateMovementCall[];
+    expect(calls[0][0].data).toMatchObject({
+      type: 'IN',
+      quantity: 3,
+      purchaseOrderLineId: 'clline000000000000000001',
+    });
+  });
+
+  it('a purchase receipt is a plain IN only — an OUT, a delivery or a return with an origin is a 400, nothing written', async () => {
+    const origin = { purchaseOrderLineId: 'clline000000000000000001' };
+    for (const data of [
+      { type: 'OUT' as const, quantity: 1 },
+      { type: 'ADJUSTMENT' as const, quantity: 1 },
+      { type: 'IN' as const, quantity: 1, returnOfId: 4 },
+    ]) {
+      await expect(
+        service.createMovement('k1', data, HUMAN_PRINCIPAL, origin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('OUT decrements via a guarded updateMany (gte + live row) and records the movement', async () => {
     tx.consumable.updateMany.mockResolvedValue({ count: 1 });
     tx.consumableMovement.create.mockResolvedValue({ id: 2 });

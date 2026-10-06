@@ -29,6 +29,17 @@
     "deleteConfirmTitle": "Delete document?",
     "deleteConfirmDescription": "\"{name}\" will be removed from this asset. This cannot be undone from here.",
     "deleteCancel": "Cancel",
-    "deleteConfirm": "Delete"
+    "deleteConfirm": "Delete",
+    "deleteConfirmDescriptionPurchase": "\"{name}\" will be removed from this purchase and from the assets that show it. This cannot be undone from here.",
+    "nextLabel": "Type (optional)",
+    "label": "Document type",
+    "labelPlaceholder": "Invoice, delivery note…",
+    "labelTooLong": "A document type is at most {max} characters.",
+    "editLabelAria": "Edit the type of {name}",
+    "saveLabel": "Save type",
+    "cancelLabel": "Cancel",
+    "labelSaved": "Document type saved.",
+    "labelCleared": "Document type removed.",
+    "labelError": "Could not save the document type."
   }
 }

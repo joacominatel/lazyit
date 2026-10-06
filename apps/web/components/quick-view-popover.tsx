@@ -247,7 +247,13 @@ function IdentityBadge({ view }: { view: QuickViewData }) {
   const tq = useTranslations("common.quickView");
   switch (view.entity) {
     case "asset":
-      return <AssetStatusBadge status={view.data.status} />;
+      return (
+        <AssetStatusBadge
+          status={view.data.status}
+          label={view.data.statusLabel}
+          showKind
+        />
+      );
     case "user":
       return (
         <span className="flex flex-wrap items-center gap-1.5">

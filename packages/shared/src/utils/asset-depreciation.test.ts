@@ -129,4 +129,35 @@ describe("computeAssetBookValue", () => {
       ),
     ).toBe(50_000);
   });
+
+  test("amounts above the old int4 ceiling depreciate exactly (ADR-0100)", () => {
+    // 30,000,000.00 server, 3,000,000.00 salvage, 24-month life, 12 months in → halfway down the base.
+    expect(
+      computeAssetBookValue(
+        {
+          purchaseCost: 3_000_000_000,
+          usefulLifeMonths: 24,
+          salvageValue: 300_000_000,
+          purchaseDate: utc(2026, 1, 1),
+        },
+        utc(2027, 1, 1),
+      ),
+    ).toBe(1_650_000_000);
+  });
+
+  test("an amount near Number.MAX_SAFE_INTEGER stays exact and within [salvage, cost]", () => {
+    const cost = 9_000_000_000_000_000; // < MAX_SAFE_INTEGER
+    expect(
+      computeAssetBookValue(
+        { purchaseCost: cost, usefulLifeMonths: 4, salvageValue: null, purchaseDate: utc(2026, 1, 1) },
+        utc(2026, 4, 1),
+      ),
+    ).toBe(2_250_000_000_000_000);
+    expect(
+      computeAssetBookValue(
+        { purchaseCost: cost, usefulLifeMonths: 4, salvageValue: null, purchaseDate: utc(2026, 1, 1) },
+        utc(2030, 1, 1),
+      ),
+    ).toBe(0);
+  });
 });

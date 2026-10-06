@@ -42,8 +42,16 @@ function ownRoute(ref: { type: string; id: string; slug?: string }): string | nu
     case "manualTask":
       return `/settings/integrations/tasks/${seg(ref.id)}`;
     case "assetTagScheme":
-      // The single instance-wide scheme (#1394): its editor lives on the instance settings page.
-      return "/settings/instance";
+      // The single instance-wide scheme (#1394): its editor lives on Settings → Asset tags (#1533).
+      return "/settings/asset-tags";
+    case "purchaseOrder":
+      return `/purchases/${seg(ref.id)}`;
+    case "supplier":
+      return `/purchases/suppliers/${seg(ref.id)}`;
+    case "assetStatusLabel":
+      // A custom asset status (ADR-0101) has no page of its own: it is managed on the Statuses tab of
+      // Settings → Taxonomies, which the tab param opens directly.
+      return "/settings/taxonomies?tab=statuses";
     default:
       return null;
   }
@@ -59,6 +67,8 @@ function buildRoute(ref: EntityPointer): string | null {
     case "assetAssignment":
     case "accessGrant":
     case "consumableMovement":
+    // A purchase document (#1478) is shown on its purchase's page.
+    case "purchaseDocument":
       return ref.parent ? ownRoute(ref.parent) : null;
     case "accessRequest":
       return ref.parent ? ownRoute(ref.parent) : "/applications/access-requests";

@@ -1,6 +1,10 @@
 "use client";
 
-import type { AiMessagePart, AiToolInvocationStatus } from "@lazyit/shared";
+import {
+  AI_NEVER_AUTO_APPROVE_WARNINGS,
+  type AiMessagePart,
+  type AiToolInvocationStatus,
+} from "@lazyit/shared";
 import {
   ExclamationTriangleIcon,
   EyeSlashIcon,
@@ -8,7 +12,7 @@ import {
   ShieldExclamationIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +30,7 @@ import { localizedText } from "@/lib/ai/sentences";
 import { plainText } from "@/lib/ai/untrusted-text";
 import type { DecisionResult } from "@/lib/api/hooks/use-ai-turn";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/utils/money";
 import { useEntityTypeLabel, usePreviewFieldLabel } from "./ai-labels";
 import { AiPreviewTable } from "./ai-preview-table";
 import { useAiSentences } from "./use-ai-sentences";
@@ -91,6 +96,7 @@ export function isPasswordSubmitKey(e: {
 export function ApprovalValue({ value }: { value: PreviewValue | null }) {
   const t = useTranslations("ai.approval");
   const format = useFormatter();
+  const locale = useLocale();
   if (value === null || value.kind === "empty") {
     return <span className="text-muted-foreground">{t("empty")}</span>;
   }
@@ -106,6 +112,19 @@ export function ApprovalValue({ value }: { value: PreviewValue | null }) {
       return <span>{value.value ? t("yes") : t("no")}</span>;
     case "number":
       return <span className="font-mono tabular-nums">{format.number(value.value)}</span>;
+    case "money":
+      return <span className="font-mono tabular-nums">{formatMoney(value.minor, locale, value.currency)}</span>;
+    case "list":
+      return (
+        <span>
+          {value.items.map((item, index) => (
+            <span key={index}>
+              {index > 0 && ", "}
+              <ApprovalValue value={item} />
+            </span>
+          ))}
+        </span>
+      );
     case "date":
       return (
         <span className="font-mono tabular-nums">
@@ -154,7 +173,8 @@ interface ApprovalCardProps {
  * Approve is never autofocused and no global key approves anything; each click disables both buttons
  * until the server answers. One card, one decision — several cards of one step are paged by
  * `AiApprovalPager` (#1409), whose "Approve all" still sends one decision per card and never covers a
- * card that needs the password, is sensitive, or whose last decision was refused.
+ * card that needs the password, is sensitive, creates assets or changes money (#1478 — the warning says
+ * so on the card), or whose last decision was refused.
  */
 export function AiApprovalCard({
   part,
@@ -381,6 +401,7 @@ export function AiApprovalCard({
               {warnings.map((code) => {
                 const isNew = addedWarnings.includes(code);
                 const needsPassword = STEP_UP_WARNINGS.includes(code);
+                const individualOnly = (AI_NEVER_AUTO_APPROVE_WARNINGS as readonly string[]).includes(code);
                 return (
                   <li
                     key={code}
@@ -397,6 +418,9 @@ export function AiApprovalCard({
                           <LockClosedIcon className="size-3" aria-hidden />
                           {t("passwordRequired")}
                         </span>
+                      )}
+                      {individualOnly && (
+                        <span className="ml-1 text-muted-foreground">· {t("individualOnly")}</span>
                       )}
                     </span>
                     {isNew && <StatusBadge tone="warning">{t("newWarning")}</StatusBadge>}

@@ -9,7 +9,7 @@ import type { Prisma, User } from '../../generated/prisma/client';
  * Never listed: `passwordHash`, `passwordUpdatedAt`, `sessionEpoch`, `mcpCredentialEpoch`,
  * `mustChangePassword` (credentials and revocation counters, ADR-0086/0097), the raw manager columns,
  * `notificationEmailOptOutTypes` (served by its own self-service endpoint) and the AD reconcile keys
- * `directorySourceId` / `directoryOffboardedAt` (ADR-0091).
+ * `directorySourceId` / `directoryOffboardedAt` / `directoryReenabledAt` (ADR-0091).
  *
  * Use it two ways:
  *   - as a Prisma `select` whenever a relation embeds a User (`include: { user: { select: … } }`), so

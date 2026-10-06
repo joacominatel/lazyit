@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-05
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -175,6 +175,8 @@ Legend:
 | asset / application / consumable / article categories | list / get | category:read | R | v1 `reference_lookup` (built, W2-5) |
 | asset / application / consumable categories | create / update / delete | category:write / delete | W / D | v1 `category_create` / `category_update` / `category_archive` (built, #1390) |
 | asset / application / consumable categories | restore | category:delete | W | not exposed: no route lists archived categories, so a card could not name or version the target (#1390) |
+| asset-status-labels (custom asset statuses, ADR-0101) | list / get | category:read | R | v1 `reference_lookup` kind `assetStatusLabel` (built, #1524) |
+| asset-status-labels | create / update; delete (with reassign) / restore | category:write; category:delete | W / D | v1 `asset_status_label_create` / `_update` / `_archive` / `_restore` (built, #1524) |
 | article categories (KB folders) | create / rename; delete / restore | category:write / delete | W / D | `kb_folder_create` / `kb_folder_rename` (#1378); delete and restore v1.1 |
 | article-categories | `PUT :id/access-rules` | settings:manage | W | v1.1, `elevated` (authz config) |
 | locations | list / get | location:read | R | v1 `reference_lookup` (built, W2-5) |
@@ -339,7 +341,7 @@ Legend:
   permissions, classes and previews. This muddies MCP annotations, list filtering and the approval card.
 - **B3. Chosen:**
   - **Reads are consolidated into task-shaped tools.** For example, `asset_get` returns the detail,
-    active assignment, recent history and linked articles; `reference_lookup` covers six taxonomy
+    active assignment, recent history and linked articles; `reference_lookup` covers seven taxonomy
     lists.
   - **Every write executes exactly one controller handler.** A write tool may *select* between two
     handlers that share a permission (e.g. publish vs unpublish). One permission, one class and one
@@ -458,16 +460,16 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 1 | `session_context` | UsersController.me, ConfigController.myPermissions, InstanceController.version, AccessGrants/Assets `mine` | open (self) | read | — |
 | 2 | `lazyit_search` | SearchController.find | search:read | read | — |
 | 3 | `navigate_to` (chat only) | the entity's get handler (existence + visibility check) | entity's read | navigate | the target (`op: navigate`) |
-| 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations `findAll` (for `optionsFrom`) | open (self; `ai:use`) | navigate | — |
-| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the six controllers (12 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
+| 3a | `request_input` ✅ built (#1388) (chat only, `awaitsInput`) — ask the user for missing data with a form the model designs; the run pauses `AWAITING_INPUT` ([[ai-assistant/provider-and-runtime\|provider]] §8.2) | UsersController.me (primary, never called) + AssetModels/AssetCategories/Locations/Suppliers/Consumables `findAll` (for `optionsFrom`; suppliers and consumables since #1478) | open (self; `ai:use`) | navigate | — |
+| 4 | `reference_lookup` ✅ built (W2-5) (kind: assetModel, location, assetCategory, assetStatusLabel (#1524), applicationCategory, consumableCategory, articleFolder) | AssetModelsController.findAll (primary) and the `findAll` / `findOne` of the seven controllers (14 handlers) | assetModel:read (listing); each kind's own route authorizes it | read | — |
 | 5 | `dashboard_summary` ✅ built (W2-9) | DashboardController.summary | dashboard:read | read | — |
 | 6 | `activity_list` ✅ built (W2-9) | DashboardController.activity | logs:read | read | — |
 | 7 | `asset_search` ✅ built (W2-5) | AssetsController.findAll / .findMine | asset:read / self | read | — |
 | 8 | `asset_get` ✅ built (W2-5) | AssetsController.findOne (+findAssignments, findHistory, findArticles facets; findAll for tag/serial) | asset:read (+article:read facet) | read | — |
-| 9 | `asset_create` ✅ built (W2-5; status defaults to `IN_STORAGE`, #1386) | AssetsController.create (+model/location lookups) | asset:write | write | asset created |
-| 9a | `asset_create_batch` ✅ built (#1387, added to the v1 cut) | AssetsController.create per row (+AssetsController.findAll for duplicates, model/location lookups, AssetCategoriesController.findAll) | asset:write | write | one asset created per row |
-| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups) | asset:write | write·D | asset updated |
-| 10a | `asset_update_batch` ✅ built (#1409, added to the v1 cut) | AssetsController.update per row (+findOne / findAll per asset reference, model/location lookups) | asset:write | write·D | one asset updated per row |
+| 9 | `asset_create` ✅ built (W2-5; status defaults to `IN_STORAGE`, #1386, unless a `customStatus` is given, #1524) | AssetsController.create (+model/location lookups, AssetStatusLabelsController.findAll) | asset:write | write | asset created |
+| 9a | `asset_create_batch` ✅ built (#1387, added to the v1 cut) | AssetsController.create per row (+AssetsController.findAll for duplicates, model/location lookups, AssetCategoriesController.findAll, AssetStatusLabelsController.findAll) | asset:write | write | one asset created per row |
+| 10 | `asset_update` ✅ built (W2-5) | AssetsController.update (+findOne, lookups incl. AssetStatusLabelsController.findAll) | asset:write | write·D | asset updated |
+| 10a | `asset_update_batch` ✅ built (#1409, added to the v1 cut) | AssetsController.update per row (+findOne / findAll per asset reference, model/location/custom-status lookups) | asset:write | write·D | one asset updated per row |
 | 11 | `asset_archive` ✅ built (W2-5) | AssetsController.remove | asset:delete | write·D | asset archived |
 | 12 | `asset_restore` ✅ built (W2-5) | AssetsController.restore (+findAll `deleted=only`) | asset:delete | write | asset restored |
 | 13 | `asset_check_out` ✅ built (W2-5) | AssetAssignmentsController.create (+AssetsController.findOne / findAll, UsersController.findAll / me) | asset:write | write | assetAssignment created (parent asset), asset updated, user updated |
@@ -483,6 +485,10 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
 | 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
+| 16l | `asset_status_label_create` ✅ built (#1524) | AssetStatusLabelsController.create (+findAll) | category:write | write | assetStatusLabel created |
+| 16m | `asset_status_label_update` ✅ built (#1524; rename, colour, description, order; kind only while unused) | AssetStatusLabelsController.update (+findAll) | category:write | write·D | assetStatusLabel updated |
+| 16n | `asset_status_label_archive` ✅ built (#1524; `moveTo` / `moveToStatus` when in use) | AssetStatusLabelsController.remove (+findAll; AssetsController.findAll for the impact) | category:delete | write·D | assetStatusLabel archived |
+| 16o | `asset_status_label_restore` ✅ built (#1524) | AssetStatusLabelsController.restore (+findAll `deleted=only`) | category:delete | write (idempotent) | assetStatusLabel restored |
 | 16j | `asset_tag_scheme_get` ✅ built (#1394) | AssetTagSchemeController.summary (primary, since #1428) | asset:write, human-only | read | — |
 | 16k | `asset_tag_scheme_update` ✅ built (#1394; only on an explicit request to change the general scheme) | AssetTagSchemeController.update (primary), .get, .previewNextTag | settings:manage, human-only | elevated·D (`INSTANCE_CONFIGURATION`) | assetTagScheme updated |
 | 17 | `application_search` ✅ built (W2-6) | ApplicationsController.findAll | application:read | read | — |
@@ -1033,7 +1039,7 @@ Accounts holding the route's permission.
   create, are the taxonomy tools (#1390).
 
 **Taxonomy tools as built (#1390).** `taxonomy.tools.ts` (domain `reference`) adds the rest of the
-lifecycle of the reference data assets, applications and consumables hang off — nine tools, all `write`,
+lifecycle of the reference data assets, applications and consumables hang off — nine tools (thirteen with the four custom-status tools of #1524), all `write`,
 none `elevated`, none with a step-up warning (they grant no access or privilege); humans and Service
 Accounts holding the route's permission are admitted, exactly as over HTTP.
 - **Categories are one tool per verb with a `kind`** (`assetCategory` · `applicationCategory` ·
@@ -1083,12 +1089,32 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   and soft warnings in the asset form and never blocks a write. `reference_lookup` returns it with
   `detail: "full"` (wrapped as untrusted); `category_create` / `category_update` set or replace it — a
   non-destructive change (no stored attribute is touched). Application and consumable categories expose
-  their `order`. Nothing else is taxonomy configuration: location types are a fixed enum; the asset tag
+  their `order`. Custom asset statuses are taxonomy too (#1524, above). Nothing else is taxonomy
+  configuration: location types are a fixed enum; the asset tag
   scheme is instance configuration (its own tools, #1394 — see below; its backfill stays unexposed); KB folder
   access rules are authorization configuration (`elevated`, after v1).
 - **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
   names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
   recorded for the KB tools).
+- **Custom asset statuses (#1524, [[0101-custom-asset-statuses]]).** Four more tools in the same file, under
+  the category permissions: `asset_status_label_create`, `asset_status_label_update`·D,
+  `asset_status_label_archive`·D and `asset_status_label_restore` (idempotent). Every description opens with
+  the concept — a team-defined name mapped to exactly one built-in status (its *kind*); the built-in status
+  drives every rule; setting a custom status sets it. A custom status is named by id or exact name from its
+  unpaged route list (entity type `assetStatusLabel`). Refused before a card: a live duplicate name
+  (`CONFLICT`), a kind change while live assets carry it (`CONFLICT`; archived carriers are refused by the
+  route), an archive in use without a destination, a destination equal to the archived one, or both
+  `moveTo` and `moveToStatus` (`INVALID_INPUT`). The archive card shows the assets that move (count + up to
+  five, through `GET /assets?statusLabelId=`) and a `moveAssetsTo` row (an entity for a custom status, the
+  status code otherwise); the route moves them and archives in one transaction and returns
+  `movedAssetCount`, which the summary names. Restore resolves through `deleted=only` (ADMIN by role — the
+  same parity gap as the other restores). On the asset side, `asset_create` / `asset_create_batch` /
+  `asset_update` / `asset_update_batch` take a `customStatus` reference (`null` clears it on an update) and
+  send `statusLabelId`; a `status` of another kind is refused before a card; a custom status suppresses the
+  `IN_STORAGE` default; the update card shows the custom status before → after (or "None (built-in status
+  only)") and the built-in status it implies, and a `status` alone that clears a custom status shows that
+  too. `asset_get` / `asset_search` return `customStatus` (`{ id, name, kind }`), and `asset_search` filters
+  by `statusLabelId`.
 
 **Asset tag scheme tools as built (#1394).** CEO decision (2026-09-24, #1394, verbatim): *"na que solo
 pueda leerlo, la idea es seguir el tag de la instancia, si puede modifcar el de activos, pero no el de
@@ -1119,7 +1145,7 @@ route). The update needs `settings:manage` (administrators); the read needs **`a
   request to change the general / instance-wide scheme — never to make one asset's tag fit.
 - **The card** shows only the fields that change, before → after (`enabled`, `prefix`, `suffix`, `width`,
   `nextNumber`), plus the next tag before → after; a no-op is `INVALID_INPUT`. It names the scheme as its
-  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/instance`) with `precondition
+  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/asset-tags`) with `precondition
   { entity, updatedAt }`: any change in between — another edit, or the counter moving because an asset
   was auto-tagged — is `STALE`. A never-configured scheme reads back with `updatedAt` = now on every
   read, so it is anchored on a fixed instant (the epoch) instead. The warning is
@@ -1134,7 +1160,8 @@ route). The update needs `settings:manage` (administrators); the read needs **`a
 - **Every caller gets the rule:** `asset_create` and `asset_create_batch` say it too ("omit `assetTag`
   unless the person gives one: the instance tag scheme assigns it; never build one from a pattern"), since
   a caller without `asset:write` (and every Service Account) cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
-  `/settings/instance` (`entity-href.ts`), where the scheme editor lives.
+  `/settings/asset-tags` (`entity-href.ts`), where the scheme editor lives (it moved off
+  `/settings/instance` in #1533).
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
@@ -1336,6 +1363,74 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
     today and signals the bell with `NOTIFIES_USERS` on the card only;
   - the TOCTOU window between the approve-time precondition and the handler's write (§9, step 3) stays
     until the consumable write handlers accept an expected `updatedAt`.
+
+**Purchases tools as built (#1478, [[0099-purchases-scope-model-and-optionality]] §11 and §13 Phase 3).**
+Twenty-one tools in `tools/purchases.tools.ts` (domain `purchases`), every call through `rt.call` on the real
+`/purchase-orders`, `/suppliers`, `/assets/:id/purchase` and purchase-document routes, so each tool gets
+exactly the route's answer: `purchaseOrder:read` is denied to VIEWER by default, so a viewer is listed no
+purchase tool at all; a Service Account is listed what its grants admit (fail-closed). Purchases, lines and
+suppliers are taken **by id** (nothing about them is unique, D-D), found with `purchase_search` /
+`supplier_search` / `purchase_get`. Money is integer minor units in the purchase's free-text currency label,
+and the descriptions say so. Other-authored text — notes, line descriptions and brand / model text, event
+payloads, document names and labels, the document draft — is wrapped as untrusted content.
+
+- **Reads** (all channels): `purchase_search` (query, status, supplier, receipt, sort, page), `purchase_get`
+  (header, lines with received / cancelled / pending and receipt state, totals per currency label, and the
+  documents through `PurchaseOrderAttachmentsController.list`), `purchase_events` (payload untrusted),
+  `purchase_pending_lines`, `supplier_search`, `supplier_get`, `asset_purchase_get` (provenance: line,
+  header, the supplier's RMA contact, documents).
+- **`purchase_document_read`** (read, **chat only**) binds the extract route (`purchaseOrder:write` +
+  `ai:use`) and keeps all its gates: the route permission, the extraction service's human-only check (a chat
+  run is delegated as the user, so the service sees that person), the *Document extraction* switch, the
+  provider capability, the caps, its own limiters and the shared token budget. It answers the draft as ONE
+  `<untrusted_content>` block — values, the verbatim header evidence, and per line the text of a field left
+  blank — plus the extraction warnings and the read-only matches, and names the document as an entity ref of
+  type `purchaseDocument` (parent: the purchase). That ref is the untrusted-source marker of
+  `AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`: it marks the rest of the **conversation**, not only the turn
+  (the runtime re-reads it from the step records of every run, [[ai-assistant/provider-and-runtime|provider]]
+  §8.1). Its description tells the model to ask what is blank or ambiguous in ONE `request_input` form
+  (`optionsFrom: suppliers` / `consumables` / `assetModels` / `locations`) and then propose one
+  `purchase_create` or `purchase_update` card. It is a read because it changes no purchase data (it appends
+  `EXTRACTION_RUN` and a usage row, as the web flow does).
+- **Writes** (class `write`, all `neverAutoApprove`): `purchase_create` (the route's create body, lines
+  inline), `purchase_update`, `purchase_line_add`, `purchase_line_update`, `purchase_line_remove` (·D,
+  `SOFT_DELETE`; refused before a card while units were received), `supplier_create` (the card counts
+  suppliers already carrying the name — a hint, never a refusal), `supplier_update`, `purchase_link_assets`
+  (`apply` is required — `[]` links only; the card shows, per asset, the before → after of each applied field
+  that fills or replaces, from `linkPreview`), `purchase_receive` (`quantity` required; the card shows the
+  route's prefill — model, status, location (none when the purchase's delivery location is archived, as the
+  route applies none), company, purchase date = the invoice date else today, warranty
+  end, cost with its currency — and received before → after), `purchase_receive_stock` (`LEDGER_APPEND`),
+  `purchase_cancel_remaining`, `purchase_apply_license` (the card reads `licenseProposal`: seats before →
+  after, the renewal date), `purchase_create_from_assets` (the card reads each selected asset through
+  `GET /assets/:id` and lists the lines the route will derive — model or name, quantity, and the unit price
+  with its currency label only when the group shares it — and how many assets are left out). Warnings:
+  `CHANGES_MONEY` when the change sets or changes an amount (a priced line, a unit price, a quantity on a
+  priced line, a priced line removed, a relabelled currency, a cost copied onto assets, a purchase from
+  assets of which any has a cost); `CREATES_ASSETS` on `purchase_receive`. The document read answers
+  lazyit's warnings and matches before the document block, so a truncated draft keeps them. A card names
+  the records it references — a line's `assetModelId`, `consumableId` and `applicationId`, the header's
+  `deliveryLocationId`, a link's `modelId` before → after — as entity values `{ type, id, label }` in the
+  same slots, the label read through the caller's own route (`findOne` of the model, location, consumable or
+  application); a read the caller may not make, or one that fails, leaves `{ type, id }`, so a card never
+  shows a name its viewer could not read. A card's precondition is the purchase's version — for
+  a line action, the newer of the purchase's and the line's `updatedAt` (a line edit does not bump the
+  purchase), so either edit makes the approval `STALE`.
+- **Mutation weights** (SEC-081): `purchase_receive` = its `quantity` (the units it creates — which is why the
+  quantity is required), `purchase_link_assets` = its assets, `purchase_create` = 1 + its lines,
+  `purchase_create_from_assets` = 1 + its assets; the rest 1.
+- **On MCP and headless** the writes follow the catalog's convention: the MCP client owns the confirmation
+  and a Service Account runs within its grants, AI access setting and mutation cap (ADR-0097). The "never
+  auto-approved" rule is the chat's; there is no chat card to skip elsewhere.
+- **Unexposed**: archive / restore of purchases and suppliers (ADMIN lifecycle actions, done from the pages),
+  `unlinkAssets` (a correction, done from the pages), `extractionStatus` (the web's probe; the tool answers the
+  same refusals), document upload / download (no file tools) and label edit / delete (human-only routes).
+- **Labels**: the sentences are `purchase_*.action` / `.summary` and `supplier_*.action` / `.summary` in
+  `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
+  `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,
+  `location`, `purchaseCost`, `serials`, `consumable`, `cancelledQuantity`, `pendingQuantity`, `application`,
+  `seatsPurchased`, `renewalDate`, `licenseWarnings`, `suppliersWithThisName`, `notLinkable`, and the header
+  fields).
 
 **Workflow operations tools as built (W2-13).** Ten tools in `workflows.tools.ts`, domain `access`, every
 channel: seven reads (`workflow_search`, `workflow_get`, `workflow_connection_list`, `workflow_run_list`,
@@ -1541,7 +1636,7 @@ Mapping per channel:
   - the refs drive "Open ‹entity›" chips; the web builds the route from `type`/`id`/`slug` (`asset` →
     `/assets/{id}`, `article` → `/kb/{slug}`, `application` → `/applications/{id}`, `user` →
     `/users/{id}`, `location` → `/locations/{id}`, `consumable` → `/consumables/{id}`, `manualTask` →
-    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/instance` (#1394), `workflowRun` →
+    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/asset-tags` (#1394, #1533), `workflowRun` →
     `/applications/{parent.id}/workflows/runs/{id}`)
     [R18] and validates it with `safeInternalPath`;
   - **auto-navigation** happens only for an explicit `navigate`-kind tool, and only when no
@@ -1566,11 +1661,13 @@ skip classification). The preview carries:
 - `warnings[]` codes: `EXTERNAL_PROVISIONING`, `EXTERNAL_DEPROVISIONING`, `CASCADE_RELEASES_ASSIGNMENTS`,
   `CASCADE_REVOKES_GRANTS`, `ROLE_CHANGE`, `IDENTITY_CHANGE`, `PRIVILEGE_GRANT`, `CREDENTIAL_DELIVERY`,
   `LEDGER_APPEND`, `SOFT_DELETE`, `PUBLISHES_TO_READERS`, `VISIBILITY_CHANGE`, `NOTIFIES_USERS`,
-  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION`, `INSTANCE_CONFIGURATION` (`PUBLISHES_TO_READERS` …
+  `IRREVERSIBLE`, `OUTBOUND_INTEGRATION`, `CRITICAL_APPLICATION`, `INSTANCE_CONFIGURATION`, `CREATES_ASSETS`,
+  `CHANGES_MONEY` (`PUBLISHES_TO_READERS` …
   `IRREVERSIBLE` merge the frontend's `notes` vocabulary and the security note's destination-visibility
   requirement; `PRIVILEGE_GRANT` and `CREDENTIAL_DELIVERY` were added by W2-0 for the step-up rule below;
   the last two by W2-12 for the workflow engine, §7; `INSTANCE_CONFIGURATION` by #1394 for the asset
-  tag scheme — no step-up);
+  tag scheme — no step-up; `CREATES_ASSETS` and `CHANGES_MONEY` by #1478 for purchases — no step-up, never
+  auto-approved, and the web leaves such a page out of "Approve all");
 - `impacted[]` — entity type and count, with a short sample, for cascading or bulk effects;
 - `elevated` and `stepUpRequired` — `elevated` is the tool's class or an escalation decided here.
   **`stepUpRequired` is derived by core** (CEO decision 2026-09-24, #1315, "Opción 2"): step-up only for
@@ -1591,7 +1688,8 @@ skip classification). The preview carries:
 - `untrustedSources[]` — refs of the other-authored content read in this turn (the banner source). A turn
   in which the provider searched the web (#1389) also carries the `webSearch` marker
   (`AI_WEB_SEARCH_SOURCE_REF`, entity type `webSearch`, no page), so its proposals show the banner and are
-  never auto-approved;
+  never auto-approved. A purchase document read by `purchase_document_read` (#1478) adds a
+  `purchaseDocument` ref the same way, for every later turn of the conversation;
 - `precondition {entity, updatedAt}`.
 
 Storage and display:
@@ -1621,7 +1719,12 @@ token, never a tool. The request carries only the pending-action id, plus the pa
 > **and** fresh previews are not elevated, need no step-up and carry no `untrustedSources` (else 409
 > `AUTO_APPROVE_NOT_ELIGIBLE`); and the new-warnings rule of step 0 applies unchanged (`PREVIEW_CHANGED` /
 > `STEP_UP_REQUIRED`). Every refusal leaves the action
-> `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings). The
+> `AWAITING_APPROVAL`, and the runtime shows the card (reloaded, since core may have added warnings).
+> **Never automatic either (#1478; ADR-0099 §11, UX decision D11):** a tool registered `neverAutoApprove`
+> (every purchase write — core reads the flag from the registry at approve time, so neither the model nor
+> the stored row can lift it), and a preview carrying `CREATES_ASSETS` or `CHANGES_MONEY`
+> (`AI_NEVER_AUTO_APPROVE_WARNINGS`, `core/pending-action.ts`), whatever the tool; both answer
+> `AUTO_APPROVE_NOT_ELIGIBLE`. The
 > claim records `approvalMode = 'AUTO'` on the invocation; `APPROVED`, `EXECUTED` and `FAILED` carry
 > `approvalMode` (`USER` for a click), `approverUserId` (the owner who enabled the mode) and
 > `autoApproveEnabledAt`. A `STALE` target or a revoked permission fails exactly as for a click.

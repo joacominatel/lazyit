@@ -22,6 +22,8 @@ import { AiInputFormSchema } from '@lazyit/shared';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { LocationsController } from '../../locations/locations.controller';
+import { SuppliersController } from '../../purchase-orders/suppliers.controller';
+import { ConsumablesController } from '../../consumables/consumables.controller';
 import { validateToolsets } from '../core/boot-validation';
 import { AiToolExecutor } from '../core/tool-executor';
 import type { AiToolRuntime, HttpShape } from '../core/tool-descriptor';
@@ -499,6 +501,99 @@ describe('request_input — options from lazyit lists, read as the user', () => 
     );
   });
 
+  it('resolves suppliers and consumables (#1478): ids as values, the tax ID or SKU telling twins apart', async () => {
+    const purchaseAnswers = new Map<
+      Type<unknown>,
+      (shape?: HttpShape) => unknown
+    >([
+      [
+        SuppliersController,
+        () => ({
+          items: [
+            { id: 's1', name: 'Compumundo', taxId: '30-12345678-9' },
+            { id: 's2', name: 'Compumundo', taxId: null },
+          ],
+          total: 2,
+        }),
+      ],
+      [
+        ConsumablesController,
+        () => ({
+          items: [{ id: 'k1', name: 'Toner HP 26A', sku: 'TN-26A' }],
+          total: 1,
+        }),
+      ],
+    ]);
+    const input = requestInputSchema.parse({
+      ...base,
+      fields: [
+        {
+          key: 'supplier',
+          label: 'Supplier',
+          kind: 'select',
+          importance: 'required',
+          optionsFrom: 'suppliers',
+        },
+        {
+          key: 'consumable',
+          label: 'Consumable',
+          kind: 'select',
+          importance: 'optional',
+          optionsFrom: 'consumables',
+        },
+      ],
+    });
+    const rt = fakeRt(purchaseAnswers);
+    const { form } = await buildInputForm(input, rt);
+    expect(AiInputFormSchema.safeParse(form).success).toBe(true);
+    const byKey = Object.fromEntries(form.fields.map((f) => [f.key, f]));
+    expect(byKey.supplier).toMatchObject({ optionsFrom: 'suppliers' });
+    expect(byKey.supplier.options).toEqual([
+      { value: 's1', label: 'Compumundo (30-12345678-9)' },
+      { value: 's2', label: 'Compumundo' },
+    ]);
+    expect(byKey.consumable.options).toEqual([
+      { value: 'k1', label: 'Toner HP 26A (TN-26A)' },
+    ]);
+    // Read as the user through the bound list routes, a bounded page sorted by name.
+    expect(rt.calls.map((c) => c.controller).sort()).toEqual(
+      ['ConsumablesController', 'SuppliersController'].sort(),
+    );
+    for (const call of rt.calls) {
+      expect(call.shape?.query).toMatchObject({ sort: 'name', dir: 'asc' });
+    }
+  });
+
+  it('a supplier list the user cannot read refuses the whole form (the route decides)', async () => {
+    const rt = fakeRt(
+      new Map<Type<unknown>, (shape?: HttpShape) => unknown>([
+        [
+          SuppliersController,
+          () => {
+            throw new ForbiddenException(
+              'Missing permission purchaseOrder:read',
+            );
+          },
+        ],
+      ]),
+    );
+    const input = requestInputSchema.parse({
+      ...base,
+      fields: [
+        {
+          key: 'supplier',
+          label: 'Supplier',
+          kind: 'select',
+          importance: 'required',
+          optionsFrom: 'suppliers',
+        },
+      ],
+    });
+    await expect(buildInputForm(input, rt)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
   it('a list the user cannot read refuses the request (the route’s 403)', async () => {
     const input = requestInputSchema.parse({
       ...base,
@@ -797,7 +892,8 @@ describe('request_input — tolerant of what providers actually send (#1403)', (
     });
     expect(message).toBe(
       'Invalid input: fields.1: (select) needs its choices: add `options` (a list of strings) or ' +
-        '`optionsFrom` (one of manufacturers, assetCategories, locations, assetModels) — or ask with ' +
+        '`optionsFrom` (one of manufacturers, assetCategories, locations, assetModels, suppliers, ' +
+        'consumables) — or ask with ' +
         'kind "text" instead',
     );
   });

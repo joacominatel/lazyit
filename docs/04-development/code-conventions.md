@@ -3,7 +3,7 @@ title: Code Conventions
 tags: [development]
 status: draft
 created: 2026-05-25
-updated: 2026-09-07
+updated: 2026-10-06
 ---
 
 # Code Conventions
@@ -31,6 +31,13 @@ Conventions for application code. Data-model conventions live in [[conventions]]
 - **Integers backed by a Postgres `Int` column use `int4()`** from `@lazyit/shared`, never a bare
   `z.number().int()` — the latter inherits zod's safe-integer bounds, which overflow the column
   (P2020 → 500) and make Swagger UI autofill `MAX_SAFE_INTEGER` ([[0036-int4-bounded-integers]]).
+  **Money is the exception** ([[0100-money-as-64-bit-minor-units]]): money columns are Prisma `BigInt`
+  validated by the shared `money()` primitive — a JSON number in `[0, Number.MAX_SAFE_INTEGER]` that
+  always carries an OpenAPI `example`. Prisma returns a `bigint`, which `JSON.stringify` refuses, so the
+  service converts every row it returns (`assetMoneyToWire` / `applicationMoneyToWire` in
+  `apps/api/src/common/money.ts`) and every body it writes (`…MoneyToDb`). A new money column gets the
+  same pair of helpers there, and a test that reads it back over HTTP; there is no global
+  `BigInt.prototype.toJSON`.
 - **Soft delete is automatic** ([[0032-soft-delete-middleware]]): a Prisma `$extends` filter scopes
   reads on soft-deletable models to `deletedAt: null` — don't re-add manual `where: { deletedAt: null }`
   guards. Use `findFirst` (not `findUnique`) for soft-delete-aware lookups by id; pass
@@ -82,13 +89,19 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
   else. Everything outside that module stays heroicons.
 - **Chrome primitives — compose, don't re-implement.** The page-frame patterns were copy-pasted
   ~16× and drifted (title scale `text-2xl` vs `text-3xl`; ad-hoc "Back to X" ghost buttons;
-  unnamed search/filter inputs). Three shared primitives now own them:
+  unnamed search/filter inputs). Shared primitives now own them:
   - `components/page-header.tsx` — `PageHeader` ({ `title`, `subtitle?`, `breadcrumb?`,
     `actions?`, `badge?` }). The **only** sanctioned page title; the scale is fixed inside it.
     Never hand-roll an `<h1 className="text-2xl/3xl …">` page title — compose this.
   - `components/breadcrumb.tsx` — `Breadcrumb` (route-driven via `usePathname`; pass explicit
     `items` on detail pages to surface a record's real name). Rendered once at the app-shell
     layout level; it **replaces** per-page "Back to X" buttons.
+  - `components/record-page.tsx` — the record-page frame for detail pages (`RecordHero`,
+    `RecordAttention`, `RecordFacts`, `RecordLayout`, `useRecordTab`), used by `assets/[id]` and
+    `users/[id]`. Layout rules: [[ledger-design-language]] §4b.
+  - `components/settings-section.tsx` — the Settings page primitives (`SettingsSection`,
+    `SettingsStatus`, `SettingRow`, `SettingLabel`, `SettingsSaveBar`), used by every `/settings/*`
+    form page. Text rules and frame: [[ledger-design-language]] §4c.
   - `components/search-input.tsx` — `SearchInput` ({ `value`, `onChange`, optional
     `debounceMs`+`onDebouncedChange`, `label` (default "Search"), `placeholder`, clearable }).
     Carries an accessible name by default — list filters must name their search box.
@@ -111,7 +124,9 @@ Structured logging is **Pino** via **`nestjs-pino`** ([[0031-logging-strategy]])
     traps `position: sticky` descendants in a containing block) · `animate-pulse-soft` (the ONE
     calm attention heartbeat — danger dots only) · `animate-shimmer` (skeleton sweep, composed
     at call sites — never edit `ui/skeleton.tsx`) · `animate-check-draw` (success-check; the
-    only `--ease-spring` use). All collapse to instant under `prefers-reduced-motion` via the
+    only `--ease-spring` use) · `animate-doc-scan` (a line sweeping a document while the AI reads
+    it — a loading loop; its call site also hides it with `motion-reduce:hidden`, and it rests off
+    the box so a collapsed run leaves nothing behind). All collapse to instant under `prefers-reduced-motion` via the
     single consolidated block in globals.css. Easing/duration tokens: `--ease-out-quad` /
     `--ease-spring` / `--dur-fast|base|slow`. `app/(app)/template.tsx` gives every route a
     free `fade-in` cross-route settle (opacity only — sticky-safe).

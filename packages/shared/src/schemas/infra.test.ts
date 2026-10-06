@@ -39,6 +39,7 @@ import {
   InfraNodeListItemSchema,
   InfraNodeSchema,
   InfraShortcutSchema,
+  InfraShortcutWriteSchema,
   inferNodeKind,
   isContainerChildExternalId,
   IpAddressSchema,
@@ -81,6 +82,56 @@ describe("InfraShortcutSchema (url validation)", () => {
     expect(
       InfraShortcutSchema.safeParse({ label: "", url: "https://ok.example" }).success,
     ).toBe(false);
+  });
+});
+
+// SEC-086 (#1327): executable schemes are refused on write; SSH and console links stay valid (ADR-0070).
+describe("InfraShortcut url scheme guard (SEC-086)", () => {
+  const EXECUTABLE = [
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "java\tscript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "file:///etc/passwd",
+    "blob:https://evil.example/uuid",
+    "javascript&#58;alert(1)",
+  ];
+  const ALLOWED = [
+    "https://nas.local:5001",
+    "http://10.0.0.5:8006",
+    "ssh://root@pve1.lan",
+    "rdp://win-dc01",
+    "vnc://10.0.0.9:5900",
+  ];
+  const shortcuts = (url: string) => [{ label: "x", url }];
+
+  test("refuses executable schemes on create and update", () => {
+    for (const url of EXECUTABLE) {
+      expect(InfraShortcutWriteSchema.safeParse({ label: "x", url }).success).toBe(false);
+      expect(
+        CreateInfraNodeSchema.safeParse({ kind: "VM", label: "n", shortcuts: shortcuts(url) }).success,
+      ).toBe(false);
+      expect(UpdateInfraNodeSchema.safeParse({ shortcuts: shortcuts(url) }).success).toBe(false);
+    }
+  });
+
+  test("keeps web, SSH and console links", () => {
+    for (const url of ALLOWED) {
+      expect(UpdateInfraNodeSchema.safeParse({ shortcuts: shortcuts(url) }).success).toBe(true);
+    }
+  });
+
+  test("still refuses unknown keys on a written shortcut", () => {
+    expect(
+      InfraShortcutWriteSchema.safeParse({ label: "x", url: "https://ok.example", extra: 1 }).success,
+    ).toBe(false);
+  });
+
+  test("the read shape still loads a legacy executable-scheme shortcut", () => {
+    expect(InfraShortcutSchema.safeParse({ label: "x", url: "javascript:alert(1)" }).success).toBe(
+      true,
+    );
   });
 });
 

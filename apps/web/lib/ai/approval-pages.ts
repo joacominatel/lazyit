@@ -1,4 +1,4 @@
-import type { AiMessagePart } from "@lazyit/shared";
+import { AI_NEVER_AUTO_APPROVE_WARNINGS, type AiMessagePart } from "@lazyit/shared";
 import type { DecisionErrorKind } from "./error-kinds";
 import { STEP_UP_WARNINGS } from "./error-kinds";
 import { groupMessageParts, type MessageItem, type ToolPart } from "./tool-groups";
@@ -181,14 +181,17 @@ export function clampPage(page: number, count: number): number {
  * - `stepUp`: it needs the user's password (the server asks for it, or a step-up warning is on it —
  *   roles, identity, privileges, credentials, a critical application);
  * - `elevated`: a sensitive change (security.md G4 — no batch approval of elevated cards);
+ * - `assetsOrMoney`: it creates assets or sets or changes an amount of money — a warning in
+ *   the shared `AI_NEVER_AUTO_APPROVE_WARNINGS`, which core never auto-approves either (ADR-0099 §11 and its
+ *   Phase 3 decisions, UX decision D11); the page itself still approves with a click and no password;
  * - `needsReview`: a decision on it was refused (STALE, preview changed, expired…) — the page shows why.
  *
  * A change proposed after reading content other people wrote IS covered (CEO decision, #1409): each
  * page still shows its "Based on content written by others" banner.
  */
-export type BulkExclusion = "stepUp" | "elevated" | "needsReview";
+export type BulkExclusion = "stepUp" | "elevated" | "assetsOrMoney" | "needsReview";
 
-export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "needsReview"];
+export const BULK_EXCLUSIONS: readonly BulkExclusion[] = ["stepUp", "elevated", "assetsOrMoney", "needsReview"];
 
 /** Why a still-waiting change can't be decided in bulk, or null when it can. Pure. */
 export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclusion | null {
@@ -202,6 +205,9 @@ export function bulkExclusion(part: ApprovalPart, state: PagerState): BulkExclus
     return "stepUp";
   }
   if (request.elevated || preview.elevated || preview.class === "elevated") return "elevated";
+  if (preview.warnings.some((code) => (AI_NEVER_AUTO_APPROVE_WARNINGS as readonly string[]).includes(code))) {
+    return "assetsOrMoney";
+  }
   if (state.errors[request.toolCallId] !== undefined) return "needsReview";
   return null;
 }

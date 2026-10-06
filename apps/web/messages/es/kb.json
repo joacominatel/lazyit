@@ -396,5 +396,31 @@
       "saved": "Reglas de acceso guardadas",
       "saveError": "No se pudieron guardar las reglas de acceso"
     }
+  },
+  "moveAudience": {
+    "cancel": "Cancelar",
+    "confirmWidens": "Mover y ampliar el acceso",
+    "confirmChanges": "Mover y cambiar el acceso",
+    "topLevel": "el primer nivel",
+    "article": {
+      "widens": {
+        "title": "¿Hacer este artículo legible para todos?",
+        "description": "“{name}” sale de una carpeta restringida hacia {destination}, que no tiene ninguna restricción. Todos los que pueden leer la base de conocimiento podrán leer este artículo."
+      },
+      "changes": {
+        "title": "¿Cambiar quién puede leer este artículo?",
+        "description": "“{name}” se mueve a {destination}, que está restringida por otras reglas de acceso. El artículo pasará a seguir las reglas de esa carpeta, y esto puede permitir que más personas lo lean."
+      }
+    },
+    "folder": {
+      "widens": {
+        "title": "¿Hacer legibles para todos los artículos de esta carpeta?",
+        "description": "“{name}” sale de una carpeta padre restringida hacia {destination}, donde nada la restringe. Todos los que pueden leer la base de conocimiento podrán leer sus artículos. Las subcarpetas con reglas de acceso propias siguen restringidas por esas reglas."
+      },
+      "changes": {
+        "title": "¿Cambiar quién puede leer los artículos de esta carpeta?",
+        "description": "“{name}” se mueve a {destination}, que hereda otras reglas de acceso. Los artículos que contiene, y los de sus subcarpetas, seguirán las reglas de la nueva ubicación, y esto puede permitir que más personas los lean."
+      }
+    }
   }
 }

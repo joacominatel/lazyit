@@ -2,6 +2,7 @@ import {
   AI_PROVIDER_DESCRIPTORS,
   AI_WEB_SEARCH_MAX_USES_MAX,
   AI_WEB_SEARCH_MAX_USES_MIN,
+  aiDocumentExtractionMediaTypes,
   aiWebSearchSupported,
   type AiConnectionDraft,
   AiConnectionTestResultSchema,
@@ -552,6 +553,25 @@ export function parseWebSearchMaxUses(raw: string): number | null {
   return value !== null && value >= AI_WEB_SEARCH_MAX_USES_MIN && value <= AI_WEB_SEARCH_MAX_USES_MAX
     ? value
     : null;
+}
+
+/* ─────────────────────────────── document extraction (#1477) ─────────────────────────────── */
+
+/**
+ * Whether purchase document extraction can work with the saved configuration, and if not, why — the key under
+ * `aiSettings.documentExtraction.availability` (ADR-0099 §11):
+ *   - `available`           — the assistant is on and its provider reads documents;
+ *   - `aiOff`               — the assistant is off (extraction needs it on as well as its own switch);
+ *   - `providerUnsupported` — the provider reads no documents (OpenAI-compatible).
+ * The switch stays usable while on, so an admin can always turn it off. The API applies the same rule.
+ */
+export type DocumentExtractionAvailability = "available" | "aiOff" | "providerUnsupported";
+
+export function documentExtractionAvailability(
+  settings: Pick<AiSettings, "enabled" | "provider">,
+): DocumentExtractionAvailability {
+  if (!settings.enabled || !settings.provider) return "aiOff";
+  return aiDocumentExtractionMediaTypes(settings.provider).length > 0 ? "available" : "providerUnsupported";
 }
 
 /* ─────────────────────────────── numbers ─────────────────────────────── */

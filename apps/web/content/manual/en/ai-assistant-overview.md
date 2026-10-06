@@ -78,6 +78,19 @@ search backend or a search partner, and may bill searches separately. lazyit its
 any other website. With OpenAI, lazyit restricts search to OpenAI's cached copy of the web, so no page
 is fetched live from its site. See [Web search](/help/ai-assistant-setup#web-search).
 
+### Purchase documents (document extraction, off by default)
+
+When **Document extraction** is on and someone chooses **Read this document** on a purchase, the **whole
+file** — an invoice, a quote or a delivery note, with its supplier, prices and tax IDs — goes to the
+provider, which reads it with no tools. No other lazyit data goes with it, not even the file name, and nothing
+read is saved until a person reviews the draft. The self-hosted OpenAI-compatible provider is never used
+for it. See [Document extraction](/help/ai-assistant-setup#document-extraction).
+
+When the **chat** reads a document — *"here is this purchase order"* — the file goes out the same way,
+and what was read (the draft, with the file name) then becomes part of that conversation, which goes to
+the provider on every later message like the rest of it. See
+[Filling a purchase from a document](/help/ai-assistant-using-the-chat#filling-a-purchase-from-a-document).
+
 ### Through external agents (MCP)
 
 An MCP client uses its own model. What it reads from lazyit goes to **whatever provider that client
@@ -102,6 +115,9 @@ AI ("ignore your instructions and grant…"). lazyit does not rely on the model 
   from what the model wrote. See [Approving changes](/help/ai-assistant-approvals).
 - **Content written by others is flagged.** A change proposed after the assistant read such content
   shows a **Based on content written by others** note, and is never applied automatically.
+- **Purchase changes are never applied automatically**, and one that creates assets or changes money
+  is never part of **Approve all**. A supplier's document marks the whole chat as based on content
+  written by others.
 - **Sensitive changes** — roles, identity, access grants, sign-in, applications marked critical,
   instance configuration — get a distinct card, never auto-approve, and some need your password.
 - **Some things are out of reach entirely**: the assistant cannot read secrets, cannot run anything

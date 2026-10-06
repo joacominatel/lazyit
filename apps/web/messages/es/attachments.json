@@ -29,6 +29,17 @@
     "deleteConfirmTitle": "¿Eliminar documento?",
     "deleteConfirmDescription": "«{name}» se quitará de este activo. Esto no se puede deshacer desde aquí.",
     "deleteCancel": "Cancelar",
-    "deleteConfirm": "Eliminar"
+    "deleteConfirm": "Eliminar",
+    "deleteConfirmDescriptionPurchase": "«{name}» se quitará de esta compra y de los activos que lo muestran. Esto no se puede deshacer desde aquí.",
+    "nextLabel": "Tipo (opcional)",
+    "label": "Tipo de documento",
+    "labelPlaceholder": "Factura, remito…",
+    "labelTooLong": "Un tipo de documento tiene como máximo {max} caracteres.",
+    "editLabelAria": "Editar el tipo de {name}",
+    "saveLabel": "Guardar tipo",
+    "cancelLabel": "Cancelar",
+    "labelSaved": "Tipo de documento guardado.",
+    "labelCleared": "Tipo de documento quitado.",
+    "labelError": "No se pudo guardar el tipo de documento."
   }
 }

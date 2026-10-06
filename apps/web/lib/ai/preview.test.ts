@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatPreviewValue, humanizeKey, presentPreview } from "./preview";
+import { formatPreviewValue, humanizeKey, isRecordArray, presentPreview } from "./preview";
 
 describe("presentPreview", () => {
   test("the action row comes first, as a sentence, and is not a field row", () => {
@@ -111,5 +111,105 @@ describe("presentPreview with sentences (#1384)", () => {
       render,
     );
     expect(model.rows[0]!.after).toEqual({ kind: "redacted" });
+  });
+});
+
+describe("purchase cards (#1478)", () => {
+  test("money is { amount, currency }: integer minor units with a free-text label", () => {
+    expect(formatPreviewValue({ amount: 150000, currency: "ARS" })).toEqual({
+      kind: "money",
+      minor: 150000,
+      currency: "ARS",
+    });
+    expect(formatPreviewValue({ amount: 999, currency: null })).toEqual({ kind: "money", minor: 999, currency: null });
+    expect(formatPreviewValue({ amount: 5 })).toEqual({ kind: "money", minor: 5, currency: null });
+    expect(formatPreviewValue({ amount: 5, currency: "<untrusted_content> USD </untrusted_content>" })).toEqual({
+      kind: "money",
+      minor: 5,
+      currency: "USD",
+    });
+    // An unknown amount (an asset without a cost) is empty, not zero.
+    expect(formatPreviewValue({ amount: null, currency: "ARS" })).toEqual({ kind: "empty" });
+    // Not money: a fractional amount, extra keys, a string amount.
+    expect(formatPreviewValue({ amount: 1.5, currency: "ARS" }).kind).toBe("text");
+    expect(formatPreviewValue({ amount: 1, currency: "ARS", note: "x" }).kind).toBe("text");
+    expect(formatPreviewValue({ amount: "1", currency: "ARS" }).kind).toBe("text");
+  });
+
+  test("money rows keep their before → after", () => {
+    const model = presentPreview({
+      changes: [
+        {
+          field: "unitPrice",
+          before: { amount: 100000, currency: "ARS" },
+          after: { amount: 120000, currency: "ARS" },
+          valueKind: "text",
+        },
+      ],
+    });
+    expect(model.rows[0]).toEqual({
+      field: "unitPrice",
+      before: { kind: "money", minor: 100000, currency: "ARS" },
+      after: { kind: "money", minor: 120000, currency: "ARS" },
+    });
+  });
+
+  test("a create's lines are a table; one added line is a one-row table", () => {
+    const line = { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: { amount: 150000, currency: "ARS" } };
+    const created = presentPreview({ changes: [{ field: "lines", after: [line, { ...line, unitPrice: null }] }] });
+    expect(created.rows[0]!.records).toHaveLength(2);
+    const added = presentPreview({ changes: [{ field: "line", after: line }] });
+    expect(added.rows[0]!.records).toEqual([line]);
+  });
+
+  test("a removed line shows the line it removes", () => {
+    const line = { description: "Notebook", kind: "ASSET", quantity: 2, unitPrice: null };
+    const removed = presentPreview({ changes: [{ field: "line", before: line, after: null }] });
+    expect(removed.rows[0]!.records).toEqual([line]);
+  });
+
+  test("only the single-record fields become a one-row table; other objects stay a value", () => {
+    const model = presentPreview({ changes: [{ field: "trigger", after: { event: "x" } }] });
+    expect(model.rows[0]!.records).toBeUndefined();
+    const money = presentPreview({ changes: [{ field: "line", after: { amount: 1, currency: "ARS" } }] });
+    expect(money.rows[0]!.records).toBeUndefined();
+  });
+});
+
+describe("money in lists (#1478)", () => {
+  test("a list of amounts keeps every amount; it is never a table or empty", () => {
+    const value = [{ amount: 100, currency: "ARS" }, { amount: 250, currency: "USD" }];
+    expect(isRecordArray(value)).toBe(false);
+    expect(formatPreviewValue(value)).toEqual({
+      kind: "list",
+      items: [
+        { kind: "money", minor: 100, currency: "ARS" },
+        { kind: "money", minor: 250, currency: "USD" },
+      ],
+    });
+    expect(formatPreviewValue([{ amount: null, currency: "ARS" }])).toEqual({ kind: "empty" });
+  });
+});
+
+describe("purchase header refs (#1478)", () => {
+  test("the delivery location reads by name, or by id when the viewer could not read it", () => {
+    const named = presentPreview({
+      changes: [
+        {
+          field: "deliveryLocationId",
+          before: { type: "location", id: "l1" },
+          after: { type: "location", id: "l2", label: "HQ" },
+          valueKind: "entity",
+        },
+      ],
+    });
+    expect(named.rows[0]).toEqual({
+      field: "deliveryLocationId",
+      before: { kind: "text", text: "l1", untrusted: false },
+      after: { kind: "text", text: "HQ", untrusted: false },
+    });
+    // An older pending card sent the raw id.
+    const raw = presentPreview({ changes: [{ field: "deliveryLocationId", after: "l2" }] });
+    expect(raw.rows[0]!.after).toEqual({ kind: "text", text: "l2", untrusted: false });
   });
 });

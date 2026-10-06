@@ -60,11 +60,7 @@ export const AI_SECRET_CIPHER = Symbol('AI_SECRET_CIPHER');
 
 /** What happened to the stored provider key on a write — the only key fact the audit ever records. */
 export type AiKeyAction =
-  | 'kept'
-  | 'set'
-  | 'cleared'
-  | 'cleared-destination-changed'
-  | 'none';
+  'kept' | 'set' | 'cleared' | 'cleared-destination-changed' | 'none';
 
 /** The fields a model call depends on. Any change to them invalidates `verifiedAt`. */
 interface ConnectionFields {
@@ -308,6 +304,11 @@ export class AiSettingsService implements AiSettingsReader {
         requested.webSearchMaxUses ??
         row?.webSearchMaxUses ??
         AI_SETTINGS_DEFAULTS.webSearchMaxUses,
+      // Document extraction (#1477) is optional on the wire the same way: omitted keeps the stored value.
+      documentExtractionEnabled:
+        requested.documentExtractionEnabled ??
+        row?.documentExtractionEnabled ??
+        AI_SETTINGS_DEFAULTS.documentExtractionEnabled,
     };
     assertConnectionShape(input);
 
@@ -456,6 +457,7 @@ export class AiSettingsService implements AiSettingsReader {
       mcpAllowAnyHttpsClient: input.mcpAllowAnyHttpsClient,
       webSearchEnabled: input.webSearchEnabled,
       webSearchMaxUses: input.webSearchMaxUses,
+      documentExtractionEnabled: input.documentExtractionEnabled,
       verifiedAt,
       disclosureAcknowledgedAt,
       ...(acknowledgingNow ? { disclosureAcknowledgedById: actorId } : {}),
@@ -593,6 +595,7 @@ export class AiSettingsService implements AiSettingsReader {
         row.webSearchMaxUses <= AI_WEB_SEARCH_MAX_USES_MAX
           ? row.webSearchMaxUses
           : AI_SETTINGS_DEFAULTS.webSearchMaxUses,
+      documentExtractionEnabled: row.documentExtractionEnabled,
       disclosureAcknowledgedAt:
         row.disclosureAcknowledgedAt?.toISOString() ?? null,
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
@@ -838,12 +841,14 @@ const PLAIN_AUDIT_FIELDS = [
   'mcpClientAllowlistRemovedDefaults',
   'webSearchEnabled',
   'webSearchMaxUses',
+  'documentExtractionEnabled',
 ] as const;
 
 /** Fields a write may omit (they keep their stored value). */
 const OPTIONAL_AUDIT_FIELDS: ReadonlySet<string> = new Set([
   'webSearchEnabled',
   'webSearchMaxUses',
+  'documentExtractionEnabled',
 ]);
 
 /**

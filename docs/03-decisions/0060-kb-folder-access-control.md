@@ -192,6 +192,30 @@ The rule set is stored as a small, zod-validated structure on the folder (the
 reviewable vocabulary, not free-form policy). The concrete column/table shape lands with [[folder]] in
 [[0059-kb-folders-links-and-import]]; this ADR fixes the **rule vocabulary and OR semantics**.
 
+> [!note] Amendment — 2026-09-10, decided by the CEO, implemented in #1299
+> **The rule CONTENT is `settings:manage`-gated; the rule's EXISTENCE is not.** The stored
+> `accessRules` — who is let in, by which kind, naming which users, role, application or asset — stays
+> readable **only** to a `settings:manage` holder on a folder read (#554), unchanged. Beside it, the
+> folder read now carries a **derived boolean**, **`hasAccessRules`**, readable by **any**
+> `category:read` caller, VIEWER included:
+>
+> - It is **derived, never stored** — computed at read time from `accessRules` through the *same*
+>   `FolderAccessService` resolution the §4 evaluator uses, so "restricted" has exactly **one**
+>   definition (`null`/empty = PUBLIC per §2; a non-empty rule list restricts; a malformed stored
+>   value counts as restricted, fail-closed). No column, no migration.
+> - It carries **one bit and nothing else**: not the rule kinds, not the user list, not the role, not
+>   any count. There is no path from `true` back to the rule.
+> - It is a statement about the **folder**, not about the **reader**. `true` does not mean "you cannot
+>   see this" — a caller who is inside the rule reads the folder normally and still sees `true`.
+>
+> **What this widens, stated plainly.** A VIEWER can now learn that a folder they *can* read carries a
+> restriction. (That a folder they *cannot* read is restricted was already inferable: its
+> `articleCount` comes back `null`, which only ever happens for a folder the caller fails §4.) The
+> existence of a boundary is disclosed; its content is not. This is a deliberate, bounded relaxation
+> of the §3 gate, not its removal — and the alternative (leaving an author unable to tell that a move
+> changes an article's audience) was judged the worse security outcome, since the confirmation §9
+> requires cannot be rendered without it.
+
 ### §4. Composition / precedence — most restrictive wins
 
 To **read** an article, **all** of the following must hold (AND):
@@ -343,11 +367,38 @@ pass §4 on the *destination*.
 >   — may you author into a space you cannot see? — and was not part of this decision.
 > - **Aliasing** an article into a destination folder the actor cannot read (`POST /articles/:id/aliases`)
 >   is likewise unchecked on the *destination* side; §6 today only re-checks the *target article*.
-> - The frontend cannot compute folder visibility itself, and the only public-vs-restricted signal on
->   a folder read (`accessRules`) is gated to `settings:manage` holders (#554), so an ordinary author
->   currently has **no** way to tell that a move widens access. Exposing a minimal derived
->   "restricted" flag to every `category:read` caller would relax that deliberate gate and is its own
->   decision — the UI confirmation depends on it.
+> - ~~The frontend cannot tell whether a folder is restricted, so the widening confirmation cannot be
+>   rendered.~~ **RESOLVED — see the amendment below.**
+
+> [!success] Resolved — 2026-09-10, decided by the CEO, implemented in #1299
+> **The signal the confirmation needs: expose only "a rule exists", yes/no.**
+>
+> The open question above was: the frontend cannot compute folder visibility itself, and the only
+> public-vs-restricted signal on a folder read (`accessRules`) is `settings:manage`-gated (#554), so
+> an ordinary author had **no** way to tell that a move widens access — while §9 requires exactly
+> that confirmation.
+>
+> Three shapes were put to the CEO: return the rules to every reader; return a per-caller "you can
+> read this folder" verdict; or return a bare existence flag. **The CEO chose the bare flag**, and it
+> is now the derived `hasAccessRules` boolean specified in the §3 amendment: it says whether the
+> folder is restricted, **never who has access nor what the rule is**, and any holder of folder read —
+> including a VIEWER — may see it.
+>
+> **The reasoning, accepted as decided.** It leaks the *existence* of a restriction, not its content —
+> and whoever is moving the article can already read **both** folders anyway (§9's destination check
+> guarantees the destination; the article's own write gate guarantees the source), so the flag tells
+> the actor nothing about a space they could not already see. Returning the rules themselves would
+> hand every VIEWER the membership of every restricted folder — a real disclosure, and the gate #554
+> exists to prevent. A per-caller verdict would be a *second* visibility evaluator on the wire,
+> answering a question the client is not entitled to ask about folders it is not moving into.
+>
+> The flag is an **additive, read-only, derived** field: existing rows compute it from data they
+> already carry, nothing is backfilled, and no write path changes. A web build predating the field
+> ignores it; a server predating it omits it, and the client must read an absent value as *unknown*,
+> never as *public*.
+>
+> **Still open, unchanged by this amendment:** the two blind-write findings above (`POST /articles`
+> into an unreadable folder, and the unchecked alias destination) remain separate product calls.
 
 ## Consequences
 

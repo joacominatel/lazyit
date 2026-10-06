@@ -3,7 +3,7 @@ title: "AI Assistant — Provider layer, agent runtime, configuration lifecycle,
 tags: [design, ai-assistant, backend, llm, providers, agent-loop, bullmq, sse, infra, security]
 status: draft
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-05
 ---
 
 # AI Assistant — Provider layer, agent runtime, configuration lifecycle, infrastructure
@@ -719,6 +719,9 @@ Rules [C]:
     stop, and propose the next batch once the person has decided, until done, never proposing the same
     change twice; and prefer a tool that proposes many similar changes as one card (described in words,
     never by name);
+  - custom asset statuses (#1524, `AI_PROMPT_VERSION` 7, every channel — a primer change): an asset always
+    has a built-in status, and an optional team-defined custom status maps to one and sets it
+    ([[0101-custom-asset-statuses]]); the tool descriptions carry the detail;
   - the principal block: display name, kind, role, sorted permission list, channel, locale;
   - an optional admin-authored `instructions` text from `AiSettings`.
 - **Provider-native web search (#1389; ADR-0097 decision 3 as amended 2026-09-24).** Frozen like the
@@ -758,6 +761,65 @@ Rules [C]:
   are no provider fallback chains.
 - **Retries.** Transient provider errors are retried by the SDK (`maxRetries: 2`). The worker never
   retries a run; the BullMQ job uses `attempts: 1`. **A write is never retried automatically.**
+
+### 6.5 Structured extraction of a purchase document (as built, #1477)
+
+[[0099-purchases-scope-model-and-optionality]] §11 asks for one call shape the chat never makes: read **one
+file** and answer with **data in a fixed shape**, no tools. It is its own port, not a chat step.
+
+- **The port.** `StructuredExtractionPort.extractStructured({ model, instructions, prompt, file: { data,
+  mediaType }, schema, schemaName, maxOutputTokens, abortSignal })` (`core/ports/structured-extraction.port.ts`,
+  token `STRUCTURED_EXTRACTION_PORT`), implemented by `AiSdkChatModel` — the same class, connection read and
+  provider pin as `step`. It reads `resolveProviderConfig()` on every call and refuses
+  (`CONVERSATION_READ_ONLY`) when the configured provider **or model** differs from the one the caller checked
+  the capability for, so a document is never sent to a destination it was not checked for. It is a sibling
+  of `ChatModelPort`, not a method on it: the agent loop never extracts, and the chat fakes stay untouched.
+- **The call** (`providers/structured-extraction.ts`): `generateText` with `output: Output.object({ schema,
+  name })` and the file as an inline `file` part (bytes, server-sniffed media type, **no filename** — it is
+  user-supplied text). There is **no `tools` key**: no lazyit tool is declared, so whatever the document says,
+  the model can only answer with data in the schema's shape (INV-AI-4). A provider may carry structured output
+  in a synthetic JSON tool of its own (Anthropic's `jsonTool` mode on models without native structured
+  output); it has no executor and only holds the answer. Everything else is the step's posture: the provider
+  definition builds the model over the egress-guarded fetch (INV-AI-7), the key is checked before any I/O,
+  `experimental_download` refuses every URL, telemetry is off, the definition's call settings apply (effort,
+  OpenAI `store: false`, Anthropic cache hints). An answer that does not fit the schema
+  (`NoObjectGeneratedError`) throws `AiStructuredOutputError` carrying only its usage; any other failure is
+  classified as a step's is, with no provider body.
+- **The schema the model fills** is transcription only: every property required and nullable, no bounds —
+  the shape every provider's strict structured-output mode accepts (OpenAI's refuses optional properties).
+  Amounts and quantities are **literal text**; dates are a `YYYY-MM-DD` reading plus the printed text; every
+  field carries `text` and `page`. The fixed instructions say the document is untrusted data and must only
+  be transcribed, never followed.
+- **lazyit reads the values** (`purchase-orders/extraction/`): amounts from the literal text in the
+  document's own number format (`1.234,56` and `1,234.56` → minor units), the decimal separator inferred
+  from every amount the document prints; a literal that reads two ways (`1.150`) with nothing to settle it
+  is left **blank** and flagged — never guessed. A trailing minus is a negative (not read); `$ 1.500.-` (the
+  whole-amount mark) is 1500; space-grouped thousands must be real groups of three. Numeric dates are read
+  from the text in the document's day/month order, and one that still reads two ways is blank
+  (`DATE_AMBIGUOUS`), whatever the model read; written dates keep the model's reading only when the year and
+  day are printed. A value with no printed evidence is dropped. Cross-checks become warnings, never
+  corrections: quantity × unit price against the printed line total, and the lines against the printed net
+  and gross only when every line has both.
+- **Which providers.** `aiDocumentExtractionMediaTypes(provider)` (`@lazyit/shared`): Anthropic and OpenAI
+  (Responses API) read PDF, PNG, JPEG, WebP and GIF, Gemini the same but GIF; the **OpenAI-compatible provider
+  reads nothing** for extraction — there is no common file API across those servers and most local models cannot
+  read a PDF. A model of a supported provider that cannot read files fails at the provider, with nothing
+  saved.
+- **Limits.** The document ≤ 10 MB, or less where the provider takes less for its type
+  (`aiDocumentExtractionMaxBytes`: Anthropic images ≤ 10 MB base64-encoded, 7 864 320 bytes raw), and ≤ 20 PDF
+  pages (counted best-effort from the file's page objects) — all checked before anything is sent. A 120 s
+  deadline (`AbortSignal.timeout` → `EXTRACTION_TIMEOUT`). Output ≤ min(`maxOutputTokens`, 16 000); at about
+  180 tokens a line plus 1 000 for the rest, the model is asked for at most `extractionLineLimit` lines (80 at
+  16 000, never under 10) and to set `moreLines` past them (`LINES_TRUNCATED`). One extraction in flight per
+  person and 5 started a minute (the service's own in-memory limiters, not the chat's). The caller's
+  `dailyTokenLimitPerPrincipal` is checked first (`BUDGET_EXCEEDED`, 429) and the call's usage is written to
+  `ai_usage` (`runId` = the extraction id), so extraction and chat share one budget.
+- **Gates and records.** Human callers only, holding `purchaseOrder:write` and `ai:use`; the assistant
+  usable, the `documentExtractionEnabled` switch on ([[ai-settings]]), the provider reading the type. One
+  `ai.extraction.finish` log line per run (ids, provider, model, latency, token and line counts, outcome —
+  never content) and one `EXTRACTION_RUN` [[purchase-order-event]] (metadata only) whenever the document may
+  have reached the provider — on success and on a failure after the request, not on a failure before any I/O
+  (`AI_DISABLED`, `CONVERSATION_READ_ONLY`, `PROVIDER_AUTH` without an HTTP status).
 
 ## 7. Data model sketch (additive Prisma)
 
@@ -1033,7 +1095,9 @@ three kinds of runtime record, role `system`, never sent to the model:
   step (the run row has no column for it, and the job carries only `{ runId }`);
 - `lazyit-step-v1` `{ stepIndex, calls, outcomes, untrustedSources }` — written with a step's assistant
   message (its calls) and again when the step pauses (the read results already known, and the pending
-  invocation ids); the latest record of a step wins;
+  invocation ids); the latest record of a step wins. A step that read a source marking the whole
+  conversation (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`: a purchase document read by extraction, #1478) and
+  pauses for nothing is re-recorded too, just before its tool message, so later turns find the source;
 - `lazyit-web-search-v1` `{ stepIndex, searches, queries, sources }` (#1389) — written right after a step's
   assistant message when the provider searched the web in it: the sources the web shows under that
   message (the provider message does not keep them) and the run's record of the search.
@@ -1087,7 +1151,11 @@ through the descriptor's `mutationWeight`, SEC-081; a call that would pass the c
 sources: for every read result whose data held `<untrusted_content>`, its entity refs, or the synthetic
 `toolResult` ref of the tool when it named none (SEC-080), merged across the run. Every step record stores
 the merged set so far, and a resume adds the reads and forms answered while the run was paused (a form's
-picked labels are lazyit text, wrapped), so a resumed run rebuilds it exactly (T-03). Outputs are capped once, at write time
+picked labels are lazyit text, wrapped), so a resumed run rebuilds it exactly (T-03). Two sources mark the
+**conversation**, not only the turn, because their content stays in the replayed history: a web search
+(#1389, its own record) and a purchase document read by `purchase_document_read` (#1478, a
+`purchaseDocument` ref in any step record of the conversation). Every run of such a conversation starts
+with them in its untrusted sources, so nothing in it is auto-approved again. Outputs are capped once, at write time
 (`AI_TOOL_OUTPUT_MAX_CHARS = 24 000` serialized, a `[truncated — N more characters; refine the query]`
 marker; core already truncates the data at 20 000). With no pending proposal the step's single tool message
 is appended and the loop continues. With one or more: the step record (known results + pending ids) is
@@ -1197,7 +1265,9 @@ a select left without choices still fails, and the error names the fix ("fields.
 choices: add `options` … or `optionsFrom` (one of …) — or ask with kind "text" instead"). The stored form
 stays strict (`AiInputFormSchema`).
 `optionsFrom` is a closed list — `manufacturers` (the distinct `AssetModel.manufacturer` names, up to three
-pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)") —
+pages of models), `assetCategories`, `locations`, `assetModels` (ids, labelled "name (manufacturer)"), and,
+for the purchase questions (#1478), `suppliers` (ids, labelled "name (tax ID)") and `consumables` (ids,
+labelled "name (SKU)") —
 resolved at call time through the list routes **as the user** (`rt.call`, so a list they cannot read
 refuses the call with the route's 403; an empty list asks the model to use a text field).
 

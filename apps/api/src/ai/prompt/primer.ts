@@ -22,7 +22,7 @@ lazyit is a self-hosted web application for a small IT team (5-20 people) that r
 
 ## Assets come first
 - The asset is the central record: a laptop, server, switch, license or any other thing the team is accountable for. Assets persist while people rotate.
-- An asset may point to an asset model (make, model, default specs) and a location. It always has a status. Type-specific attributes live in its specs.
+- An asset may point to an asset model (make, model, default specs) and a location. It always has a built-in status; an optional team-defined custom status maps to one and sets it. Type-specific attributes live in its specs.
 - An asset has an internal id (opaque, permanent) and, optionally, an asset tag (the human label on the sticker) and a serial number. Tags and serials are unique among live assets.
 - Ownership is never a field on the asset. It is an assignment: checking an asset out to a person opens an assignment, checking it in closes it. An asset can have several active owners at once. Reassigning means checking in the current owner and checking out to the new one. Closed assignments stay as history.
 

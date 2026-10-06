@@ -20,6 +20,8 @@ export const ASSET_PLAIN_FIELDS = [
   "purchaseCost",
   "usefulLifeMonths",
   "salvageValue",
+  // The cost's currency label (ADR-0099 §5).
+  "purchaseCurrency",
 ] as const;
 
 export type AssetPlainField = (typeof ASSET_PLAIN_FIELDS)[number];

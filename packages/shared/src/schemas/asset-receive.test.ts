@@ -73,16 +73,23 @@ describe("ReceiveAssetsSchema", () => {
     const result = ReceiveAssetsSchema.safeParse({ ...base, purchaseCost: 12345 });
     expect(result.success).toBe(true);
     expect(result.success && result.data.purchaseCost).toBe(12345);
-    // A fractional value is not minor units → rejected by int4.
+    // A fractional value is not minor units → rejected by money().
     expect(
       ReceiveAssetsSchema.safeParse({ ...base, purchaseCost: 12.5 }).success,
     ).toBe(false);
   });
 
+  test("accepts a purchaseCost above the old int4 ceiling and rejects one above MAX_SAFE_INTEGER (ADR-0100)", () => {
+    expect(ReceiveAssetsSchema.safeParse({ ...base, purchaseCost: 3_000_000_000 }).success).toBe(true);
+    expect(
+      ReceiveAssetsSchema.safeParse({ ...base, purchaseCost: Number.MAX_SAFE_INTEGER + 2 }).success,
+    ).toBe(false);
+  });
+
   test("rejects an unknown key (strictObject)", () => {
     expect(
-      ReceiveAssetsSchema.safeParse({ ...base, warrantyEnd: "2027-01-01T00:00:00.000Z" })
-        .success,
+      // `warrantyEnd` became a known key in #1473 (receive against a purchase line); `assetTag` stays unknown.
+      ReceiveAssetsSchema.safeParse({ ...base, assetTag: "LZ-0001" }).success,
     ).toBe(false);
   });
 });

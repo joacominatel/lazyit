@@ -1,13 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { AdminGate } from "../../_components/admin-gate";
 import { ServiceAccountsManager } from "./service-accounts-manager";
 
 /** Stable empty breadcrumb for the service accounts PageHeader. */
-const BREADCRUMB = <Breadcrumb />;
 
 /**
  * Settings → Service accounts body (client). Extracted from `page.tsx` for the ADR-0067
@@ -25,7 +23,6 @@ export function ServiceAccountsView() {
         <PageHeader
           title={t("serviceAccounts.title")}
           subtitle={t("serviceAccounts.subtitle")}
-          breadcrumb={BREADCRUMB}
         />
         <ServiceAccountsManager />
       </div>

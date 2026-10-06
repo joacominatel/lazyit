@@ -5,23 +5,21 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
+  ChevronDownIcon,
   FunnelIcon,
+  LinkIcon,
   PlusIcon,
   QrCodeIcon,
   ServerStackIcon,
   ShareIcon,
+  ShoppingCartIcon,
   TrashIcon,
   UserMinusIcon,
   UserPlusIcon,
   ViewColumnsIcon,
 } from "@heroicons/react/24/outline";
-import {
-  type AssetListItem,
-  type AssetStatus,
-  AssetStatusSchema,
-  type BatchResult,
-} from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import { type AssetListItem, type BatchResult } from "@lazyit/shared";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
@@ -63,6 +61,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -112,14 +111,43 @@ import {
   ASSET_FILTER_DEFAULTS as FILTER_DEFAULTS,
   ASSET_LIST_OPTIONS,
   deriveAssetFilters,
+  statusFilterChoice,
+  statusFilterPatch,
+  statusLabelFilterId,
 } from "./assets-list-query";
 import { downloadAssetsExport } from "./assets-csv";
+import {
+  COLUMN_GROUPS,
+  DEFAULT_VISIBLE_COLUMNS,
+  type HideableColumn,
+  listCost,
+  toggledColumns,
+  visibleColumnSet,
+} from "./assets-list-columns";
 import { AssetRowActions } from "./asset-row-actions";
 import { ReceiveStockButton } from "./receive-stock-dialog";
+import { LinkAssetsDialog, type LinkAssetRef } from "@/components/purchases/link-assets-dialog";
+import {
+  CreatePurchaseFromAssetsDialog,
+  type FromAssetsRef,
+} from "@/components/purchases/create-from-assets-dialog";
 import {
   AssetStatusBadge,
   useAssetStatusLabel,
 } from "./asset-status-badge";
+import {
+  batchStatusFields,
+  choiceOf,
+  labelOfChoice,
+  sameChoice,
+  type StatusChoice,
+  updateStatusFields,
+} from "./asset-status-options";
+import {
+  AssetStatusMenuOptions,
+  AssetStatusSelect,
+  useAssetStatusOptions,
+} from "./asset-status-picker";
 import { AssignUserDialog } from "./assign-user-dialog";
 import { StackedOwnerAvatars } from "./stacked-owner-avatars";
 
@@ -142,55 +170,17 @@ const WARRANTY_LABEL_KEY: Record<
   expired: "expired",
 };
 
-/**
- * The Assets-table columns an operator can show/hide via the column picker (#695). The `name` identity
- * column (the row's canonical link) and the row `actions` column are always rendered and intentionally
- * absent here. Keys match the `ResourceColumn` keys and the per-key body-cell map below, so the header
- * and body never drift, and the ARRAY ORDER is the canonical left-to-right table order (persistence
- * re-emits selections in this order). Ported from the Users picker and scoped to this page by CTO
- * decision (the shared `ResourceTable` stays untouched).
- */
-const HIDEABLE_COLUMNS = [
-  "assetTag",
-  "model",
-  "category",
-  "location",
-  "company",
-  "status",
-  "owners",
-  "updated",
-] as const;
-type HideableColumn = (typeof HIDEABLE_COLUMNS)[number];
-
-/**
- * Column-picker grouping — purely presentational structure for the dropdown so the list reads as
- * labelled sections. The flattened union of `keys` MUST equal `HIDEABLE_COLUMNS` (every hideable
- * column appears in exactly one group); it drives only the menu, never visibility.
- */
-const COLUMN_GROUPS: { id: string; keys: readonly HideableColumn[] }[] = [
-  { id: "details", keys: ["assetTag", "model", "category", "location", "company"] },
-  { id: "status", keys: ["status", "owners"] },
-  { id: "activity", keys: ["updated"] },
-];
-
 /** localStorage key persisting the visible hideable-column set (per browser). */
 const COLUMNS_STORAGE_KEY = "lazyit:assets:columns";
 
 /** Stable empty placeholder for the loading skeleton's mobile children slot. */
 const LOADING_MOBILE_CHILDREN = <></>;
 
-
-/**
- * The columns shown by default — the picker subtracts from (and adds back to) this set. Every hideable
- * column is on out of the box, so the table is unchanged for operators who never open the picker; the
- * picker just lets them turn columns off.
- */
-const DEFAULT_VISIBLE_COLUMNS: HideableColumn[] = [...HIDEABLE_COLUMNS];
-
 export function AssetsListView() {
   const router = useRouter();
   const t = useTranslations("assets.list");
   const { date } = useFormatters();
+  const locale = useLocale();
   const tEmpty = useTranslations("assets.empty");
   const tc = useTranslations("common");
   const tShared = useTranslations("shared");
@@ -207,6 +197,7 @@ export function AssetsListView() {
   const mounted = useMounted();
   const canWrite = useCan("asset:write");
   const canDelete = useCan("asset:delete");
+  const canWritePurchases = useCan("purchaseOrder:write");
   // Same coarse gate the Migrator wizard route uses (`import:run`, ADR-0069) — only surface the
   // shortcut to those who can actually run a bulk import; the wizard enforces it again server-side.
   const canImport = useCan("import:run");
@@ -226,13 +217,26 @@ export function AssetsListView() {
     setQ,
     toggleSort,
     setFilter,
+    setFilters,
     setLimit,
     setOffset,
     clearFilters,
     filtersActive,
   } = useListParams(ASSET_LIST_OPTIONS);
 
-  const statusFilter = filters.status as AssetStatus | "ALL";
+  // The status filter is one picker over two URL params (ADR-0101): `status` (a built-in status, every
+  // custom one of that kind included) or `statusLabel` (one custom status). See `statusFilterPatch`.
+  const statusGroups = useAssetStatusOptions();
+  const statusFilter = statusFilterChoice(
+    filters,
+    (id) => statusGroups.find((g) => g.labels.some((l) => l.id === id))?.status,
+  );
+  const statusFilterLabel = statusFilter
+    ? labelOfChoice(statusFilter, statusGroups)
+    : null;
+  // A custom-status filter still applies while its name is loading (or unreadable without
+  // `category:read`): its chip stays, so it can always be seen and cleared.
+  const statusLabelFilter = statusLabelFilterId(filters.statusLabel);
   const categoryFilter = filters.category;
   // The EXACT model filter (#943, deep-linked from the asset detail page's Model link) — distinct
   // from `categoryFilter` above. No picker for it (URL-only); the chip is its sole surface + clear.
@@ -298,28 +302,14 @@ export function AssetsListView() {
   const [storedColumns, setStoredColumns, columnsMounted] = useLocalStorage<
     HideableColumn[]
   >(COLUMNS_STORAGE_KEY, DEFAULT_VISIBLE_COLUMNS);
-  // Defend against stale/garbage storage (renamed/removed keys, or a non-array shape from an older
-  // build): only keep known hideable keys.
-  const visibleColumns = useMemo(() => {
-    if (!columnsMounted || !Array.isArray(storedColumns)) {
-      return new Set<HideableColumn>(DEFAULT_VISIBLE_COLUMNS);
-    }
-    return new Set(storedColumns.filter((key) => HIDEABLE_COLUMNS.includes(key)));
-  }, [columnsMounted, storedColumns]);
+  const visibleColumns = useMemo(
+    () => visibleColumnSet(storedColumns, columnsMounted),
+    [columnsMounted, storedColumns],
+  );
   const isColumnVisible = (key: HideableColumn) => visibleColumns.has(key);
 
   function toggleColumn(key: HideableColumn, visible: boolean) {
-    setStoredColumns((prev) => {
-      const kept = (Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS).filter(
-        (k) => HIDEABLE_COLUMNS.includes(k),
-      );
-      if (visible) {
-        if (kept.includes(key)) return kept;
-        // Re-emit in canonical column order so persistence stays stable regardless of toggle order.
-        return HIDEABLE_COLUMNS.filter((k) => k === key || kept.includes(k));
-      }
-      return kept.filter((k) => k !== key);
-    });
+    setStoredColumns((prev) => toggledColumns(prev, key, visible));
   }
 
   // The page is already scoped server-side (status/category/location/owner/ownership/#824), so the
@@ -327,10 +317,15 @@ export function AssetsListView() {
   const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Multi-select over the currently visible rows — the API batch endpoints all require asset:delete
-  // (bulk delete/restore/status are lifecycle ops), so gate the selection column on canDelete.
+  // (bulk delete/restore/status are lifecycle ops). Linking the selection to a purchase (ADR-0099, #1475)
+  // needs asset:write + purchaseOrder:write instead; either makes the rows selectable.
   const visibleIds = useMemo(() => rows.map((asset) => asset.id), [rows]);
   const selection = useRowSelection(visibleIds);
-  const selectable = canDelete;
+  const canLinkPurchases = canWrite && canWritePurchases && !archived;
+  const selectable = canDelete || canLinkPurchases;
+  const [linking, setLinking] = useState<LinkAssetRef[] | null>(null);
+  // Create one purchase from the selection (#1477) — the same permissions as linking it to one.
+  const [creatingFrom, setCreatingFrom] = useState<FromAssetsRef[] | null>(null);
 
   // Which of the assets ON THIS PAGE back a topology node — the small "On topology" glyph per row
   // (issue #765), made exact in #1152. It resolves the visible ids as a bounded batch (`?assetIds=`)
@@ -363,15 +358,15 @@ export function AssetsListView() {
   }
 
   /** Change one asset's status from the row kebab (reversible — no confirm, matching the batch flow). */
-  function handleChangeStatus(asset: AssetListItem, status: AssetStatus) {
-    if (status === asset.status) return;
+  function handleChangeStatus(asset: AssetListItem, choice: StatusChoice) {
+    if (sameChoice(choice, choiceOf(asset))) return;
+    const name =
+      labelOfChoice(choice, statusGroups)?.name ?? statusLabel(choice.status);
     updateAsset.mutate(
-      { id: asset.id, data: { status } },
+      { id: asset.id, data: updateStatusFields(choice) },
       {
         onSuccess: () =>
-          toast.success(
-            t("statusChangedToast", { status: statusLabel(status) }),
-          ),
+          toast.success(t("statusChangedToast", { status: name })),
         onError: (err) => notifyError(err, t("statusChangeError")),
       },
     );
@@ -438,7 +433,8 @@ export function AssetsListView() {
     return (
       <AssetRowActions
         assetId={asset.id}
-        currentStatus={asset.status}
+        currentStatus={choiceOf(asset)}
+        currentLabel={asset.statusLabel}
         hasOwner={owned}
         onEdit={
           canWrite ? () => router.push(`/assets/${asset.id}/edit`) : undefined
@@ -450,7 +446,7 @@ export function AssetsListView() {
         onUnassign={canWrite ? () => setUnassigning(asset) : undefined}
         onChangeStatus={
           canWrite
-            ? (status) => handleChangeStatus(asset, status)
+            ? (choice) => handleChangeStatus(asset, choice)
             : undefined
         }
         onDelete={
@@ -490,6 +486,24 @@ export function AssetsListView() {
         ),
         skeleton: <Skeleton className="h-4 w-20" />,
       },
+      isColumnVisible("serial") && {
+        key: "serial",
+        header: (
+          <SortableHeader
+            label={t("columns.serial")}
+            active={sort === "serial"}
+            direction={dir}
+            onToggle={() => toggleSort("serial")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-24" />,
+      },
+      // The model's manufacturer: the API sorts plain asset columns only, so this one is not sortable.
+      isColumnVisible("manufacturer") && {
+        key: "manufacturer",
+        header: t("columns.manufacturer"),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
       isColumnVisible("model") && {
         key: "model",
         header: t("columns.model"),
@@ -526,6 +540,43 @@ export function AssetsListView() {
         key: "owners",
         header: t("columns.owners"),
         skeleton: <Skeleton className="size-6 rounded-full" />,
+      },
+      isColumnVisible("purchaseDate") && {
+        key: "purchaseDate",
+        header: (
+          <SortableHeader
+            label={t("columns.purchaseDate")}
+            active={sort === "purchaseDate"}
+            direction={dir}
+            onToggle={() => toggleSort("purchaseDate")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      isColumnVisible("warrantyEnd") && {
+        key: "warrantyEnd",
+        header: (
+          <SortableHeader
+            label={t("columns.warrantyEnd")}
+            active={sort === "warrantyEnd"}
+            direction={dir}
+            onToggle={() => toggleSort("warrantyEnd")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
+      },
+      // Sorts the amounts as stored, whatever their currency label (no conversion, ADR-0099 §5).
+      isColumnVisible("purchaseCost") && {
+        key: "purchaseCost",
+        header: (
+          <SortableHeader
+            label={t("columns.purchaseCost")}
+            active={sort === "purchaseCost"}
+            direction={dir}
+            onToggle={() => toggleSort("purchaseCost")}
+          />
+        ),
+        skeleton: <Skeleton className="h-4 w-20" />,
       },
       isColumnVisible("updated") && {
         key: "updated",
@@ -575,12 +626,18 @@ export function AssetsListView() {
           },
         ]
       : []),
-    ...(statusFilter !== "ALL"
+    ...(statusFilter || statusLabelFilter
       ? [
           {
             key: "status",
-            label: t("chips.status", { value: statusLabel(statusFilter) }),
-            onClear: () => setFilter("status", FILTER_DEFAULTS.status),
+            label: t("chips.status", {
+              value:
+                statusFilterLabel?.name ??
+                (statusLabelFilter || !statusFilter
+                  ? "…"
+                  : statusLabel(statusFilter.status)),
+            }),
+            onClear: () => setFilters(statusFilterPatch(null)),
           },
         ]
       : []),
@@ -770,22 +827,13 @@ export function AssetsListView() {
               placeholder={t("searchPlaceholder")}
               className="lg:max-w-xs lg:flex-1"
             />
-            <Select
+            <AssetStatusSelect
               value={statusFilter}
-              onValueChange={(value) => setFilter("status", value)}
-            >
-              <SelectTrigger className="lg:w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">{t("filters.allStatuses")}</SelectItem>
-                {AssetStatusSchema.options.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {statusLabel(status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(choice) => setFilters(statusFilterPatch(choice))}
+              groups={statusGroups}
+              allLabel={t("filters.allStatuses")}
+              className="lg:w-56"
+            />
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="justify-start lg:w-auto">
@@ -1004,7 +1052,12 @@ export function AssetsListView() {
                     ) : null}
                   </span>
                 }
-                badge={<AssetStatusBadge status={asset.status} />}
+                badge={
+                  <AssetStatusBadge
+                    status={asset.status}
+                    label={asset.statusLabel}
+                  />
+                }
                 selectable={selectable}
                 selected={selection.isSelected(asset.id)}
                 onSelectedChange={(on) => selection.setSelected(asset.id, on)}
@@ -1039,6 +1092,40 @@ export function AssetsListView() {
                         assignments={asset.activeAssignments}
                       />
                     </ResourceCardMeta>
+                    {/* The #1511 columns are opt-in, so the card shows them only once turned on. */}
+                    {isColumnVisible("serial") ? (
+                      <ResourceCardMeta label={t("columns.serial")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.serial ?? "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("manufacturer") ? (
+                      <ResourceCardMeta label={t("columns.manufacturer")}>
+                        {asset.model?.manufacturer ?? "—"}
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("purchaseDate") ? (
+                      <ResourceCardMeta label={t("columns.purchaseDate")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("warrantyEnd") ? (
+                      <ResourceCardMeta label={t("columns.warrantyEnd")}>
+                        <span className="font-mono tabular-nums">
+                          {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
+                    {isColumnVisible("purchaseCost") ? (
+                      <ResourceCardMeta label={t("columns.purchaseCost")}>
+                        <span className="font-mono tabular-nums">
+                          <CostValue asset={asset} locale={locale} noCurrency={t("noCurrency")} />
+                        </span>
+                      </ResourceCardMeta>
+                    ) : null}
                     <ResourceCardMeta label={t("columns.updated")}>
                       <span className="font-mono tabular-nums">
                         {date(asset.updatedAt)}
@@ -1098,6 +1185,19 @@ export function AssetsListView() {
                     {asset.assetTag ?? "—"}
                   </TableCell>
                 ),
+                serial: (
+                  <TableCell
+                    key="serial"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.serial ?? "—"}
+                  </TableCell>
+                ),
+                manufacturer: (
+                  <TableCell key="manufacturer" className="text-muted-foreground">
+                    {asset.model?.manufacturer ?? "—"}
+                  </TableCell>
+                ),
                 model: (
                   <TableCell key="model" className="text-muted-foreground">
                     {asset.model?.name ?? "—"}
@@ -1126,7 +1226,10 @@ export function AssetsListView() {
                 ),
                 status: (
                   <TableCell key="status">
-                    <AssetStatusBadge status={asset.status} />
+                    <AssetStatusBadge
+                      status={asset.status}
+                      label={asset.statusLabel}
+                    />
                   </TableCell>
                 ),
                 owners: (
@@ -1134,6 +1237,30 @@ export function AssetsListView() {
                     <StackedOwnerAvatars
                       assignments={asset.activeAssignments}
                     />
+                  </TableCell>
+                ),
+                purchaseDate: (
+                  <TableCell
+                    key="purchaseDate"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.purchaseDate ? date(asset.purchaseDate) : "—"}
+                  </TableCell>
+                ),
+                warrantyEnd: (
+                  <TableCell
+                    key="warrantyEnd"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    {asset.warrantyEnd ? date(asset.warrantyEnd) : "—"}
+                  </TableCell>
+                ),
+                purchaseCost: (
+                  <TableCell
+                    key="purchaseCost"
+                    className="font-mono text-muted-foreground tabular-nums"
+                  >
+                    <CostValue asset={asset} locale={locale} noCurrency={t("noCurrency")} />
                   </TableCell>
                 ),
                 updated: (
@@ -1217,48 +1344,123 @@ export function AssetsListView() {
               </Button>
             ) : (
               <>
-                <Select
-                  onValueChange={(value) =>
-                    runBatch(
-                      () =>
-                        batchStatus.mutateAsync({
-                          ids: selection.selectedIds,
-                          status: value as AssetStatus,
-                        }),
-                      { entityKey: "asset", verb: "updated" },
-                      t("batchStatusError"),
-                    )
-                  }
-                >
-                  <SelectTrigger size="sm" className="w-40">
-                    <SelectValue placeholder={t("setStatusPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AssetStatusSchema.options.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {statusLabel(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() =>
-                    runBatch(
-                      () => batchDelete.mutateAsync(selection.selectedIds),
-                      { entityKey: "asset", verb: "deleted" },
-                      t("batchDeleteError"),
-                    )
-                  }
-                  disabled={batchDelete.isPending}
-                >
-                  <TrashIcon />
-                  {tc("delete")}
-                </Button>
+                {/* Purchase actions share one menu so the bar stays a single row (#1512). */}
+                {canLinkPurchases ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="sm" variant="outline">
+                        <ShoppingCartIcon />
+                        {/* Icon-only on a phone so the actions keep to one line; still the button's name. */}
+                        <span className="sr-only sm:not-sr-only">
+                          {t("purchaseActions")}
+                        </span>
+                        <ChevronDownIcon />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setLinking(
+                            rows
+                              .filter((asset) => selection.isSelected(asset.id))
+                              .map((asset) => ({
+                                id: asset.id,
+                                name: asset.name,
+                                assetTag: asset.assetTag,
+                                modelId: asset.modelId,
+                              })),
+                          )
+                        }
+                      >
+                        <LinkIcon />
+                        {t("linkToPurchase")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setCreatingFrom(
+                            rows
+                              .filter((asset) => selection.isSelected(asset.id))
+                              .map((asset) => ({ id: asset.id, name: asset.name, assetTag: asset.assetTag })),
+                          )
+                        }
+                      >
+                        <ShoppingCartIcon />
+                        {t("createPurchase")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+                {canDelete ? (
+                  <>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={batchStatus.isPending}
+                        >
+                          {t("setStatus")}
+                          <ChevronDownIcon />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        className="max-h-80 w-auto min-w-56 overflow-y-auto"
+                      >
+                        <AssetStatusMenuOptions
+                          groups={statusGroups}
+                          onSelect={(choice) =>
+                            runBatch(
+                              () =>
+                                batchStatus.mutateAsync({
+                                  ids: selection.selectedIds,
+                                  ...batchStatusFields(choice),
+                                }),
+                              { entityKey: "asset", verb: "updated" },
+                              t("batchStatusError"),
+                            )
+                          }
+                        />
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        runBatch(
+                          () => batchDelete.mutateAsync(selection.selectedIds),
+                          { entityKey: "asset", verb: "deleted" },
+                          t("batchDeleteError"),
+                        )
+                      }
+                      disabled={batchDelete.isPending}
+                    >
+                      <TrashIcon />
+                      <span className="sr-only sm:not-sr-only">
+                        {tc("delete")}
+                      </span>
+                    </Button>
+                  </>
+                ) : null}
               </>
             )}
           </BatchActionBar>
+
+          {linking ? (
+            <LinkAssetsDialog
+              assets={linking}
+              onClose={() => setLinking(null)}
+              onLinked={selection.clear}
+            />
+          ) : null}
+
+          {creatingFrom ? (
+            <CreatePurchaseFromAssetsDialog
+              assets={creatingFrom}
+              onClose={() => setCreatingFrom(null)}
+              onCreated={selection.clear}
+            />
+          ) : null}
 
           <Pagination
             total={total}
@@ -1333,5 +1535,27 @@ export function AssetsListView() {
         </AlertDialog>
       ) : null}
     </div>
+  );
+}
+
+/** The Cost cell: the amount as entered with its label, or "No currency" beside an unlabelled one. */
+function CostValue({
+  asset,
+  locale,
+  noCurrency,
+}: {
+  asset: AssetListItem;
+  locale: string;
+  noCurrency: string;
+}) {
+  const cost = listCost(asset.purchaseCost, asset.purchaseCurrency, locale);
+  if (!cost) return "—";
+  return (
+    <>
+      {cost.amount}
+      {cost.noCurrency ? (
+        <span className="font-sans"> · {noCurrency}</span>
+      ) : null}
+    </>
   );
 }

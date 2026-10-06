@@ -41,7 +41,7 @@ const DEFAULT_PAGES = [
   "/reports", "/reports/audit", "/profile", "/account", "/account/ai", "/account/notifications",
   "/settings", "/settings/ai", "/settings/instance", "/settings/roles",
   "/settings/roles/permissions", "/settings/service-accounts", "/settings/taxonomies",
-  "/settings/agents",
+  "/settings/agents", "/settings/email", "/settings/directory", "/settings/asset-tags",
 ];
 const pages = [...DEFAULT_PAGES, ...process.argv.slice(2)];
 const HYDRATION = /Minified React error #(418|423|425)|Hydration failed|hydration mismatch/i;

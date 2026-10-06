@@ -612,8 +612,10 @@ export function BatchActionBar({
   const tc = useTranslations("common");
   if (count === 0) return null;
   return (
+    // One row while it fits; otherwise the actions move to their own line as a group, never squeezed
+    // beside the count into a cramped block (#1512).
     <div
-      className="sticky bottom-4 z-20 mx-auto flex w-full max-w-2xl flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
+      className="sticky bottom-4 z-20 mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80"
       role="region"
       aria-label={t("table.bulkActions")}
     >

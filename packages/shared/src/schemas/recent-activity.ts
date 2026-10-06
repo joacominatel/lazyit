@@ -143,6 +143,10 @@ export const RECENT_ACTIVITY_ACTIONS = [
   // menu and rejected as an `action` filter.
   "consumable_delivered",
   "consumable_returned",
+  // An asset linked to / unlinked from a purchase line (ADR-0099, #1473) — the lowercased PURCHASE_LINKED /
+  // PURCHASE_UNLINKED AssetHistory events, surfaced generically by the view (same reason as above).
+  "purchase_linked",
+  "purchase_unlinked",
   "granted",
   "revoked",
   "stock_in",

@@ -83,6 +83,7 @@ function makeRow(overrides: Row = {}): Row {
     mcpAllowAnyHttpsClient: false,
     webSearchEnabled: false,
     webSearchMaxUses: 5,
+    documentExtractionEnabled: false,
     disclosureAcknowledgedAt: null,
     disclosureAcknowledgedById: null,
     verifiedAt: null,
@@ -1027,6 +1028,30 @@ describe('AiSettingsService — config audit', () => {
         webSearchEnabled: { before: true, after: false },
         webSearchMaxUses: { before: 3, after: 8 },
       },
+    });
+  });
+
+  it('document extraction (#1477): off by default, omitted keeps the stored value, a change is audited', async () => {
+    const fresh = setup();
+    expect((await fresh.service.getSettings()).documentExtractionEnabled).toBe(
+      false,
+    );
+
+    const { service, audits } = setup({
+      row: enabledRow({ documentExtractionEnabled: true }),
+    });
+    // A caller written before the switch existed omits it: the stored value stays, no audit.
+    const kept = await service.updateSettings(enabledBody(), 'a');
+    expect(kept.documentExtractionEnabled).toBe(true);
+    expect(audits()).toEqual([]);
+
+    const changed = await service.updateSettings(
+      enabledBody({ documentExtractionEnabled: false }),
+      'a',
+    );
+    expect(changed.documentExtractionEnabled).toBe(false);
+    expect(audits()[0].detail).toMatchObject({
+      changes: { documentExtractionEnabled: { before: true, after: false } },
     });
   });
 

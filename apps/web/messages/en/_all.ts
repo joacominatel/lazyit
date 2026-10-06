@@ -25,6 +25,7 @@ import nav from "./nav.json";
 import notifications from "./notifications.json";
 import oauth from "./oauth.json";
 import profile from "./profile.json";
+import purchases from "./purchases.json";
 import settings from "./settings.json";
 import setup from "./setup.json";
 import shared from "./shared.json";
@@ -43,6 +44,7 @@ const messages = {
   attachments,
   applications,
   consumables,
+  purchases,
   kb,
   help,
   users,

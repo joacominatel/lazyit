@@ -3,6 +3,39 @@
     "title": "Solo administradores",
     "description": "Configuración — configuración de la instancia, gestión de taxonomías y el resumen de roles — está disponible para administradores. Pídele a un administrador si necesitas un cambio aquí."
   },
+  "nav": {
+    "label": "Páginas de configuración",
+    "overview": "Resumen",
+    "groups": {
+      "inventory": "Inventario",
+      "access": "Acceso",
+      "integrations": "Integraciones",
+      "system": "Sistema"
+    },
+    "items": {
+      "taxonomies": "Taxonomías",
+      "locations": "Ubicaciones",
+      "assetTags": "Etiquetas de activos",
+      "imports": "Importaciones",
+      "roles": "Roles y permisos",
+      "serviceAccounts": "Cuentas de servicio",
+      "email": "Correo",
+      "directory": "Directorio AD/LDAP",
+      "agents": "Agentes de inventario",
+      "ai": "Asistente IA",
+      "integrations": "Tareas",
+      "instance": "General y versión"
+    }
+  },
+  "section": {
+    "status": {
+      "on": "Activado",
+      "off": "Desactivado",
+      "configured": "Configurado"
+    },
+    "unsaved": "Cambios sin guardar",
+    "noChanges": "Sin cambios"
+  },
   "hub": {
     "title": "Configuración",
     "subtitle": "Configuración de la instancia, gestión de taxonomías, roles y cuentas de servicio — solo administradores.",
@@ -14,12 +47,16 @@
       "title": "Ubicaciones",
       "description": "Gestiona los lugares donde residen físicamente tus activos — oficinas, centros de datos, racks y depósitos."
     },
+    "assetTags": {
+      "title": "Etiquetas de activos",
+      "description": "Asigna una etiqueta correlativa a los activos nuevos y etiqueta los que ya tienes."
+    },
     "imports": {
       "title": "Importación masiva",
       "description": "Carga un inventario de activos existente desde un archivo CSV o JSON — una acción de administrador guiada y ocasional para una instancia nueva."
     },
     "roles": {
-      "title": "Roles",
+      "title": "Roles y permisos",
       "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
     },
     "serviceAccounts": {
@@ -30,13 +67,21 @@
       "title": "Agentes de inventario",
       "description": "Define cómo informa y qué recolecta cada agente de lazyit de este parque, y revisa qué hosts descubiertos se confirman automáticamente."
     },
+    "email": {
+      "title": "Correo",
+      "description": "Envía las notificaciones también por correo, a través de tu propio relay SMTP."
+    },
+    "directory": {
+      "title": "Directorio AD/LDAP",
+      "description": "Importa personas de solo lectura desde tu Active Directory o LDAP."
+    },
     "integrations": {
       "title": "Integraciones y flujos",
       "description": "La bandeja de tareas manuales entre aplicaciones para los flujos de aprovisionamiento. La automatización por aplicación se configura en la pestaña Flujos de cada una."
     },
     "instance": {
-      "title": "Instancia",
-      "description": "Revisa cómo está configurada esta instancia de lazyit — proveedor de identidad, estado de configuración y postura de ejecución."
+      "title": "General y versión",
+      "description": "Revisa la versión en uso, actualiza lazyit y mira cómo está configurada esta instancia."
     },
     "ai": {
       "title": "Asistente de IA",
@@ -44,9 +89,11 @@
     }
   },
   "instance": {
-    "title": "Instancia",
-    "subtitle": "Cómo está configurada esta instancia de lazyit — la postura de ejecución (definida por variables de entorno) y el esquema de etiquetas de activos.",
-    "cardTitle": "Configuración",
+    "title": "General y versión",
+    "subtitle": "La versión, las actualizaciones y cómo está configurada esta instancia.",
+    "cardTitle": "Instancia",
+    "cardSummary": "Lo define el entorno al desplegar.",
+    "cardHelp": "El proveedor de identidad y la postura de ejecución se cambian con variables de entorno al desplegar. Esta vista solo lee el resultado.",
     "loadError": "No se pudo cargar el estado de la instancia",
     "loadErrorHint": "La API podría estar caída o ser inaccesible.",
     "rows": {
@@ -67,17 +114,11 @@
       "generic-oidc": "OIDC genérico (usa el tuyo)",
       "local": "Cuentas locales"
     },
-    "agentsMoved": {
-      "title": "Agentes de inventario",
-      "body": "La política de agentes del parque — frecuencia de informe, recolectores y exclusiones — ahora tiene su propia sección, junto con las reglas de confirmación automática y los ámbitos que pueden sobrescribirla.",
-      "link": "Abrir Agentes de inventario"
-    },
     "updates": {
       "title": "Versión y actualizaciones",
-      "subtitle": "Comprueba si hay nuevas versiones de lazyit y ejecuta una actualización guiada y respaldada desde el host.",
+      "subtitle": "Busca nuevas versiones y ejecuta una actualización guiada.",
       "rows": {
         "current": "Versión actual",
-        "status": "Estado",
         "latest": "Última versión",
         "viewRelease": "Ver notas de la versión",
         "lastChecked": "Última comprobación",
@@ -97,7 +138,7 @@
       "optIn": {
         "label": "Comprobar actualizaciones semanalmente",
         "description": "Consulta github.com de forma anónima en busca de nuevas versiones. Desactivado por defecto; nunca se envían datos de la instancia y falla en silencio si está bloqueado.",
-        "smtpHint": "Para recibir también un correo cuando te quedes atrás, configura SMTP en la tarjeta de abajo."
+        "smtpHint": "Para recibir también un correo cuando te quedes atrás, <link>configura el correo saliente</link>."
       },
       "cta": {
         "update": "Actualizar a {version}",
@@ -132,12 +173,16 @@
     }
   },
   "assetTagScheme": {
-    "title": "Esquema de etiquetas de activos",
-    "subtitle": "Asigna automáticamente una etiqueta correlativa a los activos nuevos — un prefijo, un número con ceros a la izquierda y un sufijo. Desactivado hasta que lo actives; una etiqueta explícita siempre prevalece.",
+    "title": "Etiquetas de activos",
+    "subtitle": "Asigna la siguiente etiqueta a los activos nuevos automáticamente.",
+    "scheme": {
+      "title": "Esquema de etiquetas",
+      "summary": "Un prefijo, un número con ceros a la izquierda y un sufijo.",
+      "help": "Desactivado hasta que lo actives. Una etiqueta escrita en el activo siempre prevalece, y se salta un número que ya usa un activo vigente."
+    },
     "loadError": "No se pudo cargar el esquema de etiquetas.",
     "retry": "Reintentar",
     "save": "Guardar esquema",
-    "disabledHint": "El esquema está desactivado. Los activos nuevos conservan su etiqueta manual (o ninguna) — actívalo para asignarla automáticamente.",
     "preview": {
       "label": "Próxima etiqueta",
       "disabledLabel": "Forma de la etiqueta (la asignación automática está desactivada)",
@@ -149,7 +194,7 @@
     },
     "fields": {
       "enabled": {
-        "label": "Asignar etiquetas automáticamente",
+        "label": "Asignar automáticamente",
         "description": "Cuando está activo, un activo nuevo sin etiqueta recibe el siguiente número de forma automática."
       },
       "prefix": {
@@ -226,7 +271,7 @@
   },
   "agentPolicy": {
     "title": "Agentes de inventario",
-    "subtitle": "La política predeterminada de todos los agentes de lazyit de este parque — con qué frecuencia informan, qué recolectan y qué dejan afuera. Se define una vez aquí, sin entrar a ningún host.",
+    "subtitle": "Lo que informan todos los agentes de este parque.",
     "revisionBadge": "Política v{revision}",
     "loadFailed": "No se pudo cargar la política de agentes.",
     "saveFailed": "No se pudo guardar la política de agentes.",
@@ -241,9 +286,15 @@
       "reload": "Recargar la política guardada"
     },
     "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección.",
+    "propagationNote": "Los hosts toman el cambio en su próximo informe.",
     "cadence": {
       "title": "Frecuencia",
-      "description": "Con qué frecuencia informa un host y cuánto espera lazyit antes de darlo por fuera de línea. Las dos están atadas: el umbral de fuera de línea tiene que ser mayor que el intervalo, o un host sano queda marcado fuera de línea entre dos de sus propios informes."
+      "description": "Con qué frecuencia informa un host y cuánto espera lazyit antes de darlo por fuera de línea. Las dos están atadas: el umbral de fuera de línea tiene que ser mayor que el intervalo, o un host sano queda marcado fuera de línea entre dos de sus propios informes.",
+      "sentence": {
+        "before": "Cada host informa cada",
+        "middle": "min y se marca fuera de línea a los",
+        "after": "min sin informar."
+      }
     },
     "interval": {
       "label": "Informar cada (minutos)",
@@ -265,8 +316,9 @@
     "collect": {
       "title": "Qué recolectan los agentes",
       "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores y los invitados del hipervisor: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
+      "summary": "{on} de {total} activos",
       "veto": "Un host siempre puede negarse. Desactivar un recolector en la configuración del propio agente de ese host — /etc/lazyit-agent/config en Linux, C:\\ProgramData\\lazyit-agent\\config en Windows — prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
-      "hardware": "Fabricante, modelo y número de serie",
+      "hardware": "Hardware y número de serie",
       "disks": "Discos y puntos de montaje",
       "nics": "Interfaces de red",
       "software": "Software instalado",
@@ -276,6 +328,7 @@
     "exclude": {
       "title": "Exclusiones",
       "description": "Patrones de nombre separados por comas; tiene que coincidir el nombre completo, y no distingue mayúsculas de minúsculas. * representa cualquier texto y ? un solo carácter — no se aceptan expresiones regulares. Cada lista admite como máximo {max} patrones.",
+      "summary": "Patrones de nombre que quedan fuera de cada informe.",
       "count": "{count, plural, =0 {Sin patrones} other {# de {max} patrones}}",
       "nicNames": {
         "label": "Ignorar interfaces de red",
@@ -303,27 +356,30 @@
     "scopes": {
       "title": "De dónde sale una política",
       "description": "Tres ámbitos, resueltos campo por campo — gana el más específico que defina ese campo.",
+      "summary": "Gana el ámbito más específico.",
       "instance": {
-        "label": "Predeterminado de la instancia",
-        "scope": "Todos los agentes de este parque."
+        "label": "Instancia",
+        "scope": "Todo el parque"
       },
       "serviceAccount": {
-        "label": "Por cuenta de servicio",
-        "scope": "La credencial de un agente — el asistente Agregar un servidor crea una por agente."
+        "label": "Cuenta de servicio",
+        "scope": "Un agente"
       },
       "node": {
-        "label": "Por host",
-        "scope": "Un solo servidor."
+        "label": "Host",
+        "scope": "Un servidor"
       },
       "editedHere": "Se edita aquí",
       "noEditor": "Todavía sin editor",
-      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local solo puede hacer que un host informe menos de lo que pide esta página, nunca más: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula."
+      "general": "Más general",
+      "specific": "Más específico",
+      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local solo puede hacer que un host informe menos de lo que pide esta página, nunca más: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula.",
+      "wizard": "Una cuenta de servicio es la credencial de un agente — el asistente Agregar un servidor crea una por agente."
     },
     "rollout": {
-      "title": "Despliegue",
       "body": "Cada host informa qué versión de la política está ejecutando realmente, así que “configurada” y “aplicada” siguen siendo cosas distintas. Un host toma un cambio en su próximo informe y lo aplica desde la ejecución siguiente.",
       "legacy": "Un servidor descubierto por un agente anterior a este canal nunca informa una versión, y no muestra ni aplicada ni pendiente.",
-      "link": "Ver el estado por host en el diagrama de infraestructura"
+      "link": "Estado por host"
     },
     "autoConfirm": {
       "title": "Reglas de confirmación automática",
@@ -334,13 +390,17 @@
     }
   },
   "smtp": {
-    "title": "Correo saliente (SMTP)",
-    "subtitle": "Conecta un relay SMTP para que lazyit pueda enviar notificaciones por correo. Desactivado hasta que lo actives; la contraseña se guarda cifrada y no se vuelve a mostrar.",
+    "title": "Correo saliente",
+    "subtitle": "Envía las notificaciones también por correo.",
+    "server": {
+      "title": "Servidor SMTP",
+      "summary": "El relay por el que lazyit envía el correo.",
+      "help": "Desactivado hasta que lo actives. Los cambios se aplican al guardar; la prueba funciona aunque el correo esté desactivado."
+    },
     "loadError": "No se pudo cargar la configuración de SMTP.",
     "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
-    "disabledHint": "El correo saliente está desactivado. Actívalo para enviar notificaciones por correo — aún puedes enviar una prueba abajo.",
     "fields": {
       "enabled": {
         "label": "Activar correo saliente",
@@ -356,6 +416,7 @@
       },
       "security": {
         "label": "Seguridad",
+        "help": "Lo recomendado es STARTTLS en el puerto 587. TLS implícito usa el 465; Ninguna envía en texto plano.",
         "options": {
           "none": "Ninguna (texto plano)",
           "starttls": "STARTTLS (recomendado, puerto 587)",
@@ -370,7 +431,7 @@
         "label": "Contraseña",
         "placeholderSet": "Configurada — deja en blanco para mantenerla",
         "placeholderUnset": "Contraseña",
-        "hintSet": "Hay una contraseña guardada. Déjala en blanco para mantenerla, o escribe una nueva para reemplazarla."
+        "help": "Se guarda cifrada y no se vuelve a mostrar. Déjala en blanco para mantener la guardada."
       },
       "fromAddress": {
         "label": "Dirección de remitente",
@@ -386,9 +447,10 @@
       }
     },
     "test": {
-      "heading": "Enviar un correo de prueba",
-      "description": "Envía un correo puntual usando la configuración guardada. Guarda tus cambios primero — la prueba usa lo almacenado, no el formulario de arriba.",
+      "heading": "Enviar una prueba",
+      "description": "Usa la configuración guardada, no los cambios sin guardar.",
       "placeholder": "tu@example.com",
+      "toLabel": "Destinatario de la prueba",
       "send": "Enviar prueba",
       "invalidEmail": "Introduce una dirección de correo de destino válida.",
       "success": "Correo de prueba enviado a {to}.",
@@ -402,15 +464,19 @@
   },
   "directory": {
     "title": "Sincronización de directorio AD / LDAP",
-    "subtitle": "Importación de solo lectura de personas desde tu Active Directory / LDAP local. lazyit crea personas de directorio sin acceso — nunca escribe en tu directorio ni permite iniciar sesión a nadie.",
+    "subtitle": "Importa personas de solo lectura desde Active Directory o LDAP.",
+    "connection": {
+      "title": "Conexión",
+      "summary": "El directorio del que lazyit lee las personas.",
+      "help": "lazyit se conecta en solo lectura y crea personas de directorio sin acceso. Nunca escribe en tu directorio ni permite iniciar sesión a nadie."
+    },
     "loadError": "No se pudo cargar la configuración del directorio.",
     "loadErrorHint": "Revisa tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
-    "disabledHint": "La sincronización programada está desactivada. Actívala para importar personas de forma periódica — igualmente puedes usar Sincronizar ahora para probar la conexión.",
     "fields": {
       "enabled": {
-        "label": "Activar sincronización programada",
+        "label": "Sincronización programada",
         "description": "Cuando está activa, lazyit se conecta periódicamente a tu directorio e importa personas. Cuando está desactivada, solo se ejecuta Sincronizar ahora manualmente."
       },
       "host": {
@@ -453,7 +519,7 @@
         "label": "Contraseña de conexión",
         "placeholderSet": "Configurada — deja en blanco para conservarla",
         "placeholderUnset": "Contraseña de conexión",
-        "hintSet": "Hay una contraseña de conexión guardada. Déjala en blanco para conservarla, o escribe una nueva para reemplazarla."
+        "help": "Se guarda cifrada y no se vuelve a mostrar. Déjala en blanco para conservar la guardada."
       },
       "searchFilter": {
         "label": "Filtro de búsqueda",
@@ -462,7 +528,9 @@
       },
       "offboardGraceDays": {
         "label": "Margen de baja (días)",
-        "description": "Cuántos días puede faltar una persona en el directorio antes de que lazyit la desactive. 0 = desactivar en la primera sincronización que ya no la encuentre."
+        "before": "Desactivar a una persona tras",
+        "after": "días sin aparecer en el directorio.",
+        "description": "0 desactiva a la persona en la primera sincronización que ya no la encuentre."
       },
       "attributeMap": {
         "label": "Mapeo de atributos",
@@ -477,6 +545,7 @@
     },
     "sync": {
       "heading": "Sincronizar ahora",
+      "summary": "Ejecuta la importación ahora con la configuración guardada.",
       "description": "Ejecuta la misma importación de solo lectura que la sincronización programada, usando la configuración guardada — guarda tus cambios primero. Esto también confirma que la conexión funciona.",
       "button": "Sincronizar ahora",
       "success": "Sincronización del directorio completada.",
@@ -498,6 +567,7 @@
     },
     "tray": {
       "title": "Personas del directorio para revisar",
+      "summary": "Personas sin acceso que importó la sincronización, las más nuevas primero.",
       "description": "Personas importadas desde tu directorio. Cada una es una persona sin acceso que puedes abrir, aprovisionar con un inicio de sesión o dar de baja desde la sección Usuarios.",
       "offboarded": "Inactiva",
       "discovered": "Añadida {when}",
@@ -550,6 +620,7 @@
           "accessGrant": "Concesiones de acceso",
           "accessRequest": "Solicitudes de acceso",
           "consumable": "Consumibles",
+          "purchaseOrder": "Compras",
           "article": "Base de conocimiento",
           "location": "Ubicaciones",
           "assetModel": "Modelos de activo",
@@ -836,6 +907,9 @@
       "consumable:read": { "label": "Ver consumibles" },
       "consumable:write": { "label": "Agregar, editar y ajustar consumibles" },
       "consumable:delete": { "label": "Eliminar consumibles" },
+      "purchaseOrder:read": { "label": "Ver compras y proveedores" },
+      "purchaseOrder:write": { "label": "Registrar y editar compras" },
+      "purchaseOrder:delete": { "label": "Eliminar compras y proveedores" },
       "assetModel:read": { "label": "Ver modelos de activo" },
       "assetModel:write": { "label": "Agregar y editar modelos de activo" },
       "assetModel:delete": { "label": "Eliminar modelos de activo" },
@@ -899,6 +973,18 @@
       "inventory:import": {
         "label": "Ejecutar importaciones masivas",
         "description": "Usa el asistente guiado para importar activos de forma masiva desde un archivo CSV o JSON. También requiere los permisos de edición correspondientes (activos, modelos, categorías, ubicaciones), verificados por fila al confirmar."
+      },
+      "purchaseOrder:view": {
+        "label": "Ver compras y proveedores",
+        "description": "Ver las compras, sus líneas, precios y documentos, y el directorio de proveedores."
+      },
+      "purchaseOrder:edit": {
+        "label": "Registrar y editar compras",
+        "description": "Crear y editar compras, sus líneas y proveedores, recibir unidades y vincular activos a una compra."
+      },
+      "purchaseOrder:delete": {
+        "label": "Eliminar compras y proveedores",
+        "description": "Archivar y restaurar compras y proveedores, y fusionar proveedores duplicados. Los activos vinculados conservan su vínculo."
       },
       "infra:view": {
         "label": "Ver el mapa de infraestructura",
@@ -1038,14 +1124,15 @@
   },
   "taxonomies": {
     "title": "Taxonomías",
-    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian.",
+    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian y tus estados de activo personalizados.",
     "tablistAria": "Tipo de taxonomía",
     "tabs": {
       "asset": "Categorías de activo",
       "application": "Categorías de aplicación",
       "consumable": "Categorías de consumible",
       "article": "Categorías de artículo",
-      "models": "Modelos de activo"
+      "models": "Modelos de activo",
+      "statuses": "Estados"
     },
     "kindLabel": {
       "asset": "categoría de activo",
@@ -1212,6 +1299,72 @@
         "updateError": "No se pudo actualizar el modelo de activo",
         "created": "Modelo de activo creado",
         "createError": "No se pudo crear el modelo de activo"
+      }
+    },
+    "statuses": {
+      "intro": "Los estados personalizados son nombres opcionales para los seis estados predefinidos: por ejemplo \"En reparación en el proveedor\" o \"En el banco de trabajo\" para En mantenimiento, o \"Pool de préstamo\" para En depósito. Cada uno corresponde a un único estado predefinido, que es el que siguen leyendo el panel, los filtros, las importaciones y todas las demás reglas. Los activos pueden quedarse con un estado predefinido sin nombre propio.",
+      "newButton": "Nuevo estado personalizado",
+      "loadError": "No se pudieron cargar los estados personalizados",
+      "builtIn": "Estado predefinido",
+      "add": "Agregar",
+      "addTo": "Agregar un estado personalizado en {status}",
+      "empty": "Todavía no hay estados personalizados. Agrega uno bajo el estado predefinido que nombra.",
+      "archivedEmpty": "No hay estados personalizados archivados.",
+      "archiveAction": "Archivar",
+      "assetsLink": "{count, plural, one {# activo} other {# activos}} con {name}",
+      "columns": {
+        "name": "Nombre",
+        "description": "Descripción",
+        "order": "Orden",
+        "assets": "Activos",
+        "kind": "Estado predefinido",
+        "archived": "Archivado"
+      },
+      "toast": {
+        "created": "Se creó el estado personalizado {name}",
+        "createError": "No se pudo crear el estado personalizado",
+        "updated": "Se actualizó el estado personalizado {name}",
+        "updateError": "No se pudo actualizar el estado personalizado",
+        "restored": "Se restauró el estado personalizado {name}",
+        "restoreError": "No se pudo restaurar el estado personalizado"
+      },
+      "form": {
+        "newTitle": "Nuevo estado personalizado",
+        "editTitle": "Editar estado personalizado",
+        "description": "Un nombre que tu equipo usa para uno de los estados predefinidos. Solo el nombre es obligatorio.",
+        "nameLabel": "Nombre",
+        "namePlaceholder": "p. ej. En reparación en el proveedor",
+        "kindLabel": "Estado predefinido",
+        "kindHelp": "Los activos con este estado personalizado toman este estado predefinido, que es el que usan todas las reglas y reportes.",
+        "kindLocked": "Bloqueado: {count, plural, one {# activo usa} other {# activos usan}} este estado personalizado. Muévelos primero a otro estado, o crea un estado personalizado nuevo.",
+        "colorLabel": "Color",
+        "colorDefault": "El color del estado predefinido",
+        "colorHelp": "Se muestra como el punto junto al nombre. Elige uno o escribe un valor #RRGGBB; déjalo vacío para usar el color del estado predefinido.",
+        "descriptionLabel": "Descripción",
+        "descriptionPlaceholder": "Opcional: cuándo usar este estado.",
+        "orderLabel": "Orden",
+        "orderPlaceholder": "Opcional: los menores van primero dentro de su estado predefinido",
+        "save": "Guardar cambios",
+        "create": "Crear estado personalizado",
+        "errors": {
+          "nameRequired": "El nombre es obligatorio.",
+          "colorInvalid": "Usa un color #RRGGBB, por ejemplo #2563EB.",
+          "orderInvalid": "El orden debe ser un número entero de 0 a 100000."
+        }
+      },
+      "archive": {
+        "title": "¿Archivar {name}?",
+        "inUseDescription": "{count, plural, one {# activo tiene} other {# activos tienen}} este estado personalizado. Elige a dónde {count, plural, one {va} other {van}}: otro estado personalizado o un estado predefinido. Cada movimiento queda registrado en el historial del activo.",
+        "unusedDescription": "Ningún activo usa este estado personalizado. Puedes restaurarlo más tarde desde la lista de archivados.",
+        "destinationLabel": "Mover los activos a",
+        "destinationPlaceholder": "Elige un estado",
+        "destinationHelp": "Obligatorio mientras haya activos con este estado personalizado.",
+        "destinationSummary": "{count, plural, one {# activo pasa} other {# activos pasan}} a {target}.",
+        "confirm": "Archivar",
+        "confirmMove": "Mover y archivar",
+        "toast": "Se archivó el estado personalizado {name}",
+        "toastMoved": "Se archivó {name} y se {count, plural, one {movió # activo} other {movieron # activos}} a {target}",
+        "error": "No se pudo archivar el estado personalizado"
       }
     }
   }

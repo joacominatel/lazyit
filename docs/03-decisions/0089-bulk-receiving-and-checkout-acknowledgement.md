@@ -3,7 +3,7 @@ title: "ADR-0089: Bulk receiving + check-out acknowledgement"
 tags: [adr, assets, receiving, asset-assignment, notifications, data-model]
 status: accepted
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-10-01
 deciders: [Joaquín Minatel]
 ---
 
@@ -29,6 +29,17 @@ verbatim, no schema change). Part B is additive metadata on [[asset-assignment]]
 > and a new **targeted** `NotificationType`. NOT a purchase-order / receiving-document entity, NOT a
 > goods-receipt ledger, NOT a signature/e-sign capture, NOT per-asset check-out *agreements* (a device
 > policy the user signs). Those remain non-goals ([[vision]]: no ticketing/procurement).
+
+> [!note] Amended 2026-10-01 by [[0099-purchases-scope-model-and-optionality|ADR-0099]] (#1466)
+> A **purchase-order entity is no longer a non-goal**: Purchases records what was bought, from which
+> supplier, with which documents, and which assets came out of it. Its hard limits (no approvals,
+> budgets, payables, three-way match or supplier portal) are in ADR-0099 §1. The rest of the sentence
+> above still stands — ADR-0099 keeps **no goods-receipt ledger** (received is derived from linked
+> assets), no signature capture and no check-out agreements — and generating assets from a purchase
+> line **reuses** this record's Part A loop. Part A and Part B are otherwise unchanged. *Built 2026-10-02
+> (#1473):* the receive body gained optional `purchaseCurrency`, `warrantyEnd` and `purchaseOrderLineId`
+> (the units are created linked to that line; it also needs `purchaseOrder:write`), and the result an
+> optional `overReceived`. The loop — one transaction and one tag-counter commit per unit — is untouched.
 
 ## Context
 

@@ -34,6 +34,12 @@ the classic flow — ownership is otherwise a separate step you take once the as
 [Assignments & history](/help/assets-assignments-history)). If the assignment part fails for any
 reason, the asset is still created; you'll just be asked to assign the owner from the asset.
 
+Something a purchase is waiting for? When a [purchase](/help/purchases-recording-purchases) still waits for
+units, the form opens with a **From purchase** picker: choosing a line opens
+[Receive stock](/help/assets-bulk-receiving#receiving-against-a-purchase) for it, so the unit is created
+already linked to its purchase, with the purchase's values. You see it only if you can view and edit
+purchases.
+
 Registering a batch of similar units? Use **Create & add another** instead of **Create asset**: it
 saves the current one and keeps the form open with the **model, location, company and status**
 carried over, clearing just the name, serial and asset tag so you can type the next unit straight
@@ -46,6 +52,27 @@ If you have a whole spreadsheet of gear to bring in, don't type them one by one 
 Assets screen offers an *Import from CSV* link), taking you straight to the guided
 [bulk import](/help/assets-bulk-import) wizard. The button appears only if you have permission to run
 an import.
+
+## The asset's page
+
+Opening an asset shows its record in three parts.
+
+- **The summary card** at the top: the asset's name and status, its asset tag (with a copy button),
+  model, category and company. Under it, a row of **key facts** answers the usual questions at a
+  glance: who holds it, where it is, how the **warranty** stands (active, ending within 90 days, or
+  expired, with a bar showing how much of the warranty period has passed) and what it is worth today.
+- **Needs attention** items appear in the card only when something needs follow-up: a warranty that
+  ends within 90 days or has already expired, an owner who hasn't acknowledged receipt yet, or an
+  owner whose account has been deactivated.
+- **Tabs** hold the rest: **Overview** (the details, grouped into identification and lifecycle, plus
+  the purchase and the custom fields), **Activity** (the activity log and the previous owners),
+  **Documents**, and **Consumables** delivered to the asset (shown to people who can view
+  consumables). The open tab is kept in the page address, so a link you share opens on the same tab.
+- **The side column** keeps the current **Owners** and the related knowledge base articles in view
+  while you move between tabs. On a narrow screen it moves below the tabs.
+
+The header keeps the everyday actions in sight, **Print label** and **Edit**. **Clone**, **View in
+topology** and **Delete** are in the **⋯** menu next to them, with the delete action set apart.
 
 ## Status
 
@@ -62,7 +89,27 @@ it. The values are:
 Status appears as a colored badge in the list and on the detail page. Changing it is recorded in the
 asset's activity log. You can change it quickly without opening the editor: on the **detail page**
 the status badge itself is a dropdown, and in the list the row's **⋯** menu has a **Change status**
-option. You can also set the status of several assets at once from the list.
+option. You can also set the status of several assets at once from the list: select them and pick one
+under **Set status** in the selection bar.
+
+### Custom statuses
+
+If your administrators have defined **custom statuses** (Settings → Taxonomies → **Statuses**, see
+[Custom asset statuses](/help/configuration-taxonomies#custom-asset-statuses)), every status picker —
+the asset form, the detail page's status dropdown, the row's **Change status**, **Set status** for a
+selection and **Receive stock** — lists them under the built-in status they belong to: the plain
+built-in status first, then its custom statuses, indented, each with its colored dot. They are
+optional; with none defined, the pickers show just the six built-in statuses.
+
+Choosing a custom status also sets its built-in status, which is what every rule keeps using — an
+asset in *Loaner pool* counts as *In storage* on the dashboard and in reports. Choosing a plain
+built-in status removes a custom one. An asset with a custom status shows its name in the status
+badge; the built-in status appears next to it on the detail page and in the quick view, and when you
+hover the badge in the list. Changes between custom statuses are recorded in the activity log too,
+naming both — for example *Loaner pool (In storage) → On the bench (In maintenance)*.
+
+Choosing a plain built-in status — from an asset's status dropdown, its edit form, or **Set status** on a
+selection — removes any custom status those assets had.
 
 ## Serial and asset tag
 
@@ -88,10 +135,27 @@ legal entity). It is **only for grouping, filtering and reporting**: it is **not
 Company does not hide anything — anyone who can see assets sees *all* assets regardless of their
 company; setting it simply lets you narrow the list to one company when you want to.
 
-It is a free-text field with **autocomplete**: as you type, lazyit suggests companies you've already
-used on other assets, so you reuse the same spelling instead of creating near-duplicates — but you
-can always type a brand-new value. There is no separate "companies" screen to manage: a company
-exists simply because at least one asset uses it.
+It is a free-text field with **suggestions**, so you reuse the same spelling instead of creating
+near-duplicates:
+
+- **When you click into it**, lazyit lists the companies *you* used most recently (remembered in this
+  browser), then the other companies already in use — most used first, with how many records use each
+  and when one was last used. Companies typed on [purchases](/help/purchases-recording-purchases) are
+  suggested too, if you can see purchases.
+- **As you type**, the closest matches come first: a company that starts with what you typed, then one
+  where a word starts with it, then one that contains it — and even a close misspelling.
+- **With the keyboard**, **↓** opens the list, **↑**/**↓** move through it, **Enter** or **Tab** takes the
+  highlighted company, and **Esc** closes the list and keeps what you typed. When the best match
+  completes what you are typing, it is highlighted for you, so **Enter** or **Tab** finishes the word;
+  **Ctrl+Enter** (**⌘+Enter** on a Mac) keeps your text exactly as typed instead.
+
+You can always type a brand-new value — a suggestion is never forced. If what you typed is just another
+spelling of a company already in use (different capitals or accents, punctuation, or a legal suffix
+such as "S.A." or "Inc."), a hint below the field says so and offers a button to use the existing
+spelling. It is only a hint: ignore it and your value is saved exactly as typed.
+
+There is no separate "companies" screen to manage: a company exists simply because at least one asset
+uses it.
 
 On the asset detail page the company is shown when set, and links to the list filtered by that
 company. You can filter and add a **Company** column to the list (see below).
@@ -99,10 +163,13 @@ company. You can filter and add a **Company** column to the list (see below).
 ## Cost & depreciation
 
 Under **Purchase & depreciation** you can optionally record what an asset cost and how long it's
-expected to serve. All three fields are optional — leave them blank for gear whose value you don't
+expected to serve. All the fields are optional — leave them blank for gear whose value you don't
 track.
 
 - **Purchase cost** — what you paid for the unit.
+- **Currency** — an optional label for the amounts, as your team writes it (`ARS`, `USD`, `u$s`…). It
+  suggests the labels already in use. lazyit never converts or interprets it; it only prints it in front
+  of the cost.
 - **Useful life** — how long you expect to use it, **in months** (for example `36` for three years).
 - **Salvage value** — its estimated worth at the end of that life. Defaults to **0** if left blank.
 
@@ -112,8 +179,29 @@ down to the salvage value across the useful life, then holds at the salvage valu
 but no useful life, the book value simply stays at the purchase cost (there's nothing to depreciate
 over). Assets with no purchase cost show no book value at all.
 
-Amounts are plain numbers — lazyit is single-organization and doesn't attach a currency, so enter and
-read them in whatever currency your team uses.
+An asset with a cost but no currency label shows its cost as **No currency** — its own visible state,
+never a default currency. Assets recorded before currency labels existed read this way until someone
+sets one. The book value carries the same label as the cost.
+
+### Entering amounts
+
+Type an amount the way numbers are written in the language you use lazyit in:
+
+| Language | Accepted | Not accepted |
+| --- | --- | --- |
+| English | `1,234.56` · `1234.56` · `1500` | `1.234,56` |
+| Spanish | `1.234,56` · `1234,56` · `1500` | `1,234.56` |
+
+Use at most **two decimals**, and leave out currency signs and minus signs. lazyit never guesses: if an
+amount can't be read in your language's format — `1,234.56` while lazyit is in Spanish, or a third
+decimal that is most likely a mistyped thousands separator — it says so below the field when you leave
+it, and the form isn't saved until you fix it. Once read, the amount is rewritten in the standard form
+(`1234,5` becomes `1.234,50`), so you can see it was understood. One shape reads differently between
+languages — a single separator followed by exactly three digits, such as `1.150` in Spanish or `1,150`
+in English. lazyit reads it as thousands and says so under the field, for example *Read as 1150*.
+
+Amounts are **shown as entered**, with your language's separators: a whole amount has no decimals
+(`1,500` in English, `1.500` in Spanish) and an amount with cents shows two (`1,234.56` / `1.234,56`).
 
 ## Custom fields
 
@@ -133,7 +221,9 @@ unexpected field). These hints are advisory only — you can always save.
 ## Finding assets in the list
 
 The **Assets** list has a search box and a **Status** dropdown right in the toolbar, plus a
-**Filters** button that opens a small panel for the rest. The search box matches an asset's name,
+**Filters** button that opens a small panel for the rest. The **Status** dropdown also lists any
+custom statuses under their built-in status: choosing a built-in status shows every asset in it,
+whatever its custom status, while choosing a custom status shows only the assets that have it. The search box matches an asset's name,
 serial, asset tag, and its model's name or manufacturer — so searching a model like "ThinkPad" or
 "Pro 14" finds every asset carrying it, even though the model isn't in the name.
 
@@ -163,24 +253,54 @@ that matches your **current filters** — the whole result set, not just the pag
 the status, category, location, company, owner or search you care about first (for example *all the
 Dell servers in the colo that are out of warranty*), then export just that slice. The file carries one
 row per asset with its name, asset tag, serial, status, category, manufacturer, model, location,
-company, purchase and warranty dates, current owners, notes and the created/updated timestamps, and is
-safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
+company, purchase and warranty dates, current owners, notes, the created/updated timestamps, the
+**purchase cost** (as a plain number with a dot for decimals, so a spreadsheet reads it) and its
+**currency** label — and, only if you can view [purchases](/help/purchases-recording-purchases), the
+asset's **supplier**, **purchase reference** and **invoice numbers**, as the last columns. Without that
+permission those three columns are left out of the file entirely. It is safe to open in a spreadsheet. Custom **specs** fields are not included in this version. If you have
 the *Show archived* view open, the export is that archived slice instead.
 
 ### Choosing which columns to show
 
-The **Columns** button (next to *Filters*) opens a checklist of the table's columns — asset tag,
-model, category, location, company, status, owners and updated. Untick the ones you don't care about to slim
-the table down to what matters for you. The **Name** column and the row actions always stay. Your
-choice is remembered in this browser, so the table keeps the same shape next time you visit. (This
-governs the desktop table; the mobile card view always shows the full set.)
+The **Columns** button (next to *Filters*) opens a checklist of the table's columns, in groups:
+
+- **Details** — asset tag, serial, manufacturer (from the asset's model), model, category, location
+  and company.
+- **Status** — status and owners.
+- **Purchase & warranty** — purchase date, warranty end and purchase cost.
+- **Activity** — updated.
+
+Untick the ones you don't care about to slim the table down, or tick more to bring them in. Out of the
+box the table shows asset tag, model, category, location, company, status, owners and updated; **serial**,
+**manufacturer** and the **Purchase & warranty** columns stay off until you turn them on. The **Name**
+column and the row actions always stay. Your choice is remembered in this browser, so the table keeps the
+same shape next time you visit.
+
+**Purchase cost** shows the amount as it was entered, with its currency label (for example *USD 1,500*).
+An amount recorded without a label reads **No currency** beside it — lazyit never assumes a currency.
+Click the **Serial**, **Purchase date**, **Warranty end** or **Purchase cost** header to sort the whole
+list by it; costs sort by amount alone, whatever their label. **Manufacturer** cannot be sorted.
+
+On a phone the asset cards always show the usual details, plus any of the serial, manufacturer and
+purchase & warranty columns you have turned on.
+
+## Where it was bought
+
+If the asset is linked to a [purchase](/help/purchases-recording-purchases), its page shows a **Purchase**
+panel in the **Overview** tab, right after *Details*: the purchase and its supplier, the reference, dates and invoice numbers, the
+supplier's support contact, and the purchase's documents to download. It is shown **only to people who
+can view purchases**; everyone else keeps seeing the asset's own cost and dates in *Details*, as before.
+The panel marks **Differs from purchase** when the asset's cost is not the price on its purchase, and
+offers **Unlink from purchase** to those who can edit purchases and assets. An asset that is not linked
+offers **Link to purchase** there instead. See
+[Purchases — The asset's Purchase panel](/help/purchases-recording-purchases#the-assets-purchase-panel).
 
 ## Assets on the topology map
 
 If an asset backs a node on the [Infrastructure diagram](/help/assets-topology-diagram) — for
 example a host, a NAS or a switch you've placed on the map — its detail page shows an **On topology**
 badge next to the status, and the same marker appears as a small share glyph beside the asset's name
-in the list. A **View in topology** button on the detail page jumps straight to the map, flying to
+in the list. **View in topology**, in the detail page's **⋯** menu, jumps straight to the map, flying to
 that node and giving it a brief highlight so you can spot which one it is at a glance. (You only see
 these when you have permission to view the topology.) The reverse link exists too: a node's details
 panel links its *inventory name* back to this asset, so you can move between an asset and its node in
@@ -189,7 +309,7 @@ either direction.
 ## Documents
 
 An asset can carry **documents** — warranty PDFs, purchase receipts, damage photos — kept on the
-asset record instead of scattered across drives and chat threads. The **Documents** section on the
+asset record instead of scattered across drives and chat threads. The **Documents** tab on the
 asset's detail page lists them with their name, size and upload date.
 
 - **Upload** with the button, or **drag and drop** files onto the section. Supported types are
@@ -199,6 +319,9 @@ asset's detail page lists them with their name, size and upload date.
 - **Delete** removes a document after a confirmation. Like the rest of lazyit this is reversible at
   the storage layer; the record of who uploaded it is kept.
 - Uploading and deleting need the asset-write permission; anyone who can view the asset can download.
+- **Type** — optional, free text (*Invoice*, *Warranty*, *Delivery note*…), suggested from the types
+  already used. Fill it before uploading, or set, change or clear it later with the pencil on the
+  document. It shows next to the file name.
 
 > **Backups.** Attachments are stored on the server's file volume, which is **not yet covered by the
 > database backup**. Until backup support ships, keep an independent copy of anything irreplaceable.
@@ -207,9 +330,9 @@ asset's detail page lists them with their name, size and upload date.
 
 - **Edit** updates the asset in place; each meaningful change (status, location, model, custom
   fields) is written to the activity log.
-- **Clone** opens a new asset pre-filled from this one, with the serial and asset tag cleared so the
+- **Clone** (in the **⋯** menu) opens a new asset pre-filled from this one, with the serial and asset tag cleared so the
   copy gets its own — handy for registering a batch of identical units.
-- **Deactivating** an asset is a soft delete: the record is hidden from the normal list but never
+- **Deactivating** an asset (**Delete** in the **⋯** menu) is a soft delete: the record is hidden from the normal list but never
   destroyed, so its history is preserved. Deactivated assets can be **restored** by an administrator,
   which also reclaims their freed serial and asset tag (unless a live asset has taken the value
   meanwhile). lazyit never hard-deletes asset data.

@@ -34,6 +34,22 @@ export const ArticleCategorySchema = z.object({
   // legacy/older server omits the field entirely — `.nullish()` accepts both, and the UI hides the
   // number when it is null/absent (self-heals on any operator upgrade without a client change).
   articleCount: int4({ min: 0, example: 0 }).nullish(),
+  // Derived "this folder carries an access rule" flag (ADR-0060 §3 carve-out, #1299). A COMPUTED read
+  // aggregate over the `accessRules` jsonb — NOT a stored column, no migration, no data touch. It is
+  // the SAME public-vs-restricted question `isPublicAccessRules` answers (`null`/empty = PUBLIC, a
+  // non-empty rule list = restricted), inverted: `true` means the folder has a restriction.
+  //
+  // It says a restriction EXISTS; it says NOTHING about the reader. It is not "you cannot see this"
+  // (a caller who reads the folder normally sees `true` for a folder they are allowed into), and it
+  // never carries the rule CONTENT — not the kinds, not the user list, not the role, not counts. The
+  // rules themselves (`accessRules`) stay gated to `settings:manage` (#554); this flag is readable by
+  // any `category:read` caller, VIEWER included, so the web UI can warn that moving an article into or
+  // out of a restricted folder changes who may read it (ADR-0060 §9).
+  //
+  // `.optional()`: a server that predates the field omits it entirely, and a client that predates it
+  // ignores it — the field self-heals on an operator upgrade with no client change. Absent means
+  // "unknown", never "public": treat only an explicit `true`/`false` as an answer.
+  hasAccessRules: z.boolean().optional(),
 });
 
 /**

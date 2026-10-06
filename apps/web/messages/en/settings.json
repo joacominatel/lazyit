@@ -3,6 +3,39 @@
     "title": "Admins only",
     "description": "Settings — instance configuration, taxonomy management and the role overview — is available to administrators. Ask an admin if you need a change here."
   },
+  "nav": {
+    "label": "Settings pages",
+    "overview": "Overview",
+    "groups": {
+      "inventory": "Inventory",
+      "access": "Access",
+      "integrations": "Integrations",
+      "system": "System"
+    },
+    "items": {
+      "taxonomies": "Taxonomies",
+      "locations": "Locations",
+      "assetTags": "Asset tags",
+      "imports": "Imports",
+      "roles": "Roles & permissions",
+      "serviceAccounts": "Service accounts",
+      "email": "Email",
+      "directory": "Directory (AD/LDAP)",
+      "agents": "Reporting agents",
+      "ai": "AI assistant",
+      "integrations": "Tasks",
+      "instance": "General & version"
+    }
+  },
+  "section": {
+    "status": {
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured"
+    },
+    "unsaved": "Unsaved changes",
+    "noChanges": "No changes"
+  },
   "hub": {
     "title": "Settings",
     "subtitle": "Instance configuration, taxonomy management, roles and service accounts — administrators only.",
@@ -14,12 +47,16 @@
       "title": "Locations",
       "description": "Manage the places your assets physically live — offices, datacenters, racks and storage."
     },
+    "assetTags": {
+      "title": "Asset tags",
+      "description": "Give new assets a running tag automatically, and tag the ones you already have."
+    },
     "imports": {
       "title": "Bulk import",
       "description": "Load an existing estate of assets from a CSV or JSON file — a guided, occasional admin action for a new instance."
     },
     "roles": {
-      "title": "Roles",
+      "title": "Roles & permissions",
       "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
     },
     "serviceAccounts": {
@@ -30,13 +67,21 @@
       "title": "Reporting agents",
       "description": "Set how every lazyit agent in this estate reports and what it collects, and review which discovered hosts are confirmed automatically."
     },
+    "email": {
+      "title": "Email",
+      "description": "Send notifications by email through your own SMTP relay."
+    },
+    "directory": {
+      "title": "Directory (AD/LDAP)",
+      "description": "Import people read-only from your Active Directory or LDAP."
+    },
     "integrations": {
       "title": "Integrations & workflows",
       "description": "The cross-application manual-task inbox for provisioning workflows. Per-app automation is configured on each application's Workflows tab."
     },
     "instance": {
-      "title": "Instance",
-      "description": "Review how this lazyit instance is configured — identity provider, setup state and runtime posture."
+      "title": "General & version",
+      "description": "Check the running version, update lazyit, and see how this instance is set up."
     },
     "ai": {
       "title": "AI assistant",
@@ -44,9 +89,11 @@
     }
   },
   "instance": {
-    "title": "Instance",
-    "subtitle": "How this lazyit instance is configured — runtime posture (set via environment) and the asset-tag scheme.",
-    "cardTitle": "Configuration",
+    "title": "General & version",
+    "subtitle": "Version, updates and how this instance is set up.",
+    "cardTitle": "Instance",
+    "cardSummary": "Set by the environment at deploy time.",
+    "cardHelp": "Operators change the identity provider and runtime posture through environment variables when they deploy. This view only reads the result.",
     "loadError": "Could not load instance status",
     "loadErrorHint": "The API may be down or unreachable.",
     "rows": {
@@ -67,17 +114,11 @@
       "generic-oidc": "Generic OIDC (bring your own)",
       "local": "Local accounts"
     },
-    "agentsMoved": {
-      "title": "Reporting agents",
-      "body": "The fleet's agent policy — reporting cadence, collectors and exclusions — now has its own section, together with the auto-confirm rules and the scopes that can override it.",
-      "link": "Open Reporting agents"
-    },
     "updates": {
       "title": "Version & updates",
-      "subtitle": "Check for new lazyit releases and run a guided, backed-up update from the host.",
+      "subtitle": "Check for releases and run a guided update.",
       "rows": {
         "current": "Current version",
-        "status": "Status",
         "latest": "Latest release",
         "viewRelease": "View release notes",
         "lastChecked": "Last checked",
@@ -97,7 +138,7 @@
       "optIn": {
         "label": "Check for updates weekly",
         "description": "Anonymously check github.com for new releases. Off by default; no instance data is ever sent, and it fails silently if blocked.",
-        "smtpHint": "To also get emailed when you fall behind, configure SMTP in the card below."
+        "smtpHint": "To also get an email when you fall behind, <link>set up outbound email</link>."
       },
       "cta": {
         "update": "Update to {version}",
@@ -132,12 +173,16 @@
     }
   },
   "assetTagScheme": {
-    "title": "Asset tag scheme",
-    "subtitle": "Auto-assign a running asset tag to new assets — a prefix, a zero-padded number and a suffix. Off until you turn it on; an explicit tag always wins.",
+    "title": "Asset tags",
+    "subtitle": "Give new assets the next tag automatically.",
+    "scheme": {
+      "title": "Tag scheme",
+      "summary": "A prefix, a zero-padded number and a suffix.",
+      "help": "Off until you turn it on. A tag typed on an asset always wins, and a number already used by a live asset is skipped."
+    },
     "loadError": "Could not load the asset-tag scheme.",
     "retry": "Retry",
     "save": "Save scheme",
-    "disabledHint": "The scheme is off. New assets keep their manual tag (or none) — turn it on to auto-assign.",
     "preview": {
       "label": "Next tag",
       "disabledLabel": "Tag shape (auto-assign is off)",
@@ -149,7 +194,7 @@
     },
     "fields": {
       "enabled": {
-        "label": "Auto-assign asset tags",
+        "label": "Auto-assign",
         "description": "When on, a new asset with no tag gets the next number automatically."
       },
       "prefix": {
@@ -226,7 +271,7 @@
   },
   "agentPolicy": {
     "title": "Reporting agents",
-    "subtitle": "The default policy for every lazyit agent in this estate — how often they report, what they collect and what they leave out. Set here once, with no host to log into.",
+    "subtitle": "What every agent in this estate reports.",
     "revisionBadge": "Policy v{revision}",
     "loadFailed": "Could not load the agent policy.",
     "saveFailed": "Could not save the agent policy.",
@@ -241,9 +286,15 @@
       "reload": "Reload the saved policy"
     },
     "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection.",
+    "propagationNote": "Hosts pick up a change on their next report.",
     "cadence": {
       "title": "Cadence",
-      "description": "How often a host reports, and how long lazyit waits before calling it offline. The two are tied together: the offline threshold has to be longer than the interval, or a healthy host is marked offline between two of its own reports."
+      "description": "How often a host reports, and how long lazyit waits before calling it offline. The two are tied together: the offline threshold has to be longer than the interval, or a healthy host is marked offline between two of its own reports.",
+      "sentence": {
+        "before": "Each host reports every",
+        "middle": "min and is marked offline after",
+        "after": "min without reporting."
+      }
     },
     "interval": {
       "label": "Report every (minutes)",
@@ -265,8 +316,9 @@
     "collect": {
       "title": "What agents collect",
       "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers and hypervisor guests work that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
+      "summary": "{on} of {total} on",
       "veto": "A host can always refuse. Turning a collector off in that host's own agent config — /etc/lazyit-agent/config on Linux, C:\\ProgramData\\lazyit-agent\\config on Windows — wins over this setting, and nothing here can switch it back on.",
-      "hardware": "Manufacturer, model and serial",
+      "hardware": "Hardware and serial",
       "disks": "Disks and mountpoints",
       "nics": "Network interfaces",
       "software": "Installed software",
@@ -276,6 +328,7 @@
     "exclude": {
       "title": "Exclusions",
       "description": "Comma-separated name patterns; the whole name has to match, and matching is case-insensitive. * stands for any run of characters, ? for exactly one — regular expressions are not accepted. Each list holds at most {max} patterns.",
+      "summary": "Name patterns left out of every report.",
       "count": "{count, plural, =0 {No patterns} other {# of {max} patterns}}",
       "nicNames": {
         "label": "Ignore network interfaces",
@@ -303,27 +356,30 @@
     "scopes": {
       "title": "Where a policy comes from",
       "description": "Three scopes, resolved field by field — the narrowest one that sets a field wins.",
+      "summary": "The most specific scope wins.",
       "instance": {
-        "label": "Instance default",
-        "scope": "Every agent in this estate."
+        "label": "Instance",
+        "scope": "Every agent"
       },
       "serviceAccount": {
-        "label": "Per service account",
-        "scope": "One agent's credential — the Add a server wizard mints one per agent."
+        "label": "Service account",
+        "scope": "One agent"
       },
       "node": {
-        "label": "Per host",
-        "scope": "One server."
+        "label": "Host",
+        "scope": "One server"
       },
       "editedHere": "Edited here",
       "noEditor": "No editor yet",
-      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
+      "general": "Most general",
+      "specific": "Most specific",
+      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one.",
+      "wizard": "A service account is one agent's credential — the Add a server wizard mints one per agent."
     },
     "rollout": {
-      "title": "Rollout",
       "body": "Each host echoes the policy version it is actually running, so “configured” and “applied” stay different things. A host picks a change up on its next check-in and applies it from the run after that.",
       "legacy": "A server discovered by an agent older than this channel never echoes a version at all, and shows neither applied nor pending.",
-      "link": "See per-host status on the infrastructure diagram"
+      "link": "Per-host status"
     },
     "autoConfirm": {
       "title": "Auto-confirm rules",
@@ -334,13 +390,17 @@
     }
   },
   "smtp": {
-    "title": "Outbound email (SMTP)",
-    "subtitle": "Connect an SMTP relay so lazyit can send email notifications. Off until you turn it on; the password is stored encrypted and never shown again.",
+    "title": "Outbound email",
+    "subtitle": "Also send notifications by email.",
+    "server": {
+      "title": "SMTP server",
+      "summary": "The relay lazyit sends email through.",
+      "help": "Off until you turn it on. Changes apply when you save; a test still works while email is off."
+    },
     "loadError": "Could not load the SMTP settings.",
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
-    "disabledHint": "Outbound email is off. Turn it on to email notifications — you can still send a test below.",
     "fields": {
       "enabled": {
         "label": "Enable outbound email",
@@ -356,6 +416,7 @@
       },
       "security": {
         "label": "Security",
+        "help": "STARTTLS on port 587 is recommended. Implicit TLS uses port 465; None sends in plaintext.",
         "options": {
           "none": "None (plaintext)",
           "starttls": "STARTTLS (recommended, port 587)",
@@ -370,7 +431,7 @@
         "label": "Password",
         "placeholderSet": "Configured — leave blank to keep",
         "placeholderUnset": "Password",
-        "hintSet": "A password is stored. Leave blank to keep it, or type a new one to replace it."
+        "help": "Stored encrypted and never shown again. Leave it blank to keep the stored password."
       },
       "fromAddress": {
         "label": "From address",
@@ -386,9 +447,10 @@
       }
     },
     "test": {
-      "heading": "Send a test email",
-      "description": "Sends a one-off email using the saved settings. Save your changes first — the test uses what's stored, not the form above.",
+      "heading": "Send a test",
+      "description": "Uses the saved settings, not unsaved changes.",
       "placeholder": "you@example.com",
+      "toLabel": "Test recipient",
       "send": "Send test",
       "invalidEmail": "Enter a valid destination email address.",
       "success": "Test email sent to {to}.",
@@ -402,15 +464,19 @@
   },
   "directory": {
     "title": "AD / LDAP directory sync",
-    "subtitle": "Read-only import of people from your on-prem Active Directory / LDAP. lazyit creates login-less directory persons — it never writes back to your directory and never logs anyone in.",
+    "subtitle": "Import people read-only from Active Directory or LDAP.",
+    "connection": {
+      "title": "Connection",
+      "summary": "The directory lazyit reads people from.",
+      "help": "lazyit binds read-only and creates login-less directory persons. It never writes back to your directory and never signs anyone in."
+    },
     "loadError": "Could not load the directory settings.",
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
-    "disabledHint": "Scheduled sync is off. Turn it on to import people on a schedule — you can still run Sync now below to test the connection.",
     "fields": {
       "enabled": {
-        "label": "Enable scheduled sync",
+        "label": "Scheduled sync",
         "description": "When on, lazyit periodically binds to your directory and imports people. When off, only a manual Sync now runs."
       },
       "host": {
@@ -453,7 +519,7 @@
         "label": "Bind password",
         "placeholderSet": "Configured — leave blank to keep",
         "placeholderUnset": "Bind password",
-        "hintSet": "A bind password is stored. Leave blank to keep it, or type a new one to replace it."
+        "help": "Stored encrypted and never shown again. Leave it blank to keep the stored password."
       },
       "searchFilter": {
         "label": "Search filter",
@@ -462,7 +528,9 @@
       },
       "offboardGraceDays": {
         "label": "Offboard grace (days)",
-        "description": "How many days a person may be missing from the directory before lazyit deactivates them. 0 = deactivate on the first sync that no longer finds them."
+        "before": "Deactivate a person after",
+        "after": "days missing from the directory.",
+        "description": "0 deactivates a person on the first sync that no longer finds them."
       },
       "attributeMap": {
         "label": "Attribute mapping",
@@ -477,6 +545,7 @@
     },
     "sync": {
       "heading": "Sync now",
+      "summary": "Run the import now with the saved settings.",
       "description": "Runs the same read-only import the schedule runs, using the saved settings — so save your changes first. This also confirms the bind works.",
       "button": "Sync now",
       "success": "Directory sync completed.",
@@ -498,6 +567,7 @@
     },
     "tray": {
       "title": "Directory people to review",
+      "summary": "Login-less people the sync imported, newest first.",
       "description": "People imported from your directory. Each is a login-less person you can open, provision a login for, or offboard from the Users section.",
       "offboarded": "Inactive",
       "discovered": "Added {when}",
@@ -550,6 +620,7 @@
           "accessGrant": "Access grants",
           "accessRequest": "Access requests",
           "consumable": "Consumables",
+          "purchaseOrder": "Purchases",
           "article": "Knowledge Base",
           "location": "Locations",
           "assetModel": "Asset models",
@@ -836,6 +907,9 @@
       "consumable:read": { "label": "View consumables" },
       "consumable:write": { "label": "Add, edit & adjust consumables" },
       "consumable:delete": { "label": "Delete consumables" },
+      "purchaseOrder:read": { "label": "View purchases & suppliers" },
+      "purchaseOrder:write": { "label": "Record & edit purchases" },
+      "purchaseOrder:delete": { "label": "Delete purchases & suppliers" },
       "assetModel:read": { "label": "View asset models" },
       "assetModel:write": { "label": "Add & edit asset models" },
       "assetModel:delete": { "label": "Delete asset models" },
@@ -899,6 +973,18 @@
       "inventory:import": {
         "label": "Run bulk imports",
         "description": "Use the guided Migrator to bulk-import assets from a CSV/JSON file. Also requires the relevant write permissions (assets, models, categories, locations), checked per row at commit."
+      },
+      "purchaseOrder:view": {
+        "label": "View purchases & suppliers",
+        "description": "See purchases, their lines, prices and documents, and the supplier directory."
+      },
+      "purchaseOrder:edit": {
+        "label": "Record & edit purchases",
+        "description": "Create and edit purchases, their lines and suppliers, receive units and link assets to a purchase."
+      },
+      "purchaseOrder:delete": {
+        "label": "Delete purchases & suppliers",
+        "description": "Archive and restore purchases and suppliers, and merge duplicate suppliers. Linked assets keep their link."
       },
       "infra:view": {
         "label": "View the server map",
@@ -1038,14 +1124,15 @@
   },
   "taxonomies": {
     "title": "Taxonomies",
-    "subtitle": "Manage the categories that classify records, plus the asset models assets reference.",
+    "subtitle": "Manage the categories that classify records, plus the asset models assets reference and your custom asset statuses.",
     "tablistAria": "Taxonomy kind",
     "tabs": {
       "asset": "Asset categories",
       "application": "Application categories",
       "consumable": "Consumable categories",
       "article": "Article categories",
-      "models": "Asset models"
+      "models": "Asset models",
+      "statuses": "Statuses"
     },
     "kindLabel": {
       "asset": "asset category",
@@ -1212,6 +1299,72 @@
         "updateError": "Couldn't update asset model",
         "created": "Asset model created",
         "createError": "Couldn't create asset model"
+      }
+    },
+    "statuses": {
+      "intro": "Custom statuses are optional names for the six built-in statuses — for example \"In repair at vendor\" or \"On the bench\" for In maintenance, or \"Loaner pool\" for In storage. Each one maps to exactly one built-in status, which is what the dashboard, filters, imports and every other rule keep reading. Assets can keep a plain built-in status.",
+      "newButton": "New custom status",
+      "loadError": "Couldn't load the custom statuses",
+      "builtIn": "Built-in status",
+      "add": "Add",
+      "addTo": "Add a custom status under {status}",
+      "empty": "No custom statuses yet. Add one under the built-in status it names.",
+      "archivedEmpty": "No archived custom statuses.",
+      "archiveAction": "Archive",
+      "assetsLink": "{count, plural, one {# asset} other {# assets}} with {name}",
+      "columns": {
+        "name": "Name",
+        "description": "Description",
+        "order": "Order",
+        "assets": "Assets",
+        "kind": "Built-in status",
+        "archived": "Archived"
+      },
+      "toast": {
+        "created": "Created the custom status {name}",
+        "createError": "Couldn't create the custom status",
+        "updated": "Updated the custom status {name}",
+        "updateError": "Couldn't update the custom status",
+        "restored": "Restored the custom status {name}",
+        "restoreError": "Couldn't restore the custom status"
+      },
+      "form": {
+        "newTitle": "New custom status",
+        "editTitle": "Edit custom status",
+        "description": "A name your team uses for one of the built-in statuses. Only the name is required.",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. In repair at vendor",
+        "kindLabel": "Built-in status",
+        "kindHelp": "Assets given this custom status take this built-in status, which drives every rule and report.",
+        "kindLocked": "Locked: {count, plural, one {# asset uses} other {# assets use}} this custom status. Move them to another status first, or create a new custom status.",
+        "colorLabel": "Color",
+        "colorDefault": "The built-in status color",
+        "colorHelp": "Shown as the dot next to the name. Pick one or type a #RRGGBB value; leave it empty to use the built-in status color.",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "Optional — when to use this status.",
+        "orderLabel": "Order",
+        "orderPlaceholder": "Optional — lower sorts first within its built-in status",
+        "save": "Save changes",
+        "create": "Create custom status",
+        "errors": {
+          "nameRequired": "Name is required.",
+          "colorInvalid": "Use a #RRGGBB color, for example #2563EB.",
+          "orderInvalid": "Order must be a whole number from 0 to 100000."
+        }
+      },
+      "archive": {
+        "title": "Archive {name}?",
+        "inUseDescription": "{count, plural, one {# asset has} other {# assets have}} this custom status. Choose where {count, plural, one {it goes} other {they go}}: another custom status or a plain built-in status. Each move is recorded in the asset's history.",
+        "unusedDescription": "No asset uses this custom status. You can restore it later from the archived list.",
+        "destinationLabel": "Move the assets to",
+        "destinationPlaceholder": "Choose a status",
+        "destinationHelp": "Required while assets use this custom status.",
+        "destinationSummary": "{count, plural, one {# asset moves} other {# assets move}} to {target}.",
+        "confirm": "Archive",
+        "confirmMove": "Move and archive",
+        "toast": "Archived the custom status {name}",
+        "toastMoved": "Archived {name} and moved {count, plural, one {# asset} other {# assets}} to {target}",
+        "error": "Couldn't archive the custom status"
       }
     }
   }

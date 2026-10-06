@@ -29,6 +29,24 @@ const KNOWN_SEGMENTS = [
   "account",
   // `/account/ai` and `/settings/ai` (ADR-0097): the humanizer would print "Ai".
   "ai",
+  // The Purchases area (ADR-0099): `/purchases`, `/purchases/pending` and `/purchases/suppliers`.
+  "purchases",
+  "pending",
+  "suppliers",
+  // The Settings area (#1533): every settings route had a humanized English crumb ("Asset Tags",
+  // "Service Accounts"), even in Spanish. Labels match the settings side nav.
+  "settings",
+  "instance",
+  "email",
+  "directory",
+  "asset-tags",
+  "agents",
+  "taxonomies",
+  "roles",
+  "permissions",
+  "service-accounts",
+  "integrations",
+  "tasks",
 ] as const;
 const KNOWN_SEGMENT_SET = new Set<string>(KNOWN_SEGMENTS);
 

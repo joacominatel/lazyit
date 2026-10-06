@@ -30,6 +30,35 @@ export function int4(opts: { min?: number; max?: number; example?: number } = {}
 }
 
 /**
+ * The upper bound of a money amount on the wire, in minor units (ADR-0100 §2): the largest integer a
+ * JSON number carries exactly. The `bigint` column is wider (2^63−1); this bound is the binding one.
+ */
+export const MONEY_MAX = Number.MAX_SAFE_INTEGER;
+
+/** The OpenAPI sample `money()` carries unless the caller passes its own: 1,500.00 in minor units. */
+const MONEY_EXAMPLE = 150_000;
+
+/**
+ * A money amount in integer minor units (hundredths), backed by a Prisma `BigInt` column (ADR-0100).
+ * Use this — never `int4()` — for every money field. On the wire it stays a JSON `number`, bounded to
+ * `[0, MONEY_MAX]`; the API converts the column's `bigint` to that number on read and back on write.
+ *
+ * `min`/`max` narrow the range; they never widen it past `[0, MONEY_MAX]`. The schema ALWAYS carries an
+ * `example`: without one, Swagger UI autofills the `maximum` into optional fields, and since
+ * `MONEY_MAX` is a valid amount it would be stored instead of rejected (the defect ADR-0036 fixed).
+ */
+export function money(opts: { min?: number; max?: number; example?: number } = {}) {
+  const min = Math.max(opts.min ?? 0, 0);
+  const max = Math.min(opts.max ?? MONEY_MAX, MONEY_MAX);
+  return z
+    .number()
+    .int()
+    .min(min)
+    .max(max)
+    .meta({ example: opts.example ?? MONEY_EXAMPLE });
+}
+
+/**
  * An optional free-text field that treats an empty/whitespace-only string as "absent".
  *
  * The naive `z.string().trim().min(1).max(N).optional()` accepts `undefined` but rejects `""` — yet

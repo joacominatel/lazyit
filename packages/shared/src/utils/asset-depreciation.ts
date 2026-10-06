@@ -6,6 +6,10 @@
  * `Asset.purchaseCost` / `salvageValue` columns store. Straight-line ONLY: the value falls in equal
  * steps from `purchaseCost` at `purchaseDate` down to `salvageValue` after `usefulLifeMonths`, then
  * stays flat. No MACRS / declining-balance / tax modeling, no multi-currency (deliberately minimal).
+ *
+ * Amounts are 64-bit on disk but at most `MONEY_MAX` (= `Number.MAX_SAFE_INTEGER`) on the wire (ADR-0100),
+ * so they stay plain `number`s here. The elapsed fraction is divided out BEFORE it multiplies the
+ * depreciable base, so no intermediate value exceeds the cost itself — never past the safe-integer range.
  */
 
 /** The stored depreciation inputs (all nullable — money in minor units, life in months). */

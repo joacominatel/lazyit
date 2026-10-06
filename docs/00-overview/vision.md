@@ -3,7 +3,7 @@ title: Vision
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-10-02
 ---
 
 # Vision
@@ -64,5 +64,13 @@ bundled-but-replaceable Zitadel (BYOI) — [[0037-idp-choice-zitadel-byoi]],
   2026-06-16: the product is IT-native (assets, access, consumables, KB) and deliberately
   not a generic ticket tool. The `Ticket`/`TicketComment` entities were never built; they
   are removed from the domain.
+- **Procurement / purchasing system** — lazyit does not run purchasing: no approval workflows,
+  budgets, invoices as payables, three-way match, supplier portal or exchange rates.
+  The customer's finance system stays the system of record for purchase orders. What lazyit
+  **does** do, since [[0099-purchases-scope-model-and-optionality]] (2026-10-01), is **record**
+  purchases — supplier, the finance PO number, documents, lines, and which assets came out of
+  them — as an area that is always available and optional at entry. That reverses the "no procurement" wording
+  [[0089-bulk-receiving-and-checkout-acknowledgement]] cited; recording is in scope, running
+  procurement is not.
 
 Related: [[problem-space]] · [[competitors]] · [[asset-centric]]

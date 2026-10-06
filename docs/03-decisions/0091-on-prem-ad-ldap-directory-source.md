@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-09-23
+updated: 2026-10-05
 deciders: [Joaquín Minatel]
 ---
 
@@ -94,6 +94,34 @@ uniques.
   rest of the sweep continues. The next run re-evaluates, so they are offboarded as soon as another active
   ADMIN exists. The predicate is the same one the `PATCH /users` last-admin guard uses
   (`UsersService.hasAnotherActiveAdmin`, [[0040-rbac-roles]]).
+  *Amended 2026-10-05 (#1311):* "only when *we* set it" is enforced by never stamping what we did not
+  deactivate. The sweep **skips a person who is already inactive** — nothing written, counted as
+  `skipped` — so a manual deactivation never carries `directoryOffboardedAt` and a reappearance leaves it
+  inactive. Every offboard is therefore of an active person and always bumps the epochs; the
+  "already-inactive person does not bump" case above no longer occurs. A manual deactivation
+  (`PATCH /users/:id`, active→inactive) also clears any stamp left from an earlier sync offboard the admin
+  had reversed, so that deactivation is not undone either. Rows stamped before this fix on a person who
+  was already inactive cannot be told apart from a genuine sync offboard (the row records no origin, and
+  activation flips were not audited before #1375), so on reappearance they still reactivate once.
+  Both the offboard and the reactivation are conditional writes on the state the sweep loaded (active and
+  unstamped, or inactive and stamped), so an admin edit landing mid-sweep wins: a 0-row match writes
+  nothing, bumps no epoch, and counts as `skipped`. While a person is missing from the directory, the sync
+  deactivates them again after the grace period: a person an admin deactivated by hand and later re-enabled
+  is active and unstamped, so the next sweep offboards them if they are still absent past grace (only a
+  re-enabled sync-offboarded person, who keeps the stamp, is left alone).
+  *Amended 2026-10-05 (#1522, CEO decision "the admin decides"):* the last sentence above no longer holds.
+  A manual re-enable now sticks whatever the person's history, mirroring the rule that the sync never
+  undoes a manual deactivation. `PATCH /users/:id` (inactive→active) stamps a new nullable
+  `User.directoryReenabledAt`; an active→inactive flip clears it. The sweep never offboards a person who
+  carries it (nothing written), and the conditional offboard also requires `directoryReenabledAt: null`,
+  so a re-enable landing mid-sweep wins. A re-enabled sync-offboarded person also keeps the stamp while
+  absent. When the person reappears in the directory, the refresh silently clears the mark and, on an
+  active person, any leftover stamp (no history row, no reactivation write), so a later absence past grace
+  offboards them as usual. That also heals a stamp-only active row left by a re-enable before this change
+  the next time the person is listed. Additive
+  migration `20261005120000_user_directory_reenabled_at`, no backfill: existing rows read `NULL`. A
+  hand-deactivated person who was re-enabled before this update carries no mark, so if they are still
+  absent past grace the next sweep offboards them once; an admin re-enables them again and that one sticks.
 
 ### Hard invariants (enforced in code, asserted by a jest test)
 

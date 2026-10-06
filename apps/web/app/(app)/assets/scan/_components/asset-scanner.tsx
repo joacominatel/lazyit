@@ -1,20 +1,19 @@
 "use client";
 
 import { ArrowLeftIcon, QrCodeIcon } from "@heroicons/react/24/outline";
-import type { Html5Qrcode } from "html5-qrcode";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useRef, useState } from "react";
+import { CameraViewfinder } from "@/components/camera-viewfinder";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useCameraScanner } from "@/lib/hooks/use-camera-scanner";
 
 /** The DOM node html5-qrcode mounts its <video> into — must exist before the instance is created. */
 const READER_ID = "asset-qr-reader";
-
-type ScanStatus = "starting" | "scanning" | "error" | "unsupported";
 
 /**
  * Camera QR lookup (#875). Opens the device camera via `html5-qrcode` — a single dependency that
@@ -29,11 +28,13 @@ type ScanStatus = "starting" | "scanning" | "error" | "unsupported";
  */
 export default function AssetScanner() {
   const t = useTranslations("assets.scan");
+  const tc = useTranslations("common.cameraScanner");
   const router = useRouter();
-  const scannerRef = useRef<Html5Qrcode | null>(null);
   // Guards against a second decode firing (and a second navigation) between the first hit and teardown.
   const handledRef = useRef(false);
-  const [status, setStatus] = useState<ScanStatus>("starting");
+  // The read is taken and the camera stopped: hold the success state until the navigation lands, rather than
+  // a "scanning" badge or a tip over a frozen camera.
+  const [found, setFound] = useState(false);
   const [manual, setManual] = useState("");
 
   /**
@@ -61,63 +62,15 @@ export default function AssetScanner() {
     [router],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      // No camera API (older browser, insecure context, or a headless environment) → skip straight to
-      // the manual-entry fallback instead of throwing.
-      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-        setStatus("unsupported");
-        return;
-      }
-      const { Html5Qrcode } = await import("html5-qrcode");
-      if (cancelled) return;
-      const instance = new Html5Qrcode(READER_ID);
-      scannerRef.current = instance;
-      try {
-        await instance.start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: (viewfinderWidth, viewfinderHeight) => {
-              const edge = Math.floor(
-                Math.min(viewfinderWidth, viewfinderHeight) * 0.7,
-              );
-              return { width: edge, height: edge };
-            },
-          },
-          (decodedText) => {
-            if (handledRef.current) return;
-            handledRef.current = true;
-            instance.stop().catch(() => {});
-            resolveScan(decodedText);
-          },
-          undefined,
-        );
-        if (cancelled) {
-          await instance.stop().catch(() => {});
-          return;
-        }
-        setStatus("scanning");
-      } catch {
-        // Permission denied, no camera, or an insecure (non-HTTPS) origin — all land here.
-        setStatus("error");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      const instance = scannerRef.current;
-      scannerRef.current = null;
-      if (instance) {
-        instance
-          .stop()
-          .then(() => instance.clear())
-          .catch(() => {});
-      }
-    };
-  }, [resolveScan]);
+  // The camera session (shared with the serials scanner of Receive stock, #1476): one read is enough here.
+  const { status, feedback } = useCameraScanner(READER_ID, (decodedText, stop) => {
+    if (handledRef.current) return false;
+    handledRef.current = true;
+    stop();
+    setFound(true);
+    resolveScan(decodedText);
+    return true;
+  });
 
   function handleManualSubmit(event: FormEvent) {
     event.preventDefault();
@@ -147,12 +100,20 @@ export default function AssetScanner() {
           target node; the library injects the <video> here. */}
       {showViewfinder ? (
         <div className="space-y-3">
-          <div
-            id={READER_ID}
-            className="overflow-hidden rounded-lg border bg-muted [&_video]:w-full"
+          <CameraViewfinder
+            readerId={READER_ID}
+            feedback={found ? "success" : feedback}
+            scanningLabel={tc("scanning")}
+            className="rounded-lg border"
           />
-          <p className="text-center text-sm text-muted-foreground">
-            {status === "starting" ? t("starting") : t("permissionHint")}
+          <p className="text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+            {found || feedback === "success"
+              ? t("found")
+              : status === "starting"
+                ? `${t("starting")} ${t("permissionHint")}`
+                : feedback === "tip"
+                  ? tc("tip")
+                  : t("hint")}
           </p>
         </div>
       ) : (

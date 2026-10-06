@@ -20,7 +20,7 @@
  * compose.yaml, i.e. the pinned image). It FAILS — never silently skips — when they are missing, so the CI job cannot go
  * green without having made a wire call.
  *
- * It drops and recreates the seven lazyit indexes: point it only at a throwaway engine.
+ * It drops and recreates every lazyit index: point it only at a throwaway engine.
  */
 import { Meilisearch } from 'meilisearch';
 import type { PinoLogger } from 'nestjs-pino';
@@ -42,6 +42,8 @@ import {
   projectConsumable,
   projectInfraNode,
   projectLocation,
+  projectPurchaseOrder,
+  projectSupplier,
   projectUser,
 } from '../src/search/search.documents';
 import type {
@@ -49,6 +51,7 @@ import type {
   VisibleFolders,
 } from '../src/article-categories/folder-access.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
+import type { PermissionResolverService } from '../src/auth/permission-resolver.service';
 
 const HOST = process.env.MEILI_HOST;
 const KEY = process.env.MEILI_MASTER_KEY;
@@ -151,6 +154,28 @@ const CONSUMABLES = [
   },
 ];
 
+const PURCHASES = [
+  {
+    id: 'po-1',
+    reference: 'OC-4512',
+    status: 'ORDERED',
+    orderDate: new Date('2026-09-12T00:00:00.000Z'),
+    invoiceNumbers: 'A-0001-00001234',
+    createdAt: new Date('2026-09-12T10:30:00.000Z'),
+    supplier: { name: 'Compumundo' },
+    lines: [{ description: 'ThinkPad T14 Gen 5' }],
+  },
+];
+const SUPPLIERS = [
+  {
+    id: 'sup-1',
+    name: 'Compumundo',
+    taxId: '30-71234567-8',
+    salesContactName: 'Ana Gómez',
+    supportContactName: null,
+  },
+];
+
 /** A Prisma double answering the self-heal's `findMany` loads with the fixture rows above. */
 function prismaFixture(): PrismaService {
   const rows = (data: unknown[]) => ({
@@ -164,6 +189,8 @@ function prismaFixture(): PrismaService {
     application: rows(APPLICATIONS),
     infraNode: rows(INFRA),
     consumable: rows(CONSUMABLES),
+    purchaseOrder: rows(PURCHASES),
+    supplier: rows(SUPPLIERS),
   } as unknown as PrismaService;
 }
 
@@ -180,6 +207,11 @@ function folderAccess(visible: VisibleFolders): FolderAccessService {
     visibleFolderIds: jest.fn().mockResolvedValue(visible),
   } as unknown as FolderAccessService;
 }
+
+/** A permission double for the purchase-index gate (#1499): this suite reads purchases. */
+const permissions = {
+  principalHas: jest.fn().mockResolvedValue(true),
+} as unknown as PermissionResolverService;
 
 /** Poll `probe` until it holds (fire-and-forget writes return before the engine task completes). */
 async function eventually(probe: () => Promise<boolean>): Promise<void> {
@@ -223,7 +255,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('self-heal on an EMPTY engine rebuilds every index from the database (new data volume)', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     expect(await search.isHealthy()).toBe(true);
     expect((await search.emptyOrMissingIndexes()).sort()).toEqual(
       [...SEARCH_INDEXES].sort(),
@@ -252,7 +284,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('cross-entity search returns the retrievable hit fields only', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     const results = await search.search({ q: 'vpn', limit: 20 });
 
     expect(results.degraded).toBeUndefined();
@@ -288,6 +320,52 @@ describe('Meilisearch wire (pinned server image)', () => {
       unit: 'units',
     });
 
+    // #1499: a purchase is found by what it bought (the line description is searchable) but the hit
+    // carries display fields only; a supplier by a contact name, which is not returned.
+    const purchase = await search.search({
+      q: 'ThinkPad',
+      entities: ['purchases'],
+      limit: 5,
+    });
+    expect(purchase.purchases?.hits[0]).toEqual({
+      id: 'po-1',
+      reference: 'OC-4512',
+      supplierName: 'Compumundo',
+      invoiceNumbers: 'A-0001-00001234',
+      status: 'ORDERED',
+      orderDate: '2026-09-12T00:00:00.000Z',
+      createdAt: '2026-09-12T10:30:00.000Z',
+    });
+    // Dates and status are display-only (searchable attributes pinned in reindex.ts): a date token like
+    // "2026" or "10" — both in the fixture's ISO dates — matches no purchase.
+    for (const token of ['2026', '10', 'ORDERED']) {
+      const dated = await search.search({
+        q: token,
+        entities: ['purchases'],
+        limit: 5,
+      });
+      expect(dated.purchases?.total).toBe(0);
+    }
+    expect(
+      (await client.index('purchases').getSearchableAttributes()) ?? [],
+    ).toEqual([
+      'reference',
+      'supplierName',
+      'invoiceNumbers',
+      'lineDescriptions',
+    ]);
+
+    const supplier = await search.search({
+      q: 'Gómez',
+      entities: ['suppliers'],
+      limit: 5,
+    });
+    expect(supplier.suppliers?.hits[0]).toEqual({
+      id: 'sup-1',
+      name: 'Compumundo',
+      taxId: '30-71234567-8',
+    });
+
     const node = await search.search({
       q: 'Catalyst',
       entities: ['infra', 'assets'],
@@ -305,6 +383,7 @@ describe('Meilisearch wire (pinned server image)', () => {
     const scoped = new SearchService(
       logger,
       folderAccess(new Set(['folder-public'])),
+      permissions,
     );
     const res = await scoped.search({
       q: 'vpn',
@@ -318,7 +397,11 @@ describe('Meilisearch wire (pinned server image)', () => {
     expect(res.articles?.total).toBe(1);
 
     // Fail-closed never-match expression for a caller with no visible folders — must stay valid syntax.
-    const none = new SearchService(logger, folderAccess(new Set()));
+    const none = new SearchService(
+      logger,
+      folderAccess(new Set()),
+      permissions,
+    );
     const empty = await none.search({
       q: 'vpn',
       entities: ['articles'],
@@ -336,7 +419,7 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('fire-and-forget upsert and remove reach the engine', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'));
+    const search = new SearchService(logger, folderAccess('ALL'), permissions);
     search.upsert(
       'users',
       projectUser({
@@ -390,6 +473,8 @@ describe('Meilisearch wire (pinned server image)', () => {
       applications: APPLICATIONS.map(projectApplication),
       infra: INFRA.map(projectInfraNode),
       consumables: CONSUMABLES.map(projectConsumable),
+      purchases: PURCHASES.map(projectPurchaseOrder),
+      suppliers: SUPPLIERS.map(projectSupplier),
     } as const;
     for (const [index, docs] of Object.entries(shapes)) {
       const stored = await client.index(index).getDocument(docs[0].id);
