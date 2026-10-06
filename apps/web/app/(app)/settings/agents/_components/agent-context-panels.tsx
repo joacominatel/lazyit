@@ -3,18 +3,13 @@
 import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { SettingsSection } from "@/components/settings-section";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useInfraAutoConfirmRules } from "@/lib/api/hooks/use-infra-nodes";
 import { useMyPermissions } from "@/lib/hooks/use-permissions";
+import { cn } from "@/lib/utils";
 
 /** The Topology screen, and its Table view where the Pending review tray (and its rules) live. */
 const DIAGRAM_HREF = "/assets/diagram";
@@ -36,62 +31,62 @@ const SCOPES = [
 ] as const;
 
 /**
- * Where a policy comes from, and how far it has actually travelled.
- *
- * Two sections that answer the questions the editor beside them cannot: *which* scope an operator is
- * editing (of the three the server resolves), and whether the fleet has picked the last change up.
- * Neither is editable — this is the read half of the section.
- *
- * Rollout deliberately carries no revision chip of its own: the number lives once, beside the page
- * title, and a second identical badge a column away would read as two different facts.
+ * Where a policy comes from — the three scopes as a ladder, least specific first, so the operator sees
+ * *which* scope this page edits (of the three the server resolves) and that the narrower two have no
+ * editor yet. Read-only. The "configured vs applied" story behind the save bar's tip, and the per-host
+ * status lives on the infrastructure diagram, linked from the header (#1533 folded the old Rollout
+ * block into those two places).
  */
 export function AgentScopesPanel() {
   const t = useTranslations("settings.agentPolicy");
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("scopes.title")}</CardTitle>
-        <CardDescription>{t("scopes.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <ol className="divide-y">
-          {SCOPES.map(({ key, editable }) => (
-            <li
-              key={key}
-              className="flex items-start justify-between gap-4 py-3 first:pt-0"
-            >
-              <div className="min-w-0 space-y-0.5">
-                <p className="text-sm font-medium">{t(`scopes.${key}.label`)}</p>
-                <p className="text-sm text-muted-foreground">
-                  {t(`scopes.${key}.scope`)}
-                </p>
-              </div>
-              <StatusBadge
-                tone={editable ? "info" : "neutral"}
-                className="mt-0.5 shrink-0"
-              >
-                {t(editable ? "scopes.editedHere" : "scopes.noEditor")}
-              </StatusBadge>
-            </li>
-          ))}
-        </ol>
-
-        <p className="text-sm text-muted-foreground">{t("scopes.footer")}</p>
-
-        <div className="space-y-3 border-t pt-5">
-          <h3 className="text-sm font-medium">{t("rollout.title")}</h3>
-          <p className="text-sm text-muted-foreground">{t("rollout.body")}</p>
-          <p className="text-sm text-muted-foreground">{t("rollout.legacy")}</p>
-          <Button asChild variant="outline" size="sm">
-            <Link href={DIAGRAM_HREF}>
-              {t("rollout.link")}
-              <ArrowTopRightOnSquareIcon className="size-4" />
-            </Link>
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <SettingsSection
+      title={t("scopes.title")}
+      summary={t("scopes.summary")}
+      help={
+        <>
+          <p>{t("scopes.description")}</p>
+          <p>{t("scopes.wizard")}</p>
+          <p>{t("scopes.footer")}</p>
+        </>
+      }
+      actions={
+        <Button asChild variant="outline" size="sm">
+          <Link href={DIAGRAM_HREF}>
+            {t("rollout.link")}
+            <ArrowTopRightOnSquareIcon className="size-4" />
+          </Link>
+        </Button>
+      }
+    >
+      <ol className="grid gap-2 sm:grid-cols-3">
+        {SCOPES.map(({ key, editable }, index) => (
+          <li
+            key={key}
+            className={cn(
+              "grid gap-1 rounded-lg px-3 py-2.5 ring-1 ring-inset",
+              editable ? "ring-primary/50" : "ring-foreground/10",
+            )}
+          >
+            <span className="text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+              {index + 1} · {t(`scopes.${key}.label`)}
+            </span>
+            <span className="text-sm font-medium">{t(`scopes.${key}.scope`)}</span>
+            <StatusBadge tone={editable ? "info" : "neutral"} className="mt-0.5">
+              {t(editable ? "scopes.editedHere" : "scopes.noEditor")}
+            </StatusBadge>
+          </li>
+        ))}
+      </ol>
+      <div
+        className="flex items-center justify-between text-xs text-muted-foreground"
+        aria-hidden
+      >
+        <span>{t("scopes.general")}</span>
+        <span>{t("scopes.specific")} →</span>
+      </div>
+    </SettingsSection>
   );
 }
 
@@ -117,30 +112,30 @@ export function AutoConfirmRulesPanel() {
   const enabled = data?.filter((rule) => rule.enabled).length ?? 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("autoConfirm.title")}</CardTitle>
-        <CardDescription>{t("autoConfirm.description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Silent when the caller cannot read the list: a count nobody is allowed to fetch is not an
-            error worth reporting on a page whose subject is the policy. */}
-        {canRead && isLoading ? (
-          <Skeleton className="h-5 w-40" />
+    <SettingsSection
+      title={t("autoConfirm.title")}
+      // Silent when the caller cannot read the list: a count nobody is allowed to fetch is not an
+      // error worth reporting on a page whose subject is the policy.
+      summary={
+        canRead && isLoading ? (
+          <Skeleton className="h-4 w-40" />
         ) : canRead && data ? (
-          <p className="text-sm text-muted-foreground">
-            {total === 0
-              ? t("autoConfirm.empty")
-              : t("autoConfirm.summary", { total, enabled })}
-          </p>
-        ) : null}
+          total === 0 ? (
+            t("autoConfirm.empty")
+          ) : (
+            t("autoConfirm.summary", { total, enabled })
+          )
+        ) : undefined
+      }
+      help={<p>{t("autoConfirm.description")}</p>}
+      actions={
         <Button asChild variant="outline" size="sm">
           <Link href={SERVERS_HREF}>
             {t("autoConfirm.manage")}
             <ArrowTopRightOnSquareIcon className="size-4" />
           </Link>
         </Button>
-      </CardContent>
-    </Card>
+      }
+    />
   );
 }

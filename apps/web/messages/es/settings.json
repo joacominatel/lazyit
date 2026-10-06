@@ -271,7 +271,7 @@
   },
   "agentPolicy": {
     "title": "Agentes de inventario",
-    "subtitle": "La política predeterminada de todos los agentes de lazyit de este parque — con qué frecuencia informan, qué recolectan y qué dejan afuera. Se define una vez aquí, sin entrar a ningún host.",
+    "subtitle": "Lo que informan todos los agentes de este parque.",
     "revisionBadge": "Política v{revision}",
     "loadFailed": "No se pudo cargar la política de agentes.",
     "saveFailed": "No se pudo guardar la política de agentes.",
@@ -286,9 +286,15 @@
       "reload": "Recargar la política guardada"
     },
     "propagation": "Un cambio se aplica en el próximo informe de cada host, y rige a partir de la ejecución siguiente. Esa demora es intencional: una política solo la aplica una ejecución que ya arrancó con ella, así que un error aquí nunca puede interrumpir al parque a mitad de una recolección.",
+    "propagationNote": "Los hosts toman el cambio en su próximo informe.",
     "cadence": {
       "title": "Frecuencia",
-      "description": "Con qué frecuencia informa un host y cuánto espera lazyit antes de darlo por fuera de línea. Las dos están atadas: el umbral de fuera de línea tiene que ser mayor que el intervalo, o un host sano queda marcado fuera de línea entre dos de sus propios informes."
+      "description": "Con qué frecuencia informa un host y cuánto espera lazyit antes de darlo por fuera de línea. Las dos están atadas: el umbral de fuera de línea tiene que ser mayor que el intervalo, o un host sano queda marcado fuera de línea entre dos de sus propios informes.",
+      "sentence": {
+        "before": "Cada host informa cada",
+        "middle": "min y se marca fuera de línea a los",
+        "after": "min sin informar."
+      }
     },
     "interval": {
       "label": "Informar cada (minutos)",
@@ -310,8 +316,9 @@
     "collect": {
       "title": "Qué recolectan los agentes",
       "description": "En Linux, un recolector desactivado no se ejecuta — el agente no reúne los datos para después descartarlos. En Windows eso solo vale para los contenedores y los invitados del hipervisor: hardware, discos, interfaces de red y software instalado viajan todos en una única llamada de PowerShell que se ejecuta igual, así que apagar uno ahí mantiene el dato fuera del informe pero no le ahorra el trabajo al host.",
+      "summary": "{on} de {total} activos",
       "veto": "Un host siempre puede negarse. Desactivar un recolector en la configuración del propio agente de ese host — /etc/lazyit-agent/config en Linux, C:\\ProgramData\\lazyit-agent\\config en Windows — prevalece sobre esta opción, y nada de aquí puede volver a activarlo.",
-      "hardware": "Fabricante, modelo y número de serie",
+      "hardware": "Hardware y número de serie",
       "disks": "Discos y puntos de montaje",
       "nics": "Interfaces de red",
       "software": "Software instalado",
@@ -321,6 +328,7 @@
     "exclude": {
       "title": "Exclusiones",
       "description": "Patrones de nombre separados por comas; tiene que coincidir el nombre completo, y no distingue mayúsculas de minúsculas. * representa cualquier texto y ? un solo carácter — no se aceptan expresiones regulares. Cada lista admite como máximo {max} patrones.",
+      "summary": "Patrones de nombre que quedan fuera de cada informe.",
       "count": "{count, plural, =0 {Sin patrones} other {# de {max} patrones}}",
       "nicNames": {
         "label": "Ignorar interfaces de red",
@@ -348,27 +356,30 @@
     "scopes": {
       "title": "De dónde sale una política",
       "description": "Tres ámbitos, resueltos campo por campo — gana el más específico que defina ese campo.",
+      "summary": "Gana el ámbito más específico.",
       "instance": {
-        "label": "Predeterminado de la instancia",
-        "scope": "Todos los agentes de este parque."
+        "label": "Instancia",
+        "scope": "Todo el parque"
       },
       "serviceAccount": {
-        "label": "Por cuenta de servicio",
-        "scope": "La credencial de un agente — el asistente Agregar un servidor crea una por agente."
+        "label": "Cuenta de servicio",
+        "scope": "Un agente"
       },
       "node": {
-        "label": "Por host",
-        "scope": "Un solo servidor."
+        "label": "Host",
+        "scope": "Un servidor"
       },
       "editedHere": "Se edita aquí",
       "noEditor": "Todavía sin editor",
-      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local solo puede hacer que un host informe menos de lo que pide esta página, nunca más: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula."
+      "general": "Más general",
+      "specific": "Más específico",
+      "footer": "La API almacena los tres ámbitos, pero ninguna pantalla de lazyit escribe los dos más específicos. Así que esta página es lo que ejecuta un host — salvo que alguno de los otros dos se haya definido directamente por la API, o que la configuración del agente en ese host vete una parte. Un ajuste local solo puede hacer que un host informe menos de lo que pide esta página, nunca más: un intervalo más largo, un tope de paquetes más bajo, exclusiones adicionales, un recolector apagado. Nada de aquí lo anula.",
+      "wizard": "Una cuenta de servicio es la credencial de un agente — el asistente Agregar un servidor crea una por agente."
     },
     "rollout": {
-      "title": "Despliegue",
       "body": "Cada host informa qué versión de la política está ejecutando realmente, así que “configurada” y “aplicada” siguen siendo cosas distintas. Un host toma un cambio en su próximo informe y lo aplica desde la ejecución siguiente.",
       "legacy": "Un servidor descubierto por un agente anterior a este canal nunca informa una versión, y no muestra ni aplicada ni pendiente.",
-      "link": "Ver el estado por host en el diagrama de infraestructura"
+      "link": "Estado por host"
     },
     "autoConfirm": {
       "title": "Reglas de confirmación automática",

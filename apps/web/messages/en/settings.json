@@ -271,7 +271,7 @@
   },
   "agentPolicy": {
     "title": "Reporting agents",
-    "subtitle": "The default policy for every lazyit agent in this estate — how often they report, what they collect and what they leave out. Set here once, with no host to log into.",
+    "subtitle": "What every agent in this estate reports.",
     "revisionBadge": "Policy v{revision}",
     "loadFailed": "Could not load the agent policy.",
     "saveFailed": "Could not save the agent policy.",
@@ -286,9 +286,15 @@
       "reload": "Reload the saved policy"
     },
     "propagation": "A change takes effect on each host's next check-in, then applies from the run after that. That short delay is deliberate: a policy is only ever applied by a run that started with it already in place, so a mistake here can never interrupt a fleet mid-collection.",
+    "propagationNote": "Hosts pick up a change on their next report.",
     "cadence": {
       "title": "Cadence",
-      "description": "How often a host reports, and how long lazyit waits before calling it offline. The two are tied together: the offline threshold has to be longer than the interval, or a healthy host is marked offline between two of its own reports."
+      "description": "How often a host reports, and how long lazyit waits before calling it offline. The two are tied together: the offline threshold has to be longer than the interval, or a healthy host is marked offline between two of its own reports.",
+      "sentence": {
+        "before": "Each host reports every",
+        "middle": "min and is marked offline after",
+        "after": "min without reporting."
+      }
     },
     "interval": {
       "label": "Report every (minutes)",
@@ -310,8 +316,9 @@
     "collect": {
       "title": "What agents collect",
       "description": "On Linux a collector that is off is never run — the agent does not gather the facts and then discard them. On Windows only containers and hypervisor guests work that way: hardware, disks, network interfaces and installed software all ride one PowerShell call that runs either way, so switching one off there keeps the fact out of the report but does not save the host the work.",
+      "summary": "{on} of {total} on",
       "veto": "A host can always refuse. Turning a collector off in that host's own agent config — /etc/lazyit-agent/config on Linux, C:\\ProgramData\\lazyit-agent\\config on Windows — wins over this setting, and nothing here can switch it back on.",
-      "hardware": "Manufacturer, model and serial",
+      "hardware": "Hardware and serial",
       "disks": "Disks and mountpoints",
       "nics": "Network interfaces",
       "software": "Installed software",
@@ -321,6 +328,7 @@
     "exclude": {
       "title": "Exclusions",
       "description": "Comma-separated name patterns; the whole name has to match, and matching is case-insensitive. * stands for any run of characters, ? for exactly one — regular expressions are not accepted. Each list holds at most {max} patterns.",
+      "summary": "Name patterns left out of every report.",
       "count": "{count, plural, =0 {No patterns} other {# of {max} patterns}}",
       "nicNames": {
         "label": "Ignore network interfaces",
@@ -348,27 +356,30 @@
     "scopes": {
       "title": "Where a policy comes from",
       "description": "Three scopes, resolved field by field — the narrowest one that sets a field wins.",
+      "summary": "The most specific scope wins.",
       "instance": {
-        "label": "Instance default",
-        "scope": "Every agent in this estate."
+        "label": "Instance",
+        "scope": "Every agent"
       },
       "serviceAccount": {
-        "label": "Per service account",
-        "scope": "One agent's credential — the Add a server wizard mints one per agent."
+        "label": "Service account",
+        "scope": "One agent"
       },
       "node": {
-        "label": "Per host",
-        "scope": "One server."
+        "label": "Host",
+        "scope": "One server"
       },
       "editedHere": "Edited here",
       "noEditor": "No editor yet",
-      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one."
+      "general": "Most general",
+      "specific": "Most specific",
+      "footer": "The API stores all three scopes, but no screen in lazyit writes the narrower two. So this page is what a host runs — unless one of the other two was set through the API directly, or the host's own agent config vetoes part of it. A local setting can only ever make a host report less than this page asks, never more: a longer interval, a lower package cap, extra exclusions, a collector switched off. Nothing here overrides one.",
+      "wizard": "A service account is one agent's credential — the Add a server wizard mints one per agent."
     },
     "rollout": {
-      "title": "Rollout",
       "body": "Each host echoes the policy version it is actually running, so “configured” and “applied” stay different things. A host picks a change up on its next check-in and applies it from the run after that.",
       "legacy": "A server discovered by an agent older than this channel never echoes a version at all, and shows neither applied nor pending.",
-      "link": "See per-host status on the infrastructure diagram"
+      "link": "Per-host status"
     },
     "autoConfirm": {
       "title": "Auto-confirm rules",
