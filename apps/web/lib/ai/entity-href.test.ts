@@ -28,8 +28,8 @@ describe("entityHref", () => {
   });
 
   test("the asset tag scheme opens the instance settings page, whatever its id (#1394)", () => {
-    expect(entityHref(ref({ type: "assetTagScheme", id: "singleton" }))).toBe("/settings/instance");
-    expect(entityHref(ref({ type: "assetTagScheme", id: "../x" }))).toBe("/settings/instance");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "singleton" }))).toBe("/settings/asset-tags");
+    expect(entityHref(ref({ type: "assetTagScheme", id: "../x" }))).toBe("/settings/asset-tags");
     expect(entityHref(ref({ type: "assetTagScheme", id: "" }))).toBeNull();
   });
 

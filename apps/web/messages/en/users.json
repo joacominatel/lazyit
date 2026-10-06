@@ -406,7 +406,7 @@
         "title": "Send a reset link by email",
         "description": "{email} gets a single-use link and chooses their own password — lazyit never sees it.",
         "unavailable": {
-          "smtp-not-configured": "Outbound email isn't configured on this instance. Set it up in Settings → Instance → SMTP to use this option.",
+          "smtp-not-configured": "Outbound email isn't configured on this instance. Set it up in Settings → Email to use this option.",
           "origin-unknown": "This instance has no public URL, so lazyit can't build a link that points back to it. Ask your administrator to set the instance URL, then try again.",
           "generic": "Sending a reset link isn't available on this instance right now."
         },
@@ -430,11 +430,11 @@
       },
       "errors": {
         "emailUnavailable": {
-          "smtp-not-configured": "Outbound email isn't configured on this instance, so the link couldn't be sent. Set it up in Settings → Instance → SMTP, or generate a temporary password instead.",
+          "smtp-not-configured": "Outbound email isn't configured on this instance, so the link couldn't be sent. Set it up in Settings → Email, or generate a temporary password instead.",
           "origin-unknown": "This instance has no public URL, so lazyit can't build a reset link. Ask your administrator to set the instance URL, or generate a temporary password instead.",
           "generic": "A reset link can't be sent from this instance right now. Generate a temporary password instead."
         },
-        "sendFailed": "The reset email couldn't be sent. Check Settings → Instance → SMTP and try again, or generate a temporary password instead.",
+        "sendFailed": "The reset email couldn't be sent. Check Settings → Email and try again, or generate a temporary password instead.",
         "inactive": "This user is inactive, or has no login account, so there's no password to reset.",
         "managed": "This account's password is managed by your identity provider — lazyit can't reset it.",
         "notFound": "This user no longer exists.",

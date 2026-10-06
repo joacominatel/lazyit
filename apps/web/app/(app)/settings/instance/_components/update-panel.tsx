@@ -9,17 +9,12 @@ import {
 } from "@heroicons/react/24/outline";
 import type { UpdateRun, UpdateRunStatus } from "@lazyit/shared";
 import { isActiveUpdateRun } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
+import { SettingRow, SettingsSection } from "@/components/settings-section";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
@@ -37,7 +32,7 @@ import { useSmtpSettings } from "@/lib/api/hooks/use-smtp-settings";
 /** A label / value row inside the card (mirrors the InfoRow in instance-settings-view). */
 function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
+    <div className="flex items-center justify-between gap-4 py-2.5 first:pt-0">
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{children}</span>
     </div>
@@ -59,7 +54,8 @@ function runTone(status: UpdateRunStatus): StatusTone {
 }
 
 /**
- * Settings → Instance: the "Version & updates" card (ADR-0084 §5). The FIRST card on the page. Shows the
+ * Settings → General & version: the "Version & updates" section (ADR-0084 §5). The FIRST section on
+ * the page; its status badge sits in the section header (#1533). Shows the
  * running version, whether a newer release is out ("N behind" / up to date / checks off / couldn't
  * check), the opt-in weekly-check toggle, the singular oxblood "update" CTA (rendered ONLY when behind),
  * the guided-update command + honest in-progress stage labels from the real UpdateRun phases, and the
@@ -149,12 +145,11 @@ export function UpdatePanel() {
   })();
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
-        <CardDescription>{t("subtitle")}</CardDescription>
-      </CardHeader>
-      <CardContent>
+    <SettingsSection
+      title={t("title")}
+      summary={t("subtitle")}
+      status={status.isLoading ? null : statusBadge}
+    >
         {status.isLoading ? (
           <div className="space-y-3">
             <Skeleton className="h-5 w-full" />
@@ -169,7 +164,6 @@ export function UpdatePanel() {
                   {data?.currentVersion ?? "—"}
                 </span>
               </InfoRow>
-              <InfoRow label={t("rows.status")}>{statusBadge}</InfoRow>
               {checkEnabled && (
                 <>
                   <InfoRow label={t("rows.latest")}>
@@ -207,25 +201,34 @@ export function UpdatePanel() {
               )}
             </div>
 
-            {/* Opt-in weekly check toggle. */}
-            <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{t("optIn.label")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t("optIn.description")}
-                </p>
-                {checkEnabled && !smtpConfigured && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("optIn.smtpHint")}
-                  </p>
-                )}
-              </div>
-              <Switch
-                checked={checkEnabled}
-                onCheckedChange={onToggle}
-                disabled={toggle.isPending || settings.isLoading}
-                aria-label={t("optIn.label")}
-              />
+            {/* Opt-in weekly check toggle — a standalone switch that autosaves, as it always has. */}
+            <div className="border-t pt-3">
+              <SettingRow
+                label={t("optIn.label")}
+                htmlFor="update-check-enabled"
+                help={<p>{t("optIn.description")}</p>}
+                note={
+                  checkEnabled && !smtpConfigured
+                    ? t.rich("optIn.smtpHint", {
+                        link: (chunks) => (
+                          <Link
+                            href="/settings/email"
+                            className="font-medium text-foreground underline underline-offset-4"
+                          >
+                            {chunks}
+                          </Link>
+                        ),
+                      })
+                    : undefined
+                }
+              >
+                <Switch
+                  id="update-check-enabled"
+                  checked={checkEnabled}
+                  onCheckedChange={onToggle}
+                  disabled={toggle.isPending || settings.isLoading}
+                />
+              </SettingRow>
             </div>
 
             {/* In-progress run: honest stage label + reconnecting note (no fake progress bar). */}
@@ -321,8 +324,7 @@ export function UpdatePanel() {
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+    </SettingsSection>
   );
 }
 

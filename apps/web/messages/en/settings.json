@@ -89,9 +89,11 @@
     }
   },
   "instance": {
-    "title": "Instance",
-    "subtitle": "How this lazyit instance is configured — runtime posture (set via environment) and the asset-tag scheme.",
-    "cardTitle": "Configuration",
+    "title": "General & version",
+    "subtitle": "Version, updates and how this instance is set up.",
+    "cardTitle": "Instance",
+    "cardSummary": "Set by the environment at deploy time.",
+    "cardHelp": "Operators change the identity provider and runtime posture through environment variables when they deploy. This view only reads the result.",
     "loadError": "Could not load instance status",
     "loadErrorHint": "The API may be down or unreachable.",
     "rows": {
@@ -112,17 +114,11 @@
       "generic-oidc": "Generic OIDC (bring your own)",
       "local": "Local accounts"
     },
-    "agentsMoved": {
-      "title": "Reporting agents",
-      "body": "The fleet's agent policy — reporting cadence, collectors and exclusions — now has its own section, together with the auto-confirm rules and the scopes that can override it.",
-      "link": "Open Reporting agents"
-    },
     "updates": {
       "title": "Version & updates",
-      "subtitle": "Check for new lazyit releases and run a guided, backed-up update from the host.",
+      "subtitle": "Check for releases and run a guided update.",
       "rows": {
         "current": "Current version",
-        "status": "Status",
         "latest": "Latest release",
         "viewRelease": "View release notes",
         "lastChecked": "Last checked",
@@ -142,7 +138,7 @@
       "optIn": {
         "label": "Check for updates weekly",
         "description": "Anonymously check github.com for new releases. Off by default; no instance data is ever sent, and it fails silently if blocked.",
-        "smtpHint": "To also get emailed when you fall behind, configure SMTP in the card below."
+        "smtpHint": "To also get an email when you fall behind, <link>set up outbound email</link>."
       },
       "cta": {
         "update": "Update to {version}",
@@ -177,12 +173,16 @@
     }
   },
   "assetTagScheme": {
-    "title": "Asset tag scheme",
-    "subtitle": "Auto-assign a running asset tag to new assets — a prefix, a zero-padded number and a suffix. Off until you turn it on; an explicit tag always wins.",
+    "title": "Asset tags",
+    "subtitle": "Give new assets the next tag automatically.",
+    "scheme": {
+      "title": "Tag scheme",
+      "summary": "A prefix, a zero-padded number and a suffix.",
+      "help": "Off until you turn it on. A tag typed on an asset always wins, and a number already used by a live asset is skipped."
+    },
     "loadError": "Could not load the asset-tag scheme.",
     "retry": "Retry",
     "save": "Save scheme",
-    "disabledHint": "The scheme is off. New assets keep their manual tag (or none) — turn it on to auto-assign.",
     "preview": {
       "label": "Next tag",
       "disabledLabel": "Tag shape (auto-assign is off)",
@@ -194,7 +194,7 @@
     },
     "fields": {
       "enabled": {
-        "label": "Auto-assign asset tags",
+        "label": "Auto-assign",
         "description": "When on, a new asset with no tag gets the next number automatically."
       },
       "prefix": {
@@ -379,13 +379,17 @@
     }
   },
   "smtp": {
-    "title": "Outbound email (SMTP)",
-    "subtitle": "Connect an SMTP relay so lazyit can send email notifications. Off until you turn it on; the password is stored encrypted and never shown again.",
+    "title": "Outbound email",
+    "subtitle": "Also send notifications by email.",
+    "server": {
+      "title": "SMTP server",
+      "summary": "The relay lazyit sends email through.",
+      "help": "Off until you turn it on. Changes apply when you save; a test still works while email is off."
+    },
     "loadError": "Could not load the SMTP settings.",
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
-    "disabledHint": "Outbound email is off. Turn it on to email notifications — you can still send a test below.",
     "fields": {
       "enabled": {
         "label": "Enable outbound email",
@@ -401,6 +405,7 @@
       },
       "security": {
         "label": "Security",
+        "help": "STARTTLS on port 587 is recommended. Implicit TLS uses port 465; None sends in plaintext.",
         "options": {
           "none": "None (plaintext)",
           "starttls": "STARTTLS (recommended, port 587)",
@@ -415,7 +420,7 @@
         "label": "Password",
         "placeholderSet": "Configured — leave blank to keep",
         "placeholderUnset": "Password",
-        "hintSet": "A password is stored. Leave blank to keep it, or type a new one to replace it."
+        "help": "Stored encrypted and never shown again. Leave it blank to keep the stored password."
       },
       "fromAddress": {
         "label": "From address",
@@ -431,9 +436,10 @@
       }
     },
     "test": {
-      "heading": "Send a test email",
-      "description": "Sends a one-off email using the saved settings. Save your changes first — the test uses what's stored, not the form above.",
+      "heading": "Send a test",
+      "description": "Uses the saved settings, not unsaved changes.",
       "placeholder": "you@example.com",
+      "toLabel": "Test recipient",
       "send": "Send test",
       "invalidEmail": "Enter a valid destination email address.",
       "success": "Test email sent to {to}.",
@@ -447,15 +453,19 @@
   },
   "directory": {
     "title": "AD / LDAP directory sync",
-    "subtitle": "Read-only import of people from your on-prem Active Directory / LDAP. lazyit creates login-less directory persons — it never writes back to your directory and never logs anyone in.",
+    "subtitle": "Import people read-only from Active Directory or LDAP.",
+    "connection": {
+      "title": "Connection",
+      "summary": "The directory lazyit reads people from.",
+      "help": "lazyit binds read-only and creates login-less directory persons. It never writes back to your directory and never signs anyone in."
+    },
     "loadError": "Could not load the directory settings.",
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
-    "disabledHint": "Scheduled sync is off. Turn it on to import people on a schedule — you can still run Sync now below to test the connection.",
     "fields": {
       "enabled": {
-        "label": "Enable scheduled sync",
+        "label": "Scheduled sync",
         "description": "When on, lazyit periodically binds to your directory and imports people. When off, only a manual Sync now runs."
       },
       "host": {
@@ -498,7 +508,7 @@
         "label": "Bind password",
         "placeholderSet": "Configured — leave blank to keep",
         "placeholderUnset": "Bind password",
-        "hintSet": "A bind password is stored. Leave blank to keep it, or type a new one to replace it."
+        "help": "Stored encrypted and never shown again. Leave it blank to keep the stored password."
       },
       "searchFilter": {
         "label": "Search filter",
@@ -507,7 +517,9 @@
       },
       "offboardGraceDays": {
         "label": "Offboard grace (days)",
-        "description": "How many days a person may be missing from the directory before lazyit deactivates them. 0 = deactivate on the first sync that no longer finds them."
+        "before": "Deactivate a person after",
+        "after": "days missing from the directory.",
+        "description": "0 deactivates a person on the first sync that no longer finds them."
       },
       "attributeMap": {
         "label": "Attribute mapping",
@@ -522,6 +534,7 @@
     },
     "sync": {
       "heading": "Sync now",
+      "summary": "Run the import now with the saved settings.",
       "description": "Runs the same read-only import the schedule runs, using the saved settings — so save your changes first. This also confirms the bind works.",
       "button": "Sync now",
       "success": "Directory sync completed.",
@@ -543,6 +556,7 @@
     },
     "tray": {
       "title": "Directory people to review",
+      "summary": "Login-less people the sync imported, newest first.",
       "description": "People imported from your directory. Each is a login-less person you can open, provision a login for, or offboard from the Users section.",
       "offboarded": "Inactive",
       "discovered": "Added {when}",

@@ -42,8 +42,8 @@ function ownRoute(ref: { type: string; id: string; slug?: string }): string | nu
     case "manualTask":
       return `/settings/integrations/tasks/${seg(ref.id)}`;
     case "assetTagScheme":
-      // The single instance-wide scheme (#1394): its editor lives on the instance settings page.
-      return "/settings/instance";
+      // The single instance-wide scheme (#1394): its editor lives on Settings → Asset tags (#1533).
+      return "/settings/asset-tags";
     case "purchaseOrder":
       return `/purchases/${seg(ref.id)}`;
     case "supplier":

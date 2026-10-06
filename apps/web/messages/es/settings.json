@@ -89,9 +89,11 @@
     }
   },
   "instance": {
-    "title": "Instancia",
-    "subtitle": "Cómo está configurada esta instancia de lazyit — la postura de ejecución (definida por variables de entorno) y el esquema de etiquetas de activos.",
-    "cardTitle": "Configuración",
+    "title": "General y versión",
+    "subtitle": "La versión, las actualizaciones y cómo está configurada esta instancia.",
+    "cardTitle": "Instancia",
+    "cardSummary": "Lo define el entorno al desplegar.",
+    "cardHelp": "El proveedor de identidad y la postura de ejecución se cambian con variables de entorno al desplegar. Esta vista solo lee el resultado.",
     "loadError": "No se pudo cargar el estado de la instancia",
     "loadErrorHint": "La API podría estar caída o ser inaccesible.",
     "rows": {
@@ -112,17 +114,11 @@
       "generic-oidc": "OIDC genérico (usa el tuyo)",
       "local": "Cuentas locales"
     },
-    "agentsMoved": {
-      "title": "Agentes de inventario",
-      "body": "La política de agentes del parque — frecuencia de informe, recolectores y exclusiones — ahora tiene su propia sección, junto con las reglas de confirmación automática y los ámbitos que pueden sobrescribirla.",
-      "link": "Abrir Agentes de inventario"
-    },
     "updates": {
       "title": "Versión y actualizaciones",
-      "subtitle": "Comprueba si hay nuevas versiones de lazyit y ejecuta una actualización guiada y respaldada desde el host.",
+      "subtitle": "Busca nuevas versiones y ejecuta una actualización guiada.",
       "rows": {
         "current": "Versión actual",
-        "status": "Estado",
         "latest": "Última versión",
         "viewRelease": "Ver notas de la versión",
         "lastChecked": "Última comprobación",
@@ -142,7 +138,7 @@
       "optIn": {
         "label": "Comprobar actualizaciones semanalmente",
         "description": "Consulta github.com de forma anónima en busca de nuevas versiones. Desactivado por defecto; nunca se envían datos de la instancia y falla en silencio si está bloqueado.",
-        "smtpHint": "Para recibir también un correo cuando te quedes atrás, configura SMTP en la tarjeta de abajo."
+        "smtpHint": "Para recibir también un correo cuando te quedes atrás, <link>configura el correo saliente</link>."
       },
       "cta": {
         "update": "Actualizar a {version}",
@@ -177,12 +173,16 @@
     }
   },
   "assetTagScheme": {
-    "title": "Esquema de etiquetas de activos",
-    "subtitle": "Asigna automáticamente una etiqueta correlativa a los activos nuevos — un prefijo, un número con ceros a la izquierda y un sufijo. Desactivado hasta que lo actives; una etiqueta explícita siempre prevalece.",
+    "title": "Etiquetas de activos",
+    "subtitle": "Asigna la siguiente etiqueta a los activos nuevos automáticamente.",
+    "scheme": {
+      "title": "Esquema de etiquetas",
+      "summary": "Un prefijo, un número con ceros a la izquierda y un sufijo.",
+      "help": "Desactivado hasta que lo actives. Una etiqueta escrita en el activo siempre prevalece, y se salta un número que ya usa un activo vigente."
+    },
     "loadError": "No se pudo cargar el esquema de etiquetas.",
     "retry": "Reintentar",
     "save": "Guardar esquema",
-    "disabledHint": "El esquema está desactivado. Los activos nuevos conservan su etiqueta manual (o ninguna) — actívalo para asignarla automáticamente.",
     "preview": {
       "label": "Próxima etiqueta",
       "disabledLabel": "Forma de la etiqueta (la asignación automática está desactivada)",
@@ -194,7 +194,7 @@
     },
     "fields": {
       "enabled": {
-        "label": "Asignar etiquetas automáticamente",
+        "label": "Asignar automáticamente",
         "description": "Cuando está activo, un activo nuevo sin etiqueta recibe el siguiente número de forma automática."
       },
       "prefix": {
@@ -379,13 +379,17 @@
     }
   },
   "smtp": {
-    "title": "Correo saliente (SMTP)",
-    "subtitle": "Conecta un relay SMTP para que lazyit pueda enviar notificaciones por correo. Desactivado hasta que lo actives; la contraseña se guarda cifrada y no se vuelve a mostrar.",
+    "title": "Correo saliente",
+    "subtitle": "Envía las notificaciones también por correo.",
+    "server": {
+      "title": "Servidor SMTP",
+      "summary": "El relay por el que lazyit envía el correo.",
+      "help": "Desactivado hasta que lo actives. Los cambios se aplican al guardar; la prueba funciona aunque el correo esté desactivado."
+    },
     "loadError": "No se pudo cargar la configuración de SMTP.",
     "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
-    "disabledHint": "El correo saliente está desactivado. Actívalo para enviar notificaciones por correo — aún puedes enviar una prueba abajo.",
     "fields": {
       "enabled": {
         "label": "Activar correo saliente",
@@ -401,6 +405,7 @@
       },
       "security": {
         "label": "Seguridad",
+        "help": "Lo recomendado es STARTTLS en el puerto 587. TLS implícito usa el 465; Ninguna envía en texto plano.",
         "options": {
           "none": "Ninguna (texto plano)",
           "starttls": "STARTTLS (recomendado, puerto 587)",
@@ -415,7 +420,7 @@
         "label": "Contraseña",
         "placeholderSet": "Configurada — deja en blanco para mantenerla",
         "placeholderUnset": "Contraseña",
-        "hintSet": "Hay una contraseña guardada. Déjala en blanco para mantenerla, o escribe una nueva para reemplazarla."
+        "help": "Se guarda cifrada y no se vuelve a mostrar. Déjala en blanco para mantener la guardada."
       },
       "fromAddress": {
         "label": "Dirección de remitente",
@@ -431,9 +436,10 @@
       }
     },
     "test": {
-      "heading": "Enviar un correo de prueba",
-      "description": "Envía un correo puntual usando la configuración guardada. Guarda tus cambios primero — la prueba usa lo almacenado, no el formulario de arriba.",
+      "heading": "Enviar una prueba",
+      "description": "Usa la configuración guardada, no los cambios sin guardar.",
       "placeholder": "tu@example.com",
+      "toLabel": "Destinatario de la prueba",
       "send": "Enviar prueba",
       "invalidEmail": "Introduce una dirección de correo de destino válida.",
       "success": "Correo de prueba enviado a {to}.",
@@ -447,15 +453,19 @@
   },
   "directory": {
     "title": "Sincronización de directorio AD / LDAP",
-    "subtitle": "Importación de solo lectura de personas desde tu Active Directory / LDAP local. lazyit crea personas de directorio sin acceso — nunca escribe en tu directorio ni permite iniciar sesión a nadie.",
+    "subtitle": "Importa personas de solo lectura desde Active Directory o LDAP.",
+    "connection": {
+      "title": "Conexión",
+      "summary": "El directorio del que lazyit lee las personas.",
+      "help": "lazyit se conecta en solo lectura y crea personas de directorio sin acceso. Nunca escribe en tu directorio ni permite iniciar sesión a nadie."
+    },
     "loadError": "No se pudo cargar la configuración del directorio.",
     "loadErrorHint": "Revisa tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
-    "disabledHint": "La sincronización programada está desactivada. Actívala para importar personas de forma periódica — igualmente puedes usar Sincronizar ahora para probar la conexión.",
     "fields": {
       "enabled": {
-        "label": "Activar sincronización programada",
+        "label": "Sincronización programada",
         "description": "Cuando está activa, lazyit se conecta periódicamente a tu directorio e importa personas. Cuando está desactivada, solo se ejecuta Sincronizar ahora manualmente."
       },
       "host": {
@@ -498,7 +508,7 @@
         "label": "Contraseña de conexión",
         "placeholderSet": "Configurada — deja en blanco para conservarla",
         "placeholderUnset": "Contraseña de conexión",
-        "hintSet": "Hay una contraseña de conexión guardada. Déjala en blanco para conservarla, o escribe una nueva para reemplazarla."
+        "help": "Se guarda cifrada y no se vuelve a mostrar. Déjala en blanco para conservar la guardada."
       },
       "searchFilter": {
         "label": "Filtro de búsqueda",
@@ -507,7 +517,9 @@
       },
       "offboardGraceDays": {
         "label": "Margen de baja (días)",
-        "description": "Cuántos días puede faltar una persona en el directorio antes de que lazyit la desactive. 0 = desactivar en la primera sincronización que ya no la encuentre."
+        "before": "Desactivar a una persona tras",
+        "after": "días sin aparecer en el directorio.",
+        "description": "0 desactiva a la persona en la primera sincronización que ya no la encuentre."
       },
       "attributeMap": {
         "label": "Mapeo de atributos",
@@ -522,6 +534,7 @@
     },
     "sync": {
       "heading": "Sincronizar ahora",
+      "summary": "Ejecuta la importación ahora con la configuración guardada.",
       "description": "Ejecuta la misma importación de solo lectura que la sincronización programada, usando la configuración guardada — guarda tus cambios primero. Esto también confirma que la conexión funciona.",
       "button": "Sincronizar ahora",
       "success": "Sincronización del directorio completada.",
@@ -543,6 +556,7 @@
     },
     "tray": {
       "title": "Personas del directorio para revisar",
+      "summary": "Personas sin acceso que importó la sincronización, las más nuevas primero.",
       "description": "Personas importadas desde tu directorio. Cada una es una persona sin acceso que puedes abrir, aprovisionar con un inicio de sesión o dar de baja desde la sección Usuarios.",
       "offboarded": "Inactiva",
       "discovered": "Añadida {when}",
