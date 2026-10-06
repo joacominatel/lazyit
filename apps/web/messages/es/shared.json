@@ -132,7 +132,19 @@
       "purchases": "Compras",
       "suppliers": "Proveedores",
       "account": "Cuenta",
-      "pending": "Unidades pendientes"
+      "pending": "Unidades pendientes",
+      "settings": "Configuración",
+      "instance": "General y versión",
+      "email": "Correo",
+      "directory": "Directorio",
+      "asset-tags": "Etiquetas de activos",
+      "agents": "Agentes de inventario",
+      "taxonomies": "Taxonomías",
+      "roles": "Roles y permisos",
+      "permissions": "Permisos",
+      "service-accounts": "Cuentas de servicio",
+      "integrations": "Integraciones",
+      "tasks": "Tareas"
     },
     "aiAndConnectedApps": "IA y apps conectadas",
     "account": "Cuenta"

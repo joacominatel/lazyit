@@ -132,7 +132,19 @@
       "purchases": "Purchases",
       "suppliers": "Suppliers",
       "account": "Account",
-      "pending": "Pending units"
+      "pending": "Pending units",
+      "settings": "Settings",
+      "instance": "General & version",
+      "email": "Email",
+      "directory": "Directory",
+      "asset-tags": "Asset tags",
+      "agents": "Reporting agents",
+      "taxonomies": "Taxonomies",
+      "roles": "Roles & permissions",
+      "permissions": "Permissions",
+      "service-accounts": "Service accounts",
+      "integrations": "Integrations",
+      "tasks": "Tasks"
     },
     "aiAndConnectedApps": "AI & connected apps",
     "account": "Account"

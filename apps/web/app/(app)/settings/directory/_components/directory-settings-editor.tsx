@@ -15,7 +15,6 @@ import { useTranslations } from "next-intl";
 import { useEffect } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { HelpTip } from "@/components/help-tip";
 import { RequestIdNote } from "@/components/request-id-note";
@@ -236,14 +235,6 @@ export function DirectorySettingsEditor() {
       <PageHeader
         title={t("title")}
         subtitle={t("subtitle")}
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tSettings("hub.title"), href: "/settings" },
-              { label: t("title") },
-            ]}
-          />
-        }
         badge={
           data ? <SettingsStatus state={data.enabled ? "on" : "off"} /> : null
         }

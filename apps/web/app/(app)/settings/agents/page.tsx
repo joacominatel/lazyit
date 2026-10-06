@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAgentPolicy } from "@/lib/api/hooks/use-agent-policy";
@@ -11,9 +10,6 @@ import {
   AutoConfirmRulesPanel,
 } from "./_components/agent-context-panels";
 import { AgentPolicyEditor } from "./_components/agent-policy-editor";
-
-/** The Settings hub, which the breadcrumb walks back to. */
-const SETTINGS_HREF = "/settings";
 
 /**
  * Settings → Reporting agents (#1174) — the section the agent surface never had.
@@ -49,14 +45,6 @@ export default function AgentsSettingsPage() {
           // Explicit crumbs rather than the path-derived default: the derived labels come from a
           // title-cased URL segment, which is English on every locale and would read "Agents" beside
           // a page titled "Reporting agents".
-          breadcrumb={
-            <Breadcrumb
-              items={[
-                { label: t("hub.title"), href: SETTINGS_HREF },
-                { label: t("agentPolicy.title") },
-              ]}
-            />
-          }
           badge={
             data ? (
               <StatusBadge tone="neutral">

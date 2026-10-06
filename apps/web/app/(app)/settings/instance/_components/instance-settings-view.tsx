@@ -4,7 +4,6 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { IntegrationMode } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { RequestIdNote } from "@/components/request-id-note";
 import { SettingsSection } from "@/components/settings-section";
@@ -42,14 +41,6 @@ export function InstanceSettingsView() {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
   // Explicit crumbs: the path-derived default would print the route segment ("Instance").
-  const breadcrumb = (
-    <Breadcrumb
-      items={[
-        { label: t("hub.title"), href: "/settings" },
-        { label: t("instance.title") },
-      ]}
-    />
-  );
   const { data, isLoading, isError, error, refetch, isFetching } =
     useConfigStatus();
   // Version identity (ADR-0083) — its own tiny read; a failure degrades to an em dash, never the card.
@@ -75,7 +66,6 @@ export function InstanceSettingsView() {
         <PageHeader
           title={t("instance.title")}
           subtitle={t("instance.subtitle")}
-          breadcrumb={breadcrumb}
           actions={
             <Button
               variant="outline"

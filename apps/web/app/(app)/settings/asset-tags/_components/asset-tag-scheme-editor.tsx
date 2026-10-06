@@ -16,7 +16,6 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Controller, type Resolver, useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import {
   SettingLabel,
@@ -279,14 +278,6 @@ export function AssetTagSchemeEditor() {
       <PageHeader
         title={t("title")}
         subtitle={t("subtitle")}
-        breadcrumb={
-          <Breadcrumb
-            items={[
-              { label: tSettings("hub.title"), href: "/settings" },
-              { label: t("title") },
-            ]}
-          />
-        }
         badge={
           data ? <SettingsStatus state={data.enabled ? "on" : "off"} /> : null
         }
