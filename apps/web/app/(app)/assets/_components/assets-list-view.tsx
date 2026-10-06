@@ -1405,7 +1405,7 @@ export function AssetsListView() {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent
                         align="end"
-                        className="max-h-80 overflow-y-auto"
+                        className="max-h-80 w-auto min-w-56 overflow-y-auto"
                       >
                         <AssetStatusMenuOptions
                           groups={statusGroups}
