@@ -530,6 +530,7 @@ export function UserDetailView({ id }: { id: string }) {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
+          role: user.role,
         }}
       />
     </div>
