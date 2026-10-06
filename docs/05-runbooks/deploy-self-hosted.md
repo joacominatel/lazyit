@@ -291,9 +291,9 @@ Instance** before and after.
 > ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → release-tag check
 > (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must
 > not be bad) → build → migrate → health-gate sequence and blocks one-click across a major. **On v2.0.0 or
-> earlier, update to v2.0.1 by hand** (`git fetch --tags && git checkout v2.0.1 && ./infra/start.sh`,
+> earlier, update to v2.1.0 by hand** (`git fetch --tags && git checkout v2.1.0 && ./infra/start.sh`,
 > after a backup): the `update.sh` you already have — the one that runs — stops at its old signature check
-> on every automated release tag (#1458); the fixed one works from v2.0.1 on ([[releasing]]).
+> on every automated release tag (#1458); the fixed one works from v2.1.0 on ([[releasing]]).
 
 > [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
 > Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is

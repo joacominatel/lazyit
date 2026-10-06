@@ -84,18 +84,18 @@ trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**
 no migration ran, otherwise stops with a confirm-gated, human-run restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
 never executes the update.
 
-> [!warning] Updating **from v2.0.0 or earlier** — the update to v2.0.1 is done by hand (#1458)
+> [!warning] Updating **from v2.0.0 or earlier** — the update to v2.1.0 is done by hand (#1458)
 > Up to v2.0.0, `update.sh` required a tag signature that the automated release tags never carry, so it
 > always stopped at its tag check (after the backup, before touching the running stack). The fixed check
-> ships in v2.0.1 — but `update.sh` always runs the copy from the version you are **leaving** (it re-runs
+> ships in v2.1.0 — but `update.sh` always runs the copy from the version you are **leaving** (it re-runs
 > itself from a temporary copy of the current checkout's script), so the fix only helps updates *from*
-> v2.0.1. For the step to v2.0.1, back up first ([[backups]]), then:
+> v2.1.0. For the step to v2.1.0, back up first ([[backups]]), then:
 >
 > ```sh
-> git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+> git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
 > ```
 >
-> `start.sh` detects the existing install, keeps every secret, and rebuilds. From v2.0.1 on,
+> `start.sh` detects the existing install, keeps every secret, and rebuilds. From v2.1.0 on,
 > `./infra/update.sh vX.Y.Z` works again.
 
 See also: [[deploy-self-hosted]], [[backups]].

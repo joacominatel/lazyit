@@ -349,10 +349,10 @@ copy — is unchanged; a failed fetch now also goes through `fail_hard`, so the 
 **The fix only applies from the release that contains it.** Step 0 re-executes a temporary copy of the
 `update.sh` in the **current** checkout, so an update always runs the updater of the version being
 *left*, never the target's. An instance on v2.0.0 or earlier therefore still stops at step 4 when it
-runs `./infra/update.sh v2.0.1`. That one update is done by hand, after a backup ([[backups]]):
+runs `./infra/update.sh v2.1.0`. That one update is done by hand, after a backup ([[backups]]):
 
 ```sh
-git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
 ```
 
-From v2.0.1 on, `./infra/update.sh vX.Y.Z` (and the in-app Update button's command) works again.
+From v2.1.0 on, `./infra/update.sh vX.Y.Z` (and the in-app Update button's command) works again.

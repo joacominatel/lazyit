@@ -169,18 +169,18 @@ Mientras una actualización se ejecuta, la sección muestra la etapa real (respa
 compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
 cuando la app vuelve.
 
-> **Si actualizas desde v2.0.0 o anterior: haz a mano la actualización a v2.0.1.** Hasta v2.0.0 el
+> **Si actualizas desde v2.0.0 o anterior: haz a mano la actualización a v2.1.0.** Hasta v2.0.0 el
 > script de actualización se detenía en su comprobación de la versión en todas las versiones (después del
-> respaldo, sin cambiar nada). La corrección llega en v2.0.1, pero el script que se ejecuta es siempre el
+> respaldo, sin cambiar nada). La corrección llega en v2.1.0, pero el script que se ejecuta es siempre el
 > de la versión *desde* la que actualizas. Así que, solo para esta actualización, respalda primero (ver
 > [Copias de seguridad y restauración](/help/deployment-operations-backups-restore)) y ejecuta en el
 > servidor:
 >
 > ```sh
-> git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+> git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
 > ```
 >
-> A partir de v2.0.1, `./infra/update.sh vX.Y.Z` funciona como se describe arriba.
+> A partir de v2.1.0, `./infra/update.sh vX.Y.Z` funciona como se describe arriba.
 
 ### Cancelar una actualización solicitada
 

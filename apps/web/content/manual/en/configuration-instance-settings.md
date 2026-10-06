@@ -156,17 +156,17 @@ Run that command on the server (over SSH). The script is careful and non-destruc
 While an update is running, the section shows the real stage (backing up, migrating, building, restarting,
 verifying) — not a fake progress bar — and quietly reconnects when the app comes back.
 
-> **Updating from v2.0.0 or earlier: do the update to v2.0.1 by hand.** Up to v2.0.0 the update script
+> **Updating from v2.0.0 or earlier: do the update to v2.1.0 by hand.** Up to v2.0.0 the update script
 > stopped at its release check on every release (after the backup, without changing anything). The fix
-> is in v2.0.1, but the script that runs is always the one from the version you are updating *from*. So
+> is in v2.1.0, but the script that runs is always the one from the version you are updating *from*. So
 > for this one update, back up first (see
 > [Backups & restore](/help/deployment-operations-backups-restore)), then run on the server:
 >
 > ```sh
-> git fetch --tags && git checkout v2.0.1 && ./infra/start.sh
+> git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
 > ```
 >
-> From v2.0.1 on, `./infra/update.sh vX.Y.Z` works as described above.
+> From v2.1.0 on, `./infra/update.sh vX.Y.Z` works as described above.
 
 ### Cancelling a requested update
 
