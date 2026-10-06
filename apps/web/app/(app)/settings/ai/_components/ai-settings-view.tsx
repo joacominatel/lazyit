@@ -8,8 +8,6 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useMemo } from "react";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { Callout } from "@/components/callout";
 import { HelpTip } from "@/components/help-tip";
 import { PageHeader } from "@/components/page-header";
@@ -43,21 +41,9 @@ import { AiWebSearchSection } from "./ai-web-search-section";
  */
 export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
   const t = useTranslations("aiSettings");
-  const tSettings = useTranslations("settings");
   const tCommon = useTranslations("common");
   const { data: settings, isLoading, isError, error, refetch } = useAiConfig();
 
-  const breadcrumb = useMemo(
-    () => (
-      <Breadcrumb
-        items={[
-          { label: tSettings("hub.title"), href: "/settings" },
-          { label: t("page.breadcrumb") },
-        ]}
-      />
-    ),
-    [t, tSettings],
-  );
 
   return (
     <AdminGate>
@@ -65,7 +51,6 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
         <PageHeader
           title={t("page.title")}
           subtitle={t("page.subtitle")}
-          breadcrumb={breadcrumb}
           actions={
             <Button asChild variant="outline" size="sm">
               <Link href={t("links.setup")} prefetch={false} target="_blank" rel="noopener">

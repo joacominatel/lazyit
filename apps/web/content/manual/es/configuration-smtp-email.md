@@ -9,15 +9,18 @@ order: 4
 
 lazyit puede enviar **correo saliente** para que un conjunto seleccionado de sus notificaciones también
 llegue a la bandeja de entrada de tu equipo, y no solo a la **campana de notificaciones** dentro de la
-app. Debes apuntar lazyit a tu servidor de correo (SMTP) existente en **Ajustes → Instancia → SMTP**
-(solo administradores). Está **desactivado hasta que lo actives**.
+app. Debes apuntar lazyit a tu servidor de correo (SMTP) existente en **Configuración → Correo** (solo
+administradores; en el menú lateral de Configuración está bajo **Integraciones**). Está **desactivado
+hasta que lo actives**, y el encabezado de la página muestra **Activado** o **Desactivado**.
 
 ## Configurar la conexión
 
-El editor de SMTP tiene estos campos:
+La sección **Servidor SMTP** tiene estos campos. Cada uno guarda su explicación larga tras el **?** junto
+a su etiqueta, y toda la sección se guarda junta con **Guardar configuración**:
 
-- **Activado** — el interruptor maestro del correo saliente. Mientras está desactivado, lazyit nunca
-  envía correos de notificación (aun así puedes enviar una prueba — ver más abajo).
+- **Activar correo saliente** — el interruptor del encabezado de la sección, el interruptor maestro del
+  correo saliente. Mientras está desactivado, lazyit nunca envía correos de notificación (aun así puedes
+  enviar una prueba — ver más abajo). Como el resto de los campos, se aplica al guardar.
 - **Host** y **Puerto** — la dirección de tu servidor de correo (p. ej. `smtp.example.com`, puerto
   `587`).
 - **Seguridad** — cómo se protege la conexión:
@@ -32,8 +35,8 @@ El editor de SMTP tiene estos campos:
   para **conservar** la contraseña guardada; escribe un valor nuevo solo para cambiarla.
 - **Dirección de origen** y **Nombre de origen** — la dirección (y el nombre opcional) desde la que se
   envían tus correos.
-- **Rechazar certificados TLS no verificados** — activado por defecto (seguro). Desactívalo solo si tu
-  servidor usa un certificado autofirmado en el que confías.
+- **Verificar certificado TLS** — activado por defecto (seguro). Desactívalo solo si tu servidor usa un
+  certificado autofirmado en el que confías.
 
 > La contraseña se guarda **cifrada en reposo**. Guardar una contraseña requiere que la clave del
 > servidor `SMTP_SECRET_KEY` esté configurada. Si no lo está, **se rechaza el guardado completo**: no se
@@ -44,9 +47,9 @@ El editor de SMTP tiene estos campos:
 
 ## Enviar un correo de prueba
 
-Usa **Enviar correo de prueba** para confirmar que todo funciona antes de depender de ello. Introduce una
-dirección de destino y lazyit envía un mensaje real usando los ajustes **guardados actualmente** — así
-que **guarda primero** y luego prueba. **No** necesitas activar el correo saliente para probar. Si el
+Usa la sección **Enviar una prueba**, debajo del formulario, para confirmar que todo funciona antes de
+depender de ello. Introduce una dirección de destino y pulsa **Enviar prueba**; lazyit envía un mensaje
+real usando los ajustes **guardados actualmente** — así que **guarda primero** y luego prueba. **No** necesitas activar el correo saliente para probar. Si el
 servidor rechaza el mensaje, lazyit muestra un error breve (por ejemplo, «conexión rechazada» o «fallo de
 autenticación») en lugar de fallar en silencio.
 

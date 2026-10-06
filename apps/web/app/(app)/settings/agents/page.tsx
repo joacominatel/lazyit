@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAgentPolicy } from "@/lib/api/hooks/use-agent-policy";
@@ -12,9 +11,6 @@ import {
 } from "./_components/agent-context-panels";
 import { AgentPolicyEditor } from "./_components/agent-policy-editor";
 
-/** The Settings hub, which the breadcrumb walks back to. */
-const SETTINGS_HREF = "/settings";
-
 /**
  * Settings → Reporting agents (#1174) — the section the agent surface never had.
  *
@@ -24,10 +20,10 @@ const SETTINGS_HREF = "/settings";
  * had no page to open. `service-accounts`, `taxonomies`, `roles` and `integrations` already
  * establish the sibling-section pattern; this is the missing sibling, not a new concept.
  *
- * The layout splits WRITE from READ rather than by topic: the editable instance-default policy fills
- * the main column in three groups (cadence · what is collected · exclusions), and the column beside
- * it carries what the operator can only read — the three scopes with two of them marked unbuilt, the
- * revision the fleet is being compared against, and the auto-confirm rules' entry point.
+ * One column since #1533, in reading order: the editable instance-default policy in three groups
+ * (cadence · what is collected · exclusions), the scopes ladder that says which of the three scopes
+ * this page edits, the shared save bar, and the auto-confirm rules' entry point last — it is a
+ * separate subject with its own home on the Servers view.
  *
  * NOT an ADR-0067 server-prefetch route, deliberately: `getAgentPolicy` takes no access token (it
  * resolves one from the client session store), so a Server Component prefetch would fire
@@ -42,21 +38,13 @@ export default function AgentsSettingsPage() {
 
   return (
     <AdminGate>
-      <div className="space-y-6">
+      <div className="max-w-3xl space-y-6">
         <PageHeader
           title={t("agentPolicy.title")}
           subtitle={t("agentPolicy.subtitle")}
           // Explicit crumbs rather than the path-derived default: the derived labels come from a
           // title-cased URL segment, which is English on every locale and would read "Agents" beside
           // a page titled "Reporting agents".
-          breadcrumb={
-            <Breadcrumb
-              items={[
-                { label: t("hub.title"), href: SETTINGS_HREF },
-                { label: t("agentPolicy.title") },
-              ]}
-            />
-          }
           badge={
             data ? (
               <StatusBadge tone="neutral">
@@ -66,15 +54,8 @@ export default function AgentsSettingsPage() {
           }
         />
 
-        <div className="grid gap-6 xl:grid-cols-3 xl:items-start">
-          <div className="xl:col-span-2">
-            <AgentPolicyEditor />
-          </div>
-          <div className="space-y-6">
-            <AgentScopesPanel />
-            <AutoConfirmRulesPanel />
-          </div>
-        </div>
+        <AgentPolicyEditor context={<AgentScopesPanel />} />
+        <AutoConfirmRulesPanel />
       </div>
     </AdminGate>
   );

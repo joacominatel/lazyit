@@ -3,7 +3,7 @@ title: "The Ledger — design language reference (frontend refactor)"
 tags: [frontend, design-system, reference, web, refactor]
 status: draft
 created: 2026-06-29
-updated: 2026-10-05
+updated: 2026-10-06
 ---
 
 # The Ledger — design language reference
@@ -133,6 +133,47 @@ sections.
   so switching never re-runs the server prefetch.
 - **Actions**: the everyday ones stay visible (one primary fill), the rest go in a `⋯` menu with
   destructive items last, behind a separator.
+
+## 4c. Settings pages
+
+Every page under `/settings` (#1533) is a configuration surface, not documentation. They share one frame,
+built from `components/settings-section.tsx`, and one set of text rules.
+
+**Text rules** — apply to every section:
+
+1. A section shows its **title**, **one short line** (≤ ~12 words) saying what it does, and its **state
+   badge** (On / Off / Configured) in the header. Nothing else as visible prose.
+2. Longer explanations live in the **"?" `HelpTip`** on the section title or the field label — kept, but
+   trimmed to what an operator needs, with a Manual link where one exists. A field keeps a visible line
+   only for a format or constraint needed while typing, a conditional state ("this list is inert while
+   its collector is off"), or a risk.
+3. **Numbers read as a sentence** when natural: *Each host reports every [15] min and is marked offline
+   after [45] min without reporting.* Each inline input keeps an accessible name.
+4. **Similar booleans are an icon checkbox grid** (the agent collectors), not a list of switch rows.
+5. **One save model per section.** A form keeps its explicit Save in the section footer (with an
+   unsaved-changes note); a standalone toggle that already autosaves keeps doing so. A switch that is
+   part of a form (SMTP, directory, asset-tag *enabled*) may sit in the section header but still saves
+   with the form. A presentation change never changes *when* something saves.
+6. **Callouts only for risk** — a revision conflict, a security update, plaintext LDAP. Routine state
+   (a preview, a review tray, a suggestion) is a plain row.
+
+**Primitives** (`components/settings-section.tsx`):
+
+- `SettingsSection` — title (+ optional `help` tip), `summary`, `status`, header `actions`, body, `footer`.
+  Same surface as `DetailPanel` (`bg-card`, `ring-1 ring-foreground/10`, `rounded-xl`), hairline between
+  header, body and footer. Header-only when there is no body (a single action such as *Send a test*).
+- `SettingsStatus` — the On / Off / Configured badge (`StatusBadge` success / neutral / info).
+- `SettingRow` — label + optional tip on the left, control on the right; rows stack with hairlines.
+- `SettingLabel` — a field label followed by its tip, the tip outside the `<label>` (#1407; the AI
+  settings' `AiFieldLabel` is an alias of it).
+- `SettingsSaveBar` — the footer holding a form's Save, with a muted note on the left.
+
+**Frame.** `settings/layout.tsx` wraps every page except the hub in `SettingsShell`: a sticky grouped side
+nav on `lg`+ (Inventory · Access · Integrations · System), a grouped page picker below that. The groups
+and items live in `settings/_lib/settings-nav.ts` (`SETTINGS_NAV`), which also builds the hub cards, and
+they carry the same gating — `settings:manage` for the area, an optional per-item permission
+(Bulk import → `import:run`). The nav shows no state badges: each state is its own read, and fetching
+them for the nav would add requests to every settings page. Form pages cap their width at `max-w-3xl`.
 
 ## 5. Do / Don't (register translation)
 

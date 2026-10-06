@@ -1145,7 +1145,7 @@ route). The update needs `settings:manage` (administrators); the read needs **`a
   request to change the general / instance-wide scheme — never to make one asset's tag fit.
 - **The card** shows only the fields that change, before → after (`enabled`, `prefix`, `suffix`, `width`,
   `nextNumber`), plus the next tag before → after; a no-op is `INVALID_INPUT`. It names the scheme as its
-  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/instance`) with `precondition
+  target (`assetTagScheme`, id `singleton` — a new entity type, linked to `/settings/asset-tags`) with `precondition
   { entity, updatedAt }`: any change in between — another edit, or the counter moving because an asset
   was auto-tagged — is `STALE`. A never-configured scheme reads back with `updatedAt` = now on every
   read, so it is anchored on a fixed instant (the epoch) instead. The warning is
@@ -1160,7 +1160,8 @@ route). The update needs `settings:manage` (administrators); the read needs **`a
 - **Every caller gets the rule:** `asset_create` and `asset_create_batch` say it too ("omit `assetTag`
   unless the person gives one: the instance tag scheme assigns it; never build one from a pattern"), since
   a caller without `asset:write` (and every Service Account) cannot list `asset_tag_scheme_get`. The web links the `assetTagScheme` ref to
-  `/settings/instance` (`entity-href.ts`), where the scheme editor lives.
+  `/settings/asset-tags` (`entity-href.ts`), where the scheme editor lives (it moved off
+  `/settings/instance` in #1533).
 
 **Users and activity tools as built (W2-9).** Every call goes through `rt.call` on the real route, so
 the RBAC guards stay in `UsersService`, in one place: the self-role-change refusal (403), the last-admin
@@ -1635,7 +1636,7 @@ Mapping per channel:
   - the refs drive "Open ‹entity›" chips; the web builds the route from `type`/`id`/`slug` (`asset` →
     `/assets/{id}`, `article` → `/kb/{slug}`, `application` → `/applications/{id}`, `user` →
     `/users/{id}`, `location` → `/locations/{id}`, `consumable` → `/consumables/{id}`, `manualTask` →
-    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/instance` (#1394), `workflowRun` →
+    `/settings/integrations/tasks/{id}`, `assetTagScheme` → `/settings/asset-tags` (#1394, #1533), `workflowRun` →
     `/applications/{parent.id}/workflows/runs/{id}`)
     [R18] and validates it with `safeInternalPath`;
   - **auto-navigation** happens only for an explicit `navigate`-kind tool, and only when no

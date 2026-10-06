@@ -3,7 +3,6 @@
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/page-header";
 import { cn } from "@/lib/utils";
 import { AdminGate } from "../_components/admin-gate";
@@ -13,7 +12,6 @@ import { CategoryManager } from "../_components/category-manager";
 import { parseTaxonomyTab, TAXONOMY_TABS, type TaxonomyTab } from "../_components/taxonomy-tabs";
 
 /** Stable empty breadcrumb for the taxonomies page PageHeader. */
-const BREADCRUMB = <Breadcrumb />;
 
 /**
  * Settings → Taxonomies. A single screen with a tab bar over the four category kinds, asset models and
@@ -34,7 +32,6 @@ export default function TaxonomiesPage() {
         <PageHeader
           title={t("taxonomies.title")}
           subtitle={t("taxonomies.subtitle")}
-          breadcrumb={BREADCRUMB}
         />
         {/* `useSearchParams` needs a Suspense boundary on a client page (the ?tab= deep link). */}
         <Suspense fallback={null}>

@@ -232,7 +232,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >
 > **AD/LDAP as a directory SOURCE** ([[0091-on-prem-ad-ldap-directory-source]], #839): besides the bulk
 > import, `directoryOnly` persons can be **reconciled read-only** from an on-prem AD/LDAP directory. A
-> singleton `DirectoryConnection` (Settings → Instance → Directory, `settings:manage`, off by default) binds
+> singleton `DirectoryConnection` (Settings → Directory, `settings:manage`, off by default) binds
 > read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
 > a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
 > `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);

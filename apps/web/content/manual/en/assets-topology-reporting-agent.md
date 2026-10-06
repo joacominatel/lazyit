@@ -891,23 +891,27 @@ brings both back.
 
 ## Configure every agent from one screen
 
-You do not edit agents host by host. **Settings → Reporting agents** — its own section in Settings,
-next to Service accounts — sets the policy for every agent in the estate, and each one picks it up on
-its next check-in.
+You do not edit agents host by host. **Settings → Reporting agents** — its own page in Settings, under
+**Integrations** in the side menu — sets the policy for every agent in the estate, and each one picks
+it up on its next check-in. Each group on the page shows a title and one line; the longer explanation
+sits behind the **?** next to its title.
 
 > **It used to live under Settings → Instance**, and the installer's own output and the comments it
-> writes into a host's config file still say so. That page now carries a link across to the section
-> instead of the editor, so following the older wording still gets you there in one more click.
+> writes into a host's config file may still say so. That page is now **General & version** and no
+> longer mentions agents — open **Settings → Reporting agents** instead.
 
 What you can set there, in three groups:
 
-- **Cadence** — how often each host reports (from 5 minutes to 24 hours; on Linux this is the setting
-  that used to mean editing a systemd timer on every machine), and how long lazyit waits before calling a host
-  offline. The second must be longer than the first, or a perfectly healthy host gets marked offline
-  between two of its own reports — the editor will not let you save a value that would do that, and it
-  says so under the field rather than after you press Save.
-- **What agents collect** — hardware, disks, network interfaces, installed software, containers, plus
-  a hard cap on how many packages a host may report. **A collector that is off is never run**, on
+- **Cadence** — one sentence with two numbers: *Each host reports every [15] min and is marked offline
+  after [45] min without reporting.* The first is how often each host reports (from 5 minutes to 24
+  hours; on Linux this is the setting that used to mean editing a systemd timer on every machine), the
+  second how long lazyit waits before calling a host offline. The second must be longer than the first,
+  or a perfectly healthy host gets marked offline between two of its own reports — the editor will not
+  let you save a value that would do that, and it says so under the sentence rather than after you press
+  Save.
+- **What agents collect** — a grid of checkboxes, one per collector: hardware, disks, network
+  interfaces, installed software, containers and hypervisor guests, plus a hard cap on how many packages
+  a host may report. **A collector that is off is never run**, on
   either platform: the agent does not gather the facts and then throw them away. On Windows that
   used to be true only of containers, because everything else came out of one PowerShell call that
   ran whatever the policy said; since v1.10 that call is built from the collectors the policy
@@ -922,17 +926,22 @@ What you can set there, in three groups:
   patterns. A list whose collector is switched off is still saved, but nothing runs it — the screen
   says so beside the list rather than leaving you to wonder why the pattern did nothing.
 
-The same section also shows **where a policy comes from**. lazyit resolves three scopes, field by
-field, and the narrowest one that sets a field wins: a per-host override, then the reporting agent's
-service account, then this instance default. **Only the instance default has an editor** — the other
-two exist in the API and are marked on screen as having none, so you can see that the hierarchy is
-there instead of wondering why one host behaves differently. The [auto-confirm
-rules](#auto-confirm-rules) are linked from there too, since they are agent configuration as well.
+Below the three groups, a ladder of three steps — **Instance · Service account · Host** — shows
+**where a policy comes from**. lazyit resolves the three scopes field by field, and the most specific
+one that sets a field wins: a per-host override, then the reporting agent's service account, then this
+instance default. **Only the instance default has an editor** (*Edited here*) — the other two exist in
+the API and are marked *No editor yet*, so you can see that the hierarchy is there instead of wondering
+why one host behaves differently. The [auto-confirm rules](#auto-confirm-rules) have a short section of
+their own at the bottom of the page, linking to where they are managed, since they are agent
+configuration as well.
+
+One **Save policy** bar at the bottom saves all three groups together, with **Discard** while you have
+unsaved changes.
 
 Three things are worth knowing before you use it.
 
-**A change lands on the next report, not instantly.** The policy travels back on each host's
-check-in, and the host applies it from the run *after* that — so allow up to two reporting intervals.
+**A change lands on the next report, not instantly** — the save bar says so in one line. The policy
+travels back on each host's check-in, and the host applies it from the run *after* that — so allow up to two reporting intervals.
 That delay is deliberate: an agent only ever applies a policy it already had in hand when it started,
 so a mistake here can never interrupt a fleet halfway through collecting.
 
@@ -957,9 +966,9 @@ at "proposals you discard" rather than "someone else's code running as root on e
 
 **Did it take?** Each host reports back which version of the policy it is running, so you can tell
 "configured" from "actually applied". The version lazyit is currently serving sits next to the
-section's title (**Policy v8**). To see whether a given host has picked it up, open that server on the
-[infrastructure diagram](/help/assets-topology-diagram) and its details window shows **Policy v7 ·
-applied** or **Policy v8 · pending** — pending simply means that host has not checked in since your
+page title (**Policy v8**). To see whether a given host has picked it up, use **Per-host status** in
+the ladder's header, or open that server on the [infrastructure diagram](/help/assets-topology-diagram)
+and its details window shows **Policy v7 · applied** or **Policy v8 · pending** — pending simply means that host has not checked in since your
 change. A server discovered by an agent older than this release shows neither, because it never
 reports a policy version at all.
 

@@ -947,24 +947,28 @@ devuelve las dos cosas.
 
 ## Configurá todos los agentes desde una sola pantalla
 
-No se editan los agentes host por host. **Configuración → Agentes de inventario** — su propia sección
-en Configuración, al lado de Cuentas de servicio — define la política de todos los agentes del parque,
-y cada uno la toma en su próximo reporte.
+No se editan los agentes host por host. **Configuración → Agentes de inventario** — su propia página
+en Configuración, bajo **Integraciones** en el menú lateral — define la política de todos los agentes
+del parque, y cada uno la toma en su próximo reporte. Cada grupo de la página muestra un título y una
+línea; la explicación larga está tras el **?** junto a su título.
 
 > **Antes vivía en Configuración → Instancia**, y tanto la salida del instalador como los comentarios
-> que escribe en el archivo de configuración de un host lo siguen diciendo así. Esa página ahora
-> lleva un enlace a la sección en lugar del editor, así que seguir el texto viejo igual te deja donde
-> corresponde, a un clic más.
+> que escribe en el archivo de configuración de un host pueden seguir diciéndolo así. Esa página ahora
+> es **General y versión** y ya no menciona a los agentes — abrí **Configuración → Agentes de
+> inventario** en su lugar.
 
 Lo que podés configurar ahí, en tres grupos:
 
-- **Frecuencia** — cada cuánto informa cada host (de 5 minutos a 24 horas; en Linux esta es la opción
-  que antes implicaba editar un temporizador de systemd en cada máquina) y cuánto espera lazyit antes de marcarlo
-  fuera de línea. El segundo valor tiene que ser mayor que el primero, o un host perfectamente sano
-  queda marcado fuera de línea entre dos de sus propios reportes — el editor no te deja guardar un
-  valor que provoque eso, y lo aclara debajo del campo en lugar de después de que presiones Guardar.
-- **Qué recolectan los agentes** — hardware, discos, interfaces de red, software instalado y
-  contenedores, más un tope estricto de cuántos paquetes puede informar un host. **Un recolector
+- **Frecuencia** — una frase con dos números: *Cada host informa cada [15] min y se marca fuera de
+  línea a los [45] min sin informar.* El primero es cada cuánto informa cada host (de 5 minutos a 24
+  horas; en Linux esta es la opción que antes implicaba editar un temporizador de systemd en cada
+  máquina), el segundo cuánto espera lazyit antes de marcarlo fuera de línea. El segundo valor tiene que
+  ser mayor que el primero, o un host perfectamente sano queda marcado fuera de línea entre dos de sus
+  propios reportes — el editor no te deja guardar un valor que provoque eso, y lo aclara debajo de la
+  frase en lugar de después de que presiones Guardar.
+- **Qué recolectan los agentes** — una grilla de casillas, una por recolector: hardware, discos,
+  interfaces de red, software instalado, contenedores e invitados del hipervisor, más un tope estricto
+  de cuántos paquetes puede informar un host. **Un recolector
   desactivado no se ejecuta**, en ninguna de las dos plataformas: el agente no reúne los datos para
   después descartarlos. En Windows eso antes valía solo para los contenedores, porque todo lo demás
   salía de una única llamada de PowerShell que se ejecutaba dijera lo que dijera la política; desde
@@ -980,19 +984,23 @@ Lo que podés configurar ahí, en tres grupos:
   patrones. Una lista cuyo recolector está apagado igual se guarda, pero no la ejecuta nadie — la
   pantalla lo dice al lado de la lista en vez de dejarte pensando por qué el patrón no hizo nada.
 
-Esa misma sección muestra además **de dónde sale una política**. lazyit resuelve tres ámbitos, campo
-por campo, y gana el más específico que defina ese campo: primero un ajuste por host, después la
-cuenta de servicio del agente que reporta, y al final este predeterminado de la instancia. **Solo el
-predeterminado de la instancia tiene editor** — los otros dos existen en la API y aparecen en pantalla
-marcados como que todavía no lo tienen, así que ves que la jerarquía está ahí en lugar de preguntarte
-por qué un host se comporta distinto. Las [reglas de confirmación
-automática](#reglas-de-confirmación-automática) también se enlazan desde ahí, porque también son
+Debajo de los tres grupos, una escalera de tres pasos — **Instancia · Cuenta de servicio · Host** —
+muestra **de dónde sale una política**. lazyit resuelve los tres ámbitos campo por campo, y gana el más
+específico que defina ese campo: primero un ajuste por host, después la cuenta de servicio del agente
+que reporta, y al final este predeterminado de la instancia. **Solo el predeterminado de la instancia
+tiene editor** (*Se edita aquí*) — los otros dos existen en la API y aparecen marcados *Todavía sin
+editor*, así que ves que la jerarquía está ahí en lugar de preguntarte por qué un host se comporta
+distinto. Las [reglas de confirmación automática](#reglas-de-confirmación-automática) tienen una sección
+corta propia al final de la página, con un enlace a donde se gestionan, porque también son
 configuración de agentes.
+
+Una sola barra **Guardar política** al final guarda los tres grupos juntos, con **Descartar cambios**
+mientras tengas cambios sin guardar.
 
 Hay tres cosas que conviene saber antes de usarlo.
 
-**Un cambio llega en el próximo reporte, no al instante.** La política viaja de vuelta en el reporte
-de cada host, y el host la aplica en la ejecución *siguiente* — así que dejá pasar hasta dos
+**Un cambio llega en el próximo reporte, no al instante** — la barra de guardado lo dice en una línea.
+La política viaja de vuelta en el reporte de cada host, y el host la aplica en la ejecución *siguiente* — así que dejá pasar hasta dos
 intervalos. Esa demora es intencional: un agente solo aplica una política que ya tenía cuando
 arrancó, de modo que un error acá nunca puede interrumpir al parque a mitad de una recolección.
 
@@ -1019,8 +1027,9 @@ como root en todos tus servidores".
 
 **¿Se aplicó?** Cada host informa qué versión de la política está ejecutando, así podés distinguir
 "configurado" de "efectivamente aplicado". La versión que lazyit está sirviendo aparece al lado del
-título de la sección (**Política v8**). Para ver si un host determinado ya la tomó, abrí ese servidor
-en el [diagrama de infraestructura](/help/assets-topology-diagram): su ventana de detalle muestra
+título de la página (**Política v8**). Para ver si un host determinado ya la tomó, usá **Estado por host** en
+el encabezado de la escalera, o abrí ese servidor en el
+[diagrama de infraestructura](/help/assets-topology-diagram): su ventana de detalle muestra
 **Política v7 · aplicada** o **Política v8 · pendiente** — pendiente significa simplemente que ese host no reportó
 desde tu cambio. Un servidor descubierto por un agente anterior a esta versión no muestra ninguna de
 las dos, porque nunca informa una versión de política.

@@ -9,19 +9,19 @@ order: 3
 
 The **asset tag scheme** auto-assigns a running asset tag to new assets — a prefix, a zero-padded
 number and a suffix (for example `IT-0042-HW`). It is **off until you turn it on**, and an explicit
-tag you type on an asset always wins. You configure it under **Settings → Instance** (administrators
-only).
+tag you type on an asset always wins. You configure it under **Settings → Asset tags** (administrators
+only; in the Settings side menu it sits under **Inventory**). The page header shows **On** or **Off**.
 
 ## Designing the scheme
 
-The editor has four fields and a **live preview** that shows the tag the next asset would really get
+The **Tag scheme** section has four fields and a **live preview** that shows the tag the next asset would really get
 as you type — the skip-existing rule below is already applied to it, so if the counter's number is
 taken the preview shows the free one that would be used instead, and says how many it stepped over.
 It never reserves that number, so it reflects the estate right now rather than promising a tag. With
-the scheme switched off, the card is labelled **Tag shape** and shows no number at all — your prefix
+the scheme switched off, the preview is labelled **Tag shape** and shows no number at all — your prefix
 and suffix around a described slot (`IT-` then *4 digits*) — because nothing is being assigned and any
 number printed there would be one the allocator will never hand out. If the check itself fails, the
-card says so and offers a **Retry** rather than waiting silently.
+preview says so and offers a **Retry** rather than waiting silently.
 
 - **Prefix** — text before the number (e.g. `IT-`). Optional.
 - **Suffix** — text after the number (e.g. `-HW`). Optional.
@@ -30,8 +30,10 @@ card says so and offers a **Retry** rather than waiting silently.
 - **Start at** — optional. Re-seed the counter so the next tag starts at this number. Leave blank to
   continue the existing sequence.
 
-Turn the scheme on with the **Auto-assign asset tags** toggle. While it is on, any new asset created
-without a tag gets the next number automatically. While it is off, nothing is auto-assigned.
+The **?** next to a label holds that field's explanation. Turn the scheme on with the **Auto-assign**
+switch in the section header. While it is on, any new asset created without a tag gets the next number
+automatically. While it is off, nothing is auto-assigned. The switch is part of the form: like the
+fields, it takes effect when you press **Save scheme**.
 
 > The counter only ever moves **forward**. Numbers can have gaps — that is expected and fine. A tag
 > you typed by hand is never overwritten by the auto-assigner.
@@ -51,7 +53,8 @@ some live assets already match the pattern, and it is never applied automaticall
 ## Backfilling existing assets
 
 Turning the scheme on tags **new** assets going forward; it does not retroactively tag what you already
-have. To tag the existing estate, use **Tag existing assets** (visible once the scheme is enabled). It
+have. To tag the existing estate, use **Tag existing assets**, next to **Save scheme** (visible while the
+**Auto-assign** switch is on). It
 opens a wizard:
 
 1. **Choose what to tag.** Two modes:

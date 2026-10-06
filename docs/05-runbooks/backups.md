@@ -46,7 +46,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > off-host with the *matching* DB dump. Never generate a fresh one on a restore.
 
 > [!warning] `SMTP_SECRET_KEY` is a *fourth* server-held master key — but OPTIONAL and trivially recoverable (ADR-0079)
-> The instance SMTP password (Settings → Instance → SMTP) is encrypted at rest (`SmtpSettings`,
+> The instance SMTP password (Settings → Email) is encrypted at rest (`SmtpSettings`,
 > AES-256-GCM) under `SMTP_SECRET_KEY` — its own key axis, SEPARATE from `WORKFLOW_SECRET_KEY` ("one key
 > per subsystem"). A DB restore **without the matching `SMTP_SECRET_KEY`** yields an **undecryptable SMTP
 > password**: outbound email stops until an admin re-enters the password in the UI. Unlike the three
@@ -89,7 +89,7 @@ right order. lazyit holds sensitive inventory/access data on a single host
 > sweep. Keep backup retention in line with what your organization expects of AI transcripts.
 
 > [!info] `DIRECTORY_SECRET_KEY` — the LDAP bind password's at-rest key: OPTIONAL and low-DR, like `SMTP_SECRET_KEY` (ADR-0091)
-> When an admin configures directory sync (Settings → Instance → Directory sync), the read-only LDAP
+> When an admin configures directory sync (Settings → Directory), the read-only LDAP
 > **bind password** is stored encrypted (AES-256-GCM) under `DIRECTORY_SECRET_KEY` — its own key axis,
 > separate from `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `WORKFLOW_SECRET_KEY`. **Back it up alongside
 > them**, in the same off-host copy of `.env.prod`. A DB restore **without the matching key** leaves the

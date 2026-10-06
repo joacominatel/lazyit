@@ -1,11 +1,9 @@
 "use client";
 
-import {
-  ArrowRightIcon,
-  InboxArrowDownIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { SettingsSection } from "@/components/settings-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -47,30 +45,27 @@ export function DirectoryPendingTray() {
   const total = data?.total ?? 0;
   if (!canReadUsers || isLoading || people.length === 0) return null;
 
+  // A plain section, not a warning callout (#1533): new arrivals are routine, not a risk.
   return (
-    <section
-      className="mt-6 space-y-3 rounded-lg border border-warning/30 bg-warning/5 p-4"
-      aria-label={t("title")}
+    <SettingsSection
+      title={t("title")}
+      summary={t("summary")}
+      help={<p>{t("description")}</p>}
+      status={<Badge variant="secondary">{total}</Badge>}
+      actions={
+        <Button asChild variant="outline" size="sm">
+          <Link href="/users?directory=directory">
+            {t("viewAll")}
+            <ArrowRightIcon />
+          </Link>
+        </Button>
+      }
     >
-      <div className="flex items-start gap-2">
-        <InboxArrowDownIcon
-          className="mt-0.5 size-5 shrink-0 text-warning"
-          aria-hidden
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold">{t("title")}</h3>
-            <Badge variant="secondary">{total}</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">{t("description")}</p>
-        </div>
-      </div>
-
-      <ul className="divide-y rounded-md border bg-card">
+      <ul className="-my-2 divide-y">
         {people.map((person) => (
           <li
             key={person.id}
-            className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="min-w-0 space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -94,15 +89,6 @@ export function DirectoryPendingTray() {
           </li>
         ))}
       </ul>
-
-      <div className="flex justify-end">
-        <Button asChild variant="outline" size="sm">
-          <Link href="/users?directory=directory">
-            {t("viewAll")}
-            <ArrowRightIcon />
-          </Link>
-        </Button>
-      </div>
-    </section>
+    </SettingsSection>
   );
 }

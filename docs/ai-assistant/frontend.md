@@ -116,7 +116,7 @@ updated: 2026-10-02
   authMode?, …`), read by `useConfigStatus` (staleTime 30s) and server-side by `apps/web/proxy.ts`.
   SMTP state is **admin-only** (`GET /config/smtp`, `settings:manage`). There is **no general
   per-caller feature-flag endpoint**.
-- **(R)** SMTP precedent (`lib/api/endpoints/smtp.ts`, `settings/instance/_components/
+- **(R)** SMTP precedent (`lib/api/endpoints/smtp.ts`, `settings/email/_components/
   smtp-settings-editor.tsx`): write-only secret (`passwordSet`, never the value), "save first, then
   test", the test endpoint returns HTTP 200 with `{ ok, error? }`.
 - **(R)** Permission labels shown in the role editor are localized in
@@ -334,7 +334,8 @@ instance-level MCP configuration and every user's connected apps.
 | `/account/ai` | `(app)` | `ai:connect`; install panel only if `aiStatus.mcp.available` | `aiKeys.oauthGrantsMine()` |
 | `/oauth/authorize?<OAuth params>` | `(auth)` / `AuthShell` | session required server-side (`await auth()` → `/login?callbackUrl=<path+query>`) | the `authorize/validate` read |
 
-Plus a hub card **"AI"** in `settings/page.tsx` `SECTIONS`, a **user-menu** item "AI & connected
+Plus a hub card **"AI"** in `settings/page.tsx` (since #1533 the hub and the settings side nav are built
+from `settings/_lib/settings-nav.ts` `SETTINGS_NAV`), a **user-menu** item "AI & connected
 apps", and explicit breadcrumb `items` on both new pages (the humanizer would print "Ai").
 
 ### 5.2 Component tree — the chat

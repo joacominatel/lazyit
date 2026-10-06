@@ -406,7 +406,7 @@
         "title": "Enviar un enlace de restablecimiento por correo",
         "description": "{email} recibe un enlace de un solo uso y elige su propia contraseña — lazyit nunca la ve.",
         "unavailable": {
-          "smtp-not-configured": "El correo saliente no está configurado en esta instancia. Configúralo en Ajustes → Instancia → SMTP para usar esta opción.",
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia. Configúralo en Configuración → Correo para usar esta opción.",
           "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace que apunte a ella. Pide a tu administrador que configure la URL de la instancia y vuelve a intentarlo.",
           "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia."
         },
@@ -430,11 +430,11 @@
       },
       "errors": {
         "emailUnavailable": {
-          "smtp-not-configured": "El correo saliente no está configurado en esta instancia, así que no se pudo enviar el enlace. Configúralo en Ajustes → Instancia → SMTP, o genera una contraseña temporal en su lugar.",
+          "smtp-not-configured": "El correo saliente no está configurado en esta instancia, así que no se pudo enviar el enlace. Configúralo en Configuración → Correo, o genera una contraseña temporal en su lugar.",
           "origin-unknown": "Esta instancia no tiene una URL pública, así que lazyit no puede construir un enlace de restablecimiento. Pide a tu administrador que configure la URL de la instancia, o genera una contraseña temporal en su lugar.",
           "generic": "Ahora mismo no se puede enviar un enlace de restablecimiento desde esta instancia. Genera una contraseña temporal en su lugar."
         },
-        "sendFailed": "No se pudo enviar el correo de restablecimiento. Revisa Ajustes → Instancia → SMTP e inténtalo de nuevo, o genera una contraseña temporal en su lugar.",
+        "sendFailed": "No se pudo enviar el correo de restablecimiento. Revisa Configuración → Correo e inténtalo de nuevo, o genera una contraseña temporal en su lugar.",
         "inactive": "Este usuario está inactivo, o no tiene cuenta de inicio de sesión, así que no hay contraseña que restablecer.",
         "managed": "La contraseña de esta cuenta la gestiona tu proveedor de identidad — lazyit no puede restablecerla.",
         "notFound": "Este usuario ya no existe.",
