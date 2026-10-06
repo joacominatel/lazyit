@@ -14,7 +14,9 @@
 #   3. Verified dual pg_dump     — MANDATORY. Dump BOTH DBs (app + zitadel_db), verify each is restorable
 #                                  (pg_restore -l), and only then keep it. A failed/unverifiable dump ABORTS
 #                                  the update — there is no override flag. Paths + sizes are printed (proof).
-#   4. verify-tag + checkout     — only an SSH-signed tag (ADR-0083) is applied; verification failure stops.
+#   4. Tag trust + checkout      — fetch master + the tag from origin over HTTPS/SSH; apply the tag only if it
+#                                  is an annotated vX.Y.Z tag on origin/master. A signature is verified when
+#                                  present (a BAD one stops), never required — CI tags are unsigned (ADR-0083).
 #   5. Missing-env → FAIL LOUD   — diff the target tag's .env.prod.example keys vs the live .env.prod; on a
 #                                  gap, print the EXACT lines to add and STOP. This script NEVER writes
 #                                  .env.prod (a human eyeball on the DR-linchpin file is the cheapest insurance).
@@ -34,7 +36,7 @@
 #   - NO docker socket is mounted anywhere; this is a HOST script the operator runs — the app never executes it.
 #
 # Usage:
-#   ./infra/update.sh v1.5.0            # update to a specific signed tag
+#   ./infra/update.sh v1.5.0            # update to a specific release tag
 #   ./infra/update.sh --yes v1.5.0      # skip the "proceed?" confirmation (still verifies + backs up)
 #   ./infra/update.sh --help
 #
@@ -46,8 +48,12 @@ set -eu
 # 0. RE-EXEC FROM A TEMP COPY — so step 4's `git checkout <tag>` can replace this very file on disk
 #    without corrupting the running shell (POSIX sh may re-read the script from disk as it executes).
 #    We resolve the repo root from the ORIGINAL $0 FIRST, then re-exec the copy with it in the env.
+#    NOTE: the copy is of the script in the CURRENT checkout — an update always runs the updater of the
+#    version you are LEAVING, never the target's. A fix to update.sh helps only from the release after it.
+#    Test seam (NEVER set in a real deploy): LAZYIT_UPDATE_LIB_ONLY=1 skips the re-exec and main, so a test
+#    can source this file and call the tag-trust functions directly (infra/test/update-tag-trust.sh).
 # =============================================================================
-if [ "${LAZYIT_UPDATE_REEXEC:-}" != "1" ]; then
+if [ "${LAZYIT_UPDATE_REEXEC:-}" != "1" ] && [ "${LAZYIT_UPDATE_LIB_ONLY:-}" != "1" ]; then
   _orig_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
   _repo_root=$(CDPATH='' cd -- "$_orig_dir/.." && pwd)
   _self_copy=$(mktemp "${TMPDIR:-/tmp}/lazyit-update.XXXXXX") || {
@@ -88,6 +94,8 @@ BACKUP_APP=""
 BACKUP_ZITADEL=""
 BACKUP_LABEL=""
 DC=""
+TAG_TRUST_ERROR=""               # set by verify_release_tag when it refuses a tag (the fail_hard reason)
+TAG_TRUST_COMMIT=""              # set by verify_release_tag on success: the verified commit step 4 checks out
 
 # =============================================================================
 # Output helpers — all status to stderr so any captured stdout stays clean.
@@ -107,14 +115,15 @@ USAGE
   ./infra/update.sh --help
 
 WHAT IT DOES
-  Backs up BOTH databases (verified) BEFORE anything, verifies the tag's SSH signature, checks out the
-  target, checks for new required env vars (and STOPS if any are missing — it never edits .env.prod),
-  builds the new images while the old stack still serves, then swaps and health-gates. If it fails
-  before any migration ran it auto-rolls-back; if a migration ran it STOPS and prints the exact,
-  human-run restore commands (never an automatic DB restore).
+  Backs up BOTH databases (verified) BEFORE anything, checks that the tag is a published release (an
+  annotated vX.Y.Z tag on origin's master, fetched over HTTPS or SSH; a signature, when the tag has one,
+  must not be bad), checks out the target, checks for new required env vars (and STOPS if any are
+  missing — it never edits .env.prod), builds the new images while the old stack still serves, then
+  swaps and health-gates. If it fails before any migration ran it auto-rolls-back; if a migration ran
+  it STOPS and prints the exact, human-run restore commands (never an automatic DB restore).
 
 OPTIONS
-  --yes, -y     Skip the interactive "proceed?" confirmation (the backup + tag verification still run).
+  --yes, -y     Skip the interactive "proceed?" confirmation (the backup + tag checks still run).
   --help, -h    Show this help and exit.
 
 SAFETY
@@ -189,13 +198,8 @@ main() {
 
   # Strict tag validation — a version tag ONLY (vX.Y.Z). This is the single interpolation guard for the
   # git + SQL commands below; reject anything else up front (no injection surface).
-  case "$TARGET_TAG" in
-    v[0-9]*.[0-9]*.[0-9]*) : ;;
-    *) die "invalid target tag '$TARGET_TAG' — expected a signed release tag like v1.5.0." ;;
-  esac
-  case "$TARGET_TAG" in
-    *[!v0-9.]*) die "invalid target tag '$TARGET_TAG' — only digits, dots and a leading v are allowed." ;;
-  esac
+  is_release_tag_name "$TARGET_TAG" || \
+    die "invalid target tag '$TARGET_TAG' — expected a release tag like v1.5.0 (a v, then three dot-separated numbers)."
 
   # ---------- run from the repo root (resolved before re-exec, passed via env) ----------
   cd "$LAZYIT_REPO_ROOT" || die "cannot cd to the repo root ($LAZYIT_REPO_ROOT)"
@@ -300,18 +304,13 @@ EOF
   info "  app     -> $BACKUP_APP ($(wc -c < "$BACKUP_APP" | tr -d ' ') bytes)"
   info "  zitadel -> $BACKUP_ZITADEL ($(wc -c < "$BACKUP_ZITADEL" | tr -d ' ') bytes)"
 
-  # ---------- 4. VERIFY-TAG + CHECKOUT ----------
+  # ---------- 4. TAG TRUST + CHECKOUT ----------
+  # The trust rule (ADR-0083 §Tag trust, #1458) lives in verify_release_tag below. It checks out the exact
+  # commit it verified, so nothing can move the tag between the check and the checkout.
   step "Verifying and checking out $TARGET_TAG"
   stamp "building"
-  git fetch --tags --quiet origin 2>/dev/null || git fetch --tags --quiet 2>/dev/null || \
-    die "git fetch failed — cannot retrieve the target tag. Check network / remote."
-  git rev-parse -q --verify "refs/tags/${TARGET_TAG}" >/dev/null 2>&1 || \
-    fail_hard "tag $TARGET_TAG does not exist after fetch. Check the tag name."
-  if ! git verify-tag "$TARGET_TAG" >/dev/null 2>&1; then
-    fail_hard "tag $TARGET_TAG is NOT a valid signed tag (git verify-tag failed). Refusing to apply an unverified release (ADR-0083). Import the signing key or check the tag."
-  fi
-  ok "tag $TARGET_TAG signature verified"
-  git checkout --quiet "$TARGET_TAG" || fail_hard "git checkout $TARGET_TAG failed."
+  verify_release_tag "$TARGET_TAG" || fail_hard "$TAG_TRUST_ERROR"
+  git checkout --quiet "$TAG_TRUST_COMMIT" || fail_hard "git checkout $TARGET_TAG ($TAG_TRUST_COMMIT) failed."
   ok "checked out $TARGET_TAG"
 
   # ---------- 5. MISSING-ENV DETECTION — FAIL LOUD, never write .env.prod ----------
@@ -415,6 +414,263 @@ fail_hard() {
   git checkout --quiet "$PREV_REF" 2>/dev/null || true
   stamp "failed" "$1"
   die "$1 The checkout was restored to $FROM_VERSION; the running stack was not changed."
+}
+
+# =============================================================================
+# RELEASE-TAG TRUST (ADR-0083 §Tag trust, ADR-0084 §3 step 4, issue #1458)
+#
+#   release.yml cuts every tag after v1.0.0 as an ANNOTATED but UNSIGNED tag (CI never holds the release
+#   owner's key), so a mandatory `git verify-tag` can never pass on them. The trust anchor is instead the
+#   one ADR-0083 already names: the GitHub identity that gates master. A target tag is applied only if
+#     1. its name is a vX.Y.Z release tag;
+#     2. every fetch URL of `origin` is an authenticated transport — HTTPS (with certificate checks on)
+#        or SSH, or a local path (no network leg). Plain http:// and git:// (and unknown schemes or
+#        remote helpers) are refused: over them anyone on the path could forge master AND the tag;
+#     3. master and the tag are fetched from origin IN THIS RUN. The tag must exist on origin; a local
+#        tag of the same name that differs from origin's stops the update (it is never overwritten);
+#     4. it is an ANNOTATED tag (a tag object, as `git tag -a` makes) whose embedded name matches;
+#     5. the commit it points at is an ancestor of (or equal to) the freshly fetched origin/master.
+#        Only the gated dev→master promotion puts commits there.
+#   A signature is verified when present and never required:
+#     - SSH-signed, gpg.ssh.allowedSignersFile configured → `git verify-tag` must pass. A bad signature or
+#       a signer you have not listed stops the update — you configured that list, so it is honoured.
+#     - SSH-signed, no allowed-signers file (the usual host) → `git verify-tag` cannot run at all, but
+#       `ssh-keygen -Y check-novalidate` still checks the signature against the tag's content: a BAD
+#       signature stops the update; a valid one is accepted with the signer's identity unchecked (the
+#       ancestry rule above already carries the trust). An ssh-keygen that is missing or too old to check
+#       → a warning, and the tag is trusted on ancestry.
+#     - OpenPGP / X.509-signed → `git verify-tag` must pass, EXCEPT when the verifier cannot run: the
+#       signer's public key is not in your keyring, or gpg/gpgsm is not installed → a warning, trusted on
+#       ancestry. A BAD signature, or any other verifier failure, stops the update.
+#   On refusal it sets TAG_TRUST_ERROR (an actionable sentence) and returns 1 — main turns that into
+#   fail_hard. On success TAG_TRUST_COMMIT is the verified commit id.
+# =============================================================================
+
+# is_release_tag_name <name> — vX.Y.Z, digits only. The character check runs first so a name with a
+# newline can never slip past the line-oriented grep.
+is_release_tag_name() {
+  case "$1" in ''|*[!v0-9.]*) return 1 ;; esac
+  printf '%s\n' "$1" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+# redact_urls — hide any user:token@ credentials embedded in URLs before they reach a message or the
+# UpdateRun row.
+redact_urls() {
+  sed -E 's#(://)[^/@[:space:]]+@#\1***@#g'
+}
+
+# last_line <text> — the last non-empty line of a command's output, credentials redacted.
+last_line() {
+  _ll=$(printf '%s\n' "$1" | sed '/^[[:space:]]*$/d' | tail -n1 | sed 's/^[[:space:]]*//; s/[[:space:]][[:space:]]*/ /g' | redact_urls)
+  printf '%s' "${_ll:-no details from git}"
+}
+
+# is_secure_fetch_url <url> — 0 when fetching from <url> authenticates the server (HTTPS with certificate
+# verification, SSH) or has no network leg (a local path / file://).
+is_secure_fetch_url() {
+  _su_lc=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$_su_lc" in
+    http://*|git://*) return 1 ;;
+    https://*)
+      # HTTPS authenticates the server only while certificate verification is on.
+      [ -z "${GIT_SSL_NO_VERIFY+set}" ] || return 1
+      _su_verify=$(git config --type=bool --get-urlmatch http.sslVerify "$1" 2>/dev/null || echo true)
+      [ "$_su_verify" != "false" ] || return 1
+      return 0 ;;
+    ssh://*|git+ssh://*|ssh+git://*|file://*) return 0 ;;
+    *::*|*://*) return 1 ;;   # remote helpers (ext::, fd::) and any other scheme
+    *) return 0 ;;            # scp-like [user@]host:path (SSH), or a local path
+  esac
+}
+
+# refuse_tag <reason> — record why the tag is refused (the caller returns 1 right after).
+refuse_tag() { TAG_TRUST_ERROR=$1; }
+
+verify_release_tag() {
+  _vt_tag=$1
+  TAG_TRUST_ERROR=""
+  TAG_TRUST_COMMIT=""
+
+  if ! is_release_tag_name "$_vt_tag"; then
+    refuse_tag "'$_vt_tag' is not a release tag — lazyit releases are named vX.Y.Z (ADR-0083)."
+    return 1
+  fi
+
+  # --- transport: every fetch URL of origin must be authenticated (insteadOf rewrites are expanded) ---
+  if ! _vt_urls=$(git remote get-url --all origin 2>/dev/null) || [ -z "$_vt_urls" ]; then
+    refuse_tag "this checkout has no 'origin' remote to fetch releases from. Point it at the lazyit repository over HTTPS or SSH: git remote add origin https://github.com/joacominatel/lazyit.git"
+    return 1
+  fi
+  _vt_bad_url=""
+  while IFS= read -r _vt_u; do
+    [ -n "$_vt_u" ] || continue
+    is_secure_fetch_url "$_vt_u" || _vt_bad_url=$_vt_u
+  done <<URLS
+$_vt_urls
+URLS
+  if [ -n "$_vt_bad_url" ]; then
+    refuse_tag "origin is fetched over an unauthenticated transport ($(printf '%s' "$_vt_bad_url" | redact_urls)) — plain http://, git://, or HTTPS with certificate checks turned off. Anyone on the network path could forge both master and the tag, so the update will not trust it. Switch origin to HTTPS or SSH, e.g.: git remote set-url origin https://github.com/joacominatel/lazyit.git"
+    return 1
+  fi
+  _vt_origin=$(printf '%s' "$_vt_urls" | head -n1 | redact_urls)
+
+  # --- fetch master + the tag from origin, now. origin/master is force-refreshed (a remote-tracking ref);
+  #     the tag is NOT forced, so a local tag that differs from origin's fails the fetch. ---
+  if ! _vt_log=$(git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master' 2>&1); then
+    refuse_tag "could not fetch master from origin ($_vt_origin): $(last_line "$_vt_log"). The release check needs origin's current master — check network access to the remote and retry."
+    return 1
+  fi
+  if ! _vt_log=$(git fetch --no-tags origin "refs/tags/$_vt_tag:refs/tags/$_vt_tag" 2>&1); then
+    refuse_tag "could not fetch tag $_vt_tag from origin ($_vt_origin): $(last_line "$_vt_log"). Either the tag does not exist on origin (check the name against the Releases page), or this checkout has a local $_vt_tag that differs from origin's — inspect it with 'git show $_vt_tag' and, if it is not the published release, delete it with 'git tag -d $_vt_tag' and retry."
+    return 1
+  fi
+
+  # --- annotated, and it names itself ---
+  _vt_type=$(git cat-file -t "refs/tags/$_vt_tag" 2>/dev/null || true)
+  if [ "$_vt_type" != "tag" ]; then
+    refuse_tag "tag $_vt_tag is a lightweight tag (it points straight at a ${_vt_type:-missing object}, not at a tag object). lazyit releases are annotated tags cut by the release workflow (ADR-0083); this one was not."
+    return 1
+  fi
+  _vt_name=$(git cat-file tag "refs/tags/$_vt_tag" 2>/dev/null | sed -n '/^$/q; s/^tag //p')
+  if [ "$_vt_name" != "$_vt_tag" ]; then
+    refuse_tag "tag $_vt_tag is a tag object that names itself '$_vt_name' — it was re-labelled, not cut as $_vt_tag by the release workflow. Refusing it."
+    return 1
+  fi
+
+  # --- the tagged commit is on origin/master ---
+  _vt_commit=$(git rev-parse -q --verify "refs/tags/$_vt_tag^{commit}" 2>/dev/null || true)
+  if [ -z "$_vt_commit" ]; then
+    refuse_tag "tag $_vt_tag does not point at a commit. Refusing it."
+    return 1
+  fi
+  _vt_master=$(git rev-parse -q --verify "refs/remotes/origin/master^{commit}" 2>/dev/null || true)
+  if [ -z "$_vt_master" ]; then
+    refuse_tag "origin/master could not be resolved after the fetch. Check the remote with 'git ls-remote origin master' and retry."
+    return 1
+  fi
+  _vt_rc=0
+  git merge-base --is-ancestor "$_vt_commit" "$_vt_master" 2>/dev/null || _vt_rc=$?
+  if [ "$_vt_rc" -ne 0 ]; then
+    _vt_hint=""
+    if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" = "true" ]; then
+      _vt_hint=" This checkout is shallow, which can hide the history that links them — run 'git fetch --unshallow origin' and retry."
+    fi
+    if [ "$_vt_rc" -eq 1 ]; then
+      refuse_tag "tag $_vt_tag points at commit $(printf '%s' "$_vt_commit" | cut -c1-12), which is not on origin/master. lazyit releases are only cut from master by the gated promotion (ADR-0083), so this tag was not published by the release process.$_vt_hint"
+    else
+      refuse_tag "could not check whether tag $_vt_tag is on origin/master (git merge-base exited $_vt_rc).$_vt_hint"
+    fi
+    return 1
+  fi
+  ok "tag $_vt_tag is an annotated release tag on origin/master ($(printf '%s' "$_vt_master" | cut -c1-12)), fetched from $_vt_origin"
+
+  # --- a signature, when present, must not be bad ---
+  verify_tag_signature "$_vt_tag" || return 1
+
+  TAG_TRUST_COMMIT=$_vt_commit
+  return 0
+}
+
+# tag_signature_kind <tag> — ssh | openpgp | x509 | none, from the LAST signature header in the tag object
+# (the one git itself verifies).
+tag_signature_kind() {
+  git cat-file tag "refs/tags/$1" 2>/dev/null | awk '
+    index($0, "-----BEGIN SSH SIGNATURE-----") == 1  { k = "ssh" }
+    index($0, "-----BEGIN PGP SIGNATURE-----") == 1  { k = "openpgp" }
+    index($0, "-----BEGIN SIGNED MESSAGE-----") == 1 { k = "x509" }
+    END { print (k == "" ? "none" : k) }'
+}
+
+verify_tag_signature() {
+  _vs_tag=$1
+  _vs_kind=$(tag_signature_kind "$_vs_tag")
+  case "$_vs_kind" in
+    none)
+      info "tag $_vs_tag is unsigned — as release-workflow tags are by design (ADR-0083); trusted via origin/master."
+      return 0 ;;
+    ssh)
+      verify_ssh_tag_signature "$_vs_tag" || return 1
+      return 0 ;;
+    *)
+      verify_gpg_tag_signature "$_vs_tag" "$_vs_kind" || return 1
+      return 0 ;;
+  esac
+}
+
+verify_ssh_tag_signature() {
+  _ss_tag=$1
+  _ss_signers=$(git config --path --get gpg.ssh.allowedSignersFile 2>/dev/null || true)
+  if [ -n "$_ss_signers" ] && [ -f "$_ss_signers" ]; then
+    if git verify-tag "$_ss_tag" >/dev/null 2>&1; then
+      ok "tag $_ss_tag: SSH signature verified against your allowed signers ($_ss_signers)"
+      return 0
+    fi
+    refuse_tag "tag $_ss_tag carries an SSH signature that does NOT verify against your allowed signers file ($_ss_signers): the signature is bad, or its signer is not listed there. Run 'git verify-tag $_ss_tag' to see which. Add the signer's key to that file only if you trust it; otherwise do not apply this tag."
+    return 1
+  fi
+  if [ -n "$_ss_signers" ]; then
+    warn "gpg.ssh.allowedSignersFile is set to '$_ss_signers', but that file does not exist — the signer's identity cannot be checked."
+  fi
+
+  # No allowed-signers file: git cannot verify at all, but ssh-keygen can still prove the signature matches
+  # the tag's content (it just cannot say WHO signed).
+  if ! command -v ssh-keygen >/dev/null 2>&1; then
+    warn "tag $_ss_tag is SSH-signed, but ssh-keygen is not installed, so the signature was not checked — trusting the tag via origin/master."
+    return 0
+  fi
+  _ss_dir=$(mktemp -d "${TMPDIR:-/tmp}/lazyit-tagsig.XXXXXX") || {
+    refuse_tag "cannot create a temporary directory to check the SSH signature on $_ss_tag."
+    return 1
+  }
+  # Split the tag object exactly as git does: the signed payload is every line before the signature.
+  git cat-file tag "refs/tags/$_ss_tag" > "$_ss_dir/raw" 2>/dev/null || true
+  _ss_at=$(awk 'index($0, "-----BEGIN SSH SIGNATURE-----") == 1 { n = NR } END { print n + 0 }' "$_ss_dir/raw")
+  awk -v n="$_ss_at" 'NR < n'  "$_ss_dir/raw" > "$_ss_dir/payload"
+  awk -v n="$_ss_at" 'NR >= n' "$_ss_dir/raw" > "$_ss_dir/sig"
+  _ss_rc=0
+  _ss_out=$(ssh-keygen -Y check-novalidate -n git -s "$_ss_dir/sig" < "$_ss_dir/payload" 2>&1) || _ss_rc=$?
+  rm -rf "$_ss_dir"
+  if [ "$_ss_rc" -eq 0 ]; then
+    info "tag $_ss_tag: the SSH signature is valid for the tag's content; its signer was not checked (no gpg.ssh.allowedSignersFile configured) — trusted via origin/master."
+    return 0
+  fi
+  case "$_ss_out" in
+    *"Could not verify signature"*|*"Couldn't verify signature"*) : ;;   # the signature itself is bad
+    *"Unsupported operation"*|*"unknown option"*|*"illegal option"*|*"usage:"*)
+      warn "tag $_ss_tag is SSH-signed, but this ssh-keygen is too old to check signatures (OpenSSH 8.2+ needed) — trusting the tag via origin/master."
+      return 0 ;;
+  esac
+  refuse_tag "tag $_ss_tag carries a BAD SSH signature: it does not match the tag's content ($(last_line "$_ss_out")). The tag was altered after it was signed, or the signature is corrupt. Do not apply it; report it to the lazyit maintainers."
+  return 1
+}
+
+verify_gpg_tag_signature() {
+  _gs_tag=$1
+  case "$2" in x509) _gs_kind="X.509" ;; *) _gs_kind="OpenPGP" ;; esac
+  if _gs_out=$(git verify-tag --raw "$_gs_tag" 2>&1); then
+    ok "tag $_gs_tag: $_gs_kind signature verified"
+    return 0
+  fi
+  case "$_gs_out" in
+    *"[GNUPG:] BADSIG"*) : ;;   # a genuinely bad signature — refused below
+    *"[GNUPG:] NO_PUBKEY"*)
+      warn "tag $_gs_tag is $_gs_kind-signed, but the signer's public key is not in your keyring, so the signature could not be checked — trusting the tag via origin/master. To check it, import the key and run: git verify-tag $_gs_tag"
+      return 0 ;;
+    *"[GNUPG:]"*) : ;;          # the verifier ran and did not accept it — refused below
+    *)
+      if [ "$2" = "x509" ]; then
+        _gs_prog=$(git config --get gpg.x509.program 2>/dev/null || echo gpgsm)
+      else
+        _gs_prog=$(git config --get gpg.openpgp.program 2>/dev/null || git config --get gpg.program 2>/dev/null || echo gpg)
+      fi
+      if ! command -v "$_gs_prog" >/dev/null 2>&1; then
+        warn "tag $_gs_tag is $_gs_kind-signed, but '$_gs_prog' is not installed, so the signature could not be checked — trusting the tag via origin/master."
+        return 0
+      fi ;;
+  esac
+  _gs_why=$(printf '%s\n' "$_gs_out" | grep -E '\[GNUPG:\] (BADSIG|EXPKEYSIG|REVKEYSIG|ERRSIG)' | head -n1 || true)
+  refuse_tag "tag $_gs_tag carries an $_gs_kind signature that FAILED verification (${_gs_why:-$(last_line "$_gs_out")}). A bad signature means the tag was altered after it was signed. Run 'git verify-tag $_gs_tag' for details; do not apply it."
+  return 1
 }
 
 # =============================================================================
@@ -568,4 +824,4 @@ $(print_restore_commands)
 EOF
 }
 
-main "$@"
+[ "${LAZYIT_UPDATE_LIB_ONLY:-}" = "1" ] || main "$@"

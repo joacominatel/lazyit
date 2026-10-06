@@ -154,7 +154,11 @@ Ejecuta ese comando en el servidor (por SSH). El script es cuidadoso y no destru
 
 1. **Respalda ambas bases de datos** (la de la app y la de identidad) y verifica que cada respaldo se
    pueda restaurar. **Si el respaldo falla, la actualización se aborta** — no hay forma de forzarla.
-2. **Verifica la firma de la versión** y la descarga.
+2. **Comprueba que la versión sea una publicación real de lazyit** y la descarga. La obtiene del
+   `origin` de tu repositorio por HTTPS o SSH y solo la acepta si es una etiqueta de versión publicada
+   (`vX.Y.Z`) en la línea principal de publicaciones. Si la versión trae una firma, una firma inválida
+   detiene la actualización; la mayoría de las versiones no van firmadas, y es lo esperado. Un remoto
+   `http://` o `git://` sin cifrar se rechaza — cámbialo antes a HTTPS o SSH.
 3. **Comprueba si hay ajustes nuevos requeridos.** Si la nueva versión necesita una variable de entorno
    que aún no tienes, **se detiene y te dice exactamente qué añadir** — nunca edita por ti tu archivo de
    secretos.
@@ -164,6 +168,19 @@ Ejecuta ese comando en el servidor (por SSH). El script es cuidadoso y no destru
 Mientras una actualización se ejecuta, la sección muestra la etapa real (respaldando, migrando,
 compilando, reiniciando, verificando) — no una barra de progreso falsa — y se reconecta con discreción
 cuando la app vuelve.
+
+> **Si actualizas desde v2.0.0 o anterior: haz a mano la actualización a v2.1.0.** Hasta v2.0.0 el
+> script de actualización se detenía en su comprobación de la versión en todas las versiones (después del
+> respaldo, sin cambiar nada). La corrección llega en v2.1.0, pero el script que se ejecuta es siempre el
+> de la versión *desde* la que actualizas. Así que, solo para esta actualización, respalda primero (ver
+> [Copias de seguridad y restauración](/help/deployment-operations-backups-restore)) y ejecuta en el
+> servidor:
+>
+> ```sh
+> git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
+> ```
+>
+> A partir de v2.1.0, `./infra/update.sh vX.Y.Z` funciona como se describe arriba.
 
 ### Cancelar una actualización solicitada
 

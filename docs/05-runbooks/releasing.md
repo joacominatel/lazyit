@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-07-02
+updated: 2026-09-28
 ---
 
 # Releasing lazyit
@@ -27,8 +27,9 @@ Once `v1.0.0` exists on `master`, releases are cut by CI — you do not tag by h
    - **MAJOR is never auto-detected** — it means operator impact (a new required env var, a
      manual compose/migration step, a DR-linchpin change). You mark it deliberately, and its
      Release notes must carry a **"⚠️ Upgrade actions"** section.
-3. Merge the promotion. The `release` job creates the **annotated, signed tag** + a **GitHub
-   Release** with generated notes. CI is otherwise push-free — there is **no external cron or
+3. Merge the promotion. The `release` job creates the **annotated tag** (unsigned — CI holds no
+   signing key; see *Tag trust* in [[0083-versioning-and-releases]]) + a **GitHub Release** with
+   generated notes. CI is otherwise push-free — there is **no external cron or
    tagging script**; the Action is the automation.
 4. **Rebuild the production images on the host** (`docker compose ... up -d --build`). The
    version an instance reports comes from the tag: `git describe --tags` → build-arg
@@ -59,6 +60,8 @@ gh release create v1.0.0 --notes-file <curated-notes.md>
 - Signing: `git config --global gpg.format ssh` + `git config --global user.signingkey <key>.pub`.
   If you can't sign yet, `git tag -a` (annotated, unsigned) is acceptable to start; adopt signing
   later. Automation tags are annotated and unsigned by design ([[0083-versioning-and-releases]]).
+- **Any tag cut by hand must be annotated (`-a` or `-s`), named `vX.Y.Z`, and on `master`** — the
+  guided updater refuses a lightweight tag, any other name, or a commit that is not on `master`.
 
 ## Policies
 
@@ -74,10 +77,25 @@ gh release create v1.0.0 --notes-file <curated-notes.md>
 The update unit is a **git checkout + rebuild** (images build on the host; there is no registry —
 [[0027-ci-pipeline]]), so an image-swap update is structurally impossible. Operators update with
 the guided **`infra/update.sh`** ([[0084-update-awareness-and-guided-update]]): it takes a
-**verified dual `pg_dump`** first, `git verify-tag`s the target, fails loud on a missing env var
-(**never writes `.env.prod`**), builds before swapping, health-gates, and — on failure —
-auto-rolls-back only when no migration ran, otherwise stops with a confirm-gated, human-run
-restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
+**verified dual `pg_dump`** first, checks the target is a real release (an annotated `vX.Y.Z` tag
+on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must not be bad — see *Tag
+trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
+`.env.prod`**), builds before swapping, health-gates, and — on failure — auto-rolls-back only when
+no migration ran, otherwise stops with a confirm-gated, human-run restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
 never executes the update.
+
+> [!warning] Updating **from v2.0.0 or earlier** — the update to v2.1.0 is done by hand (#1458)
+> Up to v2.0.0, `update.sh` required a tag signature that the automated release tags never carry, so it
+> always stopped at its tag check (after the backup, before touching the running stack). The fixed check
+> ships in v2.1.0 — but `update.sh` always runs the copy from the version you are **leaving** (it re-runs
+> itself from a temporary copy of the current checkout's script), so the fix only helps updates *from*
+> v2.1.0. For the step to v2.1.0, back up first ([[backups]]), then:
+>
+> ```sh
+> git fetch --tags && git checkout v2.1.0 && ./infra/start.sh
+> ```
+>
+> `start.sh` detects the existing install, keeps every secret, and rebuilds. From v2.1.0 on,
+> `./infra/update.sh vX.Y.Z` works again.
 
 See also: [[deploy-self-hosted]], [[backups]].
