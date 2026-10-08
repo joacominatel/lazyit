@@ -86,7 +86,8 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
  * method directly) — no guard/DB wiring.
  *
  * `findAll` positional args:
- * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, …).
+ * (user, categoryId, authorId, status, q, linked, linkedTo, assetId, applicationId, limit, offset,
+ * page, principal, sort, includeSubfolders).
  */
 describe('ArticlesController GET /articles (multi-select filters + allowlist, #198)', () => {
   const findPage = jest.fn().mockResolvedValue({ items: [], total: 0 });
@@ -152,12 +153,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
   });
 
   it('parses multi-value status into an array (#198)', () => {
-    void controller.findAll(
-      undefined,
-      undefined,
-      undefined,
-      'DRAFT,PUBLISHED',
-    );
+    void controller.findAll(undefined, undefined, undefined, 'DRAFT,PUBLISHED');
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
@@ -167,12 +163,10 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
   });
 
   it('accepts repeated params (string[]) for status (#198)', () => {
-    void controller.findAll(
-      undefined,
-      undefined,
-      undefined,
-      ['DRAFT', 'PUBLISHED'],
-    );
+    void controller.findAll(undefined, undefined, undefined, [
+      'DRAFT',
+      'PUBLISHED',
+    ]);
     expect(findPage).toHaveBeenCalledWith(
       expect.objectContaining({ status: ['DRAFT', 'PUBLISHED'] }),
       expect.anything(),
@@ -340,4 +334,90 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
       undefined,
     );
   });
+  // --- browse order + subfolder widening (#1539) ----------------------------
+
+  // `sort` / `includeSubfolders` sit after the principal in the positional list; this names them.
+  const listWith = (params: {
+    categoryId?: string;
+    sort?: string;
+    includeSubfolders?: string;
+  }) =>
+    controller.findAll(
+      undefined,
+      params.categoryId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      params.sort,
+      params.includeSubfolders,
+    );
+
+  it.each(['updated', 'title', 'created'])(
+    'forwards a valid sort=%s to the service (#1539)',
+    (sort) => {
+      void listWith({ sort });
+      expect(findPage).toHaveBeenCalledWith(
+        expect.objectContaining({ sort }),
+        expect.anything(),
+        undefined,
+        undefined,
+      );
+    },
+  );
+
+  it('leaves sort undefined when omitted, so the service keeps its default order (#1539)', () => {
+    void listWith({});
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: undefined, includeSubfolders: false }),
+      expect.anything(),
+      undefined,
+      undefined,
+    );
+  });
+
+  it.each(['newest', 'TITLE', 'updatedAt', ''])(
+    'rejects an unknown sort=%p with 400 (never reaches the service, #1539)',
+    (sort) => {
+      expect(() => listWith({ sort })).toThrow(BadRequestException);
+      expect(findPage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a repeated sort param (an array) with 400 (#1539)', () => {
+    expect(() =>
+      listWith({ sort: ['title', 'created'] as unknown as string }),
+    ).toThrow(BadRequestException);
+    expect(findPage).not.toHaveBeenCalled();
+  });
+
+  it('forwards includeSubfolders=true with the categoryId filter (#1539)', () => {
+    void listWith({ categoryId: CUID_A, includeSubfolders: 'true' });
+    expect(findPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryId: [CUID_A],
+        includeSubfolders: true,
+      }),
+      expect.anything(),
+      undefined,
+      undefined,
+    );
+  });
+
+  it.each(['false', '1', 'yes', 'TRUE', ''])(
+    'rejects an unknown includeSubfolders=%p with 400 (#1539)',
+    (includeSubfolders) => {
+      expect(() => listWith({ categoryId: CUID_A, includeSubfolders })).toThrow(
+        BadRequestException,
+      );
+      expect(findPage).not.toHaveBeenCalled();
+    },
+  );
 });

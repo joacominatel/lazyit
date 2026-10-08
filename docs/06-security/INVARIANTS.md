@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-05
+updated: 2026-10-08
 ---
 
 # Security invariants — auth & authorization
@@ -476,8 +476,9 @@ laundering access to a folder they cannot see.
 - `apps/api/src/search/search.service.ts` — `/search` post-filters article hits per caller (the
   search-leak fix): the home folder is carried into the Meili doc (`projectArticle` → `categoryId`,
   a filterable attribute set by `reindex.ts`), then any hit whose folder the caller can't see is dropped
-  (ADMIN bypasses; SA/anonymous → PUBLIC only); the internal `categoryId` is stripped before the hit
-  ships.
+  (ADMIN bypasses; SA/anonymous → PUBLIC only). A hit that survives keeps its `categoryId` — a folder
+  the caller can already read, the same id `GET /articles/:id` returns — and a dropped hit ships nothing
+  (#1539).
 - `apps/api/src/article-categories/article-categories.service.ts` — the category reads
   (`findAll`/`findOne`, backing `GET /article-categories`) use an explicit select that **omits the
   `accessRules` jsonb column** (the folder's permission boundary: allowed user UUIDs + the gating
