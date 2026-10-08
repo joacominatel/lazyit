@@ -100,7 +100,8 @@ export const ArticleApplicationIdFilterSchema = z.cuid();
  * sensible reading in a browse list:
  *
  *  - `updated` (default): newest-updated first, the order the list always had.
- *  - `title`: alphabetical, A to Z (case-insensitive).
+ *  - `title`: alphabetical, A to Z, in the database collation (on a byte-wise collation, capitals sort
+ *    before lowercase — the same rule every other name sort in lazyit follows).
  *  - `created`: newest-created first.
  *
  * Every order ends with the unique `id`, so paging never repeats or skips a row between pages.
