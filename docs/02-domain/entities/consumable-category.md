@@ -3,7 +3,7 @@ title: ConsumableCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-10-08
 ---
 
 # ConsumableCategory
@@ -22,6 +22,11 @@ seed set is an initial, non-special list.
   `WHERE "deletedAt" IS NULL`, freed for reuse / restore on soft delete,
   [[0041-soft-delete-reuse-and-restore]]); `description?`; `icon?` (heroicon name, free string);
   `order?` (sort key, nulls last); soft delete + timestamps ([[0006-soft-delete-and-auditing]]).
+- `usageCount?` — **read-only, computed, not a column** (#1540). Only on the list read
+  (`GET /consumable-categories`): the number of **live** consumables filed under the category (`0` when
+  unused), so Settings → Taxonomies shows what is in use before an archive. `Consumable` is not
+  auto-scoped by the read filter, so the count filters `deletedAt: null` explicitly. Absent from
+  `GET /:id` and the write responses.
 
 ## Endpoints
 

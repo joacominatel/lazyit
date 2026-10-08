@@ -3,7 +3,7 @@ title: ApplicationCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-08
 ---
 
 # ApplicationCategory
@@ -56,11 +56,13 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/application-category.ts`)
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
+| `usageCount` | `int?` | **read-only, computed — not a column** (#1540). Only on `GET /application-categories`: the number of **live** applications filed under this category; `0` when unused. Absent from `GET /:id` and the write responses. |
 
 ## Endpoints
 
 `apps/api/src/application-categories/` (`ApplicationCategoriesModule`): `GET /application-categories`
-(excludes soft-deleted, ordered by `order` then `name`), `GET /application-categories/:id`, `POST`,
+(excludes soft-deleted, ordered by `order` then `name`; each row carries the computed `usageCount`, so
+Settings → Taxonomies shows what is in use before an archive), `GET /application-categories/:id`, `POST`,
 `PATCH /:id`, `DELETE /:id` (soft delete; detaches its applications), `POST /:id/restore`
 (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against
 the shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]).

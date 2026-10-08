@@ -3,7 +3,7 @@ title: AssetCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-30
+updated: 2026-10-08
 ---
 
 # AssetCategory
@@ -64,11 +64,13 @@ Prisma model `AssetCategory` → table `asset_categories`. Validation schemas
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete; reads filter `deletedAt: null`. |
+| `usageCount` | `int?` | **read-only, computed — not a column** (#1540). Only on `GET /asset-categories`: the number of **live** assets whose **live** model is filed under this category (`asset → model → category`; an asset of a soft-deleted model is not counted here — its archived model's row carries it). `0` when unused. Absent from `GET /:id` and the write responses. |
 
 ## Endpoints
 
 `apps/api/src/asset-categories/` (`AssetCategoriesModule`): `GET /asset-categories` (excludes
-soft-deleted), `GET /asset-categories/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete),
+soft-deleted; each row carries the computed `usageCount`, so Settings → Taxonomies shows what is in use
+before an archive — one read, batched relation counts, never per row), `GET /asset-categories/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete),
 `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
 Documented via Swagger ([[0018-api-documentation-swagger]]).
 
