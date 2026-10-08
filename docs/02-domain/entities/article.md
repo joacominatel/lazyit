@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-10-08
 ---
 
 # Article
@@ -111,8 +111,13 @@ deferred.
   matches (#598). On top of that, the per-caller folder-access **in-app post-filter is retained as a
   defense-in-depth backstop** (re-running the read evaluator over the returned hits and dropping any the
   caller can't see — the index can lag a just-revoked grant, so authz never relies on Meili alone; INV-9)
-  — so a **restricted article never surfaces to a non-matching caller**. `categoryId` is retrieved
-  internally for the filter and **stripped** from the shipped hit.
+  — so a **restricted article never surfaces to a non-matching caller**. `categoryId` is retrieved for
+  the filter and **ships only on a hit that survives it** (#1539): the caller can already read that
+  folder, so a result row can show where the article lives; a dropped hit ships nothing. Surviving hits
+  also carry the article's **`updatedAt`**, read from the database in one `id IN [...]` query over live
+  rows (not from the index, so it needs no reindex). A hit whose row is no longer live ships without it,
+  and a failed read is logged and the hits ship without it — search never degrades over it. Both hit
+  fields are nullish in `ArticleHitSchema`, so an older API or a stale index document still parses.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`. A **cascade folder
   delete** ([[folder]]) **deindexes** every article it soft-deletes from Meilisearch (fire-and-forget,
   post-commit — mirroring the single-article delete path), so a cascade leaves no ghost hits (#595).
@@ -175,6 +180,12 @@ listings), `@@index([status, publishedAt])` (latest published).
   `?categoryId=&authorId=&status=&q=` (`q` = case-insensitive substring on title/excerpt) plus
   `?linked=only` (keep only articles with ≥1 [[article-link]]) and `?linkedTo=asset|application`
   (narrow that to a target kind) — both allowlisted, an unknown value → `400` ([[0042-article-versioning-and-linking]]).
+  `?includeSubfolders=true` (#1539) widens a `categoryId` filter to each selected folder **plus every
+  live descendant** (one query over the live folder tree, walked in memory, cycle-safe); folder access
+  still applies on top, so a descendant the caller may not read stays out. No effect without
+  `categoryId`. `?sort=updated|title|created` (#1539) picks the order — `updated` (the default) newest
+  first, `title` A to Z in the database collation, `created` newest first — and every order ends with
+  `id` so offset paging never repeats or skips a row. Both are allowlisted: any other value → `400`.
   The lean list item adds two card-UI affordances computed in the query (no body load, no N+1):
   `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
   metric). The owner is already exposed as `authorId`.

@@ -3,7 +3,7 @@ title: Folder
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-13
+updated: 2026-10-08
 ---
 
 # Folder
@@ -155,6 +155,11 @@ carries the per-folder `articleCount` (`null` for a folder the caller cannot rea
   reads — an additive, read-only, computed field (`FolderAccessService.restrictedFolderIds`) that
   shares the request-scoped folder-tree load with the §4 evaluation, so the list read pays no extra
   query. The `settings:manage` gate on `accessRules` itself is unchanged.
+- **Built (#1539):** `GET /articles?categoryId=…&includeSubfolders=true` lists a folder's whole live
+  subtree — one query over the live folder tree, walked in memory and cycle-safe, with the §4 folder
+  pin still ANDed on top, so a restricted descendant stays out for a caller who cannot read it. A
+  `/search` article hit that survives the folder post-filter now ships its `categoryId` (a folder the
+  caller can already read) instead of having it stripped; dropped hits are unchanged.
 - **Still deferred:** the `ArticleCategory` → `Folder` model/table **rename** is a follow-up (a
   separate migration); a guided-reparent UX on delete (the rule is "no silent orphaning"; the mechanism
   is the 409 today); the Phase-2 alias-as-share (§7, reserved).
