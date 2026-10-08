@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ArticleHitSchema,
   PurchaseHitSchema,
   SEARCH_ENTITIES,
   SearchEntitySchema,
@@ -64,5 +65,41 @@ describe("search contract — purchases and suppliers (#1499)", () => {
     expect(parsed.suppliers?.hits[0]?.name).toBe("Compumundo");
     // A caller without purchaseOrder:read gets neither key — still a valid envelope.
     expect(SearchResultsSchema.parse({ assets: { hits: [], total: 0 } }).purchases).toBeUndefined();
+  });
+});
+
+describe("search contract — article hit folder and date (#1539)", () => {
+  const base = {
+    id: "a1",
+    slug: "vpn",
+    title: "VPN",
+    excerpt: null,
+    status: "PUBLISHED",
+  };
+
+  test("carries the home folder and the ISO updatedAt when the API sends them", () => {
+    const hit = ArticleHitSchema.parse({
+      ...base,
+      categoryId: "folder1",
+      updatedAt: "2026-10-01T12:00:00.000Z",
+    });
+    expect(hit.categoryId).toBe("folder1");
+    expect(hit.updatedAt).toBe("2026-10-01T12:00:00.000Z");
+  });
+
+  test("both are nullish: an older API or a stale index document parses unchanged", () => {
+    const hit = ArticleHitSchema.parse(base);
+    expect(hit.categoryId).toBeUndefined();
+    expect(hit.updatedAt).toBeUndefined();
+    expect(
+      ArticleHitSchema.safeParse({ ...base, categoryId: null, updatedAt: null })
+        .success,
+    ).toBe(true);
+  });
+
+  test("updatedAt must be an ISO datetime", () => {
+    expect(
+      ArticleHitSchema.safeParse({ ...base, updatedAt: "yesterday" }).success,
+    ).toBe(false);
   });
 });
