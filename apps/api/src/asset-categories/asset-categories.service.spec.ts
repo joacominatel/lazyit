@@ -161,9 +161,70 @@ describe('AssetCategoriesService', () => {
 
     await service.findAll();
 
+    expect(assetCategory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { name: 'asc' } }),
+    );
+  });
+
+  // --- usageCount (#1540) --------------------------------------------------
+  it('findAll counts live assets only through LIVE models (both deletedAt filters explicit)', async () => {
+    assetCategory.findMany.mockResolvedValue([]);
+
+    await service.findAll();
+
+    // Nested relation reads are not rewritten by the ADR-0032 read filter, so the query itself must
+    // exclude soft-deleted models AND soft-deleted assets.
     expect(assetCategory.findMany).toHaveBeenCalledWith({
       orderBy: { name: 'asc' },
+      include: {
+        models: {
+          where: { deletedAt: null },
+          select: {
+            _count: { select: { assets: { where: { deletedAt: null } } } },
+          },
+        },
+      },
     });
+  });
+
+  it("findAll sums the live-asset counts of a category's live models into usageCount", async () => {
+    assetCategory.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        name: 'Laptop',
+        deletedAt: null,
+        models: [{ _count: { assets: 3 } }, { _count: { assets: 2 } }],
+      },
+      { id: 'c2', name: 'Server', deletedAt: null, models: [] },
+      {
+        id: 'c3',
+        name: 'Switch',
+        deletedAt: null,
+        models: [{ _count: { assets: 0 } }],
+      },
+    ]);
+
+    const rows = await service.findAll();
+
+    expect(rows).toEqual([
+      { id: 'c1', name: 'Laptop', deletedAt: null, usageCount: 5 },
+      { id: 'c2', name: 'Server', deletedAt: null, usageCount: 0 },
+      { id: 'c3', name: 'Switch', deletedAt: null, usageCount: 0 },
+    ]);
+    // The relation projection never leaks into the response.
+    expect(rows[0]).not.toHaveProperty('models');
+  });
+
+  it('findOne is unchanged: no relation include, no usageCount', async () => {
+    const found = { id: 'c1', name: 'Laptop', deletedAt: null };
+    assetCategory.findFirst.mockResolvedValue(found);
+
+    const row = await service.findOne('c1');
+
+    expect(assetCategory.findFirst).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+    });
+    expect(row).not.toHaveProperty('usageCount');
   });
 
   // --- restore (ADR-0041) --------------------------------------------------

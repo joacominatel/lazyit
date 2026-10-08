@@ -3,7 +3,7 @@ title: AssetModel
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-08
 ---
 
 # AssetModel
@@ -58,6 +58,7 @@ Prisma model `AssetModel` → table `asset_models`. Validation schemas (`AssetMo
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | soft delete. |
+| `usageCount` | `int?` | **read-only, computed — not a column** (#1540). Only on the `GET /asset-models` page items: the number of **live** assets of this model; `0` when unused. Computed on both slices — an archived model (`?deleted=only`) still shows the live assets that point at it. Absent from `GET /:id` and the write responses. |
 
 ## UI behavior
 
@@ -70,7 +71,7 @@ the values before saving the concrete unit.
 `apps/api/src/asset-models/` (`AssetModelsModule`): `GET /asset-models` — **paginated** `Page<AssetModel>`
 envelope with a server-side case-insensitive **`q`** over name/manufacturer/sku, an optional
 `?categoryId=` filter, an allowlisted `sort` (`name`/`manufacturer`/`sku`/`createdAt`/`updatedAt`,
-default `createdAt desc`) and the `deleted` slice — migrated off the raw array so the searchable model
+default `createdAt desc`) and the `deleted` slice, each item carrying the computed `usageCount` — migrated off the raw array so the searchable model
 picker can search/page authoritatively (issue #199, [[0030-list-pagination-contract]] §8). Then
 `GET /asset-models/:id`, `POST`, `PATCH /:id`, `DELETE /:id` (soft delete), `POST /:id/restore`
 (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]). An invalid `categoryId` on

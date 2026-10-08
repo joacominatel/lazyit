@@ -54,9 +54,52 @@ describe('ConsumableCategoriesService', () => {
 
     await service.findAll();
 
+    expect(consumableCategory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      }),
+    );
+  });
+
+  // --- usageCount (#1540) --------------------------------------------------
+  it('findAll counts only live consumables (the relation count carries deletedAt: null)', async () => {
+    consumableCategory.findMany.mockResolvedValue([]);
+
+    await service.findAll();
+
     expect(consumableCategory.findMany).toHaveBeenCalledWith({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      include: {
+        _count: { select: { consumables: { where: { deletedAt: null } } } },
+      },
     });
+  });
+
+  it('findAll maps the relation count to usageCount (zero when unused)', async () => {
+    consumableCategory.findMany.mockResolvedValue([
+      { id: 'c1', name: 'Cables', deletedAt: null, _count: { consumables: 4 } },
+      { id: 'c2', name: 'Other', deletedAt: null, _count: { consumables: 0 } },
+    ]);
+
+    const rows = await service.findAll();
+
+    expect(rows).toEqual([
+      { id: 'c1', name: 'Cables', deletedAt: null, usageCount: 4 },
+      { id: 'c2', name: 'Other', deletedAt: null, usageCount: 0 },
+    ]);
+    expect(rows[0]).not.toHaveProperty('_count');
+  });
+
+  it('findOne is unchanged: no relation count, no usageCount', async () => {
+    const found = { id: 'c1', name: 'Cables', deletedAt: null };
+    consumableCategory.findFirst.mockResolvedValue(found);
+
+    const row = await service.findOne('c1');
+
+    expect(consumableCategory.findFirst).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+    });
+    expect(row).not.toHaveProperty('usageCount');
   });
 
   it('returns a category by id when it exists', async () => {
