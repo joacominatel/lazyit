@@ -104,12 +104,12 @@ const TYPE_META: Record<
     href: () => "/secrets",
   },
   // The two SENSITIVE-audit alerts (ADR-0056 amendment #852) — admin-broadcast security nudges. Both
-  // carry no entityId, so they deep-link by TYPE: a matrix widening → the role→permission editor; an
+  // carry no entityId, so they deep-link by TYPE: a matrix widening → the role × capability matrix; an
   // agent going dark → the topology map. Destructive tone marks them as "look at this".
   permission_widened: {
     icon: ShieldExclamationIcon,
     tone: "bg-destructive/10 text-destructive",
-    href: () => "/settings/roles/permissions",
+    href: () => "/settings/roles",
   },
   "infra.agent_offline": {
     icon: SignalSlashIcon,

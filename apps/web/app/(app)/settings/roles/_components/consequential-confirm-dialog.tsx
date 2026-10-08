@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Callout } from "@/components/callout";
 import { Button } from "@/components/ui/button";
-import type { SaveDiff } from "./permissions-form";
+import type { SaveDiff } from "../_lib/permissions-form";
 
 interface ConsequentialConfirmDialogProps {
   open: boolean;

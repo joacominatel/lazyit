@@ -57,7 +57,7 @@
     },
     "roles": {
       "title": "Roles y permisos",
-      "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
+      "description": "Qué pueden hacer Miembros y Observadores, junto al Administrador."
     },
     "serviceAccounts": {
       "title": "Cuentas de servicio",
@@ -579,12 +579,9 @@
     }
   },
   "roles": {
-    "title": "Roles",
-    "subtitle": "Quién tiene cada nivel de acceso y qué puede hacer cada rol. Cambia un rol desde la sección de Usuarios.",
+    "title": "Roles y permisos",
+    "subtitle": "Qué puede hacer cada rol. Cambia el rol de una persona desde Usuarios.",
     "manageUsers": "Gestionar usuarios",
-    "viewMembers": "Ver {count, plural, =0 {sin miembros} one {# miembro} other {# miembros}}",
-    "fullAccessLocked": "Acceso completo — no editable.",
-    "editPermissions": "Editar permisos",
     "meta": {
       "ADMIN": {
         "label": "Administrador",
@@ -600,74 +597,16 @@
       }
     },
     "permissions": {
-      "title": "Permisos del rol",
-      "subtitle": "Configura qué pueden hacer los Miembros y los Observadores. El Administrador siempre tiene acceso completo.",
       "idpNote": "Estos permisos son exclusivos de lazyit — nunca aparecen en tu proveedor de identidad.",
       "loadError": "No se pudieron cargar los permisos",
-      "startFromPreset": "Empezar desde un preajuste",
-      "resetToDefaults": "Restablecer a los valores predeterminados",
-      "capabilitiesHeading": "Capacidades",
-      "summary": {
-        "heading": "Qué puede hacer este rol",
-        "levels": {
-          "edit": "Ver y editar",
-          "view": "Solo ver",
-          "none": "Sin acceso"
-        },
-        "domains": {
-          "asset": "Activos",
-          "application": "Aplicaciones",
-          "accessGrant": "Concesiones de acceso",
-          "accessRequest": "Solicitudes de acceso",
-          "consumable": "Consumibles",
-          "purchaseOrder": "Compras",
-          "article": "Base de conocimiento",
-          "location": "Ubicaciones",
-          "assetModel": "Modelos de activo",
-          "category": "Categorías",
-          "user": "Usuarios",
-          "dashboard": "Panel",
-          "search": "Búsqueda",
-          "settings": "Configuración",
-          "logs": "Registros de actividad",
-          "workflow": "Flujos de trabajo",
-          "notification": "Notificaciones",
-          "secret": "Gestor de Secretos",
-          "import": "Importaciones",
-          "infra": "Mapa de servidores",
-          "ai": "Asistente de IA"
-        }
-      },
-      "segmented": {
-        "ariaLabel": "Elige un rol para editar",
-        "adminTitle": "El Administrador tiene acceso completo y no se puede editar.",
-        "full": "Completo",
-        "admin": "Administrador",
-        "member": "Miembro",
-        "viewer": "Observador",
-        "unsavedChanges": "Cambios sin guardar"
-      },
       "preset": {
-        "custom": "Personalizado",
-        "customEdited": "Personalizado (editaste)",
-        "customHint": "Un conjunto único que no coincide con ningún preajuste."
-      },
-      "capabilityGroup": {
-        "ariaLabel": "Capacidades de {label}",
-        "adminLevel": "Nivel administrador",
-        "partial": "Parcial"
+        "custom": "Personalizado"
       },
       "fineTune": {
         "title": "Ajuste fino (avanzado)",
         "subtitle": "Control exacto por permiso",
-        "description": "Cada interruptor aquí es un único permiso. Los cambios convierten el rol en un conjunto Personalizado y actualizan las capacidades de arriba.",
+        "description": "Cada casilla aquí es un permiso para un rol. Un cambio convierte ese rol en Personalizado y se ve como una celda concedida en parte en la matriz.",
         "adminLevel": "Nivel administrador"
-      },
-      "saveBar": {
-        "ariaLabel": "Cambios de permisos sin guardar",
-        "message": "Tienes cambios de permisos sin guardar.",
-        "discard": "Descartar",
-        "saveChanges": "Guardar cambios"
       },
       "confirm": {
         "title": "Revisa este cambio antes de guardar",
@@ -694,6 +633,26 @@
           "VIEWER": "Los Observadores"
         }
       }
+    },
+    "matrix": {
+      "ariaLabel": "Permisos por rol",
+      "capability": "Capacidad",
+      "members": "{count, plural, =0 {Nadie} one {# persona} other {# personas}}",
+      "all": "Todo",
+      "adminLocked": "El Administrador siempre tiene todos los permisos y no se puede editar.",
+      "presetLabel": "Preajuste para {role}",
+      "roleUnsaved": "Cambios sin guardar",
+      "groupSummary": "{granted} de {total} concedidas a {role}",
+      "granted": "Concedido",
+      "partial": "Concedida en parte — algunos de sus permisos se ajustaron en Ajuste fino.",
+      "cellLabel": "{capability} — {role}",
+      "adminLevelTopic": "{capability} es de nivel administrador",
+      "adminLevelHelp": "Nivel administrador: una eliminación o una acción de administración. Puedes concederla a este rol; al guardar te pedimos que lo confirmes.",
+      "reset": "Restablecer valores predeterminados",
+      "discard": "Descartar",
+      "unsaved": "{count, plural, one {# cambio sin guardar} other {# cambios sin guardar}}",
+      "noChanges": "No hay cambios sin guardar",
+      "save": "{count, plural, =0 {Guardar} one {Guardar # cambio} other {Guardar # cambios}}"
     }
   },
   "serviceAccounts": {
