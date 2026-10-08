@@ -4,6 +4,7 @@ import { Meilisearch } from 'meilisearch';
 import { SearchService } from './search.service';
 import { FolderAccessService } from '../article-categories/folder-access.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { PrismaService } from '../prisma/prisma.service';
 import type { VisibleFolders } from '../article-categories/folder-access.service';
 
 // Mock the Meili client with an explicit factory: jest can't transform the ESM `meilisearch`
@@ -53,6 +54,12 @@ const permissionsMock = {
   principalHas: jest.fn(),
 };
 
+// The article-hit `updatedAt` enrichment (#1539) reads live rows through Prisma. Defaults to no rows (so
+// no hit gains `updatedAt` and the pre-#1539 expectations hold); the enrichment tests wire real rows.
+const prismaMock = {
+  article: { findMany: jest.fn() },
+};
+
 async function buildService(
   logger: { info: jest.Mock; error: jest.Mock },
   folderAccess: { visibleFolderIds: jest.Mock } = folderAccessMock(),
@@ -63,6 +70,7 @@ async function buildService(
       { provide: getLoggerToken(SearchService.name), useValue: logger },
       { provide: FolderAccessService, useValue: folderAccess },
       { provide: PermissionResolverService, useValue: permissionsMock },
+      { provide: PrismaService, useValue: prismaMock },
     ],
   }).compile();
   return moduleRef.get(SearchService);
@@ -73,6 +81,7 @@ describe('SearchService', () => {
 
   beforeEach(() => {
     permissionsMock.principalHas.mockResolvedValue(true);
+    prismaMock.article.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -276,9 +285,9 @@ describe('SearchService', () => {
 
     // --- ADR-0060 §5: the search-leak fix (INV-9) ----------------------------
 
-    it('drops a restricted article hit from a non-matching caller and strips the internal categoryId', async () => {
+    it('drops a restricted article hit from a non-matching caller and keeps categoryId on the survivor (#1539)', async () => {
       // Two article hits: one in a PUBLIC folder, one in a folder the caller cannot see. The post-filter
-      // must drop the restricted one entirely AND strip `categoryId` from the surviving (public) hit.
+      // must drop the restricted one entirely; the surviving (public) hit keeps its readable home folder.
       const folderAccess = folderAccessMock(new Set(['public-folder']));
       const scopedService = await buildService(logger, folderAccess);
       // Re-point the (already-constructed) mocked client onto the new instance: buildService reuses the
@@ -316,12 +325,18 @@ describe('SearchService', () => {
         } as never,
       });
 
-      // Only the public-folder article survives; the restricted one NEVER surfaces.
+      // Only the public-folder article survives; the restricted one NEVER surfaces — not its title, not
+      // its folder. The survivor ships its home folder, which the caller can read (#1539).
       expect(result.articles?.hits).toEqual([
-        { id: 'pub1', slug: 'public', title: 'Public' },
+        {
+          id: 'pub1',
+          slug: 'public',
+          title: 'Public',
+          categoryId: 'public-folder',
+        },
       ]);
-      // The internal folder key is stripped from the shipped hit (wire ArticleHit has no categoryId).
-      expect(result.articles?.hits[0]).not.toHaveProperty('categoryId');
+      expect(JSON.stringify(result)).not.toContain('secret-folder');
+      expect(JSON.stringify(result)).not.toContain('sec1');
       // total reflects the engine's filtered count minus what the backstop dropped (2 - 1).
       expect(result.articles?.total).toBe(1);
       // Resolved exactly ONCE per search: the SAME visible set feeds the Meili filter AND the backstop.
@@ -442,13 +457,18 @@ describe('SearchService', () => {
 
       // The readable article is returned (it would have been dropped by the old post-filter-only path).
       expect(result.articles?.hits).toEqual([
-        { id: 'readable1', slug: 'readable', title: 'Readable runbook' },
+        {
+          id: 'readable1',
+          slug: 'readable',
+          title: 'Readable runbook',
+          categoryId: 'readable-folder',
+        },
       ]);
       // total reflects the engine's count of readable matches, not the kept page size by coincidence.
       expect(result.articles?.total).toBe(1);
     });
 
-    it('an ADMIN (visibleFolderIds = ALL) keeps every article hit (categoryId still stripped)', async () => {
+    it('an ADMIN (visibleFolderIds = ALL) keeps every article hit, with its categoryId (#1539)', async () => {
       const folderAccess = folderAccessMock('ALL');
       const scopedService = await buildService(logger, folderAccess);
       client.multiSearch.mockResolvedValue({
@@ -479,9 +499,215 @@ describe('SearchService', () => {
       });
 
       expect(result.articles?.hits).toEqual([
-        { id: 'sec1', slug: 'secret', title: 'Secret' },
+        {
+          id: 'sec1',
+          slug: 'secret',
+          title: 'Secret',
+          categoryId: 'secret-folder',
+        },
       ]);
-      expect(result.articles?.hits[0]).not.toHaveProperty('categoryId');
+    });
+
+    it('an ADMIN keeps a hit MISSING its categoryId, shipped without the field (#1539)', async () => {
+      const scopedService = await buildService(logger, folderAccessMock('ALL'));
+      client.multiSearch.mockResolvedValue({
+        results: [
+          {
+            indexUid: 'articles',
+            hits: [
+              { id: 'stale', slug: 'stale', title: 'Stale' },
+              { id: 'odd', slug: 'odd', title: 'Odd', categoryId: null },
+            ],
+            estimatedTotalHits: 2,
+          },
+        ],
+      });
+
+      const result = await scopedService.search({
+        q: 'stale',
+        entities: ['articles'],
+        limit: 10,
+      });
+
+      // Only a string folder id ever ships; a missing or non-string value stays out of the hit.
+      expect(result.articles?.hits).toEqual([
+        { id: 'stale', slug: 'stale', title: 'Stale' },
+        { id: 'odd', slug: 'odd', title: 'Odd' },
+      ]);
+    });
+
+    // --- #1539: article hits carry their live updatedAt (read from the DB, not the index) -----------
+
+    describe('article hit updatedAt enrichment (#1539)', () => {
+      const VIEWER = {
+        kind: 'human',
+        user: { id: 'u1', role: 'VIEWER' },
+      } as never;
+      const articleHits = (
+        hits: Array<Record<string, unknown>>,
+        estimatedTotalHits = hits.length,
+      ) => ({
+        results: [{ indexUid: 'articles', hits, estimatedTotalHits }],
+      });
+
+      it('stamps each surviving hit with its live updatedAt from ONE id-IN query over live rows', async () => {
+        const scoped = await buildService(
+          logger,
+          folderAccessMock(new Set(['f1'])),
+        );
+        client.multiSearch.mockResolvedValue(
+          articleHits([
+            { id: 'a1', title: 'One', categoryId: 'f1' },
+            { id: 'a2', title: 'Two', categoryId: 'f1' },
+            { id: 'hidden', title: 'Hidden', categoryId: 'f-secret' },
+          ]),
+        );
+        prismaMock.article.findMany.mockResolvedValue([
+          { id: 'a2', updatedAt: new Date('2026-10-01T12:00:00.000Z') },
+          { id: 'a1', updatedAt: new Date('2026-09-30T08:30:00.000Z') },
+        ]);
+
+        const result = await scoped.search({
+          q: 'x',
+          entities: ['articles'],
+          limit: 10,
+          principal: VIEWER,
+        });
+
+        expect(result.articles?.hits).toEqual([
+          {
+            id: 'a1',
+            title: 'One',
+            categoryId: 'f1',
+            updatedAt: '2026-09-30T08:30:00.000Z',
+          },
+          {
+            id: 'a2',
+            title: 'Two',
+            categoryId: 'f1',
+            updatedAt: '2026-10-01T12:00:00.000Z',
+          },
+        ]);
+        expect(result.articles?.total).toBe(2);
+        // One query, only for the hits that SURVIVED the folder backstop (never the dropped one).
+        expect(prismaMock.article.findMany).toHaveBeenCalledTimes(1);
+        expect(prismaMock.article.findMany).toHaveBeenCalledWith({
+          where: { id: { in: ['a1', 'a2'] }, deletedAt: null },
+          select: { id: true, updatedAt: true },
+        });
+      });
+
+      it('a hit with no live row ships without updatedAt — the set of hits is unchanged', async () => {
+        client.multiSearch.mockResolvedValue(
+          articleHits([
+            { id: 'live', title: 'Live', categoryId: 'f1' },
+            { id: 'gone', title: 'Gone', categoryId: 'f1' },
+          ]),
+        );
+        prismaMock.article.findMany.mockResolvedValue([
+          { id: 'live', updatedAt: new Date('2026-10-02T00:00:00.000Z') },
+        ]);
+
+        const result = await service.search({
+          q: 'x',
+          entities: ['articles'],
+          limit: 10,
+        });
+
+        expect(result.articles?.hits).toEqual([
+          {
+            id: 'live',
+            title: 'Live',
+            categoryId: 'f1',
+            updatedAt: '2026-10-02T00:00:00.000Z',
+          },
+          { id: 'gone', title: 'Gone', categoryId: 'f1' },
+        ]);
+        expect(result.articles?.total).toBe(2);
+      });
+
+      it('survives an enrichment failure: hits ship without updatedAt, not degraded, error logged', async () => {
+        client.multiSearch.mockResolvedValue(
+          articleHits([{ id: 'a1', title: 'One', categoryId: 'f1' }]),
+        );
+        const boom = new Error('db down');
+        prismaMock.article.findMany.mockRejectedValue(boom);
+
+        const result = await service.search({
+          q: 'x',
+          entities: ['articles'],
+          limit: 10,
+        });
+
+        expect(result.degraded).toBeUndefined();
+        expect(result.articles).toEqual({
+          hits: [{ id: 'a1', title: 'One', categoryId: 'f1' }],
+          total: 1,
+        });
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        const [meta] = logger.error.mock.calls[0] as [{ err: unknown }];
+        expect(meta.err).toBe(boom);
+      });
+
+      it('runs no query when the articles block has no hits', async () => {
+        client.multiSearch.mockResolvedValue(articleHits([], 0));
+
+        await service.search({ q: 'x', entities: ['articles'], limit: 10 });
+
+        expect(prismaMock.article.findMany).not.toHaveBeenCalled();
+      });
+
+      it('runs no query when every hit was dropped by the folder backstop', async () => {
+        const scoped = await buildService(
+          logger,
+          folderAccessMock(new Set(['f1'])),
+        );
+        client.multiSearch.mockResolvedValue(
+          articleHits([{ id: 'hidden', title: 'Hidden', categoryId: 'f2' }]),
+        );
+
+        const result = await scoped.search({
+          q: 'x',
+          entities: ['articles'],
+          limit: 10,
+          principal: VIEWER,
+        });
+
+        expect(result.articles).toEqual({ hits: [], total: 0 });
+        expect(prismaMock.article.findMany).not.toHaveBeenCalled();
+      });
+
+      it('runs no query when articles are not requested', async () => {
+        client.multiSearch.mockResolvedValue({
+          results: [
+            {
+              indexUid: 'assets',
+              hits: [{ id: 'as1' }],
+              estimatedTotalHits: 1,
+            },
+          ],
+        });
+
+        await service.search({ q: 'x', entities: ['assets'], limit: 10 });
+
+        expect(prismaMock.article.findMany).not.toHaveBeenCalled();
+      });
+
+      it('the degraded path is unchanged: a failed multiSearch never reaches the enrichment', async () => {
+        client.multiSearch.mockRejectedValueOnce(new Error('meili down'));
+
+        const result = await service.search({
+          q: 'x',
+          entities: ['articles'],
+          limit: 10,
+        });
+
+        expect(result).toEqual({
+          articles: { hits: [], total: 0 },
+          degraded: true,
+        });
+        expect(prismaMock.article.findMany).not.toHaveBeenCalled();
+      });
     });
 
     it('drops an article hit MISSING its categoryId for a non-admin (fail closed)', async () => {
