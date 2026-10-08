@@ -6,15 +6,39 @@ import type {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Live consumables only (#1540): `usageCount` counts what an operator sees in the catalog. `Consumable`
+ * is NOT auto-scoped by the ADR-0032 read filter (and a relation `_count` never is), so the
+ * `deletedAt: null` is explicit.
+ */
+const LIVE_CONSUMABLE_COUNT = {
+  _count: { select: { consumables: { where: { deletedAt: null } } } },
+} as const satisfies Prisma.ConsumableCategoryInclude;
+
+type CategoryWithCount = Prisma.ConsumableCategoryGetPayload<{
+  include: typeof LIVE_CONSUMABLE_COUNT;
+}>;
+
+function withUsageCount(row: CategoryWithCount) {
+  const { _count, ...category } = row;
+  return { ...category, usageCount: _count.consumables };
+}
+
 @Injectable()
 export class ConsumableCategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** All non-deleted categories, ordered by `order` (nulls last) then name. */
-  findAll() {
-    return this.prisma.consumableCategory.findMany({
+  /**
+   * All non-deleted categories, ordered by `order` (nulls last) then name, each with the computed
+   * `usageCount` of live consumables filed under it (#1540) — one query, the count is a relation
+   * aggregate, not a per-row lookup. Only this list read carries it; single reads and writes do not.
+   */
+  async findAll() {
+    const rows = await this.prisma.consumableCategory.findMany({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      include: LIVE_CONSUMABLE_COUNT,
     });
+    return rows.map(withUsageCount);
   }
 
   /** A single non-deleted category by id; throws 404 if missing or deleted. */

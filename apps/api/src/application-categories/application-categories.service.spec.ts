@@ -54,9 +54,52 @@ describe('ApplicationCategoriesService', () => {
 
     await service.findAll();
 
+    expect(applicationCategory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      }),
+    );
+  });
+
+  // --- usageCount (#1540) --------------------------------------------------
+  it('findAll counts only live applications (the relation count carries deletedAt: null)', async () => {
+    applicationCategory.findMany.mockResolvedValue([]);
+
+    await service.findAll();
+
     expect(applicationCategory.findMany).toHaveBeenCalledWith({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      include: {
+        _count: { select: { applications: { where: { deletedAt: null } } } },
+      },
     });
+  });
+
+  it('findAll maps the relation count to usageCount (zero when unused)', async () => {
+    applicationCategory.findMany.mockResolvedValue([
+      { id: 'c1', name: 'SaaS', deletedAt: null, _count: { applications: 4 } },
+      { id: 'c2', name: 'Other', deletedAt: null, _count: { applications: 0 } },
+    ]);
+
+    const rows = await service.findAll();
+
+    expect(rows).toEqual([
+      { id: 'c1', name: 'SaaS', deletedAt: null, usageCount: 4 },
+      { id: 'c2', name: 'Other', deletedAt: null, usageCount: 0 },
+    ]);
+    expect(rows[0]).not.toHaveProperty('_count');
+  });
+
+  it('findOne is unchanged: no relation count, no usageCount', async () => {
+    const found = { id: 'c1', name: 'SaaS', deletedAt: null };
+    applicationCategory.findFirst.mockResolvedValue(found);
+
+    const row = await service.findOne('c1');
+
+    expect(applicationCategory.findFirst).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+    });
+    expect(row).not.toHaveProperty('usageCount');
   });
 
   it('returns a category by id when it exists', async () => {
