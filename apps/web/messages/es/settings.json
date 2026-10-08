@@ -1083,16 +1083,6 @@
   },
   "taxonomies": {
     "title": "Taxonomías",
-    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian y tus estados de activo personalizados.",
-    "tablistAria": "Tipo de taxonomía",
-    "tabs": {
-      "asset": "Categorías de activo",
-      "application": "Categorías de aplicación",
-      "consumable": "Categorías de consumible",
-      "article": "Categorías de artículo",
-      "models": "Modelos de activo",
-      "statuses": "Estados"
-    },
     "kindLabel": {
       "asset": "categoría de activo",
       "application": "categoría de aplicación",
@@ -1129,9 +1119,6 @@
     "categories": {
       "newButton": "Nueva {label}",
       "loadError": "No se pudo cargar la lista de {label}",
-      "emptyTitle": "Aún no hay entradas de {label}",
-      "emptyDescription": "Agrega la primera para empezar a clasificar registros — quedará disponible para elegir donde sea que se referencie este tipo.",
-      "emptyAction": "Crear la primera",
       "selectAll": "Seleccionar todas las entradas de {label}",
       "selectRow": "Seleccionar {name}",
       "bulkDelete": {
@@ -1140,12 +1127,6 @@
         "resultAllDeleted": "Se eliminaron {deleted, plural, one {# categoría} other {# categorías}}.",
         "resultPartial": "Se eliminaron {deleted}, {skipped} omitidas (aún en uso).",
         "resultAllSkipped": "{skipped, plural, one {# categoría omitida} other {# categorías omitidas}} (aún en uso)."
-      },
-      "columns": {
-        "name": "Nombre",
-        "description": "Descripción",
-        "order": "Orden",
-        "updated": "Actualizado"
       },
       "form": {
         "editTitle": "Editar {label}",
@@ -1198,22 +1179,14 @@
         "updateError": "No se pudo actualizar la {label}",
         "created": "{label} creada",
         "createError": "No se pudo crear la {label}"
-      }
+      },
+      "inlinePlaceholder": "Nueva categoría…",
+      "empty": "Todavía no hay categorías."
     },
     "models": {
       "newButton": "Nuevo modelo",
       "loadError": "No se pudieron cargar los modelos de activo",
-      "emptyTitle": "Aún no hay modelos de activo",
-      "emptyDescription": "Agrega una marca y modelo — por ejemplo, una MacBook Pro 14 — para que cada activo que registres pueda referenciarlo en lugar de volver a escribir las especificaciones.",
-      "emptyAction": "Crear el primer modelo",
       "entityLabel": "modelo de activo",
-      "columns": {
-        "name": "Nombre",
-        "manufacturer": "Fabricante",
-        "sku": "SKU",
-        "category": "Categoría",
-        "updated": "Actualizado"
-      },
       "form": {
         "editTitle": "Editar modelo de activo",
         "newTitle": "Nuevo modelo de activo",
@@ -1258,7 +1231,8 @@
         "updateError": "No se pudo actualizar el modelo de activo",
         "created": "Modelo de activo creado",
         "createError": "No se pudo crear el modelo de activo"
-      }
+      },
+      "empty": "Todavía no hay modelos de activo."
     },
     "statuses": {
       "intro": "Los estados personalizados son nombres opcionales para los seis estados predefinidos: por ejemplo \"En reparación en el proveedor\" o \"En el banco de trabajo\" para En mantenimiento, o \"Pool de préstamo\" para En depósito. Cada uno corresponde a un único estado predefinido, que es el que siguen leyendo el panel, los filtros, las importaciones y todas las demás reglas. Los activos pueden quedarse con un estado predefinido sin nombre propio.",
@@ -1271,14 +1245,6 @@
       "archivedEmpty": "No hay estados personalizados archivados.",
       "archiveAction": "Archivar",
       "assetsLink": "{count, plural, one {# activo} other {# activos}} con {name}",
-      "columns": {
-        "name": "Nombre",
-        "description": "Descripción",
-        "order": "Orden",
-        "assets": "Activos",
-        "kind": "Estado predefinido",
-        "archived": "Archivado"
-      },
       "toast": {
         "created": "Se creó el estado personalizado {name}",
         "createError": "No se pudo crear el estado personalizado",
@@ -1324,7 +1290,47 @@
         "toast": "Se archivó el estado personalizado {name}",
         "toastMoved": "Se archivó {name} y se {count, plural, one {movió # activo} other {movieron # activos}} a {target}",
         "error": "No se pudo archivar el estado personalizado"
-      }
+      },
+      "archivedLabel": "{taxonomy} archivados",
+      "archivedOn": "Archivado el {date}"
+    },
+    "help": "Las listas que clasifican los registros: categorías, modelos de activo y estados de activo personalizados. Las carpetas de la base de conocimiento se gestionan en la propia base de conocimiento.",
+    "listLabel": "Taxonomías",
+    "groups": {
+      "assets": "Activos",
+      "applications": "Aplicaciones",
+      "consumables": "Consumibles",
+      "knowledge": "Conocimiento"
+    },
+    "panes": {
+      "asset": "Categorías",
+      "models": "Modelos",
+      "statuses": "Estados personalizados",
+      "application": "Categorías",
+      "consumable": "Categorías"
+    },
+    "paneTitles": {
+      "asset": "Categorías de activos",
+      "models": "Modelos de activo",
+      "statuses": "Estados de activo personalizados",
+      "application": "Categorías de aplicaciones",
+      "consumable": "Categorías de consumibles"
+    },
+    "kbFolders": "Carpetas → en la KB",
+    "kbPointer": "Las categorías de artículos ahora son las carpetas de la base de conocimiento. Créalas, renómbralas, descríbelas y ordénalas en la base de conocimiento.",
+    "kbOpen": "Abrir la base de conocimiento",
+    "filterLabel": "Filtrar {taxonomy}",
+    "filterPlaceholder": "Filtrar…",
+    "noMatches": "Nada coincide con el filtro.",
+    "select": "Seleccionar",
+    "selectDone": "Listo",
+    "selectAllVisible": "Seleccionar todo lo visible",
+    "inlineAdd": "Agregar",
+    "usage": {
+      "assets": "{count, plural, one {# activo} other {# activos}}",
+      "apps": "{count, plural, one {# app} other {# apps}}",
+      "consumables": "{count, plural, one {# consumible} other {# consumibles}}",
+      "unused": "Sin uso"
     }
   }
 }

@@ -1083,16 +1083,6 @@
   },
   "taxonomies": {
     "title": "Taxonomies",
-    "subtitle": "Manage the categories that classify records, plus the asset models assets reference and your custom asset statuses.",
-    "tablistAria": "Taxonomy kind",
-    "tabs": {
-      "asset": "Asset categories",
-      "application": "Application categories",
-      "consumable": "Consumable categories",
-      "article": "Article categories",
-      "models": "Asset models",
-      "statuses": "Statuses"
-    },
     "kindLabel": {
       "asset": "asset category",
       "application": "application category",
@@ -1129,9 +1119,6 @@
     "categories": {
       "newButton": "New {label}",
       "loadError": "Could not load {label} list",
-      "emptyTitle": "No {label} entries yet",
-      "emptyDescription": "Add your first one to start classifying records — it becomes pickable wherever this kind is referenced.",
-      "emptyAction": "Create the first one",
       "selectAll": "Select all {label} entries",
       "selectRow": "Select {name}",
       "bulkDelete": {
@@ -1140,12 +1127,6 @@
         "resultAllDeleted": "Deleted {deleted, plural, one {# category} other {# categories}}.",
         "resultPartial": "Deleted {deleted}, {skipped} skipped (still in use).",
         "resultAllSkipped": "{skipped, plural, one {# category} other {# categories}} skipped (still in use)."
-      },
-      "columns": {
-        "name": "Name",
-        "description": "Description",
-        "order": "Order",
-        "updated": "Updated"
       },
       "form": {
         "editTitle": "Edit {label}",
@@ -1198,22 +1179,14 @@
         "updateError": "Couldn't update {label}",
         "created": "Created {label}",
         "createError": "Couldn't create {label}"
-      }
+      },
+      "inlinePlaceholder": "New category…",
+      "empty": "No categories yet."
     },
     "models": {
       "newButton": "New model",
       "loadError": "Could not load asset models",
-      "emptyTitle": "No asset models yet",
-      "emptyDescription": "Add a make and model — say, a MacBook Pro 14 — so every asset you register can reference it instead of retyping the specs.",
-      "emptyAction": "Create the first model",
       "entityLabel": "asset model",
-      "columns": {
-        "name": "Name",
-        "manufacturer": "Manufacturer",
-        "sku": "SKU",
-        "category": "Category",
-        "updated": "Updated"
-      },
       "form": {
         "editTitle": "Edit asset model",
         "newTitle": "New asset model",
@@ -1258,7 +1231,8 @@
         "updateError": "Couldn't update asset model",
         "created": "Asset model created",
         "createError": "Couldn't create asset model"
-      }
+      },
+      "empty": "No asset models yet."
     },
     "statuses": {
       "intro": "Custom statuses are optional names for the six built-in statuses — for example \"In repair at vendor\" or \"On the bench\" for In maintenance, or \"Loaner pool\" for In storage. Each one maps to exactly one built-in status, which is what the dashboard, filters, imports and every other rule keep reading. Assets can keep a plain built-in status.",
@@ -1271,14 +1245,6 @@
       "archivedEmpty": "No archived custom statuses.",
       "archiveAction": "Archive",
       "assetsLink": "{count, plural, one {# asset} other {# assets}} with {name}",
-      "columns": {
-        "name": "Name",
-        "description": "Description",
-        "order": "Order",
-        "assets": "Assets",
-        "kind": "Built-in status",
-        "archived": "Archived"
-      },
       "toast": {
         "created": "Created the custom status {name}",
         "createError": "Couldn't create the custom status",
@@ -1324,7 +1290,47 @@
         "toast": "Archived the custom status {name}",
         "toastMoved": "Archived {name} and moved {count, plural, one {# asset} other {# assets}} to {target}",
         "error": "Couldn't archive the custom status"
-      }
+      },
+      "archivedLabel": "Archived {taxonomy}",
+      "archivedOn": "Archived {date}"
+    },
+    "help": "The lists that classify records: categories, asset models and custom asset statuses. Knowledge Base folders are managed in the Knowledge Base itself.",
+    "listLabel": "Taxonomies",
+    "groups": {
+      "assets": "Assets",
+      "applications": "Applications",
+      "consumables": "Consumables",
+      "knowledge": "Knowledge"
+    },
+    "panes": {
+      "asset": "Categories",
+      "models": "Models",
+      "statuses": "Custom statuses",
+      "application": "Categories",
+      "consumable": "Categories"
+    },
+    "paneTitles": {
+      "asset": "Asset categories",
+      "models": "Asset models",
+      "statuses": "Custom asset statuses",
+      "application": "Application categories",
+      "consumable": "Consumable categories"
+    },
+    "kbFolders": "Folders → in the KB",
+    "kbPointer": "Article categories are the Knowledge Base folders now. Create, rename, describe and order them in the Knowledge Base.",
+    "kbOpen": "Open the Knowledge Base",
+    "filterLabel": "Filter {taxonomy}",
+    "filterPlaceholder": "Filter…",
+    "noMatches": "Nothing matches the filter.",
+    "select": "Select",
+    "selectDone": "Done",
+    "selectAllVisible": "Select all shown",
+    "inlineAdd": "Add",
+    "usage": {
+      "assets": "{count, plural, one {# asset} other {# assets}}",
+      "apps": "{count, plural, one {# app} other {# apps}}",
+      "consumables": "{count, plural, one {# consumable} other {# consumables}}",
+      "unused": "Unused"
     }
   }
 }
