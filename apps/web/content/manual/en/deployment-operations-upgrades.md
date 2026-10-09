@@ -13,7 +13,7 @@ forward-only.
 
 ## Before you upgrade
 
-> **Back up both databases and the environment file first.** Database migrations only move forward —
+> **Back up the database and the environment file first.** Database migrations only move forward —
 > there is no automatic rollback. Your safety net is the pre-upgrade backup. See
 > [Backups & restore](/help/deployment-operations-backups-restore).
 
@@ -57,6 +57,15 @@ search and exact-id resolver calls to `GET /infra/nodes/page`, which returns
 `{ items, total, limit, offset }`. The topology canvas is a different contract and should continue to
 use `GET /infra/graph/nodes`; do not substitute the paged list for the map.
 
+#### Bundled identity provider removed
+
+lazyit no longer ships a built-in identity provider: people sign in with local accounts or through your
+own OIDC provider (see [Identity provider](/help/deployment-operations-identity-provider)). Installs on
+either of those are unaffected. If `./infra/start.sh` or the API refuses to start because it found a
+leftover of the old bundled provider, nothing was changed — no file written, no volume removed.
+Follow the migration runbook in the repository,
+`docs/05-runbooks/migrate-off-bundled-zitadel.md`, or stay on the previous release until you can.
+
 ## New required settings after a pull
 
 A version that adds a feature may introduce a **new environment value**. A few of them the startup
@@ -79,8 +88,8 @@ anything. It works whether you sign in with built-in accounts or an identity pro
 - `./infra/start.sh --dry-run` shows what it would add without writing anything.
 
 After it adds a key, back up the updated environment file off-host. Keys that protect data you already
-have — the workflow secret key, the identity-provider master key, the sign-in secrets, the database
-passwords — are **never** generated for you: if one is missing, the script names it and you add it by
+have — the workflow secret key, the sign-in secrets, the database passwords — are **never** generated
+for you: if one is missing, the script names it and you add it by
 hand. The update script (`./infra/update.sh`) never edits the file either; it stops on a missing key and
 tells you which one.
 
@@ -108,9 +117,9 @@ Two examples that have shipped:
     --env-file infra/env/.env.prod up -d api
   ```
 
-> The workflow secret key is an **unrotatable** key, like the identity-provider master key: it decrypts
-> stored connector credentials. Back it up off-host and **never** generate a fresh one on a restore, or
-> those credentials become undecryptable. See [Backups & restore](/help/deployment-operations-backups-restore).
+> The workflow secret key is an **unrotatable** key: it decrypts stored connector credentials. Back it
+> up off-host and **never** generate a fresh one on a restore, or those credentials become
+> undecryptable. See [Backups & restore](/help/deployment-operations-backups-restore).
 
 Release notes call out any new required value. When in doubt, compare your environment file against the
 shipped example (`infra/env/.env.prod.example`) for newly added entries.
@@ -122,10 +131,8 @@ backup** and redeploy the previous image. This is exactly why the pre-upgrade ba
 
 ## Bundled component versions
 
-The bundled images (database, identity provider, search, broker, proxy) are pinned to specific
-versions for reproducible deploys. They move only on a deliberate bump. Before bumping the identity
-provider in particular, back up its database **and** keep the matching master key, since its data is
-tied to that key.
+The bundled images (database, search, broker, proxy) are pinned to specific versions for reproducible
+deploys. They move only on a deliberate bump.
 
 The **search engine** is the exception that needs no preparation. Its data only opens on the exact
 engine version that wrote it, so each search-engine upgrade starts on a **new** data volume and lazyit
