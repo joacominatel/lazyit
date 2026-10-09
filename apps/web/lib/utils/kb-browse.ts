@@ -95,6 +95,34 @@ export function kbBrowseMode(params: KbParamsReader): KbBrowseMode {
   return "view";
 }
 
+/**
+ * Whether the list is narrowed BEYOND what defines the page it is on, which decides the empty state
+ * ("no articles match your filters" with a way out, versus a plain "nothing here yet"). A view is
+ * itself a filter (`status=DRAFT`, `linked=only`), so counting it would tell an author with no drafts
+ * that their filters match nothing and offer a "Clear filters" that throws them back home.
+ *
+ *  - My drafts: nothing else can narrow it (a linked filter turns it into Linked) → never narrowed.
+ *  - Linked: narrowed by a status, or by a target kind or a specific asset/application.
+ *  - All articles and a folder: narrowed by any status or any linked filter.
+ *  - Search and Recent have their own empty states and are never "narrowed" here.
+ */
+export function kbNarrowedBeyondView(params: KbParamsReader): boolean {
+  const mode = kbBrowseMode(params);
+  if (mode === "search" || mode === "recent") return false;
+  const status = listValues(params.get("status"));
+  const view = kbActiveView(params);
+  if (view === "drafts") return false;
+  if (view === "linked") {
+    return (
+      status.length > 0 ||
+      listValues(params.get("linkedTo")).length > 0 ||
+      listValues(params.get("assetId")).length > 0 ||
+      listValues(params.get("applicationId")).length > 0
+    );
+  }
+  return status.length > 0 || kbLinkedActive(params);
+}
+
 /** The default list order; written to the URL as no parameter at all. */
 export const DEFAULT_KB_SORT: ArticleListSort = "updated";
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  kbNarrowedBeyondView,
   DEFAULT_KB_SORT,
   kbActiveView,
   kbBrowseMode,
@@ -120,5 +121,34 @@ describe("statusSegment / statusValuesFor", () => {
     expect(statusValuesFor("all")).toEqual([]);
     expect(statusValuesFor("DRAFT")).toEqual(["DRAFT"]);
     expect(statusValuesFor("PUBLISHED")).toEqual(["PUBLISHED"]);
+  });
+});
+
+describe("kbNarrowedBeyondView", () => {
+  const p = (query: string) => new URLSearchParams(query);
+
+  test("My drafts alone is not a narrowing, so an empty drafts view reads as empty, not unmatched", () => {
+    expect(kbNarrowedBeyondView(p("status=DRAFT"))).toBe(false);
+  });
+
+  test("Linked alone is not a narrowing; a status or a specific target is", () => {
+    expect(kbNarrowedBeyondView(p("linked=only"))).toBe(false);
+    expect(kbNarrowedBeyondView(p("linked=only&status=PUBLISHED"))).toBe(true);
+    expect(kbNarrowedBeyondView(p("linkedTo=asset"))).toBe(true);
+    expect(kbNarrowedBeyondView(p("assetId=classet000000000000000000"))).toBe(true);
+  });
+
+  test("on All articles and in a folder, a status or a linked filter narrows", () => {
+    expect(kbNarrowedBeyondView(p(""))).toBe(false);
+    expect(kbNarrowedBeyondView(p("status=PUBLISHED"))).toBe(true);
+    const folder = "categoryId=clfolder00000000000000000";
+    expect(kbNarrowedBeyondView(p(folder))).toBe(false);
+    expect(kbNarrowedBeyondView(p(`${folder}&status=DRAFT`))).toBe(true);
+    expect(kbNarrowedBeyondView(p(`${folder}&linked=only`))).toBe(true);
+  });
+
+  test("search and Recent are never narrowed here", () => {
+    expect(kbNarrowedBeyondView(p("q=vpn&status=DRAFT"))).toBe(false);
+    expect(kbNarrowedBeyondView(p("view=recent&status=DRAFT"))).toBe(false);
   });
 });

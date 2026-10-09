@@ -16,7 +16,7 @@ import {
   type Folder,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ApplicationMultiSelect } from "@/components/application-multi-select";
@@ -51,6 +51,7 @@ import {
   type KbBrowseMode,
   type KbStatusSegment,
   kbBrowseMode,
+  kbNarrowedBeyondView,
   kbSortParam,
   parseIncludeSubfolders,
   parseKbSort,
@@ -136,6 +137,23 @@ function UrlSearchBar() {
   return <KbSearchBar value={q} onSearch={setQ} />;
 }
 
+/**
+ * The Recent view's search box. A search covers the whole KB, not this browser's list, so it leaves the
+ * view: it lands on `/kb?q=…` and the rail stops highlighting Recent while global results show.
+ */
+function RecentSearchBar() {
+  const router = useRouter();
+  return (
+    <KbSearchBar
+      value=""
+      onSearch={(query) => {
+        const trimmed = query.trim();
+        if (trimmed) router.push(`/kb?${new URLSearchParams({ q: trimmed }).toString()}`);
+      }}
+    />
+  );
+}
+
 function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
   const t = useTranslations("kb");
   const searchParams = useSearchParams();
@@ -151,7 +169,6 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     getFilterValues,
     setOffset,
     clearFilters,
-    filtersActive,
   } = useListParams({ filters: FILTER_DEFAULTS });
 
   const sort = parseKbSort(searchParams.get("sort"));
@@ -458,7 +475,7 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
           ) : total === 0 ? (
             <EmptyList
               mode={mode}
-              filtered={filtersActive && (mode !== "folder" || statusValues.length > 0 || linkedOnly)}
+              filtered={kbNarrowedBeyondView(searchParams)}
               onClear={searching ? () => setQ("") : clearNarrowing}
             />
           ) : (
@@ -633,7 +650,7 @@ function RecentView() {
           ) : null
         }
       />
-      <UrlSearchBar />
+      <RecentSearchBar />
       {items.length > 0 ? (
         <RecentArticleTable
           items={items}
