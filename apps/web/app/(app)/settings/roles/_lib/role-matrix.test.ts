@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildDefaultRolePermissions,
   CAPABILITY_BY_ID,
+  PERMISSION_PILLARS,
   PRESET_BY_ID,
   type RolePermissionMatrix,
 } from "@lazyit/shared";
@@ -42,8 +43,8 @@ describe("groupSummary", () => {
     expect(groupSummary("inventory", new Set([view.permissions[0]!])).granted).toBe(0);
   });
 
-  test("the matrix renders the same five groups the per-role editor did", () => {
-    expect([...MATRIX_PILLARS]).toEqual(["inventory", "access", "knowledge", "manage", "automation"]);
+  test("the matrix renders every pillar, AI included, in catalog order", () => {
+    expect([...MATRIX_PILLARS]).toEqual([...PERMISSION_PILLARS]);
   });
 });
 

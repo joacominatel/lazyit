@@ -22,9 +22,10 @@ import {
  */
 
 /**
- * The capability groups the matrix renders, in order — exactly the groups the per-role editor showed
- * before the matrix. The `ai` pillar's capabilities have never had a group there; they stay reachable
- * through Fine-tune, as before.
+ * The capability groups the matrix renders, in order: every pillar. The per-role editor before the
+ * matrix rendered all but `ai`, although the Manual (Permission configuration) documents an AI area
+ * with "Use the AI assistant" and "Connect external AI agents" and the catalog carries its labels —
+ * the matrix follows the documentation and shows it.
  */
 export const MATRIX_PILLARS = [
   "inventory",
@@ -32,6 +33,7 @@ export const MATRIX_PILLARS = [
   "knowledge",
   "manage",
   "automation",
+  "ai",
 ] as const satisfies readonly PermissionPillar[];
 
 /** One matrix cell: every permission of the capability held, some of them, or none. */

@@ -43,8 +43,8 @@ const PERMISSIONS_BY_DOMAIN: { domain: string; permissions: Permission[] }[] =
 /**
  * The advanced "Fine-tune" disclosure under the role matrix, COLLAPSED by default. For the rare admin
  * who needs exact control it lists every raw `domain:action` permission, grouped by domain, with one
- * checkbox per editable role — the full catalog, including the slots the capability layer hides (the
- * AI verbs among them). It edits the same staged sets as the matrix, so a change here flips that
+ * checkbox per editable role — the full catalog, including the slots the capability layer hides. It
+ * edits the same staged sets as the matrix, so a change here flips that
  * role's preset to Custom and shows as a partial cell above. Above-default-tier permissions carry ⚠.
  */
 export function FineTune({ staged, onToggle }: FineTuneProps) {
