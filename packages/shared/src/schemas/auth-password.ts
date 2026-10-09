@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { PASSWORD_MAX_LENGTH } from "../constants/local-auth";
 import { SessionExpiresAtSchema } from "./auth-login";
-import { ZitadelPasswordSchema } from "./primitives";
+import { PasswordPolicySchema } from "./primitives";
 
 /**
  * Local-mode password-lifecycle wire contracts — ADR-0086 §F4 (AUTH_MODE=local). Shared so the API's
  * DTOs and the F4b web forms validate ONE definition. Every *new* password is validated against the
- * SAME {@link ZitadelPasswordSchema} the first-run `/setup` and admin temp-password use (one strength
+ * SAME {@link PasswordPolicySchema} the first-run `/setup` and admin temp-password use (one strength
  * policy, no drift — see `password-policy.test.ts`). A *current* password is only length-bounded (it was
  * already accepted at set-time under whatever policy applied then, so re-imposing today's regex on it is
  * wrong; the KDF cap {@link PASSWORD_MAX_LENGTH} still applies as anti-DoS).
@@ -26,7 +26,7 @@ export const PASSWORD_CHANGE_REQUIRED_CODE = "PASSWORD_CHANGE_REQUIRED" as const
  */
 export const ChangePasswordRequestSchema = z.object({
   currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
-  newPassword: ZitadelPasswordSchema,
+  newPassword: PasswordPolicySchema,
 });
 export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
@@ -70,7 +70,7 @@ export type ForgotPasswordResponse = z.infer<
  */
 export const ResetPasswordRequestSchema = z.object({
   token: z.string().min(1).max(512),
-  newPassword: ZitadelPasswordSchema,
+  newPassword: PasswordPolicySchema,
 });
 export type ResetPasswordRequest = z.infer<typeof ResetPasswordRequestSchema>;
 
