@@ -47,7 +47,11 @@ prep but stop before starting the apps (useful in CI/tests):
 > 4. `prisma migrate deploy` → **`prisma generate`** (explicit — `migrate deploy` does NOT regenerate
 >    the client, and a stale client breaks the API boot, #480) → `prisma db seed`;
 > 5. wires `apps/api/.env` (`AUTH_MODE=local` + a dev `SESSION_SIGNING_SECRET`, OIDC vars commented
->    out) and `apps/web/.env` (`AUTH_MODE=local`) — idempotent, never duplicating lines.
+>    out) and `apps/web/.env` (`AUTH_MODE=local`) — idempotent, never duplicating lines. If
+>    `apps/web/.env` still sets `AUTH_ISSUER` to `http://localhost:8080` — the removed dev Zitadel — it
+>    also comments out `AUTH_ISSUER`, `AUTH_CLIENT_ID` and `AUTH_CLIENT_SECRET` and says so: a set
+>    `AUTH_ISSUER` turns on the web's OIDC sign-in, here against a server that no longer runs.
+>    `dev:up` never edits `.env`; it only warns when it finds that stale issuer.
 >
 > The `.env` files it writes are gitignored — **no secret is ever committed**. After it finishes, open
 > `http://localhost:3000/setup` to create the first admin **once**, then `http://localhost:3000/login`.
