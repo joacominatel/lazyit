@@ -48,6 +48,13 @@ describe('expandFolderSubtrees (#1539)', () => {
     expect(expandFolderSubtrees(['root'], live)).toEqual(['root', 'a', 'b']);
   });
 
+  it('does not expand a root that is not live — a child restored under a soft-deleted parent is not reached', () => {
+    // `a1` is soft-deleted (absent from the live list) but `a1x` was restored under it: asking for `a1`
+    // keeps the root id (it matches no live article) and never walks to its live child.
+    const live = TREE.filter((f) => f.id !== 'a1');
+    expect(expandFolderSubtrees(['a1'], live)).toEqual(['a1']);
+  });
+
   it('is cycle-safe: a corrupt parentId loop terminates and yields each folder once', () => {
     const cyclic: FolderTreeEdge[] = [
       { id: 'x', parentId: 'z' },

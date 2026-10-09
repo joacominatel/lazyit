@@ -11,7 +11,8 @@ export interface FolderTreeEdge {
  * level.
  *
  * - Every root is returned, whether or not it appears in `folders` (the caller's filter already named it;
- *   a root that is not live simply matches no live article).
+ *   a root that is not live simply matches no live article). A root missing from `folders` is NOT
+ *   expanded: a live child restored under a soft-deleted parent is not reached through that parent.
  * - Descendants are only those reachable through `folders`. Pass the LIVE folders, and a soft-deleted
  *   folder is never reached, which also cuts off anything filed under it.
  * - Cycle-safe: a folder already collected is never expanded twice, so a corrupt `parentId` loop ends.
@@ -30,12 +31,13 @@ export function expandFolderSubtrees(
     else childrenOf.set(folder.parentId, [folder.id]);
   }
 
+  const known = new Set(folders.map((folder) => folder.id));
   const collected = new Set<string>();
   const queue: string[] = [];
   for (const id of rootIds) {
     if (collected.has(id)) continue;
     collected.add(id);
-    queue.push(id);
+    if (known.has(id)) queue.push(id);
   }
   for (let cursor = 0; cursor < queue.length; cursor += 1) {
     for (const child of childrenOf.get(queue[cursor]) ?? []) {
