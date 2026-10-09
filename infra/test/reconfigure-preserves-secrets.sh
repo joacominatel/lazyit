@@ -189,7 +189,7 @@ fi
 if grep -qE '^(OIDC_[A-Z_]*|AUTH_ISSUER|AUTH_CLIENT_ID|AUTH_CLIENT_SECRET|AUTH_INTERNAL_ISSUER|SESSION_SIGNING_SECRET|IDENTITY_PROVIDER_TYPE|ZITADEL_[A-Z_]*|LAZYIT_DOMAIN)=' infra/env/.env.prod.example; then
   echo "FAIL: .env.prod.example carries an active auth-mode-specific or Zitadel key — infra/update.sh would stop instances that do not use it"; fail=1
 fi
-for _k in OIDC_ISSUER OIDC_JWKS_URI OIDC_CLIENT_ID OIDC_CLIENT_SECRET AUTH_ISSUER AUTH_CLIENT_ID AUTH_CLIENT_SECRET; do
+for _k in OIDC_ISSUER OIDC_JWKS_URI OIDC_CLIENT_ID AUTH_ISSUER AUTH_CLIENT_ID AUTH_CLIENT_SECRET; do
   [ "$(grep -cE "^# ${_k}=" infra/env/.env.prod.example)" -eq 1 ] \
     || { echo "FAIL: .env.prod.example must carry exactly one '# ${_k}=' placeholder (the BYOI render fills it)"; fail=1; }
 done
@@ -214,10 +214,15 @@ assert_kv_in "$ENVF4" AUTH_ISSUER        https://login.example.com
 assert_kv_in "$ENVF4" OIDC_JWKS_URI      https://login.example.com/oauth2/keys
 assert_kv_in "$ENVF4" OIDC_CLIENT_ID     lazyit-web
 assert_kv_in "$ENVF4" AUTH_CLIENT_ID     lazyit-web
-assert_kv_in "$ENVF4" OIDC_CLIENT_SECRET CLIENTsentinel
 assert_kv_in "$ENVF4" AUTH_CLIENT_SECRET CLIENTsentinel
 if grep -qE '^(SESSION_SIGNING_SECRET|IDENTITY_PROVIDER_TYPE|AUTH_INTERNAL_ISSUER|ZITADEL_[A-Z_]*|LAZYIT_DOMAIN)=' "$ENVF4"; then
   echo "FAIL: BYOI render wrote a local-only, Zitadel or IDENTITY_PROVIDER_TYPE key"; fail=1
+fi
+if grep -qE '^OIDC_CLIENT_SECRET=' "$ENVF4"; then
+  echo "FAIL: BYOI render wrote OIDC_CLIENT_SECRET — the API never reads it; the secret belongs on AUTH_CLIENT_SECRET only"; fail=1
+fi
+if grep -c 'CLIENTsentinel' "$ENVF4" | grep -qvx 1; then
+  echo "FAIL: BYOI render must carry the client secret exactly once (AUTH_CLIENT_SECRET)"; fail=1
 fi
 if grep -v '^[[:space:]]*#' "$ENVF4" | grep -qi 'zitadel'; then echo "FAIL: BYOI render has an active line mentioning zitadel"; fail=1; fi
 _p4=$(stat -c '%a' "$ENVF4" 2>/dev/null || stat -f '%Lp' "$ENVF4")
