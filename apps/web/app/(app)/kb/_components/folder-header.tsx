@@ -162,6 +162,7 @@ export function FolderHeader({
           mode="create"
           parentId={folder.id}
           parentName={folder.name}
+          onCreated={(id) => navigate(id)}
         />
       ) : null}
     </div>
