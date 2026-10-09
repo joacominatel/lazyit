@@ -81,19 +81,26 @@ function echoUpsertedUser(args: { create: Record<string, unknown> }) {
   return { ...DB_USER, ...args.create };
 }
 
-// jitProvision calls user.findFirst with three distinguishable shapes:
-//   { where: { externalId }, includeSoftDeleted: true } — the sub lookup (includes soft-deleted);
-//   { where: { email } }                                — the account-link-by-email lookup (LIVE);
-//   { where: { id } }                                   — the post-claim refetch (LIVE).
+// jitProvision calls user.findFirst with four distinguishable shapes:
+//   { where: { externalId }, includeSoftDeleted: true }             — the sub lookup (includes soft-deleted);
+//   { where: { email } }                                            — the account-link-by-email lookup (LIVE);
+//   { where: { email, deletedAt: { not: null } }, includeSoftDeleted } — the offboarded-email lookup;
+//   { where: { id } }                                               — the post-claim refetch (LIVE).
 // `routeFindFirst` builds a findFirst impl from per-shape handlers so the linking tests can return
 // different rows for the email lookup vs. the refetch without ordering assumptions.
 function routeFindFirst(handlers: {
   byExternalId?: (sub: unknown) => unknown;
   byEmail?: (email: unknown) => unknown;
+  byDeletedEmail?: (email: unknown) => unknown;
   byId?: (id: unknown) => unknown;
 }) {
   return (args: { where?: Record<string, unknown> }) => {
     const where = args.where ?? {};
+    if ('deletedAt' in where && 'email' in where) {
+      return handlers.byDeletedEmail
+        ? handlers.byDeletedEmail(where.email)
+        : null;
+    }
     if ('externalId' in where) {
       return handlers.byExternalId
         ? handlers.byExternalId(where.externalId)
@@ -1046,6 +1053,193 @@ describe('JwtAuthGuard', () => {
             where: { externalId: 'oidc-sub-rehire' },
           }),
         );
+      });
+
+      describe('offboarded before the first sign-in (ADR-0102 §5)', () => {
+        const OFFBOARDED = {
+          ...DB_USER,
+          id: '22222222-2222-2222-2222-222222222222',
+          email: 'gone@corp.com',
+          externalId: null,
+          deletedAt: new Date('2026-10-01T00:00:00Z'),
+        };
+        const offboardedByEmail = (email: unknown) =>
+          email === OFFBOARDED.email ? { id: OFFBOARDED.id } : null;
+
+        function deletedEmailCall() {
+          return (
+            prismaUser.findFirst.mock.calls as Array<[Record<string, unknown>]>
+          ).find((c) => 'deletedAt' in ((c[0]?.where as object) ?? {}));
+        }
+
+        it('refuses with the same 403 as the soft-deleted-by-sub path and creates nothing', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-never-signed-in',
+              email: 'Gone@Corp.com',
+              email_verified: true,
+              given_name: 'Gone',
+              family_name: 'Person',
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          const attempt = guard.canActivate(
+            makeCtx({ headers: { authorization: 'Bearer t' } }),
+          );
+
+          await expect(attempt).rejects.toBeInstanceOf(ForbiddenException);
+          await expect(attempt).rejects.toThrow('Account has been deactivated');
+          expect(prismaUser.upsert).not.toHaveBeenCalled();
+          expect(prismaUser.updateMany).not.toHaveBeenCalled();
+          expect(deletedEmailCall()![0]).toEqual({
+            where: { email: 'gone@corp.com', deletedAt: { not: null } },
+            select: { id: true },
+            includeSoftDeleted: true,
+          });
+        });
+
+        it('returns the same 403 body as a soft-deleted sub (no enumeration of why)', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: { sub: 'oidc-sub-001' },
+          });
+          prismaUser.findFirst.mockResolvedValue({
+            ...DB_USER,
+            deletedAt: new Date(),
+          });
+          const bySub = await guard
+            .canActivate(makeCtx({ headers: { authorization: 'Bearer t' } }))
+            .catch((e: ForbiddenException) => e.getResponse());
+
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-never-signed-in',
+              email: 'gone@corp.com',
+              email_verified: true,
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          const byEmail = await guard
+            .canActivate(makeCtx({ headers: { authorization: 'Bearer t' } }))
+            .catch((e: ForbiddenException) => e.getResponse());
+
+          expect(byEmail).toEqual(bySub);
+        });
+
+        it('creates a fresh user as before when the offboarded row has a different email', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-new-hire',
+              email: 'new.hire@corp.com',
+              email_verified: true,
+              given_name: 'New',
+              family_name: 'Hire',
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          await expect(
+            guard.canActivate(
+              makeCtx({ headers: { authorization: 'Bearer t' } }),
+            ),
+          ).resolves.toBe(true);
+          expect(prismaUser.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { externalId: 'oidc-sub-new-hire' },
+            }),
+          );
+        });
+
+        it('still links a LIVE unclaimed row holding the email, even if an offboarded row shares it', async () => {
+          const LIVE = {
+            ...OFFBOARDED,
+            id: '33333333-3333-3333-3333-333333333333',
+            deletedAt: null,
+          };
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-rehired',
+              email: 'gone@corp.com',
+              email_verified: true,
+            },
+          });
+          let claimed = false;
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => LIVE,
+              byDeletedEmail: offboardedByEmail,
+              byId: () =>
+                claimed ? { ...LIVE, externalId: 'oidc-sub-rehired' } : LIVE,
+            }),
+          );
+          prismaUser.updateMany.mockImplementation(() => {
+            claimed = true;
+            return Promise.resolve({ count: 1 });
+          });
+          const req: Record<string, unknown> = {
+            headers: { authorization: 'Bearer t' },
+          };
+
+          await expect(guard.canActivate(makeCtx(req))).resolves.toBe(true);
+          expect(prismaUser.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { id: LIVE.id, externalId: null },
+            }),
+          );
+          expect((req.user as { id: string }).id).toBe(LIVE.id);
+          expect(prismaUser.upsert).not.toHaveBeenCalled();
+        });
+
+        it('keeps the current behaviour on an UNVERIFIED email: no offboarded lookup, a fresh row is created', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-unverified',
+              email: 'gone@corp.com',
+              email_verified: false,
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          await expect(
+            guard.canActivate(
+              makeCtx({ headers: { authorization: 'Bearer t' } }),
+            ),
+          ).resolves.toBe(true);
+          expect(deletedEmailCall()).toBeUndefined();
+          expect(prismaUser.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { externalId: 'oidc-sub-unverified' },
+            }),
+          );
+        });
       });
     });
 

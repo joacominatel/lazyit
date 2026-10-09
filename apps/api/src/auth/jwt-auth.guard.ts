@@ -443,7 +443,8 @@ export class JwtAuthGuard implements CanActivate {
    *    if a LIVE user already holds the (normalized) email and is UNCLAIMED (externalId IS NULL), bind
    *    this sub onto that row and inherit its role (this is how the seeded ADMIN is adopted by the
    *    operator's IdP identity). If that email is already linked to a DIFFERENT sub, 409 (never steal
-   *    an account). Otherwise create a fresh User: sub → externalId, email, given_name + family_name →
+   *    an account). If only a SOFT-DELETED user holds that verified email, 403 as above (ADR-0102 §5).
+   *    Otherwise create a fresh User: sub → externalId, email, given_name + family_name →
    *    firstName/lastName (falls back to splitting `name`, then the email local-part).
    *
    * The create is a real upsert on the `externalId` unique key (was a check-then-act findFirst+create
@@ -621,6 +622,18 @@ export class JwtAuthGuard implements CanActivate {
         return linked;
       }
       // Extremely unlikely (row soft-deleted between read and refetch) — fall through to create.
+    }
+
+    // An offboarded person who never signed in must not come back as a new account; restore is the way back.
+    if (emailClaim !== undefined && emailVerified) {
+      const offboarded = await this.prisma.user.findFirst({
+        where: { email, deletedAt: { not: null } },
+        select: { id: true },
+        includeSoftDeleted: true,
+      } as Prisma.UserFindFirstArgs);
+      if (offboarded) {
+        throw new ForbiddenException('Account has been deactivated');
+      }
     }
 
     // Upsert on the externalId unique key (race-proof): if a parallel first-login request already
