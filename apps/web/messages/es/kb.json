@@ -379,7 +379,7 @@
     "roleLabel": {
       "ADMIN": "Administradores",
       "MEMBER": "Miembros",
-      "VIEWER": "Observadores"
+      "VIEWER": "Lectores"
     },
     "selectRole": "Selecciona un rol",
     "selectApplication": "Selecciona una aplicación",
