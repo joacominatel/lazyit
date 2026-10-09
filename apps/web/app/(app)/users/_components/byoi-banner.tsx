@@ -5,12 +5,7 @@ import { useTranslations } from "next-intl";
 import { Callout } from "@/components/callout";
 import { useClientOnlyConfigStatus } from "@/lib/api/hooks/use-config-status";
 
-/**
- * BYOI graceful-degradation banner on the Users page (ADR-0043 §5d / §7b). When the instance runs a
- * generic OIDC IdP (integrationMode = "generic-oidc"), lazyit cannot manage users/roles in that
- * provider — write-back is a no-op — so role and user changes are LOCAL-ONLY. This non-blocking
- * notice tells the operator to manage accounts in their own IdP. Renders nothing in zitadel mode.
- */
+// Under OIDC lazyit never writes to the IdP (ADR-0102), so user and role changes stay in lazyit.
 export function ByoiBanner() {
   const t = useTranslations("users.list.byoi");
   const { data: status } = useClientOnlyConfigStatus();
