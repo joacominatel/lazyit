@@ -1,34 +1,4 @@
-import { Logger, ServiceUnavailableException } from '@nestjs/common';
-
-// The ZitadelIdentityProvider transitively imports `jose` (ESM) via the management service; ts-jest
-// cannot parse it. These tests never reach the signing path (they exercise the absent-config branch),
-// so a minimal SignJWT stub is enough to let the module graph load.
-jest.mock('jose', () => {
-  class SignJWT {
-    setProtectedHeader() {
-      return this;
-    }
-    setIssuer() {
-      return this;
-    }
-    setSubject() {
-      return this;
-    }
-    setAudience() {
-      return this;
-    }
-    setIssuedAt() {
-      return this;
-    }
-    setExpirationTime() {
-      return this;
-    }
-    sign() {
-      return Promise.resolve('signed.jwt.assertion');
-    }
-  }
-  return { SignJWT };
-});
+import { Logger } from '@nestjs/common';
 
 // The providers import the generated Prisma client only for the `Role` TYPE (import type), which is
 // erased at compile time — but jest still resolves the module graph, so stub it to avoid loading the
@@ -42,72 +12,74 @@ jest.mock('../../../generated/prisma/client', () => ({
 import { createIdentityProvider } from './identity-provider.factory';
 import { GenericOidcIdentityProvider } from './generic-oidc.identity-provider';
 import { LocalIdentityProvider } from './local.identity-provider';
-import { ZitadelIdentityProvider } from './zitadel.identity-provider';
 import { PasswordResetUnsupportedError } from './identity-provider.interface';
 
-describe('createIdentityProvider (ADR-0043 factory)', () => {
-  it('returns the Zitadel provider for "zitadel"', () => {
-    const provider = createIdentityProvider('zitadel');
-    expect(provider).toBeInstanceOf(ZitadelIdentityProvider);
-    expect(provider.kind).toBe('zitadel');
-    expect(provider.supportsManagement).toBe(true);
+describe('createIdentityProvider (ADR-0102 §4)', () => {
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    warnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
   });
 
-  it('returns the generic-oidc provider for "generic-oidc"', () => {
-    const provider = createIdentityProvider('generic-oidc');
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it('defaults to generic-oidc when IDENTITY_PROVIDER_TYPE is unset under AUTH_MODE=oidc, without a warning', () => {
+    const provider = createIdentityProvider(undefined, 'oidc');
     expect(provider).toBeInstanceOf(GenericOidcIdentityProvider);
     expect(provider.kind).toBe('generic-oidc');
     expect(provider.supportsManagement).toBe(false);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('is case-insensitive and trims the env value', () => {
-    expect(createIdentityProvider('  Generic-OIDC ')).toBeInstanceOf(
+  it('returns generic-oidc for an explicit "generic-oidc" (case/space-insensitive), without a warning', () => {
+    expect(createIdentityProvider('generic-oidc', 'oidc')).toBeInstanceOf(
       GenericOidcIdentityProvider,
     );
-    expect(createIdentityProvider('ZITADEL')).toBeInstanceOf(
-      ZitadelIdentityProvider,
+    expect(createIdentityProvider('  Generic-OIDC ', 'oidc')).toBeInstanceOf(
+      GenericOidcIdentityProvider,
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('maps a legacy "zitadel" value to generic-oidc with exactly one warning (never fails boot)', () => {
+    const provider = createIdentityProvider('ZITADEL', 'oidc');
+    expect(provider).toBeInstanceOf(GenericOidcIdentityProvider);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('IDENTITY_PROVIDER_TYPE=zitadel'),
     );
   });
 
-  it('defaults to Zitadel when the value is unset', () => {
-    expect(createIdentityProvider(undefined)).toBeInstanceOf(
-      ZitadelIdentityProvider,
+  it('maps an unrecognized value to generic-oidc with one warning', () => {
+    expect(createIdentityProvider('okta', 'oidc')).toBeInstanceOf(
+      GenericOidcIdentityProvider,
     );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to Zitadel (with a warn) for an unrecognized value', () => {
-    const warnSpy = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
-
-    const provider = createIdentityProvider('okta');
-
-    expect(provider).toBeInstanceOf(ZitadelIdentityProvider);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+  it('uses generic-oidc under AUTH_MODE=shim too', () => {
+    expect(createIdentityProvider(undefined, 'shim')).toBeInstanceOf(
+      GenericOidcIdentityProvider,
+    );
   });
 
   // ADR-0086 §5 (F1c): AUTH_MODE=local selects the no-op LocalIdentityProvider, IGNORING the IdP type.
   it('returns the LocalIdentityProvider when AUTH_MODE=local, regardless of IDENTITY_PROVIDER_TYPE', () => {
     for (const rawType of [undefined, 'zitadel', 'generic-oidc', 'okta']) {
-      const provider = createIdentityProvider(rawType, null, 'local');
+      const provider = createIdentityProvider(rawType, 'local');
       expect(provider).toBeInstanceOf(LocalIdentityProvider);
       expect(provider.kind).toBe('local');
       expect(provider.supportsManagement).toBe(false);
     }
     // Case/space-insensitive on AUTH_MODE.
-    expect(createIdentityProvider('zitadel', null, '  LOCAL ')).toBeInstanceOf(
+    expect(createIdentityProvider('zitadel', '  LOCAL ')).toBeInstanceOf(
       LocalIdentityProvider,
     );
-  });
-
-  it('keeps the IdP-type parse when AUTH_MODE is not local', () => {
-    expect(createIdentityProvider('generic-oidc', null, 'oidc')).toBeInstanceOf(
-      GenericOidcIdentityProvider,
-    );
-    expect(createIdentityProvider('zitadel', null, 'shim')).toBeInstanceOf(
-      ZitadelIdentityProvider,
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -227,76 +199,6 @@ describe('GenericOidcIdentityProvider (BYOI — ADR-0043 #5)', () => {
       PasswordResetUnsupportedError,
     );
 
-    warnSpy.mockRestore();
-  });
-});
-
-describe('ZitadelIdentityProvider (write-back — ADR-0043 Phase 2)', () => {
-  let provider: ZitadelIdentityProvider;
-  // Snapshot the Management env so each test starts from a clean, deterministic config state.
-  const savedEnv = { ...process.env };
-
-  beforeEach(() => {
-    delete process.env.ZITADEL_MGMT_SA_KEY;
-    delete process.env.ZITADEL_MGMT_SA_KEY_PATH;
-    delete process.env.ZITADEL_MGMT_PROJECT_ID;
-    delete process.env.ZITADEL_MGMT_API_URL;
-    delete process.env.OIDC_ISSUER;
-    delete process.env.OIDC_JWKS_URI;
-    provider = new ZitadelIdentityProvider();
-  });
-
-  afterEach(() => {
-    process.env = { ...savedEnv };
-  });
-
-  it('resolves the external ref to { externalId: sub } without a Management call', async () => {
-    await expect(provider.resolveExternalRef('zitadel-sub')).resolves.toEqual({
-      externalId: 'zitadel-sub',
-    });
-  });
-
-  it('advertises management support', () => {
-    expect(provider.kind).toBe('zitadel');
-    expect(provider.supportsManagement).toBe(true);
-  });
-
-  it('absent config: management methods throw "not configured" 503 (never blocks login)', async () => {
-    // No ZITADEL_MGMT_* set. The provider was constructed without throwing (boot-safe); the
-    // management methods reject with a clear ServiceUnavailableException (mapped to 503 upstream).
-    const warnSpy = jest
-      .spyOn(Logger.prototype, 'warn')
-      .mockImplementation(() => undefined);
-
-    await expect(
-      provider.createUser({
-        email: 'a@b.com',
-        firstName: 'A',
-        lastName: 'B',
-        role: 'VIEWER',
-      }),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    await expect(provider.deactivateUser('ext-1')).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-    await expect(provider.grantRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-    await expect(provider.revokeRole('ext-1', 'ADMIN')).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-    // Issue #149: the new write-backs degrade the same way — 503, never blocking login.
-    await expect(
-      provider.updateUser('ext-1', { email: 'new@b.com' }),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    await expect(provider.requestPasswordReset('ext-1')).rejects.toBeInstanceOf(
-      ServiceUnavailableException,
-    );
-
-    // The absent credential is reported via a structured WARN, never blocking boot/login.
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Zitadel management'),
-    );
     warnSpy.mockRestore();
   });
 });
