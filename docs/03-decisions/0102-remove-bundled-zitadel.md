@@ -263,9 +263,8 @@ Where the implementation settled a detail differently from the first draft of th
 - **§5:** the post-offboarding 403 covers a person who has signed in before and, by verified email, one
   offboarded before their first sign-in.
 
-**Outstanding:** `infra/update.sh` on the integration branch still runs the dual dump of §1 (the app
-database and `zitadel_db`, `infra/update.sh:292-305`). Its mode-aware fix is tracked by #1545 (PR #1549,
-against `dev`); the `zitadel_db` dump goes when that lands here.
+- **§1:** `infra/update.sh` dumps the app database only and refuses a bundled install before it takes the
+  lock, the backup or the checkout, with the same signals as `start.sh` (#1549 merged from `dev`, then #1561).
 
 ## Related
 
