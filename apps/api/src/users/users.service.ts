@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -43,11 +42,7 @@ import { UserHistoryService } from '../user-history/user-history.service';
 import { toThemePreference, toUiLocale } from './user-preferences.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
-import {
-  IDENTITY_PROVIDER,
-  PasswordResetUnsupportedError,
-  type IdentityProvider,
-} from '../auth/identity/identity-provider.interface';
+import { resolveIntegrationMode } from '../config/integration-mode';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import {
   AdminResetLinkError,
@@ -61,6 +56,19 @@ import {
  * an address is NOT a real mailbox, so a person carrying it can never auto-promote by verified-email login.
  */
 export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
+
+/**
+ * Thrown by {@link UsersService.requestPasswordReset} outside local mode: the operator's IdP owns the
+ * reset. The controller maps it to a 501, never a 2xx that pretends a reset was sent (INV-4).
+ */
+export class PasswordResetUnsupportedError extends Error {
+  constructor(
+    message = 'Password reset is managed by your identity provider; lazyit cannot trigger it.',
+  ) {
+    super(message);
+    this.name = 'PasswordResetUnsupportedError';
+  }
+}
 
 /** The manager-bearing columns a user row carries (ADR-0058) — the subset the read descriptor needs. */
 type ManagerColumns = { managerId: string | null; managerName: string | null };
@@ -188,10 +196,7 @@ export class UsersService {
     // emitter post-commit to fire the SAME admin_granted / critical_app_access nudges a hand-created
     // grant produces. The bell is admin VISIBILITY — independent of the engine fire toggle.
     private readonly accessGrants: AccessGrantsService,
-    // Read only for `kind` (local vs OIDC). Nothing is written back to the IdP (ADR-0102).
-    @Inject(IDENTITY_PROVIDER)
-    private readonly idp: IdentityProvider,
-    // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the `kind==='local'`
+    // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the local-mode
     // branches of create() + requestPasswordReset() to hash/store passwords and mint temp-passwords —
     // no IdP mirror. Global (AuthModule), so no module import is needed here.
     private readonly provisioning: LocalProvisioningService,
@@ -205,7 +210,7 @@ export class UsersService {
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086 §5). */
   private isLocalMode(): boolean {
-    return this.idp.kind === 'local';
+    return resolveIntegrationMode(process.env.AUTH_MODE) === 'local';
   }
 
   /**
@@ -555,13 +560,13 @@ export class UsersService {
       // row. NEVER client-supplied: the public Users controller never passes it; only the import
       // commit engine (a trusted server caller) does. The role is FORCED to VIEWER here regardless of
       // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
-      skipIdpWriteBack?: boolean;
+      directoryOnly?: boolean;
       directoryAttrs?: Prisma.InputJsonValue;
       // ADR-0091 (#839): AD/LDAP directory-source provenance stamped on the NEW directory person. Only the
       // read-only directory reconcile (a trusted server caller) passes these; the public Users controller
       // never does. `directorySource` discriminates the origin ("ad"); `directorySourceId` is the AD
       // objectGUID canonical string — the immutable natural key the reconcile upserts on (NEVER externalId,
-      // INV-2). Both are additive to the existing skipIdpWriteBack branch and change none of its invariants
+      // INV-2). Both are additive to the existing directoryOnly branch and change none of its invariants
       // (role stays VIEWER, externalId stays null, no login).
       directorySource?: string;
       directorySourceId?: string;
@@ -572,9 +577,7 @@ export class UsersService {
     // default) so the service is the authoritative default for app-created users and the behaviour is
     // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
     // A directory-only person is ALWAYS VIEWER — never trust the payload (which can't carry role anyway).
-    const role = opts?.skipIdpWriteBack
-      ? Role.VIEWER
-      : (data.role ?? Role.VIEWER);
+    const role = opts?.directoryOnly ? Role.VIEWER : (data.role ?? Role.VIEWER);
     // Resolve the manager either/or → DB columns (ADR-0058). On create there is no subject yet, so no
     // cycle is possible; the FK-live + at-most-one checks still apply. Then build the explicit create
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
@@ -585,7 +588,7 @@ export class UsersService {
     // `directoryOnly`/`directoryAttrs`, persist the row, record its CREATED history (correlated to the
     // import session via `createdPayload`), sync search, and return. `externalId` stays null (SEC-006);
     // `role` is VIEWER (forced above).
-    if (opts?.skipIdpWriteBack) {
+    if (opts?.directoryOnly) {
       const directoryUser = await this.prisma.user.create({
         data: {
           ...createData,
@@ -718,7 +721,9 @@ export class UsersService {
       });
       return updated;
     });
-    this.auditWriteBack('provisionLocalAccount', actorId, id, { local: true });
+    this.logCredentialChange('provisionLocalAccount', actorId, id, {
+      local: true,
+    });
     this.search.upsert('users', projectUser(onboarded));
     // The plaintext is returned to the admin to hand off ONCE — never stored in plaintext or shown again.
     return { temporaryPassword };
@@ -749,8 +754,8 @@ export class UsersService {
     };
   }
 
-  /** Structured audit line for a successful IdP write-back (ADR-0043 §3 — no DB audit table yet). */
-  private auditWriteBack(
+  /** Structured log line for an admin-driven local credential change; UserHistory is the durable audit. */
+  private logCredentialChange(
     operation: string,
     actorId: string | undefined,
     subjectUserId: string,
@@ -758,7 +763,7 @@ export class UsersService {
   ): void {
     this.logger.info(
       { op: operation, actor: actorId ?? 'system', subjectUserId, fields },
-      `IdP write-back: ${operation}`,
+      `Local credential change: ${operation}`,
     );
   }
 
@@ -1040,7 +1045,9 @@ export class UsersService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
-      this.auditWriteBack('resetPasswordByAdmin', actorId, id, { local: true });
+      this.logCredentialChange('resetPasswordByAdmin', actorId, id, {
+        local: true,
+      });
       // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
       // plaintext is ever recorded (the payload carries nothing sensitive).
       await this.recordHistory(
@@ -1120,7 +1127,7 @@ export class UsersService {
       });
     }
 
-    this.auditWriteBack('resetPasswordLinkByAdmin', actorId, user.id, {
+    this.logCredentialChange('resetPasswordLinkByAdmin', actorId, user.id, {
       local: true,
       sessionsRevoked,
     });

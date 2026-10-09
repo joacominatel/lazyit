@@ -4,8 +4,6 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
 import { MustChangePasswordGuard } from './must-change-password.guard';
 import { PermissionResolverService } from './permission-resolver.service';
-import { IDENTITY_PROVIDER } from './identity/identity-provider.interface';
-import { createIdentityProvider } from './identity/identity-provider.factory';
 import { LocalCredentialService } from './local/local-credential.service';
 import { LocalProvisioningService } from './local/local-provisioning.service';
 import { PasswordStepUpVerifier } from './local/password-step-up.verifier';
@@ -35,16 +33,13 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
  * guard can inject it; it stays in the SAME APP_GUARD slot/order, so registration is otherwise
  * unchanged.
  *
- * It also provides the {@link IDENTITY_PROVIDER}: local under AUTH_MODE=local, generic OIDC otherwise
- * (ADR-0102 §4). Every method is a no-op; the seam is retired once its callers are gone (ADR-0102 §6).
- *
  * It also provides the DB-first {@link PrincipalLoaderService} and the {@link ServiceAccountAuthenticator}
  * (ADR-0097): the guard's local, service-account and delegated-identity branches share them, and they are
  * exported so the AI layer and the MCP resource server (`/mcp`, R10) re-load and verify principals with
  * the very same code.
  *
- * See ADR-0038 (auth / JIT provisioning), ADR-0040 (RBAC roles), ADR-0102 (bundled Zitadel removed),
- * ADR-0046 (Roles & Permissions v2) and ADR-0097 (AI delegated execution).
+ * See ADR-0038 (auth / JIT provisioning), ADR-0040 (RBAC roles), ADR-0046 (Roles & Permissions v2) and
+ * ADR-0097 (AI delegated execution).
  */
 @Global()
 @Module({
@@ -81,20 +76,11 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     { provide: APP_GUARD, useClass: MustChangePasswordGuard },
     // Authorization third: enforce @RequirePermission against the now-populated request.user.
     { provide: APP_GUARD, useClass: RolesGuard },
-    {
-      provide: IDENTITY_PROVIDER,
-      useFactory: () =>
-        createIdentityProvider(
-          process.env.IDENTITY_PROVIDER_TYPE,
-          process.env.AUTH_MODE,
-        ),
-    },
   ],
   exports: [
     JwtAuthGuard,
     RolesGuard,
     PermissionResolverService,
-    IDENTITY_PROVIDER,
     LocalCredentialService,
     LocalProvisioningService,
     PasswordStepUpVerifier,

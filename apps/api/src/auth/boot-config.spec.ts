@@ -250,4 +250,41 @@ describe('validateBootConfig (fail-loud boot config)', () => {
       ).not.toThrow();
     });
   });
+
+  describe('legacy IDENTITY_PROVIDER_TYPE (ADR-0102 §4)', () => {
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('boots with a legacy "zitadel" value and warns exactly once (case/space-insensitive)', () => {
+      expect(() =>
+        validateBootConfig({ ...OIDC_OK, IDENTITY_PROVIDER_TYPE: ' ZITADEL ' }),
+      ).not.toThrow();
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('IDENTITY_PROVIDER_TYPE=zitadel'),
+      );
+    });
+
+    it('stays silent when the variable is unset or generic-oidc', () => {
+      validateBootConfig({ ...OIDC_OK });
+      validateBootConfig({
+        ...OIDC_OK,
+        IDENTITY_PROVIDER_TYPE: 'generic-oidc',
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('stays silent in local mode, which never read it', () => {
+      validateBootConfig({ ...LOCAL_OK, IDENTITY_PROVIDER_TYPE: 'zitadel' });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
 });

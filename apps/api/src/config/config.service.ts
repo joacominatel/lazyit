@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
@@ -10,10 +9,6 @@ import { Role } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
-import {
-  IDENTITY_PROVIDER,
-  type IdentityProvider,
-} from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import { resolveIntegrationMode } from './integration-mode';
 import { SetupCsrfService } from './setup-csrf.service';
@@ -41,22 +36,20 @@ export class ConfigService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
-    @Inject(IDENTITY_PROVIDER)
-    private readonly idp: IdentityProvider,
     private readonly csrf: SetupCsrfService,
     private readonly provisioning: LocalProvisioningService,
     @InjectPinoLogger(ConfigService.name)
     private readonly logger: PinoLogger,
   ) {}
 
-  /** `local` under AUTH_MODE=local, else `generic-oidc` — matching the provider the AuthModule builds. */
+  /** `local` under AUTH_MODE=local, else `generic-oidc`. */
   integrationMode(): IntegrationMode {
     return resolveIntegrationMode(process.env.AUTH_MODE);
   }
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
   private isLocalMode(): boolean {
-    return this.idp.kind === 'local';
+    return this.integrationMode() === 'local';
   }
 
   /**

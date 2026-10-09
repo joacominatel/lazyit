@@ -13,8 +13,8 @@ describe("IntegrationModeSchema", () => {
     expect(IntegrationModeSchema.parse("local")).toBe("local");
   });
 
-  test("still parses the deprecated zitadel value (ADR-0102 §4)", () => {
-    expect(IntegrationModeSchema.parse("zitadel")).toBe("zitadel");
+  test("no longer accepts the dropped zitadel value (ADR-0102 §4)", () => {
+    expect(IntegrationModeSchema.safeParse("zitadel").success).toBe(false);
   });
 
   test("rejects an unknown mode", () => {

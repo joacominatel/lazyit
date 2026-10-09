@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SetupPasswordSchema } from "./config";
-import { PasswordPolicySchema, ZitadelPasswordSchema } from "./primitives";
+import { PasswordPolicySchema } from "./primitives";
 import { TempPasswordSchema } from "./user";
 
 /**
@@ -37,10 +37,6 @@ describe("password-policy drift guard (#474)", () => {
   test("TempPasswordSchema and SetupPasswordSchema are the shared PasswordPolicySchema", () => {
     expect(TempPasswordSchema).toBe(PasswordPolicySchema);
     expect(SetupPasswordSchema).toBe(PasswordPolicySchema);
-  });
-
-  test("the deprecated ZitadelPasswordSchema alias is the same schema (ADR-0102 §8)", () => {
-    expect(ZitadelPasswordSchema).toBe(PasswordPolicySchema);
   });
 
   for (const [name, schema] of Object.entries(SCHEMAS)) {

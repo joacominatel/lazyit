@@ -53,8 +53,11 @@ import { isServicePrincipal, type Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { AllowPasswordChangeRequired } from '../auth/allow-password-change-required.decorator';
 import { ActorService } from '../common/actor.service';
-import { UsersService, USER_SORT_ALLOWLIST } from './users.service';
-import { PasswordResetUnsupportedError } from '../auth/identity/identity-provider.interface';
+import {
+  PasswordResetUnsupportedError,
+  UsersService,
+  USER_SORT_ALLOWLIST,
+} from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { resolveResetLinkOrigin } from './reset-link-origin';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
