@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
+import { useAssetModelTotal } from "@/lib/api/hooks/use-asset-models";
 import { useAssetStatusLabels } from "@/lib/api/hooks/use-asset-status-labels";
 import { useConsumableCategories } from "@/lib/api/hooks/use-consumable-categories";
 import { cn } from "@/lib/utils";
@@ -89,7 +89,8 @@ function useTaxonomySelection(): [TaxonomySelection, (next: TaxonomySelection) =
 function usePaneCounts(): Record<TaxonomyPane, number | undefined> {
   return {
     asset: useAssetCategories().data?.length,
-    models: useAssetModels().data?.length,
+    // The envelope total: the directory read is capped at 200 rows.
+    models: useAssetModelTotal().data,
     statuses: useAssetStatusLabels().data?.length,
     application: useApplicationCategories().data?.length,
     consumable: useConsumableCategories().data?.length,
