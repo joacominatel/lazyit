@@ -388,9 +388,8 @@ export class JwtAuthGuard implements CanActivate {
     if (!this.jwks) {
       const jwksUri =
         process.env.OIDC_JWKS_URI ?? `${issuer}/.well-known/jwks.json`;
-      // When JWKS is fetched from an internal Docker URL, Zitadel still resolves its instance
-      // from the forwarded host. Inject X-Forwarded-* derived from the external issuer so the
-      // fetch reaches the right instance (otherwise Zitadel returns 404 "Instance not found").
+      // A multi-tenant IdP reached at an internal URL resolves its instance from the forwarded host,
+      // so send X-Forwarded-* derived from the external issuer.
       const headers = this.forwardedHeaders(issuer);
       const options = headers ? { headers } : undefined;
       this.jwks = createRemoteJWKSet(new URL(jwksUri), options);
@@ -401,7 +400,7 @@ export class JwtAuthGuard implements CanActivate {
       ({ payload } = await jwtVerify(token, this.jwks, {
         issuer,
         // Pin the signature algorithm to RS256 so a token can never be verified under a weaker or
-        // attacker-chosen `alg` (alg-confusion / "none" downgrade). Zitadel signs OIDC tokens RS256.
+        // attacker-chosen `alg` (alg-confusion / "none" downgrade). RS256 is the OIDC default.
         algorithms: ['RS256'],
         // audience validation: omit if OIDC_CLIENT_ID is unset so the guard does not fail when
         // access tokens carry a resource audience rather than the client id.
