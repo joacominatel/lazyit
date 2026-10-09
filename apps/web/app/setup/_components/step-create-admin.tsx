@@ -123,10 +123,11 @@ function PasswordChecklist({
  * locked badge rather than an editable control.
  *
  * In local mode the server reports `requiresAdminPassword` and the wizard also collects an initial
- * password with a live complexity checklist; under OIDC the password is neither shown nor sent. The form schema is built dynamically from that flag and
- * validates the password against the shared `SetupPasswordSchema`. The CSRF token (from the status
- * payload) is threaded into the POST; the backend's idempotent gate, CSRF check and rate limit are
- * the real enforcement boundary — surfaced via the parent's onError.
+ * password with a live complexity checklist; under OIDC the password is neither shown nor sent. The
+ * form schema is built dynamically from that flag and validates the password against the shared
+ * `SetupPasswordSchema`. The CSRF token (from the status payload) is threaded into the POST; the
+ * backend's idempotent gate, CSRF check and rate limit are the real enforcement boundary — surfaced
+ * via the parent's onError.
  */
 export function StepCreateAdmin({
   csrfToken,

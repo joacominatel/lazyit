@@ -19,7 +19,7 @@ OIDC_ISSUER=https://auth.example.com
 OIDC_CLIENT_ID=your-client-id
 OIDC_JWKS_URI=https://auth.example.com/.well-known/jwks.json`;
 
-export const SNIPPET = `${WEB_SNIPPET}\n\n${API_SNIPPET}`;
+const SNIPPET = `${WEB_SNIPPET}\n\n${API_SNIPPET}`;
 
 function SnippetBlock({ label, value }: { label: string; value: string }) {
   return (
