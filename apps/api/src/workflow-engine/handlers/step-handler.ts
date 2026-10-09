@@ -288,7 +288,7 @@ export interface TestConnectionResult {
 
 /**
  * One connector type's executor. Selected by {@link kind} from the `ConnectorRegistry`
- * (capability-by-key, mirroring the in-tree `IdentityProvider` factory — not `instanceof`). Stateless
+ * (capability-by-key, not `instanceof`). Stateless
  * and effectively-once by key.
  */
 export interface StepHandler<

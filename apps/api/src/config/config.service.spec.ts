@@ -5,8 +5,6 @@ import { ConfigService } from './config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { SetupCsrfService } from './setup-csrf.service';
-import { IDENTITY_PROVIDER } from '../auth/identity/identity-provider.interface';
-import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). ConfigService uses
@@ -25,20 +23,6 @@ type PrismaUserMock = {
   create: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
-};
-
-type IdpMock = {
-  kind: string;
-  supportsManagement: boolean;
-  resolveExternalRef: jest.Mock;
-  createUser: jest.Mock;
-  deactivateUser: jest.Mock;
-  grantRole: jest.Mock;
-  revokeRole: jest.Mock;
-  // Issue #149: the IdentityProvider gained updateUser + requestPasswordReset. ConfigService never
-  // calls them, but the mock must satisfy the interface shape for the `as IdentityProvider` cast.
-  updateUser: jest.Mock;
-  requestPasswordReset: jest.Mock;
 };
 
 type SearchMock = { upsert: jest.Mock; remove: jest.Mock; search: jest.Mock };
@@ -84,7 +68,6 @@ describe('ConfigService', () => {
     generateTempPassword: jest.Mock;
   };
   let search: SearchMock;
-  let idp: IdpMock;
   let logger: LoggerMock;
 
   beforeEach(async () => {
@@ -111,18 +94,6 @@ describe('ConfigService', () => {
       }),
       generateTempPassword: jest.fn().mockReturnValue('Temp-Pass-9xZ!'),
     };
-    // Default posture: generic OIDC, the only OIDC flavour since ADR-0102.
-    idp = {
-      kind: 'generic-oidc',
-      supportsManagement: false,
-      resolveExternalRef: jest.fn(),
-      createUser: jest.fn(),
-      deactivateUser: jest.fn(),
-      grantRole: jest.fn(),
-      revokeRole: jest.fn(),
-      updateUser: jest.fn(),
-      requestPasswordReset: jest.fn(),
-    };
     logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({
@@ -131,7 +102,6 @@ describe('ConfigService', () => {
         SetupCsrfService,
         { provide: PrismaService, useValue: prisma },
         { provide: SearchService, useValue: search },
-        { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: LocalProvisioningService, useValue: provisioning },
         { provide: getLoggerToken(ConfigService.name), useValue: logger },
       ],
@@ -193,19 +163,15 @@ describe('ConfigService', () => {
   // ---------- AUTH_MODE=local (ADR-0086 §5, F1c) ----------------------------
 
   describe('local mode', () => {
-    // Put the service into local posture: the AuthModule builds the LocalIdentityProvider
-    // (kind='local', supportsManagement=false) and AUTH_MODE=local drives integrationMode + the marker.
+    // AUTH_MODE=local drives the local branches, integrationMode and the marker.
     beforeEach(() => {
-      idp.kind = 'local';
-      idp.supportsManagement = false;
       process.env.AUTH_MODE = 'local';
     });
 
-    it('getStatus DECOUPLES requiresAdminPassword from supportsManagement — true in local mode, with authMode=local', async () => {
+    it('getStatus requires an admin password in local mode, with authMode=local', async () => {
       user.count.mockResolvedValue(0);
       const status = await service.getStatus();
-      // supportsManagement is false (no IdP) yet the wizard STILL must collect a password (else the first
-      // ADMIN is un-loggable and the instance bricks — ADR-0086 §5).
+      // Without it the first ADMIN is un-loggable and the instance bricks (ADR-0086 §5).
       expect(status.requiresAdminPassword).toBe(true);
       expect(status.authMode).toBe('local');
       expect(status.integrationMode).toBe('local');
@@ -236,7 +202,6 @@ describe('ConfigService', () => {
           mustChangePassword: false,
         },
       });
-      expect(idp.createUser).not.toHaveBeenCalled();
       expect(user.update).not.toHaveBeenCalled();
       expect(outcome.adminId).toBe('local-admin-1');
     });
@@ -285,7 +250,6 @@ describe('ConfigService', () => {
           role: 'ADMIN',
         },
       });
-      expect(idp.createUser).not.toHaveBeenCalled();
       expect(provisioning.credentialFields).not.toHaveBeenCalled();
       expect(user.update).not.toHaveBeenCalled();
       expect(search.upsert).toHaveBeenCalledWith(

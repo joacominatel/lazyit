@@ -8,7 +8,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { getLoggerToken, PinoLogger } from 'nestjs-pino';
-import { UsersService } from './users.service';
+import { PasswordResetUnsupportedError, UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
@@ -16,11 +16,6 @@ import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { UserHistoryService } from '../user-history/user-history.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
-import {
-  IDENTITY_PROVIDER,
-  PasswordResetUnsupportedError,
-} from '../auth/identity/identity-provider.interface';
-import type { IdentityProvider } from '../auth/identity/identity-provider.interface';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import {
   AdminResetLinkError,
@@ -50,21 +45,6 @@ type PrismaUserMock = {
   groupBy: jest.Mock;
 };
 
-// A mock IdentityProvider. The service only reads `kind`; the management methods stay as spies so the
-// tests can prove nothing is written back to the IdP (ADR-0102).
-type IdpMock = {
-  kind: string;
-  supportsManagement: boolean;
-  resolveExternalRef: jest.Mock;
-  createUser: jest.Mock;
-  deactivateUser: jest.Mock;
-  grantRole: jest.Mock;
-  revokeRole: jest.Mock;
-  // Issue #149: profile (name/email) write-back + password-reset trigger.
-  updateUser: jest.Mock;
-  requestPasswordReset: jest.Mock;
-};
-
 // The transaction client the offboarding writes go through; $transaction runs the callback with it.
 // `userHistory.create` is present so the structural UserHistoryWriter type is satisfied when the real
 // service threads the tx client; the emission itself is asserted via the mocked UserHistoryService.
@@ -89,7 +69,7 @@ describe('UsersService', () => {
   let search: SearchMock;
   let tx: TxMock;
   let assignments: { releaseAllForUser: jest.Mock };
-  let idp: IdpMock;
+  const originalAuthMode = process.env.AUTH_MODE;
   // ADR-0086 §5 (F1c): the local provisioning primitive. Mocked so the local-mode create/reset tests
   // assert hash-store/temp-password behaviour without running argon2.
   let provisioning: {
@@ -218,20 +198,8 @@ describe('UsersService', () => {
     // AssetAssignmentsService is mocked; its own logic is covered in its spec. Default: no active
     // assignments to release.
     assignments = { releaseAllForUser: jest.fn().mockResolvedValue([]) };
-    // Default IdP: generic OIDC. Every management method is a spy that would succeed if called.
-    idp = {
-      kind: 'generic-oidc',
-      supportsManagement: false,
-      resolveExternalRef: jest.fn((sub: string) =>
-        Promise.resolve({ externalId: sub }),
-      ),
-      createUser: jest.fn().mockResolvedValue({ externalId: 'oidc-user-1' }),
-      deactivateUser: jest.fn().mockResolvedValue(undefined),
-      grantRole: jest.fn().mockResolvedValue(undefined),
-      revokeRole: jest.fn().mockResolvedValue(undefined),
-      updateUser: jest.fn().mockResolvedValue(undefined),
-      requestPasswordReset: jest.fn().mockResolvedValue(undefined),
-    };
+    // Default posture: OIDC. The local-mode blocks flip AUTH_MODE themselves.
+    process.env.AUTH_MODE = 'oidc';
     // Local provisioning primitive (ADR-0086 §5). Defaults return a deterministic hash fragment + temp
     // password so the local-mode tests can assert the stored fields without argon2.
     provisioning = {
@@ -287,7 +255,6 @@ describe('UsersService', () => {
         { provide: UserHistoryService, useValue: history },
         { provide: WorkflowTriggerService, useValue: workflowTrigger },
         { provide: AccessGrantsService, useValue: accessGrants },
-        { provide: IDENTITY_PROVIDER, useValue: idp as IdentityProvider },
         { provide: LocalProvisioningService, useValue: provisioning },
         { provide: PasswordLifecycleService, useValue: passwordLifecycle },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
@@ -295,6 +262,11 @@ describe('UsersService', () => {
     }).compile();
 
     service = moduleRef.get(UsersService);
+  });
+
+  afterEach(() => {
+    if (originalAuthMode === undefined) delete process.env.AUTH_MODE;
+    else process.env.AUTH_MODE = originalAuthMode;
   });
 
   it('OIDC create: a plain row + CREATED history, no IdP call (ADR-0102)', async () => {
@@ -323,7 +295,6 @@ describe('UsersService', () => {
       data: { ...dto, role: 'VIEWER' },
     });
     // externalId stays null: JIT links it on the person's first sign-in (ADR-0038).
-    expect(idp.createUser).not.toHaveBeenCalled();
     expect(user.update).not.toHaveBeenCalled();
     // Fire-and-forget search sync (ADR-0035).
     expect(search.upsert).toHaveBeenCalledWith('users', {
@@ -385,7 +356,6 @@ describe('UsersService', () => {
     await expect(service.create(dto)).rejects.toThrow('history write failed');
     // No compensation path: a created row is never hard-deleted (ADR-0102).
     expect(user.delete).not.toHaveBeenCalled();
-    expect(idp.createUser).not.toHaveBeenCalled();
   });
 
   // ADR-0064 (issue #411) — admin temporary-password provisioning lives only in local mode. Under OIDC
@@ -403,7 +373,6 @@ describe('UsersService', () => {
     );
     // Validated BEFORE the write: no row, no IdP call.
     expect(user.create).not.toHaveBeenCalled();
-    expect(idp.createUser).not.toHaveBeenCalled();
     expect(user.delete).not.toHaveBeenCalled();
     expect(search.upsert).not.toHaveBeenCalled();
     expect(history.record).not.toHaveBeenCalled();
@@ -413,8 +382,7 @@ describe('UsersService', () => {
   // 400); a no-password create lands password-less (imported / provision-later); directoryOnly unaffected.
   describe('local-mode create (ADR-0086 §5)', () => {
     beforeEach(() => {
-      idp.kind = 'local';
-      idp.supportsManagement = false;
+      process.env.AUTH_MODE = 'local';
     });
 
     it('hashes a supplied password onto passwordHash (mustChangePassword=true), no IdP call, no 400', async () => {
@@ -455,7 +423,6 @@ describe('UsersService', () => {
       });
       expect(createArg.data).not.toHaveProperty('password');
       // No IdP mirror at all in local mode.
-      expect(idp.createUser).not.toHaveBeenCalled();
       expect(user.update).not.toHaveBeenCalled();
       // The CREATED history row is still appended.
       expect(history.record).toHaveBeenCalledWith(
@@ -481,7 +448,6 @@ describe('UsersService', () => {
         user.create.mock.calls as Array<[{ data: Record<string, unknown> }]>
       )[0][0];
       expect(createArg.data).not.toHaveProperty('passwordHash');
-      expect(idp.createUser).not.toHaveBeenCalled();
     });
   });
 
@@ -506,7 +472,6 @@ describe('UsersService', () => {
         directoryAttrs: { jobTitle: 'Tech' },
       });
 
-      expect(idp.createUser).not.toHaveBeenCalled();
       // The row is created with directoryOnly=true + the routed directoryAttrs, role forced VIEWER.
       expect(user.create).toHaveBeenCalledWith({
         data: {
@@ -549,7 +514,6 @@ describe('UsersService', () => {
       )[0][0];
       expect(createArg.data.role).toBe('VIEWER');
       expect(createArg.data.directoryOnly).toBe(true);
-      expect(idp.createUser).not.toHaveBeenCalled();
     });
   });
 
@@ -571,8 +535,7 @@ describe('UsersService', () => {
     };
 
     beforeEach(() => {
-      idp.kind = 'local';
-      idp.supportsManagement = false;
+      process.env.AUTH_MODE = 'local';
     });
 
     it('mints + hashes a temp password, flips directoryOnly=false, keeps the role, audits UPDATED, returns the temp password once', async () => {
@@ -631,7 +594,7 @@ describe('UsersService', () => {
     });
 
     it('400 in OIDC mode — no credential is ever minted (invariant not bypassed)', async () => {
-      idp.kind = 'generic-oidc';
+      process.env.AUTH_MODE = 'oidc';
       user.findFirst.mockResolvedValue(DIRECTORY);
 
       await expect(
@@ -866,7 +829,6 @@ describe('UsersService', () => {
     ).resolves.toMatchObject({ userId: 'uuid-1' });
 
     // Disabling the IdP account is the operator's step; nothing inside the transaction is a network call.
-    expect(idp.deactivateUser).not.toHaveBeenCalled();
     const updateCalls = tx.user.update.mock.calls as Array<
       [{ data: { deletedAt: Date } }]
     >;
@@ -1219,7 +1181,6 @@ describe('UsersService', () => {
       await service.updateOwnProfile(linked as never, { lastName: 'Newer' });
 
       expect(user.update).toHaveBeenCalledTimes(1);
-      expect(idp.updateUser).not.toHaveBeenCalled();
     });
   });
 
@@ -1985,9 +1946,6 @@ describe('UsersService', () => {
         email: 'new@b.com',
         externalId: 'oidc-sub-9',
       });
-      expect(idp.grantRole).not.toHaveBeenCalled();
-      expect(idp.revokeRole).not.toHaveBeenCalled();
-      expect(idp.updateUser).not.toHaveBeenCalled();
       expect(history.record).toHaveBeenCalledWith(tx, {
         userId: 'member-1',
         eventType: 'ROLE_CHANGED',
@@ -2018,7 +1976,6 @@ describe('UsersService', () => {
 
       // One write, no compensating second update that could leave isActive behind.
       expect(user.update).toHaveBeenCalledTimes(1);
-      expect(idp.updateUser).not.toHaveBeenCalled();
       expect(history.record).toHaveBeenCalledWith(
         tx,
         expect.objectContaining({ eventType: 'DEACTIVATED' }),
@@ -2108,7 +2065,6 @@ describe('UsersService', () => {
           linkOrigin: 'https://lazyit.example.com',
         }),
       ).rejects.toBeInstanceOf(PasswordResetUnsupportedError);
-      expect(idp.requestPasswordReset).not.toHaveBeenCalled();
       // Nothing went out → no PASSWORD_RESET_SENT row, and the credential is untouched.
       expect(history.record).not.toHaveBeenCalled();
       expect(user.update).not.toHaveBeenCalled();
@@ -2150,8 +2106,7 @@ describe('UsersService', () => {
     // ADR-0086 §5 (F1c): local mode mints a temp-password directly — no IdP, no 501.
     describe('local mode', () => {
       beforeEach(() => {
-        idp.kind = 'local';
-        idp.supportsManagement = false;
+        process.env.AUTH_MODE = 'local';
       });
 
       it('mints + hashes a temp-password, bumps sessionEpoch, audits PASSWORD_RESET_BY_ADMIN, returns the temp password (no IdP call, no 501)', async () => {
@@ -2190,7 +2145,6 @@ describe('UsersService', () => {
           sessionsRevoked: true,
         });
         // NO IdP call in local mode.
-        expect(idp.requestPasswordReset).not.toHaveBeenCalled();
         // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject.
         expect(history.record).toHaveBeenCalledWith(
           expect.anything(),
@@ -2386,7 +2340,7 @@ describe('UsersService', () => {
   // Issue #1268 — what the reset dialog may offer, resolved server-side (GET /users/password-reset-capabilities).
   describe('passwordResetCapabilities', () => {
     it('local + SMTP ready + a known origin: every capability is available, no reason', async () => {
-      idp.kind = 'local';
+      process.env.AUTH_MODE = 'local';
       passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
 
       await expect(
@@ -2399,7 +2353,7 @@ describe('UsersService', () => {
     });
 
     it('local + SMTP off: email is unavailable with smtp-not-configured, temp-password still offered', async () => {
-      idp.kind = 'local';
+      process.env.AUTH_MODE = 'local';
       passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
 
       await expect(
@@ -2413,7 +2367,7 @@ describe('UsersService', () => {
     });
 
     it('local + SMTP ready but no resolvable origin: origin-unknown', async () => {
-      idp.kind = 'local';
+      process.env.AUTH_MODE = 'local';
       passwordLifecycle.isOutboundEmailReady.mockResolvedValue(true);
 
       await expect(service.passwordResetCapabilities(null)).resolves.toEqual({
@@ -2425,7 +2379,7 @@ describe('UsersService', () => {
     });
 
     it('names SMTP first when BOTH are missing — the operator should not be sent to the wrong setting', async () => {
-      idp.kind = 'local';
+      process.env.AUTH_MODE = 'local';
       passwordLifecycle.isOutboundEmailReady.mockResolvedValue(false);
 
       await expect(
@@ -2436,7 +2390,7 @@ describe('UsersService', () => {
     });
 
     it('OIDC: everything false and NO reason — the IdP owns resets, there is nothing to fix here', async () => {
-      idp.kind = 'generic-oidc';
+      process.env.AUTH_MODE = 'oidc';
 
       await expect(
         service.passwordResetCapabilities('https://lazyit.example.com'),

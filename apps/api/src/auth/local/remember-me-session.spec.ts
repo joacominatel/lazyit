@@ -30,7 +30,6 @@ import { AssetHistoryService } from '../../asset-history/asset-history.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigger.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
-import { IDENTITY_PROVIDER } from '../identity/identity-provider.interface';
 import { DirectoryReconcileService } from '../../directory/directory-reconcile.service';
 import { inMemoryUserSessions } from './user-session-table.harness-spec';
 import type { DirectoryConnectionService } from '../../directory/directory-connection.service';
@@ -241,10 +240,6 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         { provide: UserHistoryService, useValue: history },
         { provide: WorkflowTriggerService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
-        {
-          provide: IDENTITY_PROVIDER,
-          useValue: { kind: 'local', supportsManagement: false },
-        },
         {
           provide: LocalProvisioningService,
           useValue: new LocalProvisioningService(credentials),

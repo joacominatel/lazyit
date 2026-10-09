@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -43,11 +42,7 @@ import { UserHistoryService } from '../user-history/user-history.service';
 import { toThemePreference, toUiLocale } from './user-preferences.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
-import {
-  IDENTITY_PROVIDER,
-  PasswordResetUnsupportedError,
-  type IdentityProvider,
-} from '../auth/identity/identity-provider.interface';
+import { resolveIntegrationMode } from '../config/integration-mode';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import {
   AdminResetLinkError,
@@ -61,6 +56,19 @@ import {
  * an address is NOT a real mailbox, so a person carrying it can never auto-promote by verified-email login.
  */
 export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
+
+/**
+ * Thrown by {@link UsersService.requestPasswordReset} outside local mode: the operator's IdP owns the
+ * reset. The controller maps it to a 501, never a 2xx that pretends a reset was sent (INV-4).
+ */
+export class PasswordResetUnsupportedError extends Error {
+  constructor(
+    message = 'Password reset is managed by your identity provider; lazyit cannot trigger it.',
+  ) {
+    super(message);
+    this.name = 'PasswordResetUnsupportedError';
+  }
+}
 
 /** The manager-bearing columns a user row carries (ADR-0058) — the subset the read descriptor needs. */
 type ManagerColumns = { managerId: string | null; managerName: string | null };
@@ -188,10 +196,7 @@ export class UsersService {
     // emitter post-commit to fire the SAME admin_granted / critical_app_access nudges a hand-created
     // grant produces. The bell is admin VISIBILITY — independent of the engine fire toggle.
     private readonly accessGrants: AccessGrantsService,
-    // Read only for `kind` (local vs OIDC). Nothing is written back to the IdP (ADR-0102).
-    @Inject(IDENTITY_PROVIDER)
-    private readonly idp: IdentityProvider,
-    // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the `kind==='local'`
+    // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the local-mode
     // branches of create() + requestPasswordReset() to hash/store passwords and mint temp-passwords —
     // no IdP mirror. Global (AuthModule), so no module import is needed here.
     private readonly provisioning: LocalProvisioningService,
@@ -205,7 +210,7 @@ export class UsersService {
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086 §5). */
   private isLocalMode(): boolean {
-    return this.idp.kind === 'local';
+    return resolveIntegrationMode(process.env.AUTH_MODE) === 'local';
   }
 
   /**
