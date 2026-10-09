@@ -3,7 +3,7 @@ title: "Workflow Engine — Map of Content"
 tags: [workflow-engine, moc, index, access]
 status: draft
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-10-09
 ---
 
 # Workflow Engine — Map of Content
@@ -16,6 +16,13 @@ updated: 2026-06-07
 >
 > **Start here:** read [[_synthesis]] first — it is the binding architecture; the seven area docs
 > below are its depth.
+
+> [!note] Zitadel references are historical (2026-10-09)
+> These dossiers were written while lazyit bundled Zitadel and wrote roles back to it. The Zitadel
+> services, the Management-API client (`zitadel-management.service.ts`), the `IdentityProvider` factory and
+> the synchronous write-back they contrast with or cite as precedent were removed by
+> [[0102-remove-bundled-zitadel]]. The engine's own rules — fire after the grant commits, bounded retry,
+> the connector model — stand on their own and are unchanged.
 
 ## The synthesis (read first)
 
