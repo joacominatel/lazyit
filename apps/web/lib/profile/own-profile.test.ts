@@ -44,7 +44,6 @@ describe("ownProfileErrorKind", () => {
     expect(
       ownProfileErrorKind(new ApiError(403, "x", { code: "SERVICE_ACCOUNT_NOT_ALLOWED" })),
     ).toBe("serviceAccount");
-    expect(ownProfileErrorKind(new ApiError(503, "x"))).toBe("identityProviderUnavailable");
     expect(ownProfileErrorKind(new ApiError(400, "x"))).toBe("invalid");
   });
 
@@ -52,5 +51,9 @@ describe("ownProfileErrorKind", () => {
     expect(ownProfileErrorKind(new ApiError(409, "x", { code: "OTHER" }))).toBe("generic");
     expect(ownProfileErrorKind(new ApiError(403, "x"))).toBe("generic");
     expect(ownProfileErrorKind(new Error("network"))).toBe("generic");
+  });
+
+  test("a 503 is not a documented refusal any more and gets the generic error", () => {
+    expect(ownProfileErrorKind(new ApiError(503, "x"))).toBe("generic");
   });
 });
