@@ -288,12 +288,14 @@ Instance** before and after.
 > `prisma migrate deploy`, which applies every pending migration **in sequence** ([[prisma-migrations]]), so
 > you never step through intermediate versions by hand. The **only** stop is a **major** in the range — apply
 > its *⚠️ Upgrade actions* before jumping past it. The guided **`infra/update.sh`**
-> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified dual backup → release-tag check
+> ([[0084-update-awareness-and-guided-update]]) automates the pull → verified backup → release-tag check
 > (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must
 > not be bad) → build → migrate → health-gate sequence and blocks one-click across a major. **On v2.0.0 or
 > earlier, update to v2.1.0 by hand** (`git fetch --tags && git checkout v2.1.0 && ./infra/start.sh`,
 > after a backup): the `update.sh` you already have — the one that runs — stops at its old signature check
-> on every automated release tag (#1458); the fixed one works from v2.1.0 on ([[releasing]]).
+> on every automated release tag (#1458); the fixed one works from v2.1.0 on ([[releasing]]). **On v2.1.0 with
+> local or BYOI auth, take the next release by hand the same way**: that `update.sh` stops at its backup step,
+> because it also dumps a Zitadel database those installs do not run (#1545).
 
 > [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
 > Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is
