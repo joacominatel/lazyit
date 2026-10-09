@@ -874,7 +874,7 @@ export class ImportCommitService {
    * we `findMany` the matching live users and branch on the DISTINCT id count: >1 → ambiguous (don't link);
    * exactly 1 → link (precedence email > legajo > username for the multi-key single-user case); 0 → create.
    *
-   * On a miss we create via UsersService.create with `skipIdpWriteBack` (a directory person) + the import
+   * On a miss we create via UsersService.create with `directoryOnly` (a directory person) + the import
    * provenance, role FORCED to VIEWER, `externalId` null. We re-validate against CreateDirectoryPersonSchema
    * first (defense-in-depth: the coerced bucket is re-checked strict at commit time). The single `name`
    * is split into the required firstName/lastName; jobTitle/department → directoryAttrs (jsonb); supervisor
@@ -1008,7 +1008,7 @@ export class ImportCommitService {
       },
       actorId,
       {
-        skipIdpWriteBack: true,
+        directoryOnly: true,
         createdPayload: { source: 'import', sessionId, rowIndex },
         ...(Object.keys(directoryAttrs).length > 0
           ? { directoryAttrs: directoryAttrs as Prisma.InputJsonValue }

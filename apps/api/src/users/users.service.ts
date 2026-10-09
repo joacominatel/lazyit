@@ -560,13 +560,13 @@ export class UsersService {
       // row. NEVER client-supplied: the public Users controller never passes it; only the import
       // commit engine (a trusted server caller) does. The role is FORCED to VIEWER here regardless of
       // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
-      skipIdpWriteBack?: boolean;
+      directoryOnly?: boolean;
       directoryAttrs?: Prisma.InputJsonValue;
       // ADR-0091 (#839): AD/LDAP directory-source provenance stamped on the NEW directory person. Only the
       // read-only directory reconcile (a trusted server caller) passes these; the public Users controller
       // never does. `directorySource` discriminates the origin ("ad"); `directorySourceId` is the AD
       // objectGUID canonical string — the immutable natural key the reconcile upserts on (NEVER externalId,
-      // INV-2). Both are additive to the existing skipIdpWriteBack branch and change none of its invariants
+      // INV-2). Both are additive to the existing directoryOnly branch and change none of its invariants
       // (role stays VIEWER, externalId stays null, no login).
       directorySource?: string;
       directorySourceId?: string;
@@ -577,9 +577,7 @@ export class UsersService {
     // default) so the service is the authoritative default for app-created users and the behaviour is
     // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
     // A directory-only person is ALWAYS VIEWER — never trust the payload (which can't carry role anyway).
-    const role = opts?.skipIdpWriteBack
-      ? Role.VIEWER
-      : (data.role ?? Role.VIEWER);
+    const role = opts?.directoryOnly ? Role.VIEWER : (data.role ?? Role.VIEWER);
     // Resolve the manager either/or → DB columns (ADR-0058). On create there is no subject yet, so no
     // cycle is possible; the FK-live + at-most-one checks still apply. Then build the explicit create
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
@@ -590,7 +588,7 @@ export class UsersService {
     // `directoryOnly`/`directoryAttrs`, persist the row, record its CREATED history (correlated to the
     // import session via `createdPayload`), sync search, and return. `externalId` stays null (SEC-006);
     // `role` is VIEWER (forced above).
-    if (opts?.skipIdpWriteBack) {
+    if (opts?.directoryOnly) {
       const directoryUser = await this.prisma.user.create({
         data: {
           ...createData,
@@ -723,7 +721,9 @@ export class UsersService {
       });
       return updated;
     });
-    this.auditWriteBack('provisionLocalAccount', actorId, id, { local: true });
+    this.logCredentialChange('provisionLocalAccount', actorId, id, {
+      local: true,
+    });
     this.search.upsert('users', projectUser(onboarded));
     // The plaintext is returned to the admin to hand off ONCE — never stored in plaintext or shown again.
     return { temporaryPassword };
@@ -754,8 +754,8 @@ export class UsersService {
     };
   }
 
-  /** Structured audit line for a successful IdP write-back (ADR-0043 §3 — no DB audit table yet). */
-  private auditWriteBack(
+  /** Structured log line for an admin-driven local credential change; UserHistory is the durable audit. */
+  private logCredentialChange(
     operation: string,
     actorId: string | undefined,
     subjectUserId: string,
@@ -763,7 +763,7 @@ export class UsersService {
   ): void {
     this.logger.info(
       { op: operation, actor: actorId ?? 'system', subjectUserId, fields },
-      `IdP write-back: ${operation}`,
+      `Local credential change: ${operation}`,
     );
   }
 
@@ -1045,7 +1045,9 @@ export class UsersService {
           mcpCredentialEpoch: { increment: 1 },
         },
       });
-      this.auditWriteBack('resetPasswordByAdmin', actorId, id, { local: true });
+      this.logCredentialChange('resetPasswordByAdmin', actorId, id, {
+        local: true,
+      });
       // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
       // plaintext is ever recorded (the payload carries nothing sensitive).
       await this.recordHistory(
@@ -1125,7 +1127,7 @@ export class UsersService {
       });
     }
 
-    this.auditWriteBack('resetPasswordLinkByAdmin', actorId, user.id, {
+    this.logCredentialChange('resetPasswordLinkByAdmin', actorId, user.id, {
       local: true,
       sessionsRevoked,
     });

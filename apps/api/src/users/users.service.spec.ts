@@ -217,7 +217,7 @@ describe('UsersService', () => {
       }),
       isOutboundEmailReady: jest.fn().mockResolvedValue(true),
     };
-    // A no-op PinoLogger stand-in (the service uses it for structured write-back audit lines).
+    // A no-op PinoLogger stand-in (the service uses it for structured credential-change lines).
     const logger = {
       info: jest.fn(),
       warn: jest.fn(),
@@ -451,8 +451,8 @@ describe('UsersService', () => {
     });
   });
 
-  // ADR-0069 REDESIGN §4.5 (Etapa 2): the directory-only create branch (`skipIdpWriteBack`).
-  describe('directory-only create (skipIdpWriteBack, ADR-0069 REDESIGN §4.5)', () => {
+  // ADR-0069 REDESIGN §4.5 (Etapa 2): the directory-only create branch (`directoryOnly`).
+  describe('directory-only create (directoryOnly, ADR-0069 REDESIGN §4.5)', () => {
     it('creates a directory person WITHOUT calling the IdP', async () => {
       const dto = { email: 'dir@b.com', firstName: 'Dir', lastName: 'Person' };
       const created = {
@@ -467,7 +467,7 @@ describe('UsersService', () => {
       user.create.mockResolvedValue(created);
 
       const result = await service.create(dto, 'actor-1', {
-        skipIdpWriteBack: true,
+        directoryOnly: true,
         createdPayload: { source: 'import', sessionId: 's1', rowIndex: 0 },
         directoryAttrs: { jobTitle: 'Tech' },
       });
@@ -505,7 +505,7 @@ describe('UsersService', () => {
       };
       user.create.mockResolvedValue({ id: 'uuid-d2', ...dto, role: 'VIEWER' });
 
-      await service.create(dto, undefined, { skipIdpWriteBack: true });
+      await service.create(dto, undefined, { directoryOnly: true });
 
       const createArg = (
         user.create.mock.calls as Array<
