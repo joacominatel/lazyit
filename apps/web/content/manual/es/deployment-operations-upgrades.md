@@ -64,7 +64,7 @@ consultando `GET /infra/graph/nodes`; no reemplaces el mapa por la lista paginad
 lazyit ya no incluye un proveedor de identidad propio: las personas inician sesión con cuentas locales o
 a través de tu propio proveedor OIDC (consulta
 [Proveedor de identidad](/help/deployment-operations-identity-provider)). Las instalaciones que ya usan
-cualquiera de las dos no se ven afectadas. Si `./infra/start.sh` o la API se niegan a arrancar porque
+cualquiera de las dos no se ven afectadas. Si `./infra/start.sh`, `./infra/update.sh` o la API se niegan a arrancar porque
 encontraron restos del antiguo proveedor incluido, no se cambió nada — ni se escribió ningún archivo ni
 se eliminó ningún volumen. Sigue la guía de migración del repositorio,
 `docs/05-runbooks/migrate-off-bundled-zitadel.md`, o quédate en la versión anterior hasta que puedas.

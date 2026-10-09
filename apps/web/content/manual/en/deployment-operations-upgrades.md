@@ -61,7 +61,7 @@ use `GET /infra/graph/nodes`; do not substitute the paged list for the map.
 
 lazyit no longer ships a built-in identity provider: people sign in with local accounts or through your
 own OIDC provider (see [Identity provider](/help/deployment-operations-identity-provider)). Installs on
-either of those are unaffected. If `./infra/start.sh` or the API refuses to start because it found a
+either of those are unaffected. If `./infra/start.sh`, `./infra/update.sh` or the API refuses to start because it found a
 leftover of the old bundled provider, nothing was changed — no file written, no volume removed.
 Follow the migration runbook in the repository,
 `docs/05-runbooks/migrate-off-bundled-zitadel.md`, or stay on the previous release until you can.
