@@ -3,6 +3,7 @@ import type {
   ArticleLinkedFilter,
   ArticleLinkedTo,
   ArticleListPage,
+  ArticleListSort,
   ArticleStatus,
   CreateArticle,
   ImportArticle,
@@ -56,6 +57,11 @@ export const deleteArticle = crud.remove;
  * OR-combine within a param and across the two params (linked to one of these assets OR these apps);
  * selecting any id implies `linked: "only"`. Comma-encoded like the other multi-value filters; each
  * element is validated as a cuid server-side (unknown -> 400).
+ *
+ * `sort` (#1539) picks the order: `updated` (the server default, newest first), `title` (A to Z) or
+ * `created` (newest first). Leave it undefined for the default so the default list keeps one query key.
+ * `includeSubfolders` (#1539) widens a `categoryId` filter to each folder plus its live descendants;
+ * folder access still applies. It is sent only when true.
  */
 export interface ArticleFilters {
   categoryId?: string[];
@@ -66,6 +72,8 @@ export interface ArticleFilters {
   linkedTo?: ArticleLinkedTo[];
   assetId?: string[];
   applicationId?: string[];
+  sort?: ArticleListSort;
+  includeSubfolders?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -98,6 +106,8 @@ export function getArticles(
   if (filters.assetId?.length) params.set("assetId", filters.assetId.join(","));
   if (filters.applicationId?.length)
     params.set("applicationId", filters.applicationId.join(","));
+  if (filters.sort) params.set("sort", filters.sort);
+  if (filters.includeSubfolders) params.set("includeSubfolders", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

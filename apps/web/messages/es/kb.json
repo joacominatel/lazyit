@@ -2,13 +2,12 @@
   "breadcrumb": "Base de conocimiento",
   "list": {
     "title": "Base de conocimiento",
-    "subtitle": "Documentación interna para el equipo.",
     "newArticle": "Nuevo artículo",
     "searchLabel": "Buscar artículos",
     "searchPlaceholder": "Buscar artículos…",
     "errorTitle": "No se pudieron cargar los artículos",
     "noMatchFilters": "Ningún artículo coincide con tus filtros.",
-    "noArticlesInFolder": "Aún no hay artículos en esta carpeta — abre una subcarpeta de arriba para seguir explorando.",
+    "noArticlesInFolder": "Aún no hay artículos en esta carpeta.",
     "emptyTitle": "Aún no hay artículos",
     "emptyDescription": "Documenta lo que sabe tu equipo: runbooks, guías paso a paso, notas de onboarding. Escribe tu primer artículo o importa uno desde un archivo.",
     "emptyAction": "Escribe tu primer artículo",
@@ -17,7 +16,10 @@
     "formerMember": "Ex-miembro",
     "uncategorized": "Sin categoría",
     "linkedCount": "{count} vinculados",
-    "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}"
+    "linkedTooltip": "{count, plural, one {Vinculado a # elemento} other {Vinculado a # elementos}}",
+    "draftTooltip": "Solo tú lo ves hasta que lo publiques",
+    "noSummary": "Sin resumen",
+    "readingShort": "{minutes} min"
   },
   "search": {
     "degradedNote": "La búsqueda de texto completo no está disponible ahora mismo — se muestran coincidencias por título y resumen.",
@@ -35,7 +37,6 @@
     "noResults": "Ningún artículo coincide con “{query}”."
   },
   "filters": {
-    "statusLabelName": "Estado",
     "linkedToLabelName": "Destino",
     "assetLabelName": "Activos",
     "applicationLabelName": "Aplicaciones",
@@ -46,15 +47,10 @@
     "linkedOnly": "Solo vinculados",
     "filtersButton": "Filtros",
     "chipSearch": "Búsqueda: “{query}”",
-    "chipStatus": "Estado: {value}",
     "chipCategory": "Categoría: {value}",
     "chipLinkedTo": "Vinculado a: {value}",
     "chipAsset": "Activo: {value}",
     "chipApplication": "Aplicación: {value}",
-    "statusLabel": {
-      "drafts": "Borradores",
-      "published": "Publicados"
-    },
     "linkedToLabel": {
       "assets": "Activos",
       "applications": "Aplicaciones"
@@ -241,21 +237,19 @@
   },
   "folders": {
     "treeLabel": "Explorar carpetas",
-    "mobileToggle": "Carpetas",
-    "allArticles": "Todos los artículos",
     "empty": "Aún no hay carpetas",
     "expand": "Expandir {name}",
     "collapse": "Contraer {name}",
     "subfoldersLabel": "Subcarpetas",
-    "childFolderCount": "{count, plural, one {# subcarpeta} other {# subcarpetas}}",
     "articleCount": "{count, plural, one {# artículo} other {# artículos}}",
     "emptyFolder": "Carpeta vacía",
     "actions": {
       "menuTitle": "Acciones de carpeta",
       "menuAriaLabel": "Acciones de {name}",
       "newChild": "Nueva subcarpeta aquí",
-      "rename": "Renombrar",
-      "move": "Mover a…"
+      "move": "Mover a…",
+      "edit": "Editar",
+      "access": "Acceso…"
     },
     "form": {
       "newRoot": "Nueva carpeta",
@@ -263,17 +257,24 @@
       "createRootDescription": "Una carpeta de primer nivel en la Base de conocimiento.",
       "createInTitle": "Nueva carpeta en {name}",
       "createDescription": "Se crea dentro de la carpeta que elegiste. Las carpetas pueden anidarse sin límite de profundidad.",
-      "renameTitle": "Renombrar carpeta",
-      "renameDescription": "Renombrar una carpeta no la mueve ni cambia quién puede leerla.",
       "nameLabel": "Nombre",
       "namePlaceholder": "p. ej. Firewalls",
       "nameRequired": "Escribe un nombre de carpeta",
       "create": "Crear carpeta",
       "save": "Guardar",
       "created": "Carpeta creada",
-      "renamed": "Carpeta renombrada",
       "createError": "No se pudo crear la carpeta",
-      "renameError": "No se pudo renombrar la carpeta"
+      "editTitle": "Editar carpeta",
+      "editDescription": "Cambiar el nombre o la descripción no mueve la carpeta ni cambia quién puede leerla.",
+      "editError": "No se pudo guardar la carpeta",
+      "saved": "Carpeta guardada",
+      "descriptionLabel": "Descripción",
+      "descriptionPlaceholder": "Qué hay en esta carpeta, en una frase",
+      "descriptionTooLong": "La descripción debe tener menos de 1000 caracteres",
+      "orderLabel": "Orden",
+      "orderHint": "Opcional. Los números más bajos van primero; las carpetas sin orden van después, por nombre.",
+      "orderInvalid": "Escribe un número entero",
+      "cannotClear": "Esto se puede cambiar, pero todavía no quitar: se mantiene el valor actual."
     },
     "move": {
       "title": "Mover carpeta",
@@ -366,8 +367,6 @@
     "restrictedAriaLabel": "Carpeta restringida",
     "inheritedRestrictedTooltip": "Restringido — heredado de {name}",
     "inheritedRestrictedAriaLabel": "Carpeta restringida (heredada de {name})",
-    "editRulesAriaLabel": "Editar reglas de acceso para {name}",
-    "editRulesTitle": "Editar reglas de acceso",
     "editorTitle": "Reglas de acceso",
     "addRuleKindLabel": "Tipo de regla",
     "addRulePlaceholder": "Añadir una regla…",
@@ -422,5 +421,96 @@
         "description": "“{name}” se mueve a {destination}, que hereda otras reglas de acceso. Los artículos que contiene, y los de sus subcarpetas, seguirán las reglas de la nueva ubicación, y esto puede permitir que más personas los lean."
       }
     }
+  },
+  "rail": {
+    "mobileToggle": "Vistas y carpetas",
+    "views": "Vistas",
+    "folders": "Carpetas",
+    "view": {
+      "all": "Todos los artículos",
+      "drafts": "Mis borradores",
+      "recent": "Recientes",
+      "linked": "Vinculados a activos y apps"
+    }
+  },
+  "table": {
+    "article": "Artículo",
+    "folder": "Carpeta",
+    "author": "Autor",
+    "reading": "Lectura",
+    "updated": "Actualizado",
+    "opened": "Abierto"
+  },
+  "home": {
+    "stats": {
+      "articles": "{count, plural, one {<n>#</n> artículo} other {<n>#</n> artículos}}",
+      "published": "{count, plural, one {<n>#</n> publicado} other {<n>#</n> publicados}}",
+      "drafts": "{count, plural, one {<n>#</n> borrador tuyo} other {<n>#</n> borradores tuyos}}",
+      "folders": "{count, plural, one {<n>#</n> carpeta} other {<n>#</n> carpetas}}"
+    },
+    "foldersTitle": "Carpetas",
+    "showAll": "Ver todas ({count})",
+    "showFewer": "Ver menos",
+    "card": {
+      "articles": "{count, plural, one {<n>#</n> artículo} other {<n>#</n> artículos}}",
+      "subfolders": "{count, plural, one {<n>#</n> subcarpeta} other {<n>#</n> subcarpetas}}"
+    },
+    "articlesTitle": "Artículos"
+  },
+  "segment": {
+    "label": "Filtrar por estado",
+    "all": "Todos",
+    "published": "Publicados",
+    "drafts": "Borradores"
+  },
+  "sort": {
+    "label": "Ordenar por",
+    "ariaLabel": "Orden: {value}",
+    "updated": "Actualizados",
+    "title": "Título",
+    "created": "Creados"
+  },
+  "folderHeader": {
+    "subfolder": "Subcarpeta",
+    "newArticleHere": "Artículo aquí",
+    "facts": {
+      "whoCanSee": "Quién la ve",
+      "articles": "Artículos",
+      "subfolders": "Subcarpetas",
+      "lastChange": "Último cambio"
+    },
+    "access": {
+      "everyone": "Todos con acceso a la base",
+      "inherited": "Restringida · por {name}",
+      "only": "Solo",
+      "orSeparator": " o ",
+      "listSeparator": ", ",
+      "people": "{count, plural, one {# persona} other {# personas}}",
+      "appHolders": "quienes tienen acceso a {name}",
+      "assetAssignees": "quienes tienen asignado {name}"
+    }
+  },
+  "folderView": {
+    "listTitle": "En esta carpeta",
+    "includeSubfolders": "Incluir subcarpetas",
+    "missingTitle": "Carpeta no encontrada",
+    "missingSubtitle": "Puede que se haya eliminado o que no tengas acceso a ella."
+  },
+  "views": {
+    "drafts": {
+      "title": "Mis borradores",
+      "subtitle": "Solo tú ves tus borradores hasta que los publiques."
+    },
+    "linked": {
+      "title": "Vinculados a activos y apps",
+      "subtitle": "Artículos conectados con al menos un activo o una aplicación."
+    },
+    "recent": {
+      "title": "Recientes",
+      "subtitle": "Artículos que abriste en este navegador, del más reciente al más antiguo. Se guardan solo en este dispositivo.",
+      "clear": "Vaciar lista",
+      "empty": "Todavía nada. Los artículos que abras aparecerán aquí."
+    },
+    "empty": "Todavía no hay artículos aquí."
   }
 }

@@ -134,6 +134,35 @@ sections.
 - **Actions**: the everyday ones stay visible (one primary fill), the rest go in a `⋯` menu with
   destructive items last, behind a separator.
 
+### KB browse (#1539)
+
+The Knowledge Base browse page (`app/(app)/kb/`) applies the same frame to a collection rather than a
+record. Its layout follows the URL (`lib/utils/kb-browse.ts`), so the rail, the page and a shared link
+always agree, and nothing about *where you are* lives in component state.
+
+- **Rail** (`lg:w-72`, in the persistent `KbShell`): a **Views** list (All articles · My drafts ·
+  Recent · Linked) over a **Folders** tree, each section under a small uppercase label; the folders
+  label carries the only "+" (new root folder). Views carry mono counts from `limit: 1` reads. A folder
+  row is chevron · colour tile · name · padlock (only when restricted, one icon, muted when inherited)
+  · mono count, then a `⋯` trigger that shows on hover, focus-within, selection and always under
+  `[@media(hover:none)]`. Low-frequency actions (Edit, Move, Access, Delete) live in that menu, never
+  as always-visible icon buttons.
+- **Colour tile**: a folder's hue is one of the five `--chart-*` tints, hashed from its id
+  (`lib/utils/kb-folder-color.ts`) — a `/15` tint plus the glyph in the full hue, decorative only
+  (the name is always beside it), so it stays inside the chart-hue AA rule.
+- **Home**: `PageHeader` with one stats sentence (mono figures) instead of a subtitle, the search box,
+  root-folder cards (tile, name, two-line description, counts, "Restricted"), then the table.
+- **Folder header**: §4b's summary card — breadcrumb above, tile + name + description + actions
+  (one primary: "New article here"; "Subfolder" outline; the rest in `⋯`), then `RecordFacts`: Who can
+  see · Articles · Subfolders · Last change. Sub-folders follow as chips.
+- **Table**: a CSS-grid list inside a `@container` card, one link per row, an `aria-hidden` column
+  header row. Columns are chosen by **container** width (`@xl`, `@2xl`/`@3xl`), not viewport, because
+  the room depends on the app sidebar and the rail; below `@xl` rows stack to two lines. Data cells
+  (reading time, relative dates) are mono; the full date rides in `title`.
+- **Controls above a list**: a status segmented control (`aria-pressed` toggles with counts), a Sort
+  dropdown and a Filters popover for the rarer narrowing; active narrowing shows as chips. Anything that
+  changes *how* the list is shown (sort, include sub-folders) survives "Clear filters".
+
 ## 4c. Settings pages
 
 Every page under `/settings` (#1533) is a configuration surface, not documentation. They share one frame,

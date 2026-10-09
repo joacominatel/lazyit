@@ -59,9 +59,10 @@ export function singleCategoryId(raw: string | null | undefined): string | null 
  * The href a folder pick navigates to, preserving the caller's current query string. Always targets
  * `/kb` (browse) — clicking a folder from a reading route takes you to that folder's browse list.
  * `offset` (paging) and `q` (an active search — Meili search is not folder-scoped, so a folder pick is
- * a "browse this folder" intent) are dropped; any other filters (status/linked/…) are preserved.
- * `folderId === null` clears the folder filter ("All articles"). `currentSearch` is a raw query string
- * (`URLSearchParams`-parseable, no leading `?`).
+ * a "browse this folder" intent) are dropped, and so is `view` (the Recent view is not folder-scoped,
+ * #1539); any other filters (status/linked/sort/…) are preserved. `folderId === null` clears the folder
+ * filter ("All articles") together with `includeSubfolders`, which only means something inside a
+ * folder. `currentSearch` is a raw query string (`URLSearchParams`-parseable, no leading `?`).
  */
 export function kbFolderHref(
   currentSearch: string,
@@ -70,8 +71,13 @@ export function kbFolderHref(
   const params = new URLSearchParams(currentSearch);
   params.delete("offset");
   params.delete("q");
-  if (folderId) params.set("categoryId", folderId);
-  else params.delete("categoryId");
+  params.delete("view");
+  if (folderId) {
+    params.set("categoryId", folderId);
+  } else {
+    params.delete("categoryId");
+    params.delete("includeSubfolders");
+  }
   const qs = params.toString();
   return qs ? `/kb?${qs}` : "/kb";
 }
