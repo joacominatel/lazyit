@@ -13,47 +13,58 @@ locked. This page walks through the editor.
 
 You need the **Change instance settings** capability (admin by default) to open it.
 
-## Open the editor
+## Open the matrix
 
-Go to **Settings → Roles**. Each role shows who holds it and a short summary of what it can do. Admin
-reads **Full access — not editable**. For Member or Viewer, choose **Edit permissions** to open the
-**Role permissions** editor.
+Go to **Settings → Roles & permissions**. The page is one table: **capabilities** in the rows, the three
+**roles** in the columns, so you compare Member and Viewer side by side.
 
-The editor works on **one role at a time**. Pick **Member** or **Viewer** at the top; Admin is shown
-but locked.
+- **Admin** is a locked reference column: every capability is granted and nothing can be changed.
+- **Member** and **Viewer** are editable. Each column header shows how many people hold the role — click
+  it to open the [Users list](/help/users-permissions-user-lifecycle) filtered to that role — and the
+  role's **preset**.
+
+The **?** next to the page title explains the three roles and reminds you that these permissions stay
+inside lazyit.
 
 ## Three ways to edit
 
-- **Presets** — **Start from a preset** applies a sensible ready-made set as a starting point. From
-  there you can adjust individual capabilities. If your set matches no preset, lazyit labels it
-  **Custom**.
-- **Capability toggles** — plain-language switches grouped by area (Inventory, Access, Knowledge,
-  Manage, Automation, AI). Each toggle maps to one or more underlying permissions; flip it to grant or
-  remove that capability for the role. The **AI** area holds **Use the AI assistant** (`ai:use`) and
-  **Connect external AI agents (MCP)** (`ai:connect`); neither is admin-level, because the assistant and
-  agents only ever act with the role's own permissions — see
-  [AI assistant — overview](/help/ai-assistant-overview#who-can-use-it).
-- **Fine-tune (advanced)** — an optional disclosure where each switch is a single raw permission
-  (`area:action`), for exact control. Changing one here flips the role to a **Custom** set and updates
-  the capability toggles above to match.
+- **Presets** — the selector in a role's column header applies a ready-made set to that role:
+  **Editor**, **Read-only** or **Inventory operator**. From there you can adjust individual
+  capabilities. When the set matches no preset, the selector reads **Custom**.
+- **Capability checkboxes** — plain-language capabilities grouped by area (Inventory, Access, Knowledge,
+  Manage, Automation, AI). Each maps to one or more underlying permissions; tick or clear the box in a
+  role's column to grant or remove that capability for the role. Each capability's **?** says what it
+  allows. The **AI** area holds **Use the AI assistant** (`ai:use`) and **Connect external AI agents
+  (MCP)** (`ai:connect`); neither is admin-level, because the assistant and agents only ever act with
+  the role's own permissions — see [AI assistant — overview](/help/ai-assistant-overview#who-can-use-it).
+  A box showing a dash means the role holds only **part** of that capability (set in Fine-tune); ticking
+  it grants the whole capability.
+- **Fine-tune (advanced)** — below the matrix, an optional disclosure listing every raw permission
+  (`area:action`) with a checkbox per role, for exact control. Changing one here flips that role to a
+  **Custom** set, and the matching capability shows as partly granted in the matrix.
 
-A live **What this role can do** summary shows, per area, whether the role ends up with **View & edit**,
-**View only** or **Cannot access**, so you can sanity-check before saving. **Reset to defaults** puts
-the role back to its shipped starting point.
+Each area's heading collapses and expands, and shows a **granted/total** count per role — *6/10* means
+the role holds six of the area's ten capabilities fully — so you can read the whole matrix without
+opening every area. A changed cell is tinted until you save. **Reset to defaults** puts both Member and
+Viewer back to their shipped starting point (still unsaved).
 
 ## Admin-level grants are flagged, not blocked
 
 You can give Member or Viewer powerful, admin-level capabilities — deleting records, granting
 application access — and you can also remove a sensitive read. These are real, legitimate choices
 (handing a trusted Member the ability to delete is allowed), so lazyit does **not** stop you. Instead
-it flags admin-level grants with an **Admin-level** marker and routes a save that includes one through
-a short confirmation that lists the effects. Confirm, and the change is saved.
+it flags admin-level capabilities with a small **⚠** marker (its tip explains why) and routes a save
+that grants one through a short confirmation that lists the effects. The same confirmation appears when
+a save removes a read a role had. Confirm, and the change is saved; any other save goes straight
+through.
 
-Admin itself is the one thing you can never edit: the editor cannot grant, revoke or scope Admin.
+Admin itself is the one thing you can never edit: the matrix cannot grant, revoke or scope Admin.
 
 ## What saving does
 
-Saving replaces the chosen role's permission set as a whole. The change:
+Your edits to both roles are held together until you save. The bar under the matrix counts them —
+**Save 3 changes** — and **Discard** puts everything back as it was saved. Saving writes Member's and
+Viewer's permission sets together, as a whole. The change:
 
 - takes effect on the **next action** each affected user performs — they do not need to sign out;
 - is **recorded** (each permission granted or revoked is written to the activity history with who

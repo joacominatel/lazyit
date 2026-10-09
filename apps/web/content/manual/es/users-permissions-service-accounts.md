@@ -16,6 +16,14 @@ Las cuentas de servicio son un tipo de principal distinto de los usuarios: nunca
 directorio de usuarios, nunca cuentan para la regla del último administrador y no dependen de tu
 proveedor de identidad. Las gestionas en **Configuración → Cuentas de servicio** (solo administradores).
 
+La página muestra cada cuenta en una fila: su nombre y el comienzo de su token, sus permisos como chips
+(pasados tres, el resto se agrupa en **+N** — pasa el puntero por encima, o léelo con un lector de
+pantalla, para ver la lista completa), cuándo se usó por última vez y cuándo vence su token — o una
+insignia cuando está **revocada**, **vencida** o **inactiva**. El menú **⋯** de una fila reúne
+**Cómo probarla**, **Editar**, **Rotar token**, **Acceso a IA** y **Revocar**. **Mostrar revocadas** cambia a
+las cuentas revocadas, cada una con **Restaurar**. Sin cuentas todavía, la página es una línea con el
+botón **Nueva cuenta de servicio**.
+
 ## Cómo se autoriza una cuenta de servicio
 
 Una cuenta de servicio se autoriza **solo por los permisos que le otorgas** — del mismo catálogo que

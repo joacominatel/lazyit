@@ -14,49 +14,62 @@ pantalla lo muestra bloqueado. Esta página recorre el editor.
 Necesitas la capacidad **Cambiar la configuración de la instancia** (administrador por defecto) para
 abrirlo.
 
-## Abrir el editor
+## Abrir la matriz
 
-Ve a **Configuración → Roles**. Cada rol muestra quién lo tiene y un breve resumen de lo que puede
-hacer. El Administrador aparece como **Acceso total — no editable**. Para Miembro o Lector, elige
-**Editar permisos** para abrir el editor de **permisos de rol**.
+Ve a **Configuración → Roles y permisos**. La página es una sola tabla: las **capacidades** en las filas y
+los tres **roles** en las columnas, así comparas Miembro y Lector lado a lado.
 
-El editor trabaja con **un rol a la vez**. Elige **Miembro** o **Lector** arriba; el Administrador se
-muestra pero bloqueado.
+- **Administrador** es una columna de referencia bloqueada: todas las capacidades están concedidas y no
+  se puede cambiar nada.
+- **Miembro** y **Lector** son editables. El encabezado de cada columna muestra cuántas personas tienen
+  el rol — haz clic para abrir la [lista de Usuarios](/help/users-permissions-user-lifecycle) filtrada
+  por ese rol — y el **ajuste predefinido** del rol.
+
+El **?** junto al título de la página explica los tres roles y te recuerda que estos permisos se quedan
+dentro de lazyit.
 
 ## Tres formas de editar
 
-- **Ajustes predefinidos** — **Empezar desde un ajuste predefinido** aplica un conjunto listo y
-  razonable como punto de partida. A partir de ahí puedes ajustar capacidades individuales. Si tu
-  conjunto no coincide con ningún ajuste, lazyit lo etiqueta como **Personalizado**.
-- **Conmutadores de capacidad** — interruptores en lenguaje sencillo agrupados por área (Inventario,
-  Acceso, Conocimiento, Gestión, Automatización, IA). Cada conmutador corresponde a uno o varios permisos
-  subyacentes; actívalo o desactívalo para otorgar o quitar esa capacidad al rol. El área **IA** agrupa
-  **Usar el asistente de IA** (`ai:use`) y **Conectar agentes de IA externos (MCP)** (`ai:connect`);
-  ninguno es de nivel administrador, porque el asistente y los agentes solo actúan con los permisos del
-  propio rol — ver [Asistente de IA — visión general](/help/ai-assistant-overview#quién-puede-usarlo).
-- **Ajuste fino (avanzado)** — una sección opcional donde cada interruptor es un permiso individual en
-  crudo (`área:acción`), para un control exacto. Cambiar uno aquí pasa el rol a un conjunto
-  **Personalizado** y actualiza los conmutadores de capacidad de arriba para que coincidan.
+- **Ajustes predefinidos** — el selector del encabezado de la columna de un rol le aplica un conjunto
+  listo: **Editor**, **Solo lectura** u **Operador de inventario**. A partir de ahí puedes ajustar
+  capacidades individuales. Cuando el conjunto no coincide con ningún ajuste, el selector muestra
+  **Personalizado**.
+- **Casillas de capacidad** — capacidades en lenguaje sencillo agrupadas por área (Inventario, Acceso,
+  Conocimiento, Gestión, Automatización, IA). Cada una corresponde a uno o varios permisos subyacentes;
+  marca o desmarca la casilla en la columna de un rol para otorgar o quitar esa capacidad. El **?** de
+  cada capacidad explica qué permite. El área **IA** agrupa **Usar el asistente de IA** (`ai:use`) y
+  **Conectar agentes de IA externos (MCP)** (`ai:connect`); ninguno es de nivel administrador, porque el
+  asistente y los agentes solo actúan con los permisos del propio rol — ver
+  [Asistente de IA — visión general](/help/ai-assistant-overview#quién-puede-usarlo). Una casilla con un
+  guion indica que el rol tiene solo **parte** de esa capacidad (ajustada en Ajuste fino); marcarla
+  concede la capacidad completa.
+- **Ajuste fino (avanzado)** — debajo de la matriz, una sección opcional que lista cada permiso en crudo
+  (`área:acción`) con una casilla por rol, para un control exacto. Cambiar uno aquí pasa ese rol a un
+  conjunto **Personalizado**, y la capacidad correspondiente se ve concedida en parte en la matriz.
 
-Un resumen en vivo de **Qué puede hacer este rol** muestra, por área, si el rol queda con **Ver y
-editar**, **Solo ver** o **Sin acceso**, para que puedas comprobarlo antes de guardar. **Restablecer
-los valores por defecto** devuelve el rol a su punto de partida original.
+El encabezado de cada área se pliega y despliega, y muestra un recuento **concedidas/total** por rol —
+*6/10* significa que el rol tiene seis de las diez capacidades del área completas — así lees toda la
+matriz sin abrir cada área. Una celda cambiada se resalta hasta que guardas. **Restablecer valores
+predeterminados** devuelve a Miembro y a Lector a su punto de partida original (todavía sin guardar).
 
 ## Las concesiones de nivel administrador se marcan, no se bloquean
 
 Puedes darle a Miembro o a Lector capacidades potentes, de nivel administrador —eliminar registros,
 conceder acceso a aplicaciones— y también puedes quitar una lectura sensible. Son decisiones reales y
 legítimas (dar a un Miembro de confianza la capacidad de eliminar está permitido), así que lazyit **no**
-te lo impide. En su lugar, marca las concesiones de nivel administrador con una etiqueta
-**Nivel administrador** y dirige un guardado que incluya una de ellas a través de una breve
-confirmación que enumera los efectos. Confirma y el cambio se guarda.
+te lo impide. En su lugar, marca las capacidades de nivel administrador con un pequeño **⚠** (su ayuda explica por
+qué) y dirige un guardado que conceda una de ellas a través de una breve confirmación que enumera los
+efectos. La misma confirmación aparece cuando un guardado quita una lectura que un rol tenía. Confirma y
+el cambio se guarda; cualquier otro guardado pasa directamente.
 
-El Administrador es lo único que nunca puedes editar: el editor no puede otorgar, revocar ni acotar al
+El Administrador es lo único que nunca puedes editar: la matriz no puede otorgar, revocar ni acotar al
 Administrador.
 
 ## Qué hace guardar
 
-Guardar reemplaza por completo el conjunto de permisos del rol elegido. El cambio:
+Tus cambios en ambos roles se mantienen juntos hasta que guardas. La barra bajo la matriz los cuenta —
+**Guardar 3 cambios** — y **Descartar** lo deja todo como estaba guardado. Guardar escribe juntos, y por
+completo, los conjuntos de permisos de Miembro y de Lector. El cambio:
 
 - surte efecto en la **siguiente acción** que realice cada usuario afectado — no necesitan cerrar
   sesión;

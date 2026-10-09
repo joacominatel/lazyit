@@ -51,7 +51,7 @@ incluye además los botones rápidos `−1` / `+1` para ajustar el conteo en el 
 
 Las categorías (Cables, Adaptadores, Periféricos, Material de oficina, Otros, …) son una agrupación
 opcional que gestionas tú. **No** se configuran en el formulario del consumible: las creas y editas
-en **Configuración → Taxonomías**, en la pestaña Consumibles. lazyit incluye un conjunto inicial
+en **Configuración → Taxonomías → Consumibles → Categorías**. lazyit incluye un conjunto inicial
 pequeño; renómbralo, amplíalo o recórtalo según tu parque.
 
 Conviene saber algunas cosas:

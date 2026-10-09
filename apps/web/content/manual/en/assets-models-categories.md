@@ -38,7 +38,7 @@ like the asset's [Company](/help/assets-asset-basics) field, and you can still t
   the top of the category list and save. The model (and every asset of it) is then uncategorized, so
   it no longer matches a category filter on the Assets list.
 
-Manage models under **Settings → Taxonomies → Asset models**. The model picker in the asset form is
+Manage models under **Settings → Taxonomies → Assets → Models**. The model picker in the asset form is
 searchable, so a long catalog stays easy to use.
 
 ## Asset categories
@@ -54,7 +54,7 @@ Categories drive grouping and the category filter on the Assets list.
 - A model points at a category, and an asset inherits its category **through its model**. The category
   filter on the Assets list matches an asset by its model's category.
 
-Manage categories under **Settings → Taxonomies → Asset categories**.
+Manage categories under **Settings → Taxonomies → Assets → Categories**.
 
 ### Specs dictionary (field hints)
 
@@ -76,7 +76,7 @@ straitjacket.
 - Editing the dictionary later does **not** rewrite assets already saved; it only changes the hints
   shown next time someone edits one.
 
-Set a category's dictionary from its editor under **Settings → Taxonomies → Asset categories**.
+Set a category's dictionary from its editor under **Settings → Taxonomies → Assets → Categories**.
 
 ## How they fit together
 

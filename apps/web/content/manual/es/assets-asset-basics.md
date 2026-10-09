@@ -101,7 +101,7 @@ la lista: selecciónalos y elige uno en **Definir estado** de la barra de selecc
 ### Estados personalizados
 
 Si los administradores definieron **estados personalizados** (Configuración → Taxonomías →
-**Estados**, consulta [Estados de activo
+**Estados personalizados**, consulta [Estados de activo
 personalizados](/help/configuration-taxonomies#estados-de-activo-personalizados)), cada selector de
 estado — el formulario del activo, el desplegable de estado de la página de detalle, **Cambiar estado**
 de la fila, **Definir estado** para una selección y **Recibir stock** — los muestra bajo el estado

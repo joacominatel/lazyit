@@ -32,15 +32,16 @@ pueden ajustar. El rol es lo que un usuario *tiene*; los permisos son lo que un 
   nada. Además, algunas vistas sensibles (el directorio de usuarios, el registro de concesiones de
   acceso y las compras y proveedores) quedan ocultas para el Lector por defecto.
 
-## La vista general de Roles
+## La página de Roles y permisos
 
-**Configuración → Roles** muestra una tarjeta por rol con, para cada uno: un **conteo de miembros en
-vivo** (cuántos usuarios activos lo tienen), un recordatorio breve de lo que el rol puede hacer y un
-enlace **Ver N miembros**. Ese enlace abre la [lista de Usuarios](/help/users-permissions-user-lifecycle)
-filtrada por ese rol — la lista de Usuarios es donde realmente navegas y gestionas quién lo tiene, con
-búsqueda, orden y paginado. Las tarjetas solo muestran conteos; ya no listan a los miembros en línea.
-Desde las mismas tarjetas puedes abrir **Editar permisos** para Miembro y Lector (Admin tiene acceso
-completo y está bloqueado).
+**Configuración → Roles y permisos** es una sola matriz: lo que puede hacer cada rol, con el
+Administrador como columna de referencia bloqueada junto a las columnas editables de Miembro y Lector.
+El encabezado de cada columna muestra un **conteo de miembros en vivo** (cuántos usuarios activos tienen
+ese rol); haz clic para abrir la [lista de Usuarios](/help/users-permissions-user-lifecycle) filtrada por
+ese rol — la lista de Usuarios es donde realmente navegas y gestionas quién lo tiene, con búsqueda, orden
+y paginado. Cómo editar lo que pueden hacer Miembro y Lector se describe en
+[Configuración de permisos](/help/users-permissions-permission-configuration). (La dirección antigua del
+editor por rol, `/settings/roles/permissions`, ahora abre esta página.)
 
 ## Cómo se asigna un rol
 

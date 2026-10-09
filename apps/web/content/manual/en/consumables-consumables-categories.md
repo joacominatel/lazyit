@@ -49,7 +49,7 @@ carries the quick `−1` / `+1` buttons for adjusting the count in place.
 
 Categories (Cables, Adapters, Peripherals, Office supplies, Other, …) are an optional grouping you
 manage yourself. They are **not** set up on the consumable form — you create and edit them under
-**Settings → Taxonomies**, on the Consumables tab. lazyit ships a small starter set; rename, add to
+**Settings → Taxonomies → Consumables → Categories**. lazyit ships a small starter set; rename, add to
 or remove it to suit your estate.
 
 A few things worth knowing:

@@ -39,7 +39,7 @@ fabricante nuevo.
   al principio de la lista de categorías y guarda. El modelo (y todos sus activos) queda sin categoría,
   así que ya no coincide con el filtro de categoría de la lista de Activos.
 
-Gestiona los modelos en **Configuración → Taxonomías → Modelos de activo**. El selector de modelo del
+Gestiona los modelos en **Configuración → Taxonomías → Activos → Modelos**. El selector de modelo del
 formulario de activo permite buscar, así un catálogo largo sigue siendo cómodo de usar.
 
 ## Categorías de activo
@@ -55,7 +55,7 @@ Firewall. Las categorías sirven para agrupar y para el filtro de categoría en 
 - Un modelo apunta a una categoría, y un activo hereda su categoría **a través de su modelo**. El
   filtro de categoría en la lista de Activos hace coincidir un activo por la categoría de su modelo.
 
-Gestiona las categorías en **Configuración → Taxonomías → Categorías de activo**.
+Gestiona las categorías en **Configuración → Taxonomías → Activos → Categorías**.
 
 ### Diccionario de specs (sugerencias de campos)
 
@@ -77,8 +77,8 @@ liviana, no una camisa de fuerza.
 - Editar el diccionario más tarde **no** reescribe los activos ya guardados; solo cambia las
   sugerencias que se muestran la próxima vez que alguien edite uno.
 
-Definí el diccionario de una categoría desde su editor en **Configuración → Taxonomías → Categorías de
-activo**.
+Definí el diccionario de una categoría desde su editor en **Configuración → Taxonomías → Activos →
+Categorías**.
 
 ## Cómo encajan
 
