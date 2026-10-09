@@ -13,8 +13,9 @@ import { ArticlesListView } from "./_components/articles-list-view";
  * The prefetched query key MUST be byte-identical to the one the child's `useArticles(filters)`
  * builds on a fresh load with no URL params — otherwise the dehydrated entry won't hit and the
  * client would refetch (double-fetch). `ArticlesListView` derives its filters from `useListParams`
- * (limit 50, offset 0) and maps every empty multi-select / inactive toggle to `undefined`, so a
- * no-param load yields exactly {@link DEFAULT_FILTERS} below. Any URL with filters/paging is NOT
+ * (limit 50, offset 0) and maps every empty multi-select / inactive toggle — and the default sort
+ * (#1539) — to `undefined`, so a no-param load yields exactly {@link DEFAULT_FILTERS} below. The home
+ * page's per-status counts are separate `limit: 1` reads and are not prefetched. Any URL with filters/paging is NOT
  * prefetched here — it simply misses the cache and the client fetches it (the correct degraded path
  * for a lower-frequency case). The #600 401 handler stays on the client provider, untouched.
  */
@@ -26,6 +27,9 @@ const DEFAULT_FILTERS: ArticleFilters = {
   linkedTo: undefined,
   assetId: undefined,
   applicationId: undefined,
+  // #1539: the default order and no sub-folder widening are sent as nothing at all.
+  sort: undefined,
+  includeSubfolders: undefined,
   limit: 50,
   offset: 0,
 };
