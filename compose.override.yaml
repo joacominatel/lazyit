@@ -1,5 +1,4 @@
-# lazyit — DEV override (auto-merged by `docker compose up`). See docs/01-architecture/
-# auth-zitadel-sot.md §9 and docs/04-development/setup.md.
+# lazyit — DEV override (auto-merged by `docker compose up`). See docs/04-development/setup.md.
 #
 # Plain `docker compose up` (from the repo ROOT) auto-loads compose.yaml + THIS file and brings up
 # ONLY the unprofiled backing services — db, meilisearch, valkey — for native `bun run dev` (api/web
@@ -7,24 +6,11 @@
 # backup) carry `profiles: [prod]` in compose.yaml, so they stay down here. This file is COMMITTED and
 # never gitignored — it is the canonical dev experience.
 #
-# Local-auth default (ADR-0086): the bundled Zitadel dev stack (zitadel, zitadel_db, and this file's
-# zitadel-secrets-init-dev) is now profiles:[oidc], so plain `docker compose up` no longer starts it —
-# `bun run dev:up` runs against the local-auth API by default (a real DX win: two fewer containers, no
-# health poll, no jq/curl). Opt back into the dev Zitadel with `bun run dev:up --zitadel`
-# (scripts/dev-setup.ts adds `--profile oidc` and brings up zitadel by name — NOT the prod sidecar).
-#
 # What it tunes vs. the canonical compose.yaml (which carries the prod hardening):
 #   - publishes each backing service on 127.0.0.1 (loopback only, never the LAN — SEC-005/ADR-0028)
-#     so the host-native api/web can reach them: Postgres 5432, Meili 7700, Valkey 6379, Zitadel 8080;
-#   - flips Zitadel to the dev form: --tlsMode disabled + EXTERNALSECURE=false + EXTERNALPORT 8080
-#     (no Caddy in front of dev — the apps hit http://localhost:8080 directly);
+#     so the host-native api/web can reach them: Postgres 5432, Meili 7700, Valkey 6379;
 #   - relaxes prod-only ergonomics for local work: restart policy back to "no", and drops the
 #     mem_limit/cpus ceilings (a laptop shouldn't be capped). Volumes/healthchecks are inherited.
-#   - adds a DEV `zitadel-secrets-init-dev` (a distinct name from the prod profiles:[prod] one) so
-#     plain `docker compose up` no longer crash-loops Zitadel on a fresh `zitadel_secrets` volume
-#     (#477). It chmods the secrets dir 0777 BEFORE Zitadel starts, so Zitadel's non-root uid can
-#     write bootstrap-key.json (otherwise the 03_default_instance migration fatals + the container
-#     restart-loops). See compose.yaml's prod zitadel-secrets-init for the full rationale.
 
 services:
   db:
@@ -51,66 +37,5 @@ services:
     # Loopback only — the dev BullMQ broker must not be reachable from the LAN (SEC-005, ADR-0028).
     ports:
       - "127.0.0.1:6379:6379"
-    mem_limit: 0
-    cpus: 0
-
-  zitadel_db:
-    # profiles:[oidc] (ADR-0086) — mirrors the base; dev Zitadel is opt-in (`--profile oidc`).
-    profiles: [oidc]
-    restart: "no"
-    mem_limit: 0
-    cpus: 0
-
-  # --- Zitadel secrets-volume permission fixer — DEV equivalent of the prod one (#477) -----
-  # A freshly-created `zitadel_secrets` volume is owned root:root (mode 0755), but the `zitadel`
-  # container runs as a NON-ROOT uid (~1000). Without this, Zitadel can't write its FirstInstance
-  # machine key (bootstrap-key.json) and the 03_default_instance migration fatals → crash-loop. This
-  # one-shot init runs as root and chmods the dir 0777 BEFORE Zitadel starts, so plain
-  # `docker compose up` works with no manual chmod (and scripts/dev-setup.ts no longer needs it).
-  # The prod zitadel-secrets-init in compose.yaml is profiles:[prod]; this is its UNPROFILED dev
-  # twin (an unprofiled service may not depend_on a profiled one). 0777 on an internal-only named
-  # volume on a single dev host is an accepted tradeoff (mirrors the prod rationale; ADR-0028).
-  # A SEPARATE service name (not "zitadel-secrets-init") on purpose: Compose merges list fields like
-  # `profiles` by UNION across files, so re-declaring the prod service here could never drop its
-  # `profiles: [prod]` (an empty list can't subtract). A distinct, unprofiled name sidesteps the merge
-  # entirely and stays active in the plain `docker compose up` dev run.
-  zitadel-secrets-init-dev:
-    # profiles:[oidc] (ADR-0086) — only needed when the dev Zitadel is opted in. dev-setup brings up
-    # zitadel BY NAME under `--profile oidc`, which pulls this init as zitadel's dependency.
-    profiles: [oidc]
-    # alpine:3.21 — pinned by digest (matches the prod zitadel-secrets-init in compose.yaml).
-    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
-    user: "0:0"
-    restart: "no"
-    command: ["sh", "-c", "chmod 0777 /zitadel-secrets"]
-    volumes:
-      - zitadel_secrets:/zitadel-secrets
-    networks: [internal]
-
-  zitadel:
-    # profiles:[oidc] (ADR-0086) — mirrors the base so plain `docker compose up` skips the dev IdP;
-    # `docker compose --profile oidc up -d zitadel` (what dev-setup --zitadel runs) brings it up.
-    profiles: [oidc]
-    # Dev: no HTTPS — Zitadel serves plain HTTP on loopback :8080; Caddy only exists in prod.
-    command: start-from-init --masterkey "${ZITADEL_MASTERKEY}" --tlsMode disabled
-    restart: unless-stopped
-    environment:
-      ZITADEL_EXTERNALSECURE: "false"       # dev: no HTTPS; Caddy handles TLS in prod
-      ZITADEL_EXTERNALPORT: "8080"
-      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_EXTERNALDOMAIN:-localhost}
-    ports:
-      # Loopback only in dev — Zitadel admin console and OIDC endpoints at localhost:8080.
-      # Admin console:  http://localhost:8080/ui/console
-      # OIDC discovery: http://localhost:8080/.well-known/openid-configuration
-      - "127.0.0.1:8080:8080"
-    # Gate Zitadel on the dev secrets-init COMPLETING (chmod 0777 the volume) so the non-root uid can
-    # write bootstrap-key.json on first boot — fixes the #477 crash-loop at the compose level. This
-    # edge is valid here because BOTH services are unprofiled in the dev merge (the prod merge adds
-    # the equivalent edge in infra/docker-compose.prod.yaml instead — see compose.yaml's note).
-    # NOTE: this MERGES with the base zitadel's `depends_on: { zitadel_db: service_healthy }` (Compose
-    # unions depends_on maps by key), so dev Zitadel waits for BOTH zitadel_db AND this init.
-    depends_on:
-      zitadel-secrets-init-dev:
-        condition: service_completed_successfully
     mem_limit: 0
     cpus: 0
