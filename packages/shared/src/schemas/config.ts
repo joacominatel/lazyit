@@ -20,9 +20,10 @@ import { EmailSchema } from "./user";
  *     write-back), so the Users page surfaces the graceful-degradation banner.
  *   - "local"        — first-party local auth (ADR-0086, `AUTH_MODE=local`): NO external IdP at all;
  *     lazyit owns username/email + password directly.
- *   - "zitadel"      — deprecated: never emitted, kept until the web stops reading it (ADR-0102 §4).
+ *
+ * The deprecated "zitadel" value was dropped once no web build read it (ADR-0102 §4).
  */
-export const IntegrationModeSchema = z.enum(["zitadel", "generic-oidc", "local"]);
+export const IntegrationModeSchema = z.enum(["generic-oidc", "local"]);
 export type IntegrationMode = z.infer<typeof IntegrationModeSchema>;
 
 /**

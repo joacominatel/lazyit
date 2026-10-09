@@ -124,6 +124,3 @@ export const PasswordPolicySchema = z
   .regex(/[a-z]/, "Must include a lowercase letter.")
   .regex(/[0-9]/, "Must include a number.")
   .regex(/[^A-Za-z0-9]/, "Must include a symbol.");
-
-/** @deprecated Use {@link PasswordPolicySchema}; kept for consumers until they move (ADR-0102 §8). */
-export const ZitadelPasswordSchema = PasswordPolicySchema;
