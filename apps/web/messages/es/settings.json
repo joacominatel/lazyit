@@ -57,7 +57,7 @@
     },
     "roles": {
       "title": "Roles y permisos",
-      "description": "Qué pueden hacer Miembros y Observadores, junto al Administrador."
+      "description": "Qué pueden hacer Miembros y Lectores, junto al Administrador."
     },
     "serviceAccounts": {
       "title": "Cuentas de servicio",
@@ -592,7 +592,7 @@
         "hint": "Operaciones normales de inventario, base de conocimiento y activos."
       },
       "VIEWER": {
-        "label": "Observador",
+        "label": "Lector",
         "hint": "Solo lectura en toda la aplicación."
       }
     },
@@ -630,7 +630,7 @@
         "deleteDefault": "{who} podrán {action} — una acción destructiva normalmente reservada a administradores.",
         "who": {
           "MEMBER": "Los Miembros",
-          "VIEWER": "Los Observadores"
+          "VIEWER": "Los Lectores"
         }
       },
       "domains": {
