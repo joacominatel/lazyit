@@ -234,7 +234,7 @@ export function getCurrentUser(): Promise<User> {
 /**
  * Edit the caller's OWN first and last name (`PATCH /users/me`, issue #1421). Any signed-in human; the
  * body is only `firstName` / `lastName`. 409 `PROFILE_MANAGED_BY_DIRECTORY` when the directory sync owns
- * the person, 403 for a service account, 503 when the identity-provider mirror fails (nothing changed).
+ * the person, 403 for a service account.
  */
 export function updateOwnProfile(data: UpdateOwnProfile): Promise<User> {
   return apiFetch<User>(`${BASE}/me`, { method: "PATCH", body: data });
