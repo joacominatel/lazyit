@@ -21,7 +21,8 @@ Builds on [[0005-id-strategy]], [[0006-soft-delete-and-auditing]], [[0007-flexib
 **Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: §A.4's manual provision-account
 endpoint is withdrawn with the bundled Zitadel. A directory person becomes an account through the JIT email
 link (OIDC) or `POST /users/:id/provision-local-account` (local mode, [[0086-local-authentication-mode]]
-§5).
+§5). The `skipIdpWriteBack` create opt (§A.3) is now named `directoryOnly`, since there is no IdP block left
+to skip.
 
 ## Context
 
