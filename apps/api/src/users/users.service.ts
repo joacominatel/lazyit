@@ -58,8 +58,7 @@ import {
  * The reserved, non-routable email DOMAIN the bulk import synthesizes for a directory person identified
  * ONLY by legajo/username (no real email) — ADR-0069 REDESIGN §4.5. The DB `email` column is non-null,
  * so the import mints `<sessionId>-<rowIndex>@directory.local` to keep the row valid + live-unique. Such
- * an address is NOT a real mailbox: a person carrying it can never auto-promote by verified-email login
- * AND cannot be manually provisioned an account (Zitadel needs a usable email) — both paths reject it.
+ * an address is NOT a real mailbox, so a person carrying it can never auto-promote by verified-email login.
  */
 export const DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN = '@directory.local';
 
@@ -189,8 +188,7 @@ export class UsersService {
     // emitter post-commit to fire the SAME admin_granted / critical_app_access nudges a hand-created
     // grant produces. The bell is admin VISIBILITY — independent of the engine fire toggle.
     private readonly accessGrants: AccessGrantsService,
-    // IdP write-back seam (ADR-0043). Zitadel mirrors lazyit's user/role decisions; generic-oidc
-    // (BYOI) no-ops every management call. Authorization stays DB-first regardless (decision #1).
+    // Read only for `kind` (local vs OIDC). Nothing is written back to the IdP (ADR-0102).
     @Inject(IDENTITY_PROVIDER)
     private readonly idp: IdentityProvider,
     // Local (first-party) provisioning primitive (ADR-0086 §5). Used only in the `kind==='local'`
@@ -543,14 +541,9 @@ export class UsersService {
    * nothing (no payload). The manager either/or is validated here (FK live + the XOR; a NEW user has no
    * reports yet, so no cycle is possible — `subjectId = null`).
    *
-   * Optional temporary password (ADR-0064, issue #411): when `data.password` is present it is set on the
-   * new bundled-Zitadel user with `passwordChangeRequired:true` (forced change at first login). It is a
-   * MANAGEMENT-path carve-out — under BYOI (`!supportsManagement`) a supplied password is a 400 before
-   * any row is created. The password is forwarded to the IdP ONLY: never persisted to our DB (it is not a
-   * `User` column — `buildProfileCreateData` allowlists columns), never logged, never echoed back. A
-   * Zitadel complexity-policy rejection rides the existing compensate-on-failure path (the just-created
-   * local row is hard-deleted, the error re-thrown — no half-provisioned user). Omitting it is fully
-   * back-compatible (the previous no-credential create).
+   * Optional temporary password (ADR-0064, issue #411): honoured only in local mode, where it is hashed
+   * with `mustChangePassword`. Under OIDC the operator's IdP owns the credential, so a supplied password
+   * is a 400 before any row is created (ADR-0102 §5).
    */
   async create(
     data: CreateUser,
@@ -558,8 +551,7 @@ export class UsersService {
     opts?: {
       createdPayload?: Prisma.InputJsonValue;
       // ADR-0069 REDESIGN §4.5: the bulk-import DIRECTORY branch. When true, this create is a
-      // directory-only person (no login, no Zitadel mirror) — the ENTIRE IdP write-back block is
-      // skipped (we branch BEFORE it below) and `directoryOnly`/`directoryAttrs` are stamped on the
+      // directory-only person (no login) and `directoryOnly`/`directoryAttrs` are stamped on the
       // row. NEVER client-supplied: the public Users controller never passes it; only the import
       // commit engine (a trusted server caller) does. The role is FORCED to VIEWER here regardless of
       // payload (role-escalation closed) — CreateDirectoryPersonSchema doesn't even carry `role`.
@@ -589,12 +581,10 @@ export class UsersService {
     const managerWrite = await this.resolveManagerWrite(data.manager, null);
     const createData = this.buildProfileCreateData(data, role, managerWrite);
 
-    // ADR-0069 REDESIGN §4.5: the DIRECTORY branch. A directory-only person has NO login and NO IdP
-    // mirror, so we MUST branch BEFORE the IdP write-back block below — NOT reuse the BYOI path, which
-    // (with supportsManagement=true) still enters the `try`, calls `idp.createUser` and returns early
-    // (~513-529). We stamp `directoryOnly`/`directoryAttrs`, persist the row, record its CREATED
-    // history (correlated to the import session via `createdPayload`), sync search, and return — never
-    // touching the IdP. `externalId` stays null (SEC-006); `role` is VIEWER (forced above).
+    // ADR-0069 REDESIGN §4.5: the DIRECTORY branch. A directory-only person has NO login. We stamp
+    // `directoryOnly`/`directoryAttrs`, persist the row, record its CREATED history (correlated to the
+    // import session via `createdPayload`), sync search, and return. `externalId` stays null (SEC-006);
+    // `role` is VIEWER (forced above).
     if (opts?.skipIdpWriteBack) {
       const directoryUser = await this.prisma.user.create({
         data: {
@@ -621,9 +611,7 @@ export class UsersService {
       this.search.upsert('users', projectUser(directoryUser));
       return this.serializeUser(directoryUser);
     }
-    // LOCAL mode (ADR-0086 §5): lazyit OWNS the credential — there is no IdP to mirror to. This branches
-    // BEFORE the BYOI 400 below because LocalIdentityProvider is `supportsManagement:false` (so a supplied
-    // password would otherwise be wrongly rejected as "BYOI"). When a password is supplied it is an
+    // LOCAL mode (ADR-0086 §5): lazyit OWNS the credential. When a password is supplied it is an
     // admin-provisioned TEMP credential (ADR-0064 semantics), so we hash it to `passwordHash` and set
     // `mustChangePassword` (stored now; enforcement is F4). Without a password the row lands password-less
     // (imported / provision-later): it cannot log in until an admin sets one. No IdP call; externalId null.
@@ -647,80 +635,14 @@ export class UsersService {
       this.search.upsert('users', projectUser(localUser));
       return this.serializeUser(localUser);
     }
-    // Temporary-password provisioning (ADR-0064, issue #411) is a MANAGEMENT-path carve-out: lazyit only
-    // ever sets a credential on the bundled Zitadel it owns. Under BYOI (`!supportsManagement`) the
-    // operator's own IdP owns the credential, so a supplied password has nowhere valid to go — reject it
-    // with a 400 BEFORE any local row is created (validate-before-write: no row to compensate, no
-    // half-provisioned user). The password is NEVER persisted/logged either way (it never reaches the DB).
-    if (data.password && !this.idp.supportsManagement) {
+    // OIDC: the operator's IdP owns the credential, so a supplied password has nowhere valid to go.
+    if (data.password) {
       throw new BadRequestException(
-        'Temporary-password provisioning is only available with the bundled identity provider.',
+        'Temporary passwords are only available in local authentication mode; your identity provider owns the credential.',
       );
     }
-    // DB-first + mirror (ADR-0043 §3): create the LOCAL row first, then mirror into the IdP. If the
-    // mirror fails we must NOT leave a split-brain (local user exists, IdP missing) — so we compensate
-    // by removing the just-created local row and surface the Management failure as 503. This is the one
-    // place a hard delete is correct: the row was created microseconds ago in THIS request, is not yet
-    // referenced by anything, and was never visible to a reader — a soft delete would leave a ghost.
+    // The person signs in through the IdP; JIT links `externalId` on first sign-in (ADR-0038).
     const user = await this.prisma.user.create({ data: createData });
-
-    try {
-      const ref = await this.idp.createUser({
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role,
-        // ADR-0064: when the admin supplied a temporary password (only reachable on the management path
-        // — the BYOI case 400'd above), set it on the new Zitadel user with passwordChangeRequired so
-        // Zitadel forces a change at first login. A Zitadel complexity-policy rejection surfaces as the
-        // adapter's failure and is handled by the compensation below (the local row is hard-deleted, the
-        // error re-thrown), so a rejected password never leaves a half-provisioned user. The password is
-        // forwarded to the IdP ONLY — never written to our DB and never logged (the audit line below
-        // carries email/role, never the credential — ADR-0031/0064).
-        ...(data.password
-          ? { password: data.password, passwordChangeRequired: true }
-          : {}),
-      });
-      this.auditWriteBack('createUser', actorId, user.id, {
-        email: user.email,
-        role,
-      });
-      // Zitadel returns the real user id; persist it as externalId so future grants/deactivate target
-      // the managed user. BYOI returns an empty ref (no IdP user) — leave externalId null in that case.
-      // The externalId update and the CREATED history row commit in ONE transaction so the user's first
-      // audited state and its log row land atomically (ADR-0033). History is emitted only on the SUCCESS
-      // path — never before the IdP mirror could still fail and trigger the hard-delete compensation
-      // (the UserHistory.userId Restrict FK would otherwise block that rollback).
-      if (this.idp.supportsManagement && ref.externalId) {
-        const linked = await this.prisma.$transaction(async (tx) => {
-          const updated = await tx.user.update({
-            where: { id: user.id },
-            data: { externalId: ref.externalId },
-          });
-          await this.recordHistory(
-            tx,
-            user.id,
-            'CREATED',
-            actorId,
-            opts?.createdPayload,
-          );
-          return updated;
-        });
-        this.search.upsert('users', projectUser(linked));
-        return this.serializeUser(linked);
-      }
-    } catch (err) {
-      // Compensate: roll the local create back so local and Zitadel never disagree (no split-brain).
-      await this.compensateLocalCreate(user.id);
-      this.logger.error(
-        { op: 'createUser', actor: actorId, subjectUserId: user.id },
-        `IdP write-back failed on create; rolled back local user (${err instanceof Error ? err.message : String(err)})`,
-      );
-      throw err;
-    }
-
-    // BYOI / no-management path: the IdP mirror has already succeeded (or no-opped), so the user row is
-    // durable and will NOT be compensated — emit the CREATED history row now (the Restrict FK is safe).
     await this.recordHistory(
       this.prisma,
       user.id,
@@ -734,106 +656,10 @@ export class UsersService {
   }
 
   /**
-   * PROMOTE a directory-only person to a real OIDC account — the manual "Crear cuenta OIDC" action
-   * (ADR-0069 REDESIGN §0 #3). The counterpart to the auto-claim by verified-email login (ADR-0038):
-   * an ADMIN takes an existing directory person (`directoryOnly=true`, `externalId=null`) and provisions
-   * its IdP account NOW. Requires an email (Zitadel needs it) → 400 if missing. Rejects a target that is
-   * NOT a directory person or already has an account (`externalId` set) → 400 (nothing to provision).
-   *
-   * NO SPLIT-BRAIN ordering: create the IdP user FIRST, then the local update (`externalId` + flip
-   * `directoryOnly=false`) + the audited history row IN ONE transaction. If the local update fails AFTER
-   * the IdP account exists, we surface a clear error and do NOT half-update the row — the IdP account is
-   * left, but the next sign-in by that verified email JIT-links it (ADR-0038) and reconciles, so no
-   * orphan and no double account. We don't roll back the IdP user (deleting it would be the riskier
-   * compensation; JIT linking is the durable backstop). 503 if the IdP create itself fails (no local
-   * change happened — fully back-out-able). Only the bundled-management IdP can mint an account here.
-   */
-  async provisionAccount(
-    id: string,
-    actorId?: string,
-  ): Promise<SerializedUser> {
-    const target = await this.findOne(id); // 404 if missing or soft-deleted
-    if (!target.directoryOnly) {
-      throw new BadRequestException(
-        'This user already has an account; only a directory person can be provisioned.',
-      );
-    }
-    if (target.externalId !== null) {
-      throw new BadRequestException(
-        'This directory person is already linked to an identity.',
-      );
-    }
-    // Zitadel NEEDS a usable email. A directory person identified only by legajo/username carries the
-    // synthesized non-routable `@directory.local` placeholder (REDESIGN §4.5) — treat that as "no email"
-    // and 400, rather than mint a broken IdP user. (The UI disables / prompts for an email; this is the
-    // server-side backstop.)
-    if (target.email.endsWith(DIRECTORY_PLACEHOLDER_EMAIL_DOMAIN)) {
-      throw new BadRequestException(
-        'This directory person has no email address; add one before provisioning an account.',
-      );
-    }
-    if (!this.idp.supportsManagement) {
-      throw new BadRequestException(
-        'Provisioning an account is only available with the bundled identity provider.',
-      );
-    }
-
-    // IdP FIRST (no local change yet → a failure here leaves the row a pure directory person, fully
-    // recoverable). A Management failure surfaces as 503 to the caller.
-    let ref;
-    try {
-      ref = await this.idp.createUser({
-        email: target.email,
-        firstName: target.firstName,
-        lastName: target.lastName,
-        role: target.role,
-      });
-    } catch (err) {
-      this.logger.error(
-        { op: 'provisionAccount', actor: actorId, subjectUserId: id },
-        `IdP createUser failed provisioning a directory person (${err instanceof Error ? err.message : String(err)})`,
-      );
-      throw new ServiceUnavailableException(
-        'Could not create the account in the identity provider. Please try again.',
-      );
-    }
-    if (!ref.externalId) {
-      // The bundled-management IdP must return a real sub; an empty ref means a misconfigured provider.
-      throw new ServiceUnavailableException(
-        'The identity provider did not return an account identifier.',
-      );
-    }
-
-    // Local update + audit in ONE transaction (atomic state flip). If THIS fails after the IdP account
-    // exists, the row stays a directory person; first login by the verified email JIT-links it (ADR-0038)
-    // — no orphan, no double account. We surface the failure honestly rather than half-updating.
-    this.auditWriteBack('provisionAccount', actorId, id, {
-      email: target.email,
-      role: target.role,
-    });
-    const linked = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({
-        where: { id },
-        data: { externalId: ref.externalId, directoryOnly: false },
-      });
-      // Reuse UPDATED (no new enum/migration): the row transitions from a login-less directory person to
-      // a real account. The payload names the action so the audit trail is unambiguous.
-      await this.recordHistory(tx, id, 'UPDATED', actorId, {
-        action: 'provisionAccount',
-        directoryOnly: false,
-      });
-      return updated;
-    });
-    this.search.upsert('users', projectUser(linked));
-    return this.serializeUser(linked);
-  }
-
-  /**
    * ONBOARD a directory-only person in LOCAL auth mode (AUTH_MODE=local, ADR-0086 §5 amendment, issue
-   * #1072) — the local-mode counterpart to {@link provisionAccount}. After a Snipe-IT / LAN mass import
-   * every person lands `directoryOnly=true`, password-less, and in local mode ALL three self-service
-   * onboarding paths are closed by construction (login rejects directoryOnly; requestPasswordReset 422s a
-   * directory person; provisionAccount hard-gates on `supportsManagement=false`). So an admin explicitly
+   * #1072). After a Snipe-IT / LAN mass import every person lands `directoryOnly=true`, password-less,
+   * and in local mode the self-service onboarding paths are closed by construction (login rejects
+   * directoryOnly; requestPasswordReset 422s a directory person). So an admin explicitly
    * mints a ONE-TIME temporary password here, using the EXACT primitives the local admin-reset uses:
    * `generateTempPassword()` + `credentialFields({ mustChangePassword: true })` (ADR-0064 semantics).
    *
@@ -844,9 +670,10 @@ export class UsersService {
    * forced VIEWER and onboarding keeps the existing role — never trusts a payload, carries none), and
    * `mustChangePassword` narrows the hand-off window (forced change at first login).
    *
-   * Guards: 404 if missing/soft-deleted (findOne); 400 in OIDC/BYOI (no local credential to mint — use
-   * {@link provisionAccount} there); 400 if the target is NOT a directory person (a real account already
-   * owns/manages a credential — use requestPasswordReset instead). No `sessionEpoch` bump: a directory
+   * Guards: 404 if missing/soft-deleted (findOne); 400 under OIDC (no local credential to mint — the
+   * person signs in through the IdP and claims the row by verified email, ADR-0038); 400 if the target
+   * is NOT a directory person (a real account already owns/manages a credential — use
+   * requestPasswordReset instead). No `sessionEpoch` bump: a directory
    * person holds no session to revoke (unlike the admin-reset, which kills a live user's sessions).
    */
   async provisionLocalAccount(
@@ -854,8 +681,8 @@ export class UsersService {
     actorId?: string,
   ): Promise<AdminPasswordResetResult> {
     const target = await this.findOne(id); // 404 if missing or soft-deleted
-    // Local mode ONLY: there is no IdP here, so lazyit owns the credential. In OIDC/BYOI there is no local
-    // credential to mint — provisionAccount (bundled Zitadel) / the foreign IdP owns onboarding instead.
+    // Local mode ONLY: there is no IdP here, so lazyit owns the credential. Under OIDC the IdP owns
+    // onboarding instead.
     if (!this.isLocalMode()) {
       throw new BadRequestException(
         'Local onboarding is only available in local authentication mode.',
@@ -920,23 +747,6 @@ export class UsersService {
       ...(data.username !== undefined ? { username: data.username } : {}),
       ...(managerWrite ?? {}),
     };
-  }
-
-  /**
-   * Roll back a just-created local user when the IdP mirror failed (no-split-brain compensation). A
-   * HARD delete is correct here: the row was created in this same request, is unreferenced, and was
-   * never returned to a caller, so deleting it leaves no audit/FK orphan (unlike the soft-delete used
-   * for genuine offboarding). Best-effort: a delete failure is logged but the original 503 still wins.
-   */
-  private async compensateLocalCreate(userId: string): Promise<void> {
-    try {
-      await this.prisma.user.delete({ where: { id: userId } });
-    } catch (err) {
-      this.logger.error(
-        { op: 'compensateLocalCreate', subjectUserId: userId },
-        `failed to roll back local user after IdP write-back failure (${err instanceof Error ? err.message : String(err)})`,
-      );
-    }
   }
 
   /** Structured audit line for a successful IdP write-back (ADR-0043 §3 — no DB audit table yet). */
@@ -1005,21 +815,20 @@ export class UsersService {
     }
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
-    // Profile edits an ADMIN can mirror (issue #149). A field only counts as CHANGED when it is present
-    // AND differs from the stored value — so a PATCH that resends the same name/email skips the IdP
-    // round-trip. `email` is already normalized (trim+lowercase, citext) by the schema (ADR-0041).
+    // A field only counts as CHANGED when it is present AND differs from the stored value — so a PATCH
+    // that resends the same name/email records nothing. `email` is already normalized (trim+lowercase,
+    // citext) by the schema (ADR-0041).
     const nameChanged =
       (data.firstName !== undefined && data.firstName !== current.firstName) ||
       (data.lastName !== undefined && data.lastName !== current.lastName);
     const emailChanged =
       data.email !== undefined && data.email !== current.email;
-    const profileChanged = nameChanged || emailChanged;
     // Activation (issue #1375): a real flip of `isActive` is its own audited event — DEACTIVATED /
     // REACTIVATED — so it surfaces in Reports → Users with its actor. A PATCH that resends the stored
     // value is not a change and logs nothing. `deactivating` (above) is the true→false half.
     const reactivating = data.isActive === true && !current.isActive;
-    // legajo / username (ADR-0058) are local-only directory identifiers: never mirrored to the IdP, but
-    // an edit is still a profile change the log records (issue #1375 — they used to change silently).
+    // legajo / username (ADR-0058) are local directory identifiers; an edit is still a profile change the
+    // log records (issue #1375 — they used to change silently).
     // `null` clears; a string is already normalized by the schema.
     const legajoChanged =
       data.legajo !== undefined && data.legajo !== (current.legajo ?? null);
@@ -1029,8 +838,7 @@ export class UsersService {
 
     // Resolve the manager either/or → DB columns (ADR-0058): validates the FK is live, rejects a
     // self-manager and a CYCLE (DFS up the chain, with `id` as the subject). `undefined` when manager
-    // wasn't in the PATCH (leave the columns untouched). The manager is LOCAL-only — NOT mirrored to the
-    // IdP — so it sits outside the role/profile IdP write-back/revert block below.
+    // wasn't in the PATCH (leave the columns untouched).
     const managerWrite = await this.resolveManagerWrite(data.manager, id);
     const managerChanged =
       managerWrite !== undefined &&
@@ -1065,106 +873,8 @@ export class UsersService {
       },
     });
 
-    // Mirror role and/or profile CHANGES to the IdP (ADR-0043 §3, issue #149). Only when the user is
-    // IdP-linked (externalId set) — a local-only row has nothing to mirror. The Zitadel mirror is a
-    // best-effort, eventually-consistent multi-call (grantRole / a profile-name PUT / a committed-LAST
-    // email POST). If ANY mirror fails we compensate by reverting the local row to its pre-update values
-    // (role + name + email) and surface the failure as 503, then make a best-effort attempt to converge
-    // the one sub-resource that could have committed ahead of the failure — the display name (see the
-    // catch). The account-linking email is committed LAST so it never diverges; a mid-sequence display-
-    // name/role divergence is transient and has zero authZ impact (authorization is DB-first, INV-5 /
-    // ADR-0043 #1). BYOI no-ops grantRole/updateUser → no throw, so this path is Zitadel-only in practice.
-    if ((roleChanged || profileChanged) && current.externalId) {
-      try {
-        if (roleChanged) {
-          await this.idp.grantRole(current.externalId, data.role!);
-          this.auditWriteBack('grantRole', actorId, id, {
-            from: current.role,
-            to: data.role,
-            externalId: current.externalId,
-          });
-        }
-        if (profileChanged) {
-          // externalId (sub) is UNCHANGED — updates the existing Zitadel user, never a re-link
-          // (SEC-006). Email is written PRE-VERIFIED by the adapter, so it never forces re-verification.
-          await this.idp.updateUser(current.externalId, {
-            // PUT /v2/users/human/{id} is a full-replace on the profile resource — givenName is
-            // required even when only familyName changed. Always send both name fields when any name
-            // changed: new value if it differs, current stored value if not (issue #219).
-            ...(nameChanged
-              ? {
-                  firstName: data.firstName ?? current.firstName,
-                  lastName: data.lastName ?? current.lastName,
-                }
-              : {}),
-            ...(emailChanged ? { email: data.email } : {}),
-          });
-          this.auditWriteBack('updateUser', actorId, id, {
-            // Log WHICH fields changed (the new email is not a secret); never the old values.
-            firstName: nameChanged ? data.firstName : undefined,
-            lastName: nameChanged ? data.lastName : undefined,
-            email: emailChanged ? data.email : undefined,
-            externalId: current.externalId,
-          });
-        }
-      } catch (err) {
-        // Revert ONLY the fields this update could have changed, back to their pre-update truth, so
-        // local and Zitadel agree (the previous values are authoritative) without touching untouched
-        // columns. role → role; name → firstName/lastName; email → email. The manager (ADR-0058) is
-        // local-only (never mirrored) but it was applied in the SAME prisma.user.update above, so on an
-        // IdP failure it must be rolled back to its pre-update value too — otherwise a failed PATCH that
-        // bundled a manager change would silently leave the new manager while reverting everything else.
-        const reverted = await this.prisma.user.update({
-          where: { id },
-          data: {
-            ...(roleChanged ? { role: current.role } : {}),
-            ...(nameChanged
-              ? { firstName: current.firstName, lastName: current.lastName }
-              : {}),
-            ...(emailChanged ? { email: current.email } : {}),
-            ...(managerChanged
-              ? {
-                  managerId: current.managerId,
-                  managerName: current.managerName,
-                }
-              : {}),
-          },
-        });
-        this.search.upsert('users', projectUser(reverted));
-        // Best-effort convergence (INV-5): the Zitadel mirror is multi-call — a profile name `PUT`
-        // followed by a committed-LAST email `POST`. If the profile PUT already committed the NEW name
-        // but a later sub-call (the email POST) then failed, Zitadel's display name is now NEW while we
-        // just reverted the local row to OLD — a bounded, cosmetic display-name divergence with ZERO
-        // authZ impact (authorization is DB-first, ADR-0043 #1). Re-mirror the reverted (current) name
-        // back to Zitadel so the two stores converge instead of drifting permanently. The account-
-        // linking email needs no such re-mirror: it is committed LAST, so on its failure Zitadel's email
-        // was never touched and already matches the reverted local row. This is a SEPARATE best-effort
-        // attempt in its OWN try/catch — it only LOGS on failure and NEVER throws over the original
-        // error, so the caller still receives the original 503.
-        if (nameChanged && current.externalId) {
-          try {
-            await this.idp.updateUser(current.externalId, {
-              firstName: current.firstName,
-              lastName: current.lastName,
-            });
-          } catch (mirrorErr) {
-            this.logger.error(
-              { op: 'updateUser', actor: actorId, subjectUserId: id },
-              `best-effort name re-mirror failed after revert; Zitadel display name may transiently diverge until the next edit (no authZ impact, DB-first) (${mirrorErr instanceof Error ? mirrorErr.message : String(mirrorErr)})`,
-            );
-          }
-        }
-        this.logger.error(
-          { op: 'updateUser', actor: actorId, subjectUserId: id },
-          `IdP write-back failed on update; reverted local user to its prior state (${err instanceof Error ? err.message : String(err)})`,
-        );
-        throw err;
-      }
-    }
-
-    // Emit UserHistory (DEBT-2, issue #185) only on the SUCCESS path — after any IdP mirror has
-    // committed, so a reverted update never produces a misleading log row. An activation flip, a role
-    // change, a manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
+    // Emit UserHistory (DEBT-2, issue #185) for what changed. An activation flip, a role change, a
+    // manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
     // DEACTIVATED / REACTIVATED has no payload; a ROLE_CHANGED carries { from, to }; a MANAGER_CHANGED
     // carries { from, to } where each side is a user-id | external-name | null; an UPDATED carries which
     // fields changed — name / email / legajo / username). Atomic in one transaction with the durable final
@@ -1212,8 +922,7 @@ export class UsersService {
         }
         if (updatedFields.length > 0) {
           await this.recordHistory(tx, id, 'UPDATED', actorId, {
-            // WHICH fields changed (never the old/new values — the email is not a secret, but keep the
-            // log shape consistent with the IdP write-back audit line: field names only).
+            // WHICH fields changed, never the old/new values.
             fields: updatedFields,
           });
         }
@@ -1237,9 +946,9 @@ export class UsersService {
    * refused the same way for completeness.
    *
    * Everything else delegates to {@link update} with ONLY the name keys, so a self-edit gets exactly the
-   * admin edit's behaviour: the Zitadel write-back with the 503 revert (INV-5), the search re-index and
-   * the same `UPDATED { fields: ['name'] }` history row, attributed to the caller. No role / activation
-   * key is ever passed, so the RBAC and last-admin guards are untouched.
+   * admin edit's behaviour: the search re-index and the same `UPDATED { fields: ['name'] }` history row,
+   * attributed to the caller. No role / activation key is ever passed, so the RBAC and last-admin guards
+   * are untouched.
    */
   async updateOwnProfile(self: User, data: UpdateOwnProfile) {
     const current = await this.findOne(self.id);
@@ -1262,22 +971,15 @@ export class UsersService {
   }
 
   /**
-   * Trigger a password reset for a user (issue #149). lazyit NEVER stores, sets or sends a password
-   * (ADR-0016/0037) — it asks the IdP to do it: Zitadel emails a reset link via ZITADEL's own SMTP.
+   * Admin password reset for a user (issue #149, #1268). Guards: 404 if the user is missing or
+   * soft-deleted (findOne filters those out), 422 if the user is INACTIVE (`isActive=false`) — a disabled
+   * account is not invited to set a new password until it is reactivated.
    *
-   * Guards (in order): 404 if the user is missing or soft-deleted (findOne filters those out), 422 if
-   * the user is INACTIVE (`isActive=false`) — a disabled account is not invited to set a new password
-   * until it is reactivated — and an honest 501 (PasswordResetUnsupportedError) for a local-only row
-   * with no `externalId`: there is no IdP identity to reset, so we never pretend an email went out.
+   * OIDC: the operator's IdP owns the credential and its reset, so this throws
+   * {@link PasswordResetUnsupportedError}, which the controller maps to an honest 501 "managed by your
+   * identity provider" — never a 2xx that pretends a reset was sent (INV-4, ADR-0102 §5).
    *
-   * BYOI (generic OIDC) cannot trigger a reset on a foreign IdP: the provider throws
-   * PasswordResetUnsupportedError, which the controller maps to a 501 "managed by your identity
-   * provider" (INV-4). A Zitadel Management failure surfaces as 503 (consistent with the other writes).
-   * Audited via a structured log line AND, since DEBT-2 (issue #185), an append-only UserHistory row
-   * (PASSWORD_RESET_SENT) emitted only after the IdP call SUCCEEDS — so a 422/501/503 never logs a
-   * reset that did not go out.
-   *
-   * LOCAL mode (ADR-0086 §5, amended by issue #1268) diverges: there is no IdP to email a link, so the
+   * LOCAL mode (ADR-0086 §5, amended by issue #1268): there is no IdP to email a link, so the
    * ADMIN picks the delivery explicitly and lazyit performs it:
    *   - `temporary-password` (and the DEFAULT when no body is sent) — mint a one-time temp-password
    *     LOCALLY, hash it to `passwordHash`, set `mustChangePassword`, BUMP the subject's `sessionEpoch`
@@ -1288,10 +990,6 @@ export class UsersService {
    * BACK-COMPAT (CLAUDE.md §8). `options` is OPTIONAL and omitting it reproduces the pre-#1268 behavior
    * exactly, so an operator who updates the API before the web build keeps a working Users page. The
    * temp-password outcome is a strict SUPERSET of the old body — `.temporaryPassword` is still there.
-   *
-   * OIDC/BYOI is UNCHANGED (204 / 501 / 503) with one addition: a `delivery` choice is meaningless there
-   * (the IdP owns the mail), so passing one is a 400 rather than a silently ignored field that would lie
-   * to the caller about what happened.
    */
   async requestPasswordReset(
     id: string,
@@ -1303,7 +1001,7 @@ export class UsersService {
       /** Pre-resolved link origin (see `./reset-link-origin`); null → the `origin-unknown` 409. */
       linkOrigin?: string | null;
     },
-  ): Promise<AdminPasswordResetOutcome | null> {
+  ): Promise<AdminPasswordResetOutcome> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
 
     if (!user.isActive) {
@@ -1358,30 +1056,7 @@ export class UsersService {
       };
     }
 
-    // OIDC / BYOI: the IdP owns the credential AND the mail, so there is no delivery to choose. Reject an
-    // explicit choice instead of dropping it — a 2xx over an ignored `delivery: 'email'` would tell the
-    // admin lazyit sent something it never sent.
-    if (options?.delivery) {
-      throw new BadRequestException(
-        'A password-reset delivery method can only be chosen in local authentication mode; your identity provider owns the reset here.',
-      );
-    }
-
-    if (!user.externalId) {
-      // No IdP identity to reset — honest 501 (same shape BYOI returns), never a misleading 2xx.
-      throw new PasswordResetUnsupportedError(
-        'This user is not linked to an identity provider, so a password reset cannot be triggered.',
-      );
-    }
-
-    await this.idp.requestPasswordReset(user.externalId);
-    this.auditWriteBack('requestPasswordReset', actorId, id, {
-      externalId: user.externalId,
-    });
-    // Append the PASSWORD_RESET_SENT history row (DEBT-2, issue #185) AFTER the IdP call succeeded —
-    // a failed/unsupported reset above already threw, so this only ever records a reset that went out.
-    await this.recordHistory(this.prisma, id, 'PASSWORD_RESET_SENT', actorId);
-    return null;
+    throw new PasswordResetUnsupportedError();
   }
 
   /**
@@ -1562,8 +1237,11 @@ export class UsersService {
    * `user:manage` is stamped as `revokedBySaId` / `releasedBySaId` so the action stays attributable and
    * the at-most-one-actor CHECK is honored (ADR-0048). Grant revocation is done INLINE here
    * (prisma.accessGrant.updateMany) rather than via the access-grants service, to keep it inside this
-   * single transaction. The IdP write-back JSON audit line still uses the human actor id (a structured
-   * log, not a DB FK column).
+   * single transaction.
+   *
+   * Under OIDC the IdP account is NOT disabled (ADR-0102 §5): the soft delete blocks the person in
+   * lazyit (a soft-deleted user's next sign-in is refused), and disabling the IdP account is the
+   * operator's step.
    */
   async remove(
     id: string,
@@ -1580,18 +1258,6 @@ export class UsersService {
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
-      // 0. Deactivate the user in the IdP FIRST, inside the transaction (ADR-0043 §2c). A Management
-      // failure throws here and rolls the ENTIRE offboarding back — so we never end up with a
-      // soft-deleted-local / still-active-in-Zitadel split-brain (the failure surfaces as 503). For an
-      // IdP-linked user only; a local-only row (externalId null) has nothing to deactivate. BYOI
-      // no-ops deactivateUser → no throw, offboarding proceeds locally exactly as before.
-      if (target.externalId) {
-        await this.idp.deactivateUser(target.externalId);
-        this.auditWriteBack('deactivateUser', actor.userId, id, {
-          externalId: target.externalId,
-        });
-      }
-
       // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
       // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).
       const { count: revokedGrants } = await tx.accessGrant.updateMany({
@@ -1764,7 +1430,7 @@ export class UsersService {
    * identity) or externalId (never client-settable, SEC-006), and NEVER touches the source's own rows.
    *
    * Semantics:
-   *  - The new user is created via the normal {@link create} path (same validation, IdP mirror, and a
+   *  - The new user is created via the normal {@link create} path (same validation, and a
    *    CREATED UserHistory row carrying `{ clonedFrom, fireWorkflows }` so the provisioning choice is
    *    audited, never silent).
    *  - Selected assignments → NEW AssetAssignment rows (assignedAt=now, actor=the cloning admin),
@@ -1793,7 +1459,7 @@ export class UsersService {
     // The source must be a live user (404 otherwise) — you clone a real colleague, never a ghost.
     await this.findOne(sourceId);
 
-    // 1) Mint the new user — a NORMAL create (validation, IdP mirror, CREATED history). The CREATED
+    // 1) Mint the new user — a NORMAL create (validation, CREATED history). The CREATED
     //    payload records the provisioning choice (clonedFrom + fireWorkflows) so it is never silent.
     const created = await this.create(data.profile, actorId, {
       createdPayload: {

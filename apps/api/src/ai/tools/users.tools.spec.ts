@@ -1264,10 +1264,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           updatedAt: T0.toISOString(),
         },
       });
-      // IdP-linked account: the role is mirrored to the identity provider.
-      expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'ROLE_CHANGE'].sort(),
-      );
+      // Nothing is written to the identity provider (ADR-0102), even for an IdP-linked account.
+      expect(preview.warnings).toEqual(['ROLE_CHANGE']);
 
       // Without the password step-up the action stays pending.
       await expect(tools.approve(action.id, chat(ADMIN))).rejects.toMatchObject(
@@ -1291,7 +1289,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       });
       expect(users.get(ID.member)!.role).toBe('VIEWER');
-      expect(idp.grantRole).toHaveBeenCalledWith('zitadel-sub-ana', 'VIEWER');
+      expect(idp.grantRole).not.toHaveBeenCalled();
       expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
       expect(ledger.find((e) => e.event === 'APPROVED')).toMatchObject({
         approverUserId: ID.admin,
@@ -1311,7 +1309,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         stepUpVerified: true,
       });
       expect(replay).toMatchObject({ status: 'SUCCEEDED', replayed: true });
-      expect(idp.grantRole).toHaveBeenCalledTimes(1);
       expect(history).toHaveLength(1);
     });
 
@@ -1343,7 +1340,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       ]);
       expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
+        ['IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
       );
       // A manager bundled with an identity field still needs the password.
       expect(preview.stepUpRequired).toBe(true);
@@ -1851,7 +1848,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         'SOFT_DELETE',
         'CASCADE_RELEASES_ASSIGNMENTS',
         'CASCADE_REVOKES_GRANTS',
-        'EXTERNAL_DEPROVISIONING',
         'IRREVERSIBLE',
       ]);
       expect(preview.changes).toContainEqual({
@@ -1887,7 +1883,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
       expect(JSON.stringify(approved.result)).not.toContain('Prod DB root');
       expect(users.get(ID.member)!.deletedAt).toBeInstanceOf(Date);
-      expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-sub-ana');
+      // The IdP account is the operator's to disable (ADR-0102 §5).
+      expect(idp.deactivateUser).not.toHaveBeenCalled();
       expect(history).toEqual([
         expect.objectContaining({
           eventType: 'DELETED',
