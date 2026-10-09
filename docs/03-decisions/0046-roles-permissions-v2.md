@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-09-26
+updated: 2026-10-08
 deciders: [Joaquín Minatel]
 ---
 
@@ -272,6 +272,18 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   (the backend has no block either; an admin-initiated delegation is accepted). `can(permission)` infra
   added (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed); the app-wide
   migration of existing `useCanWrite` gate sites to `can()` is a separate follow-up.
+  **Amended 2026-10-08 (#1540) — the role-first editor becomes one role × capability matrix**, by CEO
+  decision on the approved round-3 mockup. The original "one role at a time" screen proved hard to read:
+  two pages (near-empty role cards, then ~3600px of switches with long descriptions) and no way to
+  compare MEMBER with VIEWER without flipping tabs and remembering. `settings/roles` is now ONE page:
+  capabilities in rows (grouped by pillar, collapsible, with an n/m summary per role), ADMIN shown locked
+  as a reference column, MEMBER and VIEWER editable side by side, a preset selector in each role's
+  column header, descriptions behind "?" tips and ⚠ for admin-level capabilities. Both roles stage
+  together and save in the same full-matrix `PUT /config/permissions` behind one save bar; the
+  consequential confirm runs over both roles exactly as before, fine-tune stays below the matrix, and the
+  separate "what this role can do" summary is dropped because the matrix is that summary.
+  `settings/roles/permissions` redirects to `settings/roles`. Nothing in the API, the catalog, the human
+  layer or the "fully configurable, never client-blocked" rule changes.
 - **P6b — permission-aware UI gating** (the call-site migration, `apps/web`). (done) Every former
   `useCanWrite`/`isAdmin` write/delete gate now uses `can('domain:action')` matching its backend
   `@RequirePermission` (write→`:write`, delete/restore→`:delete`, grants→`accessGrant:grant`, user

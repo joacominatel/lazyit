@@ -22,6 +22,10 @@ export const ConsumableCategorySchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   deletedAt: z.iso.datetime().nullable(),
+  // How many live (non-deleted) consumables filed under this category (#1540), so Settings → Taxonomies can show what is in use before an archive. A
+  // COMPUTED read aggregate, not a stored column: no migration. Only the list read populates it; it is
+  // absent from single reads, writes and an older API, so every consumer treats it as optional.
+  usageCount: z.number().int().min(0).nullish(),
 });
 
 /** Payload to create a ConsumableCategory. `name` is unique (enforced by the DB). */

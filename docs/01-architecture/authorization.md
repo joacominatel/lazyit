@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-03
+updated: 2026-10-08
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -277,7 +277,7 @@ Every former `isAdmin`/`useCanWrite` write-or-delete gate now uses `can('domain:
 backend `@RequirePermission` (write→`:write`, delete/restore→`:delete`, grants→`accessGrant:grant`, user
 admin→`user:manage`, settings/taxonomy→`settings:manage`). The `can()` infra
 (`useMyPermissions`/`useCan` over `/config/my-permissions`, **fails closed** while loading);
-`useCanWrite` was retired. The role-first editor lives at `settings/roles/permissions`; the
+`useCanWrite` was retired. The role × capability matrix lives at `settings/roles` (`settings/roles/permissions` redirects there, #1540); the
 service-accounts admin at `settings/service-accounts` (one-time secret reveal). The one deliberate
 exception is the "Show archived" toggle, kept on `isAdmin` because the API's `deleted=only` slice stays
 role-based, not a permission. See [[0046-roles-permissions-v2]] P6b/P7, [[0020-frontend-data-layer]].

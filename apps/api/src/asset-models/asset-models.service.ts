@@ -31,6 +31,24 @@ export const ASSET_MODEL_SORT_ALLOWLIST = {
   updatedAt: 'updatedAt',
 } as const;
 
+/**
+ * Live assets only (#1540): `usageCount` counts what an operator sees in the inventory. A relation
+ * `_count` is not rewritten by the ADR-0032 read filter, so the `deletedAt: null` is explicit. It
+ * applies to both slices: an archived model's row still shows the live assets that point at it.
+ */
+const LIVE_ASSET_COUNT = {
+  _count: { select: { assets: { where: { deletedAt: null } } } },
+} as const satisfies Prisma.AssetModelInclude;
+
+type ModelWithCount = Prisma.AssetModelGetPayload<{
+  include: typeof LIVE_ASSET_COUNT;
+}>;
+
+function withUsageCount(row: ModelWithCount) {
+  const { _count, ...model } = row;
+  return { ...model, usageCount: _count.assets };
+}
+
 @Injectable()
 export class AssetModelsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -43,6 +61,8 @@ export class AssetModelsService {
    * `only`) scopes the page to live or soft-deleted rows; `only` carries the ADR-0032
    * `includeSoftDeleted` escape hatch so the read filter doesn't re-hide them (ADMIN-gated at the
    * controller). Runs `findMany(take/skip)` + `count` over the same `where` in one `$transaction`.
+   * Each row on the page carries the computed `usageCount` of its live assets (#1540) — a relation
+   * aggregate inside the same `findMany`, not a per-row lookup.
    */
   async findPage(filters: AssetModelFilters, page: PageQuery) {
     const where = {
@@ -71,11 +91,12 @@ export class AssetModelsService {
         orderBy,
         take,
         skip,
+        include: LIVE_ASSET_COUNT,
         ...escapeHatch,
       }),
       this.prisma.assetModel.count({ where, ...escapeHatch }),
     ]);
-    return pageOf(items, total, page);
+    return pageOf(items.map(withUsageCount), total, page);
   }
 
   /** The shared `where` for the model list — used identically by findPage and its count. */
@@ -115,7 +136,9 @@ export class AssetModelsService {
       // specs is free-form jsonb; zod's Record<string, unknown> needs a cast to Prisma's Json input.
       data: {
         ...rest,
-        ...(specs !== undefined ? { specs: specs as Prisma.InputJsonValue } : {}),
+        ...(specs !== undefined
+          ? { specs: specs as Prisma.InputJsonValue }
+          : {}),
       },
     });
   }
@@ -127,7 +150,9 @@ export class AssetModelsService {
       where: { id },
       data: {
         ...rest,
-        ...(specs !== undefined ? { specs: specs as Prisma.InputJsonValue } : {}),
+        ...(specs !== undefined
+          ? { specs: specs as Prisma.InputJsonValue }
+          : {}),
       },
     });
   }

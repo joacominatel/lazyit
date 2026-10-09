@@ -57,7 +57,7 @@
     },
     "roles": {
       "title": "Roles & permissions",
-      "description": "See who has which RBAC role across the team. Role changes happen in the Users section."
+      "description": "What Members and Viewers can do, side by side with Admin."
     },
     "serviceAccounts": {
       "title": "Service accounts",
@@ -579,12 +579,9 @@
     }
   },
   "roles": {
-    "title": "Roles",
-    "subtitle": "Who holds which access level, and what each role can do. Change a role from the Users section.",
+    "title": "Roles & permissions",
+    "subtitle": "What each role can do. Change a person's role from Users.",
     "manageUsers": "Manage users",
-    "viewMembers": "View {count, plural, =0 {no members} one {# member} other {# members}}",
-    "fullAccessLocked": "Full access — not editable.",
-    "editPermissions": "Edit permissions",
     "meta": {
       "ADMIN": {
         "label": "Admin",
@@ -600,74 +597,16 @@
       }
     },
     "permissions": {
-      "title": "Role permissions",
-      "subtitle": "Configure what Members and Viewers can do. Admin always has full access.",
       "idpNote": "These permissions are lazyit-only — they never appear in your identity provider.",
       "loadError": "Couldn't load permissions",
-      "startFromPreset": "Start from a preset",
-      "resetToDefaults": "Reset to defaults",
-      "capabilitiesHeading": "Capabilities",
-      "summary": {
-        "heading": "What this role can do",
-        "levels": {
-          "edit": "View & edit",
-          "view": "View only",
-          "none": "Cannot access"
-        },
-        "domains": {
-          "asset": "Assets",
-          "application": "Applications",
-          "accessGrant": "Access grants",
-          "accessRequest": "Access requests",
-          "consumable": "Consumables",
-          "purchaseOrder": "Purchases",
-          "article": "Knowledge Base",
-          "location": "Locations",
-          "assetModel": "Asset models",
-          "category": "Categories",
-          "user": "Users",
-          "dashboard": "Dashboard",
-          "search": "Search",
-          "settings": "Settings",
-          "logs": "Activity logs",
-          "workflow": "Workflows",
-          "notification": "Notifications",
-          "secret": "Secret Manager",
-          "import": "Imports",
-          "infra": "Server map",
-          "ai": "AI assistant"
-        }
-      },
-      "segmented": {
-        "ariaLabel": "Choose a role to edit",
-        "adminTitle": "Admin has full access and cannot be edited.",
-        "full": "Full",
-        "admin": "Admin",
-        "member": "Member",
-        "viewer": "Viewer",
-        "unsavedChanges": "Unsaved changes"
-      },
       "preset": {
-        "custom": "Custom",
-        "customEdited": "Custom (you edited)",
-        "customHint": "A one-off set that matches no preset."
-      },
-      "capabilityGroup": {
-        "ariaLabel": "{label} capabilities",
-        "adminLevel": "Admin-level",
-        "partial": "Partial"
+        "custom": "Custom"
       },
       "fineTune": {
         "title": "Fine-tune (advanced)",
         "subtitle": "Exact per-permission control",
-        "description": "Each switch here is a single permission. Changes flip the role to a Custom set and update the capability toggles above.",
+        "description": "Each checkbox here is one permission for one role. A change flips that role to Custom and shows as a partly granted cell in the matrix.",
         "adminLevel": "Admin-level"
-      },
-      "saveBar": {
-        "ariaLabel": "Unsaved permission changes",
-        "message": "You have unsaved permission changes.",
-        "discard": "Discard",
-        "saveChanges": "Save changes"
       },
       "confirm": {
         "title": "Review this change before saving",
@@ -693,7 +632,50 @@
           "MEMBER": "Members",
           "VIEWER": "Viewers"
         }
+      },
+      "domains": {
+        "asset": "Assets",
+        "application": "Applications",
+        "accessGrant": "Access grants",
+        "accessRequest": "Access requests",
+        "consumable": "Consumables",
+        "purchaseOrder": "Purchases",
+        "article": "Knowledge Base",
+        "location": "Locations",
+        "assetModel": "Asset models",
+        "category": "Categories",
+        "user": "Users",
+        "dashboard": "Dashboard",
+        "search": "Search",
+        "settings": "Settings",
+        "logs": "Activity logs",
+        "workflow": "Workflows",
+        "notification": "Notifications",
+        "secret": "Secret Manager",
+        "import": "Imports",
+        "infra": "Server map",
+        "ai": "AI assistant"
       }
+    },
+    "matrix": {
+      "ariaLabel": "Permissions by role",
+      "capability": "Capability",
+      "members": "{count, plural, =0 {No one} one {# person} other {# people}}",
+      "all": "All",
+      "adminLocked": "Admin always has every permission and can't be edited.",
+      "presetLabel": "Preset for {role}",
+      "roleUnsaved": "Unsaved changes",
+      "groupSummary": "{granted} of {total} granted to {role}",
+      "granted": "Granted",
+      "partial": "Partly granted — some of its permissions were set in Fine-tune.",
+      "cellLabel": "{capability} — {role}",
+      "adminLevelTopic": "{capability} is admin-level",
+      "adminLevelHelp": "Admin-level: a delete or an administrative action. You can grant it to this role; saving asks you to confirm.",
+      "reset": "Reset to defaults",
+      "discard": "Discard",
+      "unsaved": "{count, plural, one {# unsaved change} other {# unsaved changes}}",
+      "noChanges": "No unsaved changes",
+      "save": "{count, plural, =0 {Save} one {Save # change} other {Save # changes}}"
     }
   },
   "serviceAccounts": {
@@ -704,13 +686,9 @@
     "newAccount": "New service account",
     "loadError": "Could not load service accounts",
     "columns": {
-      "name": "Name",
       "token": "Token",
-      "permissions": "Permissions",
-      "lastUsed": "Last used",
-      "status": "Status"
+      "permissions": "Permissions"
     },
-    "never": "Never",
     "systemManaged": {
       "badge": "System-managed",
       "hint": "Owned by the workflow engine — every workflow run executes as this account.",
@@ -719,14 +697,10 @@
     "empty": {
       "revokedTitle": "No revoked service accounts",
       "title": "No service accounts yet",
-      "revokedDescription": "Revoked (soft-deleted) accounts appear here and can be restored.",
-      "description": "Give a CI runner, script or integration scoped, non-human access to the API — create one and hand it a token instead of a person's login.",
-      "action": "Create the first one"
+      "action": "New service account"
     },
     "permissionsSummary": {
-      "none": "None",
-      "count": "{count, plural, one {# permission} other {# permissions}}",
-      "extra": "{count, plural, other {+# more}}"
+      "none": "None"
     },
     "status": {
       "active": "Active",
@@ -871,7 +845,11 @@
       "selectAllAria": "Select all {label} permissions",
       "all": "All",
       "adminLevel": "Admin-level"
-    }
+    },
+    "lastUsed": "Used {when}",
+    "neverUsed": "Never used",
+    "expires": "Expires {date}",
+    "noExpiry": "No expiry"
   },
   "permissionMeta": {
     "pillars": {
@@ -1124,16 +1102,6 @@
   },
   "taxonomies": {
     "title": "Taxonomies",
-    "subtitle": "Manage the categories that classify records, plus the asset models assets reference and your custom asset statuses.",
-    "tablistAria": "Taxonomy kind",
-    "tabs": {
-      "asset": "Asset categories",
-      "application": "Application categories",
-      "consumable": "Consumable categories",
-      "article": "Article categories",
-      "models": "Asset models",
-      "statuses": "Statuses"
-    },
     "kindLabel": {
       "asset": "asset category",
       "application": "application category",
@@ -1170,23 +1138,14 @@
     "categories": {
       "newButton": "New {label}",
       "loadError": "Could not load {label} list",
-      "emptyTitle": "No {label} entries yet",
-      "emptyDescription": "Add your first one to start classifying records — it becomes pickable wherever this kind is referenced.",
-      "emptyAction": "Create the first one",
       "selectAll": "Select all {label} entries",
       "selectRow": "Select {name}",
       "bulkDelete": {
         "confirmTitle": "Delete {count, plural, one {# category} other {# categories}}?",
-        "confirmDescription": "This soft-deletes the selected categories. Any that are still in use — they have articles or sub-folders — are kept and skipped.",
+        "confirmDescription": "This soft-deletes the selected categories; they can be restored. Records filed under them keep their data but show no category until the category is restored or they are re-filed.",
         "resultAllDeleted": "Deleted {deleted, plural, one {# category} other {# categories}}.",
-        "resultPartial": "Deleted {deleted}, {skipped} skipped (still in use).",
-        "resultAllSkipped": "{skipped, plural, one {# category} other {# categories}} skipped (still in use)."
-      },
-      "columns": {
-        "name": "Name",
-        "description": "Description",
-        "order": "Order",
-        "updated": "Updated"
+        "resultPartial": "Deleted {deleted}; {skipped} couldn't be deleted.",
+        "resultAllSkipped": "Couldn't delete {skipped, plural, one {# category} other {# categories}}."
       },
       "form": {
         "editTitle": "Edit {label}",
@@ -1239,22 +1198,21 @@
         "updateError": "Couldn't update {label}",
         "created": "Created {label}",
         "createError": "Couldn't create {label}"
+      },
+      "inlinePlaceholder": "New category…",
+      "empty": "No categories yet.",
+      "deleteImpact": {
+        "used": "Used by {usage} — they keep their records but show no category until it is restored.",
+        "unused": "Nothing is filed under it.",
+        "unknown": "Anything filed under it keeps its record but shows no category until it is restored.",
+        "bulkUsed": "In use: {names} — {usage} in all will show no category until restored.",
+        "bulkUnused": "None of them is in use."
       }
     },
     "models": {
       "newButton": "New model",
       "loadError": "Could not load asset models",
-      "emptyTitle": "No asset models yet",
-      "emptyDescription": "Add a make and model — say, a MacBook Pro 14 — so every asset you register can reference it instead of retyping the specs.",
-      "emptyAction": "Create the first model",
       "entityLabel": "asset model",
-      "columns": {
-        "name": "Name",
-        "manufacturer": "Manufacturer",
-        "sku": "SKU",
-        "category": "Category",
-        "updated": "Updated"
-      },
       "form": {
         "editTitle": "Edit asset model",
         "newTitle": "New asset model",
@@ -1299,7 +1257,8 @@
         "updateError": "Couldn't update asset model",
         "created": "Asset model created",
         "createError": "Couldn't create asset model"
-      }
+      },
+      "empty": "No asset models yet."
     },
     "statuses": {
       "intro": "Custom statuses are optional names for the six built-in statuses — for example \"In repair at vendor\" or \"On the bench\" for In maintenance, or \"Loaner pool\" for In storage. Each one maps to exactly one built-in status, which is what the dashboard, filters, imports and every other rule keep reading. Assets can keep a plain built-in status.",
@@ -1312,14 +1271,6 @@
       "archivedEmpty": "No archived custom statuses.",
       "archiveAction": "Archive",
       "assetsLink": "{count, plural, one {# asset} other {# assets}} with {name}",
-      "columns": {
-        "name": "Name",
-        "description": "Description",
-        "order": "Order",
-        "assets": "Assets",
-        "kind": "Built-in status",
-        "archived": "Archived"
-      },
       "toast": {
         "created": "Created the custom status {name}",
         "createError": "Couldn't create the custom status",
@@ -1365,7 +1316,47 @@
         "toast": "Archived the custom status {name}",
         "toastMoved": "Archived {name} and moved {count, plural, one {# asset} other {# assets}} to {target}",
         "error": "Couldn't archive the custom status"
-      }
+      },
+      "archivedLabel": "Archived {taxonomy}",
+      "archivedOn": "Archived {date}"
+    },
+    "help": "The lists that classify records: categories, asset models and custom asset statuses. Knowledge Base folders are managed in the Knowledge Base itself.",
+    "listLabel": "Taxonomies",
+    "groups": {
+      "assets": "Assets",
+      "applications": "Applications",
+      "consumables": "Consumables",
+      "knowledge": "Knowledge"
+    },
+    "panes": {
+      "asset": "Categories",
+      "models": "Models",
+      "statuses": "Custom statuses",
+      "application": "Categories",
+      "consumable": "Categories"
+    },
+    "paneTitles": {
+      "asset": "Asset categories",
+      "models": "Asset models",
+      "statuses": "Custom asset statuses",
+      "application": "Application categories",
+      "consumable": "Consumable categories"
+    },
+    "kbFolders": "Folders → in the KB",
+    "kbPointer": "Article categories are the Knowledge Base folders now. Create, rename, describe and order them in the Knowledge Base.",
+    "kbOpen": "Open the Knowledge Base",
+    "filterLabel": "Filter {taxonomy}",
+    "filterPlaceholder": "Filter…",
+    "noMatches": "Nothing matches the filter.",
+    "select": "Select",
+    "selectDone": "Done",
+    "selectAllVisible": "Select all shown",
+    "inlineAdd": "Add",
+    "usage": {
+      "assets": "{count, plural, one {# asset} other {# assets}}",
+      "apps": "{count, plural, one {# app} other {# apps}}",
+      "consumables": "{count, plural, one {# consumable} other {# consumables}}",
+      "unused": "Unused"
     }
   }
 }

@@ -195,7 +195,8 @@ An **archive** card carries *"Archives it. It can be restored later."* and says 
 — *"Also affects 12 assets"*, with a few named. If you can't see some of those records, **Used by** says
 *"Unknown to you: …"* instead of zero: the item may still be in use. If the count changes before you
 approve, the card updates as described in [When the card changes under you](#when-the-card-changes-under-you).
-Archived categories are restored from **Settings → Taxonomies**, not from the chat.
+Archived categories are not restored from the chat — see
+[What deleting a category does](/help/configuration-taxonomies#what-you-can-manage).
 
 ## Asset tags
 

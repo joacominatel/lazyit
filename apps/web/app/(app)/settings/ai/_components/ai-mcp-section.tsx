@@ -1,27 +1,13 @@
 "use client";
 
-import {
-  ArrowTopRightOnSquareIcon,
-  GlobeAltIcon,
-  InformationCircleIcon,
-  LinkIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowTopRightOnSquareIcon, GlobeAltIcon } from "@heroicons/react/24/outline";
 import type { AiSettings } from "@lazyit/shared";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useSyncExternalStore } from "react";
-import { Callout } from "@/components/callout";
 import { CopyButton } from "@/components/copy-button";
 import { HelpTip } from "@/components/help-tip";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Field } from "@/components/ui/field";
-import { Separator } from "@/components/ui/separator";
+import { SettingLabel, SettingRow, SettingsSection } from "@/components/settings-section";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
@@ -34,7 +20,6 @@ import {
   mcpEndpoint,
 } from "../_lib/ai-settings-form";
 import { AiErrorNotice } from "./ai-error-notice";
-import { AiFieldLabel } from "./ai-field-label";
 import { AiMcpAllowlistEditor } from "./ai-mcp-allowlist-editor";
 
 const noSubscribe = () => () => {};
@@ -49,15 +34,15 @@ function useLocationPart(part: "origin" | "protocol"): string | null {
 }
 
 /**
- * Settings → AI: external AI agents over MCP (ADR-0097; frontend.md §5.3; mcp-and-oauth.md §8, §14).
- * The MCP switch is independent of the LLM provider — MCP works with no provider configured. The card
- * reads how clients authenticate on THIS instance from `/ai/status` (`mcp.auth`) and says it in plain
- * words: OAuth sign-in on an HTTPS instance; personal tokens on a plain-HTTP `lan` instance, where OAuth
- * cannot work — one line, with the details in its help tip. The tip also names the two traps operators hit: an internal CA that Claude Code (Node.js) does
- * not trust, and cloud connectors (claude.ai, ChatGPT) that need a publicly reachable HTTPS instance.
- * The endpoint is `/ai/status` `mcp.endpoint` (the API's pinned `WEB_ORIGIN` + `/mcp`); only when the
- * server has none is the page's own origin shown, with a note. The install panel itself lives on the
- * per-user page `/account/ai` (W3-9); the card embeds the same `McpInstallPanel` while `mcp.available`.
+ * Settings → AI → External agents (ADR-0097; frontend.md §5.3; mcp-and-oauth.md §8, §14). The MCP switch
+ * is independent of the LLM provider — MCP works with no provider configured. The section reads how
+ * clients authenticate on THIS instance from `/ai/status` (`mcp.auth`) and says it in one line: OAuth
+ * sign-in on an HTTPS instance; personal tokens on a plain-HTTP `lan` instance, where OAuth cannot work —
+ * the details, including the internal-CA and cloud-connector traps, sit in its "?" tip. The endpoint is
+ * `/ai/status` `mcp.endpoint` (the API's pinned `WEB_ORIGIN` + `/mcp`); only when the server has none is
+ * the page's own origin shown, with a note. The install panel itself lives on `/account/ai` (W3-9); the
+ * section embeds the same `McpInstallPanel` while `mcp.available`. The allowed-clients editor follows as
+ * its own section.
  */
 export function AiMcpSection({ settings }: { settings: AiSettings }) {
   const t = useTranslations("aiSettings.mcp");
@@ -77,48 +62,35 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <LinkIcon className="size-5 text-muted-foreground" aria-hidden />
-            <CardTitle>{t("title")}</CardTitle>
-            <HelpTip topic={t("title")} href={tLinks("mcp")}>
-              <p>{t("help")}</p>
-            </HelpTip>
-          </div>
+    <div className="space-y-4">
+      <SettingsSection
+        title={t("title")}
+        summary={t("description")}
+        help={<p>{t("help")}</p>}
+        helpHref={tLinks("mcp")}
+        status={
           <StatusBadge tone={settings.mcpEnabled ? "success" : "neutral"}>
             {settings.mcpEnabled ? t("on") : t("off")}
           </StatusBadge>
-        </div>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <Field orientation="horizontal" className="rounded-lg border bg-muted/20 p-3">
-          <div className="flex flex-1 flex-col gap-0.5">
-            <AiFieldLabel
-              htmlFor="ai-mcp-enabled"
-              className="font-medium"
-              help={<p>{t("switch.description")}</p>}
-            >
-              {t("switch.label")}
-            </AiFieldLabel>
-          </div>
+        }
+      >
+        <SettingRow
+          label={t("switch.label")}
+          htmlFor="ai-mcp-enabled"
+          help={<p>{t("switch.description")}</p>}
+        >
           <Switch
             id="ai-mcp-enabled"
             checked={settings.mcpEnabled}
             disabled={save.isPending}
-            onCheckedChange={(checked) =>
-              save.save(buildUpdate(settings, { mcpEnabled: checked }))
-            }
+            onCheckedChange={(checked) => save.save(buildUpdate(settings, { mcpEnabled: checked }))}
           />
-        </Field>
-        <AiErrorNotice error={save.error} />
+        </SettingRow>
 
-        {connection ? (
-          <Callout tone="info" icon={<InformationCircleIcon />}>
-            <div className="space-y-1 text-sm">
-              <p className="flex items-center gap-1 font-medium">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t pt-2.5">
+          {connection ? (
+            <div className="min-w-0 space-y-0.5">
+              <p className="flex items-center gap-0.5 text-sm font-medium">
                 {connection.mode === "oauth" ? t("mode.oauth.title") : t("mode.personalToken.title")}
                 <HelpTip topic={t("mode.help")} href={tLinks("mcp")}>
                   {connection.mode === "oauth" ? (
@@ -148,61 +120,51 @@ export function AiMcpSection({ settings }: { settings: AiSettings }) {
                 </HelpTip>
               </p>
               {connection.source === "browser" ? (
-                <p className="text-muted-foreground">{t("mode.detectedFromBrowser")}</p>
+                <p className="text-xs text-muted-foreground">{t("mode.detectedFromBrowser")}</p>
               ) : null}
             </div>
-          </Callout>
-        ) : (
-          <div
-            className="space-y-2 rounded-md border p-3"
-            aria-busy="true"
-            role="status"
-          >
-            <span className="sr-only">{t("mode.loading")}</span>
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-5/6" />
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <p className="flex items-center gap-0.5 text-sm font-medium">
-            {t("endpoint.label")}
-            <HelpTip topic={t("endpoint.label")}>
-              <p>{t("endpoint.description")}</p>
+          ) : (
+            <div className="w-full space-y-1.5" aria-busy="true" role="status">
+              <span className="sr-only">{t("mode.loading")}</span>
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          )}
+          <span className="inline-flex items-center gap-0.5">
+            <Link
+              href="/account/ai"
+              className="inline-flex items-center gap-1 text-sm font-medium underline-offset-4 hover:underline"
+            >
+              {t("install.link")}
+              <ArrowTopRightOnSquareIcon className="size-4" aria-hidden />
+            </Link>
+            <HelpTip topic={t("install.link")}>
+              <p>{t("install.description")}</p>
             </HelpTip>
-          </p>
-          <div className="flex items-center gap-2 rounded-lg border px-3 py-2">
-            <code className="min-w-0 flex-1 font-mono text-sm break-all">
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-2.5">
+          <div className="space-y-0.5">
+            <SettingLabel help={<p>{t("endpoint.description")}</p>}>{t("endpoint.label")}</SettingLabel>
+            {endpoint?.source === "page" ? (
+              <p className="text-xs text-muted-foreground">{t("endpoint.pageFallback")}</p>
+            ) : null}
+          </div>
+          <div className="flex min-w-0 max-w-full items-center gap-2">
+            <code className="min-w-0 rounded-md border px-2.5 py-1.5 font-mono text-sm break-all">
               {endpoint?.url ?? "…"}
             </code>
             {endpoint ? <CopyButton value={endpoint.url} label={t("endpoint.copy")} /> : null}
           </div>
-          {endpoint?.source === "page" ? (
-            <p className="text-sm text-muted-foreground">{t("endpoint.pageFallback")}</p>
-          ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Link
-            href="/account/ai"
-            className="inline-flex items-center gap-1 font-medium underline-offset-4 hover:underline"
-          >
-            {t("install.link")}
-            <ArrowTopRightOnSquareIcon className="size-4" aria-hidden />
-          </Link>
-          <span className="text-muted-foreground">{t("install.description")}</span>
-        </div>
+        <AiErrorNotice error={save.error} />
 
         {/* The shared install panel (W3-9), for the admin too — only while MCP is usable by this caller. */}
-        {status.data?.mcp?.available ? (
-          <McpInstallPanel auth={status.data.mcp.auth} />
-        ) : null}
+        {status.data?.mcp?.available ? <McpInstallPanel auth={status.data.mcp.auth} /> : null}
+      </SettingsSection>
 
-        <Separator />
-
-        <AiMcpAllowlistEditor settings={settings} />
-      </CardContent>
-    </Card>
+      <AiMcpAllowlistEditor settings={settings} />
+    </div>
   );
 }

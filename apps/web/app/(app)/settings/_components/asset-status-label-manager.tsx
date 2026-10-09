@@ -1,13 +1,12 @@
 "use client";
 
-import { InformationCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import {
   type AssetStatus,
   type AssetStatusLabel,
   AssetStatusSchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -16,17 +15,12 @@ import {
   useAssetStatusLabel,
 } from "@/app/(app)/assets/_components/asset-status-badge";
 import { ArchivedToggle } from "@/components/archived-toggle";
-import { Callout } from "@/components/callout";
 import {
   ErrorState,
-  type ResourceColumn,
-  ResourceTable,
   RestoreRowAction,
   RowActions,
 } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
 import {
   useArchivedAssetStatusLabels,
   useAssetStatusLabels,
@@ -37,24 +31,36 @@ import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { AssetStatusLabelArchiveDialog } from "./asset-status-label-archive-dialog";
 import { AssetStatusLabelFormDialog } from "./asset-status-label-form-dialog";
+import {
+  TaxonomyGroupRow,
+  TaxonomyList,
+  TaxonomyListSkeleton,
+  TaxonomyNote,
+  TaxonomyPaneHeader,
+  TaxonomyRow,
+  UsageText,
+} from "./taxonomy-list";
+import { filterTaxonomy } from "./taxonomy-usage";
 
 /**
- * Settings → Taxonomies → Statuses (ADR-0101, #1524): the custom asset statuses, grouped under the six
- * BUILT-IN statuses they map to. The built-ins are fixed group headers — never editable — so the mapping
- * is visible at a glance: every custom status is a name for one of them, and the built-in status is what
- * every rule reads. Custom statuses are optional; with none, the page explains them and offers to add one.
+ * Settings → Taxonomies → Custom statuses (ADR-0101, #1524, #1540): the custom asset statuses as compact
+ * rows, grouped under the six BUILT-IN statuses they map to. The built-ins are fixed group rows — never
+ * editable — each with "Add" for a custom status under it. A row shows its swatch, name, the
+ * description muted when there is one, how many assets carry it (a link to them) and a ⋯ menu (Edit /
+ * Archive). Archive keeps its dialog, which moves the assets first when any use the status.
  *
  * Gates mirror the category managers: create/edit `category:write`, archive/restore `category:delete`;
  * the archived list is ADMIN-only (ADR-0041), like every archived view.
  */
-export function AssetStatusLabelManager() {
+export function AssetStatusLabelManager({ title }: { title: string }) {
   const t = useTranslations("settings.taxonomies.statuses");
-  const tc = useTranslations("common");
+  const tt = useTranslations("settings.taxonomies");
   const statusLabel = useAssetStatusLabel();
   const canWrite = useCan("category:write");
   const canDelete = useCan("category:delete");
   const { isAdmin } = usePermissions();
   const [showArchived, setShowArchived] = useState(false);
+  const [filter, setFilter] = useState("");
 
   const { data, isLoading, isError, error, refetch } = useAssetStatusLabels();
   const archived = useArchivedAssetStatusLabels(isAdmin && showArchived);
@@ -66,6 +72,8 @@ export function AssetStatusLabelManager() {
   const [archiving, setArchiving] = useState<AssetStatusLabel | null>(null);
 
   const labels = data ?? [];
+  const visible = filterTaxonomy(labels, filter, (l) => [l.name, l.description]);
+  const filtering = filter.trim().length > 0;
 
   function openCreate(kind?: AssetStatus) {
     setEditing(undefined);
@@ -86,60 +94,36 @@ export function AssetStatusLabelManager() {
     });
   }
 
-  const columns: ResourceColumn[] = [
-    { key: "name", header: t("columns.name"), skeleton: <Skeleton className="h-4 w-40" /> },
-    {
-      key: "description",
-      header: t("columns.description"),
-      skeleton: <Skeleton className="h-4 w-56" />,
-    },
-    {
-      key: "order",
-      header: t("columns.order"),
-      headClassName: "w-20",
-      skeleton: <Skeleton className="h-4 w-8" />,
-    },
-    {
-      key: "assets",
-      header: t("columns.assets"),
-      headClassName: "w-24",
-      skeleton: <Skeleton className="h-4 w-8" />,
-    },
-    {
-      key: "actions",
-      header: tc("actions"),
-      srOnlyHeader: true,
-      headClassName: "w-12 text-right",
-      skeleton: <Skeleton className="ml-auto size-7" />,
-    },
-  ];
-
   return (
-    <div className="space-y-4">
-      <Callout tone="info" icon={<InformationCircleIcon />}>
-        <p className="text-sm">{t("intro")}</p>
-      </Callout>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {isAdmin ? (
-          <ArchivedToggle
-            id="statuses-show-archived"
-            checked={showArchived}
-            onCheckedChange={setShowArchived}
-          />
-        ) : (
-          <span />
-        )}
-        {canWrite && !showArchived ? (
-          <Button size="sm" onClick={() => openCreate()}>
-            <PlusIcon />
-            {t("newButton")}
-          </Button>
-        ) : null}
-      </div>
+    <div className="space-y-3">
+      <TaxonomyPaneHeader
+        title={title}
+        help={<p>{t("intro")}</p>}
+        filter={filter}
+        onFilterChange={setFilter}
+        actions={
+          <>
+            {isAdmin ? (
+              <ArchivedToggle
+                id="statuses-show-archived"
+                checked={showArchived}
+                onCheckedChange={setShowArchived}
+              />
+            ) : null}
+            {canWrite && !showArchived ? (
+              <Button size="sm" onClick={() => openCreate()}>
+                <PlusIcon />
+                {t("newButton")}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
       {showArchived ? (
         <ArchivedStatuses
+          title={title}
+          filter={filter}
           labels={archived.data}
           isLoading={archived.isLoading}
           isError={archived.isError}
@@ -149,87 +133,69 @@ export function AssetStatusLabelManager() {
           restoring={restore.isPending}
         />
       ) : isLoading ? (
-        <ResourceTable columns={columns} isLoading />
+        <TaxonomyListSkeleton />
       ) : isError ? (
         <ErrorState title={t("loadError")} onRetry={() => refetch()} error={error} />
       ) : (
-        <ResourceTable columns={columns}>
-          {AssetStatusSchema.options.map((status) => {
-            const group = labels.filter((label) => label.kind === status);
+        <TaxonomyList label={title}>
+          {filtering && visible.length === 0 ? (
+            <TaxonomyNote>{tt("noMatches")}</TaxonomyNote>
+          ) : null}
+          {AssetStatusSchema.options.flatMap((status) => {
+            const group = visible.filter((label) => label.kind === status);
+            if (filtering && group.length === 0) return [];
             return [
-              <TableRow key={`group-${status}`} className="bg-muted/40 hover:bg-muted/40">
-                <TableCell colSpan={columns.length}>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2">
-                      <AssetStatusBadge status={status} />
-                      <span className="text-xs text-muted-foreground">{t("builtIn")}</span>
-                    </span>
-                    {canWrite ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openCreate(status)}
-                        aria-label={t("addTo", { status: statusLabel(status) })}
-                      >
-                        <PlusIcon />
-                        <span className="sr-only sm:not-sr-only">{t("add")}</span>
-                      </Button>
-                    ) : null}
-                  </div>
-                </TableCell>
-              </TableRow>,
-              ...group.map((label) => (
-                <TableRow key={label.id}>
-                  <TableCell className="pl-8 font-medium">
-                    <span className="flex items-center gap-2">
-                      <AssetStatusSwatch status={label.kind} color={label.color} className="size-2" />
-                      {label.name}
-                    </span>
-                  </TableCell>
-                  <TableCell
-                    className="max-w-[320px] truncate text-muted-foreground"
-                    title={label.description ?? undefined}
+              <TaxonomyGroupRow key={`group-${status}`}>
+                <AssetStatusBadge status={status} />
+                <span className="flex-1 text-xs text-muted-foreground">{t("builtIn")}</span>
+                {canWrite ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openCreate(status)}
+                    aria-label={t("addTo", { status: statusLabel(status) })}
                   >
-                    {label.description ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground tabular-nums">
-                    {label.order ?? "—"}
-                  </TableCell>
-                  <TableCell className="tabular-nums">
-                    {(label.assetCount ?? 0) > 0 ? (
-                      <Link
-                        href={`/assets?statusLabel=${encodeURIComponent(label.id)}`}
-                        className="underline-offset-4 hover:underline"
-                        aria-label={t("assetsLink", {
-                          count: label.assetCount ?? 0,
-                          name: label.name,
-                        })}
-                      >
-                        {label.assetCount}
-                      </Link>
-                    ) : (
-                      <span className="text-muted-foreground">0</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {canWrite || canDelete ? (
+                    <PlusIcon />
+                    <span className="sr-only sm:not-sr-only">{t("add")}</span>
+                  </Button>
+                ) : null}
+              </TaxonomyGroupRow>,
+              ...group.map((label) => (
+                <TaxonomyRow
+                  key={label.id}
+                  className="pl-8"
+                  leading={
+                    <AssetStatusSwatch status={label.kind} color={label.color} className="size-2" />
+                  }
+                  name={label.name}
+                  description={label.description}
+                  usage={
+                    <UsageText
+                      noun="assets"
+                      count={label.assetCount}
+                      href={`/assets?statusLabel=${encodeURIComponent(label.id)}`}
+                      linkLabel={t("assetsLink", {
+                        count: label.assetCount ?? 0,
+                        name: label.name,
+                      })}
+                    />
+                  }
+                  actions={
+                    canWrite || canDelete ? (
                       <RowActions
                         onEdit={canWrite ? () => openEdit(label) : undefined}
                         onDelete={canDelete ? () => setArchiving(label) : undefined}
                         deleteLabel={t("archiveAction")}
                       />
-                    ) : null}
-                  </TableCell>
-                </TableRow>
+                    ) : null
+                  }
+                />
               )),
             ];
           })}
-        </ResourceTable>
+          {!filtering && labels.length === 0 ? <TaxonomyNote>{t("empty")}</TaxonomyNote> : null}
+        </TaxonomyList>
       )}
-
-      {!showArchived && !isLoading && !isError && labels.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      ) : null}
 
       <AssetStatusLabelFormDialog
         open={formOpen}
@@ -252,6 +218,8 @@ export function AssetStatusLabelManager() {
 
 /** The archived custom statuses (ADMIN), each with Restore — it comes back with no assets. */
 function ArchivedStatuses({
+  title,
+  filter,
   labels,
   isLoading,
   isError,
@@ -260,6 +228,8 @@ function ArchivedStatuses({
   onRestore,
   restoring,
 }: {
+  title: string;
+  filter: string;
   labels: AssetStatusLabel[] | undefined;
   isLoading: boolean;
   isError: boolean;
@@ -269,51 +239,36 @@ function ArchivedStatuses({
   restoring: boolean;
 }) {
   const t = useTranslations("settings.taxonomies.statuses");
-  const tc = useTranslations("common");
+  const tt = useTranslations("settings.taxonomies");
   const kindName = useAssetStatusLabel();
   const { date } = useFormatters();
-  const columns: ResourceColumn[] = [
-    { key: "name", header: t("columns.name"), skeleton: <Skeleton className="h-4 w-40" /> },
-    { key: "kind", header: t("columns.kind"), skeleton: <Skeleton className="h-4 w-24" /> },
-    {
-      key: "archived",
-      header: t("columns.archived"),
-      skeleton: <Skeleton className="h-4 w-20" />,
-    },
-    {
-      key: "actions",
-      header: tc("actions"),
-      srOnlyHeader: true,
-      headClassName: "w-28 text-right",
-      skeleton: <Skeleton className="ml-auto h-7 w-20" />,
-    },
-  ];
-  if (isLoading) return <ResourceTable columns={columns} isLoading />;
+  if (isLoading) return <TaxonomyListSkeleton />;
   if (isError) return <ErrorState title={t("loadError")} onRetry={onRetry} error={error} />;
-  if (!labels || labels.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("archivedEmpty")}</p>;
-  }
+  const all = labels ?? [];
+  const visible = filterTaxonomy(all, filter, (l) => [l.name, l.description]);
   return (
-    <ResourceTable columns={columns}>
-      {labels.map((label) => (
-        <TableRow key={label.id}>
-          <TableCell className="font-medium">
-            <span className="flex items-center gap-2">
-              <AssetStatusSwatch status={label.kind} color={label.color} className="size-2" />
-              {label.name}
+    <TaxonomyList label={t("archivedLabel", { taxonomy: title })}>
+      {all.length === 0 ? (
+        <TaxonomyNote>{t("archivedEmpty")}</TaxonomyNote>
+      ) : visible.length === 0 ? (
+        <TaxonomyNote>{tt("noMatches")}</TaxonomyNote>
+      ) : (
+        visible.map((label) => (
+          <li key={label.id} className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+            <AssetStatusSwatch status={label.kind} color={label.color} className="size-2" />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">{label.name}</span>{" "}
+              <span className="text-xs text-muted-foreground">{kindName(label.kind)}</span>
             </span>
-          </TableCell>
-          <TableCell className="text-muted-foreground">{kindName(label.kind)}</TableCell>
-          <TableCell className="text-muted-foreground tabular-nums">
-            {label.deletedAt ? date(label.deletedAt) : "—"}
-          </TableCell>
-          <TableCell className="text-right">
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">
+              {label.deletedAt ? t("archivedOn", { date: date(label.deletedAt) }) : null}
+            </span>
             {onRestore ? (
               <RestoreRowAction onRestore={() => onRestore(label)} disabled={restoring} />
             ) : null}
-          </TableCell>
-        </TableRow>
-      ))}
-    </ResourceTable>
+          </li>
+        ))
+      )}
+    </TaxonomyList>
   );
 }

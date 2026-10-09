@@ -2,22 +2,17 @@
 
 import {
   ArrowPathIcon,
-  PlusIcon,
-  TagIcon,
+  CheckCircleIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
-import { EmptyState } from "@/components/empty-state";
 import {
   BatchActionBar,
   ErrorState,
-  type ResourceColumn,
-  ResourceTable,
   RowActions,
-  SelectCell,
 } from "@/components/resource-table";
 import {
   AlertDialog,
@@ -29,110 +24,100 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TableCell, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  useApplicationCategories,
+  useCreateApplicationCategory,
+  useDeleteApplicationCategory,
+} from "@/lib/api/hooks/use-application-categories";
+import {
+  useAssetCategories,
+  useCreateAssetCategory,
+  useDeleteAssetCategory,
+} from "@/lib/api/hooks/use-asset-categories";
+import {
+  useConsumableCategories,
+  useCreateConsumableCategory,
+  useDeleteConsumableCategory,
+} from "@/lib/api/hooks/use-consumable-categories";
+import { notifyError } from "@/lib/api/notify-error";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
-import { useApplicationCategories, useDeleteApplicationCategory } from "@/lib/api/hooks/use-application-categories";
-import { useArticleCategories, useDeleteArticleCategory } from "@/lib/api/hooks/use-article-categories";
-import { useAssetCategories, useDeleteAssetCategory } from "@/lib/api/hooks/use-asset-categories";
-import { useConsumableCategories, useDeleteConsumableCategory } from "@/lib/api/hooks/use-consumable-categories";
-import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan } from "@/lib/hooks/use-permissions";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
-  type AnyCategory,
-  type CategoryKind,
-  categoryOrder,
-  kindHasOrder,
-} from "./taxonomy-types";
+  InlineCreateRow,
+  TaxonomyList,
+  TaxonomyListSkeleton,
+  TaxonomyNote,
+  TaxonomyPaneHeader,
+  TaxonomyRow,
+  UsageText,
+} from "./taxonomy-list";
+import type { AnyCategory, CategoryKind } from "./taxonomy-types";
+import { bulkUsage, filterTaxonomy, type UsageNoun, usageLabel } from "./taxonomy-usage";
+
+/** The category kinds Settings → Taxonomies manages. KB folders (the `article` kind) live in the KB. */
+export type ManagedCategoryKind = Exclude<CategoryKind, "article">;
+
+/** What each kind's `usageCount` counts. */
+const USAGE_NOUN: Record<ManagedCategoryKind, UsageNoun> = {
+  asset: "assets",
+  application: "apps",
+  consumable: "consumables",
+};
 
 /**
- * CRUD table for one category kind, used inside the Taxonomies tabs. Reads the kind's list hook and
- * picks the matching delete hook (all four are called unconditionally per the Rules of Hooks). The
- * shared `ResourceTable` / `RowActions` / `DeleteConfirmDialog` keep it consistent with the resource
- * lists; create/edit goes through {@link CategoryFormDialog}.
+ * One category kind as a compact list (#1540): name (description muted, only when present), the "In
+ * use" count from the list read's `usageCount` (nothing when the API sends none), a ⋯ menu with Edit /
+ * Duplicate / Delete, and an inline "New category…" row. Edit and Duplicate open the full
+ * {@link CategoryFormDialog} (description, icon, order, the asset specs dictionary).
+ *
+ * Bulk delete stays: "Select" turns on a checkbox per row and the batch bar (gated on
+ * `category:delete`, as before). Gates: create/edit/duplicate `category:write`, delete
+ * `category:delete` — the same per-affordance gates the API enforces, fail-closed while loading.
  */
-export function CategoryManager({ kind }: { kind: CategoryKind }) {
+export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; title: string }) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  const { date } = useFormatters();
-  const assetQuery = useAssetCategories();
-  const applicationQuery = useApplicationCategories();
-  const consumableQuery = useConsumableCategories();
-  const articleQuery = useArticleCategories();
-
-  const deleteAsset = useDeleteAssetCategory();
-  const deleteApplication = useDeleteApplicationCategory();
-  const deleteConsumable = useDeleteConsumableCategory();
-  const deleteArticle = useDeleteArticleCategory();
-
-  const query = {
-    asset: assetQuery,
-    application: applicationQuery,
-    consumable: consumableQuery,
-    article: articleQuery,
-  }[kind];
-  const remove = {
-    asset: deleteAsset,
-    application: deleteApplication,
-    consumable: deleteConsumable,
-    article: deleteArticle,
-  }[kind];
-
-  const { data, isLoading, isError, error, refetch } = query;
-  const hasOrder = kindHasOrder(kind);
+  const queries = {
+    asset: useAssetCategories(),
+    application: useApplicationCategories(),
+    consumable: useConsumableCategories(),
+  };
+  const deletes = {
+    asset: useDeleteAssetCategory(),
+    application: useDeleteApplicationCategory(),
+    consumable: useDeleteConsumableCategory(),
+  };
+  const creates = {
+    asset: useCreateAssetCategory(),
+    application: useCreateApplicationCategory(),
+    consumable: useCreateConsumableCategory(),
+  };
+  const { data, isLoading, isError, error, refetch } = queries[kind];
+  const remove = deletes[kind];
+  const create = creates[kind];
   const label = t(`taxonomies.kindLabel.${kind}`);
-  // The category CRUD endpoints are gated on category:write / category:delete (a clone is a create →
-  // category:write). The surface lives behind the settings:manage AdminGate; these finer gates match
-  // the backend per-affordance and fail closed while the permission set loads.
   const canWrite = useCan("category:write");
   const canDelete = useCan("category:delete");
 
+  const [filter, setFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AnyCategory | undefined>(undefined);
   const [cloning, setCloning] = useState<AnyCategory | undefined>(undefined);
   const [deleting, setDeleting] = useState<AnyCategory | undefined>(undefined);
+  const [selecting, setSelecting] = useState(false);
 
-  const columns: ResourceColumn[] = [
-    {
-      key: "name",
-      header: t("taxonomies.categories.columns.name"),
-      skeleton: <Skeleton className="h-4 w-40" />,
-    },
-    {
-      key: "description",
-      header: t("taxonomies.categories.columns.description"),
-      skeleton: <Skeleton className="h-4 w-56" />,
-    },
-    ...(hasOrder
-      ? [
-          {
-            key: "order",
-            header: t("taxonomies.categories.columns.order"),
-            headClassName: "w-20",
-            skeleton: <Skeleton className="h-4 w-8" />,
-          } satisfies ResourceColumn,
-        ]
-      : []),
-    {
-      key: "updated",
-      header: t("taxonomies.categories.columns.updated"),
-      skeleton: <Skeleton className="h-4 w-20" />,
-    },
-    {
-      key: "actions",
-      header: tc("actions"),
-      srOnlyHeader: true,
-      headClassName: "w-12 text-right",
-      skeleton: <Skeleton className="ml-auto size-7" />,
-    },
-  ];
-
-  function openCreate() {
-    setEditing(undefined);
-    setCloning(undefined);
-    setFormOpen(true);
-  }
+  const categories = useMemo(() => (data ?? []) as AnyCategory[], [data]);
+  const visible = useMemo(
+    () => filterTaxonomy(categories, filter, (c) => [c.name, c.description]),
+    [categories, filter],
+  );
+  const visibleIds = useMemo(() => visible.map((c) => c.id), [visible]);
+  const selection = useRowSelection(visibleIds);
+  const selectable = canDelete && selecting;
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   function openEdit(category: AnyCategory) {
     setCloning(undefined);
@@ -146,46 +131,37 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
     setFormOpen(true);
   }
 
-  const categories = (data ?? []) as AnyCategory[];
-  const hasData = categories.length > 0;
+  function stopSelecting() {
+    selection.clear();
+    setSelecting(false);
+  }
 
-  // ── Multi-select + bulk delete (KB/Settings UX batch) ────────────────────────────────────────
-  // Copies the resource-list precedent (assets/users): `useRowSelection` over the visible rows feeds
-  // ResourceTable's `selection` prop + a `BatchActionBar`. The bulk action is a lifecycle op, so the
-  // whole thing is gated on `category:delete` — when the caller can't delete, `selection` is omitted
-  // and the checkbox column never renders. DELETE is the only bulk action for v1; merge/move is a
-  // deliberate follow-up (see follow_ups).
-  // Derive from the query's `data` (stable identity), not the per-render `categories` array, so the
-  // memo actually memoizes.
-  const visibleIds = useMemo(
-    () => ((data ?? []) as AnyCategory[]).map((c) => c.id),
-    [data],
-  );
-  const selection = useRowSelection(visibleIds);
-  const selectable = canDelete;
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  async function createNamed(name: string) {
+    try {
+      await create.mutateAsync({ name } as never);
+      toast.success(t("taxonomies.categories.toast.created", { label }));
+    } catch (err) {
+      notifyError(err, t("taxonomies.categories.toast.createError", { label }));
+      throw err;
+    }
+  }
 
   /**
-   * Loop the EXISTING per-kind delete over the selected ids client-side (no batch endpoint). A
-   * category that still has live articles/children 409s and is intentionally KEPT — a partial success
-   * is the CORRECT outcome here, not an error. Succeeded rows are deselected (they'll drop out on the
-   * list's invalidation); the skipped rows stay selected so the operator can see and re-target them,
-   * and a summary toast reports the split.
+   * Loop the per-kind delete over the selection (no batch endpoint). A category delete is a plain,
+   * restorable soft delete with no in-use guard: records filed under it keep their data and show no
+   * category until it is restored or they are re-filed. A row whose request fails stays selected so
+   * the operator can see it; a toast reports the split.
    */
   async function handleBulkDelete() {
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
     setIsBulkDeleting(true);
-    const results = await Promise.allSettled(
-      ids.map((id) => remove.mutateAsync(id)),
-    );
+    const results = await Promise.allSettled(ids.map((id) => remove.mutateAsync(id)));
     let deleted = 0;
     let skipped = 0;
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         deleted += 1;
-        // Clear only what actually went; a rejected (in-use → 409) row stays selected.
         selection.setSelected(ids[index], false);
       } else {
         skipped += 1;
@@ -195,130 +171,110 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
     setBulkConfirmOpen(false);
     const tb = (key: string, values?: Record<string, number>) =>
       t(`taxonomies.categories.bulkDelete.${key}`, values);
-    if (skipped === 0) {
-      toast.success(tb("resultAllDeleted", { deleted }));
-    } else if (deleted === 0) {
-      toast.error(tb("resultAllSkipped", { skipped }));
-    } else {
-      toast.success(tb("resultPartial", { deleted, skipped }));
-    }
+    if (skipped === 0) toast.success(tb("resultAllDeleted", { deleted }));
+    else if (deleted === 0) toast.error(tb("resultAllSkipped", { skipped }));
+    else toast.success(tb("resultPartial", { deleted, skipped }));
   }
 
   return (
-    <div className="space-y-4">
-      {canWrite ? (
-        <div className="flex items-center justify-end">
-          <Button onClick={openCreate} size="sm">
-            <PlusIcon />
-            {t("taxonomies.categories.newButton", { label })}
-          </Button>
-        </div>
-      ) : null}
+    <div className="space-y-3">
+      <TaxonomyPaneHeader
+        title={title}
+        filter={filter}
+        onFilterChange={setFilter}
+        actions={
+          canDelete && categories.length > 0 ? (
+            selecting ? (
+              <Button variant="ghost" size="sm" onClick={stopSelecting}>
+                {t("taxonomies.selectDone")}
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => setSelecting(true)}>
+                <CheckCircleIcon />
+                {t("taxonomies.select")}
+              </Button>
+            )
+          ) : null
+        }
+      />
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading />
+        <TaxonomyListSkeleton />
       ) : isError ? (
         <ErrorState
           title={t("taxonomies.categories.loadError", { label })}
           onRetry={() => refetch()}
           error={error}
         />
-      ) : !hasData ? (
-        <EmptyState
-          icon={TagIcon}
-          pillar="manage"
-          title={t("taxonomies.categories.emptyTitle", { label })}
-          description={t("taxonomies.categories.emptyDescription")}
-          action={
-            canWrite
-              ? {
-                  label: t("taxonomies.categories.emptyAction"),
-                  onClick: openCreate,
-                }
-              : undefined
-          }
-        />
       ) : (
-        <ResourceTable
-          columns={columns}
-          selection={
-            selectable
-              ? {
-                  enabled: true,
-                  allSelected: selection.allSelected,
-                  someSelected: selection.someSelected,
-                  onToggleAll: selection.toggleAll,
-                  selectAllLabel: t("taxonomies.categories.selectAll", {
-                    label,
-                  }),
-                }
-              : undefined
+        <TaxonomyList
+          label={title}
+          footer={
+            canWrite ? (
+              <InlineCreateRow
+                placeholder={t("taxonomies.categories.inlinePlaceholder")}
+                label={t("taxonomies.categories.newButton", { label })}
+                onCreate={createNamed}
+              />
+            ) : null
           }
         >
-          {categories.map((category) => (
-            <TableRow
-              key={category.id}
-              data-state={
-                selectable && selection.isSelected(category.id)
-                  ? "selected"
-                  : undefined
-              }
-            >
-              {selectable ? (
-                <SelectCell
-                  checked={selection.isSelected(category.id)}
-                  onCheckedChange={(on) =>
-                    selection.setSelected(category.id, on)
-                  }
-                  label={t("taxonomies.categories.selectRow", {
-                    name: category.name,
-                  })}
-                />
-              ) : null}
-              <TableCell className="font-medium">{category.name}</TableCell>
-              <TableCell
-                className="max-w-[320px] truncate text-muted-foreground"
-                title={category.description ?? undefined}
-              >
-                {category.description ?? "—"}
-              </TableCell>
-              {hasOrder ? (
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {categoryOrder(category) ?? "—"}
-                </TableCell>
-              ) : null}
-              <TableCell className="text-muted-foreground tabular-nums">
-                {date(category.updatedAt)}
-              </TableCell>
-              <TableCell className="text-right">
-                {canWrite || canDelete ? (
-                  <RowActions
-                    onEdit={canWrite ? () => openEdit(category) : undefined}
-                    onClone={canWrite ? () => openClone(category) : undefined}
-                    onDelete={
-                      canDelete ? () => setDeleting(category) : undefined
-                    }
+          {selectable && visible.length > 0 ? (
+            <li className="flex items-center gap-3 bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground">
+              <Checkbox
+                checked={
+                  selection.allSelected ? true : selection.someSelected ? "indeterminate" : false
+                }
+                onCheckedChange={() => selection.toggleAll(!selection.allSelected)}
+                aria-label={t("taxonomies.categories.selectAll", { label })}
+              />
+              {t("taxonomies.selectAllVisible")}
+            </li>
+          ) : null}
+          {categories.length === 0 ? (
+            <TaxonomyNote>{t("taxonomies.categories.empty")}</TaxonomyNote>
+          ) : visible.length === 0 ? (
+            <TaxonomyNote>{t("taxonomies.noMatches")}</TaxonomyNote>
+          ) : (
+            visible.map((category) => (
+              <TaxonomyRow
+                key={category.id}
+                selected={selectable && selection.isSelected(category.id)}
+                leading={
+                  selectable ? (
+                    <Checkbox
+                      checked={selection.isSelected(category.id)}
+                      onCheckedChange={(on) => selection.setSelected(category.id, on === true)}
+                      aria-label={t("taxonomies.categories.selectRow", { name: category.name })}
+                    />
+                  ) : null
+                }
+                name={category.name}
+                description={category.description}
+                usage={
+                  <UsageText
+                    noun={USAGE_NOUN[kind]}
+                    count={"usageCount" in category ? category.usageCount : undefined}
                   />
-                ) : null}
-              </TableCell>
-            </TableRow>
-          ))}
-        </ResourceTable>
+                }
+                actions={
+                  canWrite || canDelete ? (
+                    <RowActions
+                      onEdit={canWrite ? () => openEdit(category) : undefined}
+                      onClone={canWrite ? () => openClone(category) : undefined}
+                      onDelete={canDelete ? () => setDeleting(category) : undefined}
+                    />
+                  ) : null
+                }
+              />
+            ))
+          )}
+        </TaxonomyList>
       )}
 
-      {/* Batch-action bar for the current selection (self-hides at 0). A single confirm dialog gates
-          the whole batch; the loop-delete + partial-success summary live in `handleBulkDelete`. */}
       {selectable ? (
-        <BatchActionBar
-          count={selection.count}
-          onClear={selection.clear}
-          entityKey="category"
-        >
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={() => setBulkConfirmOpen(true)}
-          >
+        <BatchActionBar count={selection.count} onClear={selection.clear} entityKey="category">
+          <Button size="sm" variant="destructive" onClick={() => setBulkConfirmOpen(true)}>
             <TrashIcon />
             {tc("delete")}
           </Button>
@@ -341,12 +297,14 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
           entityKey="category"
           name={deleting.name}
           onConfirm={() => remove.mutateAsync(deleting.id)}
-        />
+        >
+          <DeleteImpact
+            noun={USAGE_NOUN[kind]}
+            count={"usageCount" in deleting ? deleting.usageCount : undefined}
+          />
+        </DeleteConfirmDialog>
       ) : null}
 
-      {/* One confirm for the whole batch (not per-row). A plain destructive Button (not
-          AlertDialogAction) so we own the spinner and only close on completion — mirrors the
-          per-row DeleteConfirmDialog. `handleBulkDelete` reports the deleted/skipped split. */}
       <AlertDialog
         open={bulkConfirmOpen}
         onOpenChange={(open) => {
@@ -356,23 +314,24 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("taxonomies.categories.bulkDelete.confirmTitle", {
-                count: selection.count,
-              })}
+              {t("taxonomies.categories.bulkDelete.confirmTitle", { count: selection.count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t("taxonomies.categories.bulkDelete.confirmDescription")}
             </AlertDialogDescription>
+            <BulkDeleteImpact
+              noun={USAGE_NOUN[kind]}
+              rows={categories
+                .filter((c) => selection.selectedIds.includes(c.id))
+                .map((c) => ({
+                  name: c.name,
+                  count: "usageCount" in c ? c.usageCount : undefined,
+                }))}
+            />
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isBulkDeleting}>
-              {tc("cancel")}
-            </AlertDialogCancel>
-            <Button
-              variant="destructive"
-              onClick={handleBulkDelete}
-              disabled={isBulkDeleting}
-            >
+            <AlertDialogCancel disabled={isBulkDeleting}>{tc("cancel")}</AlertDialogCancel>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isBulkDeleting}>
               {isBulkDeleting && <ArrowPathIcon className="animate-spin" />}
               {tc("delete")}
             </Button>
@@ -381,4 +340,46 @@ export function CategoryManager({ kind }: { kind: CategoryKind }) {
       </AlertDialog>
     </div>
   );
+}
+
+/**
+ * What deleting one category does to the records filed under it, when the list read sent a count: it
+ * is a restorable soft delete, nothing is refused, and those records simply show no category.
+ */
+function DeleteImpact({ noun, count }: { noun: UsageNoun; count: number | null | undefined }) {
+  const t = useTranslations("settings.taxonomies");
+  const label = usageLabel(noun, count);
+  if (!label) return <>{t("categories.deleteImpact.unknown")}</>;
+  if (label.key === "unused") return <>{t("categories.deleteImpact.unused")}</>;
+  return (
+    <>
+      {t("categories.deleteImpact.used", { usage: t(`usage.${label.key}`, { count: label.count }) })}
+    </>
+  );
+}
+
+/** The bulk version: which selected categories are in use, and how many records lose their category. */
+function BulkDeleteImpact({
+  noun,
+  rows,
+}: {
+  noun: UsageNoun;
+  rows: { name: string; count: number | null | undefined }[];
+}) {
+  const t = useTranslations("settings.taxonomies");
+  const { inUse, total, known } = bulkUsage(rows);
+  if (inUse.length > 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t("categories.deleteImpact.bulkUsed", {
+          names: inUse.join(", "),
+          usage: t(`usage.${noun}`, { count: total }),
+        })}
+      </p>
+    );
+  }
+  if (known && rows.length > 0) {
+    return <p className="text-sm text-muted-foreground">{t("categories.deleteImpact.bulkUnused")}</p>;
+  }
+  return null;
 }

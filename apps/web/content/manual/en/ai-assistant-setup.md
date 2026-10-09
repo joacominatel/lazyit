@@ -8,14 +8,17 @@ subcategory: setup
 # AI assistant — setup
 
 Everything about AI is configured in **Settings → AI**, which needs the **Configure the instance**
-permission. The page has five cards:
+permission. Four tiles at the top show at a glance what is on — **Provider** (configured or not),
+**Web search**, **Document reading** and **External agents** (with how many clients are allowed). Click a
+tile to open its tab:
 
-1. **The provider** — a setup wizard while the assistant is off, the **Provider & model** editor once it
-   is on.
-2. **Behaviour & limits** — retention, budgets and the assistant's instructions.
-3. **Web search** — off by default.
-4. **External AI agents (MCP)** — its own switch, the endpoint, and the allowed clients.
-5. **Turn off the AI assistant** — shown while it is on.
+1. **Connection** — a setup wizard while the assistant is off, the **Provider & model** editor once it
+   is on, and **Turn off the AI assistant** while it is on.
+2. **Limits** — behaviour and limits: retention, budgets and the assistant's instructions.
+3. **Capabilities** — web search and document extraction, both off by default.
+4. **External agents** — MCP: its own switch, the endpoint, and the allowed clients.
+
+The open tab is part of the address (`?tab=capabilities`, for example), so you can link straight to it.
 
 Next to each setting, the **?** explains it (hover, or click, tap or press Enter to keep it open; Escape
 closes it). Most tips end with **Learn more in the Manual**, which opens the matching section of this
@@ -31,7 +34,8 @@ of the API service. A fresh install and `start.sh --reconfigure` write it for yo
 generate one with `openssl rand -hex 32`, set it, restart the API, and back it up with the rest of your
 environment file.
 
-Until it is set, Settings → AI says so at the top, no API key can be saved, and only a keyless
+Until it is set, Settings → AI says so in one line at the top (its **?** says how to fix it), no API
+key can be saved, and only a keyless
 OpenAI-compatible server can be used. MCP does not need it. Losing it only means typing the provider
 key again.
 
@@ -108,7 +112,7 @@ someone asks it to set up a workflow for. It is **off** by default.
   See [What leaves your server](/help/ai-assistant-overview#to-search-partners-web-search-off-by-default).
 - **Which providers.** Anthropic, OpenAI, and Google Gemini 3 or later. The OpenAI-compatible provider
   and older Gemini models have none that works together with lazyit's tools; the switch is then disabled
-  and the card says why.
+  and the section says why.
 - **Chat only.** Headless runs never search, because their changes run without anyone approving them.
   MCP clients search with their own tools, if any.
 - **Results are untrusted.** Once the assistant has searched the web in a conversation, **nothing in
@@ -119,6 +123,9 @@ someone asks it to set up a workflow for. It is **off** by default.
 - **Searches per step** (default 5, 1–20) caps the searches in one model step, where the provider
   supports a limit (Anthropic).
 - **Applies to new conversations.** Turning it off makes the chats that had it read-only.
+- **You confirm before it goes on.** The switch's **?** holds what leaves lazyit; turning the switch on
+  opens a confirmation that shows it in full, and nothing is saved until you choose **Turn on web
+  search**. Turning it off applies at once.
 
 Your provider account can also disable web search on its side (Anthropic: the organization's privacy
 settings in the Claude Console; OpenAI: the organization's or project's tool permissions). If it is off
@@ -138,7 +145,7 @@ It is **off** by default, also on instances that were updated.
   [What leaves your server](/help/ai-assistant-overview#purchase-documents-document-extraction-off-by-default).
 - **It needs the assistant on**, and a provider that reads documents: Anthropic, OpenAI or Google Gemini.
   The OpenAI-compatible provider is never used for it (its servers have no common way to read a file); the
-  switch is then disabled and the card says why. It stays usable while on, so you can always turn it off.
+  switch is then disabled and the section says why. It stays usable while on, so you can always turn it off.
 - **Who sees it.** People who can edit purchases and use the AI assistant. Service accounts never read
   documents.
 - **What it reads.** PDF and image documents, up to 10 MB (a little less for images with Anthropic; Gemini
@@ -146,6 +153,9 @@ It is **off** by default, also on instances that were updated.
   are never sent.
 - **Budget and record.** Each read counts against the person's daily token budget (the same as the chat),
   and the purchase's activity log records it — never the values read.
+- **You confirm before it goes on.** The switch's **?** holds what leaves lazyit; turning the switch on
+  opens a confirmation that shows it in full, and nothing is saved until you choose **Turn on document
+  extraction**. Turning it off applies at once.
 
 ## External AI agents (MCP)
 
@@ -154,10 +164,10 @@ connects them (who also needs **Connect external AI agents (MCP)**). It is indep
 it works with no provider configured and does not need `AI_SECRET_KEY`. Turning it off disconnects every
 client at once; their authorizations work again when you turn it back on.
 
-The card shows:
+The **External agents** tab shows:
 
 - **The MCP endpoint** — the address for a client set up by hand: the API's `WEB_ORIGIN` followed by
-  `/mcp`. When no `WEB_ORIGIN` is pinned, the card shows this page's address and says so; clients on
+  `/mcp`. When no `WEB_ORIGIN` is pinned, the tab shows this page's address and says so; clients on
   other machines may need the instance's network address instead.
 - **How clients sign in on this instance**, decided by `WEB_ORIGIN` — not by whether this page happens to
   be shown over HTTPS:
@@ -180,7 +190,7 @@ computer. The person-side steps are in [Claude Code & MCP](/help/ai-assistant-cl
 
 ### Allowed clients
 
-Two things in the MCP card decide which clients may connect:
+Two things in the **Allowed clients** section decide which clients may connect:
 
 - **Accept any client with an https:// callback — on by default.** Any MCP client whose sign-in callback
   is an `https://` address may *ask* a person for access, even if it is not listed. That alone grants
@@ -188,14 +198,17 @@ Two things in the MCP card decide which clients may connect:
   unverified client. It never admits a loopback callback (`http://127.0.0.1/…`) or an app-scheme callback
   such as `cursor://…` — those need a list entry. **Turn it off to accept only listed clients.**
 - **The list.** lazyit ships **built-in clients** — Claude Code, OpenAI Codex, OpenCode, Gemini CLI,
-  Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop and ChatGPT — each with its identifier and
-  how that identifier was checked (**Verified** from the client's own code or documentation, or **Vendor
-  docs**). **Remove** a built-in client to stop it connecting, and **Restore** it at any time. Pi,
+  Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop and ChatGPT. They show as compact chips, a
+  check mark on the ones whose identifier is **Verified**. **View details** opens the full list: each
+  client's identifier and how it was checked (**Verified** from the client's own code or documentation,
+  or **Vendor docs**). There, **Remove** a built-in client to stop it connecting, and **Restore** it at
+  any time. Pi,
   Windsurf and Zed are not built in, because their identifiers could not be verified — add them yourself.
   A built-in client you removed that a later lazyit version no longer ships is listed under **Removed
   clients no longer in the built-in list**; restoring it only clears your removal.
 
-**Add a client** by one of:
+Under **Clients you added**, the add form is one row — a name, how to recognize the client, the value,
+and **Add client**. Recognize it by one of:
 
 - its **client-metadata URL** — the `https://` URL the client uses as its client id; or
 - its **callback address** — the exact address it sends people back to after sign-in: `https://…`, a
@@ -233,7 +246,7 @@ whatever you choose; create a separate account for AI. See also
 
 ## Turning it off
 
-**Turn off the assistant** (at the bottom of the page) hides it for everyone and refuses new requests at
+**Turn off the assistant** (at the bottom of the **Connection** tab) hides it for everyone and refuses new requests at
 once. Conversations are kept and still deleted when their retention ends; changes waiting for approval
 cannot be approved while it is off. The provider, model and encrypted key are kept, so turning it back on
 is a single step. External AI agents are not affected — they have their own switch.

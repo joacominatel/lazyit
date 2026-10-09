@@ -21,10 +21,10 @@ custodia las credenciales**. Hay cinco:
 
 ## Valor seguro por defecto: solo administrador
 
-En una instalación nueva **los cinco los tiene solo el administrador**. Los miembros y observadores no
+En una instalación nueva **los cinco los tiene solo el administrador**. Los miembros y lectores no
 reciben ninguno por defecto — la automatización, como el historial de actividad y el Gestor de
 secretos, empieza restringida a los administradores. Un administrador puede delegar cualquiera de
-ellos en Miembro u Observador desde la configuración de permisos por rol (consulta
+ellos en Miembro o Lector desde la configuración de permisos por rol (consulta
 [Permisos](/help/permissions) para ver cómo funciona el ajuste de roles).
 
 ## Separación de funciones
@@ -42,6 +42,6 @@ La división es deliberada, para que distintas personas puedan asumir distintas 
 
 ## Ajustar los valores por defecto
 
-Conceder cualquiera de estos a Miembro u Observador es una delegación significativa, así que lazyit lo
+Conceder cualquiera de estos a Miembro o Lector es una delegación significativa, así que lazyit lo
 marca con claridad y te pide confirmación — no te lo impide. El administrador siempre tiene todos los
 permisos y no se puede editar.

@@ -46,6 +46,19 @@ export function useAssetModels() {
 }
 
 /**
+ * How many live asset models exist — the list envelope's `total`, not the length of the capped
+ * directory page (which stops at 200). Shares {@link useAssetModels}' query (same key and fetch, a
+ * different `select`), so it adds no request. Backs the count in the Settings → Taxonomies list.
+ */
+export function useAssetModelTotal() {
+  return useQuery({
+    queryKey: assetModelKeys.lists(),
+    queryFn: () => getAssetModels({ limit: MAX_PAGE_LIMIT }),
+    select: (page) => page.total,
+  });
+}
+
+/**
  * A single page of asset models with server-side `q` search and paging (returns the
  * `AssetModelListPage` envelope) — backs the searchable model Combobox. `keepPreviousData` holds the
  * current page while the next query resolves so searching doesn't flash an empty list.

@@ -94,7 +94,7 @@ under **Set status** in the selection bar.
 
 ### Custom statuses
 
-If your administrators have defined **custom statuses** (Settings → Taxonomies → **Statuses**, see
+If your administrators have defined **custom statuses** (Settings → Taxonomies → **Custom statuses**, see
 [Custom asset statuses](/help/configuration-taxonomies#custom-asset-statuses)), every status picker —
 the asset form, the detail page's status dropdown, the row's **Change status**, **Set status** for a
 selection and **Receive stock** — lists them under the built-in status they belong to: the plain

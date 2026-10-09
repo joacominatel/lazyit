@@ -6,15 +6,38 @@ import type {
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * Live applications only (#1540): `usageCount` counts what an operator sees in the catalog. A relation
+ * `_count` is not rewritten by the ADR-0032 read filter, so the `deletedAt: null` is explicit.
+ */
+const LIVE_APPLICATION_COUNT = {
+  _count: { select: { applications: { where: { deletedAt: null } } } },
+} as const satisfies Prisma.ApplicationCategoryInclude;
+
+type CategoryWithCount = Prisma.ApplicationCategoryGetPayload<{
+  include: typeof LIVE_APPLICATION_COUNT;
+}>;
+
+function withUsageCount(row: CategoryWithCount) {
+  const { _count, ...category } = row;
+  return { ...category, usageCount: _count.applications };
+}
+
 @Injectable()
 export class ApplicationCategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** All non-deleted categories, ordered by `order` (nulls last) then name. */
-  findAll() {
-    return this.prisma.applicationCategory.findMany({
+  /**
+   * All non-deleted categories, ordered by `order` (nulls last) then name, each with the computed
+   * `usageCount` of live applications filed under it (#1540) — one query, the count is a relation
+   * aggregate, not a per-row lookup. Only this list read carries it; single reads and writes do not.
+   */
+  async findAll() {
+    const rows = await this.prisma.applicationCategory.findMany({
       orderBy: [{ order: { sort: 'asc', nulls: 'last' } }, { name: 'asc' }],
+      include: LIVE_APPLICATION_COUNT,
     });
+    return rows.map(withUsageCount);
   }
 
   /** A single non-deleted category by id; throws 404 if missing or deleted. */

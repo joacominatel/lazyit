@@ -159,7 +159,9 @@ describe('AssetModelsService', () => {
   });
 
   it('findPage without filters lists the active slice, newest first, and wraps a Page envelope', async () => {
-    assetModel.findMany.mockResolvedValue([{ id: 'm1' }]);
+    assetModel.findMany.mockResolvedValue([
+      { id: 'm1', _count: { assets: 2 } },
+    ]);
     assetModel.count.mockResolvedValue(1);
 
     const result = await service.findPage({}, PAGE);
@@ -169,12 +171,15 @@ describe('AssetModelsService', () => {
       orderBy: { createdAt: 'desc' },
       take: 50,
       skip: 0,
+      include: {
+        _count: { select: { assets: { where: { deletedAt: null } } } },
+      },
     });
     expect(assetModel.count).toHaveBeenCalledWith({
       where: { deletedAt: null },
     });
     expect(result).toEqual({
-      items: [{ id: 'm1' }],
+      items: [{ id: 'm1', usageCount: 2 }],
       total: 1,
       limit: 50,
       offset: 0,
@@ -248,5 +253,51 @@ describe('AssetModelsService', () => {
       where: { deletedAt: { not: null } },
       includeSoftDeleted: true,
     });
+  });
+
+  // --- usageCount (#1540) --------------------------------------------------
+  it("findPage maps each row's live-asset count to usageCount (zero when unused), dropping _count", async () => {
+    assetModel.findMany.mockResolvedValue([
+      { id: 'm1', name: 'R740', _count: { assets: 7 } },
+      { id: 'm2', name: 'X1', _count: { assets: 0 } },
+    ]);
+    assetModel.count.mockResolvedValue(2);
+
+    const result = await service.findPage({}, PAGE);
+
+    expect(result.items).toEqual([
+      { id: 'm1', name: 'R740', usageCount: 7 },
+      { id: 'm2', name: 'X1', usageCount: 0 },
+    ]);
+    expect(result.items[0]).not.toHaveProperty('_count');
+  });
+
+  it('findPage(only) still counts live assets of an archived model (the relation count is explicit)', async () => {
+    assetModel.findMany.mockResolvedValue([
+      { id: 'm1', deletedAt: new Date(), _count: { assets: 1 } },
+    ]);
+    assetModel.count.mockResolvedValue(1);
+
+    const result = await service.findPage({}, { ...PAGE, deleted: 'only' });
+
+    // The escape hatch widens the MODEL slice only; the asset count keeps deletedAt: null.
+    expect(assetModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          _count: { select: { assets: { where: { deletedAt: null } } } },
+        },
+      }),
+    );
+    expect(result.items[0]).toMatchObject({ id: 'm1', usageCount: 1 });
+  });
+
+  it('findOne is unchanged: no relation count, no usageCount', async () => {
+    const found = { id: 'm1', name: 'R740', deletedAt: null };
+    assetModel.findFirst.mockResolvedValue(found);
+
+    const row = await service.findOne('m1');
+
+    expect(assetModel.findFirst).toHaveBeenCalledWith({ where: { id: 'm1' } });
+    expect(row).not.toHaveProperty('usageCount');
   });
 });

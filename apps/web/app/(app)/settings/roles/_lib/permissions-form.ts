@@ -13,7 +13,7 @@ import {
 import {
   permissionLabel,
   type SettingsTranslator,
-} from "../../../_lib/permission-labels";
+} from "../../_lib/permission-labels";
 
 /**
  * Web-local (presentation) helpers for the role permissions editor. PURE — no React, no fetching.
