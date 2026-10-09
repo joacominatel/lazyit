@@ -3,7 +3,7 @@ title: WorkflowRun
 tags: [domain, entity, workflow-engine, access, append-only, async]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-09
 ---
 
 # WorkflowRun
@@ -24,8 +24,9 @@ also the **transactional-outbox row** and the **idempotency unit** of the engine
 > `{ workflowRunId }` BullMQ job and the `workflow-run.sweeper` covers the crash / broker-down window.
 > The engine therefore fires **after** the grant commits, **never inside it**, and a failing enqueue is
 > **swallowed** (the run stays `PENDING`; the sweeper re-enqueues). A failing external call **never**
-> rolls back, blocks or 503s the grant — the deliberate **inverse** of the Zitadel strong-coupling
-> ([[0043-zitadel-source-of-truth]] / [[INVARIANTS]] INV-5). The grant is the durable audit fact; an
+> rolls back, blocks or 503s the grant — the deliberate **inverse** of the Zitadel strong-coupling it was
+> designed against ([[0043-zitadel-source-of-truth]] / [[INVARIANTS]] INV-5), since removed by
+> [[0102-remove-bundled-zitadel]]. The grant is the durable audit fact; an
 > un-provisioned external account is a recoverable `FAILED` run + notification, not a split-brain.
 
 ## Relationships

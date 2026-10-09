@@ -3,7 +3,7 @@ title: "AI assistant — Frontend surfaces (chat, settings, MCP install, OAuth c
 tags: [design, frontend, web, ai-assistant, mcp, oauth, ux, i18n, manual]
 status: draft
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-09
 ---
 
 # AI assistant — Frontend surfaces
@@ -50,9 +50,9 @@ updated: 2026-10-02
   its own switch, independent of the provider (CEO, round 2).
 - Every user-facing change updates the Manual (en + es) — [[0062-in-app-help-manual-surface]],
   [[manual-authoring]].
-- Standing constraint from issue #1310 (open, `needs-decision`): new features must not add
-  Zitadel/OIDC-specific paths; OAuth 2.1 for MCP clients "is issued by lazyit itself on top of the
-  local session."
+- Standing constraint from issue #1310: new features must not add Zitadel/OIDC-specific paths; OAuth 2.1
+  for MCP clients "is issued by lazyit itself on top of the local session." (#1310 was later narrowed by
+  [[0102-remove-bundled-zitadel]]: only the bundled Zitadel was removed, and generic OIDC stays opt-in.)
 
 ---
 

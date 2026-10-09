@@ -3,7 +3,7 @@ title: Tech Stack
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-02
+updated: 2026-10-09
 ---
 
 # Tech Stack
@@ -55,7 +55,8 @@ Two workloads ride this substrate today:
   deprovisions the user in an external system (Jira / Redmine / any REST or webhook target) via an
   **opinionated error-handling DAG**. The engine fires **after the grant transaction commits**,
   decoupled by a transactional outbox, so a failing external call never blocks or rolls back the
-  access grant (the deliberate inverse of the synchronous Zitadel write-back). Its front↔back
+  access grant (the deliberate inverse of the synchronous Zitadel write-back it was designed against, since
+  removed by [[0102-remove-bundled-zitadel]]). Its front↔back
   contracts live in `@lazyit/shared` ([[shared-package]]). Data model, contracts and execution
   semantics: [[0054-applications-workflow-engine]]; full design vault:
   [[workflow-engine/_MOC|Workflow Engine]].
@@ -82,12 +83,14 @@ This is **shipped**, not planned. Rationale and index/reconcile design:
 
 ## Authentication & authorization
 
-Auth is **live**, not deferred. The IdP is **Zitadel** — bundled by default with a **BYOI**
-(bring-your-own-OIDC) escape hatch so an operator can point lazyit at their own provider
-([[0037-idp-choice-zitadel-byoi]], [[0043-zitadel-source-of-truth]]). The Next.js frontend drives the
-OIDC flow with Auth.js v5 ([[0039-authjs-v5-frontend-oidc]]). **Authorization** is DB-first
-fine-grained permissions, entirely lazyit-local (never synced to the IdP, so it rides BYOI unchanged).
-Topology, source-of-truth split and gotchas: [[auth-zitadel-sot]], [[authorization]].
+Auth is **live**, not deferred. Each instance runs one immutable `AUTH_MODE`: **local** accounts by
+default (lazyit owns the password and the session, [[0086-local-authentication-mode]]), or **generic
+OIDC** against the operator's own IdP (BYOI), configured by environment variables. No IdP ships with
+lazyit and lazyit never writes to one ([[0102-remove-bundled-zitadel]]). Under OIDC the Next.js frontend
+drives the flow with Auth.js v5 ([[0039-authjs-v5-frontend-oidc]]) and the API verifies the bearer token
+against the issuer's JWKS with `jose`. **Authorization** is DB-first fine-grained permissions, entirely
+lazyit-local, so it is the same in both modes. Topology and env: [[deployment]]; authorization:
+[[authorization]].
 
 > [!warning] Bun-first vs app stack
 > The repo's `CLAUDE.md` mandates `Bun.serve`, `Bun.sql`, `Bun.redis` and `bun test`, but
@@ -101,8 +104,8 @@ Each significant choice has an ADR:
 [[0001-monorepo-bun-turborepo]] · [[0002-nestjs-backend]] · [[0003-prisma-orm]] ·
 [[0010-nextjs-frontend]] · [[0011-tailwind-styling]] · [[0012-testing-strategy]] ·
 [[0025-containerization-strategy]] · [[0035-search-architecture]] ·
-[[0037-idp-choice-zitadel-byoi]] · [[0039-authjs-v5-frontend-oidc]] ·
-[[0043-zitadel-source-of-truth]] · [[0053-async-workers-bullmq-valkey]] ·
+[[0039-authjs-v5-frontend-oidc]] · [[0086-local-authentication-mode]] ·
+[[0102-remove-bundled-zitadel]] · [[0053-async-workers-bullmq-valkey]] ·
 [[0054-applications-workflow-engine]].
 
 Related: [[monorepo]] · [[shared-package]] · [[deployment]] · [[workflow-engine/_MOC|Workflow Engine]]
