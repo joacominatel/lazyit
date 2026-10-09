@@ -108,8 +108,7 @@ check "lan install detected as local" "$(lib "$WORK/lan.env" 'echo "mode=$INSTAL
 without "$WORK/byoi.env" "$WORK/legacy-byoi.env" AUTH_MODE
 check "no AUTH_MODE is BYOI" "$(lib "$WORK/legacy-byoi.env" 'echo "mode=$INSTALL_MODE"')" "^mode=byoi$"
 
-# 2. A fresh install of every mode has nothing missing — against the real example, and against one where
-#    every key start.sh comments out for some mode is active, so the per-mode rules match start.sh.
+# 2. A fresh install of every mode has nothing missing, also when every per-mode key is active in the example.
 sed -E 's/^# ((OIDC_[A-Z_]+|AUTH_ISSUER|AUTH_CLIENT_[A-Z]+|SESSION_SIGNING_SECRET)=)/\1/' "$EXAMPLE" >"$WORK/all-active.example"
 for m in lan local byoi; do
   check "$m install: no env key reported missing" \
@@ -142,8 +141,7 @@ check "local install: a failed app dump aborts" "$(backup "$WORK/local.env")" \
   'app database backup FAILED' 'lazyit updated'
 unset FAKE_DC_DOWN
 
-# 6. An install still wired to the removed bundled Zitadel is refused by a full run, before the lock, the
-#    backup or the checkout. The sandbox is a repo root with stub docker and git that log every call.
+# 6. A bundled install is refused by a full run before any docker or git call; the stubs log every call.
 SANDBOX="$WORK/sandbox"
 mkdir -p "$SANDBOX/infra/env" "$WORK/bin"
 cp "$UPDATE_SH" "$SANDBOX/infra/update.sh"
@@ -173,8 +171,7 @@ EOF
 chmod +x "$WORK/bin/docker" "$WORK/bin/git"
 export FAKE_CALLS="$WORK/calls.log"
 
-# run_update <env-file> <volumes> — a full `update.sh --yes v9.9.9` in the sandbox; prints its output, then
-#   the calls the stubs saw and what it left on disk.
+# run_update <env-file> <volumes> — output of a full `update.sh --yes v9.9.9`, then the stub calls and leftovers.
 run_update() {
   cp "$1" "$SANDBOX/infra/env/.env.prod"
   rm -rf "$SANDBOX/.update.lock" "$SANDBOX/backups"
