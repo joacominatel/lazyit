@@ -15,10 +15,16 @@ deciders: [Joaquín Minatel]
 
 **Supersedes** [[0037-idp-choice-zitadel-byoi]]; its "BYOI by environment variables" contract (§3) is
 carried forward here. **Amends** [[0038-jit-user-provisioning]], [[0039-authjs-v5-frontend-oidc]],
-[[0043-zitadel-source-of-truth]], [[0047-guided-first-deploy-bootstrap]], [[0048-service-accounts]],
+[[0040-rbac-roles]], [[0043-zitadel-source-of-truth]], [[0046-roles-permissions-v2]],
+[[0047-guided-first-deploy-bootstrap]], [[0048-service-accounts]], [[0054-applications-workflow-engine]],
 [[0064-admin-user-provisioning-credentials]], [[0069-migrator-import]],
-[[0084-update-awareness-and-guided-update]] and [[0086-local-authentication-mode]]. Narrows #1310, which is
-closed as superseded by #1543: removing all OIDC is no longer planned.
+[[0084-update-awareness-and-guided-update]], [[0086-local-authentication-mode]] and
+[[0091-on-prem-ad-ldap-directory-source]]. Narrows #1310, which is closed as superseded by #1543: removing
+all OIDC is no longer planned.
+
+**Built** — 2026-10-09 on the epic branch (PRs #1546–#1554). Implementation settled §2, §4, §5, §7 and
+§8 more precisely than first written; those sections now describe what shipped, and
+[§ Implementation](#implementation) lists the differences.
 
 ## Context
 
@@ -98,10 +104,17 @@ Everything that exists only to run or drive the bundled IdP goes:
 
 The contract of [[0037-idp-choice-zitadel-byoi]] §3 carries forward: the API validates tokens from any
 OIDC-compliant IdP through its discovery document and JWKS, with no vendor SDK, configured entirely by
-environment variables (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` for the API; `AUTH_ISSUER`,
-`AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET` for the web). The `/setup` wizard keeps showing the BYOI environment
-snippet so an operator can wire, or later move to, their own IdP; it will list the API keys as well as the
-web's.
+environment variables:
+
+- **API:** `AUTH_MODE=oidc`, `OIDC_ISSUER` and `OIDC_JWKS_URI` (both required at boot,
+  `apps/api/src/auth/boot-config.ts:98-105`), and an optional `OIDC_CLIENT_ID` that, when set, is the
+  expected token audience (`apps/api/src/auth/jwt-auth.guard.ts:405-409`). The API is a resource server
+  only: it never reads `OIDC_CLIENT_SECRET`.
+- **Web:** `AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET` (Auth.js, [[0039-authjs-v5-frontend-oidc]]).
+
+The `/setup` wizard keeps showing the BYOI environment snippet so an operator can wire, or later move to,
+their own IdP. It lists both the web and the API keys
+(`apps/web/app/setup/_components/byoi-snippet.tsx:13-22`).
 
 **No in-app OIDC configuration and no stored OIDC secret.** Configuring the IdP from the UI, with the client
 secret kept in the database, is out of scope.
@@ -109,44 +122,62 @@ secret kept in the database, is out of scope.
 ### 3. `AUTH_MODE` is unchanged; no data migration
 
 `AUTH_MODE` stays `shim | local | oidc` and stays immutable per instance ([[0086-local-authentication-mode]]
-§1). The persisted mode marker stores the `AUTH_MODE` value (`config.service.ts:303-310`), which is `oidc`
-for both bundled and BYOI, so the boot check (`apps/api/src/main.ts:50-61`) is unaffected. **No Prisma
-migration** ships in this epic.
+§1). The persisted mode marker stores the `AUTH_MODE` value
+(`apps/api/src/config/config.service.ts:196-203`), which is `oidc` for both bundled and BYOI, so the boot
+check (`apps/api/src/main.ts:39-55`) is unaffected. **No Prisma migration** ships in this epic.
 
 ### 4. Read tolerance for the old identity values
 
-- `IDENTITY_PROVIDER_TYPE` unset outside `AUTH_MODE=local` means generic OIDC. A legacy `zitadel` value is
-  read-tolerated: it maps to generic OIDC and logs one warning. It never fails boot.
-- `IntegrationMode` keeps `zitadel` as a deprecated value the API never emits, until the web stops reading
-  it; then it is dropped.
-- `ConfigStatus.canProvisionAccounts` keeps being emitted as `false`, and `SetupResult.mirrored` as `false`,
-  so an older web build reading them keeps working.
+- `IDENTITY_PROVIDER_TYPE` is no longer read: the identity posture comes from `AUTH_MODE` alone
+  (`resolveIntegrationMode`, `apps/api/src/config/integration-mode.ts:4-6`), so `oidc` always means generic
+  OIDC. A legacy `IDENTITY_PROVIDER_TYPE=zitadel` is tolerated: outside `AUTH_MODE=local` it logs one
+  warning at boot-config validation (`apps/api/src/auth/boot-config.ts:139-145`). It never fails boot.
+- `IntegrationMode` is `generic-oidc | local` (`packages/shared/src/schemas/config.ts:26`). The API never
+  emitted `zitadel` after the identity-core change and the web ships in the same release, so the deprecated
+  value was dropped within the epic rather than kept for a later release.
+- `ConfigStatus.canProvisionAccounts` keeps being emitted as `false` (`apps/api/src/config/config.service.ts:86`),
+  and `SetupResult.mirrored` as `false` (`apps/api/src/config/config.controller.ts:130`), so an older web
+  build reading them keeps working.
 
 ### 5. What the IdP owns stays in the IdP
 
 Under generic OIDC the operator's IdP owns credentials and sessions, so lazyit does not offer them: the
 admin password reset is hidden in the UI outside local mode, and there are no temporary passwords and no
-sessions list. Offboarding no longer disables an IdP account; lazyit still blocks the person itself — the
-soft delete stays DB-first, and a soft-deleted user's next sign-in is refused with a 403 instead of being
-re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:469-470`, [[0038-jit-user-provisioning]]). Disabling
-the account in the IdP is the operator's step.
+sessions list. Offboarding no longer disables an IdP account. The soft delete stays DB-first, and it blocks
+a person who has signed in before: their `externalId` still matches the token's `sub`, so the next sign-in
+is refused with a 403 instead of being re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:463-470`,
+[[0038-jit-user-provisioning]]).
+
+That block has a limit. A person offboarded **before their first OIDC sign-in** has no `externalId`, and
+the verified-email account link ignores soft-deleted rows (`jwt-auth.guard.ts:572`). If their IdP account
+stays enabled, their first sign-in JIT-creates a fresh `VIEWER` row. Offboarding under OIDC therefore has
+to be paired with disabling the account at the IdP — that step is the operator's, and it is what actually
+ends access.
 
 ### 6. The `IdentityProvider` seam is retired
 
 With one OIDC flavour and nothing to write back to, the `IdentityProvider` adapter seam of
-[[0043-zitadel-source-of-truth]] §1 has no second implementation to abstract. It is retired once the callers
-are gone. This closes the "Zitadel machine-user mirror" that [[0048-service-accounts]] deferred to a future
-ADR: it will not be built.
+[[0043-zitadel-source-of-truth]] §1 has no second implementation to abstract. It is retired:
+`apps/api/src/auth/identity/` is gone, and the local-mode branches read `AUTH_MODE` directly. This closes
+the "Zitadel machine-user mirror" that [[0048-service-accounts]] deferred to a future ADR: it will not be
+built.
 
 ### 7. Upgrade safety: guards, no migration tooling
 
 No live instance runs the bundled Zitadel, so **no migration tooling is built**. Two guards catch a stray
 install instead, and both change nothing:
 
-- `infra/start.sh` **refuses to start** when it finds bundled leftovers — `AUTH_MODE=oidc` with an active
-  `ZITADEL_MASTERKEY`, or an issuer or JWKS URL pointing at `zitadel:8080` — and points to a migration
-  runbook.
-- The API logs a **boot tripwire** on the same signals and points to the same runbook.
+- `infra/start.sh` **refuses to run** on an existing install whose env still wires the bundled IdP — an
+  active `ZITADEL_MASTERKEY`; an `OIDC_ISSUER`, `OIDC_JWKS_URI`, `AUTH_ISSUER` or `AUTH_INTERNAL_ISSUER`
+  pointing at `zitadel:8080`; or a `<project>_zitadel_db_data` volume with no `OIDC_CLIENT_ID` — before it
+  writes anything, and points to the migration runbook (`docs/05-runbooks/migrate-off-bundled-zitadel.md`).
+  The guard **does not fire on an `AUTH_MODE=local` install**: local mode never used the IdP, so a stray
+  Zitadel volume or key next to it is no reason to stop (`infra/start.sh:904-920`).
+- The API **refuses to start** under `AUTH_MODE=oidc` with an active `ZITADEL_MASTERKEY`, or an
+  `OIDC_ISSUER` or `OIDC_JWKS_URI` whose host is `zitadel:8080`. It is a boot-config check, so it fails
+  before Nest is created, with a CRITICAL log naming the variable and the same runbook
+  (`apps/api/src/auth/boot-config.ts:114-126`, exit at `:152-155`). Outside `oidc` those values are inert
+  and ignored.
 
 Operator volumes are never removed automatically. Once the services are gone from compose, their volumes
 (`zitadel_db_data`, `zitadel_secrets`) are undeclared, and compose never deletes an undeclared volume — not
@@ -155,14 +186,17 @@ section ([[releasing]], [[0083-versioning-and-releases]]).
 
 ### 8. Password policy
 
-`ZitadelPasswordSchema` (`packages/shared/src/schemas/primitives.ts:118`) is renamed to a neutral name, with
-the old name kept as an alias. A lazyit-owned password policy is a separate, future issue.
+`ZitadelPasswordSchema` is renamed `PasswordPolicySchema` (`packages/shared/src/schemas/primitives.ts:119`).
+The alias was dropped once every caller had moved to the new name; it was an internal TypeScript name, not
+a wire contract. A lazyit-owned password policy is a separate, future issue.
 
 ### Not amended
 
-[[0040-rbac-roles]], [[0046-roles-permissions-v2]], [[0050-user-history-and-activity-user-entity]] and
-[[0054-applications-workflow-engine]] mention the Zitadel mirror as context or contrast. Their decisions do
-not depend on it, and they stay as written.
+[[0050-user-history-and-activity-user-entity]] mentions the Zitadel mirror as context; its decision does not
+depend on it, and it stays as written. [[0040-rbac-roles]], [[0046-roles-permissions-v2]] and
+[[0054-applications-workflow-engine]] were first listed here too, but each states something about the seam
+or the role mirror that is no longer true, so they carry a dated amendment line instead; their decisions are
+unchanged.
 
 ## Consequences
 
@@ -183,8 +217,8 @@ not depend on it, and they stay as written.
     them on first sign-in), and offboarding means disabling them there too.
   - A stray bundled install cannot just upgrade: it stops at the guard and follows the migration runbook by
     hand.
-  - Two compatibility shims live until the web stops reading them: the deprecated `zitadel` enum value and
-    the always-`false` fields.
+  - One compatibility shim lives until no supported web build reads it: the always-`false`
+    `canProvisionAccounts` and `mirrored` fields.
 
 - **Follow-ups (epic #1543):**
   - API identity and config, users, the shared contract, the setup wizard and users UI, and the operator
@@ -195,11 +229,41 @@ not depend on it, and they stay as written.
     [[INVARIANTS]] (Phase 3).
   - A lazyit-owned password policy, as a separate issue.
 
+## Implementation
+
+Built on the integration branch `feat/issue-1543-remove-bundled-zitadel`:
+
+| PR | Unit |
+| --- | --- |
+| #1546 | Setup wizard: local or your own OIDC; the BYOI snippet lists the web and API keys |
+| #1547 | Shared contract: `PasswordPolicySchema`; `zitadel` deprecated in `IntegrationMode` |
+| #1548 | Users UI: "Create OIDC account" removed; admin reset hidden outside local mode |
+| #1550 | API identity core and `/config`: generic OIDC by default; the boot refusal on bundled leftovers |
+| #1551 | Operator scripts: `start.sh` local or BYOI with the refuse guard; the dev Zitadel path removed |
+| #1552 | API users: write-back, `provision-account`, deactivate mirror and compensation delete removed |
+| #1553 | Runtime: Zitadel compose services, `oidc` overlay, Caddy `auth.` site, bootstrap sidecar and client-file loaders removed; the backup sidecar dumps the app database only |
+| #1554 | The `IdentityProvider` seam, the `zitadel` contract value and the `ZitadelPasswordSchema` alias removed |
+
+Where the implementation settled a detail differently from the first draft of this record:
+
+- **§7:** the API boot check refuses to start rather than logging a tripwire, and the `start.sh` guard skips
+  `AUTH_MODE=local` installs.
+- **§2:** the API needs `OIDC_JWKS_URI` and never reads `OIDC_CLIENT_SECRET`; the client secret is the web's.
+- **§4:** the `zitadel` `IntegrationMode` value was dropped within the epic, not in a later release.
+- **§8:** the `ZitadelPasswordSchema` alias was dropped with it.
+- **§5:** the post-offboarding 403 covers only a person who has signed in before; one offboarded before
+  their first sign-in is stopped only by disabling the IdP account.
+
+**Outstanding:** `infra/update.sh` on the integration branch still runs the dual dump of §1 (the app
+database and `zitadel_db`, `infra/update.sh:292-305`). Its mode-aware fix is tracked by #1545 (PR #1549,
+against `dev`); the `zitadel_db` dump goes when that lands here.
+
 ## Related
 
 [[0037-idp-choice-zitadel-byoi]] · [[0038-jit-user-provisioning]] · [[0039-authjs-v5-frontend-oidc]] ·
-[[0043-zitadel-source-of-truth]] · [[0047-guided-first-deploy-bootstrap]] · [[0048-service-accounts]] ·
-[[0064-admin-user-provisioning-credentials]] · [[0069-migrator-import]] ·
+[[0040-rbac-roles]] · [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] ·
+[[0047-guided-first-deploy-bootstrap]] · [[0048-service-accounts]] · [[0054-applications-workflow-engine]] ·
+[[0064-admin-user-provisioning-credentials]] · [[0069-migrator-import]] · [[0091-on-prem-ad-ldap-directory-source]] ·
 [[0083-versioning-and-releases]] · [[0084-update-awareness-and-guided-update]] ·
 [[0086-local-authentication-mode]] · [[auth-zitadel-sot]] · [[auth-bootstrap]] · [[backups]] ·
 [[releasing]] · [[INVARIANTS]] · [[SEC-022-isactive-not-rolled-back-on-idp-revert]]

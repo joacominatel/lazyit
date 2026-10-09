@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-02
+updated: 2026-10-09
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -82,7 +82,8 @@ Quoted verbatim in Spanish where the CEO's words are the decision.
    el codigo, y hagamoslo escalable".
 5. **Configuration** is instance-wide, set by an admin; the API key is encrypted at rest.
 6. **MCP authentication:** "OAuth 2.1 desde el día uno". All OIDC/Zitadel is to be removed (#1310);
-   this design adds no OIDC dependency.
+   this design adds no OIDC dependency. (#1310 was later narrowed by [[0102-remove-bundled-zitadel]]: only
+   the bundled Zitadel was removed, and generic OIDC stays opt-in.)
 7. **Conversations** are saved with a configurable retention; mutating calls are permanently audited.
 8. **The skill is served by the instance.**
 9. **Live control** = backend actions + a reactive UI + navigation to entities. Not click-level UI

@@ -3,7 +3,7 @@ title: Deployment
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-23
+updated: 2026-10-09
 ---
 
 # Deployment
@@ -45,8 +45,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Components:** Postgres, a one-shot **migrate** job, the **API**, the **web** app, **Caddy**,
   **Meilisearch** (the full-text search engine — [[stack]], [[0035-search-architecture]]), and
   **Valkey** (the BullMQ broker for the async `.docx` import + the Applications Workflow Engine —
-  [[stack]]). With the bundled IdP, a **Zitadel** server + DB + one-shot bootstrap sidecar also run
-  ([[auth-zitadel-sot]]).
+  [[stack]]). No identity provider ships in the stack: authentication is local accounts or your own
+  OIDC IdP, running outside it ([[0102-remove-bundled-zitadel]]; see *Identity & authorization* below).
 - **Images:** multi-stage, with dependencies installed and shared tooling run on Bun 1.4.2, and
   application runtimes on Node (`node:26-alpine`). The API compiles in its Bun builder and runs
   `node dist/src/main`; the web runs `next build` under a real Node 26 Debian build stage and serves
@@ -133,8 +133,8 @@ self-hosted, single-org tool ([[0015-deployment-model]]). The implementation liv
 - **Exposure:** only Caddy publishes ports; Postgres, Meilisearch, Valkey, the API and web stay on the
   internal network. The dev DB, Meilisearch and Valkey bind loopback only.
   → [[0028-secrets-and-config]], SEC-005.
-- **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is a
-  third unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD` and `ZITADEL_MASTERKEY`): losing it
+- **Backups:** manual `pg_dump`/`pg_restore` now, automation deferred. **`WORKFLOW_SECRET_KEY` is the
+  unrotatable DR linchpin** (alongside `POSTGRES_PASSWORD`): losing it
   makes every stored connector credential undecryptable, so back it up off-host with the *matching*
   DB dump. `SMTP_SECRET_KEY`, `AI_SECRET_KEY` and `DIRECTORY_SECRET_KEY` are low-DR (losing one costs a
   re-typed password or API key) but ride the same `.env.prod` copy. → [[backups]].
@@ -158,10 +158,14 @@ The **recommended** first-deploy path is the guided, idempotent, **non-destructi
 ([[0047-guided-first-deploy-bootstrap]]) — a thin POSIX-`sh` wrapper over the existing env contract +
 prod compose (it adds no app logic and changes no contract). Shape **DETECT → ASK → GENERATE → UP →
 POINT**: it checks prerequisites, asks ~6 questions, renders `infra/env/.env.prod` with strong random
-secrets (eliminating the three classic foot-guns — the exactly-32-char `ZITADEL_MASTERKEY`, the
-`DATABASE_URL`/`POSTGRES_PASSWORD` coupling, and the forgotten `chmod 600`), runs the canonical prod
-compose, and points the operator at **`https://<host>/setup`**. It **never** regenerates the unrotatable
-`MASTERKEY` or runs any teardown — a destructive reset stays a documented manual operation. The manual
+secrets (eliminating the classic foot-guns — the `DATABASE_URL`/`POSTGRES_PASSWORD` coupling and the
+forgotten `chmod 600`), runs the canonical prod compose, and points the operator at
+**`https://<host>/setup`**. Authentication is two-way: built-in accounts (the default) or BYOI, where it
+writes the OIDC client values the operator registered in their own IdP. It **never** regenerates an
+existing secret (above all the unrotatable `WORKFLOW_SECRET_KEY`) or runs any teardown — a destructive
+reset stays a documented manual operation. On an existing install whose env still wires the removed
+bundled Zitadel it **refuses** before writing anything (skipped on `AUTH_MODE=local` installs —
+[[0102-remove-bundled-zitadel]] §7). The manual
 `cp`/`openssl`/`chmod`/`up` steps remain documented as the explicit fallback ([[deploy-self-hosted]],
 [[docker-prod-like-first-boot]]).
 
@@ -175,14 +179,24 @@ yet; the registry will be GHCR when one exists. → [[0027-ci-pipeline]].
 
 ## Identity & authorization (as built)
 
-Auth is **live**, not reserved: the IdP is **Zitadel** with a **BYOI** (bring-your-own-OIDC) escape
-hatch ([[0037-idp-choice-zitadel-byoi]], [[0043-zitadel-source-of-truth]]). In the bundled flow a
-one-shot **`zitadel-bootstrap` sidecar** (prod profile) provisions the project / OIDC app / roles / a
-runtime service-account key zero-touch and writes `oidc-client.json` to the `zitadel_secrets` volume,
-which `api`/`web` read at startup; Caddy reverse-proxies `auth.<domain>` → `zitadel:8080`. The first
-ADMIN is created by the in-app **`/setup` wizard** (the bootstrap script never creates a user). The IdP
-`sub` maps to `User.externalId` (JIT on first login — [[0038-jit-user-provisioning]]). Full topology +
-gotchas: [[auth-zitadel-sot]].
+Auth is **live**, chosen once per instance by `AUTH_MODE` and immutable afterwards
+([[0086-local-authentication-mode]]):
+
+- **`local`** (the default) — built-in accounts: lazyit owns the password and mints its own session. No
+  IdP.
+- **`oidc`** — **BYOI**, your own OIDC IdP (Entra ID, Okta, Keycloak, Authentik…), configured only by
+  environment variables. The web signs in through Auth.js with `AUTH_ISSUER` / `AUTH_CLIENT_ID` /
+  `AUTH_CLIENT_SECRET` ([[0039-authjs-v5-frontend-oidc]]); the API is a resource server that verifies
+  the bearer token against `OIDC_ISSUER` and `OIDC_JWKS_URI` (both required at boot, `OIDC_CLIENT_ID`
+  optional as the audience) and never holds a client secret. The IdP `sub` maps to `User.externalId` (JIT
+  on first login — [[0038-jit-user-provisioning]]).
+
+No IdP runs in the stack and lazyit **never writes to the IdP**: creating, editing or offboarding a person
+changes lazyit only, and disabling the IdP account is the operator's step — the one that ends access for a
+person offboarded before their first sign-in ([[0102-remove-bundled-zitadel]] §5). The bundled Zitadel, its
+bootstrap sidecar and the `auth.` Caddy site were removed by [[0102-remove-bundled-zitadel]]; the API
+refuses to boot under `AUTH_MODE=oidc` while the env still points at them. The first ADMIN is created by
+the in-app **`/setup` wizard**, which also shows the BYOI environment snippet (web + API keys).
 
 **Authorization** is DB-first fine-grained permissions (`@RequirePermission`) for two principal kinds —
 humans and non-human [[service-account]]s — entirely **lazyit-local** (permissions never touch the IdP,
@@ -197,9 +211,9 @@ path. See [[authorization]], [[0046-roles-permissions-v2]], [[0048-service-accou
   splitting it out is a documented follow-up when job volume / CPU-heavy flows warrant it
   ([[0053-async-workers-bullmq-valkey]]).
 
-Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[auth-zitadel-sot]] ·
+Related: [[stack]] · [[monorepo]] · [[setup]] · [[authorization]] · [[0102-remove-bundled-zitadel]] ·
 [[backups]] · [[05-runbooks/_MOC|Runbooks]] · [[0025-containerization-strategy]] ·
 [[0026-reverse-proxy-tls]] · [[0027-ci-pipeline]] · [[0028-secrets-and-config]] ·
-[[0035-search-architecture]] · [[0043-zitadel-source-of-truth]] ·
+[[0035-search-architecture]] · [[0086-local-authentication-mode]] ·
 [[0047-guided-first-deploy-bootstrap]] · [[0053-async-workers-bullmq-valkey]] ·
 [[0054-applications-workflow-engine]] · [[0097-ai-assistant-mcp-and-headless-api]]

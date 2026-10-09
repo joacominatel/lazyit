@@ -3,16 +3,17 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
 
 > **Decisions of record:** [[0046-roles-permissions-v2]] (fixed roles + configurable permissions) ·
 > [[0048-service-accounts]] (a non-human principal) · [[0097-ai-assistant-mcp-and-headless-api]] (the AI
-> channels: delegated identity, OAuth scopes, personal tokens, SA limits — §9). Authentication (who you are) is the Zitadel/OIDC
-> dossier [[auth-zitadel-sot]] / [[0043-zitadel-source-of-truth]]; **this note is authorization** (what
-> you may do). The non-negotiables are [[INVARIANTS]] (INV-1, INV-8, INV-SA-1…4, INV-AI-1…17); this note is the
+> channels: delegated identity, OAuth scopes, personal tokens, SA limits — §9). Authentication (who you
+> are) is local accounts or your own OIDC IdP — [[0086-local-authentication-mode]],
+> [[0102-remove-bundled-zitadel]], [[deployment]]; **this note is authorization** (what you may do). The
+> non-negotiables are [[INVARIANTS]] (INV-1, INV-8, INV-SA-1…4, INV-AI-1…17); this note is the
 > architecture *behind* them. Don't contradict the ADRs — align to them.
 
 ## 0. The model in one paragraph
@@ -248,8 +249,9 @@ is accepted by design). The only guardrails are *ADMIN-immutable* + *catalog-mem
 
 ## 6. Service accounts as a non-human principal
 
-A [[service-account]] is a SEPARATE model — not a flag on [[user]], not a Zitadel machine user (BYOI-safe;
-the IdP machine-user mirror is a deferred future ADR). It authenticates with a lazyit-native token
+A [[service-account]] is a SEPARATE model — not a flag on [[user]], not an IdP machine user (BYOI-safe;
+the deferred Zitadel machine-user mirror will not be built, [[0102-remove-bundled-zitadel]] §6). It
+authenticates with a lazyit-native token
 `lzit_sa_<id>_<secret>` (the secret is a 256-bit random, stored only as a SHA-256 hash + a non-secret
 `tokenPrefix`, shown once, constant-time-verified). It is authorized by direct
 [[service-account-permission]] grants from the same catalog, never a role, never ADMIN, FAIL-CLOSED.
@@ -360,6 +362,6 @@ temporary passwords), the AI's own configuration (`/config/ai*`) and any generic
 configuration itself is `settings:manage` + `ServicePrincipalForbiddenGuard`.
 
 Related: [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[0040-rbac-roles]] ·
-[[0043-zitadel-source-of-truth]] · [[auth-zitadel-sot]] · [[INVARIANTS]] · [[shared-package]] ·
+[[0043-zitadel-source-of-truth]] · [[0102-remove-bundled-zitadel]] · [[INVARIANTS]] · [[shared-package]] ·
 [[role-permission]] · [[service-account]] · [[user]] · [[0097-ai-assistant-mcp-and-headless-api]] ·
 [[ai-assistant/_synthesis]]

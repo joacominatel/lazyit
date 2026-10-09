@@ -22,6 +22,10 @@ discipline ([[0006-soft-delete-and-auditing]] / [[0041-soft-delete-reuse-and-res
 id strategy ([[0005-id-strategy]]). It is the deliberate **inverse** of the Zitadel strong-coupling
 ([[0043-zitadel-source-of-truth]] / INV-5).
 
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the Zitadel write-back this record
+contrasts with, the `IdentityProvider` factory (§7) and `zitadel-management.service.ts` (§8b) it cites as
+precedents are removed; the connector model, the retry posture and the decoupling rule stand unchanged.
+
 > **Scope of this ADR (Phase 1a + 1a-revision):** the data-model foundation — entities, enums,
 > contracts and the decisions everything else builds on, **including the step-graph topology**
 > (decision §8: the opinionated error-handling DAG, added in the 1a-revision). **No engine runtime,

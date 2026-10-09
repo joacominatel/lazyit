@@ -3,15 +3,15 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # Security invariants — auth & authorization
 
 The **non-negotiables** of the lazyit auth stack, distilled from
 [[0043-zitadel-source-of-truth]] §6 (the CEO-approved conditions of acceptance) and the design
-dossier [[auth-zitadel-sot]] §6. These are not findings or open issues — they are the *baseline a
-finding is measured against*. If code diverges from any of them, that divergence is a `SEC-NNN`
+dossier [[auth-zitadel-sot]] §6, as amended by [[0102-remove-bundled-zitadel|ADR-0102]]. These are
+not findings or open issues — they are the *baseline a finding is measured against*. If code diverges from any of them, that divergence is a `SEC-NNN`
 ([[_MOC]]); link this note from it.
 
 > **How to use this note.** Before reviewing or changing anything on the auth/authZ path, confirm the
@@ -25,6 +25,10 @@ finding is measured against*. If code diverges from any of them, that divergence
 > **Purchases** ([[0099-purchases-scope-model-and-optionality|ADR-0099]], epic #1465) added INV-PO-1 and
 > amended INV-AI-3, -4, -7, -11 and -12 on 2026-10-02 (#1489). Their `file:line` references are to the
 > integration branch at `74a2a485`.
+>
+> **Bundled Zitadel removed** ([[0102-remove-bundled-zitadel|ADR-0102]], epic #1543). On 2026-10-09
+> INV-4 and INV-6 were rewritten, INV-5 was retired, and INV-1, -3, -8, INV-DIR-1 and -2 were corrected.
+> Their `file:line` references are to the integration branch at `340645acb`.
 
 ---
 
@@ -43,8 +47,9 @@ and BYOI-safe (a generic IdP need not emit a role claim at all).
 - `apps/api/src/auth/jwt-auth.guard.ts` — `JwtAuthGuard` resolves `request.user` from the DB by
   `externalId` (the `sub`); the role on a JIT insert is computed from DB state
   (`userCount === 0 ? ADMIN : VIEWER`), not from any token claim.
-- `apps/api/src/auth/identity/identity-provider.interface.ts` — the interface contract states the IdP
-  is a *write-back mirror*, never an authorization source.
+- There is no IdP adapter ([[0102-remove-bundled-zitadel|ADR-0102]] §6). The API reaches the IdP only for
+  its JWKS and, on a first sign-in, the userinfo profile (`jwt-auth.guard.ts:388-413`, `:497`); neither
+  feeds `request.user.role`.
 
 > The token-authoritative variant (read role from the claim) was **explicitly rejected** in ADR-0043
 > §2 / Fork #1. There is currently **no code path that reads a role claim into `request.user.role`**, so
@@ -87,113 +92,88 @@ IP**, and **audits every admin creation**.
 un-forgeable, un-brute-forceable, and self-locking.
 
 **Where enforced.**
-- `apps/api/src/config/config.service.ts` — `setup()` 409s when `user.count({ role: ADMIN }) > 0`;
-  audits each creation via a structured Pino line (op/email/ip/mirrored).
+- `apps/api/src/config/config.service.ts` — `setup()` 409s when `user.count({ role: ADMIN }) > 0`
+  (`:121-128`); audits each creation via a structured Pino line with the operation, the new admin's id
+  and email, and the IP (`:158`, `:178`). Local mode sets the admin's password; OIDC mode creates the row
+  only, with no IdP call, and the operator's IdP identity claims it by verified email (INV-2).
 - `apps/api/src/config/config.controller.ts` — rejects a missing/invalid CSRF token with 403 before any
   DB work; the setup route carries `@UseGuards(SetupRateLimitGuard)`.
 - `apps/api/src/config/setup-csrf.service.ts` — stateless HMAC double-submit token.
 - `apps/api/src/config/setup-rate-limit.guard.ts` — per-IP fixed-window limiter (429 over the cap).
 
-## INV-4 — BYOI degrades gracefully; the Management API is never on the runtime authN path
+## INV-4 — lazyit never manages IdP accounts; under OIDC only token validation reaches the IdP
 
-**Rule.** The Zitadel Management API is used for **setup + write-back only**. It is never on the login
-path. A missing or misconfigured Management credential **warns** — it never blocks login or boot. Under
-`generic-oidc` (BYOI) all management methods are no-ops.
+**Rule.** lazyit has no IdP management client ([[0102-remove-bundled-zitadel|ADR-0102]] §1, §6). Under
+`AUTH_MODE=oidc` the API reaches the operator's IdP only to verify tokens (JWKS) and, on a first sign-in,
+to read the userinfo profile through the discovery document. It never creates, edits, disables or
+resets an IdP account. What the IdP owns is refused honestly, never faked: an admin password reset is a
+**501**, a temporary password on create is a **400**, and local onboarding is a **400** outside local
+mode. Offboarding is DB-first: lazyit
+blocks the person itself, and disabling the IdP account is the operator's step (ADR-0102 §5). A
+bundled-Zitadel leftover in OIDC mode **refuses boot**; a legacy `IDENTITY_PROVIDER_TYPE=zitadel` only
+warns and is ignored.
 
-**Why.** Authentication must keep working with any standard OIDC IdP even when there is nothing to write
-back to; a write-back capability outage can never lock people out.
-
-**Where enforced.**
-- `apps/api/src/auth/identity/generic-oidc.identity-provider.ts` — management methods no-op with a
-  `warn` (`supportsManagement = false`). **Exception (issue #149):** `requestPasswordReset` does NOT
-  silently no-op — a reset is a user-visible ACTION, so it REJECTS with `PasswordResetUnsupportedError`,
-  which the Users controller maps to an honest **501** ("managed by your identity provider") rather than
-  a 2xx that falsely implies a reset email was sent. `updateUser` (profile/email mirror) still no-ops.
-- `apps/api/src/auth/identity/zitadel-management.service.ts` — the constructor never throws; a missing
-  credential WARNs at boot-config resolution and throws "Zitadel management not configured" from the
-  *management methods only*, never on the authN path.
-- `apps/api/src/auth/boot-config.ts` — boot validation warns (does not fail) on an absent Management
-  credential.
-
-## INV-5 — Write-back is no-split-brain: a Management failure rolls back and surfaces 503
-
-**Rule.** When lazyit mirrors a user/role change to Zitadel and the Management call fails, the **local
-change is rolled back** (or compensated) and the request returns **503** — never a silent partial
-write. Offboarding deactivates the IdP user **inside the offboard transaction**.
-
-The mirror is **best-effort, eventually-consistent across sub-resources**, not a single atomic write:
-`update`'s profile mirror is two non-atomic Zitadel v2 calls — a display-name `PUT` then a
-**committed-LAST** email `POST`. The guarantees are therefore scoped:
-- **The account-linking email never diverges.** It is committed LAST, so on its failure Zitadel's email
-  is untouched and the local revert restores the prior address — the two agree. `externalId` (sub) is
-  never changed by an edit (SEC-006), so the identity link is never at risk.
-- **A mid-sequence display-name (or role) divergence is transient, not permanent.** If the name `PUT`
-  commits but the email `POST` then fails, Zitadel briefly holds the NEW name while local reverts to OLD.
-  The catch makes a **best-effort compensating re-mirror** of the reverted name back to Zitadel to
-  converge them; if even that re-mirror fails it only LOGS (never throws over the original 503), leaving
-  at worst a cosmetic display-name drift fixed by the next edit.
-- **Zero authZ impact regardless.** Authorization is **DB-first** (ADR-0043 #1): permissions resolve
-  from local `RolePermission` rows (INV-8), never from a Zitadel name or claim, so a stale Zitadel
-  display name or role grants nothing. The divergence is cosmetic, bounded, and eventually-fixable — not
-  a security hole. (We deliberately do NOT claim "local and Zitadel never disagree".)
-
-**Why.** A soft-deleted-local / still-active-in-IdP divergence would be a real security drift, so those
-roll back hard (503). The remaining cosmetic display-name/role drift is compensated best-effort because
-it carries no authZ weight; failing loud on the primary write plus best-effort convergence keeps the two
-stores consistent in practice without pretending a multi-call mirror is atomic.
+**Why.** Authentication keeps working with any standard OIDC IdP, there is no management credential to
+leak or misconfigure, and an operator is never told an IdP action happened when it did not.
 
 **Where enforced.**
-- `apps/api/src/users/users.service.ts` — `create` hard-deletes the just-created local row on a mirror
-  failure (+503); a role change reverts the local role on a `grantRole` failure (+503); an ADMIN
-  name/email edit (`update`, issue #149) mirrors `updateUser` (Zitadel v2 profile `PUT` + a PRE-VERIFIED,
-  committed-LAST email `POST`, same `externalId` — no re-link, SEC-006) and, on failure, reverts ONLY the
-  changed local fields (role/name/email) (+503) **and** best-effort re-mirrors the reverted display name
-  back to Zitadel (own try/catch, log-only, never throws over the 503) to converge the one sub-resource
-  that could have committed ahead of the failure; `remove` (offboard) runs `deactivateUser` inside the `$transaction`
-  so a failure rolls the whole offboarding back. Every write-back is audited. `requestPasswordReset`
-  (issue #149) is NOT a mirror but a triggered IdP action — it 404s a missing/soft-deleted user, **422**s
-  an inactive one, and 503s a Zitadel Management failure (the email itself is sent by ZITADEL's SMTP).
-- `apps/api/src/auth/identity/zitadel-management.service.ts` — the 503 itself was hardened in issue #196
-  **without changing this invariant**: (a) the **public** `ServiceUnavailableException` message is now
-  GENERIC + actionable (*"The identity provider is temporarily unavailable. Your change was not saved,
-  please try again in a moment."*) — the internal verb/path/upstream status no longer leak to the toast
-  (`notifyError` surfaces the API message verbatim); the rich detail stays in the WARN log, correlated by
-  request id (ADR-0031). (b) `request()` retries a **transient** upstream failure (a network error or a
-  `408/429/5xx`) with a bounded exponential backoff + jitter (≤3 attempts, total added latency capped
-  ~1.8s, honours `Retry-After`), so a brief Zitadel blip is invisible to the admin while a **sustained**
-  outage still falls through to the revert-and-503 path above unchanged. A permanent `4xx` is **never**
-  retried, the token/auth fetch is not retried, and the two NON-idempotent writes (create-user `POST
-  /v2/users/human`, the grant-ADD `POST .../grants`) single-shot so a lost-response retry can never
-  duplicate a user/grant. The **consistency model (strong coupling) is unchanged** — retry only shrinks
-  the window in which a *transient* blip trips the revert; it does not relax INV-5. *(The queue/reconcile
-  vs. strong-coupling consistency-model question — issue #196 layer (c) — is DEFERRED to a future CEO
-  decision and is intentionally not addressed here.)*
-- **Exception (deliberate):** `apps/api/src/config/config.service.ts` `setup()` is the one place that
-  **degrades instead of blocking** — a first-run mirror failure keeps the local ADMIN (`mirrored:
-  false`, warn) rather than 503, so a Zitadel misconfiguration can never wedge first-run (ADR-0043 §6
-  #4; the operator repairs Zitadel afterwards).
+- `apps/api/src/auth/jwt-auth.guard.ts:388-413` — JWKS + `jwtVerify` (issuer, RS256); `:497` and
+  `:679` (`fetchUserinfo`) — discovery + userinfo, fail-soft, on a first sign-in only. No other
+  outbound IdP call exists in `apps/api/src`.
+- `apps/api/src/users/users.service.ts:1066` + `apps/api/src/users/users.controller.ts:608-609` —
+  `requestPasswordReset` outside local mode throws `PasswordResetUnsupportedError`, mapped to **501**
+  ("managed by your identity provider"), never a 2xx that implies a reset email was sent.
+- `apps/api/src/users/users.service.ts:641-645` — a password on `create` under OIDC is a **400** before any
+  row exists; `:689-693` — `provisionLocalAccount` is a **400** outside local mode.
+- `apps/api/src/users/users.service.ts:1253` (`remove`) — the offboarding transaction (`:1267`) makes no
+  network call. `apps/api/src/auth/jwt-auth.guard.ts:463-470` — a soft-deleted user whose `externalId`
+  matches the token's `sub` gets **403** on every request, even while the IdP token is still valid.
+  **Scope:** this covers a person who has signed in at least once. A person offboarded before their first
+  sign-in has no `externalId`; if the IdP account stays enabled, their next sign-in JIT-provisions a
+  fresh VIEWER row, because the email-link lookup never sees soft-deleted rows (INV-2). Disabling the IdP
+  account closes both cases.
+- `apps/api/src/config/config.service.ts:166-183` — `/setup` under OIDC creates the first ADMIN row only.
+- `apps/api/src/auth/boot-config.ts:114-126` — `ZITADEL_MASTERKEY`, or an `OIDC_ISSUER` / `OIDC_JWKS_URI`
+  on `zitadel:8080`, in OIDC mode fails boot validation and points at the migration runbook;
+  `:138-146` — the legacy `IDENTITY_PROVIDER_TYPE=zitadel` warning.
+- `apps/api/src/config/integration-mode.ts` — the integration mode derives from `AUTH_MODE` alone;
+  `IDENTITY_PROVIDER_TYPE` is ignored.
 
-## INV-6 — Secrets are files on the `zitadel_secrets` volume, never baked in or committed
+## INV-5 — Retired 2026-10-09 (write-back no-split-brain)
 
-**Rule.** `ZITADEL_MASTERKEY`, `OIDC_CLIENT_SECRET`, and the Management service-account key are
-**mounted secret files** (the `zitadel_secrets` volume / `oidc-client.json` / `sa-key.json`), never
-inlined into an image or committed. `infra/env/.env.prod` is `chmod 600` + gitignored. The
-service-account credential is **rotatable** (Private-Key JWT at runtime; rotate the bootstrap PAT every
-30 days) and scoped as narrowly as Zitadel allows.
+**Retired** on 2026-10-09 by [[0102-remove-bundled-zitadel|ADR-0102]] (epic #1543, PR #1552). INV-5
+governed how lazyit mirrored user and role changes to the bundled Zitadel and rolled the local change
+back when the Management call failed. The write-back, the deactivate mirror inside offboarding, the
+create-compensation hard delete and the `/setup` mirror exception are all removed, so it constrains
+nothing. Its one open divergence, [[SEC-022-isactive-not-rolled-back-on-idp-revert|SEC-022]], is closed as
+no longer applicable. The ID is kept so references still resolve; the full text is in git history.
 
-**Why.** A secret baked into a layer or committed to git leaks to every puller; file-mounted secrets
-stay on the single host and can be rotated without a rebuild.
+What holds instead: a user edit is one local write (`apps/api/src/users/users.service.ts:861-879`), and
+the offboarding transaction holds no network call (INV-4).
+
+## INV-6 — Instance secrets live only in the host's `.env.prod`, never baked in or committed
+
+**Rule.** The OIDC client secrets (`OIDC_CLIENT_SECRET`, `AUTH_CLIENT_SECRET`), `AUTH_SECRET`,
+`SESSION_SIGNING_SECRET` and the other instance secrets live only in `infra/env/.env.prod` on the host:
+`chmod 600`, gitignored, never inlined into an image layer or committed. lazyit holds no IdP
+service-account key and ships no secrets volume ([[0102-remove-bundled-zitadel|ADR-0102]] §1). The web
+container gets only the auth keys it uses. On a host upgraded from the bundled deployment, the old
+`zitadel_secrets` and `zitadel_db_data` volumes are undeclared; compose never removes them, so they stay
+until the operator removes them (ADR-0102 §7).
+
+**Why.** A secret baked into a layer or committed to git leaks to every puller; a host-local file stays
+on the single host and can be rotated without a rebuild.
 
 **Where enforced / documented.**
-- `infra/env/.env.prod.example` — `ZITADEL_MASTERKEY` is **exactly 32 bytes**; all `OIDC_*`/`AUTH_*`
-  client secrets flow through the sidecar's `oidc-client.json`, not env, in the bundled flow.
-- `apps/api/src/auth/identity/zitadel-management.service.ts` — reads the SA key from
-  `ZITADEL_MGMT_SA_KEY_PATH` (a mounted file); the key/secret is never logged.
-- The `zitadel_secrets` volume is internal-only; the sidecar writes `oidc-client.json` / `sa-key.json`
-  world-readable (`0644`) on a single-host internal volume (accepted tradeoff — see
-  [[auth-zitadel-sot]] §4e); the machine key stays `0600`.
-- Runbooks: [[auth-bootstrap]] §0b (clean re-bootstrap pairs `down -v` with removing the volume),
-  [[deploy-self-hosted]], [[backups]] (the masterkey is the DR linchpin).
+- `.gitignore:2` — `.env*` ignores `infra/env/.env.prod`.
+- `infra/start.sh:684-697` — the guided install writes the env file atomically, `chmod 600`, and verifies
+  the mode; `infra/env/.env.prod.example:5` tells a manual install to do the same. The BYOI keys stay
+  commented in the example (`:181-196`) and are written only when the operator answers `byoi`.
+- `compose.yaml:156-178` — the web container gets an explicit `environment:` block (the Auth.js secret and
+  the OIDC client) instead of `env_file`, so it never sees the database or Meilisearch secrets.
+- `apps/api/src/auth/boot-config.ts` — `SESSION_SIGNING_SECRET` is required and at least 32 characters in
+  local mode, so a weak or missing session key fails boot.
+- Runbooks: [[deploy-self-hosted]], [[backups]].
 
 ## INV-7 — DEFAULT VIEWER for new users; first-ever user stays ADMIN
 
@@ -225,8 +205,9 @@ the `RolePermission` **database rows**, never from a token claim — the same DB
 so an ADMIN is always omnipotent and the last-admin / first-admin invariants (INV-7 + the ADR-0040
 last-admin guard) stay intact. ADMIN omnipotence is over **authorization / visibility** only — see
 **INV-10** for the deliberate cryptographic exception where even an ADMIN cannot decrypt a zero-knowledge
-[[secret-vault]] they are not a crypto member of (capability ≠ cryptographic access). Permissions are **lazyit-local** — they are NEVER mirrored to the IdP;
-only the three coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
+[[secret-vault]] they are not a crypto member of (capability ≠ cryptographic access). Permissions and
+roles are **lazyit-local** — neither is written to the IdP. The coarse-role `grantRole` write-back of
+[[0043-zitadel-source-of-truth]] §3 was removed by [[0102-remove-bundled-zitadel|ADR-0102]].
 
 **Why.** Permissions are an authorization source, so a forged/misconfigured token must not be able to
 confer one; and an editable ADMIN set could strip the last administrator of a power and wedge the
@@ -564,13 +545,14 @@ rotation; the API imports no crypto capable of exploiting it.
 [[0069-migrator-import]] §A.3):
 
 1. **Never authenticates until an explicit promotion.** It has `externalId = null` (never set by the
-   import) and a `role` that is forced VIEWER; until it is promoted it has no login. Three promotion
+   import) and a `role` that is forced VIEWER; until it is promoted it has no login. Two promotion
    paths exist, each keeping the existing (VIEWER) role: (a) the JIT guard (`jwt-auth.guard.ts`) on a
-   verified email match (OIDC); (b) `POST /users/:id/provision-account` (ADMIN, bundled Zitadel) which
-   sets `externalId`; and (c) — **local mode only**, issue #1072 — `POST /users/:id/provision-local-account`
-   (ADMIN) which sets a `passwordHash` (one-time temp password, `mustChangePassword=true`). All three flip
-   `directoryOnly = false`, at which point it is a normal `User`. This is the only amendment to "never
-   receives a credential": it is admin-action-gated, never self-service, and never widens the role
+   verified email match (OIDC); and (b) — **local mode only**, issue #1072 —
+   `POST /users/:id/provision-local-account` (ADMIN) which sets a `passwordHash` (one-time temp password,
+   `mustChangePassword=true`). Both flip `directoryOnly = false`, at which point it is a normal `User`.
+   The bundled-Zitadel `POST /users/:id/provision-account` was removed by
+   [[0102-remove-bundled-zitadel|ADR-0102]]. Path (b) is the only amendment to "never receives a
+   credential": it is admin-action-gated, never self-service, and never widens the role
    ([[0086-local-authentication-mode]] §5 amendment).
 2. **Never holds an administrative role.** `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
    rejects any `role` field. The import path forces VIEWER unconditionally; the regular `PATCH /users`
@@ -592,8 +574,8 @@ allowing a bulk import to gift ADMIN to the first real login or to block the las
 - `apps/api/prisma/schema.prisma` — `User.directoryOnly Boolean @default(false)`.
 - `packages/shared/src/schemas/user.ts` — `CreateDirectoryPersonSchema` strict (no `role`, no
   `externalId`); `UserSchema` exposes `directoryOnly: z.boolean()`.
-- `apps/api/src/import/import-commit.service.ts` — forces `directoryOnly: true`, calls
-  `users.service.create` with `skipIdpWriteBack: true` (never calls `idp.createUser` at import time).
+- `apps/api/src/import/import-commit.service.ts:1011` — calls `users.service.create` with the
+  `directoryOnly: true` option, whose branch (`users.service.ts:591-616`) creates the row with no login.
 
 ## INV-DIR-2 — `directoryOnly = true` ⇒ NEVER the subject of an AccessGrant or IdP provisioning
 
@@ -604,13 +586,10 @@ cannot be written back to the IdP at import time. Specifically:
    or renewal) checks `user.directoryOnly` and returns **400** ("a directory person has no account; no
    access can be granted until they log in or are provisioned"). This closes the "is a User → FK works"
    shortcut: the FK to `User` is structurally valid, but the capability is explicitly blocked.
-2. **No IdP write-back at import time.** `users.service.create` called with `skipIdpWriteBack: true`
-   bypasses the entire Zitadel Management API block. No `idp.createUser`, no `grantRole`, no Zitadel
-   user is created. The person exists only in lazyit's DB.
-3. **`POST /users/:id/provision-account` is the sole IdP write path** for a directory person. It is
-   ADMIN-only, requires a real email (not `@directory.local`), and follows the no-split-brain pattern
-   (INV-5): IdP first, local update second; local failure after IdP success is reconcilable via the
-   next JIT login.
+2. **No IdP provisioning.** lazyit never writes to the IdP (INV-4,
+   [[0102-remove-bundled-zitadel|ADR-0102]]). The person exists only in lazyit's DB.
+3. **Promotion is the only way out**, through the two paths of INV-DIR-1 §1: a verified-email JIT link
+   (OIDC) or `POST /users/:id/provision-local-account` (ADMIN, local mode).
 
 **Enumerated FK paths to `User` that imply capability (verified against schema):**
 
@@ -620,7 +599,7 @@ cannot be written back to the IdP at import time. Specifically:
 | `AssetAssignment.userId` | **ALLOWED** (the purpose of directory persons) | — |
 | `AccessRequest.requesterId` | Not applicable — directory persons cannot authenticate | No request can be submitted |
 | `UserHistory.userId` | Structural — no capability | — |
-| External IdP (Zitadel) | YES at import | `skipIdpWriteBack`; only `provision-account` writes to IdP |
+| External IdP | Not applicable | lazyit never writes to the IdP (ADR-0102) |
 
 **Why.** Without this invariant, an `AccessGrant` created for a directory person would sit permanently
 `revokedAt: null` with no way for the person to authenticate and no workflow step to receive it — an
@@ -628,10 +607,12 @@ irrevocable, dangling grant. The `assertUserUsable` guard prevents the orphan fr
 
 **Where enforced.**
 - `apps/api/src/access-grants/access-grants.service.ts` — `assertUserUsable` gains `select { directoryOnly }` + `if (user.directoryOnly) throw 400`.
-- `apps/api/src/users/users.service.ts` — `create()` internal opt `{ skipIdpWriteBack?: boolean }` branches before the IdP block when `true`.
-- `apps/api/src/users/users.controller.ts` — `provision-account` endpoint (ADMIN-only, `user:manage`).
+- `apps/api/src/users/users.service.ts:591-616` — `create()`'s internal `{ directoryOnly?: boolean }`
+  option creates the row with `directoryOnly: true` and the role forced VIEWER.
+- `apps/api/src/users/users.controller.ts:692` — `provision-local-account` (ADMIN-only, `user:manage`);
+  `users.service.ts:689-700` refuses it outside local mode or for a row that is not directory-only.
 - Tests: `access-grants.service.spec.ts` — `assertUserUsable` with `directoryOnly=true` → 400.
-  `users.service.spec.ts` — `skipIdpWriteBack=true` with `supportsManagement=true` does NOT call `idp.createUser`.
+  `users.service.spec.ts:455-517` — the directory-only create forces VIEWER and `directoryOnly: true`.
 
 ## INV-PO-1 — Purchase provenance follows `purchaseOrder:read`, enforced at the API, never UI-only
 
@@ -1063,7 +1044,8 @@ resolves.
 
 ---
 
-Related: [[0043-zitadel-source-of-truth]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] ·
+Related: [[0043-zitadel-source-of-truth]] · [[0102-remove-bundled-zitadel]] · [[0046-roles-permissions-v2]] ·
+[[0048-service-accounts]] ·
 [[0060-kb-folder-access-control]] · [[0061-secret-manager-zero-knowledge]] · [[0031-logging-strategy]] ·
 [[auth-zitadel-sot]] · [[0038-jit-user-provisioning]] · [[0040-rbac-roles]] ·
 [[0041-soft-delete-reuse-and-restore]] · [[0028-secrets-and-config]] · [[deferred]] · [[summary]] · [[_MOC]] ·

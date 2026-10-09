@@ -24,7 +24,8 @@ is over-scoped" call in §3's options and §8 is revised by it.
 The `start.sh` choice is two-way (built-in accounts or your own IdP), and the
 `infra/docker-compose.oidc.yaml` overlay, the `profiles:[oidc]` Zitadel services, the mode-gated Caddy
 `auth.` block and the `zitadel_db` backup leave §Infra consequences. `AUTH_MODE` (`shim | local | oidc`),
-its immutability and the persisted mode marker are unchanged.
+its immutability and the persisted mode marker are unchanged. The `IdentityProvider` seam is retired, so
+`LocalIdentityProvider` no longer exists; local-mode checks read `AUTH_MODE` directly.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],

@@ -45,8 +45,7 @@ const nameResolver = zodResolver(
  * When the AD/LDAP directory sync owns the person (`directorySource` set, ADR-0091) the API refuses the
  * edit with a 409, because the next sync would overwrite it — so the name is shown read-only with a
  * one-line note instead of a form. A 409 that still arrives (the directory claimed the person after the
- * page loaded), a service-account 403 and a 503 from the identity-provider mirror (nothing was changed)
- * each show a clear inline message.
+ * page loaded) and a service-account 403 each show a clear inline message.
  */
 export function ProfileNamePanel({ user }: { user: User }) {
   const t = useTranslations("profile.name");

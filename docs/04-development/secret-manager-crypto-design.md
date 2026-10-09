@@ -3,7 +3,7 @@ title: "Secret Manager — crypto design note (build-time primitives)"
 tags: [development, security, secrets, crypto, secret-manager, knowledge-base]
 status: accepted
 created: 2026-06-12
-updated: 2026-08-17
+updated: 2026-10-09
 ---
 
 # Secret Manager — crypto design note (build-time primitives)
@@ -503,7 +503,7 @@ note adds the **payload classes above** as never-log even when they would otherw
 ### Disaster recovery (ADR §10)
 
 - The **recovery key is the user's PERSONAL, off-host, shown-once DR artifact** — the zero-knowledge
-  analogue of `ZITADEL_MASTERKEY` / `WORKFLOW_SECRET_KEY` in [[backups]], except it is **per-user and
+  analogue of `WORKFLOW_SECRET_KEY` in [[backups]], except it is **per-user and
   never on the host**.
 - **A DB + `.env` restore brings back CIPHERTEXT ONLY** — `ciphertext`/`iv`/`authTag`, public keys,
   wrapped DEK blobs, and the encrypted private-key blobs. It does **NOT** restore the ability to
