@@ -29,7 +29,7 @@ import { useSetupMutation } from "@/lib/api/hooks/use-config-status";
 const FORM_ID = "setup-admin-form";
 
 /**
- * Form-only shape when the bundled-Zitadel path requires an initial password. Extends the shared
+ * Form-only shape when the server requires an initial password (local mode). Extends the shared
  * `SetupAdminSchema` with a `password` and a form-local `confirmPassword` — both validated against
  * the shared `SetupPasswordSchema` so the rules and copy stay in lockstep with the API (and apps/web
  * keeps using shared schemas only, never importing `zod` directly). The match check is attached to
@@ -50,11 +50,10 @@ type AdminFormValues = SetupAdmin & {
 };
 
 /**
- * Live complexity checklist mirroring the bundled-IdP password UX (Zitadel-style grid of
- * requirements with a check/cross per rule). The rule predicates mirror the shared
- * `SetupPasswordSchema` rule-for-rule; the localized labels live in the `setup.admin.checklist`
- * namespace (issue #506) — the schema's own (English) messages remain the server-side fallback. The
- * confirmation row is form-local (the schema enforces the match via a refine).
+ * Live complexity checklist: a grid of requirements with a check/cross per rule. The rule predicates
+ * mirror the shared `SetupPasswordSchema` rule-for-rule; the localized labels live in the
+ * `setup.admin.checklist` namespace (issue #506) — the schema's own (English) messages remain the
+ * server-side fallback. The confirmation row is form-local (the schema enforces the match via a refine).
  */
 function buildPasswordChecklist(
   password: string,
@@ -123,9 +122,8 @@ function PasswordChecklist({
  * to ADMIN by definition (this endpoint exists only to bootstrap the first administrator), shown as a
  * locked badge rather than an editable control.
  *
- * In bundled-Zitadel mode the server reports `requiresAdminPassword` and the wizard also collects an
- * initial password (set by the backend in Zitadel) with a live complexity checklist; in BYOI the
- * password is neither shown nor sent. The form schema is built dynamically from that flag and
+ * In local mode the server reports `requiresAdminPassword` and the wizard also collects an initial
+ * password with a live complexity checklist; under OIDC the password is neither shown nor sent. The form schema is built dynamically from that flag and
  * validates the password against the shared `SetupPasswordSchema`. The CSRF token (from the status
  * payload) is threaded into the POST; the backend's idempotent gate, CSRF check and rate limit are
  * the real enforcement boundary — surfaced via the parent's onError.
@@ -140,7 +138,7 @@ export function StepCreateAdmin({
   csrfToken: string;
   requiresAdminPassword: boolean;
   onBack: () => void;
-  onCreated: (email: string, mirrored: boolean) => void;
+  onCreated: (email: string) => void;
   onError: (error: unknown) => void;
 }) {
   const t = useTranslations("setup.admin");
@@ -161,8 +159,7 @@ export function StepCreateAdmin({
     useWatch({ control: form.control, name: "confirmPassword" }) ?? "";
 
   const onSubmit = form.handleSubmit((values) => {
-    // `confirmPassword` is form-only; `password` is sent ONLY in the bundled-IdP path. In BYOI we
-    // strip both so the wire payload matches the shared `SetupAdmin` shape exactly.
+    // `confirmPassword` is form-only; `password` is sent only when the server asked for one.
     const data: SetupAdmin = requiresAdminPassword
       ? {
           email: values.email,
@@ -179,7 +176,7 @@ export function StepCreateAdmin({
     setup.mutate(
       { data, csrfToken },
       {
-        onSuccess: (result) => onCreated(result.email, result.mirrored),
+        onSuccess: (result) => onCreated(result.email),
         onError,
       },
     );

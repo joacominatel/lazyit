@@ -7,13 +7,30 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 /**
- * The three env vars an operator sets to wire their own OIDC provider (BYOI — ADR-0037/0039 §7a).
- * Shown when "Bring your own OIDC" is selected in step 1, with a copy button. These are the same
- * three vars apps/web/auth.ts reads — keep them in sync if that contract changes.
+ * What an operator sets to wire their own OIDC provider (ADR-0102 §2). Keep in sync with
+ * apps/web/auth.ts and the API's boot config, which requires OIDC_JWKS_URI under AUTH_MODE=oidc.
  */
-const SNIPPET = `AUTH_ISSUER=https://auth.example.com
+const WEB_SNIPPET = `AUTH_ISSUER=https://auth.example.com
 AUTH_CLIENT_ID=your-client-id
 AUTH_CLIENT_SECRET=your-client-secret`;
+
+const API_SNIPPET = `AUTH_MODE=oidc
+OIDC_ISSUER=https://auth.example.com
+OIDC_CLIENT_ID=your-client-id
+OIDC_JWKS_URI=https://auth.example.com/.well-known/jwks.json`;
+
+export const SNIPPET = `${WEB_SNIPPET}\n\n${API_SNIPPET}`;
+
+function SnippetBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <pre className="overflow-x-auto whitespace-pre rounded bg-background px-3 py-2 font-mono text-xs text-foreground">
+        {value}
+      </pre>
+    </div>
+  );
+}
 
 export function ByoiSnippet() {
   const t = useTranslations("setup.byoi");
@@ -47,9 +64,10 @@ export function ByoiSnippet() {
           )}
         </Button>
       </div>
-      <pre className="overflow-x-auto whitespace-pre rounded bg-background px-3 py-2 font-mono text-xs text-foreground">
-        {SNIPPET}
-      </pre>
+      <div className="space-y-2">
+        <SnippetBlock label={t("webLabel")} value={WEB_SNIPPET} />
+        <SnippetBlock label={t("apiLabel")} value={API_SNIPPET} />
+      </div>
       <p className="mt-2 text-xs text-muted-foreground">{t("note")}</p>
     </div>
   );
