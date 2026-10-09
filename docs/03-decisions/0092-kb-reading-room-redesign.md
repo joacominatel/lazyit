@@ -142,7 +142,10 @@ The browse screen now reads like the record pages (ADR-0077 §4b) instead of a b
 4. **Sort and status are visible.** A status control (All / Published / Drafts) and a sort control
    (updated, title, created) replace digging through the Filters popover for the common cases.
 5. **Search rows say where and when.** Each result shows its folder path and its updated date.
-6. **The folder dialog edits description and order**, so the KB is the one place folders are managed;
+6. **The rail is wider.** It is `lg:w-72` (312px with its gap, up from 280px), so the reading-view
+   chrome is now 600px and the 2026-09-09 arithmetic sums to exactly 1800px: the split breakpoint does
+   not move (`apps/web/lib/utils/kb-reading-layout.ts`).
+7. **The folder dialog edits description and order**, so the KB is the one place folders are managed;
    Settings → Taxonomies links here instead of keeping a second folder manager (#1540).
 
 Three read-side additions back this, all additive and computed: `GET /articles?sort=` (closed
