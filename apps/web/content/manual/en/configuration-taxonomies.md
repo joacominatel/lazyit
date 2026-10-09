@@ -30,9 +30,9 @@ entries it has; pick one and it opens on the right. (On a phone the list is a pi
   [Folders & access](/help/knowledge-base-folders-access).
 
 Each entry is one compact row: its **name**, its description in muted text when it has one, how much
-it is **in use** — *42 assets*, *5 apps*, *3 consumables*, or *Unused* — and a **⋯** menu. The count
-tells you at a glance whether an entry can be removed without reassigning anything. (Right after an
-update, before the server reports counts, the column stays empty rather than guessing.)
+it is **in use** — *42 assets*, *5 apps*, *3 consumables*, or *Unused* — and a **⋯** menu. For a category,
+the count is how many records will **lose their category** if you delete it. (Right after an update,
+before the server reports counts, the column stays empty rather than guessing.)
 
 - **Add** — type a name in the **New category…** row at the bottom of a category list and press
   **Add** (or Enter). Models and custom statuses have more fields, so they keep a **New** button that
@@ -44,12 +44,21 @@ update, before the server reports counts, the column stays empty rather than gue
   confirmation.
 - **Filter** — the filter box above each list narrows it by name or description.
 
+**What deleting a category does.** Deleting an asset, application or consumable category is a
+**soft delete**: the category is hidden, never erased, and it can be restored. lazyit does **not** stop
+you from deleting a category that is in use. The records filed under it keep all their data, but they
+show **no category** until the category is restored or you file them under another one. The
+confirmation says how many records that is (*Used by 42 assets — they keep their records but show no
+category until it is restored*). There is no list of deleted categories in Settings yet; an
+administrator can restore one through the API (`POST /api/asset-categories/{id}/restore`, and the same
+under `application-categories` and `consumable-categories`).
+
 **Removing several categories at once.** Choose **Select** above the list to show a checkbox on each
-row, tick the ones you want to remove and use **Delete** in the selection bar. lazyit deletes them one
-by one and reports the result — because a category that is **still in use** is protected and cannot
-be removed, a batch can end as a **partial success**: the free ones are deleted and the in-use ones
-are **kept and skipped**, with a summary such as *"Deleted 3, 2 skipped (still in use)"*. The skipped
-rows stay selected so you can reassign their records first and try again. **Done** leaves selection.
+row, tick the ones you want to remove and use **Delete** in the selection bar. The confirmation names
+the selected categories that are in use and how many records will show no category in all. lazyit
+deletes them one by one and reports the result; if a request fails (a lost connection, say), that row
+stays selected and the summary says how many could not be deleted, so you can try again. **Done**
+leaves selection.
 (Bulk delete requires the category-delete permission; **Select** only appears when you hold it.)
 
 Old links that opened a tab — `?tab=asset`, `?tab=models`, `?tab=statuses` and so on — still open the
@@ -109,9 +118,10 @@ A category or model is a **reference** that records point at — it is not the r
 *belongs to* an asset category and *is a* model; it does not own a private copy of either. That is why
 keeping the list curated matters: rename a category once and every record that references it follows.
 
-Because records depend on these entries, lazyit protects them: it follows the same
-**soft-delete and audit** rules as the rest of the domain, so removing a taxonomy entry does not
-silently break the records that reference it. If an entry is in use, fix or reassign the records first.
+Removing a taxonomy entry follows the same **soft-delete and audit** rules as the rest of the domain:
+the entry is hidden, not erased, and the records that reference it are kept. A record whose category
+was deleted simply shows none. Check the **In use** count before you delete, and file the records under
+another entry first if they should keep one.
 
 ## Where to manage related setup
 

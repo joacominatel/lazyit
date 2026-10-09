@@ -33,9 +33,10 @@ arriba.)
   [Carpetas y acceso](/help/knowledge-base-folders-access).
 
 Cada entrada es una fila compacta: su **nombre**, su descripción en gris cuando la tiene, cuánto está
-**en uso** — *42 activos*, *5 apps*, *3 consumibles* o *Sin uso* — y un menú **⋯**. El recuento te dice
-de un vistazo si puedes quitar una entrada sin reasignar nada. (Justo después de una actualización,
-antes de que el servidor informe los recuentos, la columna queda vacía en lugar de adivinar.)
+**en uso** — *42 activos*, *5 apps*, *3 consumibles* o *Sin uso* — y un menú **⋯**. En una categoría, el
+recuento es cuántos registros **perderán su categoría** si la eliminas. (Justo después de una
+actualización, antes de que el servidor informe los recuentos, la columna queda vacía en lugar de
+adivinar.)
 
 - **Agregar** — escribe un nombre en la fila **Nueva categoría…** al final de una lista de categorías y
   pulsa **Agregar** (o Intro). Los modelos y los estados personalizados tienen más campos, así que
@@ -47,13 +48,22 @@ antes de que el servidor informe los recuentos, la columna queda vacía en lugar
   una confirmación.
 - **Filtrar** — el cuadro de filtro sobre cada lista la acota por nombre o descripción.
 
+**Qué hace eliminar una categoría.** Eliminar una categoría de activos, aplicaciones o consumibles es
+un **borrado lógico**: la categoría se oculta, nunca se borra, y se puede restaurar. lazyit **no** te
+impide eliminar una categoría que está en uso. Los registros archivados en ella conservan todos sus
+datos, pero se muestran **sin categoría** hasta que se restaure la categoría o los clasifiques en otra.
+La confirmación dice cuántos registros son (*La usan 42 activos — conservan sus registros, pero se
+muestran sin categoría hasta que se restaure*). Todavía no hay una lista de categorías eliminadas en
+Configuración; un administrador puede restaurar una a través de la API
+(`POST /api/asset-categories/{id}/restore`, y lo mismo en `application-categories` y
+`consumable-categories`).
+
 **Eliminar varias categorías a la vez.** Elige **Seleccionar** sobre la lista para mostrar una casilla
-en cada fila, marca las que quieras quitar y usa **Eliminar** en la barra de selección. lazyit las
-elimina una por una e informa el resultado: como una categoría que **aún está en uso** está protegida y
-no se puede quitar, un lote puede terminar como un **éxito parcial**: las libres se eliminan y las que
-están en uso se **conservan y se omiten**, con un resumen como *"Se eliminaron 3, 2 omitidas (aún en
-uso)"*. Las filas omitidas quedan seleccionadas para que primero reasignes sus registros y vuelvas a
-intentarlo. **Listo** sale de la selección. (El borrado masivo requiere el permiso de eliminación de
+en cada fila, marca las que quieras quitar y usa **Eliminar** en la barra de selección. La
+confirmación nombra las categorías seleccionadas que están en uso y cuántos registros se mostrarán sin
+categoría en total. lazyit las elimina una por una e informa el resultado; si una petición falla (por
+ejemplo, se corta la conexión), esa fila queda seleccionada y el resumen dice cuántas no se pudieron
+eliminar, para que vuelvas a intentarlo. **Listo** sale de la selección. (El borrado masivo requiere el permiso de eliminación de
 categorías; **Seleccionar** solo aparece si lo tienes.)
 
 Los enlaces antiguos que abrían una pestaña — `?tab=asset`, `?tab=models`, `?tab=statuses`, etc. —
@@ -118,10 +128,10 @@ sí. Un activo *pertenece a* una categoría de activo y *es un* modelo; no posee
 ninguno. Por eso importa mantener la lista curada: renombra una categoría una vez y todos los registros
 que la referencian lo reflejan.
 
-Como los registros dependen de estas entradas, lazyit las protege: siguen las mismas reglas de
-**borrado lógico y auditoría** que el resto del dominio, así que eliminar una entrada de taxonomía no
-rompe en silencio los registros que la referencian. Si una entrada está en uso, primero corrige o
-reasigna los registros.
+Quitar una entrada de taxonomía sigue las mismas reglas de **borrado lógico y auditoría** que el resto
+del dominio: la entrada se oculta, no se borra, y los registros que la referencian se conservan. Un
+registro cuya categoría se eliminó simplemente se muestra sin ella. Revisa el recuento **En uso** antes
+de eliminar, y clasifica primero los registros en otra entrada si deben conservar una.
 
 ## Dónde gestionar la configuración relacionada
 
