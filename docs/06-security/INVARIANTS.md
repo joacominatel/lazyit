@@ -28,7 +28,10 @@ not findings or open issues — they are the *baseline a finding is measured aga
 >
 > **Bundled Zitadel removed** ([[0102-remove-bundled-zitadel|ADR-0102]], epic #1543). On 2026-10-09
 > INV-4 and INV-6 were rewritten, INV-5 was retired, and INV-1, -3, -8, INV-DIR-1 and -2 were corrected.
-> Their `file:line` references are to the integration branch at `340645acb`.
+> Their `file:line` references are to the integration branch at `340645acb`. The same day the
+> generic-OIDC hardening (#1543, unit B5) amended INV-2 and INV-4: offboarding now blocks a first sign-in
+> by verified email, and userinfo is resolved from the issuer's discovery document; the `jwt-auth.guard.ts`
+> references in INV-1, -2 and -4 are to that change.
 
 ---
 
@@ -48,7 +51,7 @@ and BYOI-safe (a generic IdP need not emit a role claim at all).
   `externalId` (the `sub`); the role on a JIT insert is computed from DB state
   (`userCount === 0 ? ADMIN : VIEWER`), not from any token claim.
 - There is no IdP adapter ([[0102-remove-bundled-zitadel|ADR-0102]] §6). The API reaches the IdP only for
-  its JWKS and, on a first sign-in, the userinfo profile (`jwt-auth.guard.ts:388-413`, `:497`); neither
+  its JWKS and, on a first sign-in, the userinfo profile (`jwt-auth.guard.ts:388-415`, `:500`); neither
   feeds `request.user.role`.
 
 > The token-authoritative variant (read role from the claim) was **explicitly rejected** in ADR-0043
@@ -61,7 +64,10 @@ and BYOI-safe (a generic IdP need not emit a role claim at all).
 **Rule.** First-login email linking claims **only** rows with `externalId IS NULL` that are **live**
 (`deletedAt IS NULL`). It NEVER re-binds an email already linked to a different `sub` (returns/keeps a
 409-style rejection), and soft-deleted rows are invisible — an offboarded user's email is never
-resurrected by a returning `sub`. **Additionally (SEC-020, code-enforced):** linking is only permitted
+resurrected by a returning `sub`. **Nor by a new `sub` (ADR-0102 §5):** when no live row holds the
+verified email but a soft-deleted one does, JIT refuses with the same 403 as a soft-deleted `sub` and
+creates nothing, so an offboarded person who never signed in cannot come back as a fresh row; a live row
+holding the email still takes precedence and links. **Additionally (SEC-020, code-enforced):** linking is only permitted
 when `email_verified === true` (boolean) or `=== 'true'` (string, as some IdPs emit). An unverified
 email throws `ForbiddenException (403)` — no existing row is ever claimed on an unverified email, so
 a BYOI attacker who self-registers with an arbitrary address cannot inherit another user's role.
@@ -76,9 +82,13 @@ the email itself must also be verified (OIDC Core §5.7).
   `externalId: null` (+ the soft-delete read filter); a row already bound to a different `sub` is not
   re-bound; `email_verified` is code-checked before any claim (SEC-020: unverified → 403,
   `updateMany` never called); and `externalId` stays **fully `@unique`** (ADR-0038/0041) so a
-  returning `sub` cannot resurrect a soft-deleted row.
+  returning `sub` cannot resurrect a soft-deleted row. `:629-639` — before the create, a verified email
+  that only a soft-deleted row holds is a **403** (`Account has been deactivated`, the body of `:470-473`).
 - `apps/api/src/auth/jwt-auth.guard.spec.ts` — tests: unverified/absent `email_verified` does NOT
-  claim + throws `ForbiddenException`; verified (`true` / `'true'`) still claims (regression guard).
+  claim + throws `ForbiddenException`; verified (`true` / `'true'`) still claims (regression guard);
+  an offboarded-before-first-sign-in verified email is a 403 with no row created, the same body as the
+  soft-deleted-`sub` 403, while a different email, a live owner of the email, and an unverified email
+  keep their previous paths.
 - Carried from [[0038-jit-user-provisioning]] / [[0041-soft-delete-reuse-and-restore]]; SEC-020 closed
   the verified-email gap; see [[deferred]] DEF-002 for the broader trusted-IdP framing.
 
@@ -105,11 +115,15 @@ un-forgeable, un-brute-forceable, and self-locking.
 
 **Rule.** lazyit has no IdP management client ([[0102-remove-bundled-zitadel|ADR-0102]] §1, §6). Under
 `AUTH_MODE=oidc` the API reaches the operator's IdP only to verify tokens (JWKS) and, on a first sign-in,
-to read the userinfo profile through the discovery document. It never creates, edits, disables or
+to read the userinfo profile through the discovery document. The access token goes only to the
+discovered `userinfo_endpoint`, or — when that endpoint sits on the issuer's own origin and `OIDC_JWKS_URI`
+names a different, internal origin (a co-located IdP) — to the same path on that internal origin; never
+to any other host. It never creates, edits, disables or
 resets an IdP account. What the IdP owns is refused honestly, never faked: an admin password reset is a
 **501**, a temporary password on create is a **400**, and local onboarding is a **400** outside local
 mode. Offboarding is DB-first: lazyit
-blocks the person itself, and disabling the IdP account is the operator's step (ADR-0102 §5). A
+blocks the person itself, including one who never signed in (by verified email), and disabling the IdP
+account remains the operator's step for whatever else the IdP fronts (ADR-0102 §5). A
 bundled-Zitadel leftover in OIDC mode **refuses boot**; a legacy `IDENTITY_PROVIDER_TYPE=zitadel` only
 warns and is ignored.
 
@@ -117,21 +131,24 @@ warns and is ignored.
 leak or misconfigure, and an operator is never told an IdP action happened when it did not.
 
 **Where enforced.**
-- `apps/api/src/auth/jwt-auth.guard.ts:388-413` — JWKS + `jwtVerify` (issuer, RS256); `:497` and
-  `:679` (`fetchUserinfo`) — discovery + userinfo, fail-soft, on a first sign-in only. No other
-  outbound IdP call exists in `apps/api/src`.
+- `apps/api/src/auth/jwt-auth.guard.ts:388-415` — JWKS + `jwtVerify` (issuer, RS256); `:500` and
+  `:685` (`fetchUserinfo`) — discovery + userinfo, fail-soft, on a first sign-in only; `:724`
+  (`resolveUserinfoEndpoint`) reads discovery from `OIDC_ISSUER`, retrying on the internal origin only
+  when the issuer is unreachable, and warns once on failure; `:778` (`userinfoRequestUrl`) is the host
+  rule above. No other outbound IdP call exists in `apps/api/src`.
 - `apps/api/src/users/users.service.ts:1066` + `apps/api/src/users/users.controller.ts:608-609` —
   `requestPasswordReset` outside local mode throws `PasswordResetUnsupportedError`, mapped to **501**
   ("managed by your identity provider"), never a 2xx that implies a reset email was sent.
 - `apps/api/src/users/users.service.ts:641-645` — a password on `create` under OIDC is a **400** before any
   row exists; `:689-693` — `provisionLocalAccount` is a **400** outside local mode.
 - `apps/api/src/users/users.service.ts:1253` (`remove`) — the offboarding transaction (`:1267`) makes no
-  network call. `apps/api/src/auth/jwt-auth.guard.ts:463-470` — a soft-deleted user whose `externalId`
+  network call. `apps/api/src/auth/jwt-auth.guard.ts:470-473` — a soft-deleted user whose `externalId`
   matches the token's `sub` gets **403** on every request, even while the IdP token is still valid.
-  **Scope:** this covers a person who has signed in at least once. A person offboarded before their first
-  sign-in has no `externalId`; if the IdP account stays enabled, their next sign-in JIT-provisions a
-  fresh VIEWER row, because the email-link lookup never sees soft-deleted rows (INV-2). Disabling the IdP
-  account closes both cases.
+  `:629-639` — a person offboarded before their first sign-in has no `externalId`; their first sign-in
+  gets the same **403** when the IdP reports their email verified and no live row holds it (INV-2). An
+  unverified email does not match, so for an IdP that does not verify emails, disabling the account at
+  the IdP is still what closes that case. The way back is the admin's Restore
+  (`POST /users/:id/restore`).
 - `apps/api/src/config/config.service.ts:166-183` — `/setup` under OIDC creates the first ADMIN row only.
 - `apps/api/src/auth/boot-config.ts:114-126` — `ZITADEL_MASTERKEY`, or an `OIDC_ISSUER` / `OIDC_JWKS_URI`
   on `zitadel:8080`, in OIDC mode fails boot validation and points at the migration runbook;

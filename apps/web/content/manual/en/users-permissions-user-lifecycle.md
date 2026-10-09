@@ -126,10 +126,10 @@ sessions on every device at once — including one where they ticked **Keep me s
 someone (clearing **Active** when you edit them) does the same.
 
 **With your own OIDC provider, disable them there too.** lazyit does not touch the person's account in
-your provider. If they have signed in to lazyit before, their next sign-in is refused; someone
-offboarded before their first sign-in, though, would get a fresh Viewer account when they sign in.
-Disabling the account in the provider is what actually ends access — make it part of the same leaver
-process.
+your provider, but it does refuse their sign-in to lazyit — whether or not they ever signed in before.
+For someone who never did, this relies on your provider reporting their email as verified. To let them
+back in, [restore them](#restore-a-user). Still disable the account in your provider as part of the same
+leaver process: that is what ends their access to everything else your provider signs them into.
 
 **Rotate the secrets they could read.** If the person was a member of any Secret vault, the confirmation
 lists those vaults (with how many secrets each holds) as a reminder to **rotate those secrets by hand**.
