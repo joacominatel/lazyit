@@ -19,19 +19,12 @@
   },
   "toast": {
     "adminCreated": "Administrador creado",
-    "adminCreatedMirrored": "Administrador creado y replicado en tu IdP",
     "adminCreateError": "No se pudo crear el administrador"
   },
   "welcome": {
-    "question": "¿Cómo quieres que los usuarios inicien sesión en lazyit?",
-    "idpLabel": "Proveedor de identidad",
-    "zitadel": {
-      "title": "Zitadel incluido",
-      "description": "El proveedor de identidad autoalojado recomendado, configurado por ti. Sin cuentas externas que conectar."
-    },
     "byoi": {
-      "title": "Usa tu propio OIDC",
-      "description": "Conecta lazyit con un proveedor OIDC que ya tengas (Okta, Authentik, Keycloak, Entra ID…)."
+      "title": "Tu propio proveedor OIDC",
+      "body": "Esta instancia inicia sesión a través de un proveedor OIDC que administras tú: Entra ID, Okta, Keycloak, Authentik o cualquier otro. Tu proveedor se encarga del inicio de sesión; los usuarios y los roles quedan en lazyit. Define las variables de abajo y continúa para crear el primer administrador."
     },
     "local": {
       "title": "Cuentas locales",
@@ -40,17 +33,17 @@
     "continue": "Continuar"
   },
   "configure": {
-    "zitadelReadyTitle": "Zitadel incluido está listo",
-    "zitadelReadyBody": "Tu proveedor de identidad se aprovisionó automáticamente: no hay nada que configurar aquí. Si el inicio de sesión aún no está disponible, es posible que Zitadel todavía se esté iniciando; dale un momento.",
     "byoiConfirm": "Confirma que tu proveedor OIDC esté conectado antes de continuar: el administrador que crees a continuación debe poder iniciar sesión a través de él.",
     "back": "Volver",
     "continue": "Continuar"
   },
   "byoi": {
-    "instructions": "Define estas variables en la app web y luego reiníciala:",
+    "instructions": "Define estas variables en la app web y en la API, y luego reinicia ambas:",
+    "webLabel": "App web",
+    "apiLabel": "API",
     "copyLabel": "Copiar variables de entorno",
     "copied": "Copiado",
-    "note": "lazyit descubre el resto a partir de tu proveedor. La gestión de usuarios y roles sigue siendo local: tu IdP solo se encarga del inicio de sesión."
+    "note": "Registra lazyit como cliente en tu proveedor para obtener el ID y el secreto de cliente. OIDC_JWKS_URI es el jwks_uri del documento de descubrimiento de tu proveedor. La gestión de usuarios y roles sigue siendo local: tu IdP solo se encarga del inicio de sesión."
   },
   "admin": {
     "intro": "Crea el primer administrador. Esta persona podrá gestionar usuarios, accesos y todo lo demás.",

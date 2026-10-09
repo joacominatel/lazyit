@@ -1,116 +1,41 @@
-import {
-  CheckCircleIcon,
-  ServerStackIcon,
-  KeyIcon,
-  LockClosedIcon,
-} from "@heroicons/react/24/outline";
+import { KeyIcon, LockClosedIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import type { IdpChoice } from "./types";
 import { ByoiSnippet } from "./byoi-snippet";
 
-interface Option {
-  value: IdpChoice;
-  title: string;
-  description: string;
-  icon: typeof ServerStackIcon;
-}
-
 /**
- * Step 1 — Welcome + IdP choice (ADR-0043 §7a step 1). Two selectable cards (a radiogroup) for the
- * bundled-Zitadel vs. BYOI fork; choosing BYOI reveals the three env vars to configure. The choice
- * only drives the guidance copy — the backend authoritatively reports the live mode.
+ * Step 1 — Welcome (ADR-0043 §7a step 1, ADR-0102). The auth mode is fixed at deploy time, so there is
+ * nothing to pick: one card explains the mode, and in OIDC mode the environment snippet follows it.
  */
 export function StepWelcome({
   choice,
-  onChoiceChange,
   onNext,
 }: {
   choice: IdpChoice;
-  onChoiceChange: (choice: IdpChoice) => void;
   onNext: () => void;
 }) {
   const t = useTranslations("setup.welcome");
+  const isLocal = choice === "local";
+  const Icon = isLocal ? LockClosedIcon : KeyIcon;
 
-  // Local mode (ADR-0086): the auth mode is fixed at deploy time and immutable — there is no IdP to
-  // pick. Skip the radiogroup entirely and just explain the mode before creating the first admin.
-  if (choice === "local") {
-    return (
-      <>
-        <CardContent className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-            <LockClosedIcon className="size-6 shrink-0 text-primary" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">
-                {t("local.title")}
-              </p>
-              <p className="text-xs text-muted-foreground">{t("local.body")}</p>
-            </div>
-          </div>
-        </CardContent>
-        <CardFooter className="justify-end">
-          <Button onClick={onNext}>{t("continue")}</Button>
-        </CardFooter>
-      </>
-    );
-  }
-
-  const options: Option[] = [
-    {
-      value: "zitadel",
-      title: t("zitadel.title"),
-      description: t("zitadel.description"),
-      icon: ServerStackIcon,
-    },
-    {
-      value: "byoi",
-      title: t("byoi.title"),
-      description: t("byoi.description"),
-      icon: KeyIcon,
-    },
-  ];
   return (
     <>
       <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">{t("question")}</p>
-        <div
-          role="radiogroup"
-          aria-label={t("idpLabel")}
-          className="grid gap-3 sm:grid-cols-2"
-        >
-          {options.map((option) => {
-            const selected = choice === option.value;
-            const Icon = option.icon;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => onChoiceChange(option.value)}
-                className={cn(
-                  "group relative flex flex-col gap-2 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  selected
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/40 hover:bg-muted/50",
-                )}
-              >
-                {selected && (
-                  <CheckCircleIcon className="absolute right-3 top-3 size-5 text-primary" />
-                )}
-                <Icon className="size-6 text-primary" />
-                <span className="text-sm font-medium">{option.title}</span>
-                <span className="text-xs text-muted-foreground">
-                  {option.description}
-                </span>
-              </button>
-            );
-          })}
+        <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <Icon className="size-6 shrink-0 text-primary" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              {isLocal ? t("local.title") : t("byoi.title")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {isLocal ? t("local.body") : t("byoi.body")}
+            </p>
+          </div>
         </div>
 
-        {choice === "byoi" && <ByoiSnippet />}
+        {!isLocal && <ByoiSnippet />}
       </CardContent>
       <CardFooter className="justify-end">
         <Button onClick={onNext}>{t("continue")}</Button>
