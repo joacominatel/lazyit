@@ -108,7 +108,7 @@ environment variables:
 
 - **API:** `AUTH_MODE=oidc`, `OIDC_ISSUER` and `OIDC_JWKS_URI` (both required at boot,
   `apps/api/src/auth/boot-config.ts:98-105`), and an optional `OIDC_CLIENT_ID` that, when set, is the
-  expected token audience (`apps/api/src/auth/jwt-auth.guard.ts:405-409`). The API is a resource server
+  expected token audience (`apps/api/src/auth/jwt-auth.guard.ts:409-411`). The API is a resource server
   only: it never reads `OIDC_CLIENT_SECRET`.
 - **Web:** `AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET` (Auth.js, [[0039-authjs-v5-frontend-oidc]]).
 
@@ -145,14 +145,21 @@ Under generic OIDC the operator's IdP owns credentials and sessions, so lazyit d
 admin password reset is hidden in the UI outside local mode, and there are no temporary passwords and no
 sessions list. Offboarding no longer disables an IdP account. The soft delete stays DB-first, and it blocks
 a person who has signed in before: their `externalId` still matches the token's `sub`, so the next sign-in
-is refused with a 403 instead of being re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:463-470`,
+is refused with a 403 instead of being re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:470-473`,
 [[0038-jit-user-provisioning]]).
 
-That block has a limit. A person offboarded **before their first OIDC sign-in** has no `externalId`, and
-the verified-email account link ignores soft-deleted rows (`jwt-auth.guard.ts:572`). If their IdP account
-stays enabled, their first sign-in JIT-creates a fresh `VIEWER` row. Offboarding under OIDC therefore has
-to be paired with disabling the account at the IdP — that step is the operator's, and it is what actually
-ends access.
+It also blocks a person offboarded **before their first OIDC sign-in**, who has no `externalId`. When no
+live user holds the token's **verified** email but a soft-deleted one does, JIT refuses with the same 403
+and creates nothing (`jwt-auth.guard.ts:629-639`). A live row holding the email still wins and is linked as
+before (`:575`), so an account the admin re-created on purpose is never locked out by an old one. The way
+back for an offboarded person is the admin's explicit **Restore** (`POST /users/:id/restore`). The block
+relies on the IdP verifying the email: an unverified email never links and never matches an offboarded
+row, so it keeps today's path (a fresh `VIEWER` row). Disabling the account at the IdP is still the
+operator's step for every other application that IdP fronts, and the one that covers an IdP that does not
+verify emails.
+
+> **Amended 2026-10-09** (#1543, unit B5): this section first recorded the pre-first-sign-in case as a
+> limit that only disabling the IdP account closed. The guard now covers it.
 
 ### 6. The `IdentityProvider` seam is retired
 
@@ -214,7 +221,8 @@ unchanged.
 - **Negative / trade-offs:**
   - An operator who wants SSO must bring and run their own IdP. There is no turnkey SSO any more.
   - lazyit no longer manages IdP accounts: onboarding an SSO user means creating them in the IdP (JIT links
-    them on first sign-in), and offboarding means disabling them there too.
+    them on first sign-in). Offboarding in lazyit blocks sign-in to lazyit (§5); the IdP account stays
+    enabled for whatever else the IdP fronts until the operator disables it.
   - A stray bundled install cannot just upgrade: it stops at the guard and follows the migration runbook by
     hand.
   - One compatibility shim lives until no supported web build reads it: the always-`false`
@@ -251,8 +259,8 @@ Where the implementation settled a detail differently from the first draft of th
 - **§2:** the API needs `OIDC_JWKS_URI` and never reads `OIDC_CLIENT_SECRET`; the client secret is the web's.
 - **§4:** the `zitadel` `IntegrationMode` value was dropped within the epic, not in a later release.
 - **§8:** the `ZitadelPasswordSchema` alias was dropped with it.
-- **§5:** the post-offboarding 403 covers only a person who has signed in before; one offboarded before
-  their first sign-in is stopped only by disabling the IdP account.
+- **§5:** the post-offboarding 403 covers a person who has signed in before and, by verified email, one
+  offboarded before their first sign-in.
 
 **Outstanding:** `infra/update.sh` on the integration branch still runs the dual dump of §1 (the app
 database and `zitadel_db`, `infra/update.sh:292-305`). Its mode-aware fix is tracked by #1545 (PR #1549,
