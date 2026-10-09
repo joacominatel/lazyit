@@ -35,6 +35,9 @@ const BUNDLED_ZITADEL_HOST = 'zitadel:8080';
 const BUNDLED_ZITADEL_MESSAGE =
   'is a leftover of the bundled Zitadel, which this version no longer ships (ADR-0102). Refusing to start so the instance does not run half-wired — follow docs/05-runbooks/migrate-off-bundled-zitadel.md, then start again';
 
+const LEGACY_IDP_TYPE_WARNING =
+  'IDENTITY_PROVIDER_TYPE=zitadel is no longer supported (the bundled Zitadel was removed, ADR-0102) and is ignored; remove the variable to silence this warning.';
+
 function pointsAtBundledZitadel(url: string | undefined): boolean {
   if (!url) return false;
   try {
@@ -133,6 +136,13 @@ export function validateBootConfig(
 ): BootConfig {
   const result = BootConfigSchema.safeParse(env);
   if (result.success) {
+    // Read-tolerated, never fatal (ADR-0102 §4); local mode never read it, so it stays silent there.
+    if (
+      result.data.AUTH_MODE !== 'local' &&
+      env.IDENTITY_PROVIDER_TYPE?.trim().toLowerCase() === 'zitadel'
+    ) {
+      console.warn(LEGACY_IDP_TYPE_WARNING);
+    }
     return result.data;
   }
   const issues = result.error.issues
