@@ -663,13 +663,9 @@
     "newAccount": "Nueva cuenta de servicio",
     "loadError": "No se pudieron cargar las cuentas de servicio",
     "columns": {
-      "name": "Nombre",
       "token": "Token",
-      "permissions": "Permisos",
-      "lastUsed": "Último uso",
-      "status": "Estado"
+      "permissions": "Permisos"
     },
-    "never": "Nunca",
     "systemManaged": {
       "badge": "Gestionada por el sistema",
       "hint": "Propiedad del motor de workflows — cada ejecución de workflow se ejecuta como esta cuenta.",
@@ -678,14 +674,10 @@
     "empty": {
       "revokedTitle": "No hay cuentas de servicio revocadas",
       "title": "Aún no hay cuentas de servicio",
-      "revokedDescription": "Las cuentas revocadas (eliminadas de forma reversible) aparecen aquí y pueden restaurarse.",
-      "description": "Dale a un ejecutor de CI, script o integración acceso acotado y no humano a la API — crea una y entrégale un token en lugar del inicio de sesión de una persona.",
-      "action": "Crear la primera"
+      "action": "Nueva cuenta de servicio"
     },
     "permissionsSummary": {
-      "none": "Ninguno",
-      "count": "{count, plural, one {# permiso} other {# permisos}}",
-      "extra": "{count, plural, other {+# más}}"
+      "none": "Ninguno"
     },
     "status": {
       "active": "Activa",
@@ -830,7 +822,11 @@
       "selectAllAria": "Seleccionar todos los permisos de {label}",
       "all": "Todos",
       "adminLevel": "Nivel administrador"
-    }
+    },
+    "lastUsed": "Usada {when}",
+    "neverUsed": "Nunca usada",
+    "expires": "Vence el {date}",
+    "noExpiry": "Sin vencimiento"
   },
   "permissionMeta": {
     "pillars": {
