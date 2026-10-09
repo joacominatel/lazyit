@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-09-23
+updated: 2026-10-08
 ---
 
 # RolePermission
@@ -147,9 +147,10 @@ the seed):
   `{ role, permissions: Permission[] }` via the same resolver, so the web can derive `can('domain:action')`
   without polluting the `User` wire shape.
 
-**Web:** the role-first editor at `settings/roles/permissions` (presets + plain-language capability
-toggles + a fine-tune disclosure; NOT a comparison grid) edits one editable role at a time, ADMIN shown
-locked. The `can()` infra (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed) gates
+**Web:** one role × capability matrix at `settings/roles` (#1540; `settings/roles/permissions`
+redirects there): capabilities in rows, ADMIN shown locked, MEMBER and VIEWER editable side by side with
+a preset per column, a fine-tune disclosure for raw per-permission control, and one save for the whole
+matrix. The `can()` infra (`useMyPermissions`/`useCan` over `/config/my-permissions`, fails closed) gates
 all write/delete affordances ([[0046-roles-permissions-v2]] P6b/P7).
 
 Related: [[user]] · [[permission-audit-log]] · [[service-account-permission]] · [[shared-package]] ·

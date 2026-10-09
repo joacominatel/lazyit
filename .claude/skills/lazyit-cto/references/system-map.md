@@ -289,7 +289,7 @@ Category/Model) to detail routes.
 | `/settings` | Settings landing | **NEW (#108)** — ADMIN-gated (`admin-gate.tsx`) admin area landing |
 | `/settings/taxonomies` | Taxonomies CRUD | CRUD for the 4 category kinds + asset-models (completed the web category/model write data layer) |
 | `/settings/roles` | Roles overview | Roles reference (links to the permissions editor) |
-| `/settings/roles/permissions` | **Permissions matrix editor (NEW, ADR-0046)** | **Role-first** editor (NOT a grid): pick a role → presets + capability toggles + fine-tune, over GET/PUT `/config/permissions`. ADMIN row immutable/full; ⚠ on delegating `:delete`/coarse verbs to MEMBER/VIEWER |
+| `/settings/roles` | **Roles & permissions matrix (ADR-0046, amended #1540)** | One role × capability matrix: capabilities in rows, ADMIN locked, MEMBER + VIEWER editable side by side with a preset per column, fine-tune below, one save over GET/PUT `/config/permissions`. ⚠ on delegating `:delete`/coarse verbs. `/settings/roles/permissions` redirects here |
 | `/settings/service-accounts` | **Service Accounts (NEW, ADR-0048)** | CRUD over `/service-accounts`; create → **one-time secret reveal** (`lzit_sa_…`, shown once); per-SA permission grants from the catalog; rotate/revoke |
 | `/settings/instance` | Instance config-status | Reads `GET /config/status` (integration mode, configured state) |
 | `/login` | Login page | Functional — redirects to IdP; first-run "Set up lazyit" gate |
