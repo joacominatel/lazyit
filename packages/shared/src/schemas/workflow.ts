@@ -383,7 +383,7 @@ export type WorkflowRetryBackoff = z.infer<typeof WorkflowRetryBackoffSchema>;
  * only CARRIES the policy — the BullMQ worker executes the attempts in 1b-B (mapping `maxAttempts`/
  * `backoff`/`delayMs` onto its `attempts` + `backoff` options). Bounded to keep a misconfiguration from
  * hammering a third party. A retry still only happens when the handler marked the failure `retryable`
- * (transient AND, for a create, idempotent — the zitadel-management posture); `maxAttempts` caps HOW
+ * (transient AND, for a create, idempotent); `maxAttempts` caps HOW
  * MANY, the handler gates WHETHER. Omitting `retry` ⇒ {@link DEFAULT_RETRY_POLICY} (a single attempt).
  */
 export const RetryPolicySchema = z.strictObject({

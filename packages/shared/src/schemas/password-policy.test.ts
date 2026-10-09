@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { SetupPasswordSchema } from "./config";
-import { ZitadelPasswordSchema } from "./primitives";
+import { PasswordPolicySchema, ZitadelPasswordSchema } from "./primitives";
 import { TempPasswordSchema } from "./user";
 
 /**
  * Drift guard (issue #474). `TempPasswordSchema` (admin temp-password, ADR-0064) and
- * `SetupPasswordSchema` (first-run wizard, ADR-0043) must enforce the IDENTICAL Zitadel default
- * complexity policy — otherwise a password could pass shared validation yet be rejected by Zitadel
- * mid-mirror (the compensate-then-503 path). Both now build from the single shared
- * `ZitadelPasswordSchema` (`schemas/primitives.ts`); these tests pin that invariant so a future edit
- * that re-diverges one schema (or the shared definition) fails CI loudly.
+ * `SetupPasswordSchema` (first-run wizard, ADR-0043) must enforce the IDENTICAL complexity policy.
+ * Both build from the single shared `PasswordPolicySchema` (`schemas/primitives.ts`); these tests pin
+ * that invariant so a future edit that re-diverges one schema (or the shared definition) fails CI loudly.
  */
 
 // A corpus of valid + invalid passwords, each tagged with the policy rule it exercises. Every schema
@@ -28,7 +26,7 @@ const CORPUS: { password: string; valid: boolean; why: string }[] = [
 ];
 
 const SCHEMAS = {
-  ZitadelPasswordSchema,
+  PasswordPolicySchema,
   TempPasswordSchema,
   SetupPasswordSchema,
 } as const;
@@ -36,9 +34,13 @@ const SCHEMAS = {
 describe("password-policy drift guard (#474)", () => {
   // Identity check: both consumers ARE the single shared source (so the corpus tests below cannot pass
   // by coincidence — a re-divergence to a fresh schema object would trip this immediately).
-  test("TempPasswordSchema and SetupPasswordSchema are the shared ZitadelPasswordSchema", () => {
-    expect(TempPasswordSchema).toBe(ZitadelPasswordSchema);
-    expect(SetupPasswordSchema).toBe(ZitadelPasswordSchema);
+  test("TempPasswordSchema and SetupPasswordSchema are the shared PasswordPolicySchema", () => {
+    expect(TempPasswordSchema).toBe(PasswordPolicySchema);
+    expect(SetupPasswordSchema).toBe(PasswordPolicySchema);
+  });
+
+  test("the deprecated ZitadelPasswordSchema alias is the same schema (ADR-0102 §8)", () => {
+    expect(ZitadelPasswordSchema).toBe(PasswordPolicySchema);
   });
 
   for (const [name, schema] of Object.entries(SCHEMAS)) {

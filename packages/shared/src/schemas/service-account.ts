@@ -5,7 +5,7 @@ import { PermissionSchema } from "./permission";
 /**
  * ServiceAccount — a NON-HUMAN principal (ADR-0048). A CI runner, a script, an integration: something
  * that calls the lazyit API without a person behind it. It is deliberately a SEPARATE entity from
- * `User` (not a `type` flag, not a Zitadel machine-user), so the human table — JIT provisioning, the
+ * `User` (not a `type` flag, not an IdP machine-user), so the human table — JIT provisioning, the
  * last-admin / first-admin invariants, `externalId` linkage — stays completely untouched.
  *
  * AUTH (ADR-0048): a service account authenticates with a LAZYIT-NATIVE token (BYOI-safe — no IdP

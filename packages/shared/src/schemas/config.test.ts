@@ -8,9 +8,13 @@ import {
 } from "./config";
 
 describe("IntegrationModeSchema", () => {
-  test("accepts the two supported IdP modes", () => {
-    expect(IntegrationModeSchema.parse("zitadel")).toBe("zitadel");
+  test("accepts the supported modes", () => {
     expect(IntegrationModeSchema.parse("generic-oidc")).toBe("generic-oidc");
+    expect(IntegrationModeSchema.parse("local")).toBe("local");
+  });
+
+  test("still parses the deprecated zitadel value (ADR-0102 §4)", () => {
+    expect(IntegrationModeSchema.parse("zitadel")).toBe("zitadel");
   });
 
   test("rejects an unknown mode", () => {
@@ -23,7 +27,7 @@ describe("ConfigStatusSchema", () => {
     const parsed = ConfigStatusSchema.parse({
       isConfigured: false,
       adminCount: 0,
-      integrationMode: "zitadel",
+      integrationMode: "local",
       devMode: true,
       csrfToken: "abc.def",
       requiresAdminPassword: true,
@@ -61,7 +65,7 @@ describe("ConfigStatusSchema", () => {
       ConfigStatusSchema.safeParse({
         isConfigured: true,
         adminCount: -1,
-        integrationMode: "zitadel",
+        integrationMode: "generic-oidc",
         devMode: false,
         csrfToken: "x",
         requiresAdminPassword: false,
@@ -71,7 +75,7 @@ describe("ConfigStatusSchema", () => {
       ConfigStatusSchema.safeParse({
         isConfigured: true,
         adminCount: 1,
-        integrationMode: "zitadel",
+        integrationMode: "generic-oidc",
         devMode: false,
         csrfToken: "",
         requiresAdminPassword: false,
