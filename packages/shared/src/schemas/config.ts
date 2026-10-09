@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ZitadelPasswordSchema } from "./primitives";
+import { PasswordPolicySchema } from "./primitives";
 import { EmailSchema } from "./user";
 
 /**
@@ -11,20 +11,16 @@ import { EmailSchema } from "./user";
  * exists), which IdP integration mode is active and whether it is running in a dev posture; the CSRF
  * token gates the one privileged write; `POST /config/setup` creates the first ADMIN.
  *
- * See docs/01-architecture/auth-zitadel-sot.md §5/§7 and ADR-0043 §6 (guardrail #3) / Fork #7.
+ * See ADR-0043 §6 (guardrail #3) / Fork #7, as amended by ADR-0102.
  */
 
 /**
- * Which IdP management posture the instance runs under (ADR-0043), derived server-side from
- * `IDENTITY_PROVIDER_TYPE`:
- *   - "zitadel"      — the bundled, lazyit-managed IdP; user/role write-back is possible.
+ * Which identity posture the instance runs under, derived server-side (ADR-0102):
  *   - "generic-oidc" — BYOI (bring your own OIDC IdP); user/role management is LOCAL-ONLY (no
  *     write-back), so the Users page surfaces the graceful-degradation banner.
  *   - "local"        — first-party local auth (ADR-0086, `AUTH_MODE=local`): NO external IdP at all;
- *     lazyit owns username/email + password directly. There is nothing to mirror to, so like BYOI it
- *     has no write-back posture (the Users page manages credentials locally). Added in F1a — the
- *     ConfigService wiring that emits it (and the UI branch) lands in a later phase.
- * Mirrors `IdentityProviderType` in the API's identity-provider factory (one definition each side).
+ *     lazyit owns username/email + password directly.
+ *   - "zitadel"      — deprecated: never emitted, kept until the web stops reading it (ADR-0102 §4).
  */
 export const IntegrationModeSchema = z.enum(["zitadel", "generic-oidc", "local"]);
 export type IntegrationMode = z.infer<typeof IntegrationModeSchema>;
@@ -49,33 +45,26 @@ export const ConfigStatusSchema = z.object({
   devMode: z.boolean(),
   csrfToken: z.string().min(1),
   /**
-   * Whether the first-run wizard must collect an initial PASSWORD for the admin. True only when the
-   * IdP supports management write-back (bundled Zitadel + a configured Management credential): there
-   * the admin's IdP user is created fresh and has NO credential, so the wizard sets the initial
-   * password (no SMTP / e-mail code path — issue #335). False for BYOI / generic OIDC, where the
-   * operator already authenticates against their own IdP (trusted-IdP model, ADR-0037/0038), and for
-   * a zitadel posture whose Management credential is not wired (we cannot set a password, so we don't
-   * ask for one). Derived server-side from `idp.supportsManagement`, never a stored flag.
+   * Whether the first-run wizard must collect an initial PASSWORD for the admin. True only in local
+   * mode (ADR-0086), where lazyit owns the credential. False for generic OIDC, where the operator
+   * already authenticates against their own IdP (trusted-IdP model, ADR-0038/0102). Derived
+   * server-side from the auth mode, never a stored flag.
    */
   requiresAdminPassword: z.boolean(),
   /**
-   * Whether the active IdP can PROVISION accounts for directory persons — i.e. the manual "Create OIDC
-   * account" promotion (ADR-0069) can actually succeed. Derived server-side from `idp.supportsManagement`:
-   * true ONLY for the bundled Zitadel; false for `AUTH_MODE=local` (ADR-0086) and BYOI / generic-OIDC,
-   * which have no management write-back. The Users page reads this to hide the impossible "Create OIDC
-   * account" action instead of offering a request that always 400s (issue #1048). Optional/additive so an
-   * older web build ignores it; the backend always populates it.
+   * Whether lazyit can provision IdP accounts for directory persons (the former "Create OIDC account"
+   * action, ADR-0069). Always false now that lazyit manages no IdP (ADR-0102 §4); still emitted so an
+   * older web build that reads it keeps hiding that action.
    */
   canProvisionAccounts: z.boolean().optional(),
   /**
    * Whether the active mode supports ADMIN-initiated LOCAL onboarding of a directory person — minting a
    * one-time temporary password so an imported, login-less person can sign in (ADR-0086 §5, issue #1072).
    * Derived server-side from `AUTH_MODE=local`: true ONLY in local mode (there is no IdP to mirror to, so
-   * lazyit sets the credential directly); undefined/false for bundled Zitadel + BYOI, which either
-   * provision an IdP account ({@link canProvisionAccounts}) or manage credentials in a foreign IdP. The
-   * Users page reads this to offer the "Onboard with a temporary password" action in place of the
-   * impossible "Create OIDC account" one. Optional/additive so an older web build ignores it; the backend
-   * populates it only in local mode (the OIDC status stays byte-identical).
+   * lazyit sets the credential directly); undefined/false for generic OIDC, where the operator's IdP
+   * manages credentials. The Users page reads this to offer the "Onboard with a temporary password"
+   * action. Optional/additive so an older web build ignores it; the backend populates it only in local
+   * mode (the OIDC status stays byte-identical).
    */
   canProvisionLocalAccounts: z.boolean().optional(),
   /**
@@ -104,16 +93,14 @@ export type CsrfToken = z.infer<typeof CsrfTokenSchema>;
  * carried in the `X-CSRF-Token` header, not the body, mirroring the standard double-submit pattern.
  */
 /**
- * Initial-password policy for the first ADMIN — the SHARED {@link ZitadelPasswordSchema}
- * (`schemas/primitives.ts`): Zitadel's DEFAULT complexity policy (min 8, max 70, upper + lower + digit +
- * symbol), with the per-rule messages the wizard's live checklist renders 1:1. lazyit sets this password
- * on the freshly-created Zitadel user via the Management API in the bundled flow (issue #335); using the
- * SAME single definition the admin temp-password `TempPasswordSchema` (`schemas/user.ts`) uses guarantees
- * Zitadel never rejects the password mid-mirror (which would leave a half-provisioned, un-loggable admin)
- * and that the two policies can no longer DRIFT apart (issue #474). NOT used in BYOI mode (the operator's
- * IdP owns the credential — ADR-0037/0038). `.max(70)` is a hard cap before the regex checks.
+ * Initial-password policy for the first ADMIN in local mode — the SHARED {@link PasswordPolicySchema}
+ * (`schemas/primitives.ts`): min 8, max 70, upper + lower + digit + symbol, with the per-rule messages
+ * the wizard's live checklist renders 1:1. Using the SAME single definition as the admin temp-password
+ * `TempPasswordSchema` (`schemas/user.ts`) means the policies can no longer DRIFT apart (issue #474).
+ * NOT used under generic OIDC (the operator's IdP owns the credential — ADR-0038/0102). `.max(70)` is a
+ * hard cap before the regex checks.
  */
-export const SetupPasswordSchema = ZitadelPasswordSchema;
+export const SetupPasswordSchema = PasswordPolicySchema;
 export type SetupPassword = z.infer<typeof SetupPasswordSchema>;
 
 export const SetupAdminSchema = z.strictObject({
@@ -123,8 +110,8 @@ export const SetupAdminSchema = z.strictObject({
   lastName: z.string().trim().min(1).max(100),
   /**
    * Initial password for the first ADMIN. OPTIONAL on the wire: it is REQUIRED only when the server
-   * reports `requiresAdminPassword` (bundled Zitadel with management) — the API re-checks that posture
-   * and 400s a missing password there — and is OMITTED entirely in BYOI / generic-OIDC. See
+   * reports `requiresAdminPassword` (local mode) — the API re-checks that posture and 400s a missing
+   * password there — and is OMITTED entirely under generic OIDC. See
    * {@link SetupPasswordSchema} and {@link ConfigStatusSchema.requiresAdminPassword}.
    */
   password: SetupPasswordSchema.optional(),
@@ -132,16 +119,14 @@ export const SetupAdminSchema = z.strictObject({
 export type SetupAdmin = z.infer<typeof SetupAdminSchema>;
 
 /**
- * `POST /config/setup` success result. `mirrored` reports whether the new ADMIN was also mirrored
- * into the IdP (true only for zitadel + a configured Management credential); when a Management call
- * failed, setup still succeeds local-only (`mirrored: false`) — first-run bootstrap is never
- * hard-blocked by an IdP misconfiguration (ADR-0043 §6 #4 / the task degrade-not-block rule).
+ * `POST /config/setup` success result. `mirrored` is always false now that lazyit writes nothing back
+ * to an IdP (ADR-0102 §4); it stays on the wire so an older web build reading it keeps working.
  */
 export const SetupResultSchema = z.object({
   success: z.literal(true),
   adminId: z.uuid(),
   email: z.email(),
-  /** Whether the ADMIN was mirrored into the IdP (false = created local-only). */
+  /** Always false (ADR-0102 §4). */
   mirrored: z.boolean(),
   setupCompletedAt: z.iso.datetime(),
 });
