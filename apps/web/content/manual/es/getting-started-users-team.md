@@ -8,8 +8,8 @@ subcategory: users-team
 # Usuarios y equipo
 
 Una vez que inicias sesión como administrador, das de alta al resto de tu equipo desde el área de
-**Usuarios**. Cada persona obtiene una cuenta de lazyit con un rol y — en el inicio de sesión
-integrado — una contraseña de un solo uso que le entregas para que pueda entrar.
+**Usuarios**. Cada persona obtiene una cuenta de lazyit con un rol y — con cuentas locales — una
+contraseña de un solo uso que le entregas para que pueda entrar.
 
 ## Agregar un usuario
 
@@ -30,43 +30,43 @@ Selecciona **Crear usuario** para terminar.
 
 ## La entrega de la contraseña temporal
 
-En el **inicio de sesión integrado**, el formulario incluye una sección de **Credencial de inicio de
-sesión** donde defines una **contraseña temporal**. Usa **Generar** para producir una segura (debe
+Con **cuentas locales**, el formulario incluye una sección de **Credencial de inicio de sesión**
+donde defines una **contraseña temporal**. Usa **Generar** para producir una segura (debe
 cumplir la lista de verificación en vivo: longitud, más una mayúscula, una minúscula, un número y un
 símbolo).
 
 Después de crear el usuario, lazyit muestra la contraseña temporal **una sola vez** para que la copies
-y la entregues — no se vuelve a mostrar, así que cópiala antes de salir de la pantalla. lazyit nunca
-almacena esta contraseña: se define en el servicio de inicio de sesión y se reemplaza en cuanto el
-usuario nuevo inicia sesión, porque está **obligado a elegir la suya en el primer inicio de sesión**.
+y la entregues — no se vuelve a mostrar, así que cópiala antes de salir de la pantalla. lazyit solo
+guarda un hash, nunca la contraseña en sí, y esta se reemplaza en cuanto el usuario nuevo inicia sesión,
+porque está **obligado a elegir la suya en el primer inicio de sesión**.
 
-> Si tu instancia usa **tu propio proveedor de identidad** (BYOI), la sección de credencial no aparece
-> y no se define ni se envía ninguna contraseña — tu proveedor es el dueño de la credencial. Un aviso
-> en la página de Usuarios te recuerda que los usuarios y roles que gestionas aquí son *locales de
-> lazyit* y no se escriben de vuelta en tu proveedor; crea y desactiva cuentas en tu IdP, y lazyit
-> mantiene su propia copia para la autorización.
+> Si tu instancia usa **tu propio proveedor OIDC**, la sección de credencial no aparece y no se define
+> ni se envía ninguna contraseña — tu proveedor es el dueño de la credencial. Un aviso en la página de
+> Usuarios te recuerda que los cambios que haces aquí *no se sincronizan* con tu proveedor: crea y
+> desactiva cuentas en tu IdP, y lazyit mantiene su propia copia para la autorización.
 
 ## Qué ocurre en el primer inicio de sesión
 
 Cuando una persona inicia sesión por primera vez, lazyit vincula la sesión a su cuenta de lazyit y
 entra a la app con el rol que definiste.
 
-Con **tu propio proveedor de identidad**, lazyit también puede aprovisionar una cuenta de forma
+Con **tu propio proveedor OIDC**, lazyit también puede crear una cuenta de forma
 *automática* en el primer inicio de sesión (just-in-time), aunque no hayas dado de alta a la persona
 antes. Si ya existe una cuenta coincidente por **correo verificado**, el primer inicio de sesión se
 vincula a ella en vez de crear un duplicado. Las cuentas aprovisionadas automáticamente también
 empiezan como **Lector** por defecto. Esto significa que el control de quién llega a lazyit es tu
 proveedor de identidad: quien pueda iniciar sesión allí puede obtener una cuenta (de solo lectura)
-aquí, salvo que le quites el acceso en el origen.
+aquí, salvo que le quites el acceso en el origen. Por lo mismo, dar de baja a alguien en lazyit no basta
+por sí solo: desactiva también su cuenta en tu proveedor.
 
 ## Gestionar a las personas existentes
 
 La página de detalle de un usuario muestra qué tiene la persona, a qué puede acceder y qué requiere
-atención — ver [La página de una persona](/help/users-permissions-user-lifecycle#la-página-de-una-persona).
-Desde ahí puedes editar su identidad, cambiar su rol, restablecer su contraseña (en el inicio de sesión
-integrado) y darlo de baja cuando se va (en el menú **⋯**). La baja archiva la cuenta
-en lugar de eliminarla, así que el historial de la persona — asignaciones y actividad pasadas — se
-conserva.
+atención — ver [La página de una
+persona](/help/users-permissions-user-lifecycle#la-página-de-una-persona). Desde ahí puedes editar su
+identidad, cambiar su rol, restablecer su contraseña (con cuentas locales) y darlo de baja cuando se va
+(en el menú **⋯**). La baja archiva la cuenta en lugar de eliminarla, así que el historial de la persona
+— asignaciones y actividad pasadas — se conserva.
 
 ## Pasos siguientes
 

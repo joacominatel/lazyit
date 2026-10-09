@@ -7,143 +7,116 @@ subcategory: identity-provider
 
 # Proveedor de identidad
 
-lazyit admite dos familias de inicio de sesión, elegidas **una sola vez al desplegar** mediante
-`AUTH_MODE` y luego **inmutables** durante toda la vida de la instancia:
+lazyit ofrece dos formas de iniciar sesión, elegidas **una sola vez al desplegar** mediante `AUTH_MODE`
+y luego **inmutables** durante toda la vida de la instancia:
 
-- **Cuentas locales** (`AUTH_MODE=local`) — lazyit es dueño del inicio de sesión (nombre de
-  usuario/correo + contraseña), **sin proveedor de identidad externo**. Es la opción más simple para un
-  despliegue en LAN o interno; consulta [Cuentas locales](#opción-3--cuentas-locales-sin-proveedor-de-identidad)
-  más abajo.
-- **Inicio de sesión único (OIDC)** — el inicio de sesión se delega en un **proveedor de identidad** que
-  habla **OIDC**, ya sea el incluido o el tuyo (las dos opciones de abajo). En esta familia lazyit no
-  almacena ninguna contraseña de inicio de sesión.
+- **Cuentas locales** (`AUTH_MODE=local`, la opción por defecto) — lazyit se encarga del inicio de
+  sesión (nombre de usuario/correo + contraseña), **sin proveedor de identidad externo**. Es la opción
+  más simple y la que elige el instalador guiado salvo que indiques otra cosa.
+- **Tu propio proveedor OIDC** (`AUTH_MODE=oidc`) — el inicio de sesión se delega en un **proveedor de
+  identidad que ya administras** y que habla **OIDC**: Entra ID, Okta, Keycloak, Authentik y similares.
+  En este modo lazyit no guarda ninguna contraseña de inicio de sesión.
 
-Aún puedes cambiar entre el proveedor OIDC incluido y el tuyo (ambos son OIDC), pero cambiar entre la
-familia **local** y la **OIDC** en una instancia con usuarios no está soportado — sus credenciales no se
-trasladan. Decide la familia desde el principio.
+Cambiar una instancia de una forma a la otra con la base de datos ya en uso no está soportado — las
+credenciales no se trasladan. Decídelo desde el principio.
 
 > Para la parte del usuario final de esta decisión (el asistente del primer arranque, añadir miembros al
 > equipo), consulta [Primeros pasos](/help/getting-started).
 
-## Opción 1 — el proveedor de identidad incluido (recomendado)
+## Cuentas locales (por defecto)
 
-lazyit incluye **Zitadel** ya integrado. Con el flujo incluido, el inicio de sesión funciona sin
-configuración adicional:
+Con `AUTH_MODE=local`, lazyit funciona **sin ningún proveedor de identidad externo** — sin issuer OIDC
+ni servicios adicionales que mantener. lazyit guarda él mismo la credencial de cada persona (las
+contraseñas se guardan como hash **argon2id**) y emite su propia sesión firmada al iniciar sesión. Es el
+patrón habitual del autoalojamiento (Gitea, Portainer, Proxmox) y el de menos piezas móviles para un
+despliegue interno pequeño.
 
-- Un paso de arranque puntual aprovisiona toda la integración OIDC en el primer arranque — el proyecto,
-  la aplicación OIDC, los roles y una cuenta de servicio — **sin tocar la consola**. Nunca copias un id
-  de cliente o un secreto a mano.
-- El proveedor incluido se ejecuta como dos contenedores (el proveedor en sí y su propia base de datos),
-  accesibles en el **subdominio `auth.`** de tu dominio, servidos por HTTPS a través del proxy inverso.
-- Solo defines un puñado de valores en el archivo de entorno: la URL externa de autenticación, tu
-  dominio, la clave maestra y una contraseña de administrador del primer arranque. El arranque aporta el
-  resto.
-
-Esta es la vía feliz. El primer administrador se crea más tarde, en el asistente de configuración dentro
-de la app — el arranque del proveedor de identidad nunca crea un usuario de la aplicación.
-
-> La **clave maestra** del proveedor de identidad es irrotable e irremplazable, y es lo que hace legible
-> una base de datos de proveedor restaurada. Trátala como una joya de la corona y respáldala fuera del
-> servidor. Consulta [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
-
-## Apariencia e idioma del inicio de sesión (proveedor incluido)
-
-El arranque también **personaliza la marca y el idioma de la página de inicio de sesión** para que
-coincida con lazyit y deje de parecer una pantalla genérica de terceros. En el mismo primer arranque,
-de forma automática:
-
-- Aplica el color de acento **oxblood** de la marca y **oculta la marca de agua «Powered by ZITADEL»**.
-- Permite **inglés y español** y sigue el idioma que estás usando en la app, de modo que la página de
-  inicio de sesión aparece en ese mismo idioma.
-- Lleva a los nuevos empleados directamente al formulario de inicio de sesión en vez de a un selector de
-  cuentas compartido, para que una persona recién incorporada nunca vea las cuentas de **otras**
-  personas en un equipo compartido.
-
-Son detalles cosméticos: si alguno no puede aplicarse en el arranque, se omite con una advertencia en los
-registros y el inicio de sesión sigue funcionando.
-
-**Añade tu logo (opcional, una sola vez).** El logo es la única pieza de marca que el arranque *no* sube
-por ti. Para añadirlo, inicia sesión en la consola del proveedor en el subdominio `auth.`
-(`/ui/console`) como administrador, abre **Settings → Branding**, sube tu logo claro y oscuro (y el
-favicon) y pulsa **Apply configuration**. Se conserva entre reinicios.
-
-**Nota sobre el primer inicio de sesión.** Con el proveedor incluido, la **contraseña inicial** de una
-persona recién añadida es **temporal**: el proveedor le pide que defina la suya en el primer inicio de
-sesión, y también puede ofrecerle añadir un segundo factor. La página de inicio de sesión muestra un
-breve recordatorio de esto. El orden en que el proveedor presenta esos pasos lo fija el proveedor y no es
-algo que lazyit pueda cambiar.
-
-## Opción 2 — usa tu propio proveedor (BYOI)
-
-Si ya tienes un proveedor de identidad compatible con OIDC — Azure AD / Entra ID, Okta, Keycloak,
-Authentik y similares — conecta lazyit a él en su lugar. El backend habla **OIDC estándar** y no usa
-ninguna API específica del proveedor, así que esto **no requiere cambios de código**.
-
-Para cambiar:
-
-1. En tu proveedor, registra una aplicación y anota su **URL de emisor (issuer)**, su **id de cliente**
-   y su **secreto de cliente**.
-2. En el archivo de entorno, define los tres valores OIDC para que apunten a tu proveedor (emisor, id de
-   cliente, secreto de cliente), más los valores de inicio de sesión correspondientes que lee la web.
-3. **Elimina los servicios de Zitadel incluidos** para que el arranque no se ejecute (el proveedor, su
-   base de datos y el ayudante de arranque).
-4. Configura la **URI de redirección** en tu proveedor con la URL de retorno de tu instancia, con la
-   forma `https://tudominio.com/api/auth/callback/<nombre-proveedor>`.
-5. Recrea los servicios afectados.
-
-Con tu propio proveedor, ese proveedor es el dueño de las contraseñas y de la creación de cuentas —
-lazyit nunca define ni almacena una contraseña de inicio de sesión. La base de datos de la aplicación no
-se ve afectada en absoluto por el cambio.
-
-## Opción 3 — cuentas locales (sin proveedor de identidad)
-
-Define `AUTH_MODE=local` y lazyit funciona **sin ningún proveedor de identidad externo** — sin Zitadel,
-sin subdominio `auth.`, sin issuer OIDC. lazyit guarda la credencial de cada persona él mismo (las
-contraseñas se cifran con **argon2id**) y emite su propia sesión firmada al iniciar sesión. Es el patrón
-estándar del autoalojamiento (Gitea, Portainer, Proxmox) y el de menos piezas móviles para un despliegue
-interno pequeño.
-
-- **Primer arranque.** El paso de elección de inicio de sesión del asistente se omite; vas directo a
-  crear el primer administrador con **nombre, correo y contraseña**. Esa contraseña se guarda (cifrada)
-  como la credencial del administrador — no hay IdP al que reflejarla.
-- **Página de inicio de sesión.** En lugar de un botón de SSO, `/login` muestra un formulario de
-  **nombre de usuario/correo + contraseña**.
-- **Dar de alta personas.** Un administrador aprovisiona a cada usuario con una contraseña directamente
-  en lazyit; no hay aprovisionamiento automático en el primer inicio de sesión (eso es un comportamiento
-  exclusivo de OIDC).
+- **Primer arranque.** El asistente de configuración confirma que estás configurando cuentas locales y
+  te lleva directo a crear el primer administrador con **nombre, correo y contraseña**. Esa contraseña
+  se guarda (como hash) como la credencial del administrador.
+- **Página de inicio de sesión.** `/login` muestra un formulario de **nombre de usuario/correo +
+  contraseña**.
+- **Dar de alta personas.** Un administrador crea a cada usuario con una contraseña temporal
+  directamente en lazyit; no hay alta automática en el primer inicio de sesión (eso solo ocurre con
+  OIDC).
 - **El secreto de firma.** El modo local requiere un `SESSION_SIGNING_SECRET` persistente (que el
   instalador guiado genera por ti). Es distinto de `AUTH_SECRET`. Rotarlo solo obliga a todos a iniciar
   sesión de nuevo — sin pérdida de datos — pero mantenlo estable para que los reinicios no cierren la
   sesión de todos.
-- **Sin MFA todavía.** El modo local es solo contraseña en esta versión; el multifactor está disponible
-  únicamente con un proveedor OIDC que lo ofrezca. Si necesitas MFA hoy, elige una familia OIDC.
-- **¿Perdiste la contraseña del último administrador?** Como no hay un IdP que la restablezca, un
-  **comando de recuperación** de un solo uso (ejecutado en el host) restablece la contraseña de un
-  administrador con nombre directamente. Consulta
+- **Sin MFA todavía.** El modo local es solo contraseña en esta versión; el multifactor solo está
+  disponible a través de un proveedor OIDC que lo ofrezca. Si necesitas MFA hoy, conecta tu propio
+  proveedor.
+- **¿Perdiste la contraseña del último administrador?** Un **comando de recuperación** de un solo uso
+  (ejecutado en el host) restablece directamente la contraseña de un administrador concreto. Consulta
   [Solución de problemas](/help/deployment-operations-troubleshooting).
 
 > **El modo local y el Gestor de Secretos.** El Gestor de Secretos sigue cifrado de extremo a extremo: tu
 > contraseña de inicio de sesión **no** es la frase de acceso de tu bóveda. Son credenciales separadas por
 > diseño — no reutilices una como la otra. Consulta [Gestor de Secretos](/help/secret-manager).
 
+## Tu propio proveedor OIDC
+
+Si ya tienes un proveedor de identidad compatible con OIDC, conecta lazyit a él. El backend habla **OIDC
+estándar** y no usa ninguna API específica del proveedor, así que **no hace falta tocar código** — solo
+variables de entorno.
+
+1. **Registra lazyit en tu proveedor** como aplicación OIDC (un cliente web confidencial). Anota su
+   **URL de emisor (issuer)**, su **ID de cliente** y su **secreto de cliente**, y el **`jwks_uri`** que
+   figura en el documento de descubrimiento del proveedor (`<issuer>/.well-known/openid-configuration`).
+2. **Configura la URI de redirección** en tu proveedor con la URL de retorno de tu instancia:
+   `https://tudominio.com/api/auth/callback/oidc`.
+3. **Pásale los valores a lazyit.** El instalador guiado (`./infra/start.sh`) te los pide cuando eliges
+   *tu propio proveedor OIDC* en la pregunta de autenticación, y los escribe por ti. Para definirlos a
+   mano, ponlos en `infra/env/.env.prod` — la app web lee los tres primeros y la API el resto:
+
+   ```sh
+   # App web
+   AUTH_ISSUER=https://auth.example.com
+   AUTH_CLIENT_ID=your-client-id
+   AUTH_CLIENT_SECRET=your-client-secret
+
+   # API
+   AUTH_MODE=oidc
+   OIDC_ISSUER=https://auth.example.com
+   OIDC_CLIENT_ID=your-client-id
+   OIDC_JWKS_URI=https://auth.example.com/.well-known/jwks.json
+   ```
+
+   `OIDC_ISSUER` y `OIDC_JWKS_URI` son **obligatorias** — sin ellas la API se niega a arrancar en modo
+   OIDC. Si tu proveedor corre en el mismo host y su dirección pública no se resuelve desde dentro de
+   los contenedores, define también `AUTH_INTERNAL_ISSUER` con una dirección a la que la app web pueda
+   llegar.
+4. **Recrea la app web y la API**, y abre `/setup`. El asistente muestra las mismas variables para que
+   las revises antes de crear el primer administrador.
+
+El **modo LAN** del instalador (HTTP sin cifrar) solo funciona con cuentas locales: la URI de
+redirección OIDC se registra contra una dirección fija, así que no puede seguir a una IP que cambia.
+
+### De qué se encarga tu proveedor
+
+Con tu propio proveedor, este es la fuente de verdad de las **credenciales**, y lazyit no se mete:
+
+- **Contraseñas, multifactor, bloqueos y sesiones** viven en tu proveedor — configúralos allí. lazyit
+  nunca ve, define ni guarda una contraseña de inicio de sesión, y la acción **Restablecer contraseña**
+  del administrador no aparece.
+- **Las personas se crean en los dos lados.** Da de alta a la persona en lazyit (**Usuarios → Nuevo
+  usuario**) y en tu proveedor con el **mismo correo**. En su primer inicio de sesión, lazyit vincula
+  ambas cuentas por **correo verificado**. Quien pueda iniciar sesión en tu proveedor y todavía no
+  exista en lazyit recibe una cuenta nueva de **Lector** en ese primer inicio de sesión.
+- **lazyit nunca escribe en tu proveedor.** Los cambios de nombre, correo y rol hechos en lazyit se
+  quedan en lazyit, y lazyit no puede crearte una cuenta en tu proveedor.
+- **Lo que corta el acceso es desactivar la cuenta en tu proveedor.** Dar de baja a alguien en lazyit
+  deja activa su cuenta en el proveedor. Si ya había iniciado sesión en lazyit, su próximo inicio de
+  sesión se rechaza; pero alguien dado de baja antes de su primer inicio de sesión recibiría una cuenta
+  nueva de Lector en cuanto entre. Desactiva siempre la cuenta en tu proveedor como parte de tu proceso
+  de salida.
+
 ## La autorización permanece en lazyit
 
-Sea cual sea el proveedor, **lo que puede hacer cada persona** se decide enteramente dentro de lazyit.
-Los permisos y los roles se guardan en la base de datos de la aplicación y nunca tocan el proveedor de
-identidad, así que se mantienen sin cambios al cambiar de proveedor. El proveedor de identidad solo
-responde «quién es esta persona»; lazyit responde «qué puede hacer». Consulta
-[Permisos](/help/permissions).
-
-Una persona que inicia sesión a través de tu proveedor antes de haber sido añadida en lazyit puede
-aprovisionarse automáticamente en ese primer inicio de sesión, asociándose a un registro por correo
-electrónico verificado.
-
-## Nota sobre el modo tipo producción local
-
-Cuando ejecutas la pila completa en tu propia máquina para pruebas, el subdominio de autenticación es
-`auth.localhost`. La mayoría de los sistemas resuelven `*.localhost` a tu máquina automáticamente; si el
-tuyo no, añade `127.0.0.1 auth.localhost` a tu archivo de hosts para que el navegador pueda llegar a la
-página de inicio de sesión. En ese caso, la URL del emisor debe incluir el puerto HTTPS alto.
+Uses la forma de inicio de sesión que uses, **lo que puede hacer cada persona** se decide enteramente
+dentro de lazyit. Los permisos y los roles se guardan en la base de datos de la aplicación y nunca tocan
+el proveedor de identidad. El proveedor solo responde «quién es esta persona»; lazyit responde «qué
+puede hacer». Consulta [Permisos](/help/permissions).
 
 ## Relacionado
 

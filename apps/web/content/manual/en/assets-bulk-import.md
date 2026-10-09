@@ -168,7 +168,7 @@ Map any **Person** field and the import will, for each row, find or create that 
 asset to them** — the assignment is recorded the same way it would be in the app, with history.
 
 - **An imported person has no login.** They are a **directory** person: a real entry in your Users list
-  (badged **Directory**), but without an account in your identity provider. They exist so the asset has
+  (badged **Directory**), but without a sign-in account. They exist so the asset has
   an owner on record; they cannot sign in until they get an account.
 - **To assign, map the person's Name *and* one identity key.** **Name** (the *Assigned to* column) is
   **required** to assign an asset, plus at least one of **Email**, **Employee no.** or **Username** to
@@ -177,17 +177,16 @@ asset to them** — the assignment is recorded the same way it would be in the a
   that's missing the name is flagged as an **invalid row** in the preview, so you fix it before
   committing — it never fails silently at the end. A row with a name but no identity key imports the
   asset **unassigned**, with a warning.
-- **They link to a real account automatically — only with a matching email.** When that person later
-  signs in through your identity provider (OIDC) using the **same verified email**, lazyit links the two:
-  the directory entry becomes their account and the **Directory** badge disappears. **A person imported
-  without a real email never links automatically** — there's no email to match on. Promote them by hand
-  (next point) when they need to sign in.
-- **You can create their account now.** An administrator can open the person's page and choose **Create
-  OIDC account** to provision them in the identity provider immediately, instead of waiting for a login.
-  The identity provider requires a real email, so the button is **disabled until the person has one** —
-  edit the person and add a real email first. This is only available with the **bundled identity
-  provider**; in local authentication mode or with your own OIDC provider lazyit can't create the
-  account, and imported people sign in through your identity provider instead.
+- **With your own OIDC provider, they link to a real account automatically — only with a matching
+  email.** When that person later signs in through your provider using the **same verified email**,
+  lazyit links the two: the directory entry becomes their account and the **Directory** badge
+  disappears. **A person imported without a real email never links automatically** — there's no email to
+  match on. Promote them by hand (next point) when they need to sign in.
+- **You can give them an account now.** With **local accounts**, an administrator can open the person's
+  page and choose **Onboard with a temporary password**: it creates their login right away and shows a
+  one-time password to hand off — no email needed. With **your own OIDC provider**, lazyit can't create
+  accounts there: create the person in your provider with a real, verified email, make sure the same
+  email is on their lazyit record, and their first sign-in links the two.
 
 The asset always imports either way; only the **assignment** depends on identifying the person.
 

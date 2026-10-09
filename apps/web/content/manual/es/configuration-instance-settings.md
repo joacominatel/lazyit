@@ -81,8 +81,8 @@ guarda en cuanto lo cambias.
 
 - **Configurada** — si la configuración inicial está completa (existe un administrador). Una
   instalación nueva muestra *Configuración pendiente* hasta que se crea el primer administrador.
-- **Proveedor de identidad** — la postura de inicio de sesión: *Zitadel (incluido)*, *OIDC genérico
-  (el tuyo propio)* o *Cuentas locales*.
+- **Proveedor de identidad** — la postura de inicio de sesión: *Cuentas locales* u *OIDC genérico (usa
+  el tuyo)*.
 - **Administradores** — cuántas cuentas de administrador tiene la instancia.
 - **Postura de ejecución** — *Desarrollo* o *Producción*.
 - **Versión** — la versión exacta que ejecuta esta instancia, fijada al construir sus imágenes. Un

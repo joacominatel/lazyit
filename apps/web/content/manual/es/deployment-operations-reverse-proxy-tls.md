@@ -17,7 +17,6 @@ lo demás permanece en la red interna.
 - **Enruta por ruta sobre un único origen.** El navegador llama a un solo origen; Caddy envía las
   peticiones de página a la web y las peticiones bajo `/api/` a la API (quitando el prefijo `/api`).
   Como todo es del mismo origen, una misma imagen web funciona en cualquier dominio.
-- **Sirve el proveedor de identidad** en el subdominio `auth.` de tu dominio, con su propio certificado.
 - **Añade cabeceras de seguridad básicas** a cada respuesta y oculta el identificador del servidor.
 
 La configuración de Caddy vive en `infra/caddy/Caddyfile`. En la mayoría de los despliegues no lo editas:
@@ -45,7 +44,6 @@ Entonces las sesiones no van cifradas, así que úsalo solo en una red local que
 Para un despliegue público con HTTPS de confianza, define esto en `infra/env/.env.prod`:
 
 - Tu **dirección del sitio** con tu nombre de dominio completo.
-- Tu **dominio** (usado para construir el subdominio `auth.` del inicio de sesión).
 - La URL de origen público (`https://tudominio.com`, sin barra final).
 - Un **correo de contacto ACME** para Let's Encrypt — **y** descomenta la línea `email` en el Caddyfile.
 - Los **puertos** publicados con los estándar `80` y `443` (los predeterminados son puertos altos para
