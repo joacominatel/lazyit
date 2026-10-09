@@ -136,10 +136,10 @@ sesiones de la persona en todos sus dispositivos a la vez — también aquella e
 sesión iniciada**. Desactivarla (desmarcar **Activo** al editarla) hace lo mismo.
 
 **Con tu propio proveedor OIDC, desactívala también allí.** lazyit no toca la cuenta de la persona en tu
-proveedor. Si ya había iniciado sesión en lazyit, su próximo inicio de sesión se rechaza; en cambio,
-alguien dado de baja antes de su primer inicio de sesión recibiría una cuenta nueva de Lector al entrar.
-Lo que de verdad corta el acceso es desactivar la cuenta en el proveedor — inclúyelo en el mismo proceso
-de salida.
+proveedor, pero sí rechaza su inicio de sesión en lazyit, haya entrado antes o no. Si nunca había
+entrado, esto depende de que tu proveedor marque su correo como verificado. Para que vuelva a entrar,
+[restáurala](#restaurar-un-usuario). Aun así, desactiva la cuenta en tu proveedor dentro del mismo proceso
+de salida: es lo que le corta el acceso a todo lo demás a lo que tu proveedor le da entrada.
 
 **Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
 confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos
