@@ -22,8 +22,8 @@ carried forward here. **Amends** [[0038-jit-user-provisioning]], [[0039-authjs-v
 [[0091-on-prem-ad-ldap-directory-source]]. Narrows #1310, which is closed as superseded by #1543: removing
 all OIDC is no longer planned.
 
-**Built** — 2026-10-09 on the epic branch (PRs #1546–#1554). Implementation settled §2, §4, §5, §7 and §8 more
-precisely than first written; those sections now describe what shipped, and
+**Built** — 2026-10-09 on the epic branch (PRs #1546–#1554). Implementation settled §2, §4, §5, §7 and
+§8 more precisely than first written; those sections now describe what shipped, and
 [§ Implementation](#implementation) lists the differences.
 
 ## Context
@@ -158,8 +158,9 @@ ends access.
 
 With one OIDC flavour and nothing to write back to, the `IdentityProvider` adapter seam of
 [[0043-zitadel-source-of-truth]] §1 has no second implementation to abstract. It is retired:
-`apps/api/src/auth/identity/` is gone, and the local-mode branches read `AUTH_MODE` directly. This closes the "Zitadel machine-user mirror" that [[0048-service-accounts]] deferred to a future
-ADR: it will not be built.
+`apps/api/src/auth/identity/` is gone, and the local-mode branches read `AUTH_MODE` directly. This closes
+the "Zitadel machine-user mirror" that [[0048-service-accounts]] deferred to a future ADR: it will not be
+built.
 
 ### 7. Upgrade safety: guards, no migration tooling
 
