@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-28
+updated: 2026-10-09
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -12,15 +12,15 @@ Install lazyit on a single host (one company = one instance — [[0015-deploymen
 domain with publicly-trusted HTTPS. Same compose as the [[docker-prod-like-first-boot|prod-like
 runbook]]; the differences are a real domain, real secrets, and backups.
 
-> [!info] Auth mode — `local` is the default; OIDC/Zitadel is opt-in (ADR-0086)
+> [!info] Auth mode — `local` is the default; your own OIDC IdP is opt-in (ADR-0086, ADR-0102)
 > `AUTH_MODE` is a **three-state, explicit-required** setting: **`local`** (built-in accounts +
-> passwords, no external IdP — the default the guided bootstrap writes), **`oidc`** (a bundled
-> Zitadel IdP *or* your own BYOI IdP — ADR-0037/0038/0039), or `shim` (the dev-only `X-User-Id`
-> bypass, **never** in production). There is **no implicit default at boot**: an unset `AUTH_MODE`
-> is a hard boot failure — see the **upgrade note in §4** (existing OIDC installs must set
-> `AUTH_MODE=oidc` before upgrading). In **OIDC** mode you additionally run the bundled Zitadel
-> (the `oidc` compose profile + overlay, below) and bootstrap the OIDC client before first login
-> ([[auth-bootstrap]]); in **local** mode there is no IdP to bootstrap — you go straight to `/setup`.
+> passwords, no external IdP — the default the guided bootstrap writes), **`oidc`** (your own IdP —
+> "bring your own IdP", BYOI — ADR-0038/0039/0102), or `shim` (the dev-only `X-User-Id` bypass,
+> **never** in production). There is **no implicit default at boot**: an unset `AUTH_MODE` is a hard
+> boot failure — see the **upgrade note in §4**. lazyit no longer ships an IdP: in **OIDC** mode you
+> register a client in your IdP and set its values in `.env.prod` ([[auth-bootstrap]]); in **local**
+> mode there is no IdP at all — you go straight to `/setup`. An install that still runs the removed
+> bundled Zitadel is refused with nothing changed — see [[migrate-off-bundled-zitadel]].
 
 ## Prerequisites
 
@@ -33,9 +33,9 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 
 > [!tip] Recommended — let the guided bootstrap do steps 1 & 2
 > The guided bootstrap script ([[0047-guided-first-deploy-bootstrap]]) automates this whole
-> section: it asks for your domain, TLS choice + ACME email, ports, IdP (bundled Zitadel or BYOI)
-> and Postgres (bundled or external), then **generates `infra/env/.env.prod` with real random
-> secrets** (a correctly-sized `ZITADEL_MASTERKEY`, `POSTGRES_PASSWORD` mirrored into
+> section: it asks for your domain, TLS choice + ACME email, ports, authentication (built-in accounts
+> or your own OIDC IdP) and Postgres (bundled or external), then **generates `infra/env/.env.prod` with
+> real random secrets** (`WORKFLOW_SECRET_KEY`, `POSTGRES_PASSWORD` mirrored into
 > `DATABASE_URL`, `AUTH_SECRET`, …) in a file that is **mode 600 from creation** (the secrets are
 > never world-readable, even for an instant), validates your free-text answers, and brings the stack
 > up — then prints the URL and points you at `https://<your-domain>/setup`.
@@ -49,10 +49,11 @@ runbook]]; the differences are a real domain, real secrets, and backups.
 > It is **idempotent and non-destructive** — re-running it on an existing install (an existing
 > `.env.prod` **or** a `lazyit-prod_*` volume) **skips generation** and just brings the stack up —
 > after appending any missing key from its short allowlist of safely generatable ones (§4, *Keys
-> `start.sh` adds on an existing install*); it **never** regenerates the unrotatable `ZITADEL_MASTERKEY` and has **no** teardown path. For
-> **BYOI**, **external Postgres**, and **Let's Encrypt/HSTS** it writes the relevant env values and
-> **prints** the one or two manual compose/Caddyfile edits to apply (it does not auto-edit those
-> files — see the BYOI / Caddyfile notes in steps 1 & 2 below). After it finishes, continue at
+> `start.sh` adds on an existing install*); it **never** regenerates the unrotatable `WORKFLOW_SECRET_KEY` and has **no** teardown path. For
+> **external Postgres** and **Let's Encrypt/HSTS** it writes the relevant env values and **prints**
+> the one or two manual compose/Caddyfile edits to apply (it does not auto-edit those files — see the
+> Caddyfile notes in steps 1 & 2 below). For **BYOI** it writes your IdP's values; registering the
+> client in your IdP is yours to do first ([[auth-bootstrap]]). After it finishes, continue at
 > **§2a** (search re-index) and **§3a** (the in-app `/setup` first login).
 >
 > The rest of this section is the **manual fallback** — exactly what the script automates. Do it by
@@ -64,8 +65,8 @@ chmod 600 infra/env/.env.prod        # OWNER read/write only — see why below (
 ```
 
 > [!danger] `chmod 600 infra/env/.env.prod` is not optional
-> This single file is the master key to everything: the DB password, the `ZITADEL_MASTERKEY`
-> (the DR linchpin — see [[backups]]), `AUTH_SECRET`, and the OIDC client secret. The default
+> This single file is the master key to everything: the DB password, the `WORKFLOW_SECRET_KEY`
+> (the DR linchpin — see [[backups]]), `AUTH_SECRET`, and (BYOI) the OIDC client secret. The default
 > `0644` is **world-readable** — any local user or a compromised low-privilege process can read
 > every secret. Set `0600` (owner-only) and confirm with `stat -c '%a' infra/env/.env.prod` → `600`.
 > Back the file up off-host, encrypted (it's gitignored and never committed).
@@ -81,9 +82,11 @@ Edit `infra/env/.env.prod`:
   site block (HSTS; never on a localhost/internal-CA install). (Skip both to keep Caddy's internal CA.)
 - Ports: keep `LAZYIT_HTTP_PORT=80` / `LAZYIT_HTTPS_PORT=443` for a public host (override the
   high-port defaults), or keep the high ports behind another proxy.
-- `LAZYIT_DOMAIN`, `ZITADEL_*`, `OIDC_*`, `AUTH_*` — auth (Zitadel IdP). Set strong values for
-  `ZITADEL_DB_PASSWORD`, `ZITADEL_MASTERKEY` (≥32 chars), `ZITADEL_ADMIN_PASSWORD`, `AUTH_SECRET`;
-  the `OIDC_*`/`AUTH_CLIENT_*` values are filled **after** the IdP bootstrap (step 3a, [[auth-bootstrap]]).
+- `WORKFLOW_SECRET_KEY`, `AUTH_SECRET`, `MEILI_MASTER_KEY` — strong random values (the example's
+  comments give the `openssl` command for each).
+- Auth: keep `AUTH_MODE=local` and uncomment `SESSION_SIGNING_SECRET` (built-in accounts), **or** set
+  `AUTH_MODE=oidc` and uncomment the `OIDC_*` / `AUTH_ISSUER` / `AUTH_CLIENT_*` block with your IdP's
+  values ([[auth-bootstrap]]). `AUTH_MODE` cannot change once the instance is set up.
 
 > [!info] Secrets handling
 > `.env.prod` is gitignored and never committed. There is no Docker secrets block or external
@@ -107,8 +110,8 @@ browser warning. It sets `AUTH_TRUST_HOST=true` and leaves `WEB_ORIGIN` **unset*
 origin from whatever host/IP the browser used. **If the LAN IP changes (DHCP), the URL just follows — no
 reconfigure needed.** Reach it at `http://<this-host>:8080`.
 
-- **`lan` requires `AUTH_MODE=local`** (built-in accounts) — OIDC/Zitadel bakes a fixed `externalDomain`
-  and can't be host-agnostic. The script forces this.
+- **`lan` requires `AUTH_MODE=local`** (built-in accounts) — an OIDC client's redirect URI is registered
+  against one fixed origin and can't be host-agnostic. The script forces this.
 - **Security:** the login session travels **unencrypted** over the LAN. Use `lan` **only** on a network
   you trust; never expose it to the public internet. The **secret vault stays end-to-end encrypted**
   regardless (its passphrase never reaches the server — INV-10), so a sniffed session grants no vault
@@ -128,8 +131,9 @@ To change the port or switch modes later (or after an IP change on a **hostname*
 `--reconfigure` re-asks the network mode / host / ports, keeps every secret (`WORKFLOW_SECRET_KEY`,
 `SESSION_SIGNING_SECRET`, `AUTH_SECRET`, `SMTP_SECRET_KEY`, `AI_SECRET_KEY`, `DIRECTORY_SECRET_KEY`, DB creds — never regenerated) and the auth mode + Postgres
 topology, touches **no** volumes, and brings the stack back up. It is supported for **local-auth installs
-only** (an OIDC deploy's IdP `externalDomain` is baked at first boot and can't be re-homed by re-rendering
-env — edit `.env.prod` by hand and re-provision Zitadel instead). Existing browser sessions from before
+only** (an OIDC deploy's redirect URI is registered in your IdP against one fixed origin and can't be
+re-homed by re-rendering env — edit `.env.prod` by hand and update the client's redirect URI in your IdP
+instead). Existing browser sessions from before
 the reconfigure go stale and self-heal to `/login` on their next request — the script's post-up guidance
 notes this; no other action needed.
 
@@ -166,10 +170,8 @@ real hostname.
 ## 2. Bring it up
 
 The stack is one canonical `compose.yaml` at the repo root plus a thin prod override; the full
-containerized stack lives behind the `prod` profile ([[auth-zitadel-sot#9-compose-structure-decided|dossier §9]]).
-Run from the **repo root**. **Which command depends on `AUTH_MODE`** (ADR-0086):
-
-**Local-auth mode (`AUTH_MODE=local` — the default):** plain `--profile prod`, no Zitadel.
+containerized stack lives behind the `prod` profile. Run from the **repo root** — the same command in
+every auth mode:
 
 ```sh
 docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
@@ -178,31 +180,14 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod ps          # all healthy; migrate exited 0
 ```
 
-**OIDC mode with the bundled Zitadel (`AUTH_MODE=oidc`):** add the **`oidc` overlay + profile** so the
-`zitadel*` services come up and the api/web wait on the `zitadel-bootstrap` sidecar. (BYOI — your own
-external IdP — stays on the plain local command above: it uses your `OIDC_*` creds and starts no
-bundled Zitadel.)
-
-```sh
-docker compose -f compose.yaml -f infra/docker-compose.prod.yaml -f infra/docker-compose.oidc.yaml \
-  --profile prod --profile oidc --env-file infra/env/.env.prod up -d --build
-```
-
-> [!note] Why the extra overlay (ADR-0086)
-> The `zitadel`, `zitadel_db`, `zitadel-secrets-init` and `zitadel-bootstrap` services carry a **bare
-> `profiles: [oidc]`**, so they only start under `--profile oidc`. `infra/docker-compose.oidc.yaml`
-> carries the api/web → `zitadel-bootstrap` `depends_on` (and the backup → `zitadel_db` gate + the
-> Caddy `auth.{domain}` site mount). Those edges **cannot** live in the base file: an active service
-> depending on a profile-excluded one makes plain `--profile prod` a parse-fatal *"invalid compose
-> project"*. The guided `infra/start.sh` picks the right invocation for you from your chosen mode.
-
 > [!note] Backward-compat — the old command is aliased
 > The previous form `docker compose -f infra/docker-compose.prod.yml up -d --build` is **superseded**.
 > It maps 1:1 to the new **base + thin override + `--profile prod` + `--env-file`** invocation above.
 > The prod **project name is unchanged** (`lazyit-prod`), so existing volumes
-> (`lazyit-prod_db_data`, `lazyit-prod_zitadel_db_data`, …) are reused — no data migration. Plain
-> `docker compose up` (no `-f`) is now the **dev** backing-services stack (Postgres + Meilisearch +
-> Zitadel for native `bun run dev`), not the full prod stack — see [[setup]].
+> (`lazyit-prod_db_data`, …) are reused — no data migration. The `infra/docker-compose.oidc.yaml`
+> overlay and `--profile oidc` are gone with the bundled Zitadel (ADR-0102). Plain `docker compose up`
+> (no `-f`) is the **dev** backing-services stack (Postgres + Meilisearch + Valkey for native
+> `bun run dev`), not the full prod stack — see [[setup]].
 
 > [!note] Version identity ([[0083-versioning-and-releases]])
 > The guided `infra/start.sh` exports `LAZYIT_VERSION=$(git describe --tags --always)` and
@@ -266,14 +251,16 @@ curl -so /dev/null -w "api:    %{http_code}\n" https://lazyit.example.com/api/us
 
 `GET /api/health/live` is the public liveness endpoint (200; the Docker/compose healthchecks use
 it). `GET /api/users` now returns **401** unauthenticated — that is the *correct* response with the
-global OIDC guard active (ADR-0038), not a broken install. To see data, bootstrap the IdP and log
+global auth guard active, not a broken install. To see data, create the first admin (§3a) and sign
 in via the web UI.
 
-## 3a. Bootstrap auth & first login
+## 3a. First admin & first login
 
-Auth is OIDC via the bundled Zitadel IdP. **Before the first real login**, register the OIDC client
-and create your first user, then fill the `OIDC_*` / `AUTH_*` values in `.env.prod` and `up -d`.
-Full procedure: **[[auth-bootstrap]]**. JIT provisioning creates the `User` row on first login.
+Open `https://<your-domain>/setup`; a fresh instance routes every visitor there. With **built-in
+accounts** (`AUTH_MODE=local`) the wizard creates the first ADMIN with a password, then you sign in at
+`/login`. With **your own IdP** (`AUTH_MODE=oidc`) the client must already be registered and its values
+set in `.env.prod`; the wizard records the first ADMIN's email, and the first sign-in from the IdP with
+that verified email becomes that admin. Full procedure: **[[auth-bootstrap]]**.
 
 ## 4. Updating to a new version
 
@@ -295,7 +282,9 @@ Instance** before and after.
 > after a backup): the `update.sh` you already have — the one that runs — stops at its old signature check
 > on every automated release tag (#1458); the fixed one works from v2.1.0 on ([[releasing]]). **On v2.1.0 with
 > local or BYOI auth, take the next release by hand the same way**: that `update.sh` stops at its backup step,
-> because it also dumps a Zitadel database those installs do not run (#1545).
+> because it also dumps a Zitadel database those installs do not run (#1545). **The release that removes the
+> bundled Zitadel is a major** ([[0102-remove-bundled-zitadel]]): local and BYOI installs update as usual;
+> a bundled-Zitadel install is refused — see [[migrate-off-bundled-zitadel]].
 
 > [!note] Deprecation policy ([[0083-versioning-and-releases]] amendment)
 > Anything user- or operator-facing (an endpoint, a config/env var, an import/export format) is
@@ -314,20 +303,18 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 **Back up the database before any update** ([[backups]]).
 
 > [!danger] Upgrade note — set `AUTH_MODE=oidc` BEFORE upgrading an existing OIDC install (ADR-0086)
-> This release adds a third auth mode (`local`) and makes **`AUTH_MODE` explicit-required**: an
-> **unset** `AUTH_MODE` used to imply OIDC, but it is now a **hard boot failure** (a silent "unset ⇒
-> local" flip would have taken every OIDC instance offline). Deployments created before this release
-> have **no `AUTH_MODE` line** in `.env.prod`, so add it **before** you pull-and-`up`:
+> The local-auth release made **`AUTH_MODE` explicit-required**: an **unset** `AUTH_MODE` used to imply
+> OIDC, but it is now a **hard boot failure** (a silent "unset ⇒ local" flip would have taken every OIDC
+> instance offline). A BYOI deployment created before that release has **no `AUTH_MODE` line** in
+> `.env.prod`, so add it **before** you pull-and-`up`:
 >
 > ```sh
 > grep -q '^AUTH_MODE=' infra/env/.env.prod || echo 'AUTH_MODE=oidc' >> infra/env/.env.prod
 > ```
 >
-> Then bring the stack up with the **OIDC command** (the `-f infra/docker-compose.oidc.yaml`
-> `--profile oidc` variant in §2) — the bundled `zitadel*` services now live behind the `oidc`
-> profile and will not start under a plain `--profile prod`. Your existing `ZITADEL_*` / `OIDC_*` /
-> `AUTH_*` values and `lazyit-prod_*` volumes are untouched; the deploy is otherwise byte-identical.
-> (The guided `infra/start.sh` detects the mode from your `.env.prod` and picks the command for you.)
+> A deployment that predates it **and** runs the bundled Zitadel cannot take that step any more: the
+> bundled IdP is gone ([[0102-remove-bundled-zitadel]]), and `start.sh`, `update.sh` and the API all
+> refuse it — follow [[migrate-off-bundled-zitadel]].
 
 > **Upgrade note — `REDIS_URL` is required (ADR-0053).** Deployments created **before** the async-workers
 > release have a `.env.prod` that predates `REDIS_URL`. The guided `start.sh` only writes it on a
@@ -361,7 +348,7 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 >   --env-file infra/env/.env.prod up -d api
 > ```
 >
-> Treat this key like `ZITADEL_MASTERKEY`: it is **unrotatable and irreplaceable** — a DB restore
+> Treat this key as a DR linchpin: it is **unrotatable and irreplaceable** — a DB restore
 > without the *matching* key yields undecryptable connector credentials. Back it up off-host (it lives
 > in `.env.prod`; see **[[backups]]**). Do **not** generate a fresh one on a restore.
 
@@ -370,8 +357,8 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > starts fine without it and an *unauthenticated* relay keeps working — but saving an SMTP **password**
 > returns a clean **409 and stores nothing at all** (the encrypt runs *before* the upsert, so the whole
 > save is rejected, not partially applied). A guided install generates the key, and **re-running
-> `./infra/start.sh` on an existing install now adds it for you** — local, BYOI and bundled-Zitadel
-> installs alike (ADR-0047 amendment 2026-09-26, see *Keys `start.sh` adds on an existing install*
+> `./infra/start.sh` on an existing install now adds it for you** — local and BYOI installs alike
+> (ADR-0047 amendment 2026-09-26, see *Keys `start.sh` adds on an existing install*
 > below). `--reconfigure` (local auth only) also adds it. `infra/update.sh` still never edits
 > `.env.prod`: it stops on the missing key, so either run `git pull` + `./infra/start.sh`, or add it by
 > hand:
@@ -433,8 +420,7 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 >   printed, never their values. A key that is already present — whatever its value or encoding — is
 >   left alone. A second run writes nothing.
 > - Keys that protect existing data or identity are **never** generated this way: `WORKFLOW_SECRET_KEY`,
->   `ZITADEL_MASTERKEY`, `AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD` /
->   `ZITADEL_DB_PASSWORD`, `MEILI_MASTER_KEY`. If one of those (or any other key the example defines) is
+>   `AUTH_SECRET`, `SESSION_SIGNING_SECRET`, `POSTGRES_PASSWORD`, `MEILI_MASTER_KEY`. If one of those (or any other key the example defines) is
 >   missing, `start.sh` only **names** it and tells you to add it by hand from the example's comment.
 > - `--dry-run` names what it would add and writes nothing.
 >
@@ -486,16 +472,16 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 
 ## 5. Backups & disaster recovery
 
-Configure backups before real use — see **[[backups]]**. The prod stack has **two** databases (the
-app DB **and** Zitadel's), and the DR linchpin `ZITADEL_MASTERKEY` lives in `infra/env/.env.prod`:
-back up **both** DBs **and** `.env.prod` off-host, or "restored the backup, nobody can log in." An
-opt-in `backup` profile sidecar automates the two DB dumps with retention (see [[backups]]).
+Configure backups before real use — see **[[backups]]**. The prod stack has **one** database, and
+the DR linchpin `WORKFLOW_SECRET_KEY` lives in `infra/env/.env.prod`: back up the DB **and**
+`.env.prod` off-host, together. An opt-in `backup` profile sidecar automates the DB dump with
+retention (see [[backups]]). Under BYOI, your IdP is backed up by its own procedure.
 
 ## 6. Resource sizing & limits
 
 The compose file sets a modest `mem_limit`/`cpus` per service (and `logging:` rotation so logs can't
 fill the disk). They cap a runaway service from OOM-ing the host; tune them to your box. The stack
-runs **eight** long-running containers (db, api, web, zitadel, zitadel_db, meilisearch, valkey, caddy)
+runs **six** long-running containers (db, api, web, meilisearch, valkey, caddy)
 plus the one-shot migrate. Suggested minimum host for a small team (≤50 assets): **2 vCPU / 4 GB RAM /
 20 GB disk**, growing with data and search volume. Watch `docker stats` and raise the limits if a
 service is constrained.
