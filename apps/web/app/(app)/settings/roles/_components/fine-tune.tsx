@@ -78,7 +78,7 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
             {PERMISSIONS_BY_DOMAIN.map(({ domain, permissions }) => (
               <fieldset key={domain} className="min-w-0 space-y-1">
                 <legend className="flex w-full items-center gap-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  <span className="flex-1">{domain}</span>
+                  <span className="flex-1">{t(`roles.permissions.domains.${domain}`)}</span>
                   {EDITABLE_ROLES.map((role) => (
                     <span key={role} className="w-14 text-center text-[10px]">
                       {t(`roles.meta.${role}.label`)}

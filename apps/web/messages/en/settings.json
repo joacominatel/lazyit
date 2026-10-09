@@ -632,6 +632,29 @@
           "MEMBER": "Members",
           "VIEWER": "Viewers"
         }
+      },
+      "domains": {
+        "asset": "Assets",
+        "application": "Applications",
+        "accessGrant": "Access grants",
+        "accessRequest": "Access requests",
+        "consumable": "Consumables",
+        "purchaseOrder": "Purchases",
+        "article": "Knowledge Base",
+        "location": "Locations",
+        "assetModel": "Asset models",
+        "category": "Categories",
+        "user": "Users",
+        "dashboard": "Dashboard",
+        "search": "Search",
+        "settings": "Settings",
+        "logs": "Activity logs",
+        "workflow": "Workflows",
+        "notification": "Notifications",
+        "secret": "Secret Manager",
+        "import": "Imports",
+        "infra": "Server map",
+        "ai": "AI assistant"
       }
     },
     "matrix": {

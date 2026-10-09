@@ -632,6 +632,29 @@
           "MEMBER": "Los Miembros",
           "VIEWER": "Los Observadores"
         }
+      },
+      "domains": {
+        "asset": "Activos",
+        "application": "Aplicaciones",
+        "accessGrant": "Concesiones de acceso",
+        "accessRequest": "Solicitudes de acceso",
+        "consumable": "Consumibles",
+        "purchaseOrder": "Compras",
+        "article": "Base de conocimiento",
+        "location": "Ubicaciones",
+        "assetModel": "Modelos de activo",
+        "category": "Categorías",
+        "user": "Usuarios",
+        "dashboard": "Panel",
+        "search": "Búsqueda",
+        "settings": "Configuración",
+        "logs": "Registros de actividad",
+        "workflow": "Flujos de trabajo",
+        "notification": "Notificaciones",
+        "secret": "Gestor de Secretos",
+        "import": "Importaciones",
+        "infra": "Mapa de servidores",
+        "ai": "Asistente de IA"
       }
     },
     "matrix": {
