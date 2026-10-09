@@ -5,13 +5,16 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderToStaticMarkup } from "react-dom/server";
 import common from "@/messages/en/common.json";
 import messages from "@/messages/en/aiSettings.json";
-import { AiDocumentExtractionSection } from "./ai-document-extraction-section";
+import {
+  AiDocumentExtractionSection,
+  DocumentExtractionDisclosure,
+} from "./ai-document-extraction-section";
 
 /**
  * The Settings → AI document extraction card (#1477), rendered to static markup (ADR-0012: no DOM runner):
- * off by default, the disclosure of what is sent to the provider on the card, and the switch disabled with
- * the reason while the assistant is off or its provider reads no documents — but usable while on, to turn
- * it off.
+ * off by default, and the switch disabled with the reason while the assistant is off or its provider reads
+ * no documents — but usable while on, to turn it off. What is sent to the provider sits in the switch's "?"
+ * tip and in the consent dialog turning it on opens (#1540) — both render `DocumentExtractionDisclosure`.
  */
 const BASE: AiSettings = {
   ...AI_SETTINGS_DEFAULTS,
@@ -32,14 +35,18 @@ const BASE: AiSettings = {
   updatedAt: null,
 };
 
-function render(settings: Partial<AiSettings>): string {
+function wrap(node: React.ReactNode): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <NextIntlClientProvider locale="en" timeZone="UTC" messages={{ aiSettings: messages, common }}>
-        <AiDocumentExtractionSection settings={{ ...BASE, ...settings }} />
+        {node}
       </NextIntlClientProvider>
     </QueryClientProvider>,
   );
+}
+
+function render(settings: Partial<AiSettings>): string {
+  return wrap(<AiDocumentExtractionSection settings={{ ...BASE, ...settings }} />);
 }
 
 /** Text as React writes it into markup (apostrophes and quotes escaped). */
@@ -54,12 +61,19 @@ function switchOf(html: string): string {
 const copy = messages.documentExtraction;
 
 describe("AiDocumentExtractionSection", () => {
-  test("off by default, usable with the assistant on, with what is sent spelled out on the card", () => {
+  test("off by default, usable with the assistant on; the disclosure sits behind the switch's tip", () => {
     const html = render({});
     const toggle = switchOf(html);
     expect(toggle).toContain('aria-checked="false"');
     expect(toggle).not.toContain(' disabled=""');
     expect(html).toContain(esc(copy.off));
+    expect(html).not.toContain(esc(copy.disclosure.egress));
+    expect(html).toContain(`aria-label="More about ${copy.switch.label}"`);
+  });
+
+  test("the disclosure spells out what is sent and that nothing is saved unreviewed", () => {
+    const html = wrap(<DocumentExtractionDisclosure />);
+    expect(html).toContain(esc(copy.disclosure.title));
     expect(html).toContain(esc(copy.disclosure.egress));
     expect(html).toContain(esc(copy.disclosure.review));
   });

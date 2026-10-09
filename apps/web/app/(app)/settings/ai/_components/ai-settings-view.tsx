@@ -3,20 +3,30 @@
 import {
   BookOpenIcon,
   CheckCircleIcon,
-  KeyIcon,
+  DocumentMagnifyingGlassIcon,
+  ExclamationTriangleIcon,
+  GlobeAltIcon,
+  LinkIcon,
   ServerIcon,
+  SparklesIcon,
 } from "@heroicons/react/24/outline";
+import type { AiSettings } from "@lazyit/shared";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import type { ComponentType, ReactNode } from "react";
 import { Callout } from "@/components/callout";
 import { HelpTip } from "@/components/help-tip";
 import { PageHeader } from "@/components/page-header";
+import { useRecordTab } from "@/components/record-page";
 import { ErrorState } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/ui/status-badge";
+import { StatusBadge, StatusDot } from "@/components/ui/status-badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAiConfig } from "@/lib/api/hooks/use-ai-config";
+import { cn } from "@/lib/utils";
 import { AdminGate } from "../../_components/admin-gate";
+import { AI_TABS, type AiTab, aiStatusTiles } from "../_lib/ai-status";
 import { AiConnectionEditor } from "./ai-connection-editor";
 import { AiDangerZone } from "./ai-danger-zone";
 import { AiDocumentExtractionSection } from "./ai-document-extraction-section";
@@ -27,27 +37,27 @@ import { AiWebSearchSection } from "./ai-web-search-section";
 
 /**
  * Settings → AI body (client; ADR-0097, docs/ai-assistant/frontend.md §5.1, §5.3). One read —
- * `GET /config/ai`, prefetched by the page — drives everything:
- *   - assistant OFF → the setup wizard (a saved draft resumes where it stopped);
- *   - assistant ON  → the provider & model editor and the danger zone;
- *   - always        → behaviour & limits, web search (#1389), purchase document extraction (#1477),
- *                     and the MCP card (its switch is independent of the provider).
- * `AdminGate` hides the page from callers without `settings:manage`; the API is the real gate.
+ * `GET /config/ai`, prefetched by the page — drives everything.
  *
- * A configuration page and little more (#1407): each control shows its label and at most one short
- * line; the explanations live in "?" `HelpTip`s and in the Manual (`ai-assistant-setup`), linked from
- * the header and from each tip. What leaves the server stays spelled out where it is decided — the
- * enable step's acknowledgement and the web search card — condensed, never hidden.
+ * Status tiles + tabs (#1540; ledger-design-language §4c): four tiles say at a glance what is on —
+ * Provider, Web search, Document reading, External agents (with the allowed-client count) — and each
+ * opens its tab. The tabs, in `?tab=`:
+ *   - Connection   — the setup wizard while the assistant is OFF (a saved draft resumes where it
+ *                    stopped), the provider & model editor and the danger zone while it is ON;
+ *   - Limits       — behaviour & limits;
+ *   - Capabilities — web search (#1389) and purchase document extraction (#1477), each switch asking
+ *                    for consent with the full "What leaves lazyit" disclosure when turned on;
+ *   - External agents — MCP and its allowed clients (independent of the provider).
+ * `AdminGate` hides the page from callers without `settings:manage`; the API is the real gate.
  */
 export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
   const t = useTranslations("aiSettings");
   const tCommon = useTranslations("common");
   const { data: settings, isLoading, isError, error, refetch } = useAiConfig();
 
-
   return (
     <AdminGate>
-      <div className="space-y-6">
+      <div className="space-y-5">
         <PageHeader
           title={t("page.title")}
           subtitle={t("page.subtitle")}
@@ -71,62 +81,181 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
 
         {isLoading ? (
           <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {AI_TABS.map((tab) => (
+                <Skeleton key={tab} className="h-[4.5rem] rounded-xl" />
+              ))}
+            </div>
             <Skeleton className="h-64 w-full rounded-xl" />
-            <Skeleton className="h-40 w-full rounded-xl" />
           </div>
         ) : isError || !settings ? (
           <ErrorState title={t("page.loadError")} onRetry={() => refetch()} error={error} />
         ) : (
-          <>
-            {justEnabled && settings.enabled ? (
-              <Callout tone="success" icon={<CheckCircleIcon />} role="status">
-                <p className="text-sm font-medium">{t("page.enabled.title")}</p>
-                <p className="text-sm">{t("page.enabled.body")}</p>
-              </Callout>
-            ) : null}
-
-            {!settings.keyConfigured ? (
-              <Callout tone="warning" icon={<KeyIcon />}>
-                <p className="flex items-center gap-1 text-sm font-medium">
-                  {t("page.secretKey.title")}
-                  <HelpTip topic={t("page.secretKey.title")} href={t("links.secretKey")}>
-                    <p>{t("page.secretKey.help")}</p>
-                  </HelpTip>
-                </p>
-                <p className="text-sm">{t("page.secretKey.body")}</p>
-              </Callout>
-            ) : null}
-
-            {settings.enabled ? (
-              <AiConnectionEditor settings={settings} />
-            ) : (
-              <AiSetupWizard settings={settings} />
-            )}
-
-            <AiLimitsEditor settings={settings} />
-
-            <AiWebSearchSection settings={settings} />
-
-            <AiDocumentExtractionSection settings={settings} />
-
-            <AiMcpSection settings={settings} />
-
-            <Callout tone="info" icon={<ServerIcon />}>
-              <p className="text-sm">
-                {t("page.serviceAccounts.body")}{" "}
-                <Link
-                  href="/settings/service-accounts"
-                  className="font-medium underline underline-offset-4"
-                >
-                  {t("page.serviceAccounts.link")}
-                </Link>
-              </p>
-            </Callout>
-
-            {settings.enabled ? <AiDangerZone settings={settings} /> : null}
-          </>
+          <AiSettingsBody settings={settings} justEnabled={justEnabled} />
         )}
       </div>
     </AdminGate>
+  );
+}
+
+function AiSettingsBody({ settings, justEnabled }: { settings: AiSettings; justEnabled: boolean }) {
+  const t = useTranslations("aiSettings");
+  const [tab, setTab] = useRecordTab<AiTab>(AI_TABS, "connection");
+  const tiles = aiStatusTiles(settings);
+
+  return (
+    <>
+      {justEnabled && settings.enabled ? (
+        <Callout tone="success" icon={<CheckCircleIcon />} role="status">
+          <p className="text-sm font-medium">{t("page.enabled.title")}</p>
+          <p className="text-sm">{t("page.enabled.body")}</p>
+        </Callout>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatusTile
+          icon={SparklesIcon}
+          label={t("tiles.provider")}
+          active={tab === "connection"}
+          onSelect={() => setTab("connection")}
+          value={tiles.provider.label ?? t("tiles.notConfigured")}
+          state={tiles.provider.state === "on"}
+          extra={
+            tiles.provider.state !== "on" ? (
+              <StatusBadge tone="warning">
+                {tiles.provider.state === "draft" ? t("tiles.draft") : t("tiles.missing")}
+              </StatusBadge>
+            ) : undefined
+          }
+        />
+        <StatusTile
+          icon={GlobeAltIcon}
+          label={t("tiles.webSearch")}
+          active={tab === "capabilities"}
+          onSelect={() => setTab("capabilities")}
+          value={tiles.webSearch ? t("page.statusOn") : t("page.statusOff")}
+          state={tiles.webSearch}
+        />
+        <StatusTile
+          icon={DocumentMagnifyingGlassIcon}
+          label={t("tiles.documents")}
+          active={tab === "capabilities"}
+          onSelect={() => setTab("capabilities")}
+          value={tiles.documents ? t("page.statusOn") : t("page.statusOff")}
+          state={tiles.documents}
+        />
+        <StatusTile
+          icon={LinkIcon}
+          label={t("tiles.agents")}
+          active={tab === "agents"}
+          onSelect={() => setTab("agents")}
+          value={t("tiles.agentsValue", {
+            state: tiles.agents.on ? t("page.statusOn") : t("page.statusOff"),
+            count: tiles.agents.clients,
+          })}
+          state={tiles.agents.on}
+        />
+      </div>
+
+      {!settings.keyConfigured ? (
+        <Callout tone="warning" icon={<ExclamationTriangleIcon />}>
+          <p className="flex flex-wrap items-center gap-1 text-sm font-medium">
+            {t("page.secretKey.title")}
+            <HelpTip topic={t("page.secretKey.title")} href={t("links.secretKey")}>
+              <p>{t("page.secretKey.body")}</p>
+              <p>{t("page.secretKey.help")}</p>
+            </HelpTip>
+          </p>
+        </Callout>
+      ) : null}
+
+      <Tabs value={tab} onValueChange={setTab} className="gap-4">
+        <TabsList aria-label={t("tabs.label")}>
+          {AI_TABS.map((key) => (
+            <TabsTrigger key={key} value={key}>
+              {t(`tabs.${key}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="connection" className="space-y-4">
+          {settings.enabled ? (
+            <AiConnectionEditor settings={settings} />
+          ) : (
+            <AiSetupWizard settings={settings} />
+          )}
+          {settings.enabled ? <AiDangerZone settings={settings} /> : null}
+        </TabsContent>
+
+        <TabsContent value="limits">
+          <AiLimitsEditor settings={settings} />
+        </TabsContent>
+
+        <TabsContent value="capabilities" className="space-y-4">
+          <AiWebSearchSection settings={settings} />
+          <AiDocumentExtractionSection settings={settings} />
+        </TabsContent>
+
+        <TabsContent value="agents" className="space-y-4">
+          <AiMcpSection settings={settings} />
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <ServerIcon className="size-4 shrink-0" aria-hidden />
+            <span>
+              {t("page.serviceAccounts.body")}{" "}
+              <Link
+                href="/settings/service-accounts"
+                className="font-medium text-foreground underline underline-offset-4"
+              >
+                {t("page.serviceAccounts.link")}
+              </Link>
+            </span>
+          </p>
+        </TabsContent>
+      </Tabs>
+    </>
+  );
+}
+
+/** One status tile: what it is, its state, and a click that opens its tab. */
+function StatusTile({
+  icon: Icon,
+  label,
+  value,
+  state,
+  extra,
+  active,
+  onSelect,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  /** On (green dot) or off (neutral dot). */
+  state: boolean;
+  extra?: ReactNode;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      className={cn(
+        "flex min-w-0 flex-col gap-1.5 rounded-xl bg-card px-4 py-3 text-left ring-1 ring-foreground/10 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring",
+        active && "ring-2 ring-primary/60",
+      )}
+    >
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="size-4 shrink-0" aria-hidden />
+        {label}
+      </span>
+      <span className="flex min-w-0 items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+          <StatusDot tone={state ? "success" : "neutral"} />
+          <span className="truncate">{value}</span>
+        </span>
+        {extra}
+      </span>
+    </button>
   );
 }
