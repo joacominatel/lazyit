@@ -15,7 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
  *
  * Depends only on globals: PrismaModule (@Global) for the ADMIN count + create, SearchModule
  * (@Global) for the search index sync, and the AuthModule's IDENTITY_PROVIDER token (@Global) for
- * the optional Zitadel mirror. The CSRF service + rate-limit guard are module-local.
+ * the local-mode check. The CSRF service + rate-limit guard are module-local.
  *
  * Roles & Permissions v2 P5 (ADR-0046): also provides {@link PermissionsConfigService} — the editable
  * role→permission matrix backend behind GET/PUT /config/permissions and GET /config/my-permissions.

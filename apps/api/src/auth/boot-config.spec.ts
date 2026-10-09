@@ -175,4 +175,79 @@ describe('validateBootConfig (fail-loud boot config)', () => {
       .join('\n');
     expect(logged).toContain('AUTH_TRUST_HOST');
   });
+
+  describe('bundled-Zitadel tripwire (ADR-0102 §7)', () => {
+    const loggedText = () =>
+      errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+
+    it('EXITS in OIDC mode with an active ZITADEL_MASTERKEY, naming the ADR and the runbook', () => {
+      expect(() =>
+        validateBootConfig({
+          ...OIDC_OK,
+          ZITADEL_MASTERKEY: 'a'.repeat(32),
+        }),
+      ).toThrow(ExitCalled);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      const logged = loggedText();
+      expect(logged).toContain('ZITADEL_MASTERKEY');
+      expect(logged).toContain('ADR-0102');
+      expect(logged).toContain(
+        'docs/05-runbooks/migrate-off-bundled-zitadel.md',
+      );
+    });
+
+    it('EXITS in OIDC mode when OIDC_JWKS_URI points at the bundled zitadel:8080', () => {
+      expect(() =>
+        validateBootConfig({
+          ...OIDC_OK,
+          OIDC_JWKS_URI: 'http://zitadel:8080/oauth/v2/keys',
+        }),
+      ).toThrow(ExitCalled);
+      expect(loggedText()).toContain('OIDC_JWKS_URI');
+    });
+
+    it('EXITS in OIDC mode when OIDC_ISSUER points at the bundled zitadel:8080', () => {
+      expect(() =>
+        validateBootConfig({ ...OIDC_OK, OIDC_ISSUER: 'http://zitadel:8080' }),
+      ).toThrow(ExitCalled);
+      expect(loggedText()).toContain('OIDC_ISSUER');
+    });
+
+    it('accepts an own IdP whose host merely contains "zitadel" (BYOI Zitadel Cloud)', () => {
+      expect(() =>
+        validateBootConfig({
+          ...OIDC_OK,
+          OIDC_ISSUER: 'https://acme.zitadel.cloud',
+          OIDC_JWKS_URI: 'https://acme.zitadel.cloud/oauth/v2/keys',
+        }),
+      ).not.toThrow();
+    });
+
+    it('treats an empty ZITADEL_MASTERKEY as inactive', () => {
+      expect(() =>
+        validateBootConfig({ ...OIDC_OK, ZITADEL_MASTERKEY: '' }),
+      ).not.toThrow();
+    });
+
+    it('ignores the leftovers outside OIDC mode, where nothing reads them', () => {
+      expect(() =>
+        validateBootConfig({
+          ...LOCAL_OK,
+          ZITADEL_MASTERKEY: 'a'.repeat(32),
+          OIDC_JWKS_URI: 'http://zitadel:8080/oauth/v2/keys',
+        }),
+      ).not.toThrow();
+    });
+
+    it('does not refuse on stale ZITADEL_MGMT_* or a legacy IDENTITY_PROVIDER_TYPE', () => {
+      expect(() =>
+        validateBootConfig({
+          ...OIDC_OK,
+          IDENTITY_PROVIDER_TYPE: 'zitadel',
+          ZITADEL_MGMT_PROJECT_ID: '123',
+          ZITADEL_MGMT_API_URL: 'http://idp.internal:8080',
+        }),
+      ).not.toThrow();
+    });
+  });
 });

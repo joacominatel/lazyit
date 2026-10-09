@@ -250,7 +250,7 @@ export interface ManualTaskSpec {
  *  - `SUCCEEDED` — the external operation completed; `externalCorrelationId` may carry the created
  *    external id (so a later revoke deprovisions the EXACT account).
  *  - `FAILED` — the operation failed; `retryable` tells the CORE whether a transient failure may be
- *    re-attempted (mirrors the zitadel-management posture: 4xx permanent, 5xx/429/network transient —
+ *    re-attempted (4xx permanent, 5xx/429/network transient —
  *    AND only when the step is idempotent, so a non-idempotent create is single-shot).
  *  - `AWAITING_INPUT` — a MANUAL step: `manualTask` is set and the run pauses in Postgres.
  */
@@ -306,12 +306,12 @@ export interface StepHandler<
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Shared outcome classification (the zitadel-management retry posture, mirrored)
+// Shared outcome classification (the retry posture)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * HTTP statuses worth a bounded retry: a transient upstream blip, NOT a permanent client error
- * (mirrors `zitadel-management.service.ts` `RETRYABLE_STATUSES`). `408` request-timeout, `429`
+ * `408` request-timeout, `429`
  * too-many-requests, and the `5xx` family. Any other `4xx` (esp. `400/401/403/404/409`) is permanent.
  */
 export const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([

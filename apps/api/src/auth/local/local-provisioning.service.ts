@@ -49,7 +49,7 @@ export class LocalProvisioningService {
 
   /**
    * Generate a strong random one-time password for an admin reset / provisioning hand-off. Satisfies the
-   * shared setup/temp password policy (Zitadel-default complexity: ≥8 chars with at least one upper, lower,
+   * shared setup/temp password policy (≥8 chars with at least one upper, lower,
    * digit and symbol) by construction — one of each class, then filled with URL-safe base64 entropy and
    * shuffled. Uses the CSPRNG (`node:crypto`), never `Math.random`. Returned to the admin ONCE (shown once,
    * never persisted in plaintext).
