@@ -5,15 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
-/**
- * Live password-complexity checklist for the local-mode password lifecycle (ADR-0086 §F4b). The rule
- * predicates mirror the shared `ZitadelPasswordSchema` (min 8, max 70, upper/lower/number/symbol)
- * rule-for-rule — the SAME policy `/setup` and admin temp-passwords enforce, so there is no drift —
- * plus a form-local confirm-match row. Labels come from `auth.password.checklist.*` (en + es).
- *
- * A view-only mirror of the setup wizard's checklist (kept local there to avoid refactoring shipped
- * code); the schema stays the single source of truth for validation — this is purely a UX affordance.
- */
+// UX only: mirrors the shared password schema rule-for-rule, which stays the validator (ADR-0086 §F4b).
 export function PasswordStrengthChecklist({
   password,
   confirmPassword,
