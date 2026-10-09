@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-09-26
+updated: 2026-10-09
 ---
 
 # UserHistory
@@ -15,8 +15,7 @@ updated: 2026-09-26
 An **append-only** log of discrete lifecycle events for a [[user]] — provisioning, profile edits,
 RBAC role changes, offboard (soft delete), restore and password-reset triggers. The User counterpart
 of [[asset-history]]: it closes the gap where the User entity, alone among the mutable domain entities,
-had no durable, queryable audit trail (only fire-and-forget IdP write-back log lines —
-[[0043-zitadel-source-of-truth]] §3). Provides the "what changed on this account, when, by whom?" trail
+had no durable, queryable audit trail (only fire-and-forget structured log lines). Provides the "what changed on this account, when, by whom?" trail
 auditing requires ([[problem-space]]), and feeds the [[recent-activity]] view's fifth source.
 
 ## Fields
@@ -53,8 +52,9 @@ Indexes: `(userId, id)` (the per-user timeline) and `(createdAt)` (powers the [[
 `{ sessionId, current }` — the user ended one of their local sessions from the device list, issue #1420,
 [[user-session]]; actor == subject). The
 `CREATED/UPDATED/DELETED/RESTORED` set mirrors [[asset-history]]; the rest are user-specific. `PASSWORD_RESET_SENT`
-records a reset **link** being sent to the subject — by the IdP in OIDC mode, or by lazyit's own SMTP when an
-admin picks the `email` delivery in local mode ([[0086-local-authentication-mode]] §5, amended by #1268);
+records a reset **link** being sent to the subject by lazyit's own SMTP when an admin picks the `email` delivery
+in local mode ([[0086-local-authentication-mode]] §5, amended by #1268); rows written before
+[[0102-remove-bundled-zitadel]] may record a reset the bundled IdP sent in OIDC mode;
 `PASSWORD_RESET_BY_ADMIN` records the other local delivery, an admin minting a **temp-password**; `PASSWORD_CHANGED`,
 `PASSWORD_RESET_REQUESTED` and `PASSWORD_RESET_COMPLETED` record the **self-service** local flows (the user changed
 their own password, a forgot-password reset link was **issued** for them, or they reset it via that email token —
@@ -67,18 +67,17 @@ admin-only (issue #1006).
 **Explicit service calls** (no interceptor), **transactional** with the change ([[0033-asset-history-event-model]]),
 all from the [[user]] service:
 
-- `create` → `CREATED` — emitted only on the **success path** (after the IdP mirror can no longer fail
-  and trigger the compensating hard-delete; the `Restrict` FK would otherwise block that rollback).
+- `create` → `CREATED`, right after the row is written. Nothing is written to the IdP and a created row is
+  never hard-deleted ([[0102-remove-bundled-zitadel]]).
 - `update` → `UPDATED` on a name / email / legajo / username edit (payload `{ fields }`, field names only),
   `DEACTIVATED` / `REACTIVATED` when `isActive` actually flips (a resend of the stored value logs nothing),
   `ROLE_CHANGED` on a role change (payload `{ from, to }`) and `MANAGER_CHANGED` on a manager change — each
-  that fired, all only **after** any IdP mirror commits (a reverted update never logs). The web UI, the API
+  that fired. The web UI, the API
   and an AI tool call (`user_update` dispatches to the same `PATCH /users/:id`) share this one emitter, so an
   AI-made change carries its `aiInvocationId`. Until issue #1375 an activation flip and a legajo/username
   edit wrote **no** row, so they never reached Reports; changes made before that release stay absent (no
   backfill — there is no trustworthy source).
-- `requestPasswordReset` → in OIDC mode, `PASSWORD_RESET_SENT` **after** the IdP call succeeds (422/501/503
-  never logs). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
+- `requestPasswordReset` → nothing in OIDC mode (it is always a 501; the IdP owns the reset). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
   the choice: `email` → `PASSWORD_RESET_SENT` after the mail is actually accepted by the relay (a 409/503
   never logs), with `sessionEpoch` bumped only if the admin opted in; `temporary-password` →
   `PASSWORD_RESET_BY_ADMIN` after the credential is reset, `sessionEpoch` **always** bumped (the stored hash
@@ -95,6 +94,9 @@ all from the [[user]] service:
   everywhere" (`POST /auth/logout`) writes no row, as before.
 - `remove`/`offboard` → `DELETED`, **inside** the offboarding transaction (atomic with the soft-delete).
 - `restore` → `RESTORED`, atomic with clearing `deletedAt`; the idempotent already-live path emits nothing.
+- `provisionLocalAccount` → `UPDATED` with payload `{ action: 'provisionLocalAccount', directoryOnly: false }`.
+  Rows with `{ action: 'provisionAccount', directoryOnly: false }` were written by the removed OIDC promotion
+  endpoint ([[0102-remove-bundled-zitadel]]); they stay as written and readable, and no new one is emitted.
 
 Actor: create/update/reset are human-only routes (`@CurrentUser` → `performedById`); offboard/restore
 attribute the full principal (`@CurrentPrincipal` → human XOR service account).
@@ -120,4 +122,4 @@ No dedicated read endpoint yet; the events surface via the [[recent-activity]] f
 Related: [[user]] · [[asset-history]] · [[recent-activity]] · [[service-account]] ·
 [[0050-user-history-and-activity-user-entity]] · [[0033-asset-history-event-model]] ·
 [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] · [[0048-service-accounts]] ·
-[[0043-zitadel-source-of-truth]]
+[[0102-remove-bundled-zitadel]]

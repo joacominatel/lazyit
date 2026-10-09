@@ -58,7 +58,7 @@ model User {
   // not IT's). Normalized (trim). Mutually exclusive with `managerId`.
   managerName    String?
   // Directory-only person (ADR-0069 amendment / ADR-0038 amendment): a row created by the bulk import
-  // for an asset's "assigned to" that has NO login and NO Zitadel mirror (externalId stays null, role
+  // for an asset's "assigned to" that has NO login and NO IdP identity (externalId stays null, role
   // stays VIEWER). It IS a User so AssetAssignment.userId (uuid FK) points at it with zero schema churn.
   // EXCLUDED from the bootstrap first-user→ADMIN count (jwt-auth.guard.ts:365) so importing people can
   // never hand ADMIN to a non-login row. Flips to false when the person first signs in via OIDC and the
@@ -359,7 +359,7 @@ enum PermissionAuditAction {
 
 /// A NON-HUMAN principal (ADR-0048): a CI runner, a script, an integration that calls the lazyit API
 /// without a person behind it. Deliberately a SEPARATE entity from `User` (not a `type` flag, not a
-/// Zitadel machine-user), so the human table — JIT provisioning, the last-admin / first-admin
+/// IdP machine-user), so the human table — JIT provisioning, the last-admin / first-admin
 /// invariants, `externalId` linkage — stays untouched. A service account NEVER has a `Role` and is
 /// NEVER ADMIN-equivalent; it is authorized solely by its direct `ServiceAccountPermission` grants.
 ///
@@ -1171,7 +1171,7 @@ enum AssetHistoryEventType {
 
 /// An append-only log of discrete lifecycle events for a User (DEBT-2, issue #185). The User entity's
 /// own audit trail — the counterpart of AssetHistory for the asset, closing the gap where Users had no
-/// queryable history (only fire-and-forget IdP write-back log lines). Append-only (ADR-0006): rows are
+/// queryable history (only structured log lines). Append-only (ADR-0006): rows are
 /// only ever INSERTed, never updated or deleted; `createdAt` only — no updatedAt / deletedAt. Emitted
 /// transactionally with the write it records (ADR-0033 pattern). Feeds the `recent_activity` view's
 /// fourth source (entityType "user"). See docs/02-domain/entities/user.md + ADR-0050.
@@ -1673,7 +1673,7 @@ model AccessGrant {
   // Applications Workflow Engine (ADR-0054, epic #248). The provisioning/deprovisioning runs this
   // grant triggered (WorkflowRun.accessGrantId). Restrict on that side: a grant with run history
   // can't be hard-deleted (grants are append-only anyway). The engine fires AFTER this grant's tx
-  // commits and NEVER rolls it back — the deliberate inverse of the Zitadel strong-coupling.
+  // commits and NEVER rolls it back.
   workflowRuns WorkflowRun[]
 
   // The self-service access request this grant was produced by, when it came from an approval
@@ -1904,7 +1904,7 @@ enum ConsumableMovementType {
 // enabled workflow behaves EXACTLY as today (ADR-0023) — granting access just records the
 // AccessGrant, one indexed lookup of overhead, nothing fires.
 //
-// THE DECOUPLING INVARIANT (the deliberate inverse of the Zitadel strong-coupling, ADR-0043/INV-5):
+// THE DECOUPLING INVARIANT:
 // the engine fires AFTER the AccessGrant transaction commits, NEVER inside it. A failing external
 // call never rolls back, blocks or 503s the grant. The grant is the source of truth; provisioning
 // is an eventually-consistent downstream effect surfaced as a FAILED run + notification.

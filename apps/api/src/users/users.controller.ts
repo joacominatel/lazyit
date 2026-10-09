@@ -13,14 +13,12 @@ import {
   Post,
   Query,
   Req,
-  Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import type { Request } from 'express';
 import {
   ApiBody,
   ApiCreatedResponse,
-  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -366,9 +364,8 @@ export class UsersController {
       'Self-service: only `firstName` and `lastName` are accepted — any other key (email, role, legajo, ' +
       'username, manager, …) is a 400; those stay on the ADMIN-only `PATCH /users/:id`. 409 ' +
       '`PROFILE_MANAGED_BY_DIRECTORY` when the AD/LDAP directory sync owns the person (ADR-0091) — the ' +
-      'next sync would overwrite it. Service accounts are refused (403). Mirrored to the bundled IdP ' +
-      'like an admin edit (503 + revert on failure) and recorded as an UPDATED user-history row with ' +
-      'the caller as actor.',
+      'next sync would overwrite it. Service accounts are refused (403). Recorded as an UPDATED ' +
+      'user-history row with the caller as actor.',
   })
   @ApiBody({ type: UpdateOwnProfileDto })
   @ApiOkResponse({ type: UserDto })
@@ -471,7 +468,7 @@ export class UsersController {
   })
   @ApiCreatedResponse({ type: UserDto })
   create(@Body() dto: CreateUserDto, @CurrentUser() actor?: User) {
-    // Pass the actor so the service can attribute the IdP write-back audit line (ADR-0043 §3).
+    // Pass the actor so the service attributes the CREATED user-history row.
     return this.users.create(dto, this.actor.resolve(actor));
   }
 
@@ -507,10 +504,8 @@ export class UsersController {
     summary:
       'Update a user — ADMIN only. Can change first/last name, email and the RBAC role.',
     description:
-      'Name/email/role edits are mirrored back to the IdP (Zitadel) inside a no-split-brain ' +
-      'transaction: if the Zitadel write fails the local change is reverted and the request is 503 ' +
-      '(issue #149). The email is the account-linking key and is written pre-verified, so it never ' +
-      'forces re-verification. externalId can never be set here (SEC-006).',
+      'A plain database write; nothing is written to the identity provider (ADR-0102). externalId ' +
+      'can never be set here (SEC-006).',
   })
   @ApiOkResponse({ type: UserDto })
   update(
@@ -526,15 +521,13 @@ export class UsersController {
 
   @Post(':id/reset-password')
   @RequirePermission('user:manage')
-  @HttpCode(204)
+  @HttpCode(200)
   @ApiOperation({
     summary:
       'Trigger a password reset for a user — ADMIN only (issue #149, #1268)',
     description:
-      'OIDC mode: asks the identity provider to send the user a password-reset link. lazyit NEVER ' +
-      'stores, sets or sends a password (ADR-0016/0037): Zitadel emails the link via ZITADEL’s own ' +
-      'SMTP. Returns 204 No Content, and a `delivery` in the body is a 400 (the IdP owns the reset ' +
-      'there, so a choice would be silently ignored). LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there ' +
+      'OIDC mode: 501 ("managed by your identity provider") — the operator’s IdP owns the credential ' +
+      'and its reset (ADR-0102 §5). LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there ' +
       'is no IdP, so the ADMIN chooses the delivery (issue #1268). `temporary-password` — also the ' +
       'behavior when NO body is sent, keeping older web builds working — mints a one-time password, ' +
       'sets mustChangePassword, ALWAYS revokes the user’s sessions (the stored hash was replaced) and ' +
@@ -542,15 +535,9 @@ export class UsersController {
       'it via the instance SMTP, revoking sessions only when revokeSessions is true. Unlike the public ' +
       'forgot-password flow this one reports honestly: 409 { reason: smtp-not-configured | ' +
       'origin-unknown } when it cannot be sent, 503 when the relay refuses — never a false success. ' +
-      '422 if the user is inactive (both modes) or is a directory-only person (local); 501 ("managed by ' +
-      'your identity provider") under BYOI / generic OIDC or for a user not linked to the IdP; 503 if ' +
-      'the Zitadel Management call fails.',
+      '422 if the user is inactive (both modes) or is a directory-only person (local).',
   })
   @ApiBody({ type: AdminPasswordResetRequestDto, required: false })
-  @ApiNoContentResponse({
-    description:
-      'OIDC mode: reset notification triggered (Zitadel will email the link).',
-  })
   // Documented as a schema rather than a createZodDto class: the outcome is a DISCRIMINATED UNION, and
   // createZodDto only accepts a single object schema.
   @ApiOkResponse({
@@ -589,17 +576,16 @@ export class UsersController {
   async resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
     // Typed `unknown`, NOT as the DTO: the global ZodValidationPipe validates any parameter whose metatype
     // is a ZodDto, and an absent body arrives from express.json as `{}` — which the (delivery-requiring)
     // schema would reject with a 400. The body must stay OPTIONAL so an operator who updates the API
     // before the web build keeps a working reset button (CLAUDE.md §8), so it is parsed explicitly below.
     @Body() body: unknown,
     @CurrentUser() actor?: User,
-  ): Promise<AdminPasswordResetOutcome | void> {
+  ): Promise<AdminPasswordResetOutcome> {
     const dto = parseResetPasswordBody(body);
     try {
-      const result = await this.users.requestPasswordReset(
+      return await this.users.requestPasswordReset(
         id,
         this.actor.resolve(actor),
         {
@@ -613,15 +599,9 @@ export class UsersController {
           linkOrigin: resolveResetLinkOrigin(process.env, req.headers),
         },
       );
-      // LOCAL mode returns the delivery outcome → 200 with a body (override the @HttpCode(204) default
-      // via the passthrough response). OIDC mode returns null → keep the byte-identical 204 No Content.
-      if (result) {
-        res.status(200);
-        return result;
-      }
     } catch (err) {
-      // BYOI (or a user with no IdP link) cannot trigger a reset: surface that HONESTLY as a 501 rather
-      // than a misleading 2xx (INV-4). Every other error (404/422/503) propagates unchanged.
+      // OIDC cannot trigger a reset: surface that HONESTLY as a 501 rather than a misleading 2xx (INV-4).
+      // Every other error (404/409/422/503) propagates unchanged.
       if (err instanceof PasswordResetUnsupportedError) {
         throw new NotImplementedException(err.message);
       }
@@ -703,35 +683,9 @@ export class UsersController {
     return this.users.restore(id, this.actor.resolveActor(principal));
   }
 
-  // The manual "Crear cuenta OIDC" promotion (ADR-0069 §0 #3): take an existing DIRECTORY
-  // person (no login) and provision its IdP account NOW — the explicit counterpart to the auto-claim by
-  // verified-email login (ADR-0038). ADMIN-only (same `user:manage` gate as every other user mutation).
-  @Post(':id/provision-account')
-  @RequirePermission('user:manage')
-  @ApiOperation({
-    summary:
-      'Provision an OIDC account for a directory person — ADMIN only (ADR-0069)',
-    description:
-      'Promotes a directory-only person (created by the bulk import, no login) into a real account: ' +
-      'creates the user in the bundled identity provider (Zitadel), sets externalId and flips ' +
-      'directoryOnly to false, all without a split-brain (IdP first, then the local update + audit in ' +
-      'one transaction). 400 if the target is not a directory person, already has an account, or has no ' +
-      'email (Zitadel requires one); 503 if the IdP create fails. Only the bundled-management IdP can ' +
-      'provision here.',
-  })
-  @ApiCreatedResponse({ type: UserDto })
-  provisionAccount(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() actor?: User,
-  ) {
-    // Pass the actor so the service attributes the audited UPDATED history row + the IdP write-back line.
-    return this.users.provisionAccount(id, this.actor.resolve(actor));
-  }
-
-  // The LOCAL-mode counterpart to provision-account (ADR-0086 §5 amendment, issue #1072): onboard a
-  // directory person by minting a ONE-TIME temporary password so an imported, login-less person can sign
-  // in. Distinct route (not a mode-branch on provision-account) because the response shape differs — this
-  // returns the temp password once, not the promoted User. ADMIN-only (same `user:manage` gate).
+  // LOCAL-mode onboarding (ADR-0086 §5 amendment, issue #1072): onboard a directory person by minting a
+  // ONE-TIME temporary password so an imported, login-less person can sign in. ADMIN-only (same
+  // `user:manage` gate).
   @Post(':id/provision-local-account')
   @RequirePermission('user:manage')
   @ApiOperation({
@@ -741,8 +695,8 @@ export class UsersController {
       'AUTH_MODE=local only: mints a one-time temporary password for a directory-only person (created by ' +
       'the bulk import, no login), hashes it, sets mustChangePassword, flips directoryOnly to false so the ' +
       'account can sign in, and returns the temp password ONCE (shown once, never stored in plaintext). ' +
-      'The existing role is kept (no privilege widening). 400 outside local mode (use provision-account ' +
-      'for the bundled Zitadel) or when the target is not a directory person; 404 if missing.',
+      'The existing role is kept (no privilege widening). 400 outside local mode or when the target is ' +
+      'not a directory person; 404 if missing.',
   })
   @ApiCreatedResponse({
     type: AdminPasswordResetResultDto,

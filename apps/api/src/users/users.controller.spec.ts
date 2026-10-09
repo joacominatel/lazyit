@@ -288,8 +288,9 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
 
 /**
  * POST /users/:id/reset-password (issue #149). The endpoint delegates to the service and must (1) return
- * 204 on success, and (2) map the service's PasswordResetUnsupportedError (BYOI / no IdP link) to an
- * HONEST 501 — never a 2xx that pretends a reset was sent (INV-4). Other errors propagate unchanged.
+ * 200 with the local delivery outcome, and (2) map the service's PasswordResetUnsupportedError (OIDC,
+ * ADR-0102 §5) to an HONEST 501 — never a 2xx that pretends a reset was sent (INV-4). Other errors
+ * propagate unchanged.
  */
 describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
   let app: INestApplication;
@@ -342,34 +343,27 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
     delete process.env.AUTH_TRUST_HOST;
   });
 
-  it('returns 204 and calls the service when the reset is triggered', async () => {
-    requestPasswordReset.mockResolvedValue(undefined);
-    const res = await request(app.getHttpServer()).post(
-      `/users/${VALID_ID}/reset-password`,
-    );
-    expect(res.status).toBe(204);
-    // Issue #1268 added the options argument; with NO body it carries no delivery choice, so the
-    // service takes exactly the pre-#1268 path.
-    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
-      linkOrigin: null,
-    });
-  });
+  const TEMP_PASSWORD_OUTCOME = {
+    delivery: 'temporary-password',
+    temporaryPassword: 'Temp-9xZ!',
+    sessionsRevoked: true,
+  };
 
   it('returns 200 with the temp password when the service mints one (local mode — ADR-0086 §5)', async () => {
-    requestPasswordReset.mockResolvedValue({
-      delivery: 'temporary-password',
-      temporaryPassword: 'Temp-9xZ!',
-      sessionsRevoked: true,
-    });
+    requestPasswordReset.mockResolvedValue(TEMP_PASSWORD_OUTCOME);
     const res = await request(app.getHttpServer()).post(
       `/users/${VALID_ID}/reset-password`,
     );
     expect(res.status).toBe(200);
     // A superset of the pre-#1268 body: an older web build reading `.temporaryPassword` still works.
     expect(res.body).toMatchObject({ temporaryPassword: 'Temp-9xZ!' });
+    // With NO body the service gets no delivery choice, so it takes the pre-#1268 default path.
+    expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
+      linkOrigin: null,
+    });
   });
 
-  it('maps PasswordResetUnsupportedError (BYOI / no IdP link) to 501, not a 2xx', async () => {
+  it('maps PasswordResetUnsupportedError (OIDC) to 501, not a 2xx', async () => {
     requestPasswordReset.mockRejectedValue(new PasswordResetUnsupportedError());
     const res = await request(app.getHttpServer()).post(
       `/users/${VALID_ID}/reset-password`,
@@ -409,13 +403,13 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
   });
 
   it('treats an EMPTY body as no choice (the pre-#1268 request an older web build still sends)', async () => {
-    requestPasswordReset.mockResolvedValue(undefined);
+    requestPasswordReset.mockResolvedValue(TEMP_PASSWORD_OUTCOME);
 
     const res = await request(app.getHttpServer())
       .post(`/users/${VALID_ID}/reset-password`)
       .send({});
 
-    expect(res.status).toBe(204);
+    expect(res.status).toBe(200);
     expect(requestPasswordReset).toHaveBeenCalledWith(VALID_ID, 'actor-1', {
       linkOrigin: null,
     });
@@ -431,7 +425,7 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
   });
 
   it('derives the link origin from the request host ONLY under AUTH_TRUST_HOST (ADR-0087 LAN mode)', async () => {
-    requestPasswordReset.mockResolvedValue(undefined);
+    requestPasswordReset.mockResolvedValue(TEMP_PASSWORD_OUTCOME);
 
     await request(app.getHttpServer())
       .post(`/users/${VALID_ID}/reset-password`)
