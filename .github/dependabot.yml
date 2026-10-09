@@ -10,7 +10,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
 
-  # Dockerfiles in infra/docker/ (api, web, migrate, zitadel-bootstrap).
+  # Dockerfiles in infra/docker/ (api, web, migrate).
   - package-ecosystem: docker
     directory: /infra/docker
     target-branch: "dev"
