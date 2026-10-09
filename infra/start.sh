@@ -16,22 +16,24 @@
 #
 # IT STOPS AT THE WATER'S EDGE (does NOT duplicate existing assets):
 #   - the in-app /setup wizard creates the first ADMIN  → the script NEVER creates a user.
-#   - the zitadel-bootstrap sidecar does ALL Zitadel plumbing (ADR-0043) → the script NEVER
-#     calls a Zitadel API nor generates OIDC client creds.
+#   - OIDC is bring-your-own-IdP (ADR-0102): the operator registers the client in their IdP and
+#     the script only records the values it is given — it NEVER calls an IdP API.
 #
 # SAFETY (the non-negotiable core):
 #   - IDEMPOTENT + NON-DESTRUCTIVE. If an install is detected (infra/env/.env.prod exists OR a
 #     lazyit-prod_* volume is present), generation is SKIPPED and we go straight to `up`.
-#   - ZITADEL_MASTERKEY (the unrotatable DR linchpin) is NEVER regenerated and existing secrets
+#   - WORKFLOW_SECRET_KEY (the unrotatable DR linchpin) is NEVER regenerated and existing secrets
 #     are NEVER overwritten. There is NO teardown / down -v / volume rm path anywhere here.
+#   - An install still wired to the removed bundled Zitadel is REFUSED before anything is written
+#     (ADR-0102 §7) — see refuse_bundled_leftovers.
 #   - The ONE write on an existing install (ADR-0047 amendment 2026-09-26): keys on the explicit
 #     SAFE_GENERATABLE_KEYS allowlist that this release's .env.prod.example defines and .env.prod lacks
 #     are APPENDED (backup first, existing lines untouched, file stays 600, names printed, never values).
 #     See add_missing_safe_keys. Nothing else in an existing .env.prod is ever written.
 #
 # Decisions that are PRINT-ONLY by design (the script never auto-edits compose/Caddyfile):
-#   BYOI (bring-your-own-IdP), external Postgres, and TLS/HSTS for a real domain. The script
-#   prints the exact manual instruction; the operator applies it.
+#   external Postgres, and TLS/HSTS for a real domain. The script prints the exact manual
+#   instruction; the operator applies it.
 #
 # Usage:
 #   ./infra/start.sh                 # interactive guided bootstrap (recommended)
@@ -51,7 +53,8 @@
 #   real  — public FQDN + optional Let's Encrypt (unchanged).
 #
 # Docs: docs/05-runbooks/docker-prod-like-first-boot.md · docs/05-runbooks/deploy-self-hosted.md
-#       ADR-0047 (this script) · ADR-0028 (secrets) · ADR-0025 (containerization) · ADR-0043 (Zitadel).
+#       ADR-0047 (this script) · ADR-0028 (secrets) · ADR-0025 (containerization) · ADR-0086 (auth
+#       modes) · ADR-0102 (no bundled IdP).
 # =============================================================================
 set -eu
 
@@ -63,23 +66,11 @@ ENV_EXAMPLE="infra/env/.env.prod.example"
 ENV_FILE="${LAZYIT_ENV_FILE:-infra/env/.env.prod}"
 COMPOSE_BASE="compose.yaml"
 COMPOSE_PROD="infra/docker-compose.prod.yaml"
-COMPOSE_OIDC="infra/docker-compose.oidc.yaml"   # OIDC overlay (bundled Zitadel); ADR-0086
 PROD_PROJECT="lazyit-prod"        # the prod compose project name (volumes are lazyit-prod_*)
 
 # Resource floor (WARN only, never hard-fail) — the runbook minimum for a small team.
 MIN_RAM_MB=4096
 MIN_DISK_MB=20480
-
-# Zitadel FirstInstance default org when ZITADEL_FIRSTINSTANCE_ORG_NAME is unset (upstream default).
-# Console loginname = {ZITADEL_ADMIN_USERNAME}@{org_slug}.{ZITADEL_EXTERNALDOMAIN}.
-ZITADEL_DEFAULT_ORG_SLUG=zitadel
-
-# ---------- helpers ----------------------------------------------------------
-# Full Zitadel console loginname (username@org.{external domain}) for operator messaging.
-zitadel_console_login() {
-  _user="${1:?}"; _extdomain="${2:?}"
-  printf '%s@%s.%s' "$_user" "$ZITADEL_DEFAULT_ORG_SLUG" "$_extdomain"
-}
 
 # ---------- flags ------------------------------------------------------------
 ASSUME_YES=0
@@ -94,15 +85,13 @@ WEB_ORIGIN_VAL="https://localhost:8443"  # UNSET (empty) in lan mode — the app
 WEB_ORIGIN_DISPLAY="https://localhost:8443"  # human-facing URL for the banner (lan has no fixed origin)
 # AUTH_TRUST_HOST (ADR-0087): render_env_file emits it =true in lan mode (keyed off DEPLOY_MODE), unset
 # otherwise. It is the contract that makes the api reflect the request Origin + the web trust the Host.
-AUTH_SUBDOMAIN="auth.localhost"   # ZITADEL_EXTERNALDOMAIN
-ISSUER_URL="https://auth.localhost:8443"
-ZITADEL_ADMIN_USERNAME="admin"
 TLS_EMAIL=""                      # set only for a real domain with Let's Encrypt
 HTTP_PORT="8080"
 HTTPS_PORT="8443"
-IDP_MODE="local"                  # local | bundled | byoi  (ADR-0086 — local is the default)
-AUTH_MODE_VAL="local"             # derived: local -> "local"; bundled/byoi -> "oidc"
+IDP_MODE="local"                  # local | byoi  (ADR-0086 — local is the default; ADR-0102)
+AUTH_MODE_VAL="local"             # derived: local -> "local"; byoi -> "oidc"
 BYOI_ISSUER=""
+BYOI_JWKS_URI=""
 BYOI_CLIENT_ID=""
 BYOI_CLIENT_SECRET=""
 PG_MODE="internal"                # internal | external
@@ -110,9 +99,7 @@ EXTERNAL_DATABASE_URL=""
 ENABLE_BACKUP=0
 
 # Secrets (filled by generate_secrets); declared here so `set -u` never trips.
-MASTERKEY=""
 POSTGRES_PASSWORD=""
-ZITADEL_DB_PASSWORD=""
 MEILI_MASTER_KEY=""
 AUTH_SECRET=""
 WORKFLOW_SECRET_KEY=""
@@ -120,7 +107,6 @@ SMTP_SECRET_KEY=""                # instance SMTP password at-rest key (ADR-0079
 AI_SECRET_KEY=""                  # AI provider API key at-rest key (ADR-0097); optional, own axis, never reuse another key
 DIRECTORY_SECRET_KEY=""           # LDAP bind password at-rest key (ADR-0091); optional, own axis, never reuse another key
 SESSION_SIGNING_SECRET=""         # local-mode HMAC session key (ADR-0086); generated always, written in local mode
-ZITADEL_ADMIN_PASSWORD=""
 DATABASE_URL_VAL=""
 
 # =============================================================================
@@ -151,8 +137,8 @@ WHAT IT DOES
 OPTIONS
   --reconfigure                  Re-run the network-mode / host / ports questions on an EXISTING
                                  install and re-render infra/env/.env.prod, PRESERVING every secret
-                                 already in the file (ZITADEL_MASTERKEY, WORKFLOW/SESSION/AUTH
-                                 secrets, DB creds — read back, never regenerated) and touching NO
+                                 already in the file (WORKFLOW/SESSION/AUTH secrets, DB creds —
+                                 read back, never regenerated) and touching NO
                                  volumes. Use it when your LAN IP changed (DHCP) or to switch
                                  network mode (e.g. localhost-HTTPS -> host-agnostic LAN HTTP).
                                  AUTH_MODE stays immutable (local<->oidc is refused, per ADR-0086).
@@ -165,18 +151,19 @@ THE ~6 QUESTIONS (interactive mode only)
   1. Network / TLS mode   — 'lan' plain-HTTP host-agnostic (trusted LAN), 'local' localhost
                             internal-CA HTTPS, or 'real' public FQDN + TLS (ADR-0087). lan implies
                             AUTH_MODE=local and prints an unencrypted-session warning.
-  2. Public domain (FQDN) — real mode only (-> auth.{domain}; hosts-file note printed).
+  2. Public domain (FQDN) — real mode only.
   3. TLS                  — real mode: Caddy internal CA vs Let's Encrypt (-> ACME email).
   4. Host ports for Caddy — lan/local default 8080; real offers 80/443.
-  5. Authentication       — local/real: built-in accounts (DEFAULT) vs bundled Zitadel OIDC vs
-                            BYOI (ADR-0086). lan forces built-in accounts.
+  5. Authentication       — local/real: built-in accounts (DEFAULT) vs BYOI, your own OIDC IdP
+                            (ADR-0086, ADR-0102). lan forces built-in accounts.
   6. Postgres             — bundled internal db (default) vs external (prints the manual step).
      (+ a yes/no: enable the opt-in backup sidecar now.)
 
 BOUNDARY
   This script does NOT create any user (that is the in-app /setup wizard) and does NOT call
-  any Zitadel API or generate OIDC creds (that is the zitadel-bootstrap sidecar). It only
+  any IdP API or register an OIDC client (with BYOI you register it in your own IdP). It only
   renders the env file and invokes the existing prod compose. It never tears anything down.
+  An install still wired to the removed bundled Zitadel is refused, with nothing changed.
 EOF
 }
 
@@ -192,7 +179,10 @@ ask() {
   else
     printf '%s: ' "$_prompt" >&2
   fi
-  IFS= read -r _ans || _ans=""
+  if ! IFS= read -r _ans; then
+    # stdin is closed: a validated prompt with no default would otherwise re-ask forever.
+    [ -n "$_ans" ] || [ -n "$_default" ] || die "no answer for '$_prompt': input ended and there is no default."
+  fi
   [ -z "$_ans" ] && _ans=$_default
   printf '%s' "$_ans"
 }
@@ -235,7 +225,7 @@ has_ctrl_or_newline() {
 ask_text() {
   _p=$1; _d=$2; _vfn=$3; _hint=$4
   while :; do
-    _val=$(ask "$_p" "$_d")
+    _val=$(ask "$_p" "$_d") || exit 1
     if has_ctrl_or_newline "$_val"; then
       if [ "$ASSUME_YES" -eq 1 ]; then
         die "value for '$_p' contains a newline or control character — refusing (it could inject an env line)."
@@ -301,6 +291,16 @@ valid_issuer_url() {
     *) return 0 ;;
   esac
 }
+valid_jwks_url() {
+  # Same shape as an issuer, but http:// is allowed: a JWKS URL may be an internal split-DNS address.
+  case "$1" in
+    http://*) valid_issuer_url "https://${1#http://}" ;;
+    *)        valid_issuer_url "$1" ;;
+  esac
+}
+valid_nonempty() {
+  [ -n "$1" ]
+}
 valid_database_url() {
   # postgresql://user:pass@host:port/db?... — we only assert the scheme + an '@host' and reject
   # control chars (already handled). Password may contain symbols, so we DON'T charset-restrict it;
@@ -312,7 +312,7 @@ valid_database_url() {
   esac
 }
 
-# ---------- host-port availability (Caddy only; DB/Meili/Zitadel are internal) ----
+# ---------- host-port availability (Caddy only; DB/Meili are internal) ----
 port_in_use() {
   _p=$1
   if command -v ss >/dev/null 2>&1; then
@@ -350,21 +350,11 @@ check_free_port() {
 generate_secrets() {
   step "Generating secrets"
 
-  # ZITADEL_MASTERKEY must be EXACTLY 32 chars (16 hex bytes -> 32 hex chars). Assert before use.
-  MASTERKEY=$(openssl rand -hex 16)
-  if [ "${#MASTERKEY}" -ne 32 ]; then
-    die "internal error: generated ZITADEL_MASTERKEY is ${#MASTERKEY} chars, expected exactly 32. Aborting (a wrong length is a guaranteed Zitadel first-boot failure)."
-  fi
-  ok "ZITADEL_MASTERKEY generated (exactly 32 chars — verified)"
-
   # POSTGRES_PASSWORD is substituted VERBATIM into DATABASE_URL (postgresql://lazyit:<pw>@db:5432/...),
   # so it MUST be URL-safe: a base64 '/' (or any of : @ ? #) terminates the URL authority early and
   # Prisma rejects it with "P1013: invalid port number in database URL" — failing the migrate job
   # (~40% of base64 passwords contain a '/'). hex is fully URL-safe and keeps 192 bits of entropy.
   POSTGRES_PASSWORD=$(openssl rand -hex 24)
-  # ZITADEL_DB_PASSWORD is passed as a discrete Postgres field (never embedded in a URL), so base64
-  # is fine here — but hex keeps the secret recipe uniform and avoids a future URL-embedding footgun.
-  ZITADEL_DB_PASSWORD=$(openssl rand -hex 24)
   # Guard the invariant for whoever edits the recipe next: POSTGRES_PASSWORD goes inside DATABASE_URL,
   # so it must carry none of the URL-authority delimiters (/ : @ ? #). Fail loud rather than emit an
   # env file that only breaks later at the migrate step with an opaque Prisma P1013.
@@ -373,13 +363,13 @@ generate_secrets() {
   esac
   MEILI_MASTER_KEY=$(openssl rand -base64 24)
   AUTH_SECRET=$(openssl rand -base64 33)
-  ok "POSTGRES_PASSWORD / ZITADEL_DB_PASSWORD / MEILI_MASTER_KEY / AUTH_SECRET generated"
+  ok "POSTGRES_PASSWORD / MEILI_MASTER_KEY / AUTH_SECRET generated"
 
   # WORKFLOW_SECRET_KEY — AES-256-GCM master key for the Applications Workflow Engine's encrypted
   # connector-credential store (WorkflowSecret, ADR-0054). Must be EXACTLY 32 bytes -> 64 hex chars
   # (openssl rand -hex 32). The engine FAILS LOUD at boot if it is missing/wrong length, and it is the
-  # THIRD unrotatable DR linchpin (alongside ZITADEL_MASTERKEY + POSTGRES_PASSWORD): a DB restore
-  # without the matching key yields undecryptable connector credentials. See docs/05-runbooks/backups.md.
+  # unrotatable DR linchpin (alongside POSTGRES_PASSWORD): a DB restore without the matching key yields
+  # undecryptable connector credentials. See docs/05-runbooks/backups.md.
   WORKFLOW_SECRET_KEY=$(openssl rand -hex 32)
   if [ "${#WORKFLOW_SECRET_KEY}" -ne 64 ]; then
     die "internal error: generated WORKFLOW_SECRET_KEY is ${#WORKFLOW_SECRET_KEY} chars, expected exactly 64 (32 hex bytes). Aborting (a wrong length fails the engine's boot check)."
@@ -427,18 +417,13 @@ generate_secrets() {
   # (ADR-0086 §4). Required ONLY in local mode; the boot-config refine demands >= 32 chars and fails loud
   # at boot otherwise (mirrors WORKFLOW_SECRET_KEY). openssl rand -hex 32 -> 64 hex chars. Generated in
   # EVERY mode (cheap, uniform recipe); render_env_file writes it active in local mode, commented in OIDC.
-  # NOT a hard DR linchpin — rotating it only forces re-login (no data loss), unlike ZITADEL_MASTERKEY /
-  # WORKFLOW_SECRET_KEY. See docs/05-runbooks/backups.md.
+  # NOT a hard DR linchpin — rotating it only forces re-login (no data loss), unlike WORKFLOW_SECRET_KEY.
+  # See docs/05-runbooks/backups.md.
   SESSION_SIGNING_SECRET=$(openssl rand -hex 32)
   if [ "${#SESSION_SIGNING_SECRET}" -ne 64 ]; then
     die "internal error: generated SESSION_SIGNING_SECRET is ${#SESSION_SIGNING_SECRET} chars, expected exactly 64 (32 hex bytes). Aborting (local-mode boot asserts >= 32)."
   fi
   ok "SESSION_SIGNING_SECRET generated (exactly 64 hex chars — verified)"
-
-  # Zitadel console admin password — random, complexity-compliant (upper+lower+digit+symbol),
-  # surfaced ONCE at the end. base64 gives upper/lower/digit; append a guaranteed symbol + Aa1.
-  ZITADEL_ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '\n')_Aa1!"
-  ok "Zitadel console admin password generated (shown once, at the end)"
 
   # The app DATABASE_URL must embed POSTGRES_PASSWORD identically (internal mode). For external
   # mode the operator gave us a full URL — use it verbatim.
@@ -457,6 +442,17 @@ generate_secrets() {
 # The template defaults to the committed example (fresh install). For --reconfigure it is the EXISTING
 # .env.prod, so any operator customisation to NON-owned keys (backup cron, import size, …) is preserved
 # — only the owned network/secret keys are rewritten (secrets from the globals hydrated by load_existing_env).
+# oidc_line KEY VALUE — an OIDC client line: active in BYOI (commented if left empty), unset in local mode.
+oidc_line() {
+  if [ "$IDP_MODE" = "byoi" ] && [ -n "$2" ]; then
+    printf '%s=%s\n' "$1" "$2"
+  elif [ "$IDP_MODE" = "byoi" ]; then
+    printf '# %s=  # not set\n' "$1"
+  else
+    printf '# %s=  # unset in local mode (AUTH_MODE=local — no OIDC IdP)\n' "$1"
+  fi >>"$_tmp"
+}
+
 render_env_file() {
   _template="${1:-$ENV_EXAMPLE}"
   step "Rendering $ENV_FILE (template: $_template)"
@@ -482,7 +478,7 @@ render_env_file() {
 
   # Create the temp file with mode 600 FROM CREATION — BEFORE a single secret is written.
   # A plain `: >"$_tmp"` honours the shell umask (022 -> 644), leaving the full secret set
-  # (incl. the unrotatable ZITADEL_MASTERKEY) world-readable in a world-traversable dir for
+  # (incl. the unrotatable WORKFLOW_SECRET_KEY) world-readable in a world-traversable dir for
   # the whole render+validate window. The (umask 077; ...) subshell makes it 600 at birth so
   # the file is never group/world-readable for even an instant (ADR-0028).
   (umask 077; : >"$_tmp") || die "cannot create the temp env file ($_tmp)."
@@ -515,47 +511,22 @@ render_env_file() {
       LAZYIT_HTTP_PORT=*)       printf 'LAZYIT_HTTP_PORT=%s\n'       "$HTTP_PORT"           >>"$_tmp" ;;
       LAZYIT_HTTPS_PORT=*)      printf 'LAZYIT_HTTPS_PORT=%s\n'      "$HTTPS_PORT"          >>"$_tmp" ;;
       MEILI_MASTER_KEY=*)       printf 'MEILI_MASTER_KEY=%s\n'       "$MEILI_MASTER_KEY"    >>"$_tmp" ;;
-      LAZYIT_DOMAIN=*)          printf 'LAZYIT_DOMAIN=%s\n'          "$DOMAIN"              >>"$_tmp" ;;
       # --- Auth mode (ADR-0086). EXPLICIT-REQUIRED at boot; we ALWAYS write it. local -> "local"
-      #     (built-in accounts, no IdP); bundled/byoi -> "oidc".
+      #     (built-in accounts, no IdP); byoi -> "oidc".
       AUTH_MODE=*)              printf 'AUTH_MODE=%s\n'              "$AUTH_MODE_VAL"       >>"$_tmp" ;;
       # SESSION_SIGNING_SECRET — required ONLY in local mode (boot asserts >= 32 chars). Active in local;
       #     commented (genuinely UNSET) in OIDC/BYOI where it is unused. Example ships it commented.
       "# SESSION_SIGNING_SECRET="*|SESSION_SIGNING_SECRET=*)
         if [ "$IDP_MODE" = "local" ]; then printf 'SESSION_SIGNING_SECRET=%s\n' "$SESSION_SIGNING_SECRET" >>"$_tmp"
         else printf '# SESSION_SIGNING_SECRET=  # unset (only needed when AUTH_MODE=local)\n' >>"$_tmp"; fi ;;
-      # --- Bundled-Zitadel-only keys. When NO bundled Zitadel runs (BYOI or local mode), these MUST be
-      #     unset/omitted (a stale bundled value here is wrong + misleading). We comment them out so the
-      #     file stays self-documenting but the var is genuinely UNSET.
-      ZITADEL_DB_PASSWORD=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# ZITADEL_DB_PASSWORD=  # unset (no bundled Zitadel DB)\n' >>"$_tmp"
-        else printf 'ZITADEL_DB_PASSWORD=%s\n' "$ZITADEL_DB_PASSWORD" >>"$_tmp"; fi ;;
-      ZITADEL_MASTERKEY=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# ZITADEL_MASTERKEY=  # unset (no bundled Zitadel)\n' >>"$_tmp"
-        else printf 'ZITADEL_MASTERKEY=%s\n' "$MASTERKEY" >>"$_tmp"; fi ;;
-      ZITADEL_EXTERNALDOMAIN=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# ZITADEL_EXTERNALDOMAIN=  # unset (no bundled Zitadel; your IdP advertises its own issuer)\n' >>"$_tmp"
-        else printf 'ZITADEL_EXTERNALDOMAIN=%s\n' "$AUTH_SUBDOMAIN" >>"$_tmp"; fi ;;
-      ZITADEL_ADMIN_PASSWORD=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# ZITADEL_ADMIN_PASSWORD=  # unset (no bundled Zitadel console)\n' >>"$_tmp"
-        else printf 'ZITADEL_ADMIN_PASSWORD=%s\n' "$ZITADEL_ADMIN_PASSWORD" >>"$_tmp"; fi ;;
-      # --- Internal Zitadel server-to-server URLs. Bundled: keep (containers reach zitadel:8080).
-      #     BYOI/local: the bundled container is absent, so the example's http://zitadel:8080 default is
-      #     stale; comment it out (BYOI falls back to the external issuer; local has no OIDC at all).
-      OIDC_JWKS_URI=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# OIDC_JWKS_URI=  # unset (no internal zitadel:8080; BYOI derives it from your issuer)\n' >>"$_tmp"
-        else printf '%s\n' "$line" >>"$_tmp"; fi ;;
-      AUTH_INTERNAL_ISSUER=*)
-        if [ "$IDP_MODE" != "bundled" ]; then printf '# AUTH_INTERNAL_ISSUER=  # unset (no internal zitadel:8080; BYOI uses the external issuer)\n' >>"$_tmp"
-        else printf '%s\n' "$line" >>"$_tmp"; fi ;;
-      # --- External OIDC issuer + its AUTH mirror. Written for OIDC (bundled/BYOI); commented in local
-      #     mode (AUTH_MODE=local has no IdP — an active issuer here would be misleading/unused).
-      OIDC_ISSUER=*)
-        if [ "$IDP_MODE" = "local" ]; then printf '# OIDC_ISSUER=  # unset in local mode (AUTH_MODE=local — no OIDC IdP)\n' >>"$_tmp"
-        else printf 'OIDC_ISSUER=%s\n' "$ISSUER_URL" >>"$_tmp"; fi ;;
-      AUTH_ISSUER=*)
-        if [ "$IDP_MODE" = "local" ]; then printf '# AUTH_ISSUER=  # unset in local mode (AUTH_MODE=local — no OIDC IdP)\n' >>"$_tmp"
-        else printf 'AUTH_ISSUER=%s\n' "$ISSUER_URL" >>"$_tmp"; fi ;;
+      # --- OIDC client (BYOI). IDENTITY_PROVIDER_TYPE is never written: unset means generic OIDC (ADR-0102).
+      "# OIDC_ISSUER="*|OIDC_ISSUER=*)               oidc_line OIDC_ISSUER "$BYOI_ISSUER" ;;
+      "# OIDC_JWKS_URI="*|OIDC_JWKS_URI=*)           oidc_line OIDC_JWKS_URI "$BYOI_JWKS_URI" ;;
+      "# OIDC_CLIENT_ID="*|OIDC_CLIENT_ID=*)         oidc_line OIDC_CLIENT_ID "$BYOI_CLIENT_ID" ;;
+      "# OIDC_CLIENT_SECRET="*|OIDC_CLIENT_SECRET=*) oidc_line OIDC_CLIENT_SECRET "$BYOI_CLIENT_SECRET" ;;
+      "# AUTH_ISSUER="*|AUTH_ISSUER=*)               oidc_line AUTH_ISSUER "$BYOI_ISSUER" ;;
+      "# AUTH_CLIENT_ID="*|AUTH_CLIENT_ID=*)         oidc_line AUTH_CLIENT_ID "$BYOI_CLIENT_ID" ;;
+      "# AUTH_CLIENT_SECRET="*|AUTH_CLIENT_SECRET=*) oidc_line AUTH_CLIENT_SECRET "$BYOI_CLIENT_SECRET" ;;
       AUTH_SECRET=*)            printf 'AUTH_SECRET=%s\n'            "$AUTH_SECRET"         >>"$_tmp" ;;
       WORKFLOW_SECRET_KEY=*)    printf 'WORKFLOW_SECRET_KEY=%s\n'    "$WORKFLOW_SECRET_KEY" >>"$_tmp" ;;
       # SMTP_SECRET_KEY (ADR-0079) — always written ACTIVE. On --reconfigure the value comes from
@@ -617,17 +588,6 @@ render_env_file() {
     } >>"$_tmp"
   fi
 
-  # BYOI: append explicit OIDC/AUTH client overrides (explicit env always wins over the file).
-  if [ "$IDP_MODE" = "byoi" ]; then
-    {
-      printf '\n# --- BYOI overrides (added by start.sh) — your own IdP, no bundled Zitadel ---\n'
-      [ -n "$BYOI_CLIENT_ID" ]     && printf 'OIDC_CLIENT_ID=%s\n'     "$BYOI_CLIENT_ID"
-      [ -n "$BYOI_CLIENT_SECRET" ] && printf 'OIDC_CLIENT_SECRET=%s\n' "$BYOI_CLIENT_SECRET"
-      [ -n "$BYOI_CLIENT_ID" ]     && printf 'AUTH_CLIENT_ID=%s\n'     "$BYOI_CLIENT_ID"
-      [ -n "$BYOI_CLIENT_SECRET" ] && printf 'AUTH_CLIENT_SECRET=%s\n' "$BYOI_CLIENT_SECRET"
-    } >>"$_tmp"
-  fi
-
   # ---------- validate the rendered file BEFORE it goes live ----------
   # No CHANGE_ME on an ACTIVE line (commented BYOI placeholder examples on '#' lines are fine).
   if grep -v '^[[:space:]]*#' "$_tmp" | grep -q 'CHANGE_ME'; then
@@ -637,21 +597,8 @@ render_env_file() {
   _am=$(grep -E '^AUTH_MODE=' "$_tmp" | head -n1 | cut -d= -f2-)
   [ "$_am" = "$AUTH_MODE_VAL" ] || die "render check failed: AUTH_MODE in the file is '$_am', expected '$AUTH_MODE_VAL'."
   case "$_am" in local|oidc) : ;; *) die "render check failed: AUTH_MODE '$_am' is not one of local|oidc." ;; esac
-  # ZITADEL_MASTERKEY length is asserted only in BUNDLED mode (BYOI/local leave it intentionally unset).
-  if [ "$IDP_MODE" = "bundled" ]; then
-    _rk=$(grep -E '^ZITADEL_MASTERKEY=' "$_tmp" | head -n1 | cut -d= -f2-)
-    [ "${#_rk}" -eq 32 ] || die "render check failed: ZITADEL_MASTERKEY in the file is ${#_rk} chars, not 32."
-  else
-    # No-bundled-Zitadel guard (BYOI + local): the bundled-Zitadel keys must NOT survive as active lines.
-    if grep -E '^(ZITADEL_EXTERNALDOMAIN|ZITADEL_MASTERKEY|ZITADEL_DB_PASSWORD|ZITADEL_ADMIN_PASSWORD)=' "$_tmp" >/dev/null 2>&1; then
-      die "render check failed ($IDP_MODE): a bundled-Zitadel key is still active — it must be unset without the bundled IdP."
-    fi
-    if grep -E '^(OIDC_JWKS_URI|AUTH_INTERNAL_ISSUER)=.*zitadel:8080' "$_tmp" >/dev/null 2>&1; then
-      die "render check failed ($IDP_MODE): an internal zitadel:8080 URL survived — it must be unset without the bundled IdP."
-    fi
-  fi
   # Local mode: SESSION_SIGNING_SECRET must be an ACTIVE line >= 32 chars, and NO OIDC issuer may survive.
-  # OIDC modes (bundled/byoi): SESSION_SIGNING_SECRET must NOT be active (it is unused there).
+  # BYOI: SESSION_SIGNING_SECRET must NOT be active (it is unused there), and the IdP values must be.
   if [ "$IDP_MODE" = "local" ]; then
     _ss=$(grep -E '^SESSION_SIGNING_SECRET=' "$_tmp" | head -n1 | cut -d= -f2-)
     [ "${#_ss}" -ge 32 ] || die "render check failed: SESSION_SIGNING_SECRET in the file is ${#_ss} chars, must be >= 32 in local mode."
@@ -662,17 +609,20 @@ render_env_file() {
     if grep -E '^SESSION_SIGNING_SECRET=' "$_tmp" >/dev/null 2>&1; then
       die "render check failed ($IDP_MODE): SESSION_SIGNING_SECRET is active — it is only used in local mode and must be unset here."
     fi
+    for _k in OIDC_ISSUER OIDC_JWKS_URI OIDC_CLIENT_ID AUTH_ISSUER AUTH_CLIENT_ID; do
+      grep -qE "^${_k}=." "$_tmp" || die "render check failed ($IDP_MODE): $_k is not an active line — the template has no '# $_k=' placeholder to fill."
+    done
   fi
   # Network/TLS mode contract (ADR-0087). lan: LAZYIT_SITE_ADDRESS is PORT-ONLY (:80 → any-host HTTP),
-  # AUTH_TRUST_HOST=true is active, WEB_ORIGIN is NOT active, and AUTH_MODE must be local (Zitadel bakes
-  # a fixed externalDomain → cannot be host-agnostic). local/real: WEB_ORIGIN active, AUTH_TRUST_HOST unset.
+  # AUTH_TRUST_HOST=true is active, WEB_ORIGIN is NOT active, and AUTH_MODE must be local (an OIDC
+  # redirect URI is registered against one fixed origin → cannot be host-agnostic). local/real: WEB_ORIGIN active, AUTH_TRUST_HOST unset.
   _sa=$(grep -E '^LAZYIT_SITE_ADDRESS=' "$_tmp" | head -n1 | cut -d= -f2-)
   if [ "$DEPLOY_MODE" = "lan" ]; then
     case "$_sa" in
       :[0-9]*) : ;;   # port-only site address (":80", ":8080", …) → host-agnostic plain HTTP, no TLS
       *) die "render check failed (lan): LAZYIT_SITE_ADDRESS='$_sa' is not a port-only ':<port>' value — lan mode needs a port-only Caddy site address for host-agnostic HTTP." ;;
     esac
-    [ "$_am" = "local" ] || die "render check failed (lan): AUTH_MODE is '$_am', but lan mode REQUIRES local auth (Zitadel/OIDC bakes a fixed externalDomain and cannot be host-agnostic)."
+    [ "$_am" = "local" ] || die "render check failed (lan): AUTH_MODE is '$_am', but lan mode REQUIRES local auth (an OIDC redirect URI is registered against one fixed origin and cannot be host-agnostic)."
     grep -qE '^AUTH_TRUST_HOST=true$' "$_tmp" || die "render check failed (lan): AUTH_TRUST_HOST must be an active 'true' line (the api/web derive the origin from the request Host)."
     if grep -qE '^WEB_ORIGIN=' "$_tmp"; then die "render check failed (lan): WEB_ORIGIN is active — it must be UNSET in lan mode (the origin is derived from the Host)."; fi
   else
@@ -721,12 +671,12 @@ render_env_file() {
       *) die "render check failed: DATABASE_URL password does not match POSTGRES_PASSWORD." ;;
     esac
   fi
-  ok "rendered file validated (no stray CHANGE_ME, MASTERKEY=32, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY + DIRECTORY_SECRET_KEY present, ports numeric, DB password matches)"
+  ok "rendered file validated (no stray CHANGE_ME, WORKFLOW_SECRET_KEY=64, SMTP_SECRET_KEY + AI_SECRET_KEY + DIRECTORY_SECRET_KEY present, ports numeric, DB password matches)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "DRY RUN: NOT writing $ENV_FILE and NOT running docker."
     info "Rendered file would carry these non-secret keys (secrets are masked):"
-    grep -E '^(AUTH_MODE|AUTH_TRUST_HOST|WEB_ORIGIN|LAZYIT_SITE_ADDRESS|LAZYIT_DOMAIN|LAZYIT_HTTP_PORT|LAZYIT_HTTPS_PORT|ZITADEL_EXTERNALDOMAIN|OIDC_ISSUER|AUTH_ISSUER)=' "$_tmp" \
+    grep -E '^(AUTH_MODE|AUTH_TRUST_HOST|WEB_ORIGIN|LAZYIT_SITE_ADDRESS|LAZYIT_HTTP_PORT|LAZYIT_HTTPS_PORT|OIDC_ISSUER|OIDC_JWKS_URI|AUTH_ISSUER)=' "$_tmp" \
       | sed 's/^/    /' >&2 || true
     rm -f "$_tmp" 2>/dev/null || true
     trap - EXIT INT TERM
@@ -758,8 +708,8 @@ _read_env() {
 # =============================================================================
 # load_existing_env — for --reconfigure. Read the CURRENT .env.prod and hydrate the secret + topology
 # globals so render_env_file re-emits them UNCHANGED. Secrets are NEVER regenerated. Only AUTH_MODE=local
-# installs are reconfigurable (OIDC/Zitadel bakes a fixed externalDomain/issuer at first boot and cannot
-# be re-homed safely — ADR-0086/0087). See docs/05-runbooks/deploy-self-hosted.md.
+# installs are reconfigurable (an OIDC redirect URI is registered in the IdP against one fixed origin, so
+# re-rendering env cannot re-home it — ADR-0086/0087). See docs/05-runbooks/deploy-self-hosted.md.
 # =============================================================================
 load_existing_env() {
   step "Reading existing secrets from $ENV_FILE (reconfigure — secrets are PRESERVED, never regenerated)"
@@ -767,7 +717,7 @@ load_existing_env() {
   AUTH_MODE_VAL=$(_read_env AUTH_MODE)
   case "$AUTH_MODE_VAL" in
     local) : ;;
-    oidc)  die "this install uses OIDC auth (AUTH_MODE=oidc). --reconfigure is supported only for local-auth installs: an OIDC deploy bakes a fixed IdP externalDomain/issuer at first boot and cannot be re-homed by re-rendering env (ADR-0086/0087). To change host/ports, edit $ENV_FILE by hand and follow docs/05-runbooks/deploy-self-hosted.md." ;;
+    oidc)  die "this install uses OIDC auth (AUTH_MODE=oidc). --reconfigure is supported only for local-auth installs: an OIDC deploy's redirect URI is registered in your IdP against one fixed origin and cannot be re-homed by re-rendering env (ADR-0086/0087). To change host/ports, edit $ENV_FILE by hand and follow docs/05-runbooks/deploy-self-hosted.md." ;;
     *)     die "cannot read a valid AUTH_MODE from $ENV_FILE (got '${AUTH_MODE_VAL:-<unset>}'). Refusing to reconfigure a file I don't understand — restore it from your off-host backup first." ;;
   esac
   IDP_MODE="local"
@@ -858,7 +808,7 @@ load_existing_env() {
 # — compose.yaml's api `environment:` block names none of them, and the shell env never reaches the
 # container. An operator who set one somewhere else can only have done it in their own compose overlay,
 # and there it still wins: an overlay's `environment:` outranks env_file, and an overlay's env_file is
-# merged AFTER $ENV_FILE. So appending can never swap the key the API actually decrypts with.) Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, ZITADEL_MASTERKEY, AUTH_SECRET,
+# merged AFTER $ENV_FILE. So appending can never swap the key the API actually decrypts with.) Keys that protect existing data or identity — WORKFLOW_SECRET_KEY, AUTH_SECRET,
 # SESSION_SIGNING_SECRET, the DB passwords, MEILI_MASTER_KEY — are NEVER generated here: they are only
 # REPORTED, with the manual instruction, exactly like every other missing key.
 #
@@ -884,7 +834,7 @@ add_missing_safe_keys() {
   done
 
   # Report-only: active example keys missing from the file that are NOT safe to generate (or need the
-  # operator's own value). A key the renderer deliberately left commented (`# KEY=` — e.g. the Zitadel keys
+  # operator's own value). A key the renderer deliberately left commented (`# KEY=` — e.g. the OIDC keys
   # in local mode) is not missing. Never written, never failed on here: the API fails loud at boot for a
   # required one, and infra/update.sh stops on any of them before touching the stack.
   _manual=""
@@ -896,7 +846,7 @@ add_missing_safe_keys() {
   if [ -n "$_manual" ]; then
     warn "$ENV_FILE lacks key(s) this release's $ENV_EXAMPLE defines. start.sh will NOT generate these (they protect existing data or identity, or need your own value):"
     for _k in $_manual; do info "    $_k"; done
-    info "  Review each against the comment above it in $ENV_EXAMPLE — some apply only to one mode (e.g. ZITADEL_* only with the bundled Zitadel)."
+    info "  Review each against the comment above it in $ENV_EXAMPLE — some apply only to one auth or network mode."
     info "  Add the ones your deployment needs by hand, then re-run ./infra/start.sh. infra/update.sh stops on any of them until they exist."
   fi
 
@@ -948,6 +898,28 @@ add_missing_safe_keys() {
 }
 
 # =============================================================================
+# refuse_bundled_leftovers <prod volumes> — stop, changing nothing, while the env still wires the removed
+# bundled Zitadel (ADR-0102 §7). Existing-install path only, before anything is written.
+# =============================================================================
+refuse_bundled_leftovers() {
+  # A local-auth install never used the IdP, so a stray Zitadel volume next to it is no reason to stop.
+  [ "$(_read_env AUTH_MODE)" = "local" ] && return 0
+  _signal=""
+  if grep -qE '^ZITADEL_MASTERKEY=' "$ENV_FILE"; then
+    _signal="an active ZITADEL_MASTERKEY"
+  elif grep -qE '^(OIDC_ISSUER|OIDC_JWKS_URI|AUTH_ISSUER|AUTH_INTERNAL_ISSUER)=.*zitadel:8080' "$ENV_FILE"; then
+    _signal="an issuer or JWKS URL pointing at zitadel:8080"
+  elif [ -z "$(_read_env OIDC_CLIENT_ID)" ] && printf '%s\n' "$1" | grep -qx "${PROD_PROJECT}_zitadel_db_data"; then
+    _signal="the ${PROD_PROJECT}_zitadel_db_data volume and no OIDC_CLIENT_ID"
+  fi
+  [ -n "$_signal" ] || return 0
+  die "$ENV_FILE belongs to a bundled-Zitadel install ($_signal).
+  The bundled Zitadel was removed (ADR-0102); nothing was changed — no file written, no container
+  started, no volume touched (${PROD_PROJECT}_zitadel_db_data and ${PROD_PROJECT}_zitadel_secrets stay as they are).
+  Stay on the previous release, or follow docs/05-runbooks/migrate-off-bundled-zitadel.md."
+}
+
+# =============================================================================
 # hint_legacy_meili_volume — PRINT-ONLY notice about the pre-v1.53 Meilisearch data volume (#1216).
 #   The Meilisearch server bump (ADR-0035 amendment 2026-09-26) moved search onto a NEW volume
 #   (<project>_meili_data_v1_53_2) because a Meilisearch database only opens on the engine version that
@@ -971,10 +943,10 @@ bring_up() {
 
   # Print-only manual steps (the script NEVER auto-edits compose/Caddyfile — by decision).
   if [ "$IDP_MODE" = "byoi" ]; then
-    info "BYOI: AUTH_MODE=oidc with your own IdP. The bundled Zitadel services are opt-in (profiles:[oidc]) and are NOT started — no --profile oidc, no manual 'profiles: [never]' edit needed. Your OIDC_* values are in $ENV_FILE."
+    info "BYOI: AUTH_MODE=oidc with your own IdP; your OIDC_* / AUTH_* values are in $ENV_FILE. Register ${WEB_ORIGIN_DISPLAY}/api/auth/callback/oidc as the redirect URI in your IdP."
   fi
   if [ "$IDP_MODE" = "local" ]; then
-    info "local mode: AUTH_MODE=local. No Zitadel is started; the API signs sessions with SESSION_SIGNING_SECRET (in $ENV_FILE). Create the first admin at /setup."
+    info "local mode: AUTH_MODE=local. The API signs sessions with SESSION_SIGNING_SECRET (in $ENV_FILE). Create the first admin at /setup."
   fi
   if [ "$PG_MODE" = "external" ]; then
     warn "External Postgres selected — DATABASE_URL points at your managed DB. Do NOT start the bundled 'db' service:"
@@ -993,16 +965,8 @@ bring_up() {
   export LAZYIT_VERSION LAZYIT_GIT_SHA
   info "building version: $LAZYIT_VERSION ($LAZYIT_GIT_SHA)"
 
-  # The canonical prod bring-up. OIDC with the BUNDLED Zitadel adds the oidc overlay + --profile oidc
-  # (ADR-0086 — the zitadel* services are profiles:[oidc], and the overlay carries the api/web ->
-  # zitadel-bootstrap dependency). local mode and BYOI stay on plain --profile prod: local has no IdP,
-  # and BYOI reaches your own external issuer (no bundled Zitadel, no bootstrap sidecar).
-  set -- docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_PROD"
-  if [ "$IDP_MODE" = "bundled" ]; then
-    set -- "$@" -f "$COMPOSE_OIDC" --profile prod --profile oidc
-  else
-    set -- "$@" --profile prod
-  fi
+  # The canonical prod bring-up, the same for both auth modes (BYOI reaches your own external issuer).
+  set -- docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_PROD" --profile prod
   [ "$ENABLE_BACKUP" -eq 1 ] && set -- "$@" --profile backup
   set -- "$@" --env-file "$ENV_FILE" up -d --build
 
@@ -1015,11 +979,7 @@ bring_up() {
     warn "LAZYIT_SKIP_BRINGUP=1 — env rendered/written but NOT bringing docker up (test mode)."
   else
     "$@" || die "docker compose up failed. Inspect with the same 'docker compose ... logs' invocation (swap 'up -d --build' for 'logs')."
-    if [ "$IDP_MODE" = "bundled" ]; then
-      ok "stack is coming up (db -> migrate; zitadel -> zitadel-bootstrap -> api -> web -> caddy)"
-    else
-      ok "stack is coming up (db -> migrate -> api -> web -> caddy)"
-    fi
+    ok "stack is coming up (db -> migrate -> api -> web -> caddy)"
   fi
 }
 
@@ -1070,42 +1030,14 @@ EOF
   LOCAL prod-like notes:
    - Caddy uses its INTERNAL CA -> your browser warns until you trust it.
 EOF
-    if [ "$IDP_MODE" = "bundled" ]; then
-      cat >&2 <<EOF
-   - OIDC / Zitadel console URL: ${ISSUER_URL} (host port ${HTTPS_PORT}, not :443).
-   - The OIDC login redirects through auth.localhost:${HTTPS_PORT}. Most resolvers map
-     *.localhost to 127.0.0.1 automatically; if yours does not, add:
-         echo "127.0.0.1 auth.localhost" | sudo tee -a /etc/hosts
-EOF
-    else
+    if [ "$IDP_MODE" = "local" ]; then
       info "   - Auth: local built-in accounts (AUTH_MODE=local) — sign in at ${WEB_ORIGIN_VAL}/login after /setup."
+    else
+      info "   - Auth: your own IdP (AUTH_MODE=oidc) — sign in at ${WEB_ORIGIN_VAL}/login after /setup."
     fi
   fi
 
-  if [ -n "$ZITADEL_ADMIN_PASSWORD" ] && [ "$IDP_MODE" = "bundled" ]; then
-    _zitadel_login="$(zitadel_console_login "$ZITADEL_ADMIN_USERNAME" "$AUTH_SUBDOMAIN")"
-    cat >&2 <<EOF
-
-  Zitadel console admin (shown ONCE — store it in your password manager now):
-      login:    ${_zitadel_login}
-      password: $ZITADEL_ADMIN_PASSWORD
-      console:  ${ISSUER_URL}/ui/console
-  (Zitadel asks for username@domain — use the full login above, not just "${ZITADEL_ADMIN_USERNAME}".
-   You normally never need this — the zitadel-bootstrap sidecar wires OIDC automatically.
-   It is only for emergency IdP administration.)
-EOF
-  fi
-
-  if [ "$IDP_MODE" = "bundled" ]; then
-    cat >&2 <<EOF
-
-  CRITICAL — back up infra/env/.env.prod OFF-HOST, encrypted:
-   it holds the UNROTATABLE ZITADEL_MASTERKEY + WORKFLOW_SECRET_KEY (the DR linchpins)
-   plus the DB password and AUTH_SECRET. Lose it and a restored backup is
-   undecryptable — nobody can log in. The backup sidecar does NOT copy it.
-EOF
-  else
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 
   CRITICAL — back up infra/env/.env.prod OFF-HOST, encrypted:
    it holds the UNROTATABLE WORKFLOW_SECRET_KEY (the DR linchpin) plus the DB password,
@@ -1114,26 +1046,13 @@ EOF
    only rotatable-at-the-cost-of-re-login (not a data-loss linchpin). The backup sidecar
    does NOT copy this file.
 EOF
-  fi
 
-  # The exact compose invocation for this deploy's mode (bundled adds the oidc overlay + profile).
-  if [ "$IDP_MODE" = "bundled" ]; then
-    _dc="docker compose -f $COMPOSE_BASE -f $COMPOSE_PROD -f $COMPOSE_OIDC --profile prod --profile oidc --env-file $ENV_FILE"
-  else
-    _dc="docker compose -f $COMPOSE_BASE -f $COMPOSE_PROD --profile prod --env-file $ENV_FILE"
-  fi
+  _dc="docker compose -f $COMPOSE_BASE -f $COMPOSE_PROD --profile prod --env-file $ENV_FILE"
   cat >&2 <<EOF
 
   Useful commands:
       DC="$_dc"
       \$DC ps                 # watch services converge (migrate exits 0)
-EOF
-  if [ "$IDP_MODE" = "bundled" ]; then
-    cat >&2 <<EOF
-      \$DC logs -f zitadel-bootstrap   # the zero-touch OIDC provisioner (must exit 0)
-EOF
-  fi
-  cat >&2 <<EOF
       \$DC logs -f api
 ============================================================================
 EOF
@@ -1165,10 +1084,9 @@ ask_questions() {
     # site address disables auto-TLS — verified with `caddy validate`); the operator's chosen HTTP host
     # port publishes it via the EXISTING compose ${LAZYIT_HTTP_PORT}:80 mapping (ponytail: no mode-specific
     # compose port block). WEB_ORIGIN stays unset + AUTH_TRUST_HOST=true, so a DHCP IP change needs no
-    # re-pin. lan REQUIRES local auth (Zitadel bakes a fixed externalDomain — see ADR-0086/0087).
+    # re-pin. lan REQUIRES local auth (an OIDC redirect URI pins one origin — see ADR-0086/0087).
     DOMAIN="localhost"
     SITE_ADDRESS=":80"
-    AUTH_SUBDOMAIN="auth.localhost"
     IDP_MODE="local"; AUTH_MODE_VAL="local"
     HTTP_PORT=$(ask_text "2) HTTP host port for lazyit (plain HTTP, reachable at http://<this-host>:<port>)" "8080" \
       valid_port "a port number 1-65535")
@@ -1182,7 +1100,6 @@ ask_questions() {
     # Local prod-like: everything pinned to localhost on high ports.
     DOMAIN="localhost"
     SITE_ADDRESS="localhost"
-    AUTH_SUBDOMAIN="auth.localhost"
     HTTP_PORT="8080"
     HTTPS_PORT="8443"
     info "local prod-like: HTTPS via Caddy's internal CA, high ports ${HTTP_PORT}/${HTTPS_PORT}."
@@ -1192,7 +1109,6 @@ ask_questions() {
       valid_fqdn "a hostname (letters, digits, dots, hyphens; no scheme, no path)")
     [ -n "$DOMAIN" ] || die "a public domain is required for a real deployment."
     SITE_ADDRESS="$DOMAIN"
-    AUTH_SUBDOMAIN="auth.${DOMAIN}"
 
     # --- Q3. TLS / ACME email (validated: basic email shape) ---
     if ask_yn "3) Use Let's Encrypt (real publicly-trusted HTTPS)? (n = Caddy internal CA)" "y"; then
@@ -1221,55 +1137,50 @@ ask_questions() {
     # Host-agnostic: no fixed origin. The app derives it from the request Host (AUTH_TRUST_HOST=true,
     # emitted by render_env_file for lan mode).
     WEB_ORIGIN_VAL=""
-    ISSUER_URL=""                        # no OIDC in lan mode
     WEB_ORIGIN_DISPLAY="http://<this-host>:${HTTP_PORT}"   # for the post-up banner only
   elif [ "$DEPLOY_MODE" = "local" ]; then
     WEB_ORIGIN_VAL="https://localhost:${HTTPS_PORT}"
-    ISSUER_URL="https://${AUTH_SUBDOMAIN}:${HTTPS_PORT}"
     WEB_ORIGIN_DISPLAY="$WEB_ORIGIN_VAL"
   else
     if [ "$HTTPS_PORT" = "443" ]; then
       WEB_ORIGIN_VAL="https://${DOMAIN}"
-      ISSUER_URL="https://${AUTH_SUBDOMAIN}"
     else
       WEB_ORIGIN_VAL="https://${DOMAIN}:${HTTPS_PORT}"
-      ISSUER_URL="https://${AUTH_SUBDOMAIN}:${HTTPS_PORT}"
     fi
     WEB_ORIGIN_DISPLAY="$WEB_ORIGIN_VAL"
   fi
 
-  # --- Q5. Authentication mode (ADR-0086) — local (default) | bundled Zitadel | BYOI ---
+  # --- Q5. Authentication mode (ADR-0086, ADR-0102) — local (default) | BYOI ---
   # SKIPPED in lan mode (forced local, set above) and under --reconfigure (auth mode is immutable per
   # ADR-0086 — preserved from the existing .env.prod). Otherwise: local is the DEFAULT (lazyit manages
-  # accounts + passwords); bundled Zitadel and BYOI are the opt-ins (AUTH_MODE=oidc). Chosen ONCE.
+  # accounts + passwords); BYOI, your own OIDC IdP, is the opt-in (AUTH_MODE=oidc). Chosen ONCE.
   if [ "$DEPLOY_MODE" = "lan" ]; then
     info "lan mode: authentication is built-in accounts (AUTH_MODE=local) — no external IdP possible with host-agnostic HTTP."
   elif [ "$RECONFIGURE" -eq 1 ]; then
     info "reconfigure: keeping the existing AUTH_MODE=${AUTH_MODE_VAL} (immutable — ADR-0086)."
   else
-    _auth=$(ask "5) Authentication — 'local' built-in accounts (default), 'bundled' Zitadel OIDC, or 'byoi' your own IdP?" "local")
+    _auth=$(ask "5) Authentication — 'local' built-in accounts (default) or 'byoi' your own OIDC IdP?" "local")
     case "$_auth" in
-      bundled|BUNDLED|Bundled)  IDP_MODE="bundled" ;;
       byoi|BYOI|Byoi)           IDP_MODE="byoi" ;;
       local|LOCAL|Local)        IDP_MODE="local" ;;
       *) warn "unrecognized choice '$_auth' — defaulting to local."; IDP_MODE="local" ;;
     esac
 
     if [ "$IDP_MODE" = "byoi" ]; then
-      info "BYOI: enter your existing IdP's OIDC details (the bundled Zitadel services will NOT be started)."
-      BYOI_ISSUER=$(ask_text "   OIDC_ISSUER (your IdP issuer URL)" "$ISSUER_URL" \
+      info "BYOI: enter the OIDC details of the client you registered in your IdP (redirect URI: ${WEB_ORIGIN_DISPLAY}/api/auth/callback/oidc)."
+      BYOI_ISSUER=$(ask_text "   OIDC_ISSUER (your IdP issuer URL)" "" \
         valid_issuer_url "an https:// issuer URL (e.g. https://login.example.com)")
+      # The API verifies tokens against this JWKS; it is the jwks_uri of <issuer>/.well-known/openid-configuration.
+      BYOI_JWKS_URI=$(ask_text "   OIDC_JWKS_URI (jwks_uri from ${BYOI_ISSUER}/.well-known/openid-configuration)" "" \
+        valid_jwks_url "an http(s):// URL (the jwks_uri value of your IdP's discovery document)")
       # Client id/secret: opaque tokens — only the newline/control-char gate applies (no charset rule).
-      BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" "" "")
+      BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" valid_nonempty "the client id is required")
       BYOI_CLIENT_SECRET=$(ask_text "   OIDC_CLIENT_SECRET" "" "" "")
-      ISSUER_URL="$BYOI_ISSUER"
-    elif [ "$IDP_MODE" = "local" ]; then
-      info "local mode: lazyit stores accounts + password hashes itself — no Zitadel, no external IdP. You create the first admin at /setup."
     else
-      info "bundled Zitadel: the zitadel-bootstrap sidecar wires OIDC automatically (no console clicking)."
+      info "local mode: lazyit stores accounts + password hashes itself — no external IdP. You create the first admin at /setup."
     fi
 
-    # Derive AUTH_MODE for the env file (ADR-0086): local -> "local"; bundled/byoi -> "oidc".
+    # Derive AUTH_MODE for the env file (ADR-0086): local -> "local"; byoi -> "oidc".
     if [ "$IDP_MODE" = "local" ]; then AUTH_MODE_VAL="local"; else AUTH_MODE_VAL="oidc"; fi
   fi
 
@@ -1316,7 +1227,6 @@ main() {
 
   [ -f "$COMPOSE_BASE" ] || die "not at the repo root: $COMPOSE_BASE not found (run ./infra/start.sh from a checkout)."
   [ -f "$COMPOSE_PROD" ] || die "missing $COMPOSE_PROD — is this a complete lazyit checkout?"
-  [ -f "$COMPOSE_OIDC" ] || die "missing $COMPOSE_OIDC (the OIDC overlay, ADR-0086) — is this a complete lazyit checkout?"
   [ -f "$ENV_EXAMPLE" ]  || die "missing $ENV_EXAMPLE (the secret contract) — cannot render the env file."
 
   cat >&2 <<EOF
@@ -1369,7 +1279,7 @@ EOF
   DISK_MB=$(df -Pm "$REPO_ROOT" 2>/dev/null | awk 'NR==2 {print $4}' || echo "")
   if [ -n "$DISK_MB" ]; then
     if [ "$DISK_MB" -lt "$MIN_DISK_MB" ]; then
-      warn "free disk ~${DISK_MB} MB is below the suggested ${MIN_DISK_MB} MB. Images + Postgres + Zitadel + Meili need headroom."
+      warn "free disk ~${DISK_MB} MB is below the suggested ${MIN_DISK_MB} MB. Images + Postgres + Meili need headroom."
     else
       ok "free disk ~${DISK_MB} MB (>= ${MIN_DISK_MB} MB floor)"
     fi
@@ -1415,20 +1325,16 @@ EOF
 
   if [ "$_existing" -eq 1 ]; then
     ok "existing install detected: $_reason"
-    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable ZITADEL_MASTERKEY) are LEFT UNTOUCHED — only allowlisted keys this release added are appended if missing."
     if [ ! -f "$ENV_FILE" ]; then
-      die "prod volumes exist but $ENV_FILE is MISSING. Restore the original .env.prod (it holds the unrotatable ZITADEL_MASTERKEY) from your off-host backup before bringing the stack up. The script will NOT regenerate it — a new MASTERKEY cannot decrypt the existing Zitadel data."
+      die "prod volumes exist but $ENV_FILE is MISSING. Restore the original .env.prod (it holds the unrotatable WORKFLOW_SECRET_KEY and the DB password) from your off-host backup before bringing the stack up. The script will NOT regenerate it — new secrets cannot read the existing data."
     fi
-    # Detect the EXISTING deploy's auth mode from the env file so bring_up uses the right compose
-    # invocation (ADR-0086). This is what keeps a re-run of an existing OIDC install byte-identical:
-    # bundled -> add the oidc overlay + --profile oidc; BYOI/local -> plain --profile prod.
+    refuse_bundled_leftovers "$_vols"
+    warn "NON-DESTRUCTIVE: skipping secret/env generation. Existing secrets (incl. the unrotatable WORKFLOW_SECRET_KEY) are LEFT UNTOUCHED — only allowlisted keys this release added are appended if missing."
     _am=$(grep -E '^AUTH_MODE=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
     if [ "$_am" = "local" ]; then
       IDP_MODE="local"; AUTH_MODE_VAL="local"
-    elif grep -qE '^ZITADEL_MASTERKEY=' "$ENV_FILE"; then
-      IDP_MODE="bundled"; AUTH_MODE_VAL="oidc"     # active ZITADEL_MASTERKEY => bundled Zitadel
     else
-      IDP_MODE="byoi"; AUTH_MODE_VAL="oidc"        # OIDC but no bundled Zitadel => BYOI
+      IDP_MODE="byoi"; AUTH_MODE_VAL="oidc"
     fi
     if [ -z "$_am" ]; then
       warn "this $ENV_FILE predates ADR-0086 (no AUTH_MODE line). AUTH_MODE is now EXPLICIT-REQUIRED — the API refuses to boot without it. Add 'AUTH_MODE=oidc' to $ENV_FILE BEFORE upgrading (detected mode: $IDP_MODE)."
@@ -1454,7 +1360,6 @@ EOF
         WEB_ORIGIN_DISPLAY="http://<this-host>:${HTTP_PORT}"
         ;;
     esac
-    ZITADEL_ADMIN_PASSWORD=""   # never re-surface an existing admin password
     bring_up
     print_post_up_guidance
     hint_legacy_meili_volume "$PROD_PROJECT"   # print-only (#1216) — never removes a volume
