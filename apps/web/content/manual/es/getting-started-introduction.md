@@ -49,8 +49,8 @@ herramientas corporativas, ese es el dolor que viene a quitar.
   a muchos clientes desde una misma instancia compartida queda fuera de alcance.
 - **Inicio de sesión flexible.** Eliges al desplegar cómo inician sesión las personas: **cuentas
   locales** (lazyit es dueño del nombre de usuario/correo + contraseña — la opción más simple para una
-  LAN) o **inicio de sesión único** delegado por OIDC a un proveedor de identidad (el integrado, o el
-  tuyo). Consulta [Configuración inicial](/help/getting-started) para la elección.
+  LAN) o **inicio de sesión único** delegado por OIDC a un proveedor de identidad que ya administras,
+  como el SSO de tu empresa. Consulta [Configuración inicial](/help/getting-started) para la elección.
 
 ## Las áreas principales
 

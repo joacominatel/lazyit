@@ -62,9 +62,9 @@ el que realmente te conocen.
 2. Cambiá el nombre, el apellido o los dos (de 1 a 100 caracteres cada uno) y elegí **Guardar**.
 
 El nombre nuevo aparece en todos lados al instante: en el menú de arriba a la derecha, en los
-responsables de activos y concesiones, y en la lista de **Usuarios**. Si tu organización inicia sesión
-con el servicio de inicio de sesión incluido en lazyit, tu nombre también se actualiza ahí. El cambio
-queda registrado en tu historial de usuario, como cualquier otro cambio de nombre.
+responsables de activos y concesiones, y en la lista de **Usuarios**. El cambio queda registrado en tu
+historial de usuario, como cualquier otro cambio de nombre. Si tu organización inicia sesión con su
+propio proveedor de identidad, tu nombre ahí no cambia.
 
 Solo se puede editar el nombre. Tu correo, rol, legajo, nombre de usuario y responsable siguen en manos
 de los administradores.
@@ -74,9 +74,8 @@ Active Directory o LDAP y vos sos una de ellas, el directorio es dueño de tu no
 lo muestra de solo lectura, con una nota que lo explica: un cambio acá solo se sobrescribiría en la
 próxima sincronización. Pedile a un administrador que lo cambie en el directorio.
 
-**Si no se puede guardar.** Si en ese momento no se puede actualizar el servicio de inicio de sesión,
-lazyit no cambia nada y te lo avisa: probá de nuevo en un momento. Las cuentas de servicio no tienen
-perfil, así que no pueden editar un nombre.
+**Si no se puede guardar.** lazyit no cambia nada y te lo avisa: probá de nuevo en un momento. Las
+cuentas de servicio no tienen perfil, así que no pueden editar un nombre.
 
 ## Tu idioma y tu tema en todos tus dispositivos
 

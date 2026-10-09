@@ -75,8 +75,7 @@ section is **read-only** — it reflects the current state; it does not change i
 
 - **Configured** — whether initial setup is complete (an administrator exists). A fresh install shows
   *Setup pending* until the first administrator is created.
-- **Identity provider** — the sign-in posture: *Zitadel (bundled)*, *Generic OIDC (bring your
-  own)* or *Local accounts*.
+- **Identity provider** — the sign-in posture: *Local accounts* or *Generic OIDC (bring your own)*.
 - **Administrators** — how many administrator accounts the instance has.
 - **Runtime posture** — *Development* or *Production*.
 - **Version** — the exact version this instance is running, baked in when its images were built. A

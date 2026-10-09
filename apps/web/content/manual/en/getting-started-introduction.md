@@ -48,7 +48,7 @@ it is built to remove.
   customers from one shared instance is out of scope.
 - **Flexible sign-in.** You choose at deploy time how people sign in: **local accounts** (lazyit owns
   the username/email + password itself — the simplest option for a LAN) or **single sign-on** delegated
-  over OIDC to an identity provider (the bundled one, or your own). See
+  over OIDC to an identity provider you already run, such as your company SSO. See
   [Initial setup](/help/getting-started) for the choice.
 
 ## The main areas
