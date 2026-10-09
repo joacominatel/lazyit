@@ -125,9 +125,11 @@ is never left half-offboarded (archived but still holding access).
 sessions on every device at once — including one where they ticked **Keep me signed in**. Deactivating
 someone (clearing **Active** when you edit them) does the same.
 
-**With your own OIDC provider, disable them there too.** Offboarding blocks the person from lazyit —
-their next sign-in is refused — but lazyit does not touch their account in your provider. Disable it
-there as part of the same leaver process.
+**With your own OIDC provider, disable them there too.** lazyit does not touch the person's account in
+your provider. If they have signed in to lazyit before, their next sign-in is refused; someone
+offboarded before their first sign-in, though, would get a fresh Viewer account when they sign in.
+Disabling the account in the provider is what actually ends access — make it part of the same leaver
+process.
 
 **Rotate the secrets they could read.** If the person was a member of any Secret vault, the confirmation
 lists those vaults (with how many secrets each holds) as a reminder to **rotate those secrets by hand**.

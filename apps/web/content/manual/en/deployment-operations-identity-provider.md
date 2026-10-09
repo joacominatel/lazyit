@@ -99,9 +99,10 @@ of its way:
   first sign-in.
 - **lazyit never writes to your provider.** Name, email and role changes made in lazyit stay in lazyit,
   and lazyit can't create an account in your provider for you.
-- **Offboarding blocks lazyit, not the provider.** Offboarding someone in lazyit refuses their next
-  sign-in to lazyit, but their account in your provider stays active — disable it there as part of
-  your leaver process.
+- **Disabling the account in your provider is what ends access.** Offboarding someone in lazyit
+  leaves their provider account active. If they have signed in to lazyit before, their next sign-in is
+  refused; but someone offboarded before their first sign-in would get a fresh Viewer account the
+  moment they sign in. Always disable the account in your provider as part of your leaver process.
 
 ## Authorization stays in lazyit
 

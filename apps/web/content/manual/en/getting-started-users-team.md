@@ -52,8 +52,8 @@ sign-in (just-in-time), even if you did not add the person beforehand. If a matc
 exists by **verified email**, the first sign-in is linked to it instead of creating a duplicate.
 Auto-provisioned accounts also start as **Viewer** by default. This means the gate on who can reach
 lazyit is your identity provider: whoever can sign in there can get a (read-only) account here unless
-you remove their access upstream. Likewise, offboarding someone in lazyit blocks them here but leaves
-their provider account active — disable it there too.
+you remove their access upstream. For the same reason, offboarding someone in lazyit is not enough on
+its own: disable their account in your provider too.
 
 ## Managing existing people
 

@@ -56,8 +56,8 @@ antes. Si ya existe una cuenta coincidente por **correo verificado**, el primer 
 vincula a ella en vez de crear un duplicado. Las cuentas aprovisionadas automáticamente también
 empiezan como **Lector** por defecto. Esto significa que el control de quién llega a lazyit es tu
 proveedor de identidad: quien pueda iniciar sesión allí puede obtener una cuenta (de solo lectura)
-aquí, salvo que le quites el acceso en el origen. Del mismo modo, dar de baja a alguien en lazyit lo
-bloquea aquí pero deja activa su cuenta en el proveedor — desactívala también allí.
+aquí, salvo que le quites el acceso en el origen. Por lo mismo, dar de baja a alguien en lazyit no basta
+por sí solo: desactiva también su cuenta en tu proveedor.
 
 ## Gestionar a las personas existentes
 

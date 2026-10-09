@@ -135,9 +135,11 @@ a medio dar de baja (archivada pero conservando acceso).
 sesiones de la persona en todos sus dispositivos a la vez — también aquella en la que marcó **Mantener la
 sesión iniciada**. Desactivarla (desmarcar **Activo** al editarla) hace lo mismo.
 
-**Con tu propio proveedor OIDC, desactívala también allí.** Dar de baja bloquea a la persona en lazyit —
-su próximo inicio de sesión se rechaza — pero lazyit no toca su cuenta en tu proveedor. Desactívala allí
-como parte del mismo proceso de salida.
+**Con tu propio proveedor OIDC, desactívala también allí.** lazyit no toca la cuenta de la persona en tu
+proveedor. Si ya había iniciado sesión en lazyit, su próximo inicio de sesión se rechaza; en cambio,
+alguien dado de baja antes de su primer inicio de sesión recibiría una cuenta nueva de Lector al entrar.
+Lo que de verdad corta el acceso es desactivar la cuenta en el proveedor — inclúyelo en el mismo proceso
+de salida.
 
 **Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
 confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos

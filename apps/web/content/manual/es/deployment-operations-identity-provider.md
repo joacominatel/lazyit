@@ -105,9 +105,11 @@ Con tu propio proveedor, este es la fuente de verdad de las **credenciales**, y 
   exista en lazyit recibe una cuenta nueva de **Lector** en ese primer inicio de sesión.
 - **lazyit nunca escribe en tu proveedor.** Los cambios de nombre, correo y rol hechos en lazyit se
   quedan en lazyit, y lazyit no puede crearte una cuenta en tu proveedor.
-- **La baja bloquea lazyit, no el proveedor.** Dar de baja a alguien en lazyit rechaza su próximo
-  inicio de sesión en lazyit, pero su cuenta en tu proveedor sigue activa — desactívala allí como parte
-  de tu proceso de salida.
+- **Lo que corta el acceso es desactivar la cuenta en tu proveedor.** Dar de baja a alguien en lazyit
+  deja activa su cuenta en el proveedor. Si ya había iniciado sesión en lazyit, su próximo inicio de
+  sesión se rechaza; pero alguien dado de baja antes de su primer inicio de sesión recibiría una cuenta
+  nueva de Lector en cuanto entre. Desactiva siempre la cuenta en tu proveedor como parte de tu proceso
+  de salida.
 
 ## La autorización permanece en lazyit
 
