@@ -1,15 +1,19 @@
 ---
 title: "ADR-0037: IdP choice — Zitadel, BYOI strategy, own Postgres"
 tags: [adr, auth, infra, oidc]
-status: accepted
+status: superseded
 created: 2026-05-26
-updated: 2026-05-26
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
 # ADR-0037: IdP choice — Zitadel, BYOI strategy, own Postgres
 
 ## Status
+
+**superseded by [[0102-remove-bundled-zitadel]]** — 2026-10-09 (#1543). The bundled Zitadel (§1, §2, §4–§6) is
+removed. §3, the BYOI-by-environment-variables contract, carries forward into ADR-0102. The body below is
+kept for history.
 
 accepted — 2026-05-26. Resolves the pending IdP provider choice left open in [[0016-auth-strategy-deferred]].
 

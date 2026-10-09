@@ -3,7 +3,7 @@ title: "ADR-0043: Zitadel as the identity & authorization source of truth (Optio
 tags: [adr, auth, authz, oidc, rbac, idp, zitadel, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -23,6 +23,12 @@ run) instead of a manual console chore.
 
 It supersedes the *defaults and follow-ups* of the prior auth ADRs as noted in
 [§ What this supersedes](#what-this-supersedes) — it does not supersede the ADRs wholesale.
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the bundled Zitadel is removed, so §3
+(Management-API write-back, including the deactivate mirror and the create compensation) and §4's
+`zitadel-bootstrap` sidecar and Zitadel wizard branch are withdrawn, and the §1 adapter seam is retired.
+DB-first roles (§2), the `/setup` guards (Fork #7), DEFAULT VIEWER (§5), the local `User` mirror (§7) and
+the §6 guardrails that do not concern the Management API still bind.
 
 > The companion design dossier (contracts, DDL, compose, wizard UX, threat model, roadmap) lives at
 > [[auth-zitadel-sot]]. This ADR records the *decision and its guardrails*; the dossier records *how*.

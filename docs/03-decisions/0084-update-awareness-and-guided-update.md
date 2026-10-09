@@ -3,7 +3,7 @@ title: "ADR-0084: Update awareness & guided update — check, weekly email, upda
 tags: [adr, updates, versioning, deployment, infra, notifications, settings]
 status: accepted
 created: 2026-07-01
-updated: 2026-09-28
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -18,6 +18,11 @@ is *designed* here (§6) as a deferred, slot-in-compatible phase. Depends on
 are signed — see its *Tag trust*), MAJOR means "not one-click-safe", and the running version is baked
 in via `git describe` → build-arg → `GET /instance/version`. Sibling of [[0047-guided-first-deploy-bootstrap]] (the `start.sh` pattern
 this extends) and [[backups]] (the DR story this must never weaken).
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: with the bundled Zitadel gone there is
+one database. The mandatory verified pre-update backup (§3) is a single dump of the app database, and "both
+databases" elsewhere in this record now reads as that one. The no-quick-rollback flag for releases that bump
+the pinned Zitadel image is dropped.
 
 ## Context
 
