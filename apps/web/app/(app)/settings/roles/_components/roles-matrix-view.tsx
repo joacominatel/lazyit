@@ -265,7 +265,7 @@ function RolesMatrix() {
         className="rounded-xl bg-card text-card-foreground ring-1 ring-foreground/10"
       >
         {/* The matrix scrolls inside its own box on a narrow screen; the page never does. */}
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full min-w-[34rem] border-collapse text-sm">
             <thead>
               <tr className="border-b">
