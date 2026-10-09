@@ -98,8 +98,10 @@ or hairpins badly — from inside the lazyit containers. Keep the public URL in 
   userinfo calls go to that origin with `X-Forwarded-Host` / `X-Forwarded-Proto` taken from
   `AUTH_ISSUER`; the browser redirect still uses `AUTH_ISSUER`.
 - **API:** point `OIDC_JWKS_URI` at the internal origin (e.g.
-  `http://<internal-host>:<port>/oauth/v2/keys`). The API sends its JWKS, discovery and userinfo
-  requests to that origin, with forwarded headers taken from `OIDC_ISSUER`.
+  `http://<internal-host>:<port>/oauth/v2/keys`). A JWKS origin that differs from the issuer's is the
+  internal route: the API fetches the keys there, falls back to it for discovery when the public name
+  does not answer, and sends userinfo calls on the issuer's own origin there — with forwarded headers
+  taken from `OIDC_ISSUER`. The access token never goes to any other host.
 
 The containers must be able to reach `<internal-host>` — attach the IdP to a network the `api` and
 `web` services share, or use an address both can route to.
@@ -138,9 +140,11 @@ and `VIEWER`. After that, roles are managed in **Users**; the API refuses to rem
   identity"*). So an IdP rebuilt with new subjects, or a move to another IdP, does not carry people
   over — lazyit has no tooling for it.
 - **Passwords, MFA and sessions** are the IdP's. lazyit offers no password reset under OIDC.
-- **Offboarding** in lazyit soft-deletes the person and refuses their next sign-in (403) — **if they
-  have signed in before**. It does not touch the IdP: **disable the account in your IdP too**. A person
-  offboarded before their first sign-in is stopped only by the IdP ([[0102-remove-bundled-zitadel]] §5).
+- **Offboarding** in lazyit soft-deletes the person and refuses their sign-in (403): by `sub` once
+  they have signed in, by verified email if they never did. The way back is **Restore** on the person.
+  It does not touch the IdP: **disable the account there too**, for everything else the IdP fronts —
+  and because an IdP that does not verify emails leaves the never-signed-in case open
+  ([[0102-remove-bundled-zitadel]] §5).
 
 ## 6 — Troubleshooting
 
@@ -162,7 +166,8 @@ Many IdPs show a secret only once — rotate it and set the new one.
 
 **409 "already linked to a different identity".** The person's `sub` changed (§5).
 
-**403 on first sign-in for an existing person.** The IdP did not send `email_verified=true`.
+**403 on sign-in.** The person was offboarded (restore them if that was a mistake), or — on a first
+sign-in that should link an existing person — the IdP did not send `email_verified=true`.
 
 **The web cannot reach the IdP from inside its container** (sign-in fails before the IdP page, with a
 fetch error in `… logs web`). Use §3c.
