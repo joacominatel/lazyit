@@ -38,3 +38,28 @@ export function filterTaxonomy<T>(
 function fold(text: string): string {
   return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 }
+
+/**
+ * What a bulk delete would detach, from the selected rows' counts: the names of the rows in use, the
+ * sum of their counts, and whether every count was known. A category delete is a plain soft delete —
+ * nothing is refused — so this only informs the confirmation.
+ */
+export function bulkUsage(
+  rows: readonly { name: string; count: number | null | undefined }[],
+): { inUse: string[]; total: number; known: boolean } {
+  const inUse: string[] = [];
+  let total = 0;
+  let known = true;
+  for (const row of rows) {
+    const label = usageLabel("assets", row.count);
+    if (!label) {
+      known = false;
+      continue;
+    }
+    if (label.count > 0) {
+      inUse.push(row.name);
+      total += label.count;
+    }
+  }
+  return { inUse, total, known };
+}

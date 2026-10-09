@@ -54,7 +54,7 @@ import {
   UsageText,
 } from "./taxonomy-list";
 import type { AnyCategory, CategoryKind } from "./taxonomy-types";
-import { filterTaxonomy, type UsageNoun } from "./taxonomy-usage";
+import { bulkUsage, filterTaxonomy, type UsageNoun, usageLabel } from "./taxonomy-usage";
 
 /** The category kinds Settings → Taxonomies manages. KB folders (the `article` kind) live in the KB. */
 export type ManagedCategoryKind = Exclude<CategoryKind, "article">;
@@ -147,9 +147,10 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
   }
 
   /**
-   * Loop the per-kind delete over the selection (no batch endpoint). A category still in use answers
-   * 409 and is intentionally KEPT — a partial success is the correct outcome. Deleted rows are
-   * deselected; skipped rows stay selected so the operator can see them; a toast reports the split.
+   * Loop the per-kind delete over the selection (no batch endpoint). A category delete is a plain,
+   * restorable soft delete with no in-use guard: records filed under it keep their data and show no
+   * category until it is restored or they are re-filed. A row whose request fails stays selected so
+   * the operator can see it; a toast reports the split.
    */
   async function handleBulkDelete() {
     const ids = selection.selectedIds;
@@ -296,7 +297,12 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
           entityKey="category"
           name={deleting.name}
           onConfirm={() => remove.mutateAsync(deleting.id)}
-        />
+        >
+          <DeleteImpact
+            noun={USAGE_NOUN[kind]}
+            count={"usageCount" in deleting ? deleting.usageCount : undefined}
+          />
+        </DeleteConfirmDialog>
       ) : null}
 
       <AlertDialog
@@ -313,6 +319,15 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
             <AlertDialogDescription>
               {t("taxonomies.categories.bulkDelete.confirmDescription")}
             </AlertDialogDescription>
+            <BulkDeleteImpact
+              noun={USAGE_NOUN[kind]}
+              rows={categories
+                .filter((c) => selection.selectedIds.includes(c.id))
+                .map((c) => ({
+                  name: c.name,
+                  count: "usageCount" in c ? c.usageCount : undefined,
+                }))}
+            />
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isBulkDeleting}>{tc("cancel")}</AlertDialogCancel>
@@ -325,4 +340,46 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
       </AlertDialog>
     </div>
   );
+}
+
+/**
+ * What deleting one category does to the records filed under it, when the list read sent a count: it
+ * is a restorable soft delete, nothing is refused, and those records simply show no category.
+ */
+function DeleteImpact({ noun, count }: { noun: UsageNoun; count: number | null | undefined }) {
+  const t = useTranslations("settings.taxonomies");
+  const label = usageLabel(noun, count);
+  if (!label) return <>{t("categories.deleteImpact.unknown")}</>;
+  if (label.key === "unused") return <>{t("categories.deleteImpact.unused")}</>;
+  return (
+    <>
+      {t("categories.deleteImpact.used", { usage: t(`usage.${label.key}`, { count: label.count }) })}
+    </>
+  );
+}
+
+/** The bulk version: which selected categories are in use, and how many records lose their category. */
+function BulkDeleteImpact({
+  noun,
+  rows,
+}: {
+  noun: UsageNoun;
+  rows: { name: string; count: number | null | undefined }[];
+}) {
+  const t = useTranslations("settings.taxonomies");
+  const { inUse, total, known } = bulkUsage(rows);
+  if (inUse.length > 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t("categories.deleteImpact.bulkUsed", {
+          names: inUse.join(", "),
+          usage: t(`usage.${noun}`, { count: total }),
+        })}
+      </p>
+    );
+  }
+  if (known && rows.length > 0) {
+    return <p className="text-sm text-muted-foreground">{t("categories.deleteImpact.bulkUnused")}</p>;
+  }
+  return null;
 }

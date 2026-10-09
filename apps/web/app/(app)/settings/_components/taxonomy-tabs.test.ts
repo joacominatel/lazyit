@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { parseTaxonomyTab, TAXONOMY_GROUPS, TAXONOMY_PANES } from "./taxonomy-tabs";
-import { filterTaxonomy, usageLabel } from "./taxonomy-usage";
+import { bulkUsage, filterTaxonomy, usageLabel } from "./taxonomy-usage";
 
 describe("parseTaxonomyTab", () => {
   test("every old ?tab= value still opens the same taxonomy", () => {
@@ -61,5 +61,30 @@ describe("filterTaxonomy", () => {
     expect(filterTaxonomy(rows, "LAP", fields).map((r) => r.name)).toEqual(["Laptop"]);
     expect(filterTaxonomy(rows, "fisicos", fields).map((r) => r.name)).toEqual(["Server"]);
     expect(filterTaxonomy(rows, "zzz", fields)).toEqual([]);
+  });
+});
+
+describe("bulkUsage", () => {
+  test("names the rows in use and sums their counts", () => {
+    expect(
+      bulkUsage([
+        { name: "Laptop", count: 42 },
+        { name: "UPS", count: 0 },
+        { name: "Server", count: 9 },
+      ]),
+    ).toEqual({ inUse: ["Laptop", "Server"], total: 51, known: true });
+  });
+
+  test("nothing in use, all counts known", () => {
+    expect(bulkUsage([{ name: "UPS", count: 0 }])).toEqual({ inUse: [], total: 0, known: true });
+  });
+
+  test("a missing count marks the summary as incomplete but keeps what is known", () => {
+    expect(
+      bulkUsage([
+        { name: "Laptop", count: 3 },
+        { name: "Old", count: null },
+      ]),
+    ).toEqual({ inUse: ["Laptop"], total: 3, known: false });
   });
 });
