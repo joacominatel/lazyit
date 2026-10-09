@@ -4,10 +4,11 @@ import { BookOpenIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { useArticleStatusCounts } from "@/lib/api/hooks/use-articles";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { rankFolderCards } from "@/lib/utils/kb-folder-rank";
 import { kbFolderHref } from "@/lib/utils/kb-shell-route";
 import type { FolderIndex } from "../_lib/use-folder-index";
 import { KbCreateActions } from "./kb-browse-controls";
@@ -71,7 +72,9 @@ export function KbFolderCards({ index }: { index: FolderIndex }) {
 
   const { roots, childrenById, restrictionOf } = index;
   const limit = canWrite ? CARD_LIMIT - 1 : CARD_LIMIT;
-  const visible = showAll ? roots : roots.slice(0, limit);
+  // The fullest branches first, so the few cards before "See all" are the folders that hold knowledge.
+  const ranked = useMemo(() => rankFolderCards(roots, childrenById), [roots, childrenById]);
+  const visible = showAll ? ranked : ranked.slice(0, limit);
 
   if (roots.length === 0 && !canWrite) return null;
 
@@ -96,7 +99,7 @@ export function KbFolderCards({ index }: { index: FolderIndex }) {
         ) : null}
       </div>
 
-      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <ul className="grid grid-cols-2 gap-3 xl:grid-cols-3">
         {visible.map((folder) => {
           const { restriction, ancestorName } = restrictionOf(folder.id);
           const subfolders = childrenById.get(folder.id)?.length ?? 0;
@@ -104,7 +107,7 @@ export function KbFolderCards({ index }: { index: FolderIndex }) {
             <li key={folder.id} className="min-w-0">
               <Link
                 href={kbFolderHref(search, folder.id)}
-                className="flex h-full flex-col gap-2 rounded-xl bg-card p-4 text-card-foreground ring-1 ring-foreground/10 outline-none transition-colors hover:bg-accent/30 hover:ring-foreground/20 focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-full flex-col gap-2 rounded-xl bg-card p-3 text-card-foreground sm:p-4 ring-1 ring-foreground/10 outline-none transition-colors hover:bg-accent/30 hover:ring-foreground/20 focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="flex min-w-0 items-center gap-2.5">
                   <FolderTile folderId={folder.id} size="sm" />
