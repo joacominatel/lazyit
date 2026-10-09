@@ -99,6 +99,7 @@ BACKUP_ZITADEL=""
 BACKUP_LABEL=""
 DC=""
 INSTALL_MODE=""                  # local | byoi | bundled — read from the live .env.prod (install_auth_mode)
+LOCK_HELD=0                      # 1 once THIS run created the lock; only then may it remove it
 TAG_TRUST_ERROR=""               # set by verify_release_tag when it refuses a tag (the fail_hard reason)
 TAG_TRUST_COMMIT=""              # set by verify_release_tag on success: the verified commit step 4 checks out
 
@@ -139,7 +140,8 @@ EOF
 
 # ---------- cleanup / lock ----------------------------------------------------
 release_lock() {
-  [ -n "${LOCK_DIR:-}" ] && [ -d "$LOCK_DIR" ] && rmdir "$LOCK_DIR" 2>/dev/null || true
+  [ "$LOCK_HELD" = 1 ] && [ -d "$LOCK_DIR" ] && rmdir "$LOCK_DIR" 2>/dev/null || true
+  LOCK_HELD=0
 }
 cleanup() {
   release_lock
@@ -229,6 +231,7 @@ EOF
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     die "another update appears to be running (lock '$LOCK_DIR' exists). If you are SURE none is, remove it: rmdir $LOCK_DIR"
   fi
+  LOCK_HELD=1
   ok "lock acquired ($LOCK_DIR)"
 
   # ---------- 2. PRE-FLIGHT ----------
