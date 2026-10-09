@@ -77,9 +77,9 @@ gh release create v1.0.0 --notes-file <curated-notes.md>
 The update unit is a **git checkout + rebuild** (images build on the host; there is no registry —
 [[0027-ci-pipeline]]), so an image-swap update is structurally impossible. Operators update with
 the guided **`infra/update.sh`** ([[0084-update-awareness-and-guided-update]]): it takes a
-**verified dual `pg_dump`** first, checks the target is a real release (an annotated `vX.Y.Z` tag
-on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must not be bad — see *Tag
-trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
+**verified `pg_dump`** first (the app database, plus Zitadel's on a bundled-Zitadel install), checks
+the target is a real release (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH;
+a signature, when present, must not be bad — see *Tag trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
 `.env.prod`**), builds before swapping, health-gates, and — on failure — auto-rolls-back only when
 no migration ran, otherwise stops with a confirm-gated, human-run restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
 never executes the update.
@@ -97,5 +97,13 @@ never executes the update.
 >
 > `start.sh` detects the existing install, keeps every secret, and rebuilds. From v2.1.0 on,
 > `./infra/update.sh vX.Y.Z` works again.
+
+> [!warning] Updating **from v2.1.0** with local or BYOI auth — the next update is done by hand (#1545)
+> Through v2.1.0, `update.sh` always dumped the bundled Zitadel's database, which local and BYOI installs do
+> not run, so it stops at its backup step before touching anything. Its env check also asked for the
+> bundled-only `ZITADEL_*` and OIDC keys those installs leave unset. The fix ships in the first release after
+> v2.1.0 and, for the same re-exec reason, only helps updates *from* that release. For that one step, back up
+> first ([[backups]]), then run the same `git fetch --tags && git checkout vX.Y.Z && ./infra/start.sh`.
+> Bundled-Zitadel installs are not affected.
 
 See also: [[deploy-self-hosted]], [[backups]].
