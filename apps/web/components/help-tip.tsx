@@ -26,9 +26,15 @@ export function HelpTip({
   href,
   children,
   className,
+  icon,
 }: {
   /** What the tip explains — becomes the trigger's accessible name ("More about {topic}"). */
   topic: string;
+  /**
+   * The trigger's glyph, instead of the "?" — e.g. the ⚠ beside an admin-level capability (#1540).
+   * Decorative: the trigger keeps its "More about {topic}" name.
+   */
+  icon?: ReactNode;
   /** A Manual page (optionally with an #anchor) holding the full explanation. */
   href?: string;
   children: ReactNode;
@@ -90,7 +96,7 @@ export function HelpTip({
           className,
         )}
       >
-        <QuestionMarkCircleIcon className="size-4" aria-hidden />
+        {icon ?? <QuestionMarkCircleIcon className="size-4" aria-hidden />}
       </PopoverTrigger>
       <PopoverContent
         align="start"

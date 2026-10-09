@@ -15,6 +15,13 @@ Service accounts are a separate kind of principal from users: they never appear 
 never count toward the last-admin rule, and do not depend on your identity provider. You manage them in
 **Settings → Service accounts** (admin only).
 
+The page lists each account on one row: its name and the start of its token, its permissions as chips
+(past three, the rest collapse into **+N** — hover it, or read it with a screen reader, for the full
+list), when it was last used, and when its token expires — or a badge when it is **revoked**,
+**expired** or **inactive**. The **⋯** menu on a row holds **How to test**, **Edit**, **Rotate token**,
+**AI access** and **Revoke**. **Show revoked** switches to the revoked accounts, each with **Restore**.
+With no accounts yet, the page is one line with the **New service account** button.
+
 ## How a service account is authorized
 
 A service account is authorized **only by the permissions you grant it** — from the same catalog users

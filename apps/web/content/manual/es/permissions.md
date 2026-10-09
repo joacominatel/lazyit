@@ -36,9 +36,9 @@ escribir mal ni inventar. Lo que **sí** puedes cambiar es qué permisos tienen 
 **Lector**. **El administrador siempre tiene todos los permisos y no se puede editar** — esto
 mantiene la instancia segura de operar (siempre hay un administrador con plena capacidad).
 
-Los administradores ajustan a Miembro y Lector desde la pantalla de configuración de
-roles y permisos, eligiendo entre capacidades en lenguaje sencillo agrupadas por área, con ajustes
-predefinidos de un clic como punto de partida.
+Los administradores ajustan a Miembro y Lector desde **Configuración → Roles y permisos** — una sola
+matriz de capacidades en lenguaje sencillo agrupadas por área, con un ajuste predefinido por rol como
+punto de partida. Consulta [Configuración de permisos](/help/users-permissions-permission-configuration).
 
 ## Quién puede hacer qué (valores por defecto)
 

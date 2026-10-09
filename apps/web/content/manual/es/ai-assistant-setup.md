@@ -8,14 +8,18 @@ subcategory: setup
 # Asistente de IA — configuración
 
 Todo lo relacionado con IA se configura en **Configuración → IA**, que requiere el permiso **Configurar
-la instancia**. La página tiene cinco tarjetas:
+la instancia**. Cuatro mosaicos arriba muestran de un vistazo qué está activo — **Proveedor**
+(configurado o no), **Búsqueda web**, **Lectura de documentos** y **Agentes externos** (con cuántos
+clientes están permitidos). Hacé clic en un mosaico para abrir su pestaña:
 
-1. **El proveedor** — un asistente de configuración mientras el asistente está desactivado, y el editor
-   **Proveedor y modelo** una vez activo.
-2. **Comportamiento y límites** — retención, presupuestos e instrucciones del asistente.
-3. **Búsqueda web** — desactivada por defecto.
-4. **Agentes de IA externos (MCP)** — su propio interruptor, el endpoint y los clientes permitidos.
-5. **Desactivar el asistente de IA** — visible mientras está activo.
+1. **Conexión** — un asistente de configuración mientras el asistente está desactivado, el editor
+   **Proveedor y modelo** una vez activo, y **Desactivar el asistente de IA** mientras está activo.
+2. **Límites** — comportamiento y límites: retención, presupuestos e instrucciones del asistente.
+3. **Capacidades** — búsqueda web y extracción de documentos, ambas desactivadas por defecto.
+4. **Agentes externos** — MCP: su propio interruptor, el endpoint y los clientes permitidos.
+
+La pestaña abierta forma parte de la dirección (`?tab=capabilities`, por ejemplo), así podés enlazarla
+directamente.
 
 Al lado de cada ajuste, el **?** lo explica (pasá el mouse por encima, o hacé clic, tocá o apretá Enter
 para dejarlo abierto; Escape lo cierra). La mayoría de las ayudas terminan con **Más información en el
@@ -31,7 +35,8 @@ Las claves de API de los proveedores se guardan cifradas con una clave propia: l
 vos. Para agregarla a mano, generala con `openssl rand -hex 32`, configurala, reiniciá la API y
 respaldala junto con el resto de tu archivo de entorno.
 
-Mientras no esté, Configuración → IA lo avisa arriba de todo, no se puede guardar ninguna clave de API
+Mientras no esté, Configuración → IA lo avisa en una línea arriba de todo (su **?** explica cómo
+resolverlo), no se puede guardar ninguna clave de API
 y solo se puede usar un servidor compatible con OpenAI que no pida clave. MCP no la necesita. Perderla
 solo implica volver a escribir la clave del proveedor.
 
@@ -111,7 +116,7 @@ producto de terceros para el que alguien le pide armar un workflow. Viene **desa
   el proveedor. Mirá [Qué sale de tu servidor](/help/ai-assistant-overview#hacia-socios-de-búsqueda-búsqueda-web-desactivada-por-defecto).
 - **Qué proveedores.** Anthropic, OpenAI y Google Gemini 3 o posterior. El proveedor compatible con OpenAI
   y los modelos Gemini anteriores no tienen una búsqueda que funcione junto con las herramientas de
-  lazyit; en ese caso el interruptor queda deshabilitado y la tarjeta explica por qué.
+  lazyit; en ese caso el interruptor queda deshabilitado y la sección explica por qué.
 - **Solo el chat.** Las ejecuciones headless nunca buscan, porque sus cambios se aplican sin que nadie
   los apruebe. Los clientes MCP buscan con sus propias herramientas, si las tienen.
 - **Los resultados no son confiables.** Una vez que el asistente buscó en la web en una conversación,
@@ -123,6 +128,9 @@ producto de terceros para el que alguien le pide armar un workflow. Viene **desa
 - **Búsquedas por paso** (5 por defecto, entre 1 y 20) limita las búsquedas en un paso del modelo, donde
   el proveedor soporta un límite (Anthropic).
 - **Rige para conversaciones nuevas.** Al desactivarla, los chats que la tenían quedan de solo lectura.
+- **Confirmás antes de activarla.** El **?** del interruptor tiene qué sale de lazyit; al activar el
+  interruptor se abre una confirmación que lo muestra completo, y no se guarda nada hasta que elegís
+  **Activar la búsqueda web**. Desactivarla se aplica al instante.
 
 Tu cuenta en el proveedor también puede tener la búsqueda web deshabilitada de su lado (Anthropic: la
 configuración de privacidad de la organización en la Claude Console; OpenAI: los permisos de
@@ -143,7 +151,7 @@ Viene **desactivada**, también en las instancias que se actualizaron.
   [Qué sale de tu servidor](/help/ai-assistant-overview#documentos-de-compras-extracción-de-documentos-desactivada-por-defecto).
 - **Necesita el asistente activado**, y un proveedor que lea documentos: Anthropic, OpenAI o Google Gemini.
   El proveedor compatible con OpenAI nunca se usa para esto (sus servidores no tienen una forma común de
-  leer un archivo); el interruptor queda deshabilitado y la tarjeta dice por qué. Sigue usable mientras está
+  leer un archivo); el interruptor queda deshabilitado y la sección dice por qué. Sigue usable mientras está
   activado, así que siempre lo podés desactivar.
 - **Quién lo ve.** Las personas que pueden editar compras y usar el asistente de IA. Las cuentas de
   servicio nunca leen documentos.
@@ -152,6 +160,9 @@ Viene **desactivada**, también en las instancias que se actualizaron.
   texto nunca se envían.
 - **Presupuesto y registro.** Cada lectura cuenta para el presupuesto diario de tokens de la persona (el
   mismo que el del chat), y el registro de actividad de la compra la registra — nunca los valores leídos.
+- **Confirmás antes de activarla.** El **?** del interruptor tiene qué sale de lazyit; al activar el
+  interruptor se abre una confirmación que lo muestra completo, y no se guarda nada hasta que elegís
+  **Activar la extracción de documentos**. Desactivarla se aplica al instante.
 
 ## Agentes de IA externos (MCP)
 
@@ -161,10 +172,10 @@ independiente del asistente: funciona sin proveedor configurado y no necesita `A
 Desactivarlo desconecta todos los clientes a la vez; sus autorizaciones vuelven a funcionar al
 reactivarlo.
 
-La tarjeta muestra:
+La pestaña **Agentes externos** muestra:
 
 - **El endpoint MCP** — la dirección para un cliente que se configura a mano: el `WEB_ORIGIN` de la API
-  seguido de `/mcp`. Si no hay `WEB_ORIGIN` fijado, la tarjeta muestra la dirección de esta página y lo
+  seguido de `/mcp`. Si no hay `WEB_ORIGIN` fijado, la pestaña muestra la dirección de esta página y lo
   aclara; los clientes en otras máquinas quizá necesiten la dirección de la instancia en tu red.
 - **Cómo inician sesión los clientes en esta instancia**, según el `WEB_ORIGIN` — no según si esta
   página se ve por HTTPS:
@@ -188,7 +199,7 @@ necesitan llegar a lazyit desde la computadora de la persona. Los pasos del lado
 
 ### Clientes permitidos
 
-Dos cosas de la tarjeta MCP deciden qué clientes pueden conectarse:
+Dos cosas de la sección **Clientes permitidos** deciden qué clientes pueden conectarse:
 
 - **Aceptar cualquier cliente con callback https:// — activado por defecto.** Cualquier cliente MCP cuyo
   callback de inicio de sesión sea una dirección `https://` puede *pedirle* acceso a una persona, aunque
@@ -197,15 +208,17 @@ Dos cosas de la tarjeta MCP deciden qué clientes pueden conectarse:
   loopback (`http://127.0.0.1/…`) ni uno con esquema de app como `cursor://…` — esos necesitan una
   entrada en la lista. **Desactivalo para aceptar solo los clientes de la lista.**
 - **La lista.** lazyit trae **clientes incluidos** — Claude Code, OpenAI Codex, OpenCode, Gemini CLI,
-  Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop y ChatGPT — cada uno con su identificador
-  y cómo se comprobó (**Verificado** desde el propio código o documentación del cliente, o **Docs del
-  proveedor**). **Quitá** un cliente incluido para que deje de conectarse, y **Restauralo** cuando
-  quieras. Pi, Windsurf y Zed no vienen incluidos porque sus identificadores no se pudieron verificar —
+  Cursor, VS Code / GitHub Copilot, claude.ai, Claude Desktop y ChatGPT. Se ven como chips compactos,
+  con una marca en los que tienen el identificador **Verificado**. **Ver detalle** abre la lista
+  completa: el identificador de cada cliente y cómo se comprobó (**Verificado** desde el propio código o
+  documentación del cliente, o **Docs del proveedor**). Ahí **quitá** un cliente incluido para que deje
+  de conectarse, y **restauralo** cuando quieras. Pi, Windsurf y Zed no vienen incluidos porque sus identificadores no se pudieron verificar —
   agregalos vos. Un cliente incluido que quitaste y que una versión posterior de lazyit ya no trae
   aparece en **Clientes quitados que ya no están en la lista incluida**; restaurarlo solo borra tu
   exclusión.
 
-**Agregar un cliente** por una de estas vías:
+En **Clientes que agregaste**, el formulario para agregar es una sola fila — un nombre, cómo
+reconocer al cliente, el valor y **Agregar cliente**. Reconocelo por una de estas vías:
 
 - su **URL de metadatos del cliente** — la URL `https://` que el cliente usa como id de cliente; o
 - su **dirección de callback** — la dirección exacta a la que devuelve a las personas después de
@@ -243,7 +256,7 @@ aparte para la IA. Mirá también [Cuentas de servicio](/help/users-permissions-
 
 ## Desactivarlo
 
-**Desactivar el asistente** (abajo de todo en la página) lo oculta para todos y rechaza pedidos nuevos
+**Desactivar el asistente** (abajo de todo en la pestaña **Conexión**) lo oculta para todos y rechaza pedidos nuevos
 al instante. Las conversaciones se conservan y se siguen borrando al vencer su retención; los cambios
 que esperan aprobación no se pueden aprobar mientras esté desactivado. El proveedor, el modelo y la
 clave cifrada se conservan, así que reactivarlo es un solo paso. Los agentes de IA externos no se ven

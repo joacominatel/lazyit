@@ -11,21 +11,12 @@ import {
   SparklesIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
-import {
-  type Permission,
-  type ServiceAccount,
-} from "@lazyit/shared";
+import type { ServiceAccount } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useReducer, useState } from "react";
 import { toast } from "sonner";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
-import { EmptyState } from "@/components/empty-state";
-import {
-  ErrorState,
-  type ResourceColumn,
-  ResourceTable,
-  RestoreRowAction,
-} from "@/components/resource-table";
+import { ErrorState, RestoreRowAction } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,7 +28,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { notifyError } from "@/lib/api/notify-error";
 import {
   useRestoreServiceAccount,
@@ -51,12 +41,12 @@ import { AiAccessDialog } from "./ai-access-dialog";
 import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
 import {
+  lifecycleCell,
+  permissionChips,
   serviceAccountStatus,
   STATUS_TONE,
 } from "./service-account-status";
 import { TestItDialog } from "./test-it-dialog";
-
-const MAX_PERMISSION_LABELS = 2;
 
 /** Which dialog / row-action is active. Each modal renders independently from its own field. */
 type DialogState = {
@@ -106,16 +96,18 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
 }
 
 /**
- * The Service Accounts admin list (ADR-0048). A ResourceTable of the instance's non-human credentials
- * with row actions (Edit / Rotate / Revoke), a "Show revoked" toggle that switches to the archived
- * (`includeRevoked`) view with per-row Restore, and a create flow that ends in the one-time secret
- * reveal. Everything writes through `settings:manage`-gated endpoints — the screen lives behind the
+ * The Service Accounts admin list (ADR-0048). A compact list (#1540) of the instance's non-human
+ * credentials — name and token prefix, permission chips (the rest collapse into "+N"), last used, and
+ * when it expires or why it no longer works — with row actions (Test / Edit / Rotate / AI access /
+ * Revoke), a "Show revoked" toggle that switches to the archived (`includeRevoked`) view with per-row
+ * Restore, and a create flow that ends in the one-time secret reveal. Empty is one line with the
+ * create button. Everything writes through `settings:manage`-gated endpoints — the screen lives behind the
  * AdminGate and re-checks `can('settings:manage')` here so a non-holder sees a read-only list.
  */
 export function ServiceAccountsManager() {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  const { relative } = useFormatters();
+  const { relative, date } = useFormatters();
   // A render-stable "now" so the status/expiry derivation (serviceAccountStatus) stays pure.
   const [now] = useState(() => Date.now());
   const [showRevoked, setShowRevoked] = useState(false);
@@ -123,60 +115,6 @@ export function ServiceAccountsManager() {
     useServiceAccounts(showRevoked);
 
   const canManage = useCan("settings:manage");
-
-  const columns: ResourceColumn[] = [
-    {
-      key: "name",
-      header: t("serviceAccounts.columns.name"),
-      skeleton: <Skeleton className="h-4 w-40" />,
-    },
-    {
-      key: "token",
-      header: t("serviceAccounts.columns.token"),
-      skeleton: <Skeleton className="h-4 w-28" />,
-    },
-    {
-      key: "permissions",
-      header: t("serviceAccounts.columns.permissions"),
-      skeleton: <Skeleton className="h-4 w-44" />,
-    },
-    {
-      key: "lastUsed",
-      header: t("serviceAccounts.columns.lastUsed"),
-      headClassName: "w-28",
-      skeleton: <Skeleton className="h-4 w-16" />,
-    },
-    {
-      key: "status",
-      header: t("serviceAccounts.columns.status"),
-      headClassName: "w-24",
-      skeleton: <Skeleton className="h-5 w-16 rounded-4xl" />,
-    },
-    {
-      key: "actions",
-      header: tc("actions"),
-      srOnlyHeader: true,
-      headClassName: "w-12 text-right",
-      skeleton: <Skeleton className="ml-auto size-7" />,
-    },
-  ];
-
-  /** A short "3 permissions · View assets, Add & edit assets, +1 more" summary for the table cell. */
-  function permissionsSummary(permissions: Permission[]): string {
-    if (permissions.length === 0) return t("serviceAccounts.permissionsSummary.none");
-    const labels = permissions
-      .slice(0, MAX_PERMISSION_LABELS)
-      .map((p) => permissionLabel(t, p));
-    const extra = permissions.length - labels.length;
-    const count = t("serviceAccounts.permissionsSummary.count", {
-      count: permissions.length,
-    });
-    const tail =
-      extra > 0
-        ? `, ${t("serviceAccounts.permissionsSummary.extra", { count: extra })}`
-        : "";
-    return `${count} · ${labels.join(", ")}${tail}`;
-  }
 
   const revoke = useRevokeServiceAccount();
   const restore = useRestoreServiceAccount();
@@ -216,7 +154,8 @@ export function ServiceAccountsManager() {
           />
           {t("serviceAccounts.showRevoked")}
         </label>
-        {canManage && !showRevoked ? (
+        {/* Empty, the one-line empty state carries the create button instead. */}
+        {canManage && !showRevoked && hasData ? (
           <Button onClick={openCreate} size="sm">
             <PlusIcon />
             {t("serviceAccounts.newAccount")}
@@ -225,7 +164,15 @@ export function ServiceAccountsManager() {
       </div>
 
       {isLoading ? (
-        <ResourceTable columns={columns} isLoading />
+        <div className="space-y-px overflow-hidden rounded-xl ring-1 ring-foreground/10">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="flex items-center gap-3 bg-card px-4 py-3">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="ml-auto h-4 w-16" />
+            </div>
+          ))}
+        </div>
       ) : isError ? (
         <ErrorState
           title={t("serviceAccounts.loadError")}
@@ -233,76 +180,104 @@ export function ServiceAccountsManager() {
           error={error}
         />
       ) : !hasData ? (
-        <EmptyState
-          icon={KeyIcon}
-          pillar="access"
-          title={
-            showRevoked
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <KeyIcon className="size-4 shrink-0" aria-hidden />
+            {showRevoked
               ? t("serviceAccounts.empty.revokedTitle")
-              : t("serviceAccounts.empty.title")
-          }
-          description={
-            showRevoked
-              ? t("serviceAccounts.empty.revokedDescription")
-              : t("serviceAccounts.empty.description")
-          }
-          action={
-            canManage && !showRevoked
-              ? {
-                  label: t("serviceAccounts.empty.action"),
-                  onClick: openCreate,
-                }
-              : undefined
-          }
-        />
+              : t("serviceAccounts.empty.title")}
+          </p>
+          {canManage && !showRevoked ? (
+            <Button size="sm" onClick={openCreate}>
+              <PlusIcon />
+              {t("serviceAccounts.empty.action")}
+            </Button>
+          ) : null}
+        </div>
       ) : (
-        <ResourceTable columns={columns}>
+        <ul
+          aria-label={t("serviceAccounts.title")}
+          className="divide-y overflow-hidden rounded-xl bg-card text-card-foreground ring-1 ring-foreground/10"
+        >
           {accounts.map((account) => {
-            const status = serviceAccountStatus(account, now);
-            const isRevoked = status === "revoked";
+            const isRevoked = serviceAccountStatus(account, now) === "revoked";
+            const lifecycle = lifecycleCell(account, now);
+            const chips = permissionChips(account.permissions);
             return (
-              <TableRow key={account.id}>
-                <TableCell className="font-medium">
-                  <span className="flex items-center gap-2">
-                    {account.name}
+              <li
+                key={account.id}
+                className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5"
+              >
+                <div className="min-w-0 flex-1 basis-48 space-y-0.5">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{account.name}</span>
+                    <code
+                      className="font-mono text-xs text-muted-foreground"
+                      title={t("serviceAccounts.columns.token")}
+                    >
+                      {account.tokenPrefix}…
+                    </code>
                     {account.systemManaged ? (
-                      <StatusBadge
-                        tone="info"
-                        title={t("serviceAccounts.systemManaged.hint")}
-                      >
+                      <StatusBadge tone="info" title={t("serviceAccounts.systemManaged.hint")}>
                         <LockClosedIcon />
                         {t("serviceAccounts.systemManaged.badge")}
                       </StatusBadge>
                     ) : null}
-                  </span>
+                  </p>
                   {account.description ? (
-                    <p className="truncate text-xs font-normal text-muted-foreground">
-                      {account.description}
-                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{account.description}</p>
                   ) : null}
-                </TableCell>
-                <TableCell>
-                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                    {account.tokenPrefix}…
-                  </code>
-                </TableCell>
-                <TableCell
-                  className="max-w-[280px] truncate text-muted-foreground"
-                  title={account.permissions.join(", ")}
+                </div>
+
+                <ul
+                  aria-label={t("serviceAccounts.columns.permissions")}
+                  className="flex min-w-0 flex-wrap items-center gap-1"
                 >
-                  {permissionsSummary(account.permissions)}
-                </TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {account.lastUsedAt
-                    ? relative(account.lastUsedAt)
-                    : t("serviceAccounts.never")}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge tone={STATUS_TONE[status]}>
-                    {t(`serviceAccounts.status.${status}`)}
-                  </StatusBadge>
-                </TableCell>
-                <TableCell className="text-right">
+                  {account.permissions.length === 0 ? (
+                    <li className="text-xs text-muted-foreground">
+                      {t("serviceAccounts.permissionsSummary.none")}
+                    </li>
+                  ) : null}
+                  {chips.shown.map((permission) => (
+                    <li
+                      key={permission}
+                      className="rounded-md bg-muted px-1.5 py-0.5 text-xs"
+                      title={permission}
+                    >
+                      {permissionLabel(t, permission)}
+                    </li>
+                  ))}
+                  {chips.hidden.length > 0 ? (
+                    <li
+                      className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+                      title={chips.hidden.map((p) => permissionLabel(t, p)).join(", ")}
+                    >
+                      <span aria-hidden>+{chips.hidden.length}</span>
+                      <span className="sr-only">
+                        {chips.hidden.map((p) => permissionLabel(t, p)).join(", ")}
+                      </span>
+                    </li>
+                  ) : null}
+                </ul>
+
+                <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground tabular-nums">
+                  <span>
+                    {account.lastUsedAt
+                      ? t("serviceAccounts.lastUsed", { when: relative(account.lastUsedAt) })
+                      : t("serviceAccounts.neverUsed")}
+                  </span>
+                  {lifecycle.kind === "status" ? (
+                    <StatusBadge tone={STATUS_TONE[lifecycle.status]}>
+                      {t(`serviceAccounts.status.${lifecycle.status}`)}
+                    </StatusBadge>
+                  ) : lifecycle.kind === "expires" ? (
+                    <span>{t("serviceAccounts.expires", { date: date(lifecycle.at) })}</span>
+                  ) : (
+                    <span>{t("serviceAccounts.noExpiry")}</span>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center justify-end">
                   {!canManage ? null : account.systemManaged ? (
                     // Engine-owned: no edit / rotate / revoke. A locked indicator, not an action menu.
                     <span
@@ -315,25 +290,15 @@ export function ServiceAccountsManager() {
                   ) : isRevoked ? (
                     <RestoreRowAction
                       onRestore={() => handleRestore(account)}
-                      disabled={
-                        restore.isPending && restore.variables === account.id
-                      }
+                      disabled={restore.isPending && restore.variables === account.id}
                     />
                   ) : (
                     <ServiceAccountRowActions
                       onEdit={() => openEdit(account)}
-                      onRotate={() =>
-                        dispatchDialog({ type: "rotatingChanged", account })
-                      }
-                      onRevoke={() =>
-                        dispatchDialog({ type: "revokingChanged", account })
-                      }
-                      onTest={() =>
-                        dispatchDialog({ type: "testingChanged", account })
-                      }
-                      onAiAccess={() =>
-                        dispatchDialog({ type: "aiAccessChanged", account })
-                      }
+                      onRotate={() => dispatchDialog({ type: "rotatingChanged", account })}
+                      onRevoke={() => dispatchDialog({ type: "revokingChanged", account })}
+                      onTest={() => dispatchDialog({ type: "testingChanged", account })}
+                      onAiAccess={() => dispatchDialog({ type: "aiAccessChanged", account })}
                       aiAccessLabel={t("serviceAccounts.rowActions.aiAccess")}
                       editLabel={tc("edit")}
                       testLabel={t("serviceAccounts.rowActions.testIt")}
@@ -342,11 +307,11 @@ export function ServiceAccountsManager() {
                       openActionsLabel={t("serviceAccounts.rowActions.openActions")}
                     />
                   )}
-                </TableCell>
-              </TableRow>
+                </div>
+              </li>
             );
           })}
-        </ResourceTable>
+        </ul>
       )}
 
       <ServiceAccountFormDialog

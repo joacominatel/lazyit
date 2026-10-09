@@ -32,8 +32,9 @@ same pages as cards, in the same groups.
 
 **Access**
 
-- **Roles & permissions** — see who holds which role across the team, and tune what each role may do
-  under [Permissions](/help/permissions). You change a person's role from the Users section.
+- **Roles & permissions** — one matrix of what each role may do, with how many people hold each role.
+  See [Permission configuration](/help/users-permissions-permission-configuration). You change a
+  person's role from the Users section.
 - **Service accounts** — create and manage non-human API credentials for CI, scripts and
   integrations, scoped by permission and revocable.
 

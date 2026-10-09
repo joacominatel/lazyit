@@ -34,8 +34,9 @@ grupos.
 
 **Acceso**
 
-- **Roles y permisos** — consulta quién tiene cada rol en el equipo y ajusta lo que cada rol puede
-  hacer en [Permisos](/help/permissions). El rol de una persona se cambia desde la sección Usuarios.
+- **Roles y permisos** — una sola matriz de lo que puede hacer cada rol, con cuántas personas tienen
+  cada uno. Consulta [Configuración de permisos](/help/users-permissions-permission-configuration). El
+  rol de una persona se cambia desde la sección Usuarios.
 - **Cuentas de servicio** — crea y gestiona credenciales de API no humanas para CI, scripts e
   integraciones, acotadas por permiso y revocables.
 

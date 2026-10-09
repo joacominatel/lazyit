@@ -57,7 +57,7 @@
     },
     "roles": {
       "title": "Roles y permisos",
-      "description": "Mira quién tiene cada rol RBAC en el equipo. Los cambios de rol se hacen en la sección de Usuarios."
+      "description": "Qué pueden hacer Miembros y Observadores, junto al Administrador."
     },
     "serviceAccounts": {
       "title": "Cuentas de servicio",
@@ -579,12 +579,9 @@
     }
   },
   "roles": {
-    "title": "Roles",
-    "subtitle": "Quién tiene cada nivel de acceso y qué puede hacer cada rol. Cambia un rol desde la sección de Usuarios.",
+    "title": "Roles y permisos",
+    "subtitle": "Qué puede hacer cada rol. Cambia el rol de una persona desde Usuarios.",
     "manageUsers": "Gestionar usuarios",
-    "viewMembers": "Ver {count, plural, =0 {sin miembros} one {# miembro} other {# miembros}}",
-    "fullAccessLocked": "Acceso completo — no editable.",
-    "editPermissions": "Editar permisos",
     "meta": {
       "ADMIN": {
         "label": "Administrador",
@@ -600,74 +597,16 @@
       }
     },
     "permissions": {
-      "title": "Permisos del rol",
-      "subtitle": "Configura qué pueden hacer los Miembros y los Observadores. El Administrador siempre tiene acceso completo.",
       "idpNote": "Estos permisos son exclusivos de lazyit — nunca aparecen en tu proveedor de identidad.",
       "loadError": "No se pudieron cargar los permisos",
-      "startFromPreset": "Empezar desde un preajuste",
-      "resetToDefaults": "Restablecer a los valores predeterminados",
-      "capabilitiesHeading": "Capacidades",
-      "summary": {
-        "heading": "Qué puede hacer este rol",
-        "levels": {
-          "edit": "Ver y editar",
-          "view": "Solo ver",
-          "none": "Sin acceso"
-        },
-        "domains": {
-          "asset": "Activos",
-          "application": "Aplicaciones",
-          "accessGrant": "Concesiones de acceso",
-          "accessRequest": "Solicitudes de acceso",
-          "consumable": "Consumibles",
-          "purchaseOrder": "Compras",
-          "article": "Base de conocimiento",
-          "location": "Ubicaciones",
-          "assetModel": "Modelos de activo",
-          "category": "Categorías",
-          "user": "Usuarios",
-          "dashboard": "Panel",
-          "search": "Búsqueda",
-          "settings": "Configuración",
-          "logs": "Registros de actividad",
-          "workflow": "Flujos de trabajo",
-          "notification": "Notificaciones",
-          "secret": "Gestor de Secretos",
-          "import": "Importaciones",
-          "infra": "Mapa de servidores",
-          "ai": "Asistente de IA"
-        }
-      },
-      "segmented": {
-        "ariaLabel": "Elige un rol para editar",
-        "adminTitle": "El Administrador tiene acceso completo y no se puede editar.",
-        "full": "Completo",
-        "admin": "Administrador",
-        "member": "Miembro",
-        "viewer": "Observador",
-        "unsavedChanges": "Cambios sin guardar"
-      },
       "preset": {
-        "custom": "Personalizado",
-        "customEdited": "Personalizado (editaste)",
-        "customHint": "Un conjunto único que no coincide con ningún preajuste."
-      },
-      "capabilityGroup": {
-        "ariaLabel": "Capacidades de {label}",
-        "adminLevel": "Nivel administrador",
-        "partial": "Parcial"
+        "custom": "Personalizado"
       },
       "fineTune": {
         "title": "Ajuste fino (avanzado)",
         "subtitle": "Control exacto por permiso",
-        "description": "Cada interruptor aquí es un único permiso. Los cambios convierten el rol en un conjunto Personalizado y actualizan las capacidades de arriba.",
+        "description": "Cada casilla aquí es un permiso para un rol. Un cambio convierte ese rol en Personalizado y se ve como una celda concedida en parte en la matriz.",
         "adminLevel": "Nivel administrador"
-      },
-      "saveBar": {
-        "ariaLabel": "Cambios de permisos sin guardar",
-        "message": "Tienes cambios de permisos sin guardar.",
-        "discard": "Descartar",
-        "saveChanges": "Guardar cambios"
       },
       "confirm": {
         "title": "Revisa este cambio antes de guardar",
@@ -693,7 +632,50 @@
           "MEMBER": "Los Miembros",
           "VIEWER": "Los Observadores"
         }
+      },
+      "domains": {
+        "asset": "Activos",
+        "application": "Aplicaciones",
+        "accessGrant": "Concesiones de acceso",
+        "accessRequest": "Solicitudes de acceso",
+        "consumable": "Consumibles",
+        "purchaseOrder": "Compras",
+        "article": "Base de conocimiento",
+        "location": "Ubicaciones",
+        "assetModel": "Modelos de activo",
+        "category": "Categorías",
+        "user": "Usuarios",
+        "dashboard": "Panel",
+        "search": "Búsqueda",
+        "settings": "Configuración",
+        "logs": "Registros de actividad",
+        "workflow": "Flujos de trabajo",
+        "notification": "Notificaciones",
+        "secret": "Gestor de Secretos",
+        "import": "Importaciones",
+        "infra": "Mapa de servidores",
+        "ai": "Asistente de IA"
       }
+    },
+    "matrix": {
+      "ariaLabel": "Permisos por rol",
+      "capability": "Capacidad",
+      "members": "{count, plural, =0 {Nadie} one {# persona} other {# personas}}",
+      "all": "Todo",
+      "adminLocked": "El Administrador siempre tiene todos los permisos y no se puede editar.",
+      "presetLabel": "Preajuste para {role}",
+      "roleUnsaved": "Cambios sin guardar",
+      "groupSummary": "{granted} de {total} concedidas a {role}",
+      "granted": "Concedido",
+      "partial": "Concedida en parte — algunos de sus permisos se ajustaron en Ajuste fino.",
+      "cellLabel": "{capability} — {role}",
+      "adminLevelTopic": "{capability} es de nivel administrador",
+      "adminLevelHelp": "Nivel administrador: una eliminación o una acción de administración. Puedes concederla a este rol; al guardar te pedimos que lo confirmes.",
+      "reset": "Restablecer valores predeterminados",
+      "discard": "Descartar",
+      "unsaved": "{count, plural, one {# cambio sin guardar} other {# cambios sin guardar}}",
+      "noChanges": "No hay cambios sin guardar",
+      "save": "{count, plural, =0 {Guardar} one {Guardar # cambio} other {Guardar # cambios}}"
     }
   },
   "serviceAccounts": {
@@ -704,13 +686,9 @@
     "newAccount": "Nueva cuenta de servicio",
     "loadError": "No se pudieron cargar las cuentas de servicio",
     "columns": {
-      "name": "Nombre",
       "token": "Token",
-      "permissions": "Permisos",
-      "lastUsed": "Último uso",
-      "status": "Estado"
+      "permissions": "Permisos"
     },
-    "never": "Nunca",
     "systemManaged": {
       "badge": "Gestionada por el sistema",
       "hint": "Propiedad del motor de workflows — cada ejecución de workflow se ejecuta como esta cuenta.",
@@ -719,14 +697,10 @@
     "empty": {
       "revokedTitle": "No hay cuentas de servicio revocadas",
       "title": "Aún no hay cuentas de servicio",
-      "revokedDescription": "Las cuentas revocadas (eliminadas de forma reversible) aparecen aquí y pueden restaurarse.",
-      "description": "Dale a un ejecutor de CI, script o integración acceso acotado y no humano a la API — crea una y entrégale un token en lugar del inicio de sesión de una persona.",
-      "action": "Crear la primera"
+      "action": "Nueva cuenta de servicio"
     },
     "permissionsSummary": {
-      "none": "Ninguno",
-      "count": "{count, plural, one {# permiso} other {# permisos}}",
-      "extra": "{count, plural, other {+# más}}"
+      "none": "Ninguno"
     },
     "status": {
       "active": "Activa",
@@ -871,7 +845,11 @@
       "selectAllAria": "Seleccionar todos los permisos de {label}",
       "all": "Todos",
       "adminLevel": "Nivel administrador"
-    }
+    },
+    "lastUsed": "Usada {when}",
+    "neverUsed": "Nunca usada",
+    "expires": "Vence el {date}",
+    "noExpiry": "Sin vencimiento"
   },
   "permissionMeta": {
     "pillars": {
@@ -1124,16 +1102,6 @@
   },
   "taxonomies": {
     "title": "Taxonomías",
-    "subtitle": "Gestiona las categorías que clasifican los registros, además de los modelos de activo que los activos referencian y tus estados de activo personalizados.",
-    "tablistAria": "Tipo de taxonomía",
-    "tabs": {
-      "asset": "Categorías de activo",
-      "application": "Categorías de aplicación",
-      "consumable": "Categorías de consumible",
-      "article": "Categorías de artículo",
-      "models": "Modelos de activo",
-      "statuses": "Estados"
-    },
     "kindLabel": {
       "asset": "categoría de activo",
       "application": "categoría de aplicación",
@@ -1170,9 +1138,6 @@
     "categories": {
       "newButton": "Nueva {label}",
       "loadError": "No se pudo cargar la lista de {label}",
-      "emptyTitle": "Aún no hay entradas de {label}",
-      "emptyDescription": "Agrega la primera para empezar a clasificar registros — quedará disponible para elegir donde sea que se referencie este tipo.",
-      "emptyAction": "Crear la primera",
       "selectAll": "Seleccionar todas las entradas de {label}",
       "selectRow": "Seleccionar {name}",
       "bulkDelete": {
@@ -1181,12 +1146,6 @@
         "resultAllDeleted": "Se eliminaron {deleted, plural, one {# categoría} other {# categorías}}.",
         "resultPartial": "Se eliminaron {deleted}, {skipped} omitidas (aún en uso).",
         "resultAllSkipped": "{skipped, plural, one {# categoría omitida} other {# categorías omitidas}} (aún en uso)."
-      },
-      "columns": {
-        "name": "Nombre",
-        "description": "Descripción",
-        "order": "Orden",
-        "updated": "Actualizado"
       },
       "form": {
         "editTitle": "Editar {label}",
@@ -1239,22 +1198,14 @@
         "updateError": "No se pudo actualizar la {label}",
         "created": "{label} creada",
         "createError": "No se pudo crear la {label}"
-      }
+      },
+      "inlinePlaceholder": "Nueva categoría…",
+      "empty": "Todavía no hay categorías."
     },
     "models": {
       "newButton": "Nuevo modelo",
       "loadError": "No se pudieron cargar los modelos de activo",
-      "emptyTitle": "Aún no hay modelos de activo",
-      "emptyDescription": "Agrega una marca y modelo — por ejemplo, una MacBook Pro 14 — para que cada activo que registres pueda referenciarlo en lugar de volver a escribir las especificaciones.",
-      "emptyAction": "Crear el primer modelo",
       "entityLabel": "modelo de activo",
-      "columns": {
-        "name": "Nombre",
-        "manufacturer": "Fabricante",
-        "sku": "SKU",
-        "category": "Categoría",
-        "updated": "Actualizado"
-      },
       "form": {
         "editTitle": "Editar modelo de activo",
         "newTitle": "Nuevo modelo de activo",
@@ -1299,7 +1250,8 @@
         "updateError": "No se pudo actualizar el modelo de activo",
         "created": "Modelo de activo creado",
         "createError": "No se pudo crear el modelo de activo"
-      }
+      },
+      "empty": "Todavía no hay modelos de activo."
     },
     "statuses": {
       "intro": "Los estados personalizados son nombres opcionales para los seis estados predefinidos: por ejemplo \"En reparación en el proveedor\" o \"En el banco de trabajo\" para En mantenimiento, o \"Pool de préstamo\" para En depósito. Cada uno corresponde a un único estado predefinido, que es el que siguen leyendo el panel, los filtros, las importaciones y todas las demás reglas. Los activos pueden quedarse con un estado predefinido sin nombre propio.",
@@ -1312,14 +1264,6 @@
       "archivedEmpty": "No hay estados personalizados archivados.",
       "archiveAction": "Archivar",
       "assetsLink": "{count, plural, one {# activo} other {# activos}} con {name}",
-      "columns": {
-        "name": "Nombre",
-        "description": "Descripción",
-        "order": "Orden",
-        "assets": "Activos",
-        "kind": "Estado predefinido",
-        "archived": "Archivado"
-      },
       "toast": {
         "created": "Se creó el estado personalizado {name}",
         "createError": "No se pudo crear el estado personalizado",
@@ -1365,7 +1309,47 @@
         "toast": "Se archivó el estado personalizado {name}",
         "toastMoved": "Se archivó {name} y se {count, plural, one {movió # activo} other {movieron # activos}} a {target}",
         "error": "No se pudo archivar el estado personalizado"
-      }
+      },
+      "archivedLabel": "{taxonomy} archivados",
+      "archivedOn": "Archivado el {date}"
+    },
+    "help": "Las listas que clasifican los registros: categorías, modelos de activo y estados de activo personalizados. Las carpetas de la base de conocimiento se gestionan en la propia base de conocimiento.",
+    "listLabel": "Taxonomías",
+    "groups": {
+      "assets": "Activos",
+      "applications": "Aplicaciones",
+      "consumables": "Consumibles",
+      "knowledge": "Conocimiento"
+    },
+    "panes": {
+      "asset": "Categorías",
+      "models": "Modelos",
+      "statuses": "Estados personalizados",
+      "application": "Categorías",
+      "consumable": "Categorías"
+    },
+    "paneTitles": {
+      "asset": "Categorías de activos",
+      "models": "Modelos de activo",
+      "statuses": "Estados de activo personalizados",
+      "application": "Categorías de aplicaciones",
+      "consumable": "Categorías de consumibles"
+    },
+    "kbFolders": "Carpetas → en la KB",
+    "kbPointer": "Las categorías de artículos ahora son las carpetas de la base de conocimiento. Créalas, renómbralas, descríbelas y ordénalas en la base de conocimiento.",
+    "kbOpen": "Abrir la base de conocimiento",
+    "filterLabel": "Filtrar {taxonomy}",
+    "filterPlaceholder": "Filtrar…",
+    "noMatches": "Nada coincide con el filtro.",
+    "select": "Seleccionar",
+    "selectDone": "Listo",
+    "selectAllVisible": "Seleccionar todo lo visible",
+    "inlineAdd": "Agregar",
+    "usage": {
+      "assets": "{count, plural, one {# activo} other {# activos}}",
+      "apps": "{count, plural, one {# app} other {# apps}}",
+      "consumables": "{count, plural, one {# consumible} other {# consumibles}}",
+      "unused": "Sin uso"
     }
   }
 }

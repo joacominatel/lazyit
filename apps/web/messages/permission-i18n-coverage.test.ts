@@ -9,15 +9,15 @@ import esSettings from "./es/settings.json";
 
 /**
  * Web-side i18n COVERING-SET guard (#900, cf. #882). The shared package owns the permission catalog —
- * the {@link PERMISSION_DOMAINS} (role summary rows), the per-permission {@link PERMISSIONS} META, and
+ * the {@link PERMISSION_DOMAINS} (the Fine-tune group headings), the per-permission {@link PERMISSIONS} META, and
  * the operator-facing {@link CAPABILITY_IDS} toggles. The web renders EACH id via a `settings.json`
  * key; when the catalog grows but the message catalog doesn't, `next-intl` throws MISSING_MESSAGE at
- * runtime (the CEO hit `permissionMeta.capabilities.article:manage`, `roles…summary.domains.notification`,
+ * runtime (the CEO hit `permissionMeta.capabilities.article:manage`, `roles…domains.notification`,
  * …). This mirrors the shared `permission-meta.test.ts` covering-set guard, extending it across the
  * i18n boundary: it maps every shared id to its EN + ES key and fails on the first hole — before it
  * ships. It is the guard whose absence let this class of drift recur (#877/#882).
  *
- * Key-shape note: `permissionMeta.permissions.*` and `roles.permissions.summary.domains.*` are keyed by
+ * Key-shape note: `permissionMeta.permissions.*` and `roles.permissions.domains.*` are keyed by
  * the RAW ids (`article:manage`, `notification`); `permissionMeta.capabilities.*` is keyed by the COLON
  * form of the dotted `CapabilityId` (`article.manage` → `article:manage`).
  */
@@ -78,13 +78,12 @@ describe.each(LOCALES)("permission i18n coverage — %s", (locale) => {
   );
 
   test.each([...PERMISSION_DOMAINS])(
-    "roles.permissions.summary.domains.%s has a label",
+    "roles.permissions.domains.%s has a label",
     (domain) => {
       expect(
         readString(catalog, [
           "roles",
           "permissions",
-          "summary",
           "domains",
           domain,
         ]),

@@ -30,14 +30,15 @@ can be tuned. The role is the thing a user *has*; permissions are what a role *g
   sensitive views (the user directory, the access-grant ledger, and purchases and suppliers) are also
   hidden from Viewer by default.
 
-## The Roles overview
+## The Roles & permissions page
 
-**Settings → Roles** shows one card per role with, for each: a **live holder count** (how many active
-users currently hold it), a short reminder of what the role can do, and a **View N members** link. That
-link opens the [Users list](/help/users-permissions-user-lifecycle) filtered to that role — the Users
-list is where you actually browse and manage who holds it, with search, sort and paging. The cards show
-counts only; they no longer list members inline. From the same cards you can open **Edit permissions**
-for Member and Viewer (Admin is full access and locked).
+**Settings → Roles & permissions** is one matrix: what each role can do, with Admin as a locked
+reference column beside the editable Member and Viewer columns. Each column header shows a **live
+holder count** (how many active users currently hold that role); click it to open the
+[Users list](/help/users-permissions-user-lifecycle) filtered to that role — the Users list is where you
+actually browse and manage who holds it, with search, sort and paging. Editing what Member and Viewer
+may do is described in [Permission configuration](/help/users-permissions-permission-configuration).
+(The old address of the per-role editor, `/settings/roles/permissions`, now opens this page.)
 
 ## How a role is assigned
 

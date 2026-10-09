@@ -37,8 +37,9 @@ typed wrong or invented. What you **can** change is which permissions **Member**
 hold. **Administrator always holds every permission and cannot be edited** — this keeps the instance
 safe to operate (there is always a fully capable admin).
 
-Administrators tune Member and Viewer from the role-permission settings screen, choosing from
-plain-language capabilities grouped by area, with one-click presets as a starting point.
+Administrators tune Member and Viewer from **Settings → Roles & permissions** — one matrix of
+plain-language capabilities grouped by area, with a preset per role as a starting point. See
+[Permission configuration](/help/users-permissions-permission-configuration).
 
 ## Who can do what (defaults)
 

@@ -274,6 +274,10 @@
       "invalid": "Enter a whole number from {min} to {max}.",
       "save": "Save",
       "saved": "Search limit saved"
+    },
+    "consent": {
+      "title": "Turn on web search?",
+      "confirm": "Turn on web search"
     }
   },
   "mcp": {
@@ -323,7 +327,6 @@
       },
       "added": {
         "title": "Clients you added",
-        "empty": "None yet.",
         "remove": "Remove {label}"
       },
       "kinds": {
@@ -370,7 +373,11 @@
         "description": "The well-known clients lazyit allows out of the box. Remove one to stop it connecting (it is then only accepted if “any https:// client” admits it); restore it at any time.",
         "remove": "Remove {label}",
         "restore": "Restore",
-        "restoreAria": "Restore {label}"
+        "restoreAria": "Restore {label}",
+        "viewDetails": "View details",
+        "hideDetails": "Hide details",
+        "more": "Show {count} more built-in clients",
+        "removedCount": "{count, plural, one {# removed} other {# removed}}"
       },
       "verification": {
         "verified": "Verified",
@@ -426,6 +433,31 @@
       "title": "What leaves lazyit",
       "egress": "Purchase documents are sent to the configured AI provider. When someone asks lazyit to read a document attached to a purchase, the whole file (an invoice, a quote or a delivery note, with its supplier, prices and tax IDs) goes to the provider, under your contract with it.",
       "review": "Nothing is saved from it until a person reviews the draft and saves the purchase. Each read counts against that person's daily AI budget and is recorded in the purchase's activity."
+    },
+    "consent": {
+      "title": "Turn on document extraction?",
+      "confirm": "Turn on document extraction"
     }
+  },
+  "tiles": {
+    "provider": "Provider",
+    "webSearch": "Web search",
+    "documents": "Document reading",
+    "agents": "External agents",
+    "notConfigured": "Not configured",
+    "missing": "Missing",
+    "draft": "Not on",
+    "agentsValue": "{state} · {count, plural, one {# client} other {# clients}}"
+  },
+  "tabs": {
+    "label": "AI settings",
+    "connection": "Connection",
+    "limits": "Limits",
+    "capabilities": "Capabilities",
+    "agents": "External agents"
+  },
+  "consent": {
+    "description": "Read what this sends out of lazyit before you turn it on.",
+    "cancel": "Cancel"
   }
 }
