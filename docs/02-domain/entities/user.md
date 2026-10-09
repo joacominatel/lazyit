@@ -46,8 +46,9 @@ the reverse.
   deleted (soft delete + lifecycle timestamps).
 - **lazyit never writes to the IdP** ([[0102-remove-bundled-zitadel]]). Creating, editing and offboarding
   a user are database writes only. Under OIDC, offboarding blocks the person in lazyit (the soft delete;
-  their next sign-in is refused) but does **not** disable their IdP account — that is the operator's step
-  in their own IdP. No `User` row is ever hard-deleted.
+  their next sign-in is refused — by `sub`, or by verified email when they never signed in, ADR-0102 §5)
+  but does **not** disable their IdP account — that is the operator's step in their own IdP. Restore is the
+  way back. No `User` row is ever hard-deleted.
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
   **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit (name, email,
   legajo, username), `DEACTIVATED` / `REACTIVATED` on a real `isActive` flip (issue #1375), `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
