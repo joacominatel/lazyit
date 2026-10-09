@@ -184,6 +184,10 @@ jobs:
       - name: Test update.sh release-tag trust
         run: sh infra/test/update-tag-trust.sh
 
+      # infra/update.sh per auth mode (#1545, ADR-0102): only the app DB is dumped, keys start.sh leaves unset for the mode are not gaps, and a bundled-Zitadel install is refused before any side effect. No Docker.
+      - name: Test update.sh auth-mode handling
+        run: sh infra/test/update-mode-aware.sh
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.

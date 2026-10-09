@@ -49,6 +49,10 @@ const DEV_VOLUMES = [
 /** Dev web origin (where /setup and /login live). */
 const WEB_ORIGIN = "http://localhost:3000";
 
+/** Where the removed dev Zitadel listened (ADR-0102). A web .env still pointing here enables OIDC against nothing. */
+const REMOVED_DEV_ISSUER = /^https?:\/\/(localhost|127\.0\.0\.1):8080(\/.*)?$/;
+const WEB_ENV_PATH = join(REPO_ROOT, "apps", "web", ".env");
+
 /** Health-wait tuning (poll db). */
 const HEALTH_RETRIES = 60;
 const HEALTH_INTERVAL_MS = 3000;
@@ -272,6 +276,24 @@ function commentOutEnvKey(text: string, key: string): string {
   return changed ? lines.join("\n") : text;
 }
 
+/** True when the active AUTH_ISSUER is the removed dev Zitadel. */
+function pointsAtRemovedDevIdp(text: string): boolean {
+  const issuer = text.match(/^\s*AUTH_ISSUER\s*=\s*(.*)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
+  return !!issuer && REMOVED_DEV_ISSUER.test(issuer);
+}
+
+/** Comment out AUTH_ISSUER and its client pair when they point at the removed dev Zitadel; returns the keys it disabled. */
+function disableRemovedDevIdp(text: string): { text: string; disabled: string[] } {
+  if (!pointsAtRemovedDevIdp(text)) return { text, disabled: [] };
+  const disabled: string[] = [];
+  for (const key of ["AUTH_ISSUER", "AUTH_CLIENT_ID", "AUTH_CLIENT_SECRET"]) {
+    const next = commentOutEnvKey(text, key);
+    if (next !== text) disabled.push(key);
+    text = next;
+  }
+  return { text, disabled };
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -319,12 +341,30 @@ async function wireLocalEnv(): Promise<void> {
   log(`wired apps/api/.env (AUTH_MODE=local, SESSION_SIGNING_SECRET set, OIDC vars off).`);
 
   // apps/web/.env — AUTH_MODE=local so the web renders the local login surface (Credentials provider).
-  const webEnvPath = join(REPO_ROOT, "apps", "web", ".env");
   const webExample = join(REPO_ROOT, "apps", "web", ".env.example");
-  let webText = await readOrSeedEnv(webEnvPath, webExample);
+  let webText = await readOrSeedEnv(WEB_ENV_PATH, webExample);
   webText = setEnvKey(webText, "AUTH_MODE", "local");
-  await Bun.write(webEnvPath, webText);
+  const stale = disableRemovedDevIdp(webText);
+  webText = stale.text;
+  await Bun.write(WEB_ENV_PATH, webText);
   log(`wired apps/web/.env (AUTH_MODE=local).`);
+  if (stale.disabled.length > 0) {
+    log(
+      `commented out ${stale.disabled.join(", ")} in apps/web/.env — they pointed at the removed dev ` +
+        `Zitadel (localhost:8080, ADR-0102).`,
+    );
+  }
+}
+
+/** --up never edits .env, so it only warns about a web .env still pointing at the removed dev Zitadel. */
+async function warnRemovedDevIdp(): Promise<void> {
+  const webEnv = Bun.file(WEB_ENV_PATH);
+  if (!(await webEnv.exists()) || !pointsAtRemovedDevIdp(await webEnv.text())) return;
+  warn(
+    "apps/web/.env sets AUTH_ISSUER to the removed dev Zitadel (localhost:8080, ADR-0102), so the web offers " +
+      "OIDC sign-in against nothing. Run `bun run dev:fresh`, or comment out AUTH_ISSUER, AUTH_CLIENT_ID " +
+      "and AUTH_CLIENT_SECRET there.",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +449,7 @@ async function runFresh(opts: Options): Promise<void> {
 async function runUp(opts: Options): Promise<void> {
   log("MODE: --up (bring services up + refresh the Prisma client, then start). Assumes --fresh ran before.");
   await assertHostTools(["docker"]);
+  await warnRemovedDevIdp();
 
   await composeUp();
   await waitForDbHealthy();

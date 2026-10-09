@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-09-28
+updated: 2026-10-09
 ---
 
 # Releasing lazyit
@@ -77,9 +77,10 @@ gh release create v1.0.0 --notes-file <curated-notes.md>
 The update unit is a **git checkout + rebuild** (images build on the host; there is no registry —
 [[0027-ci-pipeline]]), so an image-swap update is structurally impossible. Operators update with
 the guided **`infra/update.sh`** ([[0084-update-awareness-and-guided-update]]): it takes a
-**verified dual `pg_dump`** first, checks the target is a real release (an annotated `vX.Y.Z` tag
-on `origin/master`, fetched over HTTPS or SSH; a signature, when present, must not be bad — see *Tag
-trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
+**verified `pg_dump`** of the app database first (an install still wired to the removed bundled Zitadel
+is refused before that — [[migrate-off-bundled-zitadel]]), checks
+the target is a real release (an annotated `vX.Y.Z` tag on `origin/master`, fetched over HTTPS or SSH;
+a signature, when present, must not be bad — see *Tag trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
 `.env.prod`**), builds before swapping, health-gates, and — on failure — auto-rolls-back only when
 no migration ran, otherwise stops with a confirm-gated, human-run restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
 never executes the update.
@@ -97,5 +98,27 @@ never executes the update.
 >
 > `start.sh` detects the existing install, keeps every secret, and rebuilds. From v2.1.0 on,
 > `./infra/update.sh vX.Y.Z` works again.
+
+> [!warning] Updating **from v2.1.0** with local or BYOI auth — the next update is done by hand (#1545)
+> Through v2.1.0, `update.sh` always dumped the bundled Zitadel's database, which local and BYOI installs do
+> not run, so it stops at its backup step before touching anything. Its env check also asked for the
+> bundled-only `ZITADEL_*` and OIDC keys those installs leave unset. The fix ships in the first release after
+> v2.1.0 and, for the same re-exec reason, only helps updates *from* that release. For that one step, back up
+> first ([[backups]]), then run the same `git fetch --tags && git checkout vX.Y.Z && ./infra/start.sh`.
+> A bundled-Zitadel install takes neither path — see the next note.
+
+> [!important] The bundled-Zitadel removal ships as a MAJOR (ADR-0102, #1543)
+> Removing the bundled Zitadel is operator impact, so its promotion carries the **`release:major`**
+> label, and its Release notes open with a **"⚠️ Upgrade actions"** section saying:
+>
+> - **Local auth** (`AUTH_MODE=local`): nothing to do.
+> - **Your own IdP** (BYOI, `AUTH_MODE=oidc`): nothing required — `/setup`, user creation, user edits
+>   and offboarding stop returning 503. The API never reads `OIDC_CLIENT_SECRET` or
+>   `IDENTITY_PROVIDER_TYPE`; delete them when convenient. Offboarding does not touch your IdP: disable
+>   the account there too ([[auth-bootstrap]] §5).
+> - **Bundled Zitadel**: `start.sh`, `update.sh` and the API refuse the install with nothing changed.
+>   Do not run `update.sh` across this release; follow [[migrate-off-bundled-zitadel]].
+> - From **v2.1.0** with local or BYOI auth, the previous note still applies: take this release with
+>   `start.sh`.
 
 See also: [[deploy-self-hosted]], [[backups]].

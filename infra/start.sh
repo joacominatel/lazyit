@@ -523,7 +523,8 @@ render_env_file() {
       "# OIDC_ISSUER="*|OIDC_ISSUER=*)               oidc_line OIDC_ISSUER "$BYOI_ISSUER" ;;
       "# OIDC_JWKS_URI="*|OIDC_JWKS_URI=*)           oidc_line OIDC_JWKS_URI "$BYOI_JWKS_URI" ;;
       "# OIDC_CLIENT_ID="*|OIDC_CLIENT_ID=*)         oidc_line OIDC_CLIENT_ID "$BYOI_CLIENT_ID" ;;
-      "# OIDC_CLIENT_SECRET="*|OIDC_CLIENT_SECRET=*) oidc_line OIDC_CLIENT_SECRET "$BYOI_CLIENT_SECRET" ;;
+      "# OIDC_CLIENT_SECRET="*|OIDC_CLIENT_SECRET=*)
+        printf '%s\n' "# OIDC_CLIENT_SECRET=  # unused: the API never reads a client secret (AUTH_CLIENT_SECRET is the web's)" >>"$_tmp" ;;
       "# AUTH_ISSUER="*|AUTH_ISSUER=*)               oidc_line AUTH_ISSUER "$BYOI_ISSUER" ;;
       "# AUTH_CLIENT_ID="*|AUTH_CLIENT_ID=*)         oidc_line AUTH_CLIENT_ID "$BYOI_CLIENT_ID" ;;
       "# AUTH_CLIENT_SECRET="*|AUTH_CLIENT_SECRET=*) oidc_line AUTH_CLIENT_SECRET "$BYOI_CLIENT_SECRET" ;;
@@ -1175,7 +1176,7 @@ ask_questions() {
         valid_jwks_url "an http(s):// URL (the jwks_uri value of your IdP's discovery document)")
       # Client id/secret: opaque tokens — only the newline/control-char gate applies (no charset rule).
       BYOI_CLIENT_ID=$(ask_text "   OIDC_CLIENT_ID" "" valid_nonempty "the client id is required")
-      BYOI_CLIENT_SECRET=$(ask_text "   OIDC_CLIENT_SECRET" "" "" "")
+      BYOI_CLIENT_SECRET=$(ask_text "   AUTH_CLIENT_SECRET (the client secret; only the web uses it)" "" "" "")
     else
       info "local mode: lazyit stores accounts + password hashes itself — no external IdP. You create the first admin at /setup."
     fi
