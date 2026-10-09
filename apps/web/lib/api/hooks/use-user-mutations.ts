@@ -174,7 +174,7 @@ export function useProvisionLocalUserAccount() {
  * Edit the caller's own name (`PATCH /users/me`, issue #1421). Seeds `/users/me` with the returned row,
  * then invalidates the users cache so the caller's row in the directory and any detail view refetch;
  * a failure re-reads `/users/me`.
- * Error messages stay with the form (409 directory-managed, 403 service account, 503 IdP mirror).
+ * Error messages stay with the form (409 directory-managed, 403 service account).
  */
 export function useUpdateOwnProfile() {
   const queryClient = useQueryClient();
