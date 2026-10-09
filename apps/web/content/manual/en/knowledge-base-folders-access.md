@@ -13,20 +13,36 @@ place where you control **who can read** which articles.
 ## Folders
 
 Every article has **exactly one home folder**, chosen as its **Category** when you write it. Folders
-can be nested, so you can build a tree such as `Servers / Linux / Provisioning`. Browse the tree
-from the folder sidebar in the Knowledge Base.
+can be nested, so you can build a tree such as `Servers / Linux / Provisioning`. Browse the tree in
+the **Folders** section of the Knowledge Base sidebar, below the views (see
+[Browsing the Knowledge Base](/help/knowledge-base-articles-authoring#browsing-the-knowledge-base)).
 
-- **Each folder shows how many articles it holds** — a small count on the folder row. It counts only
-  the articles **you can actually see** (published articles, plus your own drafts), so it never
-  reveals more than the folder's list would. A **restricted folder you cannot read shows no number**,
-  and folders on an older server simply show none until it is updated.
-- **Create a top-level folder** with **New folder** at the top of the folder sidebar.
+- **Each folder has a colour tile** — a small coloured square next to its name. The colour is picked
+  automatically from the folder and stays the same everywhere (the sidebar, the home page cards, the
+  folder's own page) and for everyone. It is a visual aid only; two folders can share a colour.
+- **Each folder shows how many articles it holds** — a small count on the right of the folder row. It
+  counts only the articles **you can actually see** (published articles, plus your own drafts), so it
+  never reveals more than the folder's list would. A **restricted folder you cannot read shows no
+  number**, and folders on an older server simply show none until it is updated.
+- **A restricted folder shows one padlock** on its row — see
+  [Restricting a folder](#restricting-a-folder). Everyone sees the padlock, not only administrators.
+- **Create a top-level folder** with the **+** next to the **Folders** heading in the sidebar, or with
+  the dashed **New folder** card on the Knowledge Base home page.
 - **Create a sub-folder** from the **⋯** menu on the folder you want it inside → **New sub-folder
-  here**. There is no depth limit — nest as deeply as your documentation needs. The new folder opens
-  as soon as it is created.
-- **Rename or move a folder** from that same **⋯** menu. **Move to…** lets you pick any other folder
-  as the new parent, or **Top level (no parent)** to pull it back out to the root; the folder's
-  sub-folders and its articles move with it.
+  here**, or with **Subfolder** on that folder's page. There is no depth limit — nest as deeply as
+  your documentation needs. The new folder opens as soon as it is created.
+- **The ⋯ menu** appears when you point at a folder row, when you move to it with the keyboard, and
+  always on the selected folder; on a touch screen it is always visible. It holds **New sub-folder
+  here**, **Edit**, **Move to…**, **Access…** (administrators) and **Delete folder**, each shown only
+  to people allowed to use it.
+- **Edit a folder** from the **⋯** menu → **Edit**. You can change its **name**, its **description**
+  (a sentence shown on its card and on its page) and its **order** — an optional whole number: lower
+  numbers sort first, and folders without one sort after, by name. Editing never moves the folder or
+  changes who can read it. A description or an order can be changed but not removed yet: if you empty
+  the field, the dialog says so and the current value is kept.
+- **Move a folder** with **Move to…** in the same menu. Pick any other folder as the new parent, or
+  **Top level (no parent)** to pull it back out to the root; the folder's sub-folders and its
+  articles move with it.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both
   exist; two folders named `Linux` under the *same* parent cannot. If a name is already taken where
   you are creating or moving to, the app says so and nothing is changed.
@@ -36,6 +52,44 @@ from the folder sidebar in the Knowledge Base.
   articles — from the Knowledge Base. The confirmation tells you exactly how many folders and
   articles are affected. The articles are soft-deleted (recoverable by an administrator from the
   database), but this is still a heavy action: read the warning before confirming.
+
+Folders are created, described and ordered here in the Knowledge Base; **Settings → Taxonomies**
+sends you here for them.
+
+## A folder's page
+
+Selecting a folder opens its page. At the top, a **breadcrumb** shows the folder's full path; each
+part is a link back up the tree. Below it, a header card holds the folder's colour tile, name and
+description, and four facts:
+
+- **Who can see** — **Everyone with KB access** for a public folder. For a restricted one,
+  administrators see the rules in words, such as *Only Admins*, *Only 3 people* or *Only holders of
+  Finance*; everyone else sees **Restricted**. A folder restricted by a parent says **Restricted ·
+  from** that parent.
+- **Articles** — the folder's own article count (the same number as in the sidebar).
+- **Subfolders** — how many folders sit directly inside it.
+- **Last change** — when an article in the folder was last updated.
+
+The header's actions:
+
+- **New article here** opens the article editor with this folder already chosen as the
+  **Category**. You can still pick another folder before saving.
+- **Subfolder** creates a folder inside this one.
+- **⋯** offers **Edit**, **Move to…**, **Access…** (administrators) and **Delete folder** — the same
+  menu as in the sidebar.
+
+Under the header, the folder's **sub-folders** appear as a row of chips — select one to open it.
+Then comes **In this folder**: the folder's articles, in the same table as the home page but without
+the Folder column (you are already in it), with the same status filter, sort and filters.
+
+### Include subfolders
+
+A folder that has sub-folders shows an **Include subfolders** switch above its list. Off (the
+default), the list shows only articles filed directly in the folder. On, it shows the folder's
+articles **and everything filed anywhere under it**, and each article from a sub-folder shows that
+sub-folder's name before its summary, so you can still tell where it lives. **Last change** follows
+the switch too. Folder access still applies: articles in a sub-folder you cannot read stay out of the
+list. The switch is part of the page address, so a link you share opens the same way.
 
 To make an article *appear* in a second folder without moving its home, use an **alias** — see
 [Linking and discovery](/help/knowledge-base-linking-discovery). An alias is navigation only and
@@ -50,8 +104,8 @@ Base already allows.
 
 ## Restricting a folder
 
-Restricting access is an **administrator** action, done per folder from the folder's settings in the
-sidebar. You add one or more **rules**; a person who matches **any** rule can read the folder (the
+Restricting access is an **administrator** action, done per folder from the folder's **⋯** menu →
+**Access…** (in the sidebar or on the folder's page). You add one or more **rules**; a person who matches **any** rule can read the folder (the
 rules are combined with OR). The rule types are:
 
 - **Users** — a named set of specific people.
@@ -66,8 +120,11 @@ reading. Revoke someone's app access or release their asset and their Knowledge 
 disappears automatically — there is no separate Knowledge Base permission to remember to remove when
 someone leaves a project or the team.
 
-A restricted folder shows a **lock** icon; a public one is open. Use **Make public** to remove all
-rules and return a folder to the default.
+A restricted folder shows a **padlock** next to its name — in the sidebar, on its home-page card
+(which also says **Restricted**), in the article list's Folder column and in search results. A public
+folder shows none. A folder that is restricted only because a parent is shows a fainter padlock;
+point at it to see which parent. Use **Make public** to remove all rules and return a folder to the
+default.
 
 ### Restrictions are inherited downward
 

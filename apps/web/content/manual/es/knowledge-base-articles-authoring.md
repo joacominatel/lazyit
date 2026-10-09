@@ -14,9 +14,72 @@ Base de conocimiento documenta *tus servidores, tus aplicaciones, tus procesos*.
 Un **artículo** es un único documento en Markdown. Lo escribes en Markdown plano, lo previsualizas
 mientras avanzas y lo publicas cuando está listo.
 
+## Explorar la Base de conocimiento
+
+La Base de conocimiento se abre en su **página de inicio**: el título con una línea de cifras
+(cuántos artículos puedes ver, cuántos están publicados, cuántos borradores son tuyos y cuántas
+carpetas hay), un cuadro de búsqueda, las **carpetas** de primer nivel como tarjetas y la tabla de
+**artículos**.
+
+### La barra lateral: vistas y carpetas
+
+La barra lateral de la izquierda tiene dos partes. Las **Vistas** son accesos fijos:
+
+- **Todos los artículos** — la página de inicio, con el número de artículos que puedes ver.
+- **Mis borradores** — tus artículos sin publicar. Los borradores son privados de su autor, así que
+  esta lista solo contiene los tuyos.
+- **Recientes** — los artículos **que abriste en este navegador**, del más reciente al más antiguo
+  (hasta 20). La lista se guarda solo en este dispositivo, en este navegador: no se envía al servidor,
+  no se comparte con nadie y no se sincroniza con tus otros dispositivos. Una ventana privada o los
+  datos del sitio bloqueados simplemente la empiezan vacía. **Vaciar lista** la borra.
+- **Vinculados a activos y apps** — artículos conectados con al menos un activo o una aplicación.
+
+Debajo, **Carpetas** es el árbol de carpetas — consulta [Carpetas y acceso](/help/knowledge-base-folders-access).
+La entrada resaltada siempre coincide con la página en la que estás, así que un enlace compartido se
+abre con la misma vista o carpeta seleccionada. En una pantalla estrecha la barra lateral se pliega
+tras un botón **Vistas y carpetas**.
+
+### La tabla de artículos
+
+Los artículos se listan como una tabla:
+
+- **Artículo** — el título, una etiqueta **Borrador** en los artículos sin publicar (pasa el puntero
+  por encima: *solo tú lo ves hasta que lo publiques*), el número de vínculos cuando el artículo está
+  vinculado a activos o apps, y el extracto debajo (o *Sin resumen* cuando no tiene).
+- **Carpeta** — la ruta completa de la carpeta del artículo, con un candado cuando esa carpeta está
+  restringida.
+- **Autor** — quién lo escribió; un compañero que ya no está se marca como **Ex-miembro**.
+- **Lectura** — el tiempo de lectura estimado.
+- **Actualizado** — hace cuánto cambió por última vez; pasa el puntero por encima para ver la fecha y
+  la hora exactas.
+
+En una pantalla estrecha cada artículo pasa a ser una fila de dos líneas con su carpeta y su fecha
+debajo del título. Sobre la tabla:
+
+- **Todos / Publicados / Borradores** filtra por estado, cada opción con su número. **Borradores** es
+  la misma lista que **Mis borradores**.
+- **Orden** ordena la lista por **Actualizados** (lo más reciente primero, por defecto), **Título** (de
+  la A a la Z) o **Creados** (lo más reciente primero).
+- **Filtros** reduce la lista a los artículos **vinculados** a activos o aplicaciones: cualquiera, un
+  tipo o algunos concretos. Los filtros activos se muestran como chips que puedes quitar uno a uno.
+
+Cada elección queda en la dirección de la página, así que puedes guardar o compartir una lista
+filtrada.
+
+### Buscar
+
+El cuadro de búsqueda busca en el **texto completo** de todos los artículos que puedes leer: títulos y
+cuerpos. Pulsa `/` para ir a él desde cualquier punto de la página, o `⌘K` (`Ctrl K`) para abrir un
+buscador rápido que salta directamente a un artículo. Cada resultado muestra resaltadas las palabras
+que coinciden, la **carpeta** del artículo y **hace cuánto se actualizó**. La búsqueda abarca toda la
+Base de conocimiento, no solo la carpeta en la que estás. Justo después de una actualización, hasta
+que la búsqueda se reindexa, los resultados recurren a coincidencias en títulos y extractos — una nota
+lo indica — y en algunos resultados pueden faltar la carpeta y la fecha.
+
 ## Escribir un artículo
 
-Abre la Base de conocimiento y elige **Nuevo artículo**. El formulario es breve:
+Abre la Base de conocimiento y elige **Nuevo artículo** — o **Artículo aquí** en la página de una
+carpeta, que abre el formulario con esa carpeta ya elegida como **Categoría**. El formulario es breve:
 
 - **Título** — el nombre del artículo. El **slug** de la URL se deriva del título automáticamente
   (una forma corta en `minúsculas-con-guiones`); no lo escribes tú.
@@ -130,7 +193,8 @@ Publica desde el propio artículo:
 - **Despublicar** — devuelve un artículo publicado a **Borrador**, ocultándolo de nuevo para todos
   excepto su autor.
 
-Una etiqueta **Borrador** marca los artículos no publicados en su página. Editar el cuerpo nunca
+Una etiqueta **Borrador** marca los artículos no publicados en su página y en la tabla de artículos,
+y **Mis borradores** en la barra lateral reúne todos los tuyos. Editar el cuerpo nunca
 cambia el estado de publicado/borrador: publicar y despublicar son acciones explícitas aparte.
 
 ## Añadir imágenes

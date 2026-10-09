@@ -14,9 +14,66 @@ Knowledge Base documents *your servers, your apps, your processes*.
 An **article** is a single Markdown document. You write it in plain Markdown, preview it as you go,
 and publish it when it is ready.
 
+## Browsing the Knowledge Base
+
+The Knowledge Base opens on its **home page**: the title with one line of figures (how many articles
+you can see, how many are published, how many drafts are yours, and how many folders there are), a
+search box, the top-level **folders** as cards, and the **articles** table.
+
+### The sidebar: views and folders
+
+The sidebar on the left has two parts. **Views** are fixed shortcuts:
+
+- **All articles** — the home page, with the number of articles you can see.
+- **My drafts** — your unpublished articles. Drafts are private to their author, so this list only
+  ever holds yours.
+- **Recent** — the articles **you opened in this browser**, newest first (up to 20). The list is
+  kept only on this device, in this browser: it is not sent to the server, not shared with anyone,
+  and not synced to your other devices. A private window or blocked site data simply starts it
+  empty. **Clear list** forgets it.
+- **Linked to assets and apps** — articles connected to at least one asset or application.
+
+Below them, **Folders** is the folder tree — see [Folders and access](/help/knowledge-base-folders-access).
+The highlighted entry always matches the page you are on, so a shared link opens with the same view
+or folder selected. On a narrow screen the sidebar folds behind a **Views and folders** button.
+
+### The articles table
+
+Articles are listed as a table:
+
+- **Article** — the title, a **Draft** label on unpublished articles (point at it: *only you can see
+  it until it's published*), a link count when the article is linked to assets or apps, and the
+  excerpt underneath (or *No summary* when it has none).
+- **Folder** — the article's full folder path, with a padlock when that folder is restricted.
+- **Author** — who wrote it; a teammate who has left is marked **Former member**.
+- **Reading** — the estimated reading time.
+- **Updated** — how long ago it last changed; point at it for the exact date and time.
+
+On a narrow screen each article becomes a two-line row with its folder and date under the title.
+Above the table:
+
+- **All / Published / Drafts** filters by status, each with its count. **Drafts** is the same list
+  as **My drafts**.
+- **Sort** orders the list by **Updated** (newest first, the default), **Title** (A to Z) or
+  **Created** (newest first).
+- **Filters** narrows to articles **linked** to assets or applications — any, a kind, or specific
+  ones. Active filters show as chips you can remove one by one.
+
+Every choice is kept in the page address, so you can bookmark or share a filtered list.
+
+### Searching
+
+The search box searches the **full text** of every article you can read — titles and bodies. Press
+`/` to jump to it from anywhere on the page, or `⌘K` (`Ctrl K`) for a quick-open box that jumps
+straight to an article. Each result shows the matching words highlighted, the article's **folder**
+and **how long ago it was updated**. Search covers the whole Knowledge Base, not just the folder you
+are in. Right after an update, until search has been re-indexed, results fall back to matching titles
+and excerpts only — a note says so — and the folder and date may be missing on some results.
+
 ## Writing an article
 
-Open the Knowledge Base and choose **New article**. The form is short:
+Open the Knowledge Base and choose **New article** — or **New article here** on a folder's page,
+which opens the form with that folder already chosen as the **Category**. The form is short:
 
 - **Title** — the article's name. The URL **slug** is derived from the title automatically (a short
   `lowercase-with-hyphens` form); you do not type it.
@@ -122,7 +179,8 @@ Publish from the article itself:
 - **Unpublish** — moves a published article **back to Draft**, hiding it from everyone but the
   author again.
 
-A **Draft** badge marks unpublished articles on their page. Editing the body never changes the
+A **Draft** badge marks unpublished articles on their page and in the articles table, and **My
+drafts** in the sidebar lists all of yours. Editing the body never changes the
 published/draft state — publishing and unpublishing are their own explicit actions.
 
 ## Adding images
