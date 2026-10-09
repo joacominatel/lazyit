@@ -184,8 +184,7 @@ jobs:
       - name: Test update.sh release-tag trust
         run: sh infra/test/update-tag-trust.sh
 
-      # infra/update.sh per auth mode (#1545): zitadel_db is dumped only on a bundled install, and keys
-      # start.sh leaves unset for the mode are not reported missing. Envs are rendered by start.sh; no Docker.
+      # infra/update.sh per auth mode (#1545, ADR-0102): only the app DB is dumped, keys start.sh leaves unset for the mode are not gaps, and a bundled-Zitadel install is refused before any side effect. No Docker.
       - name: Test update.sh auth-mode handling
         run: sh infra/test/update-mode-aware.sh
 
