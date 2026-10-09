@@ -207,7 +207,8 @@ elemento — *"También afecta a 12 activos"*, con algunos nombrados. Si no pod�
 registros, **Usado por** dice *"No lo podés ver: …"* en vez de cero: el elemento puede seguir en
 uso. Si el número cambia antes de que apruebes, la tarjeta se actualiza como se explica en
 [Cuando la tarjeta cambia mientras decidís](#cuando-la-tarjeta-cambia-mientras-decidís). Las categorías
-archivadas se restauran desde **Configuración → Taxonomías**, no desde el chat.
+archivadas no se restauran desde el chat — mirá
+[Qué puedes gestionar](/help/configuration-taxonomies#qué-puedes-gestionar).
 
 ## Etiquetas de activos
 
