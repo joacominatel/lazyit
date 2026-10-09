@@ -2,26 +2,21 @@
 /**
  * lazyit — one-command dev bootstrap (issue #483).
  *
- * Turns the long manual dev bring-up into a single command, with two modes. It mirrors the
- * robustness of the prod `infra/scripts/zitadel-bootstrap.sh`: idempotent and fail-loud. This
- * resolves the dev-auth part of #481 (dev Zitadel auto-bootstrap) and #477 (Zitadel dev volume
- * perms — also fixed at the compose level in `compose.override.yaml`).
+ * Turns the long manual dev bring-up into a single command, with two modes. Idempotent and
+ * fail-loud. Dev auth is LOCAL (ADR-0086); there is no bundled dev IdP (ADR-0102) — to try OIDC in
+ * dev, point apps/{api,web}/.env at your own IdP by hand.
  *
  *   bun scripts/dev-setup.ts --up      (default) bring services up + fresh Prisma client + start apps
- *   bun scripts/dev-setup.ts --fresh   wipe dev state, rebuild from zero, wire env (LOCAL auth default)
- *   bun scripts/dev-setup.ts --fresh --zitadel   same, but bring up the bundled dev Zitadel + OIDC (ADR-0086)
+ *   bun scripts/dev-setup.ts --fresh   wipe dev state, rebuild from zero, wire env (local auth)
  *
  * Flags:
  *   --fresh      destructive full rebuild (requires a typed "yes" unless --yes is passed)
- *   --up         (default) non-destructive: assumes --fresh ran before and Zitadel is bootstrapped
+ *   --up         (default) non-destructive: assumes --fresh ran before
  *   --yes / -y   skip the --fresh confirmation prompt (CI / unattended)
  *   --no-start   do all prep but DON'T `bun run dev` at the end (runnable in CI/tests)
  *
  * Bun-first (CLAUDE.md "Bun usage — SCOPED"): uses `Bun.$` for processes and `Bun.file` for I/O.
- * It REUSES `infra/scripts/zitadel-bootstrap.sh` for the Zitadel provisioning — it does NOT
- * reimplement it. Secrets (the SA key, the OIDC client secret) never land in a git-tracked file:
- * the `.env` files are gitignored, and `sa-key.json` is stashed OUTSIDE the repo tree under
- * ~/.lazyit-dev (mode 0600).
+ * The `.env` files it writes are gitignored — no secret lands in a git-tracked file.
  *
  * SAFETY: `--fresh` removes the dev Docker volumes (lazyit_*). It is gated behind a typed
  * confirmation. Never run it against a stack you care about without understanding what it wipes.
@@ -29,9 +24,7 @@
 
 import { $ } from "bun";
 import { randomBytes } from "node:crypto";
-import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtemp, mkdir, rm, chmod, readFile } from "node:fs/promises";
 
 // ---------------------------------------------------------------------------
 // Constants — the dev recipe verified working this session (issue #483).
@@ -40,12 +33,10 @@ import { mkdtemp, mkdir, rm, chmod, readFile } from "node:fs/promises";
 /** Repo root = parent of scripts/ (this file lives at <root>/scripts/dev-setup.ts). */
 const REPO_ROOT = join(import.meta.dir, "..");
 
-/** Compose project name (compose.yaml `name: lazyit`) → volumes are prefixed `lazyit_`. */
-const COMPOSE_PROJECT = "lazyit";
-
-/** Dev volumes removed by --fresh. Mirrors `docker compose down -v` for this project. */
+/** Dev volumes removed by --fresh (compose project `lazyit`). Mirrors `docker compose down -v`. */
 const DEV_VOLUMES = [
   "lazyit_db_data",
+  // Left over from the removed bundled dev Zitadel (ADR-0102); listed so --fresh reclaims them.
   "lazyit_zitadel_db_data",
   "lazyit_zitadel_secrets",
   // Meilisearch data is one volume per server version (ADR-0035 amendment 2026-09-26). The legacy
@@ -55,29 +46,15 @@ const DEV_VOLUMES = [
   "lazyit_valkey_data",
 ] as const;
 
-/** The shared secrets volume Zitadel writes bootstrap-key.json into (and the sidecar reads). */
-const ZITADEL_SECRETS_VOLUME = `${COMPOSE_PROJECT}_zitadel_secrets`;
-
-/** Dev endpoints (compose.override.yaml publishes Zitadel on loopback :8080). */
-const ZITADEL_URL = "http://localhost:8080";
+/** Dev web origin (where /setup and /login live). */
 const WEB_ORIGIN = "http://localhost:3000";
 
-/** Where the runtime SA key is stashed — OUTSIDE the repo tree, mode 0600 (never tracked). */
-const SA_KEY_STASH_DIR = join(homedir(), ".lazyit-dev");
-const SA_KEY_STASH_PATH = join(SA_KEY_STASH_DIR, "sa-key.json");
-
-/** The reusable prod bootstrap script — run on the host for dev (NOT reimplemented). */
-const BOOTSTRAP_SCRIPT = join(REPO_ROOT, "infra", "scripts", "zitadel-bootstrap.sh");
-
-/** alpine image used for throwaway volume reads (matches the prod secrets-init digest family). */
-const ALPINE_IMAGE = "alpine:3.21";
-
-/** Health-wait tuning (poll db + Zitadel). */
+/** Health-wait tuning (poll db). */
 const HEALTH_RETRIES = 60;
 const HEALTH_INTERVAL_MS = 3000;
 
 // ---------------------------------------------------------------------------
-// Tiny logging + fail-loud helpers (mirror the bootstrap script's log/fail).
+// Tiny logging + fail-loud helpers.
 // ---------------------------------------------------------------------------
 
 const log = (msg: string) => console.log(`[dev-setup] ${msg}`);
@@ -97,8 +74,6 @@ interface Options {
   mode: "fresh" | "up";
   yes: boolean;
   noStart: boolean;
-  /** true => bring up the bundled dev Zitadel + OIDC wiring (ADR-0086 opt-in); false => local auth. */
-  zitadel: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -106,9 +81,6 @@ function parseArgs(argv: string[]): Options {
   let up = false;
   let yes = false;
   let noStart = false;
-  // Local-auth is the DEFAULT (ADR-0086). Opt into the bundled dev Zitadel with --zitadel or
-  // LAZYIT_DEV_AUTH=oidc (the env var lets CI/tooling flip it without editing the command).
-  let zitadel = process.env.LAZYIT_DEV_AUTH === "oidc";
 
   for (const arg of argv) {
     switch (arg) {
@@ -125,21 +97,18 @@ function parseArgs(argv: string[]): Options {
       case "--no-start":
         noStart = true;
         break;
-      case "--zitadel":
-        zitadel = true;
-        break;
       case "--help":
       case "-h":
         printUsage();
         process.exit(0);
       default:
-        fail(`unknown flag: ${arg} (use --fresh | --up | --yes | --no-start | --zitadel | --help)`);
+        fail(`unknown flag: ${arg} (use --fresh | --up | --yes | --no-start | --help)`);
     }
   }
 
   if (fresh && up) fail("--fresh and --up are mutually exclusive");
   // --up is the default when neither is given.
-  return { mode: fresh ? "fresh" : "up", yes, noStart, zitadel };
+  return { mode: fresh ? "fresh" : "up", yes, noStart };
 }
 
 function printUsage(): void {
@@ -147,16 +116,13 @@ function printUsage(): void {
     [
       "lazyit dev bootstrap (issue #483)",
       "",
-      "  bun scripts/dev-setup.ts [--up | --fresh] [--yes] [--no-start] [--zitadel]",
+      "  bun scripts/dev-setup.ts [--up | --fresh] [--yes] [--no-start]",
       "",
       "  --up        (default) bring services up + refresh the Prisma client, then start the apps.",
       "              Assumes --fresh ran before. Does NOT touch .env.",
       "  --fresh     wipe dev state and rebuild from zero: remove dev volumes, bring services up,",
       "              migrate+generate+seed, wire apps/{web,api}/.env, then start.",
       "              DESTRUCTIVE — requires a typed 'yes' unless --yes is passed.",
-      "  --zitadel   opt into the bundled dev Zitadel + OIDC (ADR-0086). Default is LOCAL auth:",
-      "              no Zitadel containers, no jq/curl needed — the API signs its own sessions.",
-      "              (Equivalent env: LAZYIT_DEV_AUTH=oidc.)",
       "  --yes, -y   skip the --fresh confirmation prompt (CI / unattended).",
       "  --no-start  do all prep but do NOT run `bun run dev` at the end (CI/tests).",
     ].join("\n"),
@@ -164,7 +130,7 @@ function printUsage(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Preflight — assert the host tools the reused bootstrap script needs exist.
+// Preflight — assert the host tools exist.
 // ---------------------------------------------------------------------------
 
 async function assertHostTools(tools: string[]): Promise<void> {
@@ -186,25 +152,11 @@ async function assertHostTools(tools: string[]): Promise<void> {
 // Docker helpers.
 // ---------------------------------------------------------------------------
 
-/**
- * Bring up the dev backing services (auto-merges compose.override.yaml).
- *
- * Local-auth default (ADR-0086): only the unprofiled backing — db, meilisearch, valkey. The bundled
- * Zitadel stack is profiles:[oidc], so plain `docker compose up -d` leaves it down.
- *
- * `withZitadel` (--zitadel / LAZYIT_DEV_AUTH=oidc): add `--profile oidc` and bring up `zitadel` BY
- * NAME so Compose pulls only its deps (zitadel_db + the dev zitadel-secrets-init-dev) — NOT the prod
- * `zitadel-bootstrap` sidecar, which dev provisions with the host script (bootstrapZitadel) instead.
- */
-async function composeUp(withZitadel: boolean): Promise<void> {
-  if (withZitadel) {
-    log("bringing up backing services + dev Zitadel: docker compose --profile oidc up -d db meilisearch valkey zitadel");
-    await $`docker compose --profile oidc up -d db meilisearch valkey zitadel`.cwd(REPO_ROOT);
-  } else {
-    log("bringing up backing services (local auth — no Zitadel): docker compose up -d");
-    // cwd = repo root so compose.yaml + compose.override.yaml are auto-discovered.
-    await $`docker compose up -d`.cwd(REPO_ROOT);
-  }
+/** Bring up the dev backing services — db, meilisearch, valkey (auto-merges compose.override.yaml). */
+async function composeUp(): Promise<void> {
+  log("bringing up backing services: docker compose up -d");
+  // cwd = repo root so compose.yaml + compose.override.yaml are auto-discovered.
+  await $`docker compose up -d`.cwd(REPO_ROOT);
 }
 
 /**
@@ -255,46 +207,6 @@ async function waitForDbHealthy(): Promise<void> {
   fail(`the \`db\` service did not become healthy within ${(HEALTH_RETRIES * HEALTH_INTERVAL_MS) / 1000}s`);
 }
 
-/**
- * Poll Zitadel's /debug/healthz until HTTP 200. The Zitadel image is shell-less (no container
- * healthcheck), so we probe the published loopback endpoint directly. Fail-loud on timeout.
- */
-async function waitForZitadelHealthy(): Promise<void> {
-  log(`waiting for Zitadel health at ${ZITADEL_URL}/debug/healthz ...`);
-  for (let i = 0; i < HEALTH_RETRIES; i++) {
-    try {
-      const resp = await fetch(`${ZITADEL_URL}/debug/healthz`);
-      if (resp.ok) {
-        log("Zitadel is healthy.");
-        return;
-      }
-    } catch {
-      // connection refused while Zitadel boots — retry below.
-    }
-    await Bun.sleep(HEALTH_INTERVAL_MS);
-  }
-  fail(`Zitadel did not become healthy within ${(HEALTH_RETRIES * HEALTH_INTERVAL_MS) / 1000}s`);
-}
-
-/**
- * Copy a file out of a Docker named volume to a host path, using a throwaway alpine container
- * that mounts the volume read-only and `cat`s the file to stdout (captured to the host file).
- * Returns true if the file existed and was copied, false otherwise.
- */
-async function copyFromVolume(volume: string, fileInVolume: string, hostDest: string): Promise<boolean> {
-  const res =
-    await $`docker run --rm -v ${volume}:/vol:ro ${ALPINE_IMAGE} sh -c ${`cat /vol/${fileInVolume} 2>/dev/null || true`}`
-      .quiet()
-      .nothrow();
-  if (res.exitCode !== 0) {
-    fail(`failed to read ${fileInVolume} from volume ${volume}: ${res.stderr.toString().trim()}`);
-  }
-  const bytes = res.stdout;
-  if (bytes.length === 0) return false;
-  await Bun.write(hostDest, bytes);
-  return true;
-}
-
 // ---------------------------------------------------------------------------
 // Prisma — migrate + generate + seed (--fresh) or just generate (--up).
 // ---------------------------------------------------------------------------
@@ -316,75 +228,6 @@ async function prismaGenerateOnly(): Promise<void> {
   // Cheap; keeps the generated client fresh so a stale client can't break the API boot (#480).
   log("refreshing the Prisma client: bunx prisma generate");
   await $`bunx prisma generate`.cwd(API_DIR);
-}
-
-// ---------------------------------------------------------------------------
-// Zitadel bootstrap — REUSE infra/scripts/zitadel-bootstrap.sh (not reimplemented).
-// ---------------------------------------------------------------------------
-
-interface OidcClient {
-  OIDC_ISSUER: string;
-  OIDC_CLIENT_ID: string;
-  OIDC_CLIENT_SECRET: string;
-  OIDC_JWKS_URI: string;
-  ZITADEL_MGMT_PROJECT_ID: string;
-}
-
-/**
- * Run the prod bootstrap script on the HOST against the dev Zitadel and return the OIDC client
- * config it writes. The script reads ZITADEL_SECRETS_DIR (NOT SECRETS_DIR) and fails if the dir
- * isn't present, so we copy bootstrap-key.json out of the volume into a fresh tmpdir first. It
- * writes oidc-client.json + sa-key.json into that tmpdir. We stash sa-key.json outside the tree.
- */
-async function bootstrapZitadel(): Promise<OidcClient> {
-  const secretsDir = await mkdtemp(join(tmpdir(), "lazyit-zitadel-"));
-  try {
-    // The bootstrap script reads <secretsDir>/bootstrap-key.json (written by Zitadel start-from-init).
-    log(`copying bootstrap-key.json out of volume ${ZITADEL_SECRETS_VOLUME} ...`);
-    const copied = await copyFromVolume(ZITADEL_SECRETS_VOLUME, "bootstrap-key.json", join(secretsDir, "bootstrap-key.json"));
-    if (!copied) {
-      fail(
-        `bootstrap-key.json not found in volume ${ZITADEL_SECRETS_VOLUME}. Zitadel should export it on ` +
-          `first boot (compose.override.yaml chmods the volume so the non-root uid can write it). ` +
-          `Check \`docker compose logs zitadel\` and \`docker compose logs zitadel-secrets-init\`.`,
-      );
-    }
-
-    log(`running the prod bootstrap script (reused, NOT reimplemented): ${BOOTSTRAP_SCRIPT}`);
-    // Same env contract the prod sidecar uses, mapped to dev loopback endpoints. The script
-    // short-circuits if oidc-client.json + sa-key.json already exist in the dir — the tmpdir is
-    // fresh each run, so --fresh always provisions cleanly.
-    await $`sh ${BOOTSTRAP_SCRIPT}`.env({
-      ...process.env,
-      ZITADEL_SECRETS_DIR: secretsDir,
-      ZITADEL_INTERNAL_URL: ZITADEL_URL,
-      OIDC_ISSUER: ZITADEL_URL,
-      WEB_ORIGIN: WEB_ORIGIN,
-    });
-
-    // Read the two outputs the script wrote.
-    const oidcPath = join(secretsDir, "oidc-client.json");
-    const saPath = join(secretsDir, "sa-key.json");
-    const oidcText = await readFile(oidcPath, "utf8").catch(() =>
-      fail(`bootstrap did not write ${oidcPath} — check its output above`),
-    );
-    const oidc = JSON.parse(oidcText) as OidcClient;
-    if (!oidc.OIDC_CLIENT_ID || !oidc.OIDC_CLIENT_SECRET || !oidc.ZITADEL_MGMT_PROJECT_ID) {
-      fail(`oidc-client.json is missing required keys (got: ${Object.keys(oidc).join(", ")})`);
-    }
-
-    // Stash the SA key OUTSIDE the repo tree (mode 0600). NEVER inside the tracked tree.
-    await mkdir(SA_KEY_STASH_DIR, { recursive: true, mode: 0o700 });
-    const saBytes = await readFile(saPath).catch(() => fail(`bootstrap did not write ${saPath}`));
-    await Bun.write(SA_KEY_STASH_PATH, saBytes);
-    await chmod(SA_KEY_STASH_PATH, 0o600);
-    log(`stashed the runtime SA key at ${SA_KEY_STASH_PATH} (chmod 600, outside the repo tree).`);
-
-    return oidc;
-  } finally {
-    // The tmpdir held bootstrap-key.json + the client secret + the SA key — scrub it.
-    await rm(secretsDir, { recursive: true, force: true });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,8 +257,7 @@ function setEnvKey(text: string, key: string, value: string): string {
 
 /**
  * Comment OUT a `KEY=...` line in place (idempotent). If the key is already commented or absent,
- * the text is returned unchanged. Used to disable AUTH_MODE=shim (the web is OIDC-only; the API
- * must validate the Bearer).
+ * the text is returned unchanged.
  */
 function commentOutEnvKey(text: string, key: string): string {
   const lines = text.split("\n");
@@ -446,34 +288,6 @@ async function readOrSeedEnv(envPath: string, examplePath: string): Promise<stri
   return text;
 }
 
-/** Idempotently wire apps/web/.env with the OIDC client id/secret + issuer. */
-async function wireWebEnv(oidc: OidcClient): Promise<void> {
-  const envPath = join(REPO_ROOT, "apps", "web", ".env");
-  const examplePath = join(REPO_ROOT, "apps", "web", ".env.example");
-  let text = await readOrSeedEnv(envPath, examplePath);
-  text = setEnvKey(text, "AUTH_ISSUER", ZITADEL_URL);
-  text = setEnvKey(text, "AUTH_CLIENT_ID", oidc.OIDC_CLIENT_ID);
-  text = setEnvKey(text, "AUTH_CLIENT_SECRET", oidc.OIDC_CLIENT_SECRET);
-  await Bun.write(envPath, text);
-  log(`wired apps/web/.env (AUTH_ISSUER, AUTH_CLIENT_ID, AUTH_CLIENT_SECRET).`);
-}
-
-/** Idempotently wire apps/api/.env: disable shim, set OIDC issuer/jwks + mgmt project + SA key path. */
-async function wireApiEnv(oidc: OidcClient): Promise<void> {
-  const envPath = join(REPO_ROOT, "apps", "api", ".env");
-  const examplePath = join(REPO_ROOT, "apps", "api", ".env.example");
-  let text = await readOrSeedEnv(envPath, examplePath);
-  // The web is OIDC-only now, so the API must validate the Bearer — disable the shim.
-  text = commentOutEnvKey(text, "AUTH_MODE");
-  text = setEnvKey(text, "OIDC_ISSUER", ZITADEL_URL);
-  // Zitadel serves keys at /oauth/v2/keys (NOT the derived /.well-known/jwks.json).
-  text = setEnvKey(text, "OIDC_JWKS_URI", `${ZITADEL_URL}/oauth/v2/keys`);
-  text = setEnvKey(text, "ZITADEL_MGMT_PROJECT_ID", oidc.ZITADEL_MGMT_PROJECT_ID);
-  text = setEnvKey(text, "ZITADEL_MGMT_SA_KEY_PATH", SA_KEY_STASH_PATH);
-  await Bun.write(envPath, text);
-  log(`wired apps/api/.env (AUTH_MODE off, OIDC_ISSUER, OIDC_JWKS_URI, ZITADEL_MGMT_PROJECT_ID, ZITADEL_MGMT_SA_KEY_PATH).`);
-}
-
 /**
  * Read an existing SESSION_SIGNING_SECRET from env text, reusing it when it is already a valid
  * (>= 32-char, non-placeholder) secret so repeated --fresh runs don't needlessly log everyone out;
@@ -487,13 +301,13 @@ function resolveDevSessionSecret(apiEnvText: string): string {
 }
 
 /**
- * Wire the env files for LOCAL auth (ADR-0086 — the default): AUTH_MODE=local + a dev
- * SESSION_SIGNING_SECRET on the API (which signs its own sessions), and AUTH_MODE=local on the web
- * (so the login surface renders the built-in Credentials flow, not OIDC). No Zitadel, no OIDC creds.
+ * Wire the env files for LOCAL auth (ADR-0086): AUTH_MODE=local + a dev SESSION_SIGNING_SECRET on the
+ * API (which signs its own sessions), and AUTH_MODE=local on the web (so the login surface renders the
+ * built-in Credentials flow, not OIDC).
  */
 async function wireLocalEnv(): Promise<void> {
   // apps/api/.env — AUTH_MODE=local + a valid SESSION_SIGNING_SECRET; comment out the OIDC vars (unused
-  // in local mode) so a stale dev Zitadel URL can't confuse anyone reading the file.
+  // in local mode) so a stale IdP URL can't confuse anyone reading the file.
   const apiEnvPath = join(REPO_ROOT, "apps", "api", ".env");
   const apiExample = join(REPO_ROOT, "apps", "api", ".env.example");
   let apiText = await readOrSeedEnv(apiEnvPath, apiExample);
@@ -548,13 +362,9 @@ async function startApps(): Promise<void> {
   await $`bun run dev`.cwd(REPO_ROOT);
 }
 
-function printNextSteps(zitadel: boolean): void {
+function printNextSteps(): void {
   console.log("");
-  if (zitadel) {
-    log("Zitadel is bootstrapped and the env files are wired. Next steps:");
-  } else {
-    log("Local auth is wired (AUTH_MODE=local — no Zitadel). Next steps:");
-  }
+  log("Local auth is wired (AUTH_MODE=local). Next steps:");
   log(`  1. open ${WEB_ORIGIN}/setup  — create the first admin ONCE`);
   log(`  2. then ${WEB_ORIGIN}/login`);
   console.log("");
@@ -565,40 +375,30 @@ function printNextSteps(zitadel: boolean): void {
 // ---------------------------------------------------------------------------
 
 async function runFresh(opts: Options): Promise<void> {
-  const auth = opts.zitadel ? "bootstrap Zitadel" : "wire local auth";
-  log(`MODE: --fresh (wipe dev state, rebuild from zero, ${auth}, wire env)`);
+  log("MODE: --fresh (wipe dev state, rebuild from zero, wire local auth)");
 
-  // Host tools: the reused Zitadel bootstrap script needs jq/openssl/curl; local mode needs only docker
-  // (a real DX win — ADR-0086). We generate the dev SESSION_SIGNING_SECRET with node:crypto, not openssl.
-  await assertHostTools(opts.zitadel ? ["docker", "jq", "openssl", "curl"] : ["docker"]);
+  // Only docker: the dev SESSION_SIGNING_SECRET comes from node:crypto, not openssl.
+  await assertHostTools(["docker"]);
 
   if (!opts.yes) await confirmFresh();
 
   // 1. Remove dev volumes.
   await wipeDevVolumes();
 
-  // 2. Bring up backing services (+ dev Zitadel when --zitadel; compose.override chmods the secrets vol).
-  await composeUp(opts.zitadel);
+  // 2. Bring up backing services.
+  await composeUp();
 
-  // 3. Wait for db healthy (+ Zitadel /debug/healthz 200 only when the dev Zitadel is up).
+  // 3. Wait for db healthy.
   await waitForDbHealthy();
-  if (opts.zitadel) await waitForZitadelHealthy();
 
   // 4. Prisma: migrate deploy + generate (explicit — #480) + seed.
   await prismaFresh();
 
-  // 5. Wire auth. Zitadel: bootstrap (reuse the prod script) → OIDC client config → wire web+api env.
-  //    Local: AUTH_MODE=local + a dev SESSION_SIGNING_SECRET on the api, AUTH_MODE=local on the web.
-  if (opts.zitadel) {
-    const oidc = await bootstrapZitadel();
-    await wireWebEnv(oidc);
-    await wireApiEnv(oidc);
-  } else {
-    await wireLocalEnv();
-  }
+  // 5. Wire local auth: AUTH_MODE=local + a dev SESSION_SIGNING_SECRET on the api, AUTH_MODE=local on the web.
+  await wireLocalEnv();
 
   // 6. Print next steps, then start (unless --no-start).
-  printNextSteps(opts.zitadel);
+  printNextSteps();
   if (opts.noStart) {
     log("--no-start: prep complete, NOT starting the apps. Run `bun run dev` when ready.");
     return;
@@ -610,9 +410,8 @@ async function runUp(opts: Options): Promise<void> {
   log("MODE: --up (bring services up + refresh the Prisma client, then start). Assumes --fresh ran before.");
   await assertHostTools(["docker"]);
 
-  await composeUp(opts.zitadel);
+  await composeUp();
   await waitForDbHealthy();
-  if (opts.zitadel) await waitForZitadelHealthy();
   await prismaGenerateOnly();
 
   if (opts.noStart) {
