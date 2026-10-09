@@ -175,6 +175,40 @@ they carry the same gating — `settings:manage` for the area, an optional per-i
 (Bulk import → `import:run`). The nav shows no state badges: each state is its own read, and fetching
 them for the nav would add requests to every settings page. Form pages cap their width at `max-w-3xl`.
 
+**Patterns for the larger settings pages** (#1540). Three shapes for a page that would otherwise be a
+long stack of sections:
+
+- **Status tiles + tabs** (`settings/ai`). When a page holds several independent capabilities, open it on
+  a row of status tiles — one per capability, each a button with an icon, a label, an On/Off dot and a
+  one-word value (*Anthropic*, *Off · 14 clients*), plus a warning badge only when something is missing.
+  A tile opens the tab that configures it. The tabs live in `?tab=` through `useRecordTab`, as on the
+  record pages (§4b). A risk callout that applies to every tab (a missing server key) sits once between
+  the tiles and the tabs, as one line with its explanation in a "?". **Consent is never moved into a
+  tip alone**: a switch that sends data out of lazyit keeps its disclosure in its "?" day to day, and
+  turning it ON opens a confirmation showing the disclosure in full (`AiEgressConfirm`); nothing saves
+  until it is confirmed, and turning it off saves at once. Long, homogeneous lists inside a tab (the
+  built-in MCP clients) render as chips, with the full rows behind a "View details" toggle.
+- **Role × capability matrix** (`settings/roles`). When the same set of switches is configured per role,
+  render one table: capabilities in rows, grouped and collapsible with a `granted/total` summary per
+  column on each group row; roles in columns, a locked reference column first (ADMIN, a check in every
+  cell), then the editable ones with their holder count (a link to the filtered Users list) and a preset
+  `Select` in the header. A cell is a checkbox — indeterminate when only part of the capability is held —
+  and is tinted while it differs from the server. Descriptions go in a "?" per row; an admin-level row
+  gets a ⚠ `HelpTip` instead of a badge. Every column is staged together and saved by ONE sticky
+  `SettingsSaveBar` ("Save N changes", N = changed cells, from `countMatrixChanges`); any confirmation the
+  save needs fires as before. The table scrolls inside its own box below ~34rem, with the capability
+  column sticky; the page itself never scrolls sideways. Raw per-permission control (Fine-tune) stays a
+  collapsed section below.
+- **Two-pane list** (`settings/taxonomies`). When a page manages several small lists, show a grouped list
+  of them on the left (module headings, a count per entry, a link out for a list managed elsewhere) and
+  the selected list on the right; below `md` the left list becomes a `Select`. The selection lives in
+  `?tab=`, keeping old values working (`parseTaxonomyTab`). Rows are compact (`taxonomy-list.tsx`): the
+  name, the description muted only when present, an "In use" count in mono (*42 assets* / *Unused*,
+  nothing when the API sent no count), and a `⋯` `RowActions` menu holding the existing dialogs. No
+  checkbox or Updated columns by default — a bulk action, when one exists, hides behind a "Select" toggle.
+  A list whose entries need only a name ends in an inline "New …" row; the full dialog stays for richer
+  edits. A filter box sits in the pane header.
+
 ## 5. Do / Don't (register translation)
 
 **Do:** the palette · Hanken + Commit Mono · stamps for status · ledger tape for audit · the
