@@ -98,6 +98,12 @@ export function AiSettingsView({ justEnabled }: { justEnabled: boolean }) {
   );
 }
 
+/**
+ * Every tab stays mounted and the inactive ones are hidden, so switching tabs never drops a half-filled
+ * form (the wizard's step, an unsaved limit) — the page held all of them at once before the tabs.
+ */
+const PANEL = "space-y-4 data-[state=inactive]:hidden";
+
 function AiSettingsBody({ settings, justEnabled }: { settings: AiSettings; justEnabled: boolean }) {
   const t = useTranslations("aiSettings");
   const [tab, setTab] = useRecordTab<AiTab>(AI_TABS, "connection");
@@ -178,7 +184,7 @@ function AiSettingsBody({ settings, justEnabled }: { settings: AiSettings; justE
           ))}
         </TabsList>
 
-        <TabsContent value="connection" className="space-y-4">
+        <TabsContent value="connection" forceMount className={PANEL}>
           {settings.enabled ? (
             <AiConnectionEditor settings={settings} />
           ) : (
@@ -187,16 +193,16 @@ function AiSettingsBody({ settings, justEnabled }: { settings: AiSettings; justE
           {settings.enabled ? <AiDangerZone settings={settings} /> : null}
         </TabsContent>
 
-        <TabsContent value="limits">
+        <TabsContent value="limits" forceMount className={PANEL}>
           <AiLimitsEditor settings={settings} />
         </TabsContent>
 
-        <TabsContent value="capabilities" className="space-y-4">
+        <TabsContent value="capabilities" forceMount className={PANEL}>
           <AiWebSearchSection settings={settings} />
           <AiDocumentExtractionSection settings={settings} />
         </TabsContent>
 
-        <TabsContent value="agents" className="space-y-4">
+        <TabsContent value="agents" forceMount className={PANEL}>
           <AiMcpSection settings={settings} />
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <ServerIcon className="size-4 shrink-0" aria-hidden />
