@@ -13,6 +13,7 @@ import {
   type ArticleLinkedFilter,
   type ArticleLinkedTo,
   type ArticleListItem,
+  type ArticleListSort,
   type ArticleStatus,
   type CreateArticle,
   type CreateArticleAlias,
@@ -39,6 +40,7 @@ import {
   type FolderTreeCache,
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
+import { expandFolderSubtrees } from '../article-categories/folder-tree';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -75,7 +77,31 @@ export interface ArticleListFilters {
    * counterpart of {@link assetId}; selecting any id implies `linked=only`.
    */
   applicationId?: string[];
+  /**
+   * Widen {@link categoryId} to each selected folder **plus every live descendant** (#1539). Folder access
+   * still ANDs on top, so a descendant the caller may not read stays out. No effect without `categoryId`.
+   */
+  includeSubfolders?: boolean;
+  /**
+   * The list order (#1539). Not a filter, but it travels with them: `updated` (the default when omitted)
+   * newest-updated first, `title` A to Z, `created` newest-created first. Every order ends with `id`.
+   */
+  sort?: ArticleListSort;
 }
+
+/**
+ * The `orderBy` for each `?sort=` key (#1539). Each key fixes its own direction, and every order ends with
+ * the unique `id` so two rows that tie on the sort column keep one stable relative order — offset paging
+ * never repeats or skips a row between pages. `title` is ordered by the database collation.
+ */
+const ARTICLE_LIST_ORDER: Record<
+  ArticleListSort,
+  Prisma.ArticleOrderByWithRelationInput[]
+> = {
+  updated: [{ updatedAt: 'desc' }, { id: 'asc' }],
+  title: [{ title: 'asc' }, { id: 'asc' }],
+  created: [{ createdAt: 'desc' }, { id: 'asc' }],
+};
 
 /**
  * Filters for the **reverse** KB lookups (`GET /assets/:id/articles`, `GET /applications/:id/articles`
@@ -152,8 +178,8 @@ export class ArticlesService {
   ) {}
 
   /**
-   * A single page of non-deleted articles, newest-updated first. PUBLISHED is visible to all; DRAFT
-   * only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
+   * A single page of non-deleted articles, newest-updated first by default. PUBLISHED is visible to
+   * all; DRAFT only to its author (the current user). Uses the LEAN projection ({@link ARTICLE_LIST_SELECT}):
    * the full Markdown `content` is omitted (`excerpt` kept) — the detail reads still return it. Runs
    * the page `findMany(take/skip)` and the `count` over the **same** `where` inside one
    * `$transaction`, so the `total` can't drift from the page. Optional filters: category, author,
@@ -161,6 +187,10 @@ export class ArticlesService {
    * keeps only articles with ≥1 ArticleLink (optionally narrowed to an asset/application target).
    * Each row carries the precomputed `readingMinutes` and a `linkCount` (relation `_count`, flattened
    * here) so the card UI gets a reading metric + "linked" indicator with no body load and no N+1.
+   *
+   * `filters.sort` picks the order ({@link ARTICLE_LIST_ORDER}; newest-updated when omitted), and
+   * `filters.includeSubfolders` widens a `categoryId` filter to each folder's live subtree (#1539). The
+   * count shares the page's `where` and needs no order.
    */
   async findPage(
     filters: ArticleListFilters,
@@ -171,12 +201,17 @@ export class ArticlesService {
     // Folder access (ADR-0060 §4): pin the list to the folders the caller may see, so a folder-hidden
     // article never even appears in the list (existence-hiding). ADMIN ('ALL') gets no folder pin.
     const visible = await this.folderAccess.visibleFolderIds(principal);
-    const where = this.buildWhere(filters, currentUser, visible);
+    const categoryId = await this.expandCategoryFilter(filters);
+    const where = this.buildWhere(
+      { ...filters, categoryId },
+      currentUser,
+      visible,
+    );
     const { take, skip } = offsetOf(page);
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.article.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: ARTICLE_LIST_ORDER[filters.sort ?? 'updated'],
         take,
         skip,
         select: ARTICLE_LIST_SELECT,
@@ -191,6 +226,27 @@ export class ArticlesService {
       linkCount: _count.links,
     }));
     return pageOf(items, total, page);
+  }
+
+  /**
+   * The `categoryId` set the list filters on (#1539). Without `includeSubfolders` (or without a
+   * `categoryId` filter) it is the caller's selection unchanged. With it, each selected folder widens to
+   * itself plus every LIVE descendant: ONE query loads the live folder tree (`id`, `parentId`) and the
+   * pure {@link expandFolderSubtrees} walks it, cycle-safe, so depth never costs extra queries. This only
+   * widens the folder FILTER — the folder-access pin (ADR-0060 §4) is still ANDed on top by
+   * {@link buildWhere}, so a descendant the caller may not read contributes nothing.
+   */
+  private async expandCategoryFilter(
+    filters: ArticleListFilters,
+  ): Promise<string[] | undefined> {
+    if (!filters.includeSubfolders || !filters.categoryId?.length) {
+      return filters.categoryId;
+    }
+    const folders = await this.prisma.articleCategory.findMany({
+      where: { deletedAt: null },
+      select: { id: true, parentId: true },
+    });
+    return expandFolderSubtrees(filters.categoryId, folders);
   }
 
   /**

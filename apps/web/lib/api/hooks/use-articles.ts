@@ -42,6 +42,42 @@ export function useArticles(filters: ArticleFilters = {}) {
   });
 }
 
+/**
+ * Per-status totals for a list scope (#1539) — the counts on the status segmented control, the rail's
+ * views and the home stats line. Two `limit: 1` reads (one per status) whose `total` is the count; the
+ * scope (`base`) is everything the list filters on except status and paging. With an empty scope the
+ * two keys are the same ones the rail uses, so the home page and the rail share one cache entry each.
+ * `all` is their sum (the two statuses partition every article the viewer can see); each value is
+ * `undefined` until its read resolves, and stays undefined on an error so the UI just hides it.
+ */
+export function useArticleStatusCounts(
+  base: Omit<ArticleFilters, "status" | "limit" | "offset"> = {},
+  enabled = true,
+) {
+  const published = useQuery({
+    queryKey: articleKeys.list({ ...base, status: ["PUBLISHED"], limit: 1 }),
+    queryFn: ({ signal }) =>
+      getArticles({ ...base, status: ["PUBLISHED"], limit: 1 }, signal),
+    enabled,
+  });
+  const drafts = useQuery({
+    queryKey: articleKeys.list({ ...base, status: ["DRAFT"], limit: 1 }),
+    queryFn: ({ signal }) =>
+      getArticles({ ...base, status: ["DRAFT"], limit: 1 }, signal),
+    enabled,
+  });
+  const publishedTotal = published.data?.total;
+  const draftsTotal = drafts.data?.total;
+  return {
+    published: publishedTotal,
+    drafts: draftsTotal,
+    all:
+      publishedTotal !== undefined && draftsTotal !== undefined
+        ? publishedTotal + draftsTotal
+        : undefined,
+  };
+}
+
 /** Fetch one article by slug (detail view); idle until a slug is provided. */
 export function useArticleBySlug(slug: string | undefined) {
   return useQuery({

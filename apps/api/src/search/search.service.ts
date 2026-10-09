@@ -11,6 +11,7 @@ import {
 } from '../article-categories/folder-access.service';
 import type { Principal } from '../auth/principal';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 /** The Meili indexes (one per searchable entity). Primary key on every index is `id`. */
 export const SEARCH_INDEXES = [
@@ -49,9 +50,10 @@ export const PURCHASE_INDEXES: readonly SearchIndex[] = [
  */
 const RETRIEVE: Record<SearchIndex, string[]> = {
   assets: ['id', 'name', 'serial', 'assetTag', 'status', 'notes'],
-  // `categoryId` (the home folder) is retrieved INTERNALLY for the ADR-0060 §5 folder-access
-  // post-filter, then STRIPPED from the hit before it ships (it is access metadata, not a hit field —
-  // the wire ArticleHit has no categoryId). `content` is indexed but never returned (SEC-061).
+  // `categoryId` (the home folder) is the ADR-0060 §5 folder-access post-filter key. It ships on a hit
+  // that SURVIVES the post-filter (#1539) — the caller can read that folder — and never on a dropped
+  // one. `updatedAt` is not retrieved: it is read from the database after the filter (no reindex).
+  // `content` is indexed but never returned (SEC-061).
   articles: ['id', 'slug', 'title', 'excerpt', 'status', 'categoryId'],
   users: ['id', 'firstName', 'lastName', 'email'],
   locations: ['id', 'name', 'type', 'address', 'floor'],
@@ -78,8 +80,8 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
   suppliers: ['id', 'name', 'taxId'],
 };
 
-/** The internal-only article-hit field stripped before a hit ships (the post-filter's folder key). */
-const ARTICLE_INTERNAL_FIELD = 'categoryId';
+/** The article-hit home-folder field: the post-filter's key, shipped only on a surviving hit (#1539). */
+const ARTICLE_FOLDER_FIELD = 'categoryId';
 
 /**
  * Build the Meili-side article folder filter (#598, ADR-0060 §5). Pins the article query to the caller's
@@ -162,6 +164,8 @@ export class SearchService {
     private readonly folderAccess: FolderAccessService,
     // #1499: the purchase-index gate's second layer (the controller is the first).
     private readonly permissions: PermissionResolverService,
+    // #1539: reads the live `updatedAt` of the article hits that survive the folder post-filter.
+    private readonly prisma: PrismaService,
   ) {
     const host = process.env.MEILI_HOST;
     const apiKey = process.env.MEILI_MASTER_KEY;
@@ -286,7 +290,7 @@ export class SearchService {
           q,
           limit,
           // cap the per-hit payload to the documented hit fields (SEC-061). For articles this includes
-          // the internal `categoryId` (the folder-access post-filter key), stripped before shipping.
+          // `categoryId`, the folder-access post-filter key (kept only on a hit the filter lets through).
           attributesToRetrieve: RETRIEVE[indexUid],
         };
         // Meili-side folder scoping (#598): pin the article query to the caller's visible folders.
@@ -324,6 +328,9 @@ export class SearchService {
       // DB walk). A drop here means index lag; `total` is decremented per dropped hit to stay honest.
       if (articleVisible !== undefined) {
         this.applyArticleFolderFilter(results, articleVisible);
+        // #1539: stamp each SURVIVING hit with its live `updatedAt`. Fail-soft on its own — an
+        // enrichment failure never degrades or empties the search.
+        await this.withArticleUpdatedAt(results);
       }
       return results;
     } catch (err: unknown) {
@@ -390,9 +397,11 @@ export class SearchService {
    * The ADR-0060 §5 article folder-access in-app BACKSTOP (INV-9 — defense in depth over the Meili-side
    * filter, #598). Mutates the `articles` block in place over the ALREADY-RESOLVED `visible` set (no DB
    * walk here — the caller resolves it once and shares it with the Meili filter): DROP every hit whose
-   * `categoryId` (home folder) is not visible, and STRIP the internal `categoryId` from each surviving
-   * hit so it never ships to the client. ADMIN ('ALL') keeps every hit; an SA / anonymous keeps only
-   * PUBLIC-folder hits.
+   * `categoryId` (home folder) is not visible. A surviving hit KEEPS its `categoryId` (#1539) so a result
+   * row can show where the article lives: the caller can already read that folder (it is the reason the
+   * hit survived) and read the same id from `GET /articles/:id`, so it discloses nothing new. A dropped
+   * hit ships nothing at all. ADMIN ('ALL') keeps every hit; an SA / anonymous keeps only PUBLIC-folder
+   * hits.
    *
    * `total` is the engine's count of the (already folder-filtered) readable matches (#598) — preserved,
    * NOT clobbered to the page size. It is only DECREMENTED per hit this backstop drops (a drop means the
@@ -400,7 +409,7 @@ export class SearchService {
    *
    * A hit missing its `categoryId` (a stale doc indexed before this field landed) is DROPPED for a
    * non-admin — fail closed: better to under-return than leak a restricted article whose folder we
-   * can't resolve.
+   * can't resolve. For an ADMIN it survives without the field (only a string folder id ever ships).
    */
   private applyArticleFolderFilter(
     results: SearchResults,
@@ -413,7 +422,7 @@ export class SearchService {
     let dropped = 0;
     for (const hit of block.hits) {
       const record = hit as Record<string, unknown>;
-      const categoryId = record[ARTICLE_INTERNAL_FIELD];
+      const { [ARTICLE_FOLDER_FIELD]: categoryId, ...rest } = record;
       const allowed =
         visible === 'ALL' ||
         (typeof categoryId === 'string' && folderVisible(visible, categoryId));
@@ -421,16 +430,61 @@ export class SearchService {
         dropped += 1;
         continue;
       }
-      // Strip the internal folder key — the wire ArticleHit carries no categoryId.
-      const { [ARTICLE_INTERNAL_FIELD]: _omit, ...shipped } = record;
-      void _omit;
-      kept.push(shipped);
+      // Ship the home folder only as a folder id the caller may read (#1539); any other value stays out.
+      kept.push(
+        typeof categoryId === 'string'
+          ? { ...rest, [ARTICLE_FOLDER_FIELD]: categoryId }
+          : rest,
+      );
     }
     // Preserve the engine's filtered total (#598); only subtract what the backstop actually dropped.
     results.articles = {
       hits: kept,
       total: Math.max(0, block.total - dropped),
     };
+  }
+
+  /**
+   * Stamp each article hit with the article's live `updatedAt` (ISO string, #1539), read from the
+   * database in ONE `id IN [...]` query over live rows. Runs AFTER the folder post-filter, so it only
+   * ever reads rows the caller may already see. It never changes WHICH hits are returned: a hit whose
+   * row is no longer live (index lag) simply ships without `updatedAt`. No query when there are no
+   * article hits. Fail-soft: a failed read is logged and the hits ship without `updatedAt` — search
+   * never degrades over an optional field.
+   */
+  private async withArticleUpdatedAt(results: SearchResults): Promise<void> {
+    const block = results.articles;
+    if (block === undefined || block.hits.length === 0) return;
+    const ids = block.hits
+      .map((hit) => (hit as Record<string, unknown>).id)
+      .filter((id): id is string => typeof id === 'string');
+    if (ids.length === 0) return;
+
+    let updatedAtById: Map<string, string>;
+    try {
+      const rows = await this.prisma.article.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+        select: { id: true, updatedAt: true },
+      });
+      updatedAtById = new Map(
+        rows.map((row) => [row.id, row.updatedAt.toISOString()]),
+      );
+    } catch (err: unknown) {
+      this.logger.error(
+        { err, op: 'article-hit-updatedAt', count: ids.length },
+        'Could not read updatedAt for article search hits — returning them without it',
+      );
+      return;
+    }
+
+    block.hits = block.hits.map((hit) => {
+      const record = hit as Record<string, unknown>;
+      const updatedAt =
+        typeof record.id === 'string'
+          ? updatedAtById.get(record.id)
+          : undefined;
+      return updatedAt === undefined ? hit : { ...record, updatedAt };
+    });
   }
 
   /** `indexes` minus the purchase indexes when `principal` lacks `purchaseOrder:read` (#1499). */

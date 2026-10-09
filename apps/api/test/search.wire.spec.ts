@@ -87,6 +87,7 @@ const ARTICLES = [
     status: 'PUBLISHED',
     content: 'Install the wireguard client and import the profile.',
     categoryId: 'folder-public',
+    updatedAt: new Date('2026-09-20T10:00:00.000Z'),
   },
   {
     id: 'art-restricted',
@@ -96,6 +97,7 @@ const ARTICLES = [
     status: 'PUBLISHED',
     content: 'Rotate the wireguard server keys quarterly.',
     categoryId: 'folder-restricted',
+    updatedAt: new Date('2026-09-21T10:00:00.000Z'),
   },
 ];
 const USERS = [
@@ -176,7 +178,11 @@ const SUPPLIERS = [
   },
 ];
 
-/** A Prisma double answering the self-heal's `findMany` loads with the fixture rows above. */
+/**
+ * A Prisma double answering the self-heal's `findMany` loads with the fixture rows above. The search
+ * read's article `updatedAt` lookup (#1539) hits the same `article.findMany`, which ignores its `where`
+ * and returns both fixture rows — the enrichment matches them to hits by id.
+ */
 function prismaFixture(): PrismaService {
   const rows = (data: unknown[]) => ({
     findMany: jest.fn().mockResolvedValue(data),
@@ -255,7 +261,12 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('self-heal on an EMPTY engine rebuilds every index from the database (new data volume)', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'), permissions);
+    const search = new SearchService(
+      logger,
+      folderAccess('ALL'),
+      permissions,
+      prismaFixture(),
+    );
     expect(await search.isHealthy()).toBe(true);
     expect((await search.emptyOrMissingIndexes()).sort()).toEqual(
       [...SEARCH_INDEXES].sort(),
@@ -284,7 +295,12 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('cross-entity search returns the retrievable hit fields only', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'), permissions);
+    const search = new SearchService(
+      logger,
+      folderAccess('ALL'),
+      permissions,
+      prismaFixture(),
+    );
     const results = await search.search({ q: 'vpn', limit: 20 });
 
     expect(results.degraded).toBeUndefined();
@@ -293,9 +309,11 @@ describe('Meilisearch wire (pinned server image)', () => {
     );
     expect(titles.sort()).toEqual(['VPN admin runbook', 'VPN setup runbook']);
     for (const hit of results.articles?.hits ?? []) {
-      // `content` is searchable but never retrieved (SEC-061); `categoryId` is stripped in-app.
+      // `content` is searchable but never retrieved (SEC-061). A surviving hit ships its home folder
+      // and its live `updatedAt` from the database (#1539).
       expect(hit).not.toHaveProperty('content');
-      expect(hit).not.toHaveProperty('categoryId');
+      expect(hit).toHaveProperty('categoryId');
+      expect(hit).toHaveProperty('updatedAt');
     }
 
     // Full-text over the (non-retrievable) article body still matches.
@@ -384,6 +402,7 @@ describe('Meilisearch wire (pinned server image)', () => {
       logger,
       folderAccess(new Set(['folder-public'])),
       permissions,
+      prismaFixture(),
     );
     const res = await scoped.search({
       q: 'vpn',
@@ -401,6 +420,7 @@ describe('Meilisearch wire (pinned server image)', () => {
       logger,
       folderAccess(new Set()),
       permissions,
+      prismaFixture(),
     );
     const empty = await none.search({
       q: 'vpn',
@@ -419,7 +439,12 @@ describe('Meilisearch wire (pinned server image)', () => {
   });
 
   it('fire-and-forget upsert and remove reach the engine', async () => {
-    const search = new SearchService(logger, folderAccess('ALL'), permissions);
+    const search = new SearchService(
+      logger,
+      folderAccess('ALL'),
+      permissions,
+      prismaFixture(),
+    );
     search.upsert(
       'users',
       projectUser({

@@ -3,7 +3,7 @@ title: "ADR-0092: The Reading Room — KB reading & browsing redesign"
 tags: [adr, knowledge-base, kb, frontend, ux, markdown, search, information-architecture]
 status: accepted
 created: 2026-07-20
-updated: 2026-09-09
+updated: 2026-10-08
 deciders: [Joaquín Minatel]
 ---
 
@@ -113,6 +113,52 @@ its invariants live in `apps/web/lib/utils/kb-reading-layout.ts`.
 
 Everything else in the Phase-2 decision stands: no collapse toggle, no persisted panel state, no
 resizable-panel dependency, and the rail's content is unchanged. Render-time only; nothing stored.
+
+## Amendment — 2026-10-08: the browse screen gets orientation (#1539)
+
+Phase 3 made the browse list dense, and the CEO's verdict on the result was blunt: *poco útil, no se
+entiende, las carpetas son horribles, no se aprovecha el espacio*. The density was right; what was
+missing was orientation. Concretely:
+
+- the folder rail was 256px, so names truncated, and every row carried four always-on controls (count,
+  padlock, the access-editor padlock button, ⋯);
+- "All articles" was one flat newest-first list, which said nothing about what exists or where;
+- a row put the title on the left and the date ~1000px away, with nothing in between;
+- opening a folder showed no header, so nothing said who could read it or what you could do there;
+- the draft dot was unexplained, there was no sort, and search results carried no folder or date.
+
+The browse screen now reads like the record pages (ADR-0077 §4b) instead of a bare list:
+
+1. **A wider rail with views.** "All articles", "My drafts" (a status filter; drafts are author-private,
+   so the filter *is* "mine"), "Recent" (per-viewer, this browser only, never sent to the server) and
+   "Linked" sit above the folders. A folder row shows one padlock only when it is restricted, and its
+   ⋯ menu (access, edit, move, delete) appears on hover, focus or selection.
+2. **A home with orientation.** Root folders appear as cards (description, counts, who can read them)
+   above a table-like article list: folder, author, reading time and updated date share the width,
+   and "Draft" is written out with a tooltip instead of a coloured dot.
+3. **A folder header.** Selecting a folder shows its path, name, description, who can see it, its counts
+   and its last change, with "New article here" (the folder preselected), "Subfolder" and the folder
+   menu. Subfolders are chips, and an "Include subfolders" switch widens the list to the whole branch.
+4. **Sort and status are visible.** A status control (All / Published / Drafts) and a sort control
+   (updated, title, created) replace digging through the Filters popover for the common cases.
+5. **Search rows say where and when.** Each result shows its folder path and its updated date.
+6. **The rail is wider.** It is `lg:w-72` (312px with its gap, up from 280px), so the reading-view
+   chrome is now 600px and the 2026-09-09 arithmetic sums to exactly 1800px: the split breakpoint does
+   not move (`apps/web/lib/utils/kb-reading-layout.ts`).
+7. **The folder dialog edits description and order**, so the KB is the one place folders are managed;
+   Settings → Taxonomies links here instead of keeping a second folder manager (#1540).
+
+Three read-side additions back this, all additive and computed: `GET /articles?sort=` (closed
+allowlist, every order ending on `id`), `?includeSubfolders=true` (expands a folder filter to its live
+descendants, with folder access still applied on top), and two nullish fields on the article search hit.
+The hit now keeps `categoryId` for the hits that survive the ADR-0060 §5 backstop, which are by
+definition in folders the caller can read, and gains `updatedAt` read from the database rather than the
+index, so it is correct without a reindex.
+
+What stays from the original decision: one strong search, the dense line-per-doc list, the persistent
+tree, no graph, no second palette. **Upgrade-safe:** no migration and no stored column; an index
+document that predates the folder field is already dropped for a non-admin by the backstop, and every
+new wire field is nullish, so an older API simply renders without it.
 
 ## Alternatives considered
 

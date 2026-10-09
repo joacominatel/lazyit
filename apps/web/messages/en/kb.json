@@ -2,13 +2,12 @@
   "breadcrumb": "Knowledge Base",
   "list": {
     "title": "Knowledge Base",
-    "subtitle": "Internal documentation for the team.",
     "newArticle": "New article",
     "searchLabel": "Search articles",
     "searchPlaceholder": "Search articles…",
     "errorTitle": "Could not load articles",
     "noMatchFilters": "No articles match your filters.",
-    "noArticlesInFolder": "No articles in this folder yet — open a sub-folder above to keep browsing.",
+    "noArticlesInFolder": "No articles in this folder yet.",
     "emptyTitle": "No articles yet",
     "emptyDescription": "Capture what your team knows — runbooks, how-tos, onboarding notes. Write your first article or import one from a file.",
     "emptyAction": "Write your first article",
@@ -17,7 +16,10 @@
     "formerMember": "Former member",
     "uncategorized": "Uncategorized",
     "linkedCount": "{count} linked",
-    "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}"
+    "linkedTooltip": "{count, plural, one {Linked to # item} other {Linked to # items}}",
+    "draftTooltip": "Only you can see it until it's published",
+    "noSummary": "No summary",
+    "readingShort": "{minutes} min"
   },
   "search": {
     "degradedNote": "Full-text search is unavailable right now — showing title and excerpt matches instead.",
@@ -35,7 +37,6 @@
     "noResults": "No articles match “{query}”."
   },
   "filters": {
-    "statusLabelName": "Status",
     "linkedToLabelName": "Target",
     "assetLabelName": "Assets",
     "applicationLabelName": "Applications",
@@ -46,15 +47,10 @@
     "linkedOnly": "Linked only",
     "filtersButton": "Filters",
     "chipSearch": "Search: “{query}”",
-    "chipStatus": "Status: {value}",
     "chipCategory": "Category: {value}",
     "chipLinkedTo": "Linked to: {value}",
     "chipAsset": "Asset: {value}",
     "chipApplication": "Application: {value}",
-    "statusLabel": {
-      "drafts": "Drafts",
-      "published": "Published"
-    },
     "linkedToLabel": {
       "assets": "Assets",
       "applications": "Applications"
@@ -241,21 +237,19 @@
   },
   "folders": {
     "treeLabel": "Browse folders",
-    "mobileToggle": "Folders",
-    "allArticles": "All articles",
     "empty": "No folders yet",
     "expand": "Expand {name}",
     "collapse": "Collapse {name}",
     "subfoldersLabel": "Sub-folders",
-    "childFolderCount": "{count, plural, one {# sub-folder} other {# sub-folders}}",
     "articleCount": "{count, plural, one {# article} other {# articles}}",
     "emptyFolder": "Empty folder",
     "actions": {
       "menuTitle": "Folder actions",
       "menuAriaLabel": "Actions for {name}",
       "newChild": "New sub-folder here",
-      "rename": "Rename",
-      "move": "Move to…"
+      "move": "Move to…",
+      "edit": "Edit",
+      "access": "Access…"
     },
     "form": {
       "newRoot": "New folder",
@@ -263,17 +257,24 @@
       "createRootDescription": "A top-level folder in the Knowledge Base.",
       "createInTitle": "New folder in {name}",
       "createDescription": "It is created inside the folder you picked. Folders can be nested as deeply as you like.",
-      "renameTitle": "Rename folder",
-      "renameDescription": "Renaming a folder does not move it and does not change who can read it.",
       "nameLabel": "Name",
       "namePlaceholder": "e.g. Firewalls",
       "nameRequired": "Enter a folder name",
       "create": "Create folder",
       "save": "Save",
       "created": "Folder created",
-      "renamed": "Folder renamed",
       "createError": "Couldn't create the folder",
-      "renameError": "Couldn't rename the folder"
+      "editTitle": "Edit folder",
+      "editDescription": "Changing the name or description does not move the folder or change who can read it.",
+      "editError": "Couldn't save the folder",
+      "saved": "Folder saved",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "What lives in this folder, in a sentence",
+      "descriptionTooLong": "Keep the description under 1,000 characters",
+      "orderLabel": "Order",
+      "orderHint": "Optional. Lower numbers sort first; folders without one sort after, by name.",
+      "orderInvalid": "Enter a whole number",
+      "cannotClear": "This can be changed but not removed yet — the current value is kept."
     },
     "move": {
       "title": "Move folder",
@@ -366,8 +367,6 @@
     "restrictedAriaLabel": "Restricted folder",
     "inheritedRestrictedTooltip": "Restricted — inherited from {name}",
     "inheritedRestrictedAriaLabel": "Restricted folder (inherited from {name})",
-    "editRulesAriaLabel": "Edit access rules for {name}",
-    "editRulesTitle": "Edit access rules",
     "editorTitle": "Access rules",
     "addRuleKindLabel": "Rule type",
     "addRulePlaceholder": "Add a rule…",
@@ -422,5 +421,96 @@
         "description": "“{name}” is moving to {destination}, which inherits different access rules. The articles in it and in its sub-folders will follow the new location's rules, and this may let more people read them."
       }
     }
+  },
+  "rail": {
+    "mobileToggle": "Views and folders",
+    "views": "Views",
+    "folders": "Folders",
+    "view": {
+      "all": "All articles",
+      "drafts": "My drafts",
+      "recent": "Recent",
+      "linked": "Linked to assets and apps"
+    }
+  },
+  "table": {
+    "article": "Article",
+    "folder": "Folder",
+    "author": "Author",
+    "reading": "Reading",
+    "updated": "Updated",
+    "opened": "Opened"
+  },
+  "home": {
+    "stats": {
+      "articles": "{count, plural, one {<n>#</n> article} other {<n>#</n> articles}}",
+      "published": "<n>{count}</n> published",
+      "drafts": "{count, plural, one {<n>#</n> draft by you} other {<n>#</n> drafts by you}}",
+      "folders": "{count, plural, one {<n>#</n> folder} other {<n>#</n> folders}}"
+    },
+    "foldersTitle": "Folders",
+    "showAll": "See all ({count})",
+    "showFewer": "Show fewer",
+    "card": {
+      "articles": "{count, plural, one {<n>#</n> article} other {<n>#</n> articles}}",
+      "subfolders": "{count, plural, one {<n>#</n> subfolder} other {<n>#</n> subfolders}}"
+    },
+    "articlesTitle": "Articles"
+  },
+  "segment": {
+    "label": "Filter by status",
+    "all": "All",
+    "published": "Published",
+    "drafts": "Drafts"
+  },
+  "sort": {
+    "label": "Sort by",
+    "ariaLabel": "Sort: {value}",
+    "updated": "Updated",
+    "title": "Title",
+    "created": "Created"
+  },
+  "folderHeader": {
+    "subfolder": "Subfolder",
+    "newArticleHere": "New article here",
+    "facts": {
+      "whoCanSee": "Who can see",
+      "articles": "Articles",
+      "subfolders": "Subfolders",
+      "lastChange": "Last change"
+    },
+    "access": {
+      "everyone": "Everyone with KB access",
+      "inherited": "Restricted · from {name}",
+      "only": "Only",
+      "orSeparator": " or ",
+      "listSeparator": ", ",
+      "people": "{count, plural, one {# person} other {# people}}",
+      "appHolders": "holders of {name}",
+      "assetAssignees": "assignees of {name}"
+    }
+  },
+  "folderView": {
+    "listTitle": "In this folder",
+    "includeSubfolders": "Include subfolders",
+    "missingTitle": "Folder not found",
+    "missingSubtitle": "It may have been deleted, or you may not have access to it."
+  },
+  "views": {
+    "drafts": {
+      "title": "My drafts",
+      "subtitle": "Only you can see your drafts until you publish them."
+    },
+    "linked": {
+      "title": "Linked to assets and apps",
+      "subtitle": "Articles connected to at least one asset or application."
+    },
+    "recent": {
+      "title": "Recent",
+      "subtitle": "Articles you opened in this browser, newest first. Kept only on this device.",
+      "clear": "Clear list",
+      "empty": "Nothing yet. Articles you open appear here."
+    },
+    "empty": "No articles here yet."
   }
 }

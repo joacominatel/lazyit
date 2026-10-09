@@ -113,7 +113,7 @@ describe('ArticlesService', () => {
   let articleLink: ArticleLinkMock;
   let articleWikiLink: ArticleWikiLinkMock;
   let articleAlias: ArticleAliasMock;
-  let articleCategory: { findFirst: jest.Mock };
+  let articleCategory: { findFirst: jest.Mock; findMany: jest.Mock };
   let asset: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
   let prisma: { $transaction: jest.Mock };
@@ -192,8 +192,7 @@ describe('ArticlesService', () => {
       $transaction: jest.fn(
         (
           arg:
-            | Array<Promise<unknown>>
-            | ((client: typeof tx) => Promise<unknown>),
+            Array<Promise<unknown>> | ((client: typeof tx) => Promise<unknown>),
         ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
       ),
     };
@@ -201,7 +200,11 @@ describe('ArticlesService', () => {
     // used. Reads delegate to resolve(user) for draft visibility; writes read principal.user.id directly.
     actor = new ActorService();
     // Category / asset / application exist by default; overridden per-test.
-    articleCategory = { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) };
+    // `findMany` backs the `includeSubfolders` live-tree load (#1539); empty unless a test wires a tree.
+    articleCategory = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'c1' }),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
     asset = { findFirst: jest.fn().mockResolvedValue({ id: 'as1' }) };
     application = { findFirst: jest.fn().mockResolvedValue({ id: 'app1' }) };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
@@ -693,7 +696,8 @@ describe('ArticlesService', () => {
       )[0][0].where;
       expect(fm.take).toBe(5);
       expect(fm.skip).toBe(10);
-      expect(fm.orderBy).toEqual({ updatedAt: 'desc' });
+      // The default order (no `sort`) is newest-updated first, with the unique `id` tiebreak (#1539).
+      expect(fm.orderBy).toEqual([{ updatedAt: 'desc' }, { id: 'asc' }]);
       // count's where is identical to the page's where (so total can't drift from the page).
       expect(countWhere).toEqual(fm.where);
       // The Page<T> envelope — `_count` flattened to `linkCount`.
@@ -703,6 +707,150 @@ describe('ArticlesService', () => {
         limit: 5,
         offset: 10,
       });
+    });
+  });
+
+  describe('findPage sort (#1539)', () => {
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+    const orderBy = (): unknown =>
+      (article.findMany.mock.calls as Array<[{ orderBy: unknown }]>)[0][0]
+        .orderBy;
+    const countArgs = (): Record<string, unknown> =>
+      (article.count.mock.calls as Array<[Record<string, unknown>]>)[0][0];
+
+    it.each([
+      [undefined, [{ updatedAt: 'desc' }, { id: 'asc' }]],
+      ['updated', [{ updatedAt: 'desc' }, { id: 'asc' }]],
+      ['title', [{ title: 'asc' }, { id: 'asc' }]],
+      ['created', [{ createdAt: 'desc' }, { id: 'asc' }]],
+    ] as const)(
+      'sort=%p orders by %j, always ending with the unique id tiebreak',
+      async (sort, expected) => {
+        await service.findPage({ sort }, PAGE, undefined);
+        expect(orderBy()).toEqual(expected);
+      },
+    );
+
+    it('leaves the count unordered and on the same where as the page', async () => {
+      await service.findPage({ sort: 'title' }, PAGE, undefined);
+      expect(countArgs()).not.toHaveProperty('orderBy');
+      expect(countArgs().where).toEqual(listWhere());
+    });
+  });
+
+  describe('findPage includeSubfolders (#1539)', () => {
+    const PAGE = { limit: 50, offset: 0, deleted: 'active' as const };
+    // The `categoryId IN` filter clauses in the list where (the folder-access pin is a separate clause).
+    const categoryClauses = (): unknown[] =>
+      listWhere().AND.filter((c) => 'categoryId' in c);
+    // root ─┬─ child ── grandchild
+    //       └─ sibling
+    // other (a separate root)
+    const TREE = [
+      { id: 'root', parentId: null },
+      { id: 'child', parentId: 'root' },
+      { id: 'grandchild', parentId: 'child' },
+      { id: 'sibling', parentId: 'root' },
+      { id: 'other', parentId: null },
+    ];
+
+    it('widens each selected folder to itself plus every nested live descendant', async () => {
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['root', 'child', 'sibling', 'grandchild'] } },
+      ]);
+    });
+
+    it('loads the live folder tree in ONE query (id + parentId, deletedAt null)', async () => {
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['child', 'other'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(articleCategory.findMany).toHaveBeenCalledTimes(1);
+      expect(articleCategory.findMany).toHaveBeenCalledWith({
+        where: { deletedAt: null },
+        select: { id: true, parentId: true },
+      });
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['child', 'other', 'grandchild'] } },
+      ]);
+    });
+
+    it('excludes a soft-deleted descendant (and what is filed under it)', async () => {
+      // `child` is soft-deleted, so the live-only query does not return it: neither it nor its
+      // `grandchild` is reached from `root`.
+      articleCategory.findMany.mockResolvedValueOnce(
+        TREE.filter((f) => f.id !== 'child'),
+      );
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['root', 'sibling'] } },
+      ]);
+    });
+
+    it('keeps the folder-access pin ANDed on top, so an unreadable descendant stays out', async () => {
+      // The caller may read `root` and `sibling`, not `child`/`grandchild`. The widened filter names
+      // them, but the separate `categoryId IN <visible>` clause still excludes them.
+      folderAccess.visibleFolderIds.mockResolvedValueOnce(
+        new Set(['root', 'sibling', 'other']),
+      );
+      articleCategory.findMany.mockResolvedValueOnce(TREE);
+      await service.findPage(
+        { categoryId: ['root'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      const clauses = categoryClauses();
+      expect(clauses).toContainEqual({
+        categoryId: { in: ['root', 'sibling', 'other'] },
+      });
+      expect(clauses).toContainEqual({
+        categoryId: { in: ['root', 'child', 'sibling', 'grandchild'] },
+      });
+      // Both apply (AND), and the count shares the very same where.
+      const countWhere = (
+        article.count.mock.calls as Array<[{ where: unknown }]>
+      )[0][0].where;
+      expect(countWhere).toEqual(listWhere());
+    });
+
+    it('is cycle-safe over a corrupt parentId loop', async () => {
+      articleCategory.findMany.mockResolvedValueOnce([
+        { id: 'x', parentId: 'z' },
+        { id: 'y', parentId: 'x' },
+        { id: 'z', parentId: 'y' },
+      ]);
+      await service.findPage(
+        { categoryId: ['x'], includeSubfolders: true },
+        PAGE,
+        undefined,
+      );
+      expect(categoryClauses()).toEqual([
+        { categoryId: { in: ['x', 'y', 'z'] } },
+      ]);
+    });
+
+    it('is a no-op without a categoryId filter — no tree query, no categoryId clause', async () => {
+      await service.findPage({ includeSubfolders: true }, PAGE, undefined);
+      expect(articleCategory.findMany).not.toHaveBeenCalled();
+      expect(categoryClauses()).toEqual([]);
+    });
+
+    it('without includeSubfolders, categoryId matches only the selected folders (no tree query)', async () => {
+      await service.findPage({ categoryId: ['root'] }, PAGE, undefined);
+      expect(articleCategory.findMany).not.toHaveBeenCalled();
+      expect(categoryClauses()).toEqual([{ categoryId: { in: ['root'] } }]);
     });
   });
 

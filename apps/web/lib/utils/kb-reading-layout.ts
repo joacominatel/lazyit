@@ -31,14 +31,16 @@ export const RAIL_COST_PX = 40 + 288;
 
 /**
  * Chrome outside this view at `md`+ with the KB folder tree showing: the app sidebar (`w-60`, 240px),
- * the app shell's `md:p-6` (48px) and the folder rail (`lg:w-64` + `gap-6`, 280px). None of it is
- * this unit's to change — it is the fixed cost the reading column is measured against.
+ * the app shell's `md:p-6` (48px) and the KB rail (`lg:w-72` + `gap-6`, 312px — widened from `w-64`
+ * in #1539). None of it is this unit's to change — it is the fixed cost the reading column is
+ * measured against.
  */
-export const READING_CHROME_PX = 240 + 48 + 280;
+export const READING_CHROME_PX = 240 + 48 + 312;
 
 /**
  * Viewport width from which the right rail sits beside the prose instead of stacking below it.
- * `READING_MEASURE_PX + RAIL_COST_PX + READING_CHROME_PX` is 1768; rounded up to a round 1800.
+ * `READING_MEASURE_PX + RAIL_COST_PX + READING_CHROME_PX` is exactly 1800 since the #1539 rail widening
+ * (it was 1768, rounded up to 1800).
  * Tailwind has no stock breakpoint here, hence the arbitrary `min-[1800px]:` variant below.
  */
 export const RAIL_MIN_VIEWPORT = 1800;

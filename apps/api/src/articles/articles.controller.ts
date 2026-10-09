@@ -27,10 +27,12 @@ import { createZodDto } from 'nestjs-zod';
 import {
   ArticleAliasSchema,
   ArticleBacklinkSchema,
+  ArticleIncludeSubfoldersSchema,
   ArticleLinkedFilterSchema,
   ArticleLinkedToSchema,
   ArticleLinkSchema,
   ArticleListPageSchema,
+  ArticleListSortSchema,
   ArticleSchema,
   ArticleStatusSchema,
   ArticleVersionPageSchema,
@@ -42,7 +44,7 @@ import {
   ImportJobAcceptedSchema,
   ImportJobStatusSchema,
   UpdateArticleSchema,
-  type ArticleLinkedFilter,
+  type ArticleListSort,
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
 import { ArticleImportService } from './import/article-import.service';
@@ -97,6 +99,13 @@ export class ArticlesController {
     description:
       'Filter by category. Multi-value (#198): comma-separated (categoryId=cuid1,cuid2) or repeated; values OR-combine (union). Each element must be a cuid — an invalid element → 400. A single value still works.',
   })
+  @ApiQuery({
+    name: 'includeSubfolders',
+    required: false,
+    enum: [...ArticleIncludeSubfoldersSchema.options],
+    description:
+      'true → widen the categoryId filter to each selected folder plus every live descendant folder (#1539). Folder access still applies: a descendant the caller may not read stays out. No effect without categoryId. Unknown value → 400.',
+  })
   @ApiQuery({ name: 'authorId', required: false })
   @ApiQuery({
     name: 'status',
@@ -141,6 +150,13 @@ export class ArticlesController {
       'Narrow the linked filter to SPECIFIC Applications (#213): keep only articles linked to ≥1 of these exact applications. Multi-value (#198): comma-separated (applicationId=cuid1,cuid2) or repeated; values OR-combine. Each element must be a cuid — an invalid element → 400. Implies linked=only.',
   })
   @ApiQuery({
+    name: 'sort',
+    required: false,
+    enum: [...ArticleListSortSchema.options],
+    description:
+      'Order (#1539): updated (default) = newest-updated first; title = A to Z; created = newest-created first. Each key fixes its own direction; every order ends with id as a unique tiebreak. Unknown value → 400.',
+  })
+  @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
@@ -174,9 +190,12 @@ export class ArticlesController {
     @Query('offset') offset?: string,
     @Query('page') page?: string,
     // The unified principal threads ADR-0060 §4 folder access into the read (ADMIN sees all; SA fails
-    // closed) — `user` still drives draft visibility (ADR-0022). Placed LAST so the existing positional
-    // filter args are unchanged (Nest resolves params by decorator, not position).
+    // closed) — `user` still drives draft visibility (ADR-0022). Placed after the original filters so
+    // their positional args are unchanged (Nest resolves params by decorator, not position).
     @CurrentPrincipal() principal?: Principal,
+    // #1539: the browse order and the subfolder widening — single-value allowlists, 400 on unknown.
+    @Query('sort') sort?: string,
+    @Query('includeSubfolders') includeSubfolders?: string,
   ) {
     return this.articles.findPage(
       {
@@ -187,7 +206,11 @@ export class ArticlesController {
         authorId: parseUuidQuery(authorId, 'authorId'),
         status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
         q,
-        linked: this.parseLinked(linked),
+        linked: this.parseSingleEnum(
+          linked,
+          ArticleLinkedFilterSchema,
+          'linked',
+        ),
         linkedTo: parseEnumArrayQuery(
           linkedTo,
           ArticleLinkedToSchema,
@@ -197,6 +220,17 @@ export class ArticlesController {
         // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
         assetId: parseCuidArrayQuery(assetId, 'assetId'),
         applicationId: parseCuidArrayQuery(applicationId, 'applicationId'),
+        includeSubfolders:
+          this.parseSingleEnum(
+            includeSubfolders,
+            ArticleIncludeSubfoldersSchema,
+            'includeSubfolders',
+          ) === 'true',
+        sort: this.parseSingleEnum<ArticleListSort>(
+          sort,
+          ArticleListSortSchema,
+          'sort',
+        ),
       },
       parsePageQuery({ limit, offset, page }),
       user,
@@ -205,17 +239,27 @@ export class ArticlesController {
   }
 
   /**
-   * Validate `?linked=` against the {@link ArticleLinkedFilterSchema} allowlist — the only accepted
-   * value is `only`. An unknown value is rejected with 400 (ADR-0030: an unknown filter value is
-   * never silently ignored). Mirrors the inline `status` check; the global ZodValidationPipe only
-   * validates `@Body()` DTOs, so raw `@Query` strings are otherwise unchecked.
+   * Validate a single-value enum query param (`?linked=`, `?sort=`, `?includeSubfolders=`) against its
+   * allowlist schema. An unknown value — or a repeated param, which Nest hands over as an array — is
+   * rejected with 400 (ADR-0030: an unknown filter value is never silently ignored); an omitted one is
+   * `undefined`. The global ZodValidationPipe only validates `@Body()` DTOs, so raw `@Query` strings are
+   * otherwise unchecked.
    */
-  private parseLinked(value?: string): ArticleLinkedFilter | undefined {
+  private parseSingleEnum<T extends string>(
+    value: string | undefined,
+    schema: {
+      safeParse: (
+        value: unknown,
+      ) => { success: true; data: T } | { success: false };
+      readonly options: readonly T[];
+    },
+    name: string,
+  ): T | undefined {
     if (value === undefined) return undefined;
-    const result = ArticleLinkedFilterSchema.safeParse(value);
+    const result = schema.safeParse(value);
     if (!result.success) {
       throw new BadRequestException(
-        `Invalid linked. Expected one of: ${ArticleLinkedFilterSchema.options.join(', ')}`,
+        `Invalid ${name}. Expected one of: ${schema.options.join(', ')}`,
       );
     }
     return result.data;

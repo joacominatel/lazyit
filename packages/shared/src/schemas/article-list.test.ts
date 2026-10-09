@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import {
   ArticleApplicationIdFilterSchema,
   ArticleAssetIdFilterSchema,
+  ArticleIncludeSubfoldersSchema,
   ArticleLinkedToFilterSchema,
+  ArticleListSortSchema,
   ArticleLinkedToSchema,
   ArticleStatusFilterSchema,
 } from "./article-list";
@@ -78,5 +80,45 @@ describe("ArticleAssetIdFilterSchema / ArticleApplicationIdFilterSchema — spec
       ArticleAssetIdFilterSchema.safeParse(`${VALID_CUID},${VALID_CUID}`)
         .success,
     ).toBe(false);
+  });
+});
+
+describe("ArticleListSortSchema — GET /articles ?sort= (#1539)", () => {
+  it("accepts exactly updated, title and created", () => {
+    expect(ArticleListSortSchema.options).toEqual([
+      "updated",
+      "title",
+      "created",
+    ]);
+    for (const key of ["updated", "title", "created"]) {
+      expect(ArticleListSortSchema.safeParse(key).success).toBe(true);
+    }
+  });
+
+  it("rejects anything else, including the column names and other casings (→ 400 at the edge)", () => {
+    for (const bad of [
+      "updatedAt",
+      "createdAt",
+      "TITLE",
+      "newest",
+      "",
+      "title,created",
+    ]) {
+      expect(ArticleListSortSchema.safeParse(bad).success).toBe(false);
+    }
+    expect(ArticleListSortSchema.safeParse(undefined).success).toBe(false);
+  });
+});
+
+describe("ArticleIncludeSubfoldersSchema — GET /articles ?includeSubfolders= (#1539)", () => {
+  it("accepts only the literal true", () => {
+    expect(ArticleIncludeSubfoldersSchema.options).toEqual(["true"]);
+    expect(ArticleIncludeSubfoldersSchema.safeParse("true").success).toBe(true);
+  });
+
+  it("rejects false, other truthy spellings and a boolean (→ 400 at the edge)", () => {
+    for (const bad of ["false", "1", "yes", "TRUE", "", true]) {
+      expect(ArticleIncludeSubfoldersSchema.safeParse(bad).success).toBe(false);
+    }
   });
 });
