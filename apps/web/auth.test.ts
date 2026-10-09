@@ -40,9 +40,6 @@ mock.module("next-auth", () => ({
 mock.module("next-auth/providers/credentials", () => ({
   default: (options: Record<string, unknown>) => ({ ...options, type: "credentials" }),
 }));
-mock.module("@/lib/auth/bootstrap-file", () => ({
-  loadWebBootstrapOidcFile: () => {},
-}));
 
 // `auth.ts` captures the global `fetch` at import time for its OIDC refresh grant, so install a
 // delegating stub BEFORE the import and swap what it delegates to per test.
