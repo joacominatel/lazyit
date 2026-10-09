@@ -110,7 +110,6 @@
       "production": "Producción"
     },
     "identityProvider": {
-      "zitadel": "Zitadel (incluido)",
       "generic-oidc": "OIDC genérico (usa el tuyo)",
       "local": "Cuentas locales"
     },

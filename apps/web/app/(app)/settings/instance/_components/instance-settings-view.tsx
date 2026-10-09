@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
-import type { IntegrationMode } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
@@ -48,13 +47,11 @@ export function InstanceSettingsView() {
 
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
-  /** Human label for the IdP posture (mirrors IntegrationModeSchema). */
-  const identityProviderLabel: Record<IntegrationMode, string> = {
-    zitadel: t("instance.identityProvider.zitadel"),
-    "generic-oidc": t("instance.identityProvider.generic-oidc"),
-    // First-party local auth (ADR-0086) — no external IdP; lazyit owns the accounts directly.
-    local: t("instance.identityProvider.local"),
-  };
+  // Anything but local is OIDC, including the legacy `zitadel` an older API may report (ADR-0102 §4).
+  const identityProviderLabel = (mode: string) =>
+    mode === "local"
+      ? t("instance.identityProvider.local")
+      : t("instance.identityProvider.generic-oidc");
 
   const posture: { label: string; tone: StatusTone } = data?.devMode
     ? { label: t("instance.posture.development"), tone: "warning" }
@@ -120,7 +117,7 @@ export function InstanceSettingsView() {
                 )}
               </InfoRow>
               <InfoRow label={t("instance.rows.identityProvider")}>
-                {identityProviderLabel[data.integrationMode]}
+                {identityProviderLabel(data.integrationMode)}
               </InfoRow>
               <InfoRow label={t("instance.rows.administrators")}>
                 <span className="font-mono tabular-nums">{data.adminCount}</span>
