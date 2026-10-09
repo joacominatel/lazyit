@@ -182,30 +182,7 @@ export function restoreUser(id: string): Promise<User> {
   return apiFetch<User>(`${BASE}/${id}/restore`, { method: "POST" });
 }
 
-/**
- * Provision an OIDC account for a directory person (`POST /users/:id/provision-account`, `user:manage` —
- * ADR-0069 REDESIGN §0 #3). The manual counterpart to the auto-claim-by-verified-email login (ADR-0038):
- * it takes an existing directory-only person (no login, `externalId == null`), creates them in the
- * bundled identity provider (Zitadel), sets `externalId` and flips `directoryOnly` to false. Resolves to
- * the now-promoted {@link User}. The honest non-success cases come back as an {@link ApiError} the caller
- * maps on its `.status`:
- *   - **400** — the target is not a directory person, is already linked, OR has no real email (Zitadel
- *     requires one; a synthesized `…@directory.local` placeholder counts as "no email"). The operator
- *     must edit the person and give them a real email first.
- *   - **503** — the IdP create failed.
- */
-export function provisionUserAccount(id: string): Promise<User> {
-  return apiFetch<User>(`${BASE}/${id}/provision-account`, { method: "POST" });
-}
-
-/**
- * Onboard a directory person in LOCAL auth mode (`POST /users/:id/provision-local-account`, `user:manage`
- * — ADR-0086 §5 / issue #1072). The local-mode counterpart to {@link provisionUserAccount}: for an
- * imported, login-less directory person it mints a ONE-TIME temporary password, flips them into a login
- * account (keeping their role), and resolves to the temp password — shown ONCE, never refetchable. Only
- * meaningful when `canProvisionLocalAccounts` is set on `GET /config/status` (local mode); the backend
- * 400s outside local mode or for a non-directory target, surfaced as an {@link ApiError} on `.status`.
- */
+/** Local-mode onboarding of a directory person (ADR-0086 §5); the temp password comes back once. */
 export function provisionLocalUserAccount(
   id: string,
 ): Promise<AdminPasswordResetResult> {

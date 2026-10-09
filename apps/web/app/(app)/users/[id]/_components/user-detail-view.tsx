@@ -462,8 +462,7 @@ export function UserDetailView({ id }: { id: string }) {
         }
         aside={
           <>
-            {/* Directory person (ADR-0069 REDESIGN §0 #3): no login yet. Offer the ADMIN-only manual OIDC
-                promotion — the explicit counterpart to the auto-claim on first verified-email login. */}
+            {/* Directory person (ADR-0069 REDESIGN §0 #3): no login yet. */}
             {user.directoryOnly && canManage && (
               <DetailPanel title={t("directory.provision.title")}>
                 <div className="space-y-3">
