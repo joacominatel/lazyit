@@ -284,15 +284,13 @@ services:
       start_period: 10s
     networks: [internal]
 
-  # --- Backup sidecar (OPT-IN) — cron + pg_dump, mode-aware (prod) ----------
+  # --- Backup sidecar (OPT-IN) — cron + pg_dump of the app DB (prod) ----------
   # In the `prod` AND a `backup` profile, so it only runs when BOTH are requested alongside the
   # prod stack:
   #   docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   #     --profile prod --profile backup --env-file infra/env/.env.prod up -d backup
-  # Dumps the app DB on a schedule to the host-mounted ./backups dir, prunes dumps older than the
-  # retention window, and (optional, OFF by default) runs an offsite hook. In OIDC mode (AUTH_MODE=oidc)
-  # it ALSO dumps the Zitadel DB; in local-auth mode (ADR-0086) there is no zitadel_db, so the cron skips
-  # that dump — otherwise every nightly run would report FAILED (zitadel_db unreachable).
+  # Dumps the app DB on a schedule to the host-mounted ./backups dir, prunes app dumps older than the
+  # retention window, and (optional, OFF by default) runs an offsite hook.
   # Respects "no mandatory cloud" — local-disk only unless you wire BACKUP_OFFSITE_CMD.
   # Full DR procedure (what/order/restore): docs/05-runbooks/backups.md.
   backup:
@@ -312,14 +310,6 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
       # App DB connection (reuses the shared POSTGRES_* + the `db` service name).
       PGHOST: db
-      # Auth mode (ADR-0086) — the cron dumps the Zitadel DB ONLY when this is `oidc`. Defaults to `oidc`
-      # so an env without it (a pre-ADR-0086 OIDC deploy) keeps dumping both DBs, byte-identical to before.
-      AUTH_MODE: ${AUTH_MODE:-oidc}
-      # Zitadel DB connection (the `zitadel_db` service uses its own credentials). Used only in OIDC mode.
-      ZITADEL_DB_HOST: zitadel_db
-      ZITADEL_DB_USER: ${ZITADEL_DB_USER:-zitadel}
-      ZITADEL_DB_PASSWORD: ${ZITADEL_DB_PASSWORD}
-      ZITADEL_DB_NAME: ${ZITADEL_DB_NAME:-zitadel}
       # OPTIONAL offsite copy — OFF unless set. Receives the dump path as $1 (e.g. an rclone/scp
       # one-liner). Leave unset to keep backups local-disk only (no mandatory cloud).
       BACKUP_OFFSITE_CMD: ${BACKUP_OFFSITE_CMD:-}
@@ -336,16 +326,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      # NOTE (ADR-0086): the backup → zitadel_db gate lives in infra/docker-compose.oidc.yaml (OIDC mode
-      # only). zitadel_db is profiles:[oidc]; keeping this edge here made `--profile prod --profile backup`
-      # in local mode parse-fatal (an active backup depending on a profile-excluded zitadel_db). The cron
-      # below already skips the Zitadel dump when AUTH_MODE≠oidc, so there is nothing to gate on in local.
     # Generate a crontab, then run cron in the foreground. Every shell `$` is written as `$$` so
     # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
-    # RUNTIME. PGPASSWORD/POSTGRES_* come from env_file; ZITADEL_* are passed explicitly above —
-    # and the cron job inherits all of them directly from `exec crond` (no env-export file; see the
-    # note by the crontab below). The job writes timestamped custom-format (-Fc) dumps and prunes by
-    # mtime. `crond -f -d 8` keeps the container alive and logs to stdout (json-file driver + rotation).
+    # RUNTIME. POSTGRES_* come from env_file, and the cron job inherits them directly from
+    # `exec crond` (no env-export file; see the note by the crontab below). The job writes timestamped
+    # custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps the container alive and logs to stdout (json-file driver + rotation).
     command:
       - sh
       - -c
@@ -404,30 +389,20 @@ services:
 
         # App DB — POSTGRES_USER/PASSWORD/DB come from the shared .env.prod (env_file).
         dump_db "app" "/backups/app-$${TS}.dump" "$$POSTGRES_PASSWORD" "$$PGHOST" "$$POSTGRES_USER" "$$POSTGRES_DB"
-        # Zitadel DB — its own credentials. OIDC mode ONLY: in local-auth mode (AUTH_MODE≠oidc) there is
-        # no zitadel_db service, so dumping it would fail every run (ADR-0086). Default oidc => a pre-ADR
-        # OIDC deploy (AUTH_MODE unset) still dumps it, unchanged.
-        if [ "$${AUTH_MODE:-oidc}" = "oidc" ]; then
-          dump_db "zitadel" "/backups/zitadel-$${TS}.dump" "$$ZITADEL_DB_PASSWORD" "$$ZITADEL_DB_HOST" "$$ZITADEL_DB_USER" "$$ZITADEL_DB_NAME"
-        else
-          echo "[lazyit-backup] AUTH_MODE=$${AUTH_MODE:-oidc} (local-auth): skipping the Zitadel DB dump — no zitadel_db in this mode"
-        fi
 
-        # Retention sweep — delete dumps older than BACKUP_RETENTION_DAYS. Only ever matches *.dump
-        # (verified, promoted) files; *.partial temp files are never left behind on the happy path
-        # and are removed on failure, so a corrupt run can never be retained as a "real" backup.
-        find /backups -name '*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
+        # Retention sweep — delete app dumps older than BACKUP_RETENTION_DAYS. Only ever matches
+        # app-*.dump (verified, promoted) files, so nothing else an operator keeps here (e.g. an old
+        # zitadel-*.dump) is pruned; *.partial temp files are never left behind on the happy path and
+        # are removed on failure, so a corrupt run can never be retained as a "real" backup.
+        find /backups -name 'app-*.dump' -type f -mtime "+$${BACKUP_RETENTION_DAYS}" -print -delete || true
 
-        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs only on dumps that were
-        # already verified + promoted above. Receives each dump path as $$1. An offsite failure is
-        # loud + non-zero (the local dumps are safe, but the offsite copy didn't happen).
+        # Optional offsite hook (OFF unless BACKUP_OFFSITE_CMD is set). Runs only on the dump that was
+        # already verified + promoted above. Receives the dump path as $$1. An offsite failure is
+        # loud + non-zero (the local dump is safe, but the offsite copy didn't happen).
         if [ -n "$${BACKUP_OFFSITE_CMD:-}" ]; then
-          for f in "/backups/app-$${TS}.dump" "/backups/zitadel-$${TS}.dump"; do
-            # The Zitadel dump is absent in local-auth mode (skipped above) — don't offsite a missing file.
-            [ -f "$$f" ] || continue
-            sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" \
-              || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
-          done
+          f="/backups/app-$${TS}.dump"
+          sh -c "$$BACKUP_OFFSITE_CMD \"\$$1\"" _ "$$f" \
+            || fail "offsite hook failed for $$f (local dump is intact; offsite copy did NOT happen)"
         fi
         echo "[lazyit-backup] run $$TS complete"
         SCRIPT
