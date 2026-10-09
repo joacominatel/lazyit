@@ -114,7 +114,7 @@ carpeta → **Acceso…** (en la barra lateral o en la página de la carpeta). A
 carpeta (las reglas se combinan con O). Los tipos de regla son:
 
 - **Usuarios** — un conjunto concreto de personas.
-- **Rol** — todos los que tengan un rol dado (Administradores, Miembros o Lectores).
+- **Rol** — todos los que tengan un rol dado (Administradores, Miembros u Observadores).
 - **Acceso a aplicación** — cualquiera que tenga acceso actualmente a una aplicación elegida. Por
   ejemplo: *"quien pueda usar la app de Finanzas puede leer sus runbooks."*
 - **Asignados al activo** — quien tenga asignado actualmente un activo elegido. Por ejemplo: *"quien
