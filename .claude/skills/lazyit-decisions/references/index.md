@@ -109,4 +109,4 @@ tells you what it costs you.
 | 0099 | Purchases — scope, model, and optionality | accepted |
 | 0100 | Money as 64-bit integer minor units | accepted |
 | 0101 | Custom asset statuses — operator-named labels mapped to the built-in AssetStatus | accepted |
-| 0102 | Remove the bundled Zitadel IdP; generic OIDC (BYOI) stays opt-in | proposed |
+| 0102 | Remove the bundled Zitadel IdP; generic OIDC (BYOI) stays opt-in | accepted |

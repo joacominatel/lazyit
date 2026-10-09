@@ -1,7 +1,7 @@
 ---
 title: "ADR-0102: Remove the bundled Zitadel IdP; generic OIDC (BYOI) stays opt-in"
 tags: [adr, auth, oidc, idp, infra, deployment, security]
-status: proposed
+status: accepted
 created: 2026-10-09
 updated: 2026-10-09
 deciders: [Joaquín Minatel]
@@ -11,7 +11,7 @@ deciders: [Joaquín Minatel]
 
 ## Status
 
-**proposed** — 2026-10-09 (epic #1543). The CEO accepts it on the pull request.
+**accepted** — 2026-10-09 (epic #1543). Accepted by the CEO on PR #1544.
 
 **Supersedes** [[0037-idp-choice-zitadel-byoi]]; its "BYOI by environment variables" contract (§3) is
 carried forward here. **Amends** [[0038-jit-user-provisioning]], [[0039-authjs-v5-frontend-oidc]],
