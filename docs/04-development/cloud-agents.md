@@ -3,7 +3,7 @@ title: Cloud agents — bringing lazyit up in a fresh VM
 tags: [development, runbook]
 status: accepted
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-10-09
 ---
 
 # Cloud agents — bringing lazyit up in a fresh VM
@@ -22,9 +22,9 @@ For a normal local setup, use [[setup]] instead.
 | PostgreSQL | `docker compose up -d db`, or `bun run db:up` for the full set | `127.0.0.1:5432` |
 | API | `bun run dev`, or `cd apps/api && bun run dev` | `3001` |
 | Web | `bun run dev`, or `cd apps/web && bun run dev` | `3000` |
-| Meilisearch / Zitadel | started by `bun run db:up`; optional in shim mode | `7700` / `8080` |
+| Meilisearch / Valkey | started by `bun run db:up`; optional in shim mode | `7700` / `6379` |
 
-The minimal end-to-end loop is **Postgres + API + Web**. Meilisearch and Zitadel are optional
+The minimal end-to-end loop is **Postgres + API + Web**. Meilisearch and Valkey are optional
 when `AUTH_MODE=shim`.
 
 ## Docker in the VM
@@ -78,8 +78,7 @@ With `AUTH_MODE=shim`, authenticated API calls need an `X-User-Id: <uuid>` heade
 creates `admin@lazyit.local`; query its id from Postgres and use it for smoke tests. `/health/*`
 is public.
 
-`POST /users` returns 503 without Zitadel management configured — expected in shim-only dev.
-Prefer asset or dashboard endpoints for a first check.
+Asset or dashboard endpoints make a good first check.
 
 ## Smoke test
 
