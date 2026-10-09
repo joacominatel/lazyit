@@ -330,7 +330,8 @@ services:
     # Compose's parse-time ${...} interpolation leaves them intact for the container shell at
     # RUNTIME. POSTGRES_* come from env_file, and the cron job inherits them directly from
     # `exec crond` (no env-export file; see the note by the crontab below). The job writes timestamped
-    # custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps the container alive and logs to stdout (json-file driver + rotation).
+    # custom-format (-Fc) dumps and prunes by mtime. `crond -f -d 8` keeps the container alive and
+    # logs to stdout (json-file driver + rotation).
     command:
       - sh
       - -c
