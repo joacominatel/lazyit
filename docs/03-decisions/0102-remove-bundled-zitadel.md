@@ -251,6 +251,7 @@ Built on the integration branch `feat/issue-1543-remove-bundled-zitadel`:
 | #1552 | API users: write-back, `provision-account`, deactivate mirror and compensation delete removed |
 | #1553 | Runtime: Zitadel compose services, `oidc` overlay, Caddy `auth.` site, bootstrap sidecar and client-file loaders removed; the backup sidecar dumps the app database only |
 | #1554 | The `IdentityProvider` seam, the `zitadel` contract value and the `ZitadelPasswordSchema` alias removed |
+| #1559 | Generic OIDC hardening: offboarded verified email refused at JIT (§5); userinfo resolved from the issuer's discovery document |
 
 Where the implementation settled a detail differently from the first draft of this record:
 
