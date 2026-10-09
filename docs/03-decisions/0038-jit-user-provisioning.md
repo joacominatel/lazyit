@@ -3,7 +3,7 @@ title: "ADR-0038: JIT user provisioning on first OIDC login"
 tags: [adr, auth, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-06-20
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,6 +14,10 @@ deciders: [Joaquín Minatel]
 accepted — 2026-05-27. Implements Phase 2 of the auth plan outlined in [[0037-idp-choice-zitadel-byoi]]
 and replaces the `X-User-Id` shim ([[0022-draft-visibility-auth-shim]], [[0024-asset-assignment-actor-shim]])
 for all actor-tracked operations.
+
+> **Amendment 2026-10-09 (#1543) — [[0102-remove-bundled-zitadel]].** The manual provision-account path
+> (`POST /users/:id/provision-account`) is withdrawn with the bundled Zitadel. A directory person is
+> promoted only by the JIT email-linking path below. JIT itself is unchanged.
 
 > **Amendment 2026-05-27 — userinfo enrichment (issue #59).** The JIT path now enriches the new
 > User's profile from the standard OIDC **userinfo endpoint**, because an OAuth *access token*

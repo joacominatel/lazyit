@@ -3,7 +3,7 @@ title: "ADR-0086: Local (first-party) authentication mode — make Zitadel/OIDC 
 tags: [adr, auth, security, deployment, data-model]
 status: accepted
 created: 2026-07-03
-updated: 2026-09-26
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -20,6 +20,11 @@ when it offboards an active person.
 **Amended** — 2026-09-26 (issue #1420): §9 per-device sessions — a `UserSession` row per sign-in, listed by
 its owner and ended one at a time, **on top of** the `sessionEpoch` model (CEO decisions). The "session table
 is over-scoped" call in §3's options and §8 is revised by it.
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: OIDC means generic OIDC (BYOI) only.
+The `start.sh` choice is two-way (built-in accounts or your own IdP), and the
+`infra/docker-compose.oidc.yaml` overlay, the `profiles:[oidc]` Zitadel services, the mode-gated Caddy
+`auth.` block and the `zitadel_db` backup leave §Infra consequences. `AUTH_MODE` (`shim | local | oidc`),
+its immutability and the persisted mode marker are unchanged.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
