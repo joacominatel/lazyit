@@ -105,6 +105,8 @@ export class JwtAuthGuard implements CanActivate {
   // JIT provisions do not re-run discovery. Null = not yet resolved (or last resolution failed).
   private userinfoEndpoint: string | null = null;
 
+  private discoveryWarned = false;
+
   private readonly principals: PrincipalLoaderService;
   private readonly serviceAccounts: ServiceAccountAuthenticator;
   private readonly sessions: UserSessionStore;
@@ -679,16 +681,7 @@ export class JwtAuthGuard implements CanActivate {
     );
   }
 
-  /**
-   * Fetch the OIDC userinfo profile for the given access token. Fail-soft: returns the parsed
-   * claims object on success, or `null` on any failure (missing issuer, discovery error, non-2xx,
-   * malformed JSON) after logging a warning. Login must never break because userinfo failed.
-   *
-   * The userinfo endpoint is located via OIDC Discovery (read once, then cached) rather than a
-   * hardcoded path, keeping the guard IdP-agnostic (BYOI — ADR-0037). When OIDC_JWKS_URI is set
-   * (the Docker split-DNS case), both the discovery and userinfo requests are rewritten to the
-   * internal origin with X-Forwarded-* headers, exactly like the JWKS init above.
-   */
+  /** Fail-soft: any failure returns null and the JIT row is built from the token claims. */
   private async fetchUserinfo(
     accessToken: string,
   ): Promise<ProfileClaims | null> {
@@ -703,14 +696,13 @@ export class JwtAuthGuard implements CanActivate {
         return null;
       }
 
-      const requestUrl = this.toInternalOrigin(endpoint);
       const headers: Record<string, string> = {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
       };
-      const forwarded = this.forwardedHeaders(issuer);
-      if (forwarded) {
-        Object.assign(headers, forwarded);
+      const requestUrl = this.userinfoRequestUrl(issuer, endpoint);
+      if (requestUrl !== endpoint) {
+        Object.assign(headers, this.forwardedHeaders(issuer));
       }
 
       const res = await fetch(requestUrl, { headers });
@@ -729,13 +721,6 @@ export class JwtAuthGuard implements CanActivate {
     }
   }
 
-  /**
-   * Resolve and cache the userinfo endpoint via OIDC Discovery
-   * (`${issuer}/.well-known/openid-configuration`). Returns the discovered `userinfo_endpoint`
-   * (its EXTERNAL URL as advertised by the IdP) or null if discovery fails / omits it. Cached at
-   * instance scope so repeated provisions reuse the result. Throwing here is fine — the caller
-   * (`fetchUserinfo`) wraps the whole flow in try/catch and treats it as fail-soft.
-   */
   private async resolveUserinfoEndpoint(
     issuer: string,
   ): Promise<string | null> {
@@ -743,42 +728,74 @@ export class JwtAuthGuard implements CanActivate {
       return this.userinfoEndpoint;
     }
 
-    const discoveryUrl = this.toInternalOrigin(
-      `${issuer}/.well-known/openid-configuration`,
-    );
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    const forwarded = this.forwardedHeaders(issuer);
-    if (forwarded) {
-      Object.assign(headers, forwarded);
+    const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
+    let doc = await this.fetchDiscovery(discoveryUrl, {});
+    // A co-located IdP may be unreachable by its public name from inside the stack.
+    const internalOrigin = this.internalOrigin(issuer);
+    if (!doc && internalOrigin) {
+      doc = await this.fetchDiscovery(
+        this.withOrigin(discoveryUrl, internalOrigin),
+        this.forwardedHeaders(issuer) ?? {},
+      );
     }
 
-    const res = await fetch(discoveryUrl, { headers });
-    if (!res.ok) {
-      this.logger.warn(
-        `OIDC discovery request returned ${res.status}; cannot resolve userinfo endpoint`,
-      );
+    const endpoint = doc?.userinfo_endpoint;
+    if (typeof endpoint !== 'string') {
+      if (!this.discoveryWarned) {
+        this.discoveryWarned = true;
+        this.logger.warn(
+          `OIDC discovery at ${discoveryUrl} did not yield a userinfo_endpoint; first sign-ins are provisioned from token claims until it does`,
+        );
+      }
       return null;
     }
-    const doc = (await res.json()) as { userinfo_endpoint?: unknown };
-    if (typeof doc.userinfo_endpoint !== 'string') {
-      this.logger.warn(
-        'OIDC discovery document has no string userinfo_endpoint; skipping userinfo enrichment',
-      );
+    this.userinfoEndpoint = endpoint;
+    return endpoint;
+  }
+
+  private async fetchDiscovery(
+    url: string,
+    extraHeaders: Record<string, string>,
+  ): Promise<{ userinfo_endpoint?: unknown } | null> {
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json', ...extraHeaders },
+      });
+      if (!res.ok) {
+        return null;
+      }
+      return ((await res.json()) ?? null) as {
+        userinfo_endpoint?: unknown;
+      } | null;
+    } catch {
       return null;
     }
-    this.userinfoEndpoint = doc.userinfo_endpoint;
-    return this.userinfoEndpoint;
   }
 
   // ---------- internal-origin / forwarded-header helpers --------------------
 
-  /**
-   * X-Forwarded-* headers derived from the EXTERNAL issuer, or undefined when no internal-origin
-   * rewrite is in effect. When OIDC_JWKS_URI is set (the Docker split-DNS case), requests reach
-   * the IdP at an internal URL but the IdP still resolves its instance from the forwarded host, so
-   * we forward the canonical external host/proto. When OIDC_JWKS_URI is unset, returns undefined
-   * (no rewrite, no forwarded headers). Shared by the JWKS init and the discovery/userinfo flow.
-   */
+  /** The token goes to the discovered host, or to the internal origin when userinfo sits on the issuer's own origin — never elsewhere. */
+  private userinfoRequestUrl(issuer: string, endpoint: string): string {
+    const internalOrigin = this.internalOrigin(issuer);
+    if (!internalOrigin) {
+      return endpoint;
+    }
+    if (new URL(endpoint).origin !== new URL(issuer).origin) {
+      return endpoint;
+    }
+    return this.withOrigin(endpoint, internalOrigin);
+  }
+
+  /** The `OIDC_JWKS_URI` origin when it differs from the issuer's, i.e. the operator's internal route to the IdP. */
+  private internalOrigin(issuer: string): string | null {
+    const jwksUri = process.env.OIDC_JWKS_URI;
+    if (!jwksUri) {
+      return null;
+    }
+    const origin = new URL(jwksUri).origin;
+    return origin === new URL(issuer).origin ? null : origin;
+  }
+
   private forwardedHeaders(
     issuer: string,
   ): { 'X-Forwarded-Host': string; 'X-Forwarded-Proto': string } | undefined {
@@ -792,24 +809,15 @@ export class JwtAuthGuard implements CanActivate {
     };
   }
 
-  /**
-   * Rewrite an external IdP URL to the internal origin when OIDC_JWKS_URI is set (the internal
-   * origin is derived from it). The path/query are preserved; only the origin (scheme + host +
-   * port) changes. When OIDC_JWKS_URI is unset, the URL is returned unchanged.
-   */
-  private toInternalOrigin(externalUrl: string): string {
-    const jwksUri = process.env.OIDC_JWKS_URI;
-    if (!jwksUri) {
-      return externalUrl;
-    }
-    const internalOrigin = new URL(jwksUri).origin;
-    const url = new URL(externalUrl);
-    return `${internalOrigin}${url.pathname}${url.search}`;
+  private withOrigin(url: string, origin: string): string {
+    const parsed = new URL(url);
+    return `${origin}${parsed.pathname}${parsed.search}`;
   }
 
-  /** Visible for testing: reset the cached JWKS set + userinfo endpoint between tests. */
+  /** Visible for testing: reset the cached JWKS set, userinfo endpoint and discovery warning between tests. */
   resetJwks(): void {
     this.jwks = null;
     this.userinfoEndpoint = null;
+    this.discoveryWarned = false;
   }
 }

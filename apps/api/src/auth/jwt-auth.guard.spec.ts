@@ -1441,56 +1441,183 @@ describe('JwtAuthGuard', () => {
         expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it('rewrites discovery + userinfo to the internal origin with X-Forwarded-* when OIDC_JWKS_URI is set', async () => {
-        process.env.OIDC_JWKS_URI = 'http://zitadel:8080/oauth/v2/keys';
+      // Answers discovery and userinfo per host; any other URL (or a host mapped to `null`) is a network error.
+      function idp(routes: Record<string, unknown>) {
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            const body = routes[url];
+            return body === undefined || body === null
+              ? Promise.reject(new Error(`ENOTFOUND ${url}`))
+              : Promise.resolve(jsonResponse(body));
+          },
+        );
+      }
+      function upsertedEmail(): unknown {
+        const [args] = prismaUser.upsert.mock.calls[0] as [
+          { create: { email: unknown } },
+        ];
+        return args.create.email;
+      }
+      function tokenCalls(): FetchCall[] {
+        return (fetchMock.mock.calls as FetchCall[]).filter(
+          (c) =>
+            (c[1]?.headers as Record<string, string> | undefined)
+              ?.Authorization !== undefined,
+        );
+      }
+
+      it('co-located IdP: reads discovery from the issuer and sends userinfo to the internal origin', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
         (jose.jwtVerify as jest.Mock).mockResolvedValue({
           payload: { sub: 'oidc-sub-internal' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
         prismaUser.upsert.mockImplementation(echoUpsertedUser);
-
-        fetchMock.mockImplementation(
-          (input: unknown): Promise<FakeResponse> => {
-            const url = String(input);
-            if (url.includes('/.well-known/openid-configuration')) {
-              // Discovery advertises the EXTERNAL userinfo endpoint.
-              return Promise.resolve(
-                jsonResponse({
-                  userinfo_endpoint:
-                    'https://auth.example.com/oidc/v1/userinfo',
-                }),
-              );
-            }
-            return Promise.resolve(
-              jsonResponse({ email: 'internal@corp.com' }),
-            );
+        idp({
+          'https://auth.example.com/.well-known/openid-configuration': {
+            userinfo_endpoint: 'https://auth.example.com/oidc/v1/userinfo',
           },
-        );
+          'http://idp:8080/oidc/v1/userinfo': { email: 'internal@corp.com' },
+        });
 
         await guard.canActivate(
           makeCtx({ headers: { authorization: 'Bearer access.token' } }),
         );
 
-        // Both requests must target the internal origin (zitadel:8080), not auth.example.com.
         const discoveryCall = findCall(
           fetchMock,
           '/.well-known/openid-configuration',
         );
-        const userinfoCall = findCall(fetchMock, '/oidc/v1/userinfo');
-        expect(String(discoveryCall![0])).toBe(
-          'http://zitadel:8080/.well-known/openid-configuration',
+        expect(discoveryCall![1]?.headers).not.toHaveProperty(
+          'X-Forwarded-Host',
         );
-        expect(String(userinfoCall![0])).toBe(
-          'http://zitadel:8080/oidc/v1/userinfo',
-        );
-        // X-Forwarded-* derived from the external issuer host.
-        expect(discoveryCall![1]?.headers).toMatchObject({
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'http://idp:8080/oidc/v1/userinfo',
+        ]);
+        expect(tokenCalls()[0][1]?.headers).toMatchObject({
           'X-Forwarded-Host': 'auth.example.com',
-        });
-        expect(userinfoCall![1]?.headers).toMatchObject({
-          'X-Forwarded-Host': 'auth.example.com',
+          'X-Forwarded-Proto': 'https',
           Authorization: 'Bearer access.token',
         });
+        expect(upsertedEmail()).toBe('internal@corp.com');
+      });
+
+      it('co-located IdP behind split DNS: retries discovery on the internal origin with X-Forwarded-*', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-split-dns' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://auth.example.com/.well-known/openid-configuration': null,
+          'http://idp:8080/.well-known/openid-configuration': {
+            userinfo_endpoint: 'https://auth.example.com/oidc/v1/userinfo',
+          },
+          'http://idp:8080/oidc/v1/userinfo': { email: 'split@corp.com' },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        const retry = findCall(
+          fetchMock,
+          'http://idp:8080/.well-known/openid-configuration',
+        );
+        expect(retry![1]?.headers).toMatchObject({
+          'X-Forwarded-Host': 'auth.example.com',
+        });
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'http://idp:8080/oidc/v1/userinfo',
+        ]);
+        expect(upsertedEmail()).toBe('split@corp.com');
+      });
+
+      it('external IdP with userinfo on another host: the token goes only to the discovered host, unrewritten', async () => {
+        process.env.OIDC_ISSUER =
+          'https://login.microsoftonline.com/tenant/v2.0';
+        process.env.OIDC_JWKS_URI =
+          'https://login.microsoftonline.com/tenant/discovery/v2.0/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'entra-sub' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration':
+            { userinfo_endpoint: 'https://graph.microsoft.com/oidc/userinfo' },
+          'https://graph.microsoft.com/oidc/userinfo': {
+            email: 'entra@corp.com',
+          },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'https://graph.microsoft.com/oidc/userinfo',
+        ]);
+        expect(tokenCalls()[0][1]?.headers).not.toHaveProperty(
+          'X-Forwarded-Host',
+        );
+        expect(upsertedEmail()).toBe('entra@corp.com');
+      });
+
+      it('external IdP whose JWKS lives on a third host: the token is never sent to the JWKS host', async () => {
+        process.env.OIDC_ISSUER = 'https://accounts.google.com';
+        process.env.OIDC_JWKS_URI =
+          'https://www.googleapis.com/oauth2/v3/certs';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'google-sub' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://accounts.google.com/.well-known/openid-configuration': {
+            userinfo_endpoint:
+              'https://openidconnect.googleapis.com/v1/userinfo',
+          },
+          'https://openidconnect.googleapis.com/v1/userinfo': {
+            email: 'g@corp.com',
+          },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'https://openidconnect.googleapis.com/v1/userinfo',
+        ]);
+        expect(findCall(fetchMock, 'www.googleapis.com')).toBeUndefined();
+      });
+
+      it('discovery failure: provisions from the token claims, never sends the token, and warns once', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-nodisc', email: 'claims@corp.com' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({});
+        const warnSpy = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(upsertedEmail()).toBe('claims@corp.com');
+        expect(tokenCalls()).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        warnSpy.mockRestore();
       });
     });
   });
