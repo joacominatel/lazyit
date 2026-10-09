@@ -22,8 +22,8 @@ carried forward here. **Amends** [[0038-jit-user-provisioning]], [[0039-authjs-v
 [[0091-on-prem-ad-ldap-directory-source]]. Narrows #1310, which is closed as superseded by #1543: removing
 all OIDC is no longer planned.
 
-**Built** — 2026-10-09 on the epic branch (PRs #1546–#1554). Implementation settled §2, §4, §7 and §8 more
-strictly than first written; those sections now describe what shipped, and
+**Built** — 2026-10-09 on the epic branch (PRs #1546–#1554). Implementation settled §2, §4, §5, §7 and §8 more
+precisely than first written; those sections now describe what shipped, and
 [§ Implementation](#implementation) lists the differences.
 
 ## Context
@@ -143,10 +143,16 @@ check (`apps/api/src/main.ts:39-55`) is unaffected. **No Prisma migration** ship
 
 Under generic OIDC the operator's IdP owns credentials and sessions, so lazyit does not offer them: the
 admin password reset is hidden in the UI outside local mode, and there are no temporary passwords and no
-sessions list. Offboarding no longer disables an IdP account; lazyit still blocks the person itself — the
-soft delete stays DB-first, and a soft-deleted user's next sign-in is refused with a 403 instead of being
-re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:468-469`, [[0038-jit-user-provisioning]]). Disabling
-the account in the IdP is the operator's step.
+sessions list. Offboarding no longer disables an IdP account. The soft delete stays DB-first, and it blocks
+a person who has signed in before: their `externalId` still matches the token's `sub`, so the next sign-in
+is refused with a 403 instead of being re-provisioned (`apps/api/src/auth/jwt-auth.guard.ts:463-470`,
+[[0038-jit-user-provisioning]]).
+
+That block has a limit. A person offboarded **before their first OIDC sign-in** has no `externalId`, and
+the verified-email account link ignores soft-deleted rows (`jwt-auth.guard.ts:572`). If their IdP account
+stays enabled, their first sign-in JIT-creates a fresh `VIEWER` row. Offboarding under OIDC therefore has
+to be paired with disabling the account at the IdP — that step is the operator's, and it is what actually
+ends access.
 
 ### 6. The `IdentityProvider` seam is retired
 
@@ -244,6 +250,8 @@ Where the implementation settled a detail differently from the first draft of th
 - **§2:** the API needs `OIDC_JWKS_URI` and never reads `OIDC_CLIENT_SECRET`; the client secret is the web's.
 - **§4:** the `zitadel` `IntegrationMode` value was dropped within the epic, not in a later release.
 - **§8:** the `ZitadelPasswordSchema` alias was dropped with it.
+- **§5:** the post-offboarding 403 covers only a person who has signed in before; one offboarded before
+  their first sign-in is stopped only by disabling the IdP account.
 
 **Outstanding:** `infra/update.sh` on the integration branch still runs the dual dump of §1 (the app
 database and `zitadel_db`, `infra/update.sh:292-305`). Its mode-aware fix is tracked by #1545 (PR #1549,

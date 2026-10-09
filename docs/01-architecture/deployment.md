@@ -192,7 +192,8 @@ Auth is **live**, chosen once per instance by `AUTH_MODE` and immutable afterwar
   on first login — [[0038-jit-user-provisioning]]).
 
 No IdP runs in the stack and lazyit **never writes to the IdP**: creating, editing or offboarding a person
-changes lazyit only, and disabling the IdP account is the operator's step. The bundled Zitadel, its
+changes lazyit only, and disabling the IdP account is the operator's step — the one that ends access for a
+person offboarded before their first sign-in ([[0102-remove-bundled-zitadel]] §5). The bundled Zitadel, its
 bootstrap sidecar and the `auth.` Caddy site were removed by [[0102-remove-bundled-zitadel]]; the API
 refuses to boot under `AUTH_MODE=oidc` while the env still points at them. The first ADMIN is created by
 the in-app **`/setup` wizard**, which also shows the BYOI environment snippet (web + API keys).
