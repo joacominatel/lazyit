@@ -179,7 +179,7 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
 **asignará el activo** — la asignación se registra igual que se haría en la app, con historial.
 
 - **Una persona importada no tiene acceso.** Es una persona de **directorio**: una entrada real en tu
-  lista de Usuarios (con la insignia **Directorio**), pero sin cuenta en tu proveedor de identidad.
+  lista de Usuarios (con la insignia **Directorio**), pero sin cuenta de acceso.
   Existe para que el activo tenga un propietario registrado; no puede iniciar sesión hasta tener cuenta.
 - **Para asignar, mapea el Nombre de la persona *y* una clave de identidad.** El **Nombre** (la
   columna *Asignado a*) es **obligatorio** para asignar un activo, además de al menos uno de **Correo**,
@@ -189,19 +189,18 @@ Mapea cualquier campo de **Persona** y la importación, para cada fila, buscará
   **fila inválida** en la vista previa, para que la corrijas antes de confirmar — nunca falla en
   silencio al final. Una fila con nombre pero sin clave de identidad importa el activo **sin asignar**,
   con una advertencia.
-- **Se vinculan a una cuenta real automáticamente — solo con un correo que coincida.** Cuando esa
-  persona inicie sesión más tarde a través de tu proveedor de identidad (OIDC) usando el **mismo correo
-  verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
+- **Con tu propio proveedor OIDC, se vinculan a una cuenta real automáticamente — solo con un correo
+  que coincida.** Cuando esa persona inicie sesión más tarde a través de tu proveedor usando el **mismo
+  correo verificado**, lazyit vincula ambas: la entrada de directorio pasa a ser su cuenta y la insignia
   **Directorio** desaparece. **Una persona importada sin un correo real nunca se vincula
   automáticamente** — no hay correo con el que coincidir. Promuévela a mano (siguiente punto) cuando
   necesite iniciar sesión.
-- **Puedes crear su cuenta ahora.** Un administrador puede abrir la página de la persona y elegir
-  **Crear cuenta OIDC** para aprovisionarla en el proveedor de identidad de inmediato, en vez de esperar
-  a un inicio de sesión. El proveedor de identidad exige un correo real, así que el botón está
-  **deshabilitado hasta que la persona tenga uno** — edita la persona y agrega un correo real primero.
-  Esto solo está disponible con el **proveedor de identidad integrado**; en modo de autenticación local
-  o con tu propio proveedor OIDC lazyit no puede crear la cuenta, y las personas importadas inician
-  sesión a través de tu proveedor de identidad.
+- **Puedes darle una cuenta ahora.** Con **cuentas locales**, un administrador puede abrir la página de
+  la persona y elegir **Dar de alta con una contraseña temporal**: crea su acceso al momento y muestra
+  una contraseña de un solo uso para entregar — no hace falta correo. Con **tu propio proveedor OIDC**,
+  lazyit no puede crear cuentas allí: crea a la persona en tu proveedor con un correo real y
+  verificado, asegúrate de que ese mismo correo figure en su registro de lazyit, y su primer inicio de
+  sesión vincula ambas.
 
 El activo siempre se importa de cualquier modo; solo la **asignación** depende de identificar a la
 persona.

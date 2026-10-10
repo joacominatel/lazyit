@@ -15,8 +15,9 @@ lives in the **Users** section and requires the **Manage users** capability (adm
 
 Choose **New user** and fill in the person's identity:
 
-- **First and last name**, and **Email** — the email is the account-linking key for your identity
-  provider, must be unique, and a change is mirrored to the IdP.
+- **First and last name**, and **Email** — the email must be unique. With your own OIDC provider it is
+  also the account-linking key: the person's first sign-in links to this record by verified email. A
+  later change stays in lazyit and is not sent to the provider.
 - **Role** — defaults to read-only; set it here or change it later. See
   [Roles](/help/users-permissions-roles).
 - **Employee number** and **Username** (both optional) — directory details, unique among active users.
@@ -25,15 +26,12 @@ Choose **New user** and fill in the person's identity:
   handle, never a credential.
 - **Manager** (optional) — either an existing lazyit user **or** a free-text name, not both.
 
-**Sign-in credential.** When lazyit can set the credential — the bundled identity provider, or an
-instance where lazyit manages passwords itself — you set a **temporary password** so the person can
-sign in; they must choose their own at first login, and it is shown only once for hand-off. Where that
-password ends up depends on who owns passwords: with the bundled identity provider it is set on the
-provider and lazyit stores nothing at all, while on an instance lazyit manages itself it is stored only
-as a **hash** — never the password you typed, so nobody, an administrator included, can read it back.
-Either way, a lost hand-off is not a dead end: reset the password (see below) rather than trying to look
-it up. If you bring your own identity provider, this step does not appear — manage the credential in
-your IdP.
+**Sign-in credential.** With **local accounts**, you set a **temporary password** so the person can
+sign in; they must choose their own at first login, and it is shown only once for hand-off. lazyit
+stores it only as a **hash** — never the password you typed, so nobody, an administrator included, can
+read it back. A lost hand-off is not a dead end: reset the password (see below) rather than trying to
+look it up. With your own OIDC provider this step does not appear — create the person in your provider
+with the same email, and manage the credential there.
 
 **Head start (optional).** You can assign one asset and grant one application access right from the
 create form, so the new person starts with what they need.
@@ -54,11 +52,11 @@ Opening a user shows their record, laid out like an asset's page.
   most recent first. Each tab only appears to people allowed to see what it lists. The open tab is
   kept in the page address, so a shared link opens on the same tab.
 - **The side column** holds the **Profile**: role (editable with *Manage users*), manager, employee
-  number, username, email and dates. For a directory person it also offers to create their sign-in
+  number, username, email and dates. For a directory person it also explains how to give them a sign-in
   account.
 
-The header keeps **Reset password** and **Edit** in sight. **Clone** and **Offboard** are in the **⋯**
-menu next to them, with Offboard set apart so it isn't clicked by mistake.
+The header keeps **Reset password** (local accounts only) and **Edit** in sight. **Clone** and
+**Offboard** are in the **⋯** menu next to them, with Offboard set apart so it isn't clicked by mistake.
 
 ## Clone a user
 
@@ -74,17 +72,11 @@ than copied, so the clone never revives a retired asset or a decommissioned appl
 
 ## Reset a password
 
-On a user's detail page, **Reset password** starts a password reset for that person. What it does
-depends on who owns passwords in your instance, and the action adapts on its own — you never have to
-remember which mode you are in.
+On a user's detail page, **Reset password** starts a password reset for that person. It exists only
+with **local accounts**, where lazyit owns passwords. With your own OIDC provider the action does not
+appear: the provider owns the credential, so reset it there.
 
-**When an identity provider owns passwords.** lazyit asks your provider to email the person a reset
-link. lazyit never sees or sets the password — it only triggers the provider, and delivery depends on
-the provider's email being configured. The action is unavailable for an inactive user (reactivate them
-first) or for an account with no identity-provider link (in that case the reset is managed entirely in
-your IdP).
-
-**When lazyit owns passwords.** You choose how the reset reaches the person:
+You choose how the reset reaches the person:
 
 - **Send a reset link by email** — the person receives a single-use link at their address and chooses
   their own password; lazyit never sees it. The confirmation tells you exactly which address the link
@@ -132,6 +124,12 @@ is never left half-offboarded (archived but still holding access).
 **They are signed out everywhere.** On an instance with **local accounts**, offboarding ends the person's
 sessions on every device at once — including one where they ticked **Keep me signed in**. Deactivating
 someone (clearing **Active** when you edit them) does the same.
+
+**With your own OIDC provider, disable them there too.** lazyit does not touch the person's account in
+your provider, but it does refuse their sign-in to lazyit — whether or not they ever signed in before.
+For someone who never did, this relies on your provider reporting their email as verified. To let them
+back in, [restore them](#restore-a-user). Still disable the account in your provider as part of the same
+leaver process: that is what ends their access to everything else your provider signs them into.
 
 **Rotate the secrets they could read.** If the person was a member of any Secret vault, the confirmation
 lists those vaults (with how many secrets each holds) as a reminder to **rotate those secrets by hand**.
@@ -185,27 +183,25 @@ pre-filtered, so the Users list is the one place you browse and manage role memb
 
 ## Directory people
 
-A **directory** person is a User without a login — created by the [bulk import](/help/assets-bulk-import)
-as an asset's "assigned to", with no account in your identity provider. They give an asset an owner on
-record before that owner can sign in.
+A **directory** person is a User without a login — created by the [bulk
+import](/help/assets-bulk-import) as an asset's "assigned to", with no sign-in account. They give an
+asset an owner on record before that owner can sign in.
 
 - **In the Users list** a directory person carries a **Directory** badge next to their name, and the
   **directory filter** (next to the status filter) narrows the list to *Directory only*, *Accounts
   only*, or everyone.
-- **They link to a real account on first sign-in** through your identity provider, when the verified
+- **With your own OIDC provider, they link to a real account on first sign-in**, when the verified
   email matches — at which point the badge disappears and they become a normal account. A directory
   person imported **without a real email never links automatically**.
-- **Give them an account now.** On a directory person's page there is an admin-only (Manage users) action
-  to onboard them, and what it does depends on how your instance signs people in:
-  - **Bundled identity provider** — **Create OIDC account** provisions them in the identity provider
-    immediately. The provider requires a real email, so the button is disabled until the person has one —
-    edit the person and add a real email first.
-  - **Local authentication mode** — **Onboard with a temporary password** creates their login right here
-    and shows a **one-time temporary password** to hand off. The password is shown **only once** (copy it
-    then), the person **must change it at first sign-in**, and onboarding **keeps their existing role** —
-    it never grants extra access. No email is required.
-  - **Your own OIDC provider (BYOI)** — lazyit cannot create accounts for you, so the option is replaced
-    with a short note; imported people sign in through your identity provider instead.
+- **Give them an account now.** What a directory person's page offers depends on how your instance signs
+  people in:
+  - **Local accounts** — an admin-only (Manage users) action, **Onboard with a temporary password**,
+    creates their login right here and shows a **one-time temporary password** to hand off. The password
+    is shown **only once** (copy it then), the person **must change it at first sign-in**, and
+    onboarding **keeps their existing role** — it never grants extra access. No email is required.
+  - **Your own OIDC provider** — lazyit cannot create accounts in your provider, so a short note takes
+    the action's place: create the person there with the same verified email, and their first sign-in
+    links the account to this record.
 
 ## Restore a user
 

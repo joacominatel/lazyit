@@ -3,7 +3,7 @@ title: "ADR-0038: JIT user provisioning on first OIDC login"
 tags: [adr, auth, oidc]
 status: accepted
 created: 2026-05-27
-updated: 2026-06-20
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -14,6 +14,18 @@ deciders: [Joaquín Minatel]
 accepted — 2026-05-27. Implements Phase 2 of the auth plan outlined in [[0037-idp-choice-zitadel-byoi]]
 and replaces the `X-User-Id` shim ([[0022-draft-visibility-auth-shim]], [[0024-asset-assignment-actor-shim]])
 for all actor-tracked operations.
+
+> **Amendment 2026-10-09 (#1543) — [[0102-remove-bundled-zitadel]].** The manual provision-account path
+> (`POST /users/:id/provision-account`) is withdrawn with the bundled Zitadel. A directory person is
+> promoted only by the JIT email-linking path below. JIT itself is unchanged by that withdrawal.
+
+> **Amendment 2026-10-09 (#1543, unit B5) — offboarded email and the userinfo host.** Two changes under
+> [[0102-remove-bundled-zitadel]] §5. (1) When no live row holds the token's **verified** email but a
+> soft-deleted one does, JIT refuses with the same 403 as a soft-deleted `sub` and creates nothing, so a
+> person offboarded before their first sign-in cannot come back as a fresh row (table below). (2) The
+> userinfo request no longer always rewrites onto the `OIDC_JWKS_URI` origin: discovery is read from
+> `OIDC_ISSUER`, and the token goes to the discovered `userinfo_endpoint` unless that endpoint sits on the
+> issuer's own origin and the JWKS origin differs (the co-located IdP case below).
 
 > **Amendment 2026-05-27 — userinfo enrichment (issue #59).** The JIT path now enriches the new
 > User's profile from the standard OIDC **userinfo endpoint**, because an OAuth *access token*
@@ -101,14 +113,19 @@ calls the standard OIDC **userinfo endpoint** with the access token as Bearer, m
   consistent with [[0037-idp-choice-zitadel-byoi]] §3 (the backend speaks generic OIDC; no
   vendor-specific path). The resolved endpoint is cached at guard-instance scope (like the JWKS set),
   so repeated provisions do not re-run discovery.
-- **No new env var.** The internal-origin rewrite reuses the existing `OIDC_JWKS_URI` signal: when it
-  is set (the Docker split-DNS case where the API reaches the IdP at an internal URL), the discovery
-  and userinfo requests are rewritten to `new URL(OIDC_JWKS_URI).origin` and carry `X-Forwarded-Host`/
-  `X-Forwarded-Proto` derived from `OIDC_ISSUER` (so the IdP resolves its instance from the canonical
-  host). When `OIDC_JWKS_URI` is unset, the externally-advertised endpoint is used directly with no
-  rewrite and no forwarded headers — mirroring exactly the guard's existing JWKS conditional.
+- **No new env var.** The internal-origin rewrite reuses the existing `OIDC_JWKS_URI` signal. Its
+  origin counts as an *internal* route to the IdP only when it differs from the `OIDC_ISSUER` origin
+  (the Docker split-DNS case of a co-located IdP). Discovery is read from `OIDC_ISSUER`; only when that
+  request fails is it retried on the internal origin. The userinfo request is rewritten to the internal
+  origin, with `X-Forwarded-Host`/`X-Forwarded-Proto` derived from `OIDC_ISSUER` (so the IdP resolves its
+  instance from the canonical host), **only** when the discovered `userinfo_endpoint` sits on the
+  issuer's own origin. Otherwise the advertised endpoint is used as-is, with no forwarded headers — so an
+  IdP that hosts userinfo elsewhere (Entra ID on `graph.microsoft.com`, Google on
+  `openidconnect.googleapis.com`) works, and the access token never reaches the JWKS host. *(Amended
+  2026-10-09: until then both requests were always rewritten whenever `OIDC_JWKS_URI` was set.)*
 - **Fail-soft.** Any discovery/userinfo failure (network error, non-2xx, malformed JSON, missing
-  `userinfo_endpoint`) is logged at **warn** level and falls back to the current placeholder behavior.
+  `userinfo_endpoint`) is logged at **warn** level — a discovery failure once per process, since it is
+  retried on every first sign-in until it succeeds — and falls back to the current placeholder behavior.
   Login is never blocked by a userinfo failure.
 - **Existing users skip it entirely.** A request whose `sub` already maps to a `User.externalId`
   returns the existing row without any discovery/userinfo round-trip.
@@ -121,7 +138,8 @@ whether a user already holds the resolved (trim + lowercase, ADR-0041) email. Th
 
 | Existing live row with that email | Action |
 | --- | --- |
-| none | create a fresh User (unchanged behavior) |
+| none, and no soft-deleted row holds the **verified** email | create a fresh User (unchanged behavior) |
+| none, but a **soft-deleted** row holds the **verified** email | **403** (same body as a soft-deleted `sub`) — create nothing; the admin's Restore is the way back *(amended 2026-10-09, [[0102-remove-bundled-zitadel]] §5)*. An unverified email skips this check. |
 | `externalId IS NULL` (unclaimed) | **CLAIM it**: bind `externalId = sub` onto that row, **preserve its existing role**, and return it. Optionally refresh `firstName`/`lastName` from the claims *only* when the stored name is a seed placeholder (`Admin User`) and real claims are present — a real human name is never overwritten. |
 | `externalId === sub` | return it (defensive; the `sub` lookup normally caught this already) |
 | `externalId` is a **DIFFERENT** sub | **409 `ConflictException`** — refuse. Never re-bind an already-linked account. |

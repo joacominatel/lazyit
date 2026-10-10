@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # RolePermission
@@ -80,8 +80,9 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   has no ledger row, so every instance receives its defaults exactly once, on the first deploy that
   ships it — no per-permission data migration. The seed never deletes a grant: admin-added rows and
   rows for permissions that left the defaults stay as they are.
-- **Permissions are lazyit-local.** They are NEVER mirrored to the IdP (BYOI-safe); only the three
-  coarse roles keep their `grantRole` write-back ([[0043-zitadel-source-of-truth]] §3).
+- **Permissions are lazyit-local.** They are NEVER mirrored to the IdP, and neither are the three coarse
+  roles: the `grantRole` write-back of [[0043-zitadel-source-of-truth]] §3 was removed with the bundled
+  Zitadel ([[0102-remove-bundled-zitadel]]).
 
 ## Conventions
 

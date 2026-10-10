@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # User
@@ -44,16 +44,22 @@ the reverse.
 - Atomic entity — implemented first, alongside [[location]].
 - Offboarding a user must not erase history: assignments and grants are *released*, not
   deleted (soft delete + lifecycle timestamps).
+- **lazyit never writes to the IdP** ([[0102-remove-bundled-zitadel]]). Creating, editing and offboarding
+  a user are database writes only. Under OIDC, offboarding blocks the person in lazyit (the soft delete;
+  their next sign-in is refused — by `sub`, or by verified email when they never signed in, ADR-0102 §5)
+  but does **not** disable their IdP account — that is the operator's step in their own IdP. Restore is the
+  way back. No `User` row is ever hard-deleted.
 - **Auditable lifecycle (DEBT-2, #185):** every User write emits an append-only [[user-history]] row
   **transactionally** with the change — `CREATED` on provisioning, `UPDATED` on a profile edit (name, email,
   legajo, username), `DEACTIVATED` / `REACTIVATED` on a real `isActive` flip (issue #1375), `ROLE_CHANGED` (payload `{ from, to }`) on a role change, `MANAGER_CHANGED` (payload `{ from, to }`,
   each side a user-id / external-name / null — [[0058-user-manager-and-clone-actions]]) on a manager
   change, `DELETED` on offboard, `RESTORED` on re-onboard, `PASSWORD_RESET_SENT` when a reset link is sent to the
-  subject (by the IdP in OIDC mode, or by lazyit's SMTP on the local `email` delivery),
+  subject by lazyit's SMTP on the local `email` delivery (older rows record an IdP-triggered reset from
+  before [[0102-remove-bundled-zitadel]] and stay readable),
   `PASSWORD_RESET_BY_ADMIN` when an admin mints a local temp-password instead
   (`AUTH_MODE=local`, [[0086-local-authentication-mode]] §5), and — self-service in local mode ([[0086-local-authentication-mode]] §F4) — `PASSWORD_CHANGED` when the user changes their own password and
-  `PASSWORD_RESET_COMPLETED` when they reset it via a forgot-password email token. This supersedes the fire-and-forget IdP write-back log lines for *durability*: those
-  structured logs remain, but the queryable trail now lives in the DB and surfaces in the
+  `PASSWORD_RESET_COMPLETED` when they reset it via a forgot-password email token. This supersedes the fire-and-forget structured log lines for *durability*: those
+  logs remain, but the queryable trail now lives in the DB and surfaces in the
   [[recent-activity]] feed (`entityType = 'user'`).
 - **Identity / auth:** the local User is the source of truth for the domain. `AUTH_MODE` is a
   three-state, instance-immutable choice ([[0086-local-authentication-mode]]): in `oidc` mode
@@ -105,7 +111,7 @@ the reverse.
     (`user:read`) — those two reads are pre-tightened to ADMIN + MEMBER (the read-authz gap closed).
   - **MEMBER / VIEWER are fully configurable** by an ADMIN within the catalog (an admin may delegate a
     `:delete` or a coarse verb; the UI warns ⚠ but the server accepts it). Permissions are
-    **lazyit-local** — never mirrored to the IdP ([[0043-zitadel-source-of-truth]] §3). See
+    **lazyit-local** — never sent to the IdP ([[0102-remove-bundled-zitadel]]). See
     [[role-permission]].
   - The **first** user ever provisioned (seed or first JIT login) is `ADMIN`; everyone else defaults to
     `VIEWER` (least-privilege; flipped from `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an
@@ -147,7 +153,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
-| `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, no Zitadel mirror, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or via `POST /users/:id/provision-account` (ADMIN manual promotion). See **Directory mode** note below. |
+| `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or, in local mode, via `POST /users/:id/provision-local-account` (ADMIN onboarding). See **Directory mode** note below. |
 | `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
@@ -184,7 +190,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
 >
 > A **directory person** is a `User` row created by the bulk import for an asset's "Assigned to" field.
-> It has no login and no Zitadel mirror. Key rules:
+> It has no login. Key rules:
 >
 > - `role = VIEWER` (forced; the import schema rejects any other value).
 > - `externalId = null` always (the import never sets it; SEC-006 blocks it from the API too).
@@ -199,7 +205,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >   is imported unassigned with an `ambiguous-identity` warning. No person is linked.
 >
 > **Capability rules (enforced as invariants — see [[INVARIANTS]] INV-DIR):**
-> - A directory person is **never** the subject of an `AccessGrant` or IdP provisioning.
+> - A directory person is **never** the subject of an `AccessGrant`.
 >   `AccessGrantsService.assertUserUsable` rejects `directoryOnly = true` rows with 400.
 > - A directory person is **never** counted in the bootstrap first-user→ADMIN logic
 >   (`jwt-auth.guard.ts` filters `directoryOnly: false` in the bootstrap count).
@@ -211,13 +217,12 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > - **Auto (JIT):** when the person logs in via OIDC with the same verified email, the standard JIT
 >   claim path (`jwt-auth.guard.ts`) binds `externalId = sub` and sets `directoryOnly = false`.
 >   The person inherits their existing `role` (VIEWER) and all prior assignments.
-> - **Manual (ADMIN, OIDC):** `POST /users/:id/provision-account` takes a real email (required), writes
->   to Zitadel first, then sets `externalId` + `directoryOnly = false`. The endpoint rejects
->   `@directory.local` placeholder emails. It **only works on the bundled-Zitadel management path**
->   (`idp.supportsManagement`): in `AUTH_MODE=local` and BYOI / generic-OIDC there is no write-back, so
->   it **400s** ("only available with the bundled identity provider"). `GET /config/status` exposes this
->   as **`canProvisionAccounts`** so the web **hides the "Create OIDC account" action** entirely in those
->   modes instead of offering a request that always fails (#1048).
+> - **No manual OIDC promotion.** `POST /users/:id/provision-account` (which created the account in the
+>   bundled Zitadel) was removed with it ([[0102-remove-bundled-zitadel]]): under OIDC the person is created
+>   in the operator's IdP and claims the row on first sign-in (the JIT path above). A placeholder
+>   `@directory.local` email can never be claimed. `GET /config/status` keeps emitting
+>   `canProvisionAccounts: false` so an older web build keeps hiding the action. Historical
+>   [[user-history]] rows with `payload.action = 'provisionAccount'` stay as written and readable.
 > - **Manual (ADMIN, local):** `POST /users/:id/provision-local-account` (issue #1072, [[0086-local-authentication-mode]]
 >   §5 amendment) onboards a directory person in `AUTH_MODE=local`: it mints a one-time temp password with the
 >   admin-reset primitives (`generateTempPassword` + `credentialFields({mustChangePassword:true})`), flips
@@ -239,7 +244,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > DISAPPEARED past a grace threshold → soft offboard (bumping `sessionEpoch` when the person was active,
 > #1308), never of a person an admin deactivated or re-enabled by hand (#1311, #1522). **Hard invariants:** the sync never changes `role`, never sets `passwordHash`/`externalId`,
 > never flips `directoryOnly`→false, never grants a login, never hard-deletes, and writes `sessionEpoch`
-> only as that offboard's revoking increment. `provisionAccount`/`provisionLocalAccount` stay the ONLY
+> only as that offboard's revoking increment. JIT promotion and `provisionLocalAccount` stay the ONLY
 > login-granting paths.
 
 ## Endpoints
@@ -259,9 +264,9 @@ literal isn't parsed as a uuid; gated `user:read`), `GET /users/me`
 [[0058-user-manager-and-clone-actions]]; see the manager/clone note above), `PATCH /users/:id`,
 `DELETE /users/:id` (soft delete), `POST /users/:id/offboard`, `POST /users/:id/restore` (re-onboard:
 clears `deletedAt`; does NOT re-grant access or re-assign assets — [[0041-soft-delete-reuse-and-restore]]),
-`POST /users/:id/reset-password` (admin-triggered password reset — see the IdP write-back note below),
-and `POST /users/:id/provision-account` (ADMIN manual promotion of a directory person — see **Directory
-mode** note above; [[0069-migrator-import]] §A.4).
+`POST /users/:id/reset-password` (admin-triggered password reset — see the profile edits and password
+reset note below), and `POST /users/:id/provision-local-account` (ADMIN onboarding of a directory person in
+local mode — see **Directory mode** note above).
 All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
 reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
 `user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
@@ -301,11 +306,10 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 >   (A `directoryOnly` person has no login and cannot reach the route; it is refused the same way.)
 > - **Service accounts are refused** (403 — fail-closed on an unannotated route, INV-SA-2, plus a
 >   handler backstop with `code: 'SERVICE_ACCOUNT_NOT_ALLOWED'`); a bot has no person record.
-> - It runs through the **same update path as the admin edit**: the name is mirrored to the bundled
->   Zitadel with the 503-and-revert rule (INV-5), the search index is refreshed, and one
+> - It runs through the **same update path as the admin edit**: the search index is refreshed and one
 >   **`UPDATED { fields: ['name'] }`** [[user-history]] row is written with the **caller as actor**.
->   Resending the stored name is not a change and writes nothing. Under BYOI the name is local only
->   (lazyit never writes to a foreign IdP), and a later sign-in does **not** overwrite it — the JIT
+>   Resending the stored name is not a change and writes nothing. The name is local only (lazyit never
+>   writes to the IdP, [[0102-remove-bundled-zitadel]]), and a later sign-in does **not** overwrite it — the JIT
 >   path only refreshes a name that still looks like a seed placeholder ([[0038-jit-user-provisioning]]).
 
 > [!note] Per-user language and theme — `/account/preferences` (issue #1422)
@@ -326,22 +330,17 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
 > the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
 
-> [!note] Admin profile edits + password reset write back to the IdP (issue #149)
-> `PATCH /users/:id` lets an `ADMIN` edit `firstName` / `lastName` / `email` (alongside `role`). A
-> name/email change is **mirrored back to Zitadel** (the v2 user service: profile `PUT` + a
-> pre-verified email `POST`) inside the same **no-split-brain** pattern as a role change — if the
-> Management call fails, the local row is reverted and the request is **503** ([[INVARIANTS]] INV-5).
-> The `email` is the **account-linking key** ([[INVARIANTS]] INV-2, `citext`): the write-back updates
-> the **existing** Zitadel user (same `sub`/`externalId` — never a re-link, SEC-006) and sets the new
-> address **pre-verified**, so the change does **not** force re-verification or break login. `externalId`
-> can never be set via the API.
-> `POST /users/:id/reset-password` in **OIDC** mode triggers **Zitadel's own** password-reset flow
-> (Management API, `password_reset` with `sendLink`): lazyit **never** stores/sets/sends a password
-> ([[0016-auth-strategy-deferred]], [[0037-idp-choice-zitadel-byoi]]) — **Zitadel emails the link via
-> ZITADEL's SMTP**. It is refused for an **inactive** user (**422**), returns **204**, and surfaces an
-> honest **501** ("managed by your identity provider") under BYOI / generic OIDC or for a user with no
-> IdP link ([[INVARIANTS]] INV-4) — never a misleading success. In **`AUTH_MODE=local`** mode
-> ([[0086-local-authentication-mode]] §5, amended by #1268) the admin instead chooses the **delivery** on an
+> [!note] Admin profile edits and password reset (issue #149, [[0102-remove-bundled-zitadel]])
+> `PATCH /users/:id` lets an `ADMIN` edit `firstName` / `lastName` / `email` (alongside `role`). The edit
+> is a **plain database write**: nothing is written to the IdP, so there is no IdP failure to revert and
+> no 503. The `email` is the **account-linking key** ([[INVARIANTS]] INV-2, `citext`) for a row not yet
+> linked; once linked, sign-in matches on `externalId`, so an email change here does not touch the IdP
+> account. `externalId` can never be set via the API (SEC-006).
+> `POST /users/:id/reset-password` in **OIDC** mode returns an honest **501** ("managed by your identity
+> provider") for every user: the operator's IdP owns the credential and its reset ([[INVARIANTS]] INV-4,
+> [[0102-remove-bundled-zitadel]] §5) — never a misleading success. It is refused for an **inactive** user
+> first (**422**) in both modes. In **`AUTH_MODE=local`** mode
+> ([[0086-local-authentication-mode]] §5, amended by #1268) the admin chooses the **delivery** on an
 > optional body `{ delivery, revokeSessions? }` — the body is optional so a pre-#1268 caller keeps today's
 > behavior:
 > - `temporary-password` (also the no-body default) mints a **one-time local temp-password**, hashes it
@@ -355,32 +354,21 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 >   link cannot be built or sent, **503** when the relay refuses.
 >
 > Both are refused for an inactive user or a **directory-only** person (**422**); directory-only rows never
-> receive a credential via any path. An explicit `delivery` under OIDC/BYOI is a **400** — the choice is
-> local-mode only. `GET /users/password-reset-capabilities` (`user:manage`) publishes which deliveries are
+> receive a credential via any path. `GET /users/password-reset-capabilities` (`user:manage`) publishes which deliveries are
 > actually available, deliberately kept off the `@Public` `GET /config/status`.
 
 > [!note] Create accepts an optional temporary password ([[0064-admin-user-provisioning-credentials]], #411)
 > `POST /users` accepts an **optional** `password` on `CreateUserSchema` — a **temporary** credential for
-> admin provisioning. It is honored **only on the bundled-Zitadel management path** (`idp.supportsManagement`):
-> the new Zitadel user is created with the password set **`changeRequired:true`**, so Zitadel **forces a
-> password change at first login** — a one-time hand-off secret, never a standing admin-known credential.
-> In **`AUTH_MODE=local`** mode ([[0086-local-authentication-mode]] §5) a supplied `password` is instead
-> **hashed to `passwordHash`** (argon2id) with `mustChangePassword=true` and **no IdP call** (`externalId`
-> stays null); omitting it lands a password-less row an admin can provision later.
-> The user is created **email auto-verified** (always-on, ADR-0064 §3 — no email-verified toggle). Under
-> **BYOI / generic OIDC** a supplied `password` is rejected with **400** *before any local row is created*
-> (the operator's own IdP owns the credential; the controls are hidden in the later full-page UI). The
-> password is **never persisted** to lazyit's DB (it is not a `User` column) and **never logged/echoed**
-> ([[0031-logging-strategy]] / [[0064-admin-user-provisioning-credentials]]). A Zitadel complexity-policy
-> rejection rides the existing **compensate-on-failure** path (the just-created local row is hard-deleted,
-> a 503 surfaced — no half-provisioned user). This is a **second, narrower** carve-out than the bootstrap
-> wizard's initial password (which is `changeRequired:false` for the very first admin — [[0043-zitadel-source-of-truth]]
-> / #335). It reuses the existing **`user:manage`** gate (no new permission). Omitting `password` is fully
-> back-compatible (the previous no-credential create). Because `CloneUserSchema.profile` reuses
-> `CreateUserSchema`, **`POST /users/:id/clone` accepts the same optional `password`** and provisions it
-> identically (same `user:manage` gate, same BYOI-400 / `changeRequired:true` / never-persisted handling) —
-> a cloned user is a new user who likewise needs a one-time credential. _Phase 1 (backend + shared
-> contract); the full-page create UI with the password control is a later phase._
+> admin provisioning. It is honored **only in `AUTH_MODE=local`** ([[0086-local-authentication-mode]] §5): a
+> supplied `password` is **hashed to `passwordHash`** (argon2id) with `mustChangePassword=true` (`externalId`
+> stays null); omitting it lands a password-less row an admin can provision later. Under **OIDC** a supplied
+> `password` is rejected with **400** *before any row is created* — the operator's IdP owns the credential
+> ([[0102-remove-bundled-zitadel]] §5). Without a password an OIDC create is a plain row plus its `CREATED`
+> history; the person claims it on first sign-in ([[0038-jit-user-provisioning]]). The password is **never
+> persisted** in plaintext and **never logged/echoed** ([[0031-logging-strategy]] /
+> [[0064-admin-user-provisioning-credentials]]). It reuses the existing **`user:manage`** gate (no new
+> permission). Because `CloneUserSchema.profile` reuses `CreateUserSchema`, **`POST /users/:id/clone`
+> accepts the same optional `password`** and handles it identically.
 
 **Web:** `users/[id]` is the asset-centric **per-person** detail page (the counterpart to the asset
 detail) — it composes the two nested reads above plus the user's authored [[article]]s, answering
@@ -396,4 +384,4 @@ Related: [[asset-assignment]] · [[access-grant]] · [[access-request]] ·
 [[role-permission]] · [[service-account]] · [[asset-centric]] · [[shared-package]] ·
 [[0013-zod-validation-pipe]] · [[0016-auth-strategy-deferred]] · [[0038-jit-user-provisioning]] ·
 [[0040-rbac-roles]] · [[0046-roles-permissions-v2]] · [[0048-service-accounts]] · [[INVARIANTS]] ·
-[[0069-migrator-import]]
+[[0069-migrator-import]] · [[0102-remove-bundled-zitadel]]

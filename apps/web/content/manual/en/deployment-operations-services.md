@@ -22,12 +22,11 @@ that publishes ports to the host; everything else lives on an internal Docker ne
 | **migrate** | One-shot migration + seed job | Runs once per deploy, then exits. Applies schema migrations before the API starts. |
 | **valkey** | Background-job broker | Backs the async workers (e.g. document import, the workflow engine). |
 | **meilisearch** | Search engine | Powers cross-entity search. Rebuildable from the database. |
-| **zitadel** | The bundled identity provider | Handles sign-in. Has its own database. |
-| **zitadel_db** | PostgreSQL for the identity provider | Separate from the application database. |
 
-With the bundled identity provider, a couple of small one-shot helpers also run at first boot to set up
-sign-in automatically — they complete and exit. With your own identity provider, the Zitadel services
-are removed (see [Identity provider](/help/deployment-operations-identity-provider)).
+No identity provider runs in the stack. With local accounts lazyit handles sign-in itself; with your
+own OIDC provider, sign-in goes to a service you run elsewhere (see
+[Identity provider](/help/deployment-operations-identity-provider)). An optional **backup** sidecar
+can also run alongside — see [Backups & restore](/help/deployment-operations-backups-restore).
 
 ## How the pieces fit together
 
@@ -38,23 +37,19 @@ are removed (see [Identity provider](/help/deployment-operations-identity-provid
   **meilisearch** in sync as data changes.
 - **migrate** runs first on every deploy: it applies database migrations and a small idempotent seed,
   then exits. The API waits for it to finish successfully before starting.
-- Sign-in flows through **zitadel** (or your own provider). The API and web app validate the tokens
-  it issues.
+- Sign-in is handled by **web** and **api** — against lazyit's own accounts, or by validating the tokens
+  your OIDC provider issues.
 
-## Two databases — both matter
+## One database
 
-The stack runs **two** PostgreSQL databases: the application database (**db**) and the identity
-provider's own database (**zitadel_db**). They are intentionally separate so they can be backed up
-independently and so swapping to your own identity provider is a clean removal.
-
-This split is the single most important thing to understand for disaster recovery: backing up only the
-application database leaves everyone **locked out**, because the accounts live in the identity
-provider's database. See [Backups & restore](/help/deployment-operations-backups-restore).
+The stack runs **one** PostgreSQL database, the application database (**db**). It holds your data and,
+with local accounts, the sign-in credentials too. See [Backups &
+restore](/help/deployment-operations-backups-restore).
 
 ## What is and isn't a backup target
 
-- **db** and **zitadel_db** hold real state — **back them both up.**
-- **meilisearch** is rebuildable: its index is reconstructed from the databases with a re-index
+- **db** holds real state — **back it up.**
+- **meilisearch** is rebuildable: its index is reconstructed from the database with a re-index
   command, so its data does not need backing up.
 - **valkey** holds only in-flight background-job state (PostgreSQL is the system of record), so it is
   not a backup target either. Its data survives restarts so queued jobs aren't lost.

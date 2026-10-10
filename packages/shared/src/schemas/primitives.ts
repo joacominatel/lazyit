@@ -101,21 +101,22 @@ export function requireAtLeastOneKey<T extends z.ZodType>(schema: T) {
 }
 
 /**
- * The bundled-Zitadel DEFAULT password complexity policy as ONE shared schema (issue #474) — min 8,
- * max 70, upper + lower + digit + symbol, with the per-rule messages the web's live checklist renders
- * 1:1. This is the SINGLE SOURCE OF TRUTH for every place that sets a password lazyit then hands to
- * Zitadel via the Management API: the first-run wizard's `SetupPasswordSchema` (`schemas/config.ts`)
- * and the admin temp-password `TempPasswordSchema` (`schemas/user.ts`) are both this schema. Defining
- * it HERE — a leaf module that imports only `zod` and is already imported by `user.ts` — keeps it
+ * The password complexity policy as ONE shared schema (issue #474) — min 8, max 70, upper + lower +
+ * digit + symbol, with the per-rule messages the web's live checklist renders 1:1. This is the SINGLE
+ * SOURCE OF TRUTH for every password lazyit sets: the first-run wizard's `SetupPasswordSchema`
+ * (`schemas/config.ts`), the admin temp-password `TempPasswordSchema` (`schemas/user.ts`) and the
+ * local-mode change / reset passwords (`schemas/auth-password.ts`) are all this schema. Defining it
+ * HERE — a leaf module that imports only `zod` and is already imported by `user.ts` — keeps it
  * cycle-free (the `config → user` EmailSchema import means `user` must never import back from `config`,
- * which is exactly why these rules used to be duplicated). Enforcing the SAME rules everywhere
- * guarantees Zitadel never rejects a lazyit-set password mid-mirror (which would leave a
- * half-provisioned, un-loggable user); a single definition means the rules can no longer DRIFT apart.
+ * which is exactly why these rules used to be duplicated); a single definition means the rules can no
+ * longer DRIFT apart. The rules are the former bundled-IdP default, kept unchanged until lazyit owns its
+ * own policy (ADR-0102 §8).
  *
- * The password itself is NEVER persisted to lazyit's DB, NEVER logged (ADR-0031) and NEVER echoed back
- * in a response. The `.max(70)` cap runs before the regex checks so an over-long input fails clearly.
+ * The password itself is NEVER persisted to lazyit's DB in plaintext, NEVER logged (ADR-0031) and NEVER
+ * echoed back in a response. The `.max(70)` cap runs before the regex checks so an over-long input fails
+ * clearly.
  */
-export const ZitadelPasswordSchema = z
+export const PasswordPolicySchema = z
   .string()
   .min(8, "Must be at least 8 characters long.")
   .max(70, "Must be less than 70 characters long.")

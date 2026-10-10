@@ -8,42 +8,41 @@ DevOps lane (skill: `.claude/skills/lazyit-devops/SKILL.md`); the source of trut
 
 The canonical Compose definition is a single **`compose.yaml` at the repo root** (all services;
 prod-only ones gated behind `profiles: [prod]`), with a committed root `compose.override.yaml` for
-dev tuning. This folder keeps only the **thin prod override**. See
-[[auth-zitadel-sot#9-compose-structure-decided|dossier §9]].
+dev tuning. This folder keeps only the **thin prod override**.
 
 ```
 (repo root)
-├── compose.yaml             # canonical: ALL services; db/meili/zitadel(+db) unprofiled (dev backing),
-│                            # api/web/migrate/caddy/backup/zitadel-bootstrap behind profiles: [prod]
-├── compose.override.yaml    # dev tuning of the backing services (loopback ports, no TLS, no limits)
+├── compose.yaml             # canonical: ALL services; db/meilisearch/valkey unprofiled (dev backing),
+│                            # api/web/migrate/caddy/backup behind profiles: [prod]
+├── compose.override.yaml    # dev tuning of the backing services (loopback ports, no limits)
 infra/
-├── start.sh                 # guided, idempotent, non-destructive first-deploy bootstrap   — ADR-0047
-├── docker-compose.prod.yaml # THIN prod override: env-file path, internal-only net, zitadel_secrets vol
+├── start.sh                 # guided, idempotent, non-destructive first-deploy bootstrap — ADR-0047
+├── update.sh                # guided, non-destructive in-place version update            — ADR-0084
+├── trust-local-ca.sh        # trust Caddy's local internal-CA root on this machine (local mode only)
+├── docker-compose.prod.yaml # THIN prod override: prod env-file path, `lazyit-prod` project name
 ├── docker/
-│   ├── api.Dockerfile               # NestJS on Node, built with Bun (multi-stage)        — ADR-0025
-│   ├── web.Dockerfile               # Next.js standalone on Node, built with Bun          — ADR-0025
-│   ├── migrate.Dockerfile           # one-shot Bun job: `prisma migrate deploy` + seed    — ADR-0025
-│   └── zitadel-bootstrap.Dockerfile # tiny alpine (curl+jq+openssl): zero-touch IdP setup — ADR-0043
-├── scripts/
-│   └── zitadel-bootstrap.sh  # one-shot, fail-loud, idempotent Zitadel provisioner        — ADR-0043
+│   ├── api.Dockerfile       # NestJS on Node, built with Bun (multi-stage)               — ADR-0025
+│   ├── web.Dockerfile       # Next.js standalone on Node, built with Bun                 — ADR-0025
+│   └── migrate.Dockerfile   # one-shot Bun job: `prisma migrate deploy` + seed           — ADR-0025
 ├── caddy/
-│   └── Caddyfile             # reverse proxy + automatic HTTPS, same-origin /api    — ADR-0026
-└── env/
-    └── .env.prod.example     # template for the (gitignored) .env.prod             — ADR-0028
+│   └── Caddyfile            # reverse proxy + automatic HTTPS, same-origin /api          — ADR-0026
+├── env/
+│   └── .env.prod.example    # template for the (gitignored) .env.prod                    — ADR-0028
+└── test/                    # shell tests for the scripts and the Caddy routing
 ```
 
 ## Scripts
 
 | Script | What it does | Run | Ref |
 | --- | --- | --- | --- |
-| `start.sh` | **Guided first-deploy bootstrap.** Detects the environment, asks ~6 questions (free-text answers validated), generates `env/.env.prod` (real `openssl` secrets, **mode 600 from creation**, atomic write) and brings the prod stack up — then points you at `/setup`. Idempotent + non-destructive (skips generation on an existing install; never regenerates `ZITADEL_MASTERKEY`; no teardown path). | `./infra/start.sh` (`--yes` / `--dry-run` / `--help`) | ADR-0047 |
-| `scripts/zitadel-bootstrap.sh` | One-shot, fail-loud, idempotent Zitadel provisioner (the `zitadel-bootstrap` sidecar's entrypoint). Wires the OIDC project/app/roles/SA — **no console clicking**. Not run by hand. | runs as the sidecar under `--profile prod` | ADR-0043 |
+| `start.sh` | **Guided first-deploy bootstrap.** Detects the environment, asks ~6 questions (free-text answers validated), generates `env/.env.prod` (real `openssl` secrets, **mode 600 from creation**, atomic write) and brings the prod stack up — then points you at `/setup`. Idempotent + non-destructive (skips generation on an existing install; never regenerates `WORKFLOW_SECRET_KEY`; no teardown path). | `./infra/start.sh` (`--yes` / `--dry-run` / `--help`) | ADR-0047 |
+| `update.sh` | **Guided in-place update** to a release tag: verified database dump first, then checkout, build, migrate, health gate, rollback on failure. | `./infra/update.sh` (`--help`) | ADR-0084 |
 
 ## Deployment levels
 
 | Level | How | Notes |
 | --- | --- | --- |
-| **Dev** | root `docker compose up` (db + meili + zitadel(+db)) + `bun run dev` | backing services in containers, apps run natively. Auto-merges `compose.override.yaml`. |
+| **Dev** | root `docker compose up` (db + meilisearch + valkey) + `bun run dev` | backing services in containers, apps run natively. Auto-merges `compose.override.yaml`. |
 | **Local prod-like** | root `compose.yaml` + thin override + `--profile prod` | full stack in containers, HTTPS via Caddy's internal CA, high ports (8080/8443). |
 | **Self-hosted real** | same command + real domain | Let's Encrypt, real secrets, backups. See runbooks. |
 
@@ -100,24 +99,19 @@ Backups: `docs/05-runbooks/backups.md`.
 - **Least exposure.** Only Caddy publishes ports. Postgres/API/Web are on the internal network;
   Postgres is never reachable from the host — ADR-0028 / SEC-005.
 - **Secrets** live in the gitignored `env/.env.prod` (copied from the example). Never committed,
-  never trivial — ADR-0028. `chmod 600` it: it holds the DB password, `ZITADEL_MASTERKEY`,
-  `AUTH_SECRET`, and the OIDC secret.
-- **Auth is wired** (ADR-0037/0038/0039): a bundled Zitadel IdP (its own `zitadel_db`) served at
-  `auth.{LAZYIT_DOMAIN}` via Caddy; the API validates OIDC tokens, the web app uses Auth.js.
-- **Zero-touch IdP bootstrap** (ADR-0043 Phase 3): the one-shot `zitadel-bootstrap` sidecar (prod
-  profile) provisions the project, OIDC app, the `ADMIN`/`MEMBER`/`VIEWER` project roles and a
-  runtime service-account from the FirstInstance machine key — **no console clicking** — and writes
-  `oidc-client.json` + `sa-key.json` into the shared `zitadel_secrets` volume that api/web read.
-  Fail-loud (`restart: "no"`) + idempotent. Bootstrap: `docs/05-runbooks/auth-bootstrap.md` §0.
-  BYOI by changing the `OIDC_*` vars and dropping the zitadel services.
+  never trivial — ADR-0028. `chmod 600` it: it holds the DB password, `WORKFLOW_SECRET_KEY`,
+  `AUTH_SECRET`, and, with OIDC, the client secret.
+- **Auth** is local accounts by default (`AUTH_MODE=local`, ADR-0086) or your own OIDC IdP
+  (`AUTH_MODE=oidc`, bring-your-own): set the `OIDC_*` values for the API and the `AUTH_*` values for
+  the web in `.env.prod`. No IdP ships with lazyit — the bundled Zitadel was removed (ADR-0102).
 - **Image digest-pinning** (ADR-0025 follow-up): every base image is pinned by `@sha256` with the
   human tag in a comment, so deploys are reproducible and rolling tags can't drift silently. Re-pin
   after a deliberate bump (command at the bottom of `compose.yaml`).
 - **Disk/OOM safety**: every long-running compose service has a `logging:` rotation block
   (json-file, 10m x 3) and a modest `mem_limit`/`cpus` so logs can't fill the disk and one runaway
   service can't OOM the single host.
-- **Backups**: an opt-in `backup` profile sidecar runs cron + `pg_dump` for **both** databases to a
-  host-mounted `./backups` with retention (off by default). Full DR procedure (what to back up,
+- **Backups**: an opt-in `backup` profile sidecar runs cron + `pg_dump` of the app database to a
+  host-mounted `./backups` with retention on `app-*.dump` (off by default). Full DR procedure (what to back up,
   restore order): `docs/05-runbooks/backups.md`.
 
 ## Not configured yet (reserved)

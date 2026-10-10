@@ -3,7 +3,7 @@ title: Vision
 tags: [overview]
 status: draft
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-09
 ---
 
 # Vision
@@ -41,9 +41,9 @@ before any external distribution. Self-hosting is the right default for this seg
 [[0061-secret-manager-zero-knowledge|Secret Manager]]) is sensitive, AD/LDAP integration is
 expected, and compliance often forbids keeping it off-premises — with clear market precedents
 (Snipe-IT, GLPI, Zammad, Authentik). **Multi-tenant SaaS is deferred** — not designed for now,
-revisitable later. Full rationale: [[0015-deployment-model]]; authentication is OIDC via a
-bundled-but-replaceable Zitadel (BYOI) — [[0037-idp-choice-zitadel-byoi]],
-[[0038-jit-user-provisioning]], [[0039-authjs-v5-frontend-oidc]].
+revisitable later. Full rationale: [[0015-deployment-model]]; authentication is built-in local
+accounts by default, or OIDC against the customer's own IdP — [[0086-local-authentication-mode]],
+[[0102-remove-bundled-zitadel]], [[0038-jit-user-provisioning]], [[0039-authjs-v5-frontend-oidc]].
 
 ## Principles
 

@@ -18,7 +18,6 @@ import {
   deleteUser,
   offboardUser,
   provisionLocalUserAccount,
-  provisionUserAccount,
   resetUserPassword,
   restoreUser,
   updateOwnProfile,
@@ -142,15 +141,7 @@ export function useRestoreUser() {
   });
 }
 
-/**
- * Trigger an admin password reset for a user (`POST /users/:id/reset-password`, `user:manage`).
- * Mode-dependent (ADR-0086 §5, issue #1268): in OIDC mode the IdP emails the link and the call resolves
- * with nothing (204); in local mode the caller passes a `delivery` and gets an
- * {@link AdminPasswordResetOutcome} back — either the address the link went to, or a one-time temporary
- * password. Nothing here touches cached user rows (a reset changes no field the UI reads), so there is
- * no invalidation — and the temp password rides ONLY the mutation result, deliberately never the cache.
- * Toasts, the reveal, and the honest 409/422/501/503/404 mapping are owned by the calling component.
- */
+/** Local-mode admin reset; the temp password rides only the mutation result, never the cache. */
 export function useResetUserPassword() {
   return useMutation<
     AdminPasswordResetOutcome | void,
@@ -158,24 +149,6 @@ export function useResetUserPassword() {
     { id: string; body?: AdminPasswordResetRequest }
   >({
     mutationFn: ({ id, body }) => resetUserPassword(id, body),
-  });
-}
-
-/**
- * Promote a directory person into a real OIDC account (`POST /users/:id/provision-account`, `user:manage`
- * — ADR-0069 REDESIGN §0 #3). On success the person stops being directory-only (the "Directory" badge
- * disappears and they become a normal login account), so this invalidates the users list AND the user's
- * detail so both reflect the promotion. Toasts and the honest 400 (no real email) / 503 (IdP failed)
- * handling are owned by the calling component (mapped on the {@link ApiError}'s `.status`).
- */
-export function useProvisionUserAccount() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => provisionUserAccount(id),
-    onSuccess: (_user, id) => {
-      queryClient.invalidateQueries({ queryKey: userKeys.all });
-      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
-    },
   });
 }
 
@@ -201,7 +174,7 @@ export function useProvisionLocalUserAccount() {
  * Edit the caller's own name (`PATCH /users/me`, issue #1421). Seeds `/users/me` with the returned row,
  * then invalidates the users cache so the caller's row in the directory and any detail view refetch;
  * a failure re-reads `/users/me`.
- * Error messages stay with the form (409 directory-managed, 403 service account, 503 IdP mirror).
+ * Error messages stay with the form (409 directory-managed, 403 service account).
  */
 export function useUpdateOwnProfile() {
   const queryClient = useQueryClient();

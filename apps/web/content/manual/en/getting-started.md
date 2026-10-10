@@ -32,7 +32,7 @@ your URL. It is safe to re-run — it is non-destructive and never overwrites ex
 When it finishes, open **`https://<your-host>/setup`** — the rest of this page walks through that
 wizard.
 
-For advanced setups (bring-your-own identity provider, an external Postgres, TLS on a real domain),
+For advanced setups (your own OIDC identity provider, an external Postgres, TLS on a real domain),
 see [Self-hosting](/help/deployment-operations-self-hosting). To upgrade an existing instance later,
 run `./infra/update.sh`.
 
@@ -41,25 +41,29 @@ run `./infra/update.sh`.
 How people sign in is chosen **once, at deploy time**, and is fixed for the life of the instance. There
 are two families:
 
-- **Local accounts** (`AUTH_MODE=local`) — lazyit owns sign-in itself. Each person has a username/email
-  and a password stored in the app. There is **no** external identity provider, no `auth.` subdomain and
-  nothing extra to run — the simplest way to stand up lazyit on a LAN. You create the first
+- **Local accounts** (`AUTH_MODE=local`, the default) — lazyit owns sign-in itself. Each person has a
+  username/email and a password stored in the app (as a hash). There is **no** external identity
+  provider and nothing extra to run — the simplest way to stand up lazyit. You create the first
   administrator (with a password) during setup.
-- **Single sign-on (OIDC)** — lazyit does not store passwords; sign-in is delegated to an **identity
-  provider (IdP)**. Within this family you pick one of two on the first run:
-  - **Bundled sign-in** — lazyit ships with a sign-in service (Zitadel) already wired up. Nothing extra
-    to configure, and you set the first administrator's password during setup.
-  - **Bring your own provider (BYOI)** — connect lazyit to your existing OIDC provider (for example your
-    company's SSO). lazyit reads three environment variables to find it:
+- **Your own OIDC provider** (`AUTH_MODE=oidc`) — lazyit does not store passwords; sign-in is delegated
+  to an **identity provider (IdP)** you already run, such as your company's SSO. lazyit finds it through
+  a handful of environment variables, which the guided installer asks for and the setup wizard shows
+  again:
 
-    ```
-    AUTH_ISSUER=https://auth.example.com
-    AUTH_CLIENT_ID=your-client-id
-    AUTH_CLIENT_SECRET=your-client-secret
-    ```
+  ```
+  # Web app
+  AUTH_ISSUER=https://auth.example.com
+  AUTH_CLIENT_ID=your-client-id
+  AUTH_CLIENT_SECRET=your-client-secret
 
-    With your own provider, that provider owns passwords and account creation — lazyit never sets or
-    stores a sign-in password.
+  # API
+  AUTH_MODE=oidc
+  OIDC_ISSUER=https://auth.example.com
+  OIDC_CLIENT_ID=your-client-id
+  OIDC_JWKS_URI=https://auth.example.com/.well-known/jwks.json
+  ```
+
+  Your provider owns passwords and sign-in; users and roles stay in lazyit.
 
 > **The auth mode is immutable.** Switching an instance between local and OIDC after it has users is
 > unsupported (their credentials don't carry across). Decide up front. For the deploy-side detail see
@@ -69,27 +73,24 @@ are two families:
 
 The first time you open a fresh instance, lazyit shows a short, full-screen **setup wizard**. The
 wizard runs **once**: as soon as an administrator exists, the instance is configured and the wizard
-sends you to the sign-in page instead. The steps adapt to the sign-in option you pick.
+sends you to the sign-in page instead. The steps adapt to how the instance was deployed.
 
-### Step 1 — Welcome and sign-in choice
+### Step 1 — Welcome
 
-In an **OIDC** instance, pick how people will sign in: **bundled sign-in** or **bring your own
-provider**. The choice is shown as two cards; select one to continue. Choosing *bring your own
-provider* reveals the three environment variables above so you can confirm they are set.
+There is nothing to choose here — the sign-in mode is fixed at deploy time. A card explains it:
 
-In a **local-accounts** instance there is nothing to choose here — the mode is fixed at deploy time.
-The step simply confirms you're setting up local accounts and takes you straight to creating the first
-administrator.
+- In a **local-accounts** instance, it confirms you're setting up lazyit's built-in accounts.
+- In an **OIDC** instance, it names your own OIDC provider and shows the environment variables above,
+  with a copy button, so you can check they are set on the web app and the API.
 
-### Step 2 — Configure (only for bring-your-own-provider)
+### Step 2 — Configure (OIDC only)
 
-If you chose the bundled sign-in, this step is skipped — the bundled service is already provisioned,
-so there is nothing to enter. (It may still be finishing its own start-up the very first time; that
-is normal.)
+In a local-accounts instance this step is skipped.
 
-If you chose your own provider, this step re-shows the three environment variables so you can confirm
-them before you create the first administrator. The administrator's email **must already exist in
-your provider** for them to be able to sign in.
+In an OIDC instance, this step shows the environment variables once more and asks you to confirm your
+provider is wired before you create the first administrator. The administrator's email **must already
+exist in your provider**, verified, for them to be able to sign in: on that first sign-in lazyit links
+the two by email.
 
 ### Step 3 — Create the first administrator
 
@@ -97,11 +98,10 @@ Enter the first administrator's **first name, last name and email**. The role is
 **Administrator** — this step exists only to create the very first admin, so the role is shown as a
 locked badge, not an editable field.
 
-- With **local accounts** or the **bundled sign-in**, you also set an **initial password** here, with a
-  live checklist of the password rules. For local accounts lazyit stores that password itself; for the
-  bundled sign-in it sets the password on the sign-in service. Either way the new admin can sign in
-  straight away, and this first administrator is not forced to change it at first sign-in (that forced
-  change applies to the team members you add later).
+- With **local accounts**, you also set an **initial password** here, with a live checklist of the
+  password rules. lazyit stores it (as a hash), the new admin can sign in straight away, and this first
+  administrator is not forced to change it at first sign-in (that forced change applies to the team
+  members you add later).
 - With **your own OIDC provider**, no password is asked for or sent — your provider owns the credential.
 
 ### Step 4 — Done

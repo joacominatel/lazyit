@@ -14,7 +14,7 @@ import { DirectorySyncSweeper } from './directory-sync.sweeper';
  *
  * PrismaService (global PrismaModule) and PermissionResolverService (global AuthModule) inject without an
  * explicit import. UsersModule provides the sanctioned directory-person CREATE rail (users.service.create,
- * skipIdpWriteBack), and UserHistoryModule the append-only audit writer for matched/offboard rows.
+ * directoryOnly), and UserHistoryModule the append-only audit writer for matched/offboard rows.
  */
 @Module({
   imports: [UsersModule, UserHistoryModule],

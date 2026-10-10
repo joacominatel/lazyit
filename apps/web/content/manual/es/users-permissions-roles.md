@@ -68,9 +68,9 @@ Dos salvaguardas protegen la instancia de quedar bloqueada o de una escalada sil
 
 ## Una nota sobre tu proveedor de identidad
 
-Si usas tu propio proveedor de identidad (BYOI), los roles se gestionan **localmente en lazyit** — no
-se leen de un token y se usan solo para la autorización dentro de la app. lazyit guarda su propia copia
-del rol; tú lo asignas y lo cambias aquí, en la sección de Usuarios.
+Los roles se gestionan **localmente en lazyit**, sea cual sea la forma de iniciar sesión. Con tu propio
+proveedor OIDC no se leen de un token ni se envían nunca al proveedor; se usan solo para la autorización
+dentro de la app. Tú los asignas y los cambias aquí, en la sección de Usuarios.
 
 Para el detalle completo de lo que puede hacer cada rol —y cómo ajustar a Miembro y Lector— consulta
 [Permisos](/help/permissions) y

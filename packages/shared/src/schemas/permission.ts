@@ -17,8 +17,7 @@ import { RoleSchema, type Role } from "./user";
  *     `User`/`Role` model — it is a flat capability list.
  *   - Authorization stays **DB-first** (INV-1, ADR-0043 #1): permissions resolve from `RolePermission`
  *     DB rows, NEVER from a token claim. This file is only the contract for the wire/seed shape.
- *   - Permissions are **lazyit-local**: they NEVER sync to the IdP. Only the 3 coarse roles keep their
- *     existing `grantRole` write-back (ADR-0043 §3). Do not couple this catalog to Zitadel.
+ *   - Permissions are **lazyit-local**: they NEVER sync to the IdP. Do not couple this catalog to one.
  */
 
 /**

@@ -26,7 +26,7 @@ para levantar una instancia real.
   [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 Un equipo pequeño (hasta ~50 activos) funciona con holgura en **2 vCPU / 4 GB de RAM / 20 GB de disco**.
-La pila ejecuta ocho contenedores de larga duración más un trabajo de migración puntual; haz crecer el
+La pila ejecuta seis contenedores de larga duración más un trabajo de migración puntual; haz crecer el
 servidor con tus datos.
 
 ## La vía recomendada: el arranque guiado
@@ -42,7 +42,7 @@ Comprueba los requisitos previos, hace unas seis preguntas (tu dominio, opción 
 proveedor de identidad, base de datos), luego **genera el archivo de entorno con secretos aleatorios
 robustos**, levanta toda la pila y te dirige al asistente de configuración dentro de la app. Es
 **idempotente y no destructivo**: volver a ejecutarlo sobre una instalación existente solo levanta la
-pila; nunca regenera las claves maestras irrotables y no tiene vía de desmontaje.
+pila; nunca regenera las claves de cifrado irrotables y no tiene vía de desmontaje.
 
 Opciones útiles:
 
@@ -56,7 +56,7 @@ Al terminar imprime tu URL y el único paso siguiente: abre **`https://<tu-servi
 el primer administrador. El script nunca crea un usuario: eso es tarea del asistente de configuración.
 
 > Haz una copia del archivo de entorno generado (`infra/env/.env.prod`) fuera del servidor y cifrada.
-> Contiene las claves maestras; si lo pierdes, una copia restaurada queda ilegible. Consulta
+> Contiene las claves de cifrado; si lo pierdes, una copia restaurada queda ilegible. Consulta
 > [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## La vía manual
@@ -72,8 +72,8 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod up -d --build
 ```
 
-El `chmod 600` **no es opcional**: el archivo guarda la contraseña de la base de datos, la clave maestra
-del proveedor de identidad, el secreto de sesión y más. Los permisos por defecto son legibles por todo
+El `chmod 600` **no es opcional**: el archivo guarda la contraseña de la base de datos, las claves de
+cifrado, los secretos de sesión y más. Los permisos por defecto son legibles por todo
 el mundo.
 
 ## Cómo es un despliegue
@@ -142,7 +142,8 @@ solicitud, así que quien tenga sesión iniciada solo debe volver a iniciarla.
 ## Qué sigue
 
 - [Servicios](/help/deployment-operations-services) — qué hace cada contenedor.
-- [Proveedor de identidad](/help/deployment-operations-identity-provider) — inicio de sesión incluido frente al propio.
+- [Proveedor de identidad](/help/deployment-operations-identity-provider) — cuentas locales o tu propio
+  proveedor OIDC.
 - [Proxy inverso y TLS](/help/deployment-operations-reverse-proxy-tls) — Caddy y certificados.
 - [Copias de seguridad y restauración](/help/deployment-operations-backups-restore) — qué guardar y cómo recuperar.
 - [Resolución de problemas](/help/deployment-operations-troubleshooting) — cuando un contenedor no levanta.

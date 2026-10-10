@@ -89,9 +89,9 @@ it stays removed through every later update.
 
 ## Permissions stay inside lazyit
 
-These permissions are **lazyit-only**. They are never written to your identity provider — the IdP
-knows nothing about them. Only the three coarse roles are mirrored to the IdP (when one is configured);
-the fine-grained permission tuning you do here lives entirely in lazyit.
+These permissions are **lazyit-only**. Neither they nor the roles are ever written to your identity
+provider — the IdP knows nothing about them. Roles and the fine-grained permission tuning you do here
+live entirely in lazyit.
 
 See [Roles](/help/users-permissions-roles) for the role model and [Permissions](/help/permissions)
 for the area/action model and the shipped defaults.

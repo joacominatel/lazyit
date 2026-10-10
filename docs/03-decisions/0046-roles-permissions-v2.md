@@ -18,6 +18,9 @@ ACLs — Option B's per-resource matrix stays rejected). It **extends** [[0043-z
 (DB-first authorization, IdP write-back, BYOI): permissions are a new DB-first authorization source
 that, like roles, is never read from a token claim and never synced to the IdP.
 
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the three coarse roles no longer keep a
+`grantRole` write-back — lazyit writes nothing to the IdP, so roles are lazyit-local like permissions.
+
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
 > guard; P3: the GETs annotated + the two pre-tightened reads; P4: the `@Roles` write-gates migrated

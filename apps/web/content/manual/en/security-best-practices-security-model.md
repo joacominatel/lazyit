@@ -11,29 +11,29 @@ This page explains, in plain terms, how lazyit decides **who you are** and **wha
 do**. You don't need to configure any of it to be safe — these are sensible defaults — but knowing
 how it works helps you run the instance well.
 
-## Identity comes from your provider, not from lazyit
+## How you sign in
 
-lazyit does **not** store sign-in passwords. Authentication is delegated to an **identity provider
-(IdP)** that speaks OIDC — either the sign-in service bundled with lazyit, or your own provider
-(your company SSO). You choose which on the first run; see
+Sign-in works one of two ways, chosen once when the instance is deployed; see
 [Getting started](/help/getting-started).
 
-That single decision shapes the whole security model:
+- **Local accounts (the default).** lazyit owns sign-in. It stores each password only as an
+  **argon2id hash** — a slow, salted, one-way fingerprint — never the password itself, so nobody, an
+  administrator included, can read a password back. Repeated failed sign-ins are slowed down and
+  rate-limited, and lazyit issues its own signed session. Sign-in is password-only in this version.
+- **Your own OIDC provider.** Authentication is delegated to an **identity provider (IdP)** you run,
+  such as your company SSO. lazyit never sees, sets, or stores a sign-in password: password rules,
+  multi-factor, lockout policy, and account resets all live with that provider — configure them there.
+  lazyit trusts the identity your provider asserts: after a successful sign-in, it identifies you by
+  the stable account identifier the provider sends, not by anything a user can type.
 
-- **Your provider owns the login credential.** When you use your own provider, lazyit never sees,
-  sets, or stores a sign-in password. Password rules, multi-factor, lockout policy, and account
-  resets all live with that provider — configure them there.
-- **lazyit trusts the identity your provider asserts.** After a successful sign-in, lazyit identifies
-  you by the stable account identifier the provider sends, not by anything a user can type. It treats
-  that provider as the source of truth for *who is signing in*.
+> With local accounts, the strength of your sign-in is the strength of your passwords — use long,
+> unique ones. With your own provider, it is the strength of your IdP: enable multi-factor
+> authentication and a sane password policy **there**. If you need multi-factor today, connect your
+> own provider.
 
-> Because identity is delegated, the strength of your sign-in is the strength of your IdP. Enable
-> multi-factor authentication and a sane password policy **in your provider** — that is where those
-> controls belong.
+## Accounts are matched by verified email (OIDC)
 
-## Accounts are matched by verified email
-
-The first time someone signs in through your provider, lazyit links that sign-in to a lazyit user
+The first time someone signs in through your own provider, lazyit links that sign-in to a lazyit user
 record by **verified email**. This lets you pre-create a person in lazyit and have their account
 "just work" the first time they sign in.
 
@@ -60,8 +60,8 @@ anything about lazyit roles.
 ## Sessions
 
 After you sign in, you hold a session in your browser. Signing out ends it. Day-to-day, that session
-is what proves who you are to lazyit; the heavy lifting of *proving identity* already happened at your
-provider.
+is what proves who you are to lazyit; the heavy lifting of *proving identity* already happened at
+sign-in.
 
 On an instance with **local accounts**, a session lasts 12 hours unless the person ticks **Keep me
 signed in**, which keeps it until they sign out. Such a session has no time limit behind it, so it is
@@ -99,9 +99,10 @@ decides:
 
 ## What this gives you
 
-- **No password database to leak.** lazyit holds no sign-in passwords — there is nothing to steal
-  there.
-- **One place to enforce sign-in policy** — your identity provider — instead of two.
+- **No readable passwords.** With local accounts lazyit keeps only argon2id hashes; with your own
+  provider it holds no sign-in passwords at all.
+- **One place to enforce sign-in policy** — lazyit with local accounts, or your identity provider —
+  never two.
 - **Tamper-resistant authorization** — your rights are read from lazyit's database, never from a
   token a client could forge.
 - **Honest secrets** — the Secret Manager is encrypted so that the server itself cannot read your

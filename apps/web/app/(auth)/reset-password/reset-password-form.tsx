@@ -2,7 +2,7 @@
 
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ResetPasswordRequestSchema, ZitadelPasswordSchema } from "@lazyit/shared";
+import { PasswordPolicySchema, ResetPasswordRequestSchema } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Controller, useForm, useWatch } from "react-hook-form";
@@ -17,11 +17,11 @@ import { useResetPassword } from "@/lib/api/hooks/use-password-lifecycle";
 
 /**
  * Form schema: the shared reset contract (token + new password) plus a form-only `confirmPassword`
- * validated against the SAME shared `ZitadelPasswordSchema` — one strength policy, no drift (apps/web
+ * validated against the SAME shared `PasswordPolicySchema` — one strength policy, no drift (apps/web
  * composes shared schemas, never importing `zod` directly). The token comes from the URL, not the form.
  */
 const ResetPasswordFormSchema = ResetPasswordRequestSchema.extend({
-  confirmPassword: ZitadelPasswordSchema,
+  confirmPassword: PasswordPolicySchema,
 }).refine((data) => data.confirmPassword === data.newPassword, {
   message: "Passwords don't match.",
   path: ["confirmPassword"],

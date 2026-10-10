@@ -13,7 +13,7 @@ porque las migraciones de base de datos solo avanzan.
 
 ## Antes de actualizar
 
-> **Respalda primero ambas bases de datos y el archivo de entorno.** Las migraciones de base de datos
+> **Respalda primero la base de datos y el archivo de entorno.** Las migraciones de base de datos
 > solo avanzan: no hay reversión automática. Tu red de seguridad es la copia previa a la actualización.
 > Consulta [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
@@ -59,6 +59,16 @@ consultas de lista, búsqueda y resolución por ids exactos a `GET /infra/nodes/
 `{ items, total, limit, offset }`. El lienzo de topología usa un contrato distinto y debe seguir
 consultando `GET /infra/graph/nodes`; no reemplaces el mapa por la lista paginada.
 
+#### Retiro del proveedor de identidad incluido
+
+lazyit ya no incluye un proveedor de identidad propio: las personas inician sesión con cuentas locales o
+a través de tu propio proveedor OIDC (consulta
+[Proveedor de identidad](/help/deployment-operations-identity-provider)). Las instalaciones que ya usan
+cualquiera de las dos no se ven afectadas. Si `./infra/start.sh`, `./infra/update.sh` o la API se niegan a arrancar porque
+encontraron restos del antiguo proveedor incluido, no se cambió nada — ni se escribió ningún archivo ni
+se eliminó ningún volumen. Sigue la guía de migración del repositorio,
+`docs/05-runbooks/migrate-off-bundled-zitadel.md`, o quédate en la versión anterior hasta que puedas.
+
 ## Nuevos ajustes obligatorios tras una descarga
 
 Una versión que añade una función puede introducir un **nuevo valor de entorno**. Algunos los puede
@@ -82,12 +92,11 @@ sesión con cuentas integradas como con un proveedor de identidad.
 - Muestra los **nombres** de las claves que añadió, nunca sus valores. Volver a ejecutarlo no añade nada.
 - `./infra/start.sh --dry-run` muestra lo que añadiría sin escribir nada.
 
-Después de que añada una clave, respalda fuera del servidor el archivo de entorno actualizado. Las claves
-que protegen datos que ya tienes — la clave de secretos de flujos de trabajo, la clave maestra del
-proveedor de identidad, los secretos de inicio de sesión, las contraseñas de las bases de datos —
-**nunca** se generan por ti: si falta una, el script la nombra y la añades a mano. El script de
-actualización (`./infra/update.sh`) tampoco edita el archivo; se detiene ante una clave que falta y te
-dice cuál.
+Después de que añada una clave, respalda fuera del servidor el archivo de entorno actualizado. Las
+claves que protegen datos que ya tienes — la clave de secretos de flujos de trabajo, los secretos de
+inicio de sesión, las contraseñas de la base de datos — **nunca** se generan por ti: si falta una, el
+script la nombra y la añades a mano. El script de actualización (`./infra/update.sh`) tampoco edita el
+archivo; se detiene ante una clave que falta y te dice cuál.
 
 ### Claves que añades a mano
 
@@ -113,9 +122,9 @@ Dos ejemplos que ya han llegado:
     --env-file infra/env/.env.prod up -d api
   ```
 
-> La clave de secretos de flujos de trabajo es una clave **irrotable**, como la clave maestra del
-> proveedor de identidad: descifra las credenciales de conector guardadas. Respáldala fuera del servidor
-> y **nunca** generes una nueva en una restauración, o esas credenciales quedan indescifrables. Consulta
+> La clave de secretos de flujos de trabajo es una clave **irrotable**: descifra las credenciales de
+> conector guardadas. Respáldala fuera del servidor y **nunca** generes una nueva en una restauración, o
+> esas credenciales quedan indescifrables. Consulta
 > [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 Las notas de la versión señalan cualquier valor obligatorio nuevo. En caso de duda, compara tu archivo de
@@ -129,10 +138,8 @@ previa a la actualización.
 
 ## Versiones de los componentes incluidos
 
-Las imágenes incluidas (base de datos, proveedor de identidad, búsqueda, intermediario, proxy) están
-fijadas a versiones concretas para despliegues reproducibles. Solo cambian con una subida deliberada.
-Antes de subir en particular el proveedor de identidad, respalda su base de datos **y** conserva la clave
-maestra correspondiente, ya que sus datos están ligados a esa clave.
+Las imágenes incluidas (base de datos, búsqueda, intermediario, proxy) están fijadas a versiones
+concretas para despliegues reproducibles. Solo cambian con una subida deliberada.
 
 El **motor de búsqueda** es la excepción que no necesita preparación. Sus datos solo se abren con la
 versión exacta del motor que los escribió, así que cada actualización del motor de búsqueda arranca con

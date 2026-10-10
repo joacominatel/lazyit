@@ -3,7 +3,7 @@ title: "ADR-0064: Admin user provisioning credentials — temporary password onl
 tags: [adr, users, auth, zitadel, provisioning, byoi, rbac, frontend, backend]
 status: accepted
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -16,6 +16,11 @@ deciders: [Joaquín Minatel]
 It is a **bounded extension** of the Zitadel-as-identity-source-of-truth arc
 ([[0037-idp-choice-zitadel-byoi]] / [[0038-jit-user-provisioning]] / [[0043-zitadel-source-of-truth]]),
 and reuses the existing `user:manage` permission ([[0046-roles-permissions-v2]]) — no new permission.
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the management-path credential
+carve-out (§2, §3) is withdrawn with the bundled Zitadel; lazyit no longer sets a password in any IdP. Under
+generic OIDC the controls stay hidden (§4); in local mode the temporary password is lazyit's own
+([[0086-local-authentication-mode]] §5). The create flow (§1) and `user:manage` (§5) still bind.
 
 > **Scope of this ADR.** A full-page user-creation flow (replacing the current dialog) with optional
 > assign-asset / assign-app at create time; a **second, narrow credential carve-out** from

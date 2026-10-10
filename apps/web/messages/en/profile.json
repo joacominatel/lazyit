@@ -14,7 +14,6 @@
     "errors": {
       "managedByDirectory": "Your name comes from your company directory, so it can't be changed here. Ask an administrator to change it there.",
       "serviceAccount": "Service accounts don't have a profile to edit.",
-      "identityProviderUnavailable": "The sign-in service couldn't be updated, so nothing was changed. Try again in a moment.",
       "invalid": "Check both names and try again.",
       "generic": "Couldn't update your name."
     }
