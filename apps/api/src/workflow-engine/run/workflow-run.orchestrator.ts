@@ -23,6 +23,7 @@ import type {
   WorkflowMappingContext,
 } from '../handlers/step-handler';
 import { RunContextBuilder } from './run-context';
+import { lockLineageAndAssertIdle } from './run-lineage';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
   classifyFailureEdge,
@@ -241,9 +242,20 @@ export class WorkflowRunOrchestrator {
     // `error` (the failed-step marker) is DELIBERATELY PRESERVED across the flip — NOT cleared here (#1068):
     // ENQUEUE-THEN-CLEAR. If the enqueue then fails we roll the run back to FAILED with its marker intact,
     // so a later retry stays resolvable. Only a CONFIRMED enqueue clears it (below).
-    const claimed = await this.prisma.workflowRun.updateMany({
-      where: { id: runId, status: 'FAILED' },
-      data: { status: 'RUNNING', finishedAt: null },
+    // AUD-007: the CAS commits under the lineage lock, so a concurrent replay of this grant event sees it.
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      if (run.accessGrantId) {
+        await lockLineageAndAssertIdle(
+          tx,
+          run.trigger,
+          run.accessGrantId,
+          runId,
+        );
+      }
+      return tx.workflowRun.updateMany({
+        where: { id: runId, status: 'FAILED' },
+        data: { status: 'RUNNING', finishedAt: null },
+      });
     });
     if (claimed.count === 0) {
       return { retried: false };
@@ -351,9 +363,9 @@ export class WorkflowRunOrchestrator {
       throw new Error(`WorkflowRun ${runId} not found`);
     }
     const steps = WorkflowStepsSchema.parse(run.workflowVersion.steps);
-    const ctx = await this.contextBuilder.build(runId);
 
     let cursor: string = startCursor ?? steps[0].key;
+    const ctx = await this.contextBuilder.build(runId);
     // The attempt number for the step at `cursor`. Carried (incremented) across a degraded in-process
     // retry of the SAME step; reset to 1 whenever the cursor advances to a different step.
     let attempt = startAttempt;
@@ -799,11 +811,7 @@ export class WorkflowRunOrchestrator {
     stepIndex: number,
     attempt: number,
     status:
-      | 'SUCCEEDED'
-      | 'FAILED'
-      | 'AWAITING_INPUT'
-      | 'COMPENSATED'
-      | 'SKIPPED',
+      'SUCCEEDED' | 'FAILED' | 'AWAITING_INPUT' | 'COMPENSATED' | 'SKIPPED',
     metadata: Record<string, unknown>,
     externalCorrelationId: string | null = null,
   ) {
@@ -823,11 +831,7 @@ export class WorkflowRunOrchestrator {
   private async setStatus(
     runId: string,
     status:
-      | 'RUNNING'
-      | 'AWAITING_INPUT'
-      | 'SUCCEEDED'
-      | 'FAILED'
-      | 'COMPENSATED',
+      'RUNNING' | 'AWAITING_INPUT' | 'SUCCEEDED' | 'FAILED' | 'COMPENSATED',
   ): Promise<void> {
     const terminal =
       status === 'SUCCEEDED' || status === 'FAILED' || status === 'COMPENSATED';
