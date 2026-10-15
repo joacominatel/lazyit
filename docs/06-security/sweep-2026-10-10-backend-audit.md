@@ -54,8 +54,8 @@ AUD-018 to [[SEC-070-health-ready-db-error-leak|SEC-070]], AUD-020 to
 [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk|SEC-041]], and AUD-025 to
 [[SEC-052-catalog-attach-to-soft-deleted-category|SEC-052]].
 
-Line numbers below are as the verifiers left them. Only the entries mapped above were re-checked
-against `dev` for this record.
+Line numbers below are as the verifiers left them. Only AUD-001, AUD-003, AUD-004, AUD-005 and
+AUD-099 were re-checked against `dev` for this record.
 
 ## The verified report
 
