@@ -46,12 +46,12 @@ const RECENT_ACTIVITY_LIMIT = 10;
  * batches over the view so the whole filtered range never sits in memory at once.
  *
  * ponytail: bounded LIMIT/OFFSET loop at 1000 rows/iteration — the laziest strategy that matches the
- * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere`. CEILINGS: (1) deep
- * OFFSET is O(offset) per page, so a multi-hundred-thousand-row export degrades toward the tail (fine
- * for an admin audit dump; a keyset cursor would fix it, but the `recent_activity` UNION-ALL view has
- * no unique stable key — `occurredAt` collides, see #719 — so keyset isn't a one-liner). (2) Not
- * snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window and
- * dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
+ * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere` and
+ * {@link ACTIVITY_ORDER_BY}. CEILINGS: (1) deep OFFSET is O(offset) per page, so a
+ * multi-hundred-thousand-row export degrades toward the tail (fine for an admin audit dump; a keyset
+ * cursor would fix it, but the `recent_activity` UNION-ALL view exposes no source row id, see #719).
+ * (2) Not snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window
+ * and dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
  */
 export const ACTIVITY_EXPORT_BATCH_SIZE = 1000;
 
@@ -81,14 +81,29 @@ const ACTIVITY_FROM = Prisma.sql`
 `;
 
 /**
+ * Newest first, then a fixed order over the columns that tell rows apart (AUD-032). A batch operation
+ * stamps one `occurredAt` on many rows (an offboarding revokes every grant at the same instant), and
+ * Postgres orders ties arbitrarily, so OFFSET pages and export batches could repeat or drop rows at a
+ * boundary. The view has no source row id; every other output column (`actorName`, `subjectName`,
+ * `targetUserName`) is derived from these keys, so rows still tied are byte-identical and their order
+ * cannot change what a page or the CSV shows.
+ */
+const ACTIVITY_ORDER_BY = Prisma.sql`
+  ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action",
+    ra."targetUserId", ra."actorId", ra."summary"
+`;
+
+/**
  * Read-only dashboard aggregation (CTO Round 1). Composes cheap counts/groupBys across the three
  * pillars into a single typed {@link DashboardSummary}. No persisted "dashboard" entity, no schema
  * change — every figure is derived from existing tables.
  *
- * Soft delete (ADR-0032): reads on soft-deletable models (Asset, Application, Consumable, Article)
- * are auto-scoped to `deletedAt: null` by the Prisma extension, so `count`/`groupBy` here already
- * exclude soft-deleted rows. The lifecycle joins (AssetAssignment, AccessGrant) are NOT
- * soft-deletable, so their close markers (`releasedAt` / `revokedAt`) are filtered explicitly.
+ * Soft delete (ADR-0032): top-level reads on Asset, Application and Article are auto-scoped to
+ * `deletedAt: null` by the Prisma extension. Consumable is deliberately outside the extension, so its
+ * reads filter `deletedAt: null` explicitly. The lifecycle joins (AssetAssignment, AccessGrant) and the
+ * append-only AssetHistory are not soft-deletable: archiving the parent leaves their rows in place, and
+ * the extension never scopes a relation filter, so they filter their close markers (`releasedAt` /
+ * `revokedAt`) AND the parent's `deletedAt: null` explicitly (SEC-071).
  *
  * The queries are independent, so they run concurrently in one `Promise.all` round-trip-ish batch.
  */
@@ -133,34 +148,41 @@ export class DashboardService {
         where: { warrantyEnd: { gt: now, lte: warrantyCutoff } },
       }),
       this.prisma.asset.groupBy({ by: ['status'], _count: { _all: true } }),
-      // Distinct assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
+      // Distinct live assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
       // row each, so its length is the distinct-asset count.
       this.prisma.assetAssignment
-        .groupBy({ by: ['assetId'], where: { releasedAt: null } })
+        .groupBy({
+          by: ['assetId'],
+          where: { releasedAt: null, asset: { is: { deletedAt: null } } },
+        })
         .then((rows) => rows.length),
 
       // --- Access ------------------------------------------------------------
-      this.prisma.accessGrant.count({ where: { revokedAt: null } }),
+      this.prisma.accessGrant.count({
+        where: { revokedAt: null, application: { is: { deletedAt: null } } },
+      }),
       this.prisma.accessGrant.count({
         where: {
           revokedAt: null,
           expiresAt: { gt: now, lte: expiryCutoff },
+          application: { is: { deletedAt: null } },
         },
       }),
-      // Active grants on critical apps. `application` is a relation filter; the related Application
-      // is auto-soft-delete-filtered, so grants whose app is soft-deleted are excluded.
       this.prisma.accessGrant.count({
-        where: { revokedAt: null, application: { is: { isCritical: true } } },
+        where: {
+          revokedAt: null,
+          application: { is: { isCritical: true, deletedAt: null } },
+        },
       }),
 
       // --- Consumables -------------------------------------------------------
-      this.prisma.consumable.count(),
+      this.prisma.consumable.count({ where: { deletedAt: null } }),
       // currentStock <= minStock, only for consumables that declare a minStock. Prisma can't compare
       // two columns, so we filter `minStock != null` and post-filter the rows; the set is small
       // (a low-stock alert list) so selecting the two ints and comparing in-process is cheap.
       this.prisma.consumable
         .findMany({
-          where: { minStock: { not: null } },
+          where: { deletedAt: null, minStock: { not: null } },
           select: { currentStock: true, minStock: true },
         })
         .then(
@@ -176,6 +198,7 @@ export class DashboardService {
 
       // --- Recent activity ---------------------------------------------------
       this.prisma.assetHistory.findMany({
+        where: { asset: { is: { deletedAt: null } } },
         orderBy: { id: 'desc' },
         take: RECENT_ACTIVITY_LIMIT,
         select: {
@@ -281,7 +304,7 @@ export class DashboardService {
         SELECT ${ACTIVITY_SELECT_COLUMNS}
         ${ACTIVITY_FROM}
         ${where}
-        ORDER BY ra."occurredAt" DESC
+        ${ACTIVITY_ORDER_BY}
         LIMIT ${take} OFFSET ${skip}
       `),
       // The COUNT carries the SAME LEFT JOIN + WHERE so a `q` over the actor name counts identically
@@ -325,7 +348,7 @@ export class DashboardService {
         SELECT ${ACTIVITY_SELECT_COLUMNS}
         ${ACTIVITY_FROM}
         ${where}
-        ORDER BY ra."occurredAt" DESC
+        ${ACTIVITY_ORDER_BY}
         LIMIT ${ACTIVITY_EXPORT_BATCH_SIZE} OFFSET ${offset}
       `);
       if (rows.length === 0) break;

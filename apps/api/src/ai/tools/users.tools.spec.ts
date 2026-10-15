@@ -448,6 +448,8 @@ const prisma = {
       return Promise.resolve(data);
     }),
   },
+  // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
+  $executeRaw: jest.fn().mockResolvedValue(0),
   /** Array form (reads) or an interactive transaction: all or nothing over the in-memory tables. */
   $transaction: jest.fn(async (arg: unknown): Promise<unknown> => {
     if (Array.isArray(arg)) return Promise.all(arg);

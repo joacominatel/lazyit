@@ -209,6 +209,8 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       secretAuditLog: { createMany: jest.fn() },
+      // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
+      $executeRaw: jest.fn().mockResolvedValue(0),
     };
     prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) =>
       Promise.resolve(fn(prisma)),

@@ -80,4 +80,31 @@ describe('DashboardService.streamActivityCsvRows (bulk filtered export, issue #8
       ACTIVITY_EXPORT_BATCH_SIZE,
     );
   });
+
+  it('orders every batch with the deterministic tiebreak, so tied rows never repeat or vanish across batches (AUD-032)', async () => {
+    const queryRaw = jest.fn().mockResolvedValue([]);
+    const prisma = { $queryRaw: queryRaw } as unknown as PrismaService;
+    const service = new DashboardService(prisma);
+
+    await collect(service.streamActivityCsvRows({}));
+
+    type Node = { strings: readonly string[]; values: readonly unknown[] };
+    const isNode = (v: unknown): v is Node =>
+      typeof v === 'object' && v !== null && 'strings' in v && 'values' in v;
+    const render = (node: Node): string =>
+      node.strings
+        .map((chunk, i) => {
+          if (i >= node.values.length) return chunk;
+          const value = node.values[i];
+          return chunk + (isNode(value) ? render(value) : '?');
+        })
+        .join('');
+    const text = render((queryRaw.mock.calls as Array<[Node]>)[0][0]).replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(text).toContain(
+      'ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action", ra."targetUserId", ra."actorId", ra."summary"',
+    );
+  });
 });

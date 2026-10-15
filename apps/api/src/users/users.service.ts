@@ -264,9 +264,10 @@ export class UsersService {
    *     ../access-grants/access-grants.service AccessGrant}s (`revokedAt: null`, ADR-0023).
    *
    * Each count is one Prisma `groupBy` by `userId` over the WHOLE page's ids (`userId IN (<page>)`),
-   * filtered to the ACTIVE lifecycle (released/revoked rows are excluded). Both joins are append-only
-   * (no `deletedAt`), so there is no soft-delete filter to apply here. A user with no rows is absent
-   * from its groupBy result and defaults to `0`. An empty page skips both queries entirely.
+   * filtered to the ACTIVE lifecycle (released/revoked rows are excluded) on a LIVE parent. Archiving an
+   * asset or application leaves its open join rows in place, and the soft-delete extension never scopes a
+   * relation filter (ADR-0032), so the parent's `deletedAt: null` is spelled out here. A user with no rows
+   * is absent from its groupBy result and defaults to `0`. An empty page skips both queries entirely.
    */
   private async attachActivityCounts(
     rows: SerializedUser[],
@@ -281,12 +282,20 @@ export class UsersService {
     const [assetGroups, grantGroups] = await Promise.all([
       this.prisma.assetAssignment.groupBy({
         by: ['userId'],
-        where: { userId: { in: userIds }, releasedAt: null },
+        where: {
+          userId: { in: userIds },
+          releasedAt: null,
+          asset: { is: { deletedAt: null } },
+        },
         _count: { _all: true },
       }),
       this.prisma.accessGrant.groupBy({
         by: ['userId'],
-        where: { userId: { in: userIds }, revokedAt: null },
+        where: {
+          userId: { in: userIds },
+          revokedAt: null,
+          application: { is: { deletedAt: null } },
+        },
         _count: { _all: true },
       }),
     ]);
@@ -589,8 +598,8 @@ export class UsersService {
     // import session via `createdPayload`), sync search, and return. `externalId` stays null (SEC-006);
     // `role` is VIEWER (forced above).
     if (opts?.directoryOnly) {
-      const directoryUser = await this.prisma.user.create({
-        data: {
+      const directoryUser = await this.createWithHistory(
+        {
           ...createData,
           directoryOnly: true,
           ...(opts.directorySource !== undefined
@@ -603,11 +612,6 @@ export class UsersService {
             ? { directoryAttrs: opts.directoryAttrs }
             : {}),
         },
-      });
-      await this.recordHistory(
-        this.prisma,
-        directoryUser.id,
-        'CREATED',
         actorId,
         opts.createdPayload,
       );
@@ -627,11 +631,8 @@ export class UsersService {
             })),
           }
         : createData;
-      const localUser = await this.prisma.user.create({ data: localData });
-      await this.recordHistory(
-        this.prisma,
-        localUser.id,
-        'CREATED',
+      const localUser = await this.createWithHistory(
+        localData,
         actorId,
         opts?.createdPayload,
       );
@@ -645,17 +646,33 @@ export class UsersService {
       );
     }
     // The person signs in through the IdP; JIT links `externalId` on first sign-in (ADR-0038).
-    const user = await this.prisma.user.create({ data: createData });
-    await this.recordHistory(
-      this.prisma,
-      user.id,
-      'CREATED',
+    const user = await this.createWithHistory(
+      createData,
       actorId,
       opts?.createdPayload,
     );
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('users', projectUser(user));
     return this.serializeUser(user);
+  }
+
+  /** Insert a user and its CREATED history row in one transaction (ADR-0033, ADR-0050). */
+  private createWithHistory(
+    data: Prisma.UserUncheckedCreateInput,
+    actorId: string | undefined,
+    createdPayload: Prisma.InputJsonValue | undefined,
+  ): Promise<User> {
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({ data });
+      await this.recordHistory(
+        tx,
+        created.id,
+        'CREATED',
+        actorId,
+        createdPayload,
+      );
+      return created;
+    });
   }
 
   /**
@@ -809,15 +826,10 @@ export class UsersService {
     // no administrator and no way to recover from the UI (409). Both a demotion away from ADMIN and a
     // deactivation do that: an inactive account cannot authenticate (JwtAuthGuard), so disabling the
     // only active ADMIN — including yourself — bricks administration exactly like demoting it (SEC-021).
-    // Demoting or deactivating any other admin is fine.
+    // Demoting or deactivating any other admin is fine. The check runs inside the write transaction
+    // below, against the target as it stands under the admin-set lock (see assertNotLastAdmin).
     const deactivating = data.isActive === false && current.isActive;
-    const demotingAdmin =
-      current.role === 'ADMIN' &&
-      data.role !== undefined &&
-      data.role !== 'ADMIN';
-    if (demotingAdmin || (deactivating && current.role === 'ADMIN')) {
-      await this.assertNotLastAdmin(id);
-    }
+    const demoting = data.role !== undefined && data.role !== 'ADMIN';
 
     const roleChanged = data.role !== undefined && data.role !== current.role;
     // A field only counts as CHANGED when it is present AND differs from the stored value — so a PATCH
@@ -855,37 +867,13 @@ export class UsersService {
     // schema); they pass through. `manager` is voided so the rest-destructure isn't flagged unused.
     const { manager, ...scalarData } = data;
     void manager;
-    // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
-    // account, but without the epoch bump a later REACTIVATION would revive every token minted before it —
-    // including a "keep me signed in" token that never expires by time. Harmless outside local mode.
-    const user = await this.prisma.user.update({
-      where: { id },
-      data: {
-        ...scalarData,
-        ...(managerWrite ?? {}),
-        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
-        ...(deactivating
-          ? {
-              sessionEpoch: { increment: 1 },
-              mcpCredentialEpoch: { increment: 1 },
-              // A stale sync stamp would let the directory sync undo this deactivation (#1311).
-              directoryOffboardedAt: null,
-              directoryReenabledAt: null,
-            }
-          : {}),
-        // The directory sync must not undo an admin's re-enable while the person stays absent (#1522).
-        ...(reactivating ? { directoryReenabledAt: new Date() } : {}),
-      },
-    });
-
     // Emit UserHistory (DEBT-2, issue #185) for what changed. An activation flip, a role change, a
     // manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
     // DEACTIVATED / REACTIVATED has no payload; a ROLE_CHANGED carries { from, to }; a MANAGER_CHANGED
     // carries { from, to } where each side is a user-id | external-name | null; an UPDATED carries which
-    // fields changed — name / email / legajo / username). Atomic in one transaction with the durable final
-    // state (ADR-0033). Every route into here — the web UI, the API and an AI tool call (which dispatches
-    // to this same PATCH route) — lands on this one emitter, so the AI path is stamped with its
-    // `aiInvocationId` by UserHistoryService (ADR-0097 decision 11).
+    // fields changed — name / email / legajo / username). Every route into here — the web UI, the API and
+    // an AI tool call (which dispatches to this same PATCH route) — lands on this one emitter, so the AI
+    // path is stamped with its `aiInvocationId` by UserHistoryService (ADR-0097 decision 11).
     // Activation and the local identifiers (legajo / username) are recorded the same way (issue #1375).
     const identifierFields = [
       ...(legajoChanged ? (['legajo'] as const) : []),
@@ -896,43 +884,70 @@ export class UsersService {
       ...(emailChanged ? (['email'] as const) : []),
       ...identifierFields,
     ];
-    if (
-      roleChanged ||
-      managerChanged ||
-      updatedFields.length > 0 ||
-      deactivating ||
-      reactivating
-    ) {
-      await this.prisma.$transaction(async (tx) => {
-        if (deactivating || reactivating) {
-          await this.recordHistory(
-            tx,
-            id,
-            deactivating ? 'DEACTIVATED' : 'REACTIVATED',
-            actorId,
-          );
-        }
-        if (roleChanged) {
-          await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
-            from: current.role,
-            to: data.role!,
-          });
-        }
-        if (managerChanged) {
-          // { from, to }: each side is the manager-user-id, the external-name string, or null (ADR-0058).
-          await this.recordHistory(tx, id, 'MANAGER_CHANGED', actorId, {
-            from: current.managerId ?? current.managerName ?? null,
-            to: managerWrite.managerId ?? managerWrite.managerName ?? null,
-          });
-        }
-        if (updatedFields.length > 0) {
-          await this.recordHistory(tx, id, 'UPDATED', actorId, {
-            // WHICH fields changed, never the old/new values.
-            fields: updatedFields,
-          });
-        }
+
+    // The last-admin check, the row write and its history rows commit together (ADR-0033): a change is
+    // never live without its audit row, and the guard's count cannot go stale before the write.
+    const user = await this.prisma.$transaction(async (tx) => {
+      if (demoting || data.isActive === false) {
+        await this.assertNotLastAdmin(
+          tx,
+          id,
+          (target) =>
+            target.role === 'ADMIN' &&
+            (demoting || (data.isActive === false && target.isActive)),
+        );
+      }
+      // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
+      // account, but without the epoch bump a later REACTIVATION would revive every token minted before
+      // it — including a "keep me signed in" token that never expires by time. Harmless outside local mode.
+      const updated = await tx.user.update({
+        where: { id },
+        data: {
+          ...scalarData,
+          ...(managerWrite ?? {}),
+          // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+          ...(deactivating
+            ? {
+                sessionEpoch: { increment: 1 },
+                mcpCredentialEpoch: { increment: 1 },
+                // A stale sync stamp would let the directory sync undo this deactivation (#1311).
+                directoryOffboardedAt: null,
+                directoryReenabledAt: null,
+              }
+            : {}),
+          // The directory sync must not undo an admin's re-enable while the person stays absent (#1522).
+          ...(reactivating ? { directoryReenabledAt: new Date() } : {}),
+        },
       });
-    }
+      if (deactivating || reactivating) {
+        await this.recordHistory(
+          tx,
+          id,
+          deactivating ? 'DEACTIVATED' : 'REACTIVATED',
+          actorId,
+        );
+      }
+      if (roleChanged) {
+        await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
+          from: current.role,
+          to: data.role!,
+        });
+      }
+      if (managerChanged) {
+        // { from, to }: each side is the manager-user-id, the external-name string, or null (ADR-0058).
+        await this.recordHistory(tx, id, 'MANAGER_CHANGED', actorId, {
+          from: current.managerId ?? current.managerName ?? null,
+          to: managerWrite.managerId ?? managerWrite.managerName ?? null,
+        });
+      }
+      if (updatedFields.length > 0) {
+        await this.recordHistory(tx, id, 'UPDATED', actorId, {
+          // WHICH fields changed, never the old/new values.
+          fields: updatedFields,
+        });
+      }
+      return updated;
+    });
 
     this.search.upsert('users', projectUser(user));
     return this.serializeUser(user);
@@ -1036,26 +1051,23 @@ export class UsersService {
       // reset immediately invalidates a possibly-compromised session (ADR-0086 §3 revocation).
       // `revokeSessions` is deliberately NOT honoured here: this path REPLACES passwordHash, so a
       // surviving session would be holding a credential that no longer exists. Revocation is unconditional.
-      await this.prisma.user.update({
-        where: { id },
-        data: {
-          ...credential,
-          sessionEpoch: { increment: 1 },
-          // The MCP connections die with the replaced credential too (ADR-0097 decision 8, amended).
-          mcpCredentialEpoch: { increment: 1 },
-        },
+      // The append-only PASSWORD_RESET_BY_ADMIN row (ADR-0086 §5 / decision G) commits with the credential
+      // change; no plaintext is ever recorded (the payload carries nothing sensitive).
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id },
+          data: {
+            ...credential,
+            sessionEpoch: { increment: 1 },
+            // The MCP connections die with the replaced credential too (ADR-0097 decision 8, amended).
+            mcpCredentialEpoch: { increment: 1 },
+          },
+        });
+        await this.recordHistory(tx, id, 'PASSWORD_RESET_BY_ADMIN', actorId);
       });
       this.logCredentialChange('resetPasswordByAdmin', actorId, id, {
         local: true,
       });
-      // Append-only audit (ADR-0086 §5 / decision G): PASSWORD_RESET_BY_ADMIN, actor + subject. No
-      // plaintext is ever recorded (the payload carries nothing sensitive).
-      await this.recordHistory(
-        this.prisma,
-        id,
-        'PASSWORD_RESET_BY_ADMIN',
-        actorId,
-      );
       return {
         delivery: 'temporary-password',
         temporaryPassword,
@@ -1115,31 +1127,28 @@ export class UsersService {
     // subject's live sessions are still legitimately theirs — killing them is a deliberate "I think this
     // account is compromised" act, not a side effect of helping someone back in.
     const sessionsRevoked = options.revokeSessions === true;
-    if (sessionsRevoked) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        // A deliberate "this account may be compromised" act: the MCP connections go too (ADR-0097
-        // decision 8, amended 2026-09-24).
-        data: {
-          sessionEpoch: { increment: 1 },
-          mcpCredentialEpoch: { increment: 1 },
-        },
-      });
-    }
+    // Append-only audit: PASSWORD_RESET_SENT ("a reset link went out"), actor = admin, subject = user,
+    // committed with the opt-in revocation. Written only AFTER a successful send, so a 409/503 never
+    // records a reset that did not happen. No raw token, no plaintext.
+    await this.prisma.$transaction(async (tx) => {
+      if (sessionsRevoked) {
+        await tx.user.update({
+          where: { id: user.id },
+          // A deliberate "this account may be compromised" act: the MCP connections go too (ADR-0097
+          // decision 8, amended 2026-09-24).
+          data: {
+            sessionEpoch: { increment: 1 },
+            mcpCredentialEpoch: { increment: 1 },
+          },
+        });
+      }
+      await this.recordHistory(tx, user.id, 'PASSWORD_RESET_SENT', actorId);
+    });
 
     this.logCredentialChange('resetPasswordLinkByAdmin', actorId, user.id, {
       local: true,
       sessionsRevoked,
     });
-    // Append-only audit: PASSWORD_RESET_SENT (the existing event type — the OIDC branch already emits it
-    // for the same meaning: "a reset link went out"), actor = admin, subject = user. Written only AFTER a
-    // successful send, so a 409/503 never records a reset that did not happen. No raw token, no plaintext.
-    await this.recordHistory(
-      this.prisma,
-      user.id,
-      'PASSWORD_RESET_SENT',
-      actorId,
-    );
 
     return {
       delivery: 'email',
@@ -1197,27 +1206,46 @@ export class UsersService {
    * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
    * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
    * administrable. The single definition of "usable admin" — the 409 guard below and the directory-sync
-   * offboard skip (ADR-0091) both call it, so the count is never duplicated.
+   * offboard skip (ADR-0091) both call it, so the count is never duplicated. `client` lets the guard
+   * count inside its own write transaction.
    */
-  async hasAnotherActiveAdmin(userId: string): Promise<boolean> {
-    const otherAdmins = await this.prisma.user.count({
+  async hasAnotherActiveAdmin(
+    userId: string,
+    client: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
+  ): Promise<boolean> {
+    const otherAdmins = await client.user.count({
       where: { role: 'ADMIN', isActive: true, id: { not: userId } },
     });
     return otherAdmins > 0;
   }
 
   /**
-   * Throws 409 Conflict if `userId` is the only remaining usable ADMIN. Used before any action that
-   * would remove their administrator powers (role demotion, deactivation, offboarding, delete), so a
+   * Throws 409 Conflict if `userId` is the only remaining usable ADMIN and `removesAdminPowers` says the
+   * change strips their administrator powers (role demotion, deactivation, offboarding, delete), so a
    * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
    * admins only: the read filter already excludes soft-deleted users, and `isActive: true` excludes
-   * deactivated ones, since neither can authenticate to administer anything (SEC-021). The
-   * check-then-act window is acceptable for a 5–20-person single-org tool: the worst case is two
-   * near-simultaneous demotions both passing, which is the same class of race ADR-0040 already accepts
-   * for first-user-ADMIN, and strictly safer than locking everyone out.
+   * deactivated ones, since neither can authenticate to administer anything (SEC-021).
+   *
+   * Runs inside the caller's write transaction, after taking one transaction-scoped advisory lock on the
+   * admin set (AUD-041), and judges the target as it stands under that lock. Two admins demoting or
+   * offboarding each other at once therefore serialise: the second waits for the first to commit,
+   * re-counts, and gets the 409 instead of leaving zero admins.
    */
-  private async assertNotLastAdmin(userId: string) {
-    if (!(await this.hasAnotherActiveAdmin(userId))) {
+  private async assertNotLastAdmin(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    removesAdminPowers: (target: { role: Role; isActive: boolean }) => boolean,
+  ) {
+    // $executeRaw, not $queryRaw: pg_advisory_xact_lock returns void (see AccessGrantsService).
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'lazyit.admin_set'}))`;
+    const target = await tx.user.findFirst({
+      where: { id: userId },
+      select: { role: true, isActive: true },
+    });
+    if (!target || !removesAdminPowers(target)) {
+      return;
+    }
+    if (!(await this.hasAnotherActiveAdmin(userId, tx))) {
       throw new ConflictException(
         'Cannot remove the last administrator. Promote another user to ADMIN first.',
       );
@@ -1254,17 +1282,15 @@ export class UsersService {
     id: string,
     actor: ActorAttribution = {},
   ): Promise<OffboardResult> {
-    const target = await this.findOne(id); // 404 if missing or already soft-deleted
-
-    // Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
-    // the instance with no administrator (409). Offboarding a non-last admin, or any non-admin, is
-    // fine. Mirrors the role-demotion guard in update().
-    if (target.role === 'ADMIN') {
-      await this.assertNotLastAdmin(id);
-    }
+    await this.findOne(id); // 404 if missing or already soft-deleted
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0. Last-admin safety guard (ADR-0040): offboarding/deleting the only remaining ADMIN would leave
+      // the instance with no administrator (409). Offboarding a non-last admin, or any non-admin, is
+      // fine. Mirrors the role-demotion guard in update(), and runs under the same admin-set lock.
+      await this.assertNotLastAdmin(tx, id, (t) => t.role === 'ADMIN');
+
       // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
       // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).
       const { count: revokedGrants } = await tx.accessGrant.updateMany({

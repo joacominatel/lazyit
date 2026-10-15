@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-09-26
+updated: 2026-10-14
 ---
 
 # RecentActivity
@@ -90,8 +90,10 @@ query is `RecentActivityQuerySchema` (the optional filters intersected with the 
 
 `GET /dashboard/activity` — gated on **`logs:read`** (issue #181), paginated (offset, default 50;
 the web requests ~20), newest first, read with a typed `$queryRaw` in
-`DashboardService.getActivity`. The web renders it as the dashboard's "Recent activity" panel via the
-data layer ([[0020-frontend-data-layer]]): `useDashboardActivity` (infinite query) →
+`DashboardService.getActivity`. Rows sharing one `occurredAt` (a batch operation stamps a single instant
+on many rows) are ordered by `entityType`, `entityId`, `action`, `targetUserId`, `actorId` and `summary`,
+so OFFSET pages and the CSV export batches never repeat or drop a tied row. The web renders it as the
+dashboard's "Recent activity" panel via the data layer ([[0020-frontend-data-layer]]): `useDashboardActivity` (infinite query) →
 `RecentActivityPanel`, and the Reports/Informes screen.
 
 ### Filters (issue #181 / DEBT-1)
