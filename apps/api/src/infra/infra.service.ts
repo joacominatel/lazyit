@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import {
   agentReportSkewPaths,
-  CONTAINER_ID_SEPARATOR,
   containerExternalId,
   containerExternalIdPrefix,
   containerNodeStatus,
@@ -19,7 +18,6 @@ import {
   disambiguateExternalId,
   guestExternalId,
   guestExternalIdPrefix,
-  GUEST_ID_SEPARATOR,
   guestNodeKind,
   guestNodeStatus,
   hostIdentityEvidence,
@@ -98,6 +96,7 @@ import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { AgentPolicyService } from './agent-policy.service';
+import { infraNodeRoleWhere } from './infra-node-role';
 
 /**
  * The 400 a RE-POINT gets (#1117) — `PATCH /infra/nodes/:id` with an `assetId` on a node that already
@@ -474,23 +473,6 @@ export type LegacyInfraNodeFilters = Pick<
   InfraNodeFilters,
   'kind' | 'status' | 'state'
 >;
-
-/** Child identity is namespaced in `externalId`; it is deliberately independent of node `kind`. */
-const INFRA_CHILD_IDENTITY_WHERE = {
-  OR: [
-    { externalId: { contains: CONTAINER_ID_SEPARATOR } },
-    { externalId: { contains: GUEST_ID_SEPARATOR } },
-  ],
-} satisfies Prisma.InfraNodeWhereInput;
-
-function infraNodeRoleWhere(
-  role: InfraNodeListRole,
-): Prisma.InfraNodeWhereInput {
-  if (role === 'CHILD') return INFRA_CHILD_IDENTITY_WHERE;
-  return {
-    OR: [{ externalId: null }, { NOT: INFRA_CHILD_IDENTITY_WHERE }],
-  };
-}
 
 /**
  * Sortable fields for `GET /infra/nodes/page` (ADR-0030 §1) — public `?sort=` key → Prisma column. An

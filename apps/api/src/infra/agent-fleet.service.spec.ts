@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { AGENT_FLEET_IDENTITY_LIMIT } from '@lazyit/shared';
+import {
+  AGENT_FLEET_IDENTITY_LIMIT,
+  CONTAINER_ID_SEPARATOR,
+  GUEST_ID_SEPARATOR,
+} from '@lazyit/shared';
 import { AgentFleetService } from './agent-fleet.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
@@ -51,6 +55,21 @@ const servicePrincipal = (...permissions: string[]) =>
     serviceAccount: { id: 'sa-caller' },
     permissions: new Set(permissions),
   }) as never;
+
+const AGENT_HOST_WHERE = {
+  source: 'AGENT',
+  OR: [
+    { externalId: null },
+    {
+      NOT: {
+        OR: [
+          { externalId: { contains: CONTAINER_ID_SEPARATOR } },
+          { externalId: { contains: GUEST_ID_SEPARATOR } },
+        ],
+      },
+    },
+  ],
+};
 
 describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
   let service: AgentFleetService;
@@ -116,17 +135,15 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
   // ── what the read is scoped to ─────────────────────────────────────────────
 
   describe('scope', () => {
-    it('reads AGENT hosts only, and never a CONTAINER child', async () => {
+    it('reads AGENT hosts only, never a container or VM guest child (AUD-057)', async () => {
       service = await build();
 
       await service.getFleet();
 
-      // A container is stamped with its HOST's agentVersion on every report (#1139) — counting one
-      // would inflate every bucket by however many containers a host happens to run.
-      expect(nodeArgs().where).toMatchObject({
-        source: 'AGENT',
-        kind: { not: 'CONTAINER' },
-      });
+      // Children are stamped with their HOST's agentVersion on every report (#1139, ADR-0095): one
+      // Proxmox host with 40 guests must read as ONE agent, not 41. A qemu guest is kind VM like a
+      // real VM host, so the exclusion is keyed on the child namespace, never on `kind`.
+      expect(nodeArgs().where).toEqual(AGENT_HOST_WHERE);
     });
 
     it('never selects `specs` — the blob stays in the database (#1135)', async () => {
@@ -606,6 +623,17 @@ describe('AgentFleetService (ADR-0094 §4, #1206)', () => {
       service = await build('v2.0.0');
 
       expect(await service.countAgentsMajorBehind()).toBe(0);
+    });
+
+    it('counts agent hosts only — hypervisor guests never inflate the email (AUD-057)', async () => {
+      service = await build();
+
+      await service.countAgentsMajorBehind();
+
+      expect(nodeArgs().where).toEqual({
+        ...AGENT_HOST_WHERE,
+        agentVersion: { not: null },
+      });
     });
 
     it('never reads `specs` or a credential — it is a scalar count on a mail path', async () => {
