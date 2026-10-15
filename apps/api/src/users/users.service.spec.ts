@@ -49,7 +49,14 @@ type PrismaUserMock = {
 // `userHistory.create` is present so the structural UserHistoryWriter type is satisfied when the real
 // service threads the tx client; the emission itself is asserted via the mocked UserHistoryService.
 type TxMock = {
-  user: { update: jest.Mock };
+  user: {
+    update: jest.Mock;
+    create: jest.Mock;
+    count: jest.Mock;
+    findFirst: jest.Mock;
+  };
+  // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
+  $executeRaw: jest.Mock;
   accessGrant: { updateMany: jest.Mock; create: jest.Mock };
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
@@ -100,6 +107,7 @@ describe('UsersService', () => {
   // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads,
   // and the #386 list-count tests can prime / inspect the per-page `groupBy` aggregations).
   let prismaMock: {
+    $transaction: jest.Mock;
     assetAssignment: { findMany: jest.Mock; groupBy: jest.Mock };
     accessGrant: { findMany: jest.Mock; groupBy: jest.Mock };
     asset: { findMany: jest.Mock };
@@ -129,7 +137,13 @@ describe('UsersService', () => {
       // test configured on `user.update`. Offboard tests override this with their own mockResolvedValue.
       user: {
         update: jest.fn((args: unknown) => user.update(args) as unknown),
+        // create, count and the guard's re-read run through the tx too (AUD-019, AUD-041); they
+        // delegate the same way.
+        create: jest.fn((args: unknown) => user.create(args) as unknown),
+        count: jest.fn((args: unknown) => user.count(args) as unknown),
+        findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
       },
+      $executeRaw: jest.fn().mockResolvedValue(0),
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
@@ -305,9 +319,11 @@ describe('UsersService', () => {
     });
     expect(search.remove).not.toHaveBeenCalled();
 
-    // DEBT-2 (issue #185): a CREATED UserHistory row, with no actor (anonymous create → {}).
+    // DEBT-2 (issue #185): a CREATED UserHistory row, with no actor (anonymous create → {}), written on
+    // the same transaction client as the insert (AUD-019).
     expect(history.record).toHaveBeenCalledTimes(1);
-    expect(history.record).toHaveBeenCalledWith(prismaMock, {
+    expect(tx.user.create).toHaveBeenCalledTimes(1);
+    expect(history.record).toHaveBeenCalledWith(tx, {
       userId: 'uuid-1',
       eventType: 'CREATED',
       actor: {},
@@ -481,9 +497,9 @@ describe('UsersService', () => {
           directoryAttrs: { jobTitle: 'Tech' },
         },
       });
-      // The CREATED history row is emitted on the base client with the import provenance payload,
-      // attributed to the actor.
-      expect(history.record).toHaveBeenCalledWith(prismaMock, {
+      // The CREATED history row is emitted on the insert's transaction client with the import provenance
+      // payload, attributed to the actor.
+      expect(history.record).toHaveBeenCalledWith(tx, {
         userId: 'uuid-dir',
         eventType: 'CREATED',
         payload: { source: 'import', sessionId: 's1', rowIndex: 0 },
@@ -1449,6 +1465,161 @@ describe('UsersService', () => {
         expect(tx.user.update).not.toHaveBeenCalled();
       });
     });
+
+    it('writes the role change and its ROLE_CHANGED row in ONE transaction (AUD-019)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'member-1',
+        role: 'MEMBER',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'member-1', role: 'ADMIN' });
+
+      await service.update('member-1', { role: 'ADMIN' }, 'actor-99');
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+      expect(history.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ eventType: 'ROLE_CHANGED' }),
+      );
+    });
+
+    // AUD-041: two admins removing each other at the same moment. A tiny in-memory "database" stands in
+    // for Postgres: the advisory lock is held until its transaction settles, and every read yields once
+    // so the two requests interleave the way concurrent HTTP requests do.
+    describe('concurrent removal of the last two admins (AUD-041)', () => {
+      type Row = { role: string; isActive: boolean; deletedAt: Date | null };
+      let rows: Record<string, Row>;
+      const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+      beforeEach(() => {
+        rows = {
+          'admin-a': { role: 'ADMIN', isActive: true, deletedAt: null },
+          'admin-b': { role: 'ADMIN', isActive: true, deletedAt: null },
+        };
+        user.findFirst.mockImplementation(
+          async ({ where }: { where: { id: string } }) => {
+            await tick();
+            return { id: where.id, ...rows[where.id] };
+          },
+        );
+        user.count.mockImplementation(
+          async ({
+            where,
+          }: {
+            where: { role: string; isActive: boolean; id: { not: string } };
+          }) => {
+            await tick();
+            return Object.entries(rows).filter(
+              ([id, r]) =>
+                id !== where.id.not &&
+                r.role === where.role &&
+                r.isActive === where.isActive &&
+                r.deletedAt === null,
+            ).length;
+          },
+        );
+        user.update.mockImplementation(
+          async ({
+            where,
+            data,
+          }: {
+            where: { id: string };
+            data: Partial<Row>;
+          }) => {
+            await tick();
+            const row = rows[where.id];
+            if (typeof data.role === 'string') row.role = data.role;
+            if (typeof data.isActive === 'boolean')
+              row.isActive = data.isActive;
+            if (data.deletedAt instanceof Date) row.deletedAt = data.deletedAt;
+            return { id: where.id, ...row };
+          },
+        );
+        let held: Promise<void> = Promise.resolve();
+        prismaMock.$transaction.mockImplementation(
+          async (fn: (client: TxMock) => Promise<unknown>) => {
+            let release: () => void = () => undefined;
+            const client: TxMock = {
+              ...tx,
+              $executeRaw: jest.fn(async () => {
+                const previous = held;
+                held = new Promise<void>((resolve) => (release = resolve));
+                await previous;
+                return 0;
+              }),
+            };
+            try {
+              return await fn(client);
+            } finally {
+              release();
+            }
+          },
+        );
+      });
+
+      const liveAdmins = () =>
+        Object.values(rows).filter(
+          (r) => r.role === 'ADMIN' && r.isActive && r.deletedAt === null,
+        ).length;
+
+      it('two admins demoting each other: one succeeds, the other gets 409', async () => {
+        const results = await Promise.allSettled([
+          service.update('admin-a', { role: 'MEMBER' }, 'admin-b'),
+          service.update('admin-b', { role: 'MEMBER' }, 'admin-a'),
+        ]);
+
+        expect(results.map((r) => r.status).sort()).toEqual([
+          'fulfilled',
+          'rejected',
+        ]);
+        const rejected = results.find((r) => r.status === 'rejected');
+        expect(rejected?.reason).toBeInstanceOf(ConflictException);
+        expect(liveAdmins()).toBe(1);
+      });
+
+      it('one admin offboarding the other while being deactivated: one ADMIN remains', async () => {
+        const results = await Promise.allSettled([
+          service.remove('admin-a', { userId: 'admin-b' }),
+          service.update('admin-b', { isActive: false }, 'admin-a'),
+        ]);
+
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+        expect(liveAdmins()).toBe(1);
+      });
+    });
+
+    it('judges the target as it stands under the lock, not the earlier read (AUD-041)', async () => {
+      // Read as a MEMBER before the transaction, promoted to the only ADMIN before the lock is granted.
+      user.findFirst
+        .mockResolvedValueOnce({ id: 'u-1', role: 'MEMBER', isActive: true })
+        .mockResolvedValue({ id: 'u-1', role: 'ADMIN', isActive: true });
+      user.count.mockResolvedValue(0);
+
+      await expect(
+        service.update('u-1', { role: 'VIEWER' }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('takes the admin-set lock before counting, inside the write transaction (AUD-041)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'admin-1',
+        role: 'ADMIN',
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
+
+      await service.update('admin-1', { role: 'MEMBER' }, 'actor-99');
+
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.user.count.mock.invocationCallOrder[0],
+      );
+      expect(tx.user.count.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.user.update.mock.invocationCallOrder[0],
+      );
+    });
   });
 
   describe('serializeUser — UI preferences (issue #1422)', () => {
@@ -2154,9 +2325,11 @@ describe('UsersService', () => {
           sessionsRevoked: true,
         });
         // NO IdP call in local mode.
-        // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject.
+        // Append-only audit: PASSWORD_RESET_BY_ADMIN, actor + subject, committed with the credential
+        // change in one transaction (AUD-019).
+        expect(tx.user.update).toHaveBeenCalledTimes(1);
         expect(history.record).toHaveBeenCalledWith(
-          expect.anything(),
+          tx,
           expect.objectContaining({
             userId: 'user-1',
             eventType: 'PASSWORD_RESET_BY_ADMIN',
@@ -2282,6 +2455,12 @@ describe('UsersService', () => {
             },
           });
           expect(result).toMatchObject({ sessionsRevoked: true });
+          // The revocation and its PASSWORD_RESET_SENT row commit together (AUD-019).
+          expect(tx.user.update).toHaveBeenCalledTimes(1);
+          expect(history.record).toHaveBeenCalledWith(
+            tx,
+            expect.objectContaining({ eventType: 'PASSWORD_RESET_SENT' }),
+          );
         });
 
         it.each([
