@@ -41,7 +41,8 @@ already has some, the dialog shows what they already hold so you can decide inte
 From an application's **Active access** list, you can **edit** a grant to change its **expiry** or
 **notes**. The grant itself — who, which application, and the access level — is intentionally
 fixed. To change the **access level**, revoke the grant and create a new one; that keeps the
-history honest about what was held and when.
+history honest about what was held and when. The expiry can't be earlier than the date the grant was
+made.
 
 ## Revoking access
 

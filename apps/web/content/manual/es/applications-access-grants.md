@@ -41,7 +41,8 @@ que ya tiene alguno, el cuadro de diálogo muestra lo que ya posee para que deci
 Desde el listado de **Acceso activo** de una aplicación puedes **editar** una concesión para
 cambiar su **vencimiento** o sus **notas**. La concesión en sí — quién, qué aplicación y el nivel
 de acceso — es intencionalmente fija. Para cambiar el **nivel de acceso**, revoca la concesión y
-crea una nueva; así el historial mantiene la verdad sobre qué se tuvo y cuándo.
+crea una nueva; así el historial mantiene la verdad sobre qué se tuvo y cuándo. El vencimiento no
+puede ser anterior a la fecha en que se otorgó la concesión.
 
 ## Revocar acceso
 

@@ -150,6 +150,7 @@
     "editSubmit": "Guardar cambios",
     "updatedToast": "Concesión actualizada",
     "updateError": "No se pudo actualizar la concesión",
+    "expiryBeforeGranted": "El vencimiento no puede ser anterior al momento en que se otorgó el acceso. Elige una fecha posterior.",
     "revokeTitle": "¿Revocar acceso?",
     "revokeDescriptionPrefix": "Revoca esta concesión de ",
     "revokeDescriptionLevel": " ({level})",
