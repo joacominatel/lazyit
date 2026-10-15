@@ -2176,9 +2176,16 @@ describe('ArticlesService', () => {
   // --- wiki-links: rebuild on save (ADR-0059 §3) ---------------------------
 
   describe('forward [[slug]] references resolve when the slug appears (AUD-101)', () => {
+    // Links follow the slug: an edge still cached on a soft-deleted holder is taken over too.
     const resolvesTo = (slug: string, id: string) =>
       expect(articleWikiLink.updateMany).toHaveBeenCalledWith({
-        where: { targetSlug: slug, resolvedTargetId: null },
+        where: {
+          targetSlug: slug,
+          OR: [
+            { resolvedTargetId: null },
+            { resolvedTarget: { is: { deletedAt: { not: null } } } },
+          ],
+        },
         data: { resolvedTargetId: id },
       });
 

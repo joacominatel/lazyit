@@ -41,6 +41,7 @@ import {
   type VisibleFolders,
 } from '../article-categories/folder-access.service';
 import { expandFolderSubtrees } from '../article-categories/folder-tree';
+import { claimableWikiLinksWhere } from './wiki-link-claim';
 
 /**
  * Listing filters for GET /articles. The `categoryId`, `status` and `linkedTo` filters are
@@ -1409,14 +1410,14 @@ export class ArticlesService {
     });
   }
 
-  /** Forward `[[slug]]` references written before this article took the slug resolve now (ADR-0059 §3). */
+  /** `[[slug]]` references left unresolved or on a soft-deleted holder resolve to this article now (ADR-0059 §3). */
   private async resolveInboundWikiLinks(
     tx: Prisma.TransactionClient,
     slug: string,
     articleId: string,
   ): Promise<void> {
     await tx.articleWikiLink.updateMany({
-      where: { targetSlug: slug, resolvedTargetId: null },
+      where: claimableWikiLinksWhere(slug),
       data: { resolvedTargetId: articleId },
     });
   }
