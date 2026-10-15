@@ -2146,6 +2146,87 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
     });
   });
 
+  describe('audit 2026-10-10 (AUD-078): an archived connection in the saved graph does not block the card', () => {
+    const archive = (id: string) => {
+      connections.get(id)!.deletedAt = new Date('2026-09-02T00:00:00.000Z');
+    };
+    const MISSING_REST = `(connection ${CONN.rest}: archived or not readable)`;
+
+    it('authoring a replacement version shows the old step as archived, and saves', async () => {
+      archive(CONN.rest);
+      const { id, preview } = await propose('workflow_author_version', {
+        workflow: { id: WF.jiraGrant },
+        steps: [
+          {
+            kind: 'WEBHOOK_OUT',
+            key: 'notify',
+            connectionId: CONN.hook,
+            dataMapping: { who: '{{ grantee.email }}' },
+          },
+        ],
+      });
+      expect(change(preview, 'outboundHosts')).toMatchObject({
+        before: [MISSING_REST],
+        after: ['https://hooks.jira.example'],
+      });
+      expect((await tools.approve(id, chat(ADMIN))).status).toBe('SUCCEEDED');
+      expect(versions).toHaveLength(2);
+    });
+
+    it('a new version that calls an archived connection is still refused before the card', async () => {
+      archive(CONN.rest);
+      expect(
+        await refused('workflow_author_version', {
+          workflow: { id: WF.jiraGrant },
+          steps: REST_STEPS,
+        }),
+      ).toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('enabling a workflow whose graph calls an archived connection reaches the dry-run card', async () => {
+      archive(CONN.rest);
+      const { preview } = await propose('workflow_set_enabled', {
+        workflow: { id: WF.jiraGrant },
+        enabled: true,
+        sampleAccessGrantId: GRANT_ANA,
+      });
+      expect(change(preview, 'outboundHosts')!.after).toEqual([MISSING_REST]);
+    });
+
+    it('re-pointing a connection used next to an archived one lists what is sent to the new host', async () => {
+      workflows.get(WF.jiraGrant)!.enabled = true;
+      versions.push({
+        id: '2',
+        workflowId: WF.jiraGrant,
+        version: 2,
+        steps: [
+          ...REST_STEPS,
+          {
+            kind: 'WEBHOOK_OUT',
+            key: 'notify',
+            connectionId: CONN.hook,
+            dataMapping: { who: '{{ grantee.email }}' },
+          },
+        ],
+        createdById: ID.admin,
+        createdBySaId: null,
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+      });
+      archive(CONN.rest);
+      const { preview } = await propose('workflow_connection_update', {
+        connection: CONN.hook,
+        config: { kind: 'WEBHOOK_OUT', url: 'https://new-hooks.example/in' },
+      });
+      expect(change(preview, 'dataSentToNewHost')!.after).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "who ← {{ grantee.email }} (the person's email)",
+          ),
+        ]),
+      );
+    });
+  });
+
   describe('workflow_update and workflow_archive', () => {
     it('update: before → after, the trigger warning; `enabled` is not a field of it', async () => {
       const { id, preview } = await propose('workflow_update', {

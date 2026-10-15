@@ -564,17 +564,30 @@ async function readConnection(rt: AiToolRuntime, id: string): Promise<Row> {
   );
 }
 
-/** The connections a set of steps calls, by id — read once each. */
+/**
+ * The connections a set of steps calls, by id — read once each. A graph already saved may call a
+ * connection archived since (the archive is allowed): with `saved`, a 403 or 404 marks it `missing`
+ * instead of failing the card, as `workflows.tools.ts` does (AUD-078). A new graph stays strict.
+ */
 async function readStepConnections(
   rt: AiToolRuntime,
   steps: readonly WorkflowStep[],
+  saved = false,
 ): Promise<Map<string, Row>> {
   const ids = new Set<string>();
   for (const step of steps) {
     if (step.kind !== 'MANUAL') ids.add(step.connectionId);
   }
   const out = new Map<string, Row>();
-  for (const id of ids) out.set(id, await readConnection(rt, id));
+  for (const id of ids) {
+    try {
+      out.set(id, await readConnection(rt, id));
+    } catch (err) {
+      const status = err instanceof HttpException ? err.getStatus() : undefined;
+      if (!saved || (status !== 403 && status !== 404)) throw err;
+      out.set(id, { id, missing: true });
+    }
+  }
   return out;
 }
 
@@ -640,7 +653,10 @@ function describeGraph(
     const connection = connections.get(step.connectionId) ?? {};
     const config = asRow(connection.config);
     const endpoint = endpointOf(config);
-    const origin = originOf(endpoint) ?? '(unknown destination)';
+    const origin =
+      connection.missing === true
+        ? `(connection ${step.connectionId}: archived or not readable)`
+        : (originOf(endpoint) ?? '(unknown destination)');
     if (!hosts.includes(origin)) hosts.push(origin);
     if (endpoint) urls.push(endpoint);
     const target =
@@ -1075,7 +1091,11 @@ const workflowAuthorVersion = defineTool({
     assertKnownTokens(input.steps);
     const next = describeGraph(input.steps, connections);
     for (const url of next.urls) await assertEgressAllowed(url);
-    const previousConnections = await readStepConnections(rt, state.steps);
+    const previousConnections = await readStepConnections(
+      rt,
+      state.steps,
+      true,
+    );
     const previous = describeGraph(state.steps, previousConnections);
 
     const enabled = workflow.enabled === true;
@@ -1306,7 +1326,7 @@ const workflowSetEnabled = defineTool({
         'The workflow has no steps yet: save them with workflow_author_version before enabling it.',
       );
     }
-    const connections = await readStepConnections(rt, state.steps);
+    const connections = await readStepConnections(rt, state.steps, true);
     const graph = describeGraph(state.steps, connections);
     for (const url of graph.urls) await assertEgressAllowed(url);
     // The dry-run route: a real sample grant, no external call, no rows written, secrets as placeholders.
@@ -1774,7 +1794,7 @@ const connectionUpdate = defineTool({
       if (user.workflow.enabled !== true) continue;
       warnings.add(triggerWarning(user.workflow.trigger));
       if (!repoint) continue;
-      const stepConnections = await readStepConnections(rt, user.steps);
+      const stepConnections = await readStepConnections(rt, user.steps, true);
       for (const other of stepConnections.values())
         anchors.push(other.updatedAt);
       stepConnections.set(String(connection.id), {
