@@ -74,6 +74,29 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** The personal email-preferences page every notification recipient can reach (#879). */
+export const NOTIFICATION_EMAIL_PREFERENCES_PATH = '/account/notifications';
+
+/** Recipients are not necessarily admins, so a notification footer points at the per-user opt-out. */
+function emailFooter(
+  kind: 'notification' | 'smtp-test',
+  appUrl: string | null,
+  brandName: string,
+): { text: string; link: string | null } {
+  if (kind === 'smtp-test') {
+    return {
+      text: `This test was sent from Settings → Email in your ${brandName} instance.`,
+      link: null,
+    };
+  }
+  return {
+    text: `You are receiving this because notification emails are enabled for your ${brandName} account. Choose which notifications reach your inbox under Notification emails in your user menu.`,
+    link: appUrl
+      ? `${appUrl.replace(/\/+$/, '')}${NOTIFICATION_EMAIL_PREFERENCES_PATH}`
+      : null,
+  };
+}
+
 /**
  * Render the ONE branded notification email (the Ledger/lazyit look — oxblood accent rule, plain type).
  * Subject = the notification title; body = title + optional summary + a single "View in lazyit" link to
@@ -89,13 +112,16 @@ export function renderNotificationEmail(input: {
   summary: string | null;
   appUrl: string | null;
   brandName: string;
+  kind?: 'notification' | 'smtp-test';
 }): RenderedEmail {
   const { title, summary, appUrl, brandName } = input;
+  const footer = emailFooter(input.kind ?? 'notification', appUrl, brandName);
   const subject = title;
   const textParts = [title];
   if (summary) textParts.push('', summary);
   if (appUrl) textParts.push('', `View in ${brandName}: ${appUrl}`);
-  textParts.push('', `— ${brandName}`);
+  textParts.push('', `— ${brandName}`, '', footer.text);
+  if (footer.link) textParts.push(footer.link);
   const text = textParts.join('\n');
 
   const safeTitle = escapeHtml(title);
@@ -111,7 +137,7 @@ export function renderNotificationEmail(input: {
       ${safeSummary ? `<p style="margin:12px 0 0;font-size:15px;line-height:1.5;color:#44403c">${safeSummary}</p>` : ''}
       ${cta}
     </div>
-    <p style="margin:20px 4px 0;font-size:12px;color:#a8a29e">You are receiving this because you administer this ${escapeHtml(brandName)} instance. Manage outbound email under Settings → Instance → SMTP.</p>
+    <p style="margin:20px 4px 0;font-size:12px;color:#a8a29e">${escapeHtml(footer.text)}${footer.link ? ` <a href="${escapeHtml(footer.link)}" style="color:#a8a29e">Manage notification emails</a>` : ''}</p>
   </div>
 </body></html>`;
 

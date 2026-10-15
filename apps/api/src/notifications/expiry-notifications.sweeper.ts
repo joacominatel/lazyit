@@ -36,11 +36,11 @@ export const ACCESS_GRANT_EXPIRING_NOTIFY_WITHIN_DAYS = 14;
 /**
  * ponytail: bounded batch per pass per type so a large backlog (e.g. the first sweep after enabling this,
  * or a bulk import of assets all warrantied to the same month) never stampedes the notification table in
- * one tick — each pass takes at most this many of each type and the next day picks up the rest (deduped
- * rows are cheap no-ops, so the backlog only ever shrinks). A const, not an env knob: it only shapes
- * per-pass load. Raise it if a real backlog is ever observed to drain too slowly.
+ * one tick. Each pass walks the window soonest-expiry first, skips items that already have their dedupe
+ * row, and emits at most this many NEW notices per type; the next pass picks up the rest, so the backlog
+ * only ever shrinks. A const, not an env knob: it only shapes per-pass load. Also the page size.
  */
-const EXPIRY_NOTIFY_BATCH = 200;
+export const EXPIRY_NOTIFY_BATCH = 200;
 
 /** A `YYYY-MM-DD` day stamp for the dedupe key — collapses the daily re-scan to ONE row per date. */
 function dayStamp(date: Date): string {
@@ -160,30 +160,35 @@ export class ExpiryNotificationsSweeper
     );
     // The EXACT dashboard window (#955): live assets whose warranty ends within N days and hasn't lapsed.
     // Soft-deleted assets are auto-excluded by the ADR-0032 extension; a null warrantyEnd never matches.
-    const assets = await this.prisma.asset.findMany({
-      where: { warrantyEnd: { gt: now, lte: cutoff } },
-      select: { id: true, name: true, assetTag: true, warrantyEnd: true },
-      take: EXPIRY_NOTIFY_BATCH,
-    });
-    let emitted = 0;
-    for (const asset of assets) {
+    return this.emitUnnotified(
+      (skip, take) =>
+        this.prisma.asset.findMany({
+          where: { warrantyEnd: { gt: now, lte: cutoff } },
+          select: { id: true, name: true, assetTag: true, warrantyEnd: true },
+          orderBy: [{ warrantyEnd: 'asc' }, { id: 'asc' }],
+          skip,
+          take,
+        }),
       // warrantyEnd is non-null here (the WHERE guarantees it), but narrow defensively for the type.
-      if (!asset.warrantyEnd) continue;
-      const date = dayStamp(asset.warrantyEnd);
-      const tag = asset.assetTag ? ` (${asset.assetTag})` : '';
-      const id = await this.notifications.emit({
-        type: 'warranty_expiring',
-        dedupeKey: `warranty_expiring:${asset.id}:${date}`,
-        title: `Warranty expiring: ${asset.name}`,
-        summary: `${asset.name}${tag} warranty ends ${date}.`,
-        entityType: 'asset',
-        entityId: asset.id,
-        // Broadcast (recipientUserId omitted): the admin feed is who renews/replaces hardware.
-        metadata: { assetName: asset.name, warrantyEnd: date },
-      });
-      if (id) emitted += 1;
-    }
-    return emitted;
+      (asset) =>
+        asset.warrantyEnd
+          ? `warranty_expiring:${asset.id}:${dayStamp(asset.warrantyEnd)}`
+          : null,
+      (asset, dedupeKey) => {
+        const date = dayStamp(asset.warrantyEnd as Date);
+        const tag = asset.assetTag ? ` (${asset.assetTag})` : '';
+        return this.notifications.emit({
+          type: 'warranty_expiring',
+          dedupeKey,
+          title: `Warranty expiring: ${asset.name}`,
+          summary: `${asset.name}${tag} warranty ends ${date}.`,
+          entityType: 'asset',
+          entityId: asset.id,
+          // Broadcast (recipientUserId omitted): the admin feed is who renews/replaces hardware.
+          metadata: { assetName: asset.name, warrantyEnd: date },
+        });
+      },
+    );
   }
 
   /** Emit `access_grant_expiring` (broadcast, about the grantee) for grants entering the 14-day window. */
@@ -192,39 +197,80 @@ export class ExpiryNotificationsSweeper
       now.getTime() + ACCESS_GRANT_EXPIRING_NOTIFY_WITHIN_DAYS * MS_PER_DAY,
     );
     // The EXACT dashboard window (expiringSoon): active grants (revokedAt null) whose expiresAt is within
-    // N days and hasn't passed. The related Application is auto-soft-delete-filtered by the extension.
-    const grants = await this.prisma.accessGrant.findMany({
-      where: {
-        revokedAt: null,
-        expiresAt: { gt: now, lte: cutoff },
+    // N days and hasn't passed. The soft-delete extension does not filter nested relations, hence the
+    // explicit parent filters.
+    return this.emitUnnotified(
+      (skip, take) =>
+        this.prisma.accessGrant.findMany({
+          where: {
+            revokedAt: null,
+            expiresAt: { gt: now, lte: cutoff },
+            application: { deletedAt: null },
+            user: { deletedAt: null },
+          },
+          select: {
+            id: true,
+            userId: true,
+            expiresAt: true,
+            application: { select: { id: true, name: true } },
+            user: { select: { firstName: true, lastName: true } },
+          },
+          orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
+          skip,
+          take,
+        }),
+      (grant) =>
+        grant.expiresAt
+          ? `access_grant_expiring:${grant.id}:${dayStamp(grant.expiresAt)}`
+          : null,
+      (grant, dedupeKey) => {
+        const date = dayStamp(grant.expiresAt as Date);
+        const who = `${grant.user.firstName} ${grant.user.lastName}`.trim();
+        const app = grant.application.name;
+        return this.notifications.emit({
+          type: 'access_grant_expiring',
+          dedupeKey,
+          title: `Access expiring: ${app}`,
+          summary: `${who}'s access to ${app} expires ${date} and will be auto-revoked.`,
+          entityType: 'application',
+          entityId: grant.application.id,
+          // The grantee — a secondary click-through + the "about whom" subject (broadcast, admin-facing).
+          targetUserId: grant.userId,
+          metadata: { granteeName: who, applicationName: app, expiresAt: date },
+        });
       },
-      select: {
-        id: true,
-        userId: true,
-        expiresAt: true,
-        application: { select: { id: true, name: true } },
-        user: { select: { firstName: true, lastName: true } },
-      },
-      take: EXPIRY_NOTIFY_BATCH,
-    });
+    );
+  }
+
+  /** Skips already-notified items before emitting, so the per-pass cap always reaches new ones. */
+  private async emitUnnotified<T>(
+    loadPage: (skip: number, take: number) => Promise<T[]>,
+    dedupeKeyOf: (item: T) => string | null,
+    emitFor: (item: T, dedupeKey: string) => Promise<string | null>,
+  ): Promise<number> {
+    let skip = 0;
+    let attempted = 0;
     let emitted = 0;
-    for (const grant of grants) {
-      if (!grant.expiresAt) continue;
-      const date = dayStamp(grant.expiresAt);
-      const who = `${grant.user.firstName} ${grant.user.lastName}`.trim();
-      const app = grant.application.name;
-      const id = await this.notifications.emit({
-        type: 'access_grant_expiring',
-        dedupeKey: `access_grant_expiring:${grant.id}:${date}`,
-        title: `Access expiring: ${app}`,
-        summary: `${who}'s access to ${app} expires ${date} and will be auto-revoked.`,
-        entityType: 'application',
-        entityId: grant.application.id,
-        // The grantee — a secondary click-through + the "about whom" subject (broadcast, admin-facing).
-        targetUserId: grant.userId,
-        metadata: { granteeName: who, applicationName: app, expiresAt: date },
+    while (attempted < EXPIRY_NOTIFY_BATCH) {
+      const page = await loadPage(skip, EXPIRY_NOTIFY_BATCH);
+      if (page.length === 0) break;
+      skip += page.length;
+      const keyed = page.flatMap((item) => {
+        const dedupeKey = dedupeKeyOf(item);
+        return dedupeKey ? [{ item, dedupeKey }] : [];
       });
-      if (id) emitted += 1;
+      const existing = await this.prisma.notification.findMany({
+        where: { dedupeKey: { in: keyed.map((k) => k.dedupeKey) } },
+        select: { dedupeKey: true },
+      });
+      const notified = new Set(existing.map((n) => n.dedupeKey));
+      for (const { item, dedupeKey } of keyed) {
+        if (notified.has(dedupeKey)) continue;
+        if (attempted >= EXPIRY_NOTIFY_BATCH) break;
+        attempted += 1;
+        if (await emitFor(item, dedupeKey)) emitted += 1;
+      }
+      if (page.length < EXPIRY_NOTIFY_BATCH) break;
     }
     return emitted;
   }

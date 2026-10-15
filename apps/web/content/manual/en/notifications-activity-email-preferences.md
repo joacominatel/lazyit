@@ -55,3 +55,5 @@ know exactly what turning it off will silence. For the full trigger list, see th
   email copy.
 - New notification types added in a future release start **on** (opted in) so you never miss a new
   signal by surprise; turn any of them off here if you prefer.
+- Every notification email ends with a short footer that points back to this page, so you always know
+  where to turn a type off.

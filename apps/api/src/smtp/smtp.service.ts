@@ -173,6 +173,7 @@ export class SmtpService {
           'If you are reading this, your outbound email settings are working.',
         appUrl: process.env.WEB_ORIGIN ?? null,
         brandName: 'lazyit',
+        kind: 'smtp-test',
       });
       const transporter = buildTransport(config);
       await transporter.sendMail({

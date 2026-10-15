@@ -23,8 +23,8 @@ export const HEALTH_REDIS = Symbol('HEALTH_REDIS');
 /** A `ping` that connects but stalls must still fail within this window (ms) — a wedged broker reads as down. */
 export const HEALTH_PING_TIMEOUT_MS = 1_000;
 
-/** Minimum gap between throttled probe-error logs (ms). Longer than the queue's: the probe is informational. */
-export const HEALTH_REDIS_ERROR_LOG_THROTTLE_MS = 30_000;
+/** Minimum gap between throttled probe-error logs (ms). The probe reconnects for as long as Valkey is down. */
+export const HEALTH_REDIS_ERROR_LOG_THROTTLE_MS = 60_000;
 
 /** The narrow surface {@link HealthService} needs — so tests inject a plain `{ ping }` stub, no socket. */
 export interface HealthRedisClient {
@@ -40,8 +40,8 @@ export type HealthRedisClientFactory = (
 /**
  * ioredis options for the probe connection. FAIL FAST (`enableOfflineQueue: false`) so a ping rejects
  * immediately when the broker is unreachable instead of buffering; `commandTimeout` bounds a connected
- * but wedged broker; a BOUNDED `retryStrategy` (shared with the queue client) means reconnection is
- * finite — never an infinite ECONNREFUSED loop.
+ * but wedged broker; the capped `retryStrategy` (shared with the queue client) keeps reconnecting, so the
+ * probe recovers on its own after a Valkey restart.
  */
 export function healthRedisOptions(): RedisOptions {
   return {
