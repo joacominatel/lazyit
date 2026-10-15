@@ -208,6 +208,13 @@ describe("resolveSort — per-resource allowlist", () => {
       expect((err as UnknownSortFieldError).allowed).toEqual(["name", "updated"]);
     }
   });
+
+  test.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])(
+    "an inherited Object.prototype key (%s) is unknown, not a sort field",
+    (sort) => {
+      expect(() => resolveSort({ sort, dir: "asc" }, allow)).toThrow(UnknownSortFieldError);
+    },
+  );
 });
 
 describe("offsetOf", () => {

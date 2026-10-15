@@ -36,7 +36,8 @@ import {
  *      for a future per-connector internal-target allowlist. localhost / 127.0.0.1 / ::1 and the IMDS
  *      address are NEVER allowlistable.
  *
- * This module has NO consumer yet (Phase 0). It is not wired into any route or service.
+ * LIVE for every outbound call: workflow REST / WEBHOOK_OUT and connection tests, OAuth CIMD fetches, AI
+ * providers — a change to this file or ip-rules.ts changes what all of them can reach.
  */
 
 /**
@@ -409,8 +410,6 @@ function normalizeHeaders(init?: HeadersInit): Record<string, string> {
  * REST `HEADER`-scheme custom credential header and the `WEBHOOK_OUT` HMAC signature header), keeping
  * only a tiny non-credential safelist, AND we drop the request body — so a `307`/`308` cannot replay
  * a signed PII payload, and no admin-named credential header is ever sent to a different origin.
- *
- * NOTE: this is the substrate-independent primitive only — it is NOT wired into any route/service yet.
  */
 export async function guardedFetch(
   input: string | URL,
@@ -424,10 +423,7 @@ export async function guardedFetch(
   let method = (init.method ?? 'GET').toUpperCase();
   const headers = normalizeHeaders(init.headers ?? undefined);
   let body = (init.body ?? undefined) as
-    | string
-    | Uint8Array
-    | Buffer
-    | undefined;
+    string | Uint8Array | Buffer | undefined;
   let redirectsLeft = maxRedirects;
 
   for (;;) {

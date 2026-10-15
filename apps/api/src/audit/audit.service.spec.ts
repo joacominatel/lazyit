@@ -300,6 +300,58 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
   });
 });
 
+describe('AuditService.streamLogsCsvRows — live table (AUD-033)', () => {
+  it('emits every row exactly once while newer rows are appended mid-export', async () => {
+    const prisma = makePrisma();
+    const total = AuditService.EXPORT_BATCH_SIZE * 2 + 5;
+    let table = Array.from({ length: total }, (_, i) => ({
+      id: i + 1,
+      action: 'ITEM_REVEALED',
+      actorId: null,
+      serviceAccountId: null,
+      vaultId: null,
+      itemId: `item-${i + 1}`,
+      targetUserId: null,
+      targetServiceAccountId: null,
+      createdAt: new Date('2026-06-30T10:00:00.000Z'),
+    }));
+    // A newest-first table that grows by three rows after every batch read, honouring skip/take/id.lt.
+    prisma.secretAuditLog.findMany.mockImplementation(
+      (args: {
+        where?: { id?: { lt: number } };
+        take: number;
+        skip?: number;
+      }) => {
+        const lt = args.where?.id?.lt ?? Infinity;
+        const page = [...table]
+          .sort((a, b) => b.id - a.id)
+          .filter((r) => r.id < lt)
+          .slice(args.skip ?? 0, (args.skip ?? 0) + args.take);
+        const next = table.length + 1;
+        table = table.concat(
+          [0, 1, 2].map((k) => ({
+            ...table[0],
+            id: next + k,
+            itemId: `item-${next + k}`,
+          })),
+        );
+        return Promise.resolve(page);
+      },
+    );
+
+    let csv = '';
+    for await (const chunk of svc(prisma).streamLogsCsvRows({
+      source: 'secret',
+    } as never)) {
+      csv += chunk;
+    }
+
+    const exported = csv.match(/item-\d+/g) ?? [];
+    expect(new Set(exported).size).toBe(exported.length);
+    expect(exported).toHaveLength(total);
+  });
+});
+
 describe('AuditController — logs:read gate', () => {
   it('declares logs:read on every audit endpoint', () => {
     // Access via a cast record so referencing the handlers doesn't trip the unbound-method rule.

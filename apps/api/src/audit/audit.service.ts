@@ -39,12 +39,8 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Rows per round-trip when STREAMING the full filtered export. Mirrors the dashboard's export batch:
-   * a bounded skip/take loop over the source's list so the whole range never sits in memory at once.
-   *
-   * ponytail: OFFSET/LIMIT batching (like the dashboard). CEILING: deep OFFSET is O(offset) per page;
-   * fine for an admin audit dump, and unlike the `recent_activity` UNION view these are real tables
-   * with a stable autoincrement `id`, so a keyset cursor is a clean future upgrade if ever needed.
+   * Rows per round-trip when STREAMING the full filtered export: a bounded keyset loop over the
+   * source's list, so the whole range never sits in memory at once.
    */
   static readonly EXPORT_BATCH_SIZE = 1000;
 
@@ -67,20 +63,21 @@ export class AuditService {
     yield `${provenanceStampLine()}\n`;
     yield `${AUDIT_LOG_CSV_HEADER}\n`;
 
-    let offset = 0;
+    // Keyset, not OFFSET: a row appended mid-export would shift every later page (AUD-033).
+    let beforeId: number | undefined;
     for (;;) {
       const [rows] = await this.readPage(
         filters,
         AuditService.EXPORT_BATCH_SIZE,
-        offset,
-        { withCount: false },
+        0,
+        { withCount: false, beforeId },
       );
       if (rows.length === 0) break;
 
       const items = await this.resolveRows(filters.source, rows);
       yield `${items.map(auditLogCsvRow).join('\n')}\n`;
 
-      offset += rows.length;
+      beforeId = rows[rows.length - 1].id;
       // A short batch means the source is exhausted — stop without an extra empty round-trip.
       if (rows.length < AuditService.EXPORT_BATCH_SIZE) break;
     }
@@ -116,24 +113,27 @@ export class AuditService {
 
   /**
    * Read one window of the chosen source into the common {@link RawAuditRow} shape, plus the FILTERED
-   * total (page read) — both under one snapshot so the count can't drift from the page. `withCount:
-   * false` (the export) skips the count. Each branch selects METADATA columns only; the secret branch
-   * NEVER selects `ciphertext`/`iv`/`authTag` (there are none on the audit row anyway — belt + braces).
+   * total (page read) in the same transaction. `withCount: false` (the export) skips the count, and
+   * `beforeId` narrows the window to rows older than that id (the export's keyset cursor). Each branch
+   * selects METADATA columns only; the secret branch NEVER selects `ciphertext`/`iv`/`authTag` (there
+   * are none on the audit row anyway — belt + braces).
    */
   private async readPage(
     filters: AuditLogFilters,
     take: number,
     skip: number,
-    opts: { withCount?: boolean } = {},
+    opts: { withCount?: boolean; beforeId?: number } = {},
   ): Promise<[RawAuditRow[], number]> {
     const withCount = opts.withCount ?? true;
+    const idBound =
+      opts.beforeId === undefined ? {} : { id: { lt: opts.beforeId } };
     // Newest first by the append-only autoincrement id — a stable, collision-free order (unlike a
     // shared-millisecond createdAt).
     const orderBy = { id: 'desc' as const };
 
     switch (filters.source) {
       case 'secret': {
-        const where = this.secretWhere(filters);
+        const where = { ...this.secretWhere(filters), ...idBound };
         const [rows, total] = await this.prisma.$transaction([
           this.prisma.secretAuditLog.findMany({
             where,
@@ -159,7 +159,7 @@ export class AuditService {
         return [rows.map(rawFromSecret), withCount ? total : 0];
       }
       case 'permission': {
-        const where = this.permissionWhere(filters);
+        const where = { ...this.permissionWhere(filters), ...idBound };
         const [rows, total] = await this.prisma.$transaction([
           this.prisma.permissionAuditLog.findMany({
             where,
@@ -182,7 +182,7 @@ export class AuditService {
         return [rows.map(rawFromPermission), withCount ? total : 0];
       }
       case 'serviceAccount': {
-        const where = this.serviceAccountWhere(filters);
+        const where = { ...this.serviceAccountWhere(filters), ...idBound };
         const [rows, total] = await this.prisma.$transaction([
           this.prisma.serviceAccountAuditLog.findMany({
             where,

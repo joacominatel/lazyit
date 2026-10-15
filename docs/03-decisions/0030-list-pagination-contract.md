@@ -102,7 +102,9 @@ per-resource**, validated against an **ALLOWLIST** by each list endpoint. An unk
 **rejected with 400** (`resolveSort` → `UnknownSortFieldError` → `BadRequestException` via
 `common/resolve-sort.ts`), **never silently ignored** — so a sort always means what it says. The
 allowlist maps each PUBLIC `?sort=` key to the Prisma column (the wire key may differ from the
-column, and the surface is bounded so a client can never order by an arbitrary/secret field).
+column, and the surface is bounded so a client can never order by an arbitrary/secret field). Only the
+allowlist's **own** keys count: an inherited `Object.prototype` name such as `?sort=constructor` is
+an unknown field and a 400 like any other (AUD-067, 2026-10-14).
 
 The asset list's previous client-side, page-local sort (a trust bug — it presented as a global sort
 but only re-ordered the loaded page) is replaced by a **real server-side `orderBy` over the full
@@ -316,6 +318,14 @@ query param whose value is a comma-joined list (`?status=DRAFT,PUBLISHED`). This
 string per filter name** (no repeated-param refactor). **Repeated params** (`?status=A&status=B`,
 which Express/Nest hand the controller as a `string[]`) are **also accepted** by the parse helpers, so
 either client encoding works.
+
+**Single-value params take one value (AUD-066, 2026-10-14).** The repeated form is accepted only where
+the controller declares the param as `string | string[]` (the multi-value filters above). A param
+declared as a scalar `string` (or number / boolean) that arrives repeated (`?q=a&q=b`) is a **400**
+(`Invalid q: expected a single value`), enforced once for every controller by the global
+`SingleValueQueryPipe` (`apps/api/src/common/single-value-query.pipe.ts`, registered in
+`CommonModule`). Before, the array reached string-only code and surfaced as a 500, or as a fake
+`degraded: true` on `/search`.
 
 **Validation — unchanged 400-on-unknown contract, applied per element.** The controller splits on
 `,`, trims, drops empty segments, **de-duplicates** (`in` is set semantics), and validates **each
