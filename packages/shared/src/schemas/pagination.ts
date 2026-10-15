@@ -131,7 +131,10 @@ export function resolveSort<TOrderBy>(
   allowlist: Record<string, string>,
 ): TOrderBy | undefined {
   if (query.sort === undefined) return undefined;
-  const prismaField = allowlist[query.sort];
+  // Own keys only: `?sort=constructor` must not resolve to an inherited Object.prototype member (AUD-067).
+  const prismaField = Object.hasOwn(allowlist, query.sort)
+    ? allowlist[query.sort]
+    : undefined;
   if (prismaField === undefined) {
     throw new UnknownSortFieldError(query.sort, Object.keys(allowlist));
   }
