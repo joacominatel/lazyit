@@ -269,9 +269,8 @@ export class AgentRunOrchestrator {
           );
         }
         // Repair: a run that ended while its step could not be answered leaves it open; answer it before
-        // the new user message so the history stays valid for the provider. Under the lock and only with
-        // no active run (an active run's open step is the one its approvals are waiting on), so a
-        // finalize racing this submission cannot answer the same step twice.
+        // the new user message so the history stays valid for the provider. (Only with no active run: an
+        // active run's open step is the one its approvals are waiting on.)
         await this.lifecycle
           .answerOpenStep(conversation.id, null, undefined, tx)
           .catch((err) => {
