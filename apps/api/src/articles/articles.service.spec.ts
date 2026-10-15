@@ -118,6 +118,7 @@ describe('ArticlesService', () => {
   let asset: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
   let prisma: { $transaction: jest.Mock };
+  let queryRaw: jest.Mock;
   // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: ActorService;
@@ -189,7 +190,18 @@ describe('ArticlesService', () => {
     //   - interactive callback form (create/update/publish/unpublish/import): invoke the callback
     //     with a `tx` exposing the same model mocks, so the snapshot write hits articleVersion and
     //     the wiki-link rebuild hits articleWikiLink (ADR-0059 §3).
-    const tx = { article, articleVersion, articleLink, articleWikiLink };
+    // `$queryRaw` is the folder row lock (AUD-023); `articleCategory` is the re-check under it.
+    queryRaw = jest.fn().mockResolvedValue([]);
+    const tx = {
+      article,
+      articleVersion,
+      articleLink,
+      articleWikiLink,
+      $queryRaw: queryRaw,
+      get articleCategory() {
+        return articleCategory;
+      },
+    };
     prisma = {
       $transaction: jest.fn(
         (
@@ -1057,6 +1069,73 @@ describe('ArticlesService', () => {
   // (ADR-0060 §1), so `PATCH /articles/:id` with a `categoryId` is an AUTHORIZATION write. Moving
   // INTO a folder the actor cannot read is refused; moving OUT of a restricted folder into a more
   // permissive one stays allowed by decision (the widening is confirmed in the UI, not blocked).
+  describe('a folder deleted mid-write cannot take the article (AUD-023)', () => {
+    // The pre-transaction check passes; the folder is soft-deleted before the transaction locks it.
+    const deletedBeforeLock = () =>
+      articleCategory.findFirst
+        .mockResolvedValueOnce({ id: 'c1' })
+        .mockResolvedValueOnce(null);
+
+    it('create locks the folder FOR SHARE and re-checks it is live inside the transaction', async () => {
+      await service.create(
+        { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+        AUTHOR_PRINCIPAL,
+      );
+      const [sql, id] = queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        string,
+      ];
+      expect(sql.join('?')).toMatch(/FOR SHARE/);
+      expect(id).toBe('c1');
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        article.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create is refused with the usual 400 when the folder is gone under the lock', async () => {
+      deletedBeforeLock();
+      await expect(
+        service.create(
+          { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+          AUTHOR_PRINCIPAL,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.create).not.toHaveBeenCalled();
+    });
+
+    it('a move is refused with the usual 400 when the destination is gone under the lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      deletedBeforeLock();
+      await expect(
+        service.update('a', { categoryId: 'dest' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.update).not.toHaveBeenCalled();
+      expect(queryRaw.mock.calls[0]).toContain('dest');
+    });
+
+    it('an edit that does not move the article takes no folder lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      await service.update('a', { title: 'New' }, AUTHOR_PRINCIPAL);
+      expect(queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
   describe('article move — folder destination guard (ADR-0060 §9, #1296)', () => {
     const inFolder = (categoryId: string, authorId = AUTHOR) => ({
       id: 'a',

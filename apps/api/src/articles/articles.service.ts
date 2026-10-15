@@ -465,6 +465,7 @@ export class ArticlesService {
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
     const article = await this.prisma.$transaction(async (tx) => {
+      await this.lockLiveFolder(tx, data.categoryId);
       const created = await tx.article.create({
         data: {
           slug,
@@ -526,6 +527,9 @@ export class ArticlesService {
     }
     const { metadata, ...rest } = data;
     const article = await this.prisma.$transaction(async (tx) => {
+      if (data.categoryId && data.categoryId !== current.categoryId) {
+        await this.lockLiveFolder(tx, data.categoryId);
+      }
       const updated = await tx.article.update({
         where: { id },
         data: {
@@ -1289,6 +1293,21 @@ export class ArticlesService {
       select: { id: true },
     });
     if (!category) {
+      throw this.unusableCategory(categoryId);
+    }
+  }
+
+  // A folder delete holds FOR UPDATE on its rows, so this waits it out and the re-read then sees it gone.
+  private async lockLiveFolder(
+    tx: Prisma.TransactionClient,
+    categoryId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT "id" FROM "article_categories" WHERE "id" = ${categoryId} FOR SHARE`;
+    const live = await tx.articleCategory.findFirst({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!live) {
       throw this.unusableCategory(categoryId);
     }
   }
