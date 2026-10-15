@@ -74,8 +74,7 @@ export interface AttachmentIngestPrisma {
       };
     }): Promise<{ id: string }>;
   };
-  // Optional only because the importer's declared transaction type predates the blob lock; Prisma's has it.
-  $executeRaw?: BlobLockClient['$executeRaw'];
+  $executeRaw: BlobLockClient['$executeRaw'];
 }
 
 /**
@@ -187,7 +186,7 @@ export async function ingestArticleImage(
     await writeFile(tmpPath, reencoded);
     const sha256 = await sha256OfFile(tmpPath);
     // Held until the import transaction commits the row (AUD-021).
-    if (prisma.$executeRaw) await lockBlob(prisma as BlobLockClient, sha256);
+    await lockBlob(prisma, sha256);
     await promoteBlob(tmpPath, sha256);
     const row = await prisma.attachment.create({
       data: {
