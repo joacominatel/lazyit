@@ -3,7 +3,7 @@ title: WorkflowVersion
 tags: [domain, entity, workflow-engine, access, append-only]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-14
 ---
 
 # WorkflowVersion
@@ -73,6 +73,13 @@ collide with a reserved terminal token; every explicit edge resolves to a known 
 *kind* of terminal; and the **effective** graph (after default + legacy resolution) is **acyclic**
 (DFS three-colour cycle detection) — which guarantees the orchestrator's walk **terminates**.
 
+**Templates use only the closed filter set.** Authoring a version (`POST /workflows/:id/versions`)
+rejects with `400` (`unknownTemplateFilters: [{ index, key, filter }]`) any `{{ path | filter }}` in a
+REST path, a data mapping or a MANUAL prompt whose filter is not `upper`, `lower`, `trim` or
+`default`. At render time an unknown filter stays a no-op, so a version authored before this check
+keeps running unchanged. A filter argument may be quoted, and a quoted argument may hold `|` or a
+single `}` (`default:"n|a"`); `}}` still ends the placeholder.
+
 ## Business rules
 
 - **Append-only and immutable.** Rows are written, never updated or deleted — no `updatedAt` /
@@ -119,7 +126,7 @@ A version has **no standalone controller** — it is authored and read through i
 [[application-workflow]] (`apps/api/src/workflow-engine/definitions/`):
 
 - `POST /workflows/:id/versions` — author a new version (the engine allocates `version`, validates the
-  step graph reachability + connection refs, then freezes `steps`). `@RequirePermission('workflow:manage')`.
+  step graph reachability, template filters + connection refs, then freezes `steps`). `@RequirePermission('workflow:manage')`.
 - `GET /workflows/:id` — the workflow detail surfaces the **`latestVersion`** (the active definition).
 - Each [[workflow-run]] pins and replays the exact `workflowVersionId` it executed.
 
