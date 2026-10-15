@@ -278,6 +278,7 @@ export class ImportCommitService {
         // A commit is idempotent (resumable — a re-run skips COMMITTED rows), so a transient infra
         // failure CAN safely retry, unlike the permanent parse failure.
         attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
         // Deterministic jobId = the sessionId: BullMQ dedups by jobId, so two concurrent enqueues for
         // the same session collapse to ONE job (no double-commit / duplicate ImportRun from a fast
         // double-click or a controller retry).
