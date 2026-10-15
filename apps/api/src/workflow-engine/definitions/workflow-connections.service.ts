@@ -131,8 +131,11 @@ export class WorkflowConnectionsService {
   }
 
   /** The raw, UNREDACTED live row — internal only (the patch merge, the probe); never returned. */
-  private async findLive(id: string) {
-    const connection = await this.prisma.workflowConnection.findFirst({
+  private async findLive(
+    id: string,
+    db: Pick<Prisma.TransactionClient, 'workflowConnection'> = this.prisma,
+  ) {
+    const connection = await db.workflowConnection.findFirst({
       where: { id, deletedAt: null },
     });
     if (!connection) {
@@ -161,7 +164,20 @@ export class WorkflowConnectionsService {
     dto: UpdateWorkflowConnectionInput,
     principal?: Principal,
   ) {
-    const connection = await this.findLive(id);
+    return this.prisma.$transaction(async (tx) => {
+      // AUD-017: lock the row so the SoD gate below judges the secretId/config this write replaces.
+      await tx.$queryRaw`SELECT "id" FROM "workflow_connections" WHERE "id" = ${id} FOR UPDATE`;
+      return this.updateLocked(tx, id, dto, principal);
+    });
+  }
+
+  private async updateLocked(
+    tx: Prisma.TransactionClient,
+    id: string,
+    dto: UpdateWorkflowConnectionInput,
+    principal?: Principal,
+  ) {
+    const connection = await this.findLive(id, tx);
     if (dto.config && dto.config.kind !== connection.kind) {
       throw new BadRequestException(
         `config.kind (${dto.config.kind}) must match the connection kind (${connection.kind})`,
@@ -184,7 +200,7 @@ export class WorkflowConnectionsService {
     if (dto.secretId !== undefined && dto.secretId !== null) {
       await this.assertSecretUsable(dto.secretId, connection.applicationId);
     }
-    const updated = await this.prisma.workflowConnection.update({
+    const updated = await tx.workflowConnection.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
