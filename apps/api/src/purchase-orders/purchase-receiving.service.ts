@@ -528,7 +528,6 @@ export class PurchaseReceivingService {
     });
   }
 
-  /** Lock the named asset rows for the transaction, then read the live ones. */
   /** Whether the line's model may be written onto an asset — live, as every asset write requires. */
   private async modelLive(
     client: Tx | PrismaService,
@@ -542,6 +541,7 @@ export class PurchaseReceivingService {
     return model !== null;
   }
 
+  /** Lock the named asset rows for the transaction, then read the live ones. */
   private async lockAssets(
     tx: Tx,
     assetIds: string[],
