@@ -1,4 +1,4 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import type { ImportArticle } from '@lazyit/shared';
 import { ArticleImportService } from './article-import.service';
@@ -20,9 +20,14 @@ jest.mock('../../../generated/prisma/client', () => ({
  * service reacts when the BullMQ/Valkey broker is unreachable.
  */
 
+const HUMAN_ID = '11111111-1111-1111-1111-111111111111';
 const HUMAN: Principal = {
   kind: 'human',
-  user: { id: '11111111-1111-1111-1111-111111111111' },
+  user: { id: HUMAN_ID },
+} as unknown as Principal;
+const OTHER_HUMAN: Principal = {
+  kind: 'human',
+  user: { id: '22222222-2222-2222-2222-222222222222' },
 } as unknown as Principal;
 
 const FIELDS: ImportArticle = {
@@ -69,6 +74,18 @@ describe('ArticleImportService.enqueue — broker reachability (issue #257)', ()
     });
   });
 
+  it('enqueues under an unguessable job id, never the sequential default', async () => {
+    const add = jest.fn().mockResolvedValue({ id: 'job-123' });
+    const service = makeService(add);
+    await service.enqueue(mdFile(), FIELDS, HUMAN);
+    const [[, , opts]] = add.mock.calls as Array<
+      [string, unknown, { jobId?: string }]
+    >;
+    expect(opts.jobId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
   it('translates an offline-queue rejection into a 503 (not a hung 202)', async () => {
     const add = jest
       .fn()
@@ -112,15 +129,70 @@ describe('ArticleImportService.enqueue — broker reachability (issue #257)', ()
   });
 });
 
+describe('ArticleImportService.getStatus — only the importer may poll (AUD-004)', () => {
+  const completedJob = () => ({
+    data: { authorId: HUMAN_ID },
+    getState: jest.fn().mockResolvedValue('completed'),
+    failedReason: undefined,
+    returnvalue: { kind: 'single', articleId: 'art-42' },
+  });
+
+  it('returns the status to the user who started the import', async () => {
+    const service = makeService(
+      jest.fn(),
+      jest.fn().mockResolvedValue(completedJob()),
+    );
+    await expect(service.getStatus('job-1', HUMAN)).resolves.toMatchObject({
+      articleId: 'art-42',
+    });
+  });
+
+  it("404s another user's job, exactly like an unknown id", async () => {
+    const service = makeService(
+      jest.fn(),
+      jest.fn().mockResolvedValue(completedJob()),
+    );
+    await expect(
+      service.getStatus('job-1', OTHER_HUMAN),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('404s a service account and an anonymous caller', async () => {
+    const service = makeService(
+      jest.fn(),
+      jest.fn().mockResolvedValue(completedJob()),
+    );
+    const sa = {
+      kind: 'service',
+      serviceAccount: { id: 'sa_1' },
+      permissions: new Set(),
+    } as unknown as Principal;
+    await expect(service.getStatus('job-1', sa)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.getStatus('job-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('404s an unknown job id', async () => {
+    const service = makeService(jest.fn(), jest.fn().mockResolvedValue(null));
+    await expect(service.getStatus('nope', HUMAN)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
 describe('ArticleImportService.getStatus — stalled job surfacing (issue #257)', () => {
   it('maps a stalled failure to a friendly, retryable message', async () => {
     const getJob = jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
       getState: jest.fn().mockResolvedValue('failed'),
       failedReason: 'job stalled more than allowable limit',
       returnvalue: undefined,
     });
     const service = makeService(jest.fn(), getJob);
-    const status = await service.getStatus('job-1');
+    const status = await service.getStatus('job-1', HUMAN);
     expect(status.state).toBe('failed');
     expect(status.error).toMatch(/timed out/i);
     expect(status.error).not.toContain('stalled'); // never echo the raw reason
@@ -135,14 +207,16 @@ describe('ArticleImportService — .zip bulk import (ADR-0059 §5)', () => {
       jobId: 'zip-job-1',
     });
     // The enqueued payload is tagged kind:'zip' so the worker takes the bulk fan-out path.
-    expect(add.mock.calls[0][1]).toMatchObject({ kind: 'zip' });
+    const [[, data]] = add.mock.calls as Array<[string, { kind?: string }]>;
+    expect(data).toMatchObject({ kind: 'zip' });
   });
 
   it('does NOT tag a single .md as kind:zip', async () => {
     const add = jest.fn().mockResolvedValue({ id: 'md-job-1' });
     const service = makeService(add);
     await service.enqueue(mdFile(), FIELDS, HUMAN);
-    expect(add.mock.calls[0][1].kind).toBeUndefined();
+    const [[, data]] = add.mock.calls as Array<[string, { kind?: string }]>;
+    expect(data.kind).toBeUndefined();
   });
 
   it('rejects an unsupported extension, listing .zip among the supported types', async () => {
@@ -184,12 +258,13 @@ describe('ArticleImportService — .zip bulk import (ADR-0059 §5)', () => {
       linksResolved: 0,
     };
     const getJob = jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
       getState: jest.fn().mockResolvedValue('completed'),
       failedReason: undefined,
       returnvalue: { kind: 'zip', batch },
     });
     const service = makeService(jest.fn(), getJob);
-    const status = await service.getStatus('zip-job-1');
+    const status = await service.getStatus('zip-job-1', HUMAN);
     expect(status.state).toBe('completed');
     expect(status.articleId).toBeNull(); // a bulk import has no single id
     expect(status.batch).toEqual(batch);
@@ -198,37 +273,40 @@ describe('ArticleImportService — .zip bulk import (ADR-0059 §5)', () => {
 
   it('a completed single-file job sets articleId and leaves batch null', async () => {
     const getJob = jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
       getState: jest.fn().mockResolvedValue('completed'),
       failedReason: undefined,
       returnvalue: { kind: 'single', articleId: 'art-42' },
     });
     const service = makeService(jest.fn(), getJob);
-    const status = await service.getStatus('md-job-1');
+    const status = await service.getStatus('md-job-1', HUMAN);
     expect(status.articleId).toBe('art-42');
     expect(status.batch).toBeNull();
   });
 
   it('treats a legacy result without kind as a single-file result (back-compat)', async () => {
     const getJob = jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
       getState: jest.fn().mockResolvedValue('completed'),
       failedReason: undefined,
       returnvalue: { articleId: 'legacy-1' },
     });
     const service = makeService(jest.fn(), getJob);
-    const status = await service.getStatus('legacy-job');
+    const status = await service.getStatus('legacy-job', HUMAN);
     expect(status.articleId).toBe('legacy-1');
     expect(status.batch).toBeNull();
   });
 
   it('maps an over-quota .zip failure to a friendly, permanent message', async () => {
     const getJob = jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
       getState: jest.fn().mockResolvedValue('failed'),
       failedReason:
-        "The archive has 900 entries, over the 500-entry import limit",
+        'The archive has 900 entries, over the 500-entry import limit',
       returnvalue: undefined,
     });
     const service = makeService(jest.fn(), getJob);
-    const status = await service.getStatus('zip-fail');
+    const status = await service.getStatus('zip-fail', HUMAN);
     expect(status.error).toMatch(/too many files|too large/i);
     expect(status.error).not.toContain('500'); // never echo the raw internals
   });

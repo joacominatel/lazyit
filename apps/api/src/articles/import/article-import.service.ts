@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type {
@@ -15,7 +16,11 @@ import type {
   ZipImportResult,
 } from '@lazyit/shared';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isServicePrincipal, type Principal } from '../../auth/principal';
+import {
+  isHumanPrincipal,
+  isServicePrincipal,
+  type Principal,
+} from '../../auth/principal';
 import {
   ALL_IMPORT_EXTENSIONS,
   extensionOf,
@@ -106,6 +111,8 @@ export class ArticleImportService {
     let job;
     try {
       job = await this.queue.add(ARTICLE_IMPORT_JOB_NAME, data, {
+        // BullMQ's default ids are a sequential counter; an unguessable id keeps them unenumerable.
+        jobId: randomUUID(),
         // A parse / bomb failure is PERMANENT — retrying would just kill another child (SEC-002).
         attempts: 1,
         // Keep finished jobs pollable for a while, but bound the set (the queue is transport, not the
@@ -134,11 +141,17 @@ export class ArticleImportService {
    * on a completed `.zip` import `batch` carries the per-item outcome (created/renamed/skipped) while
    * `articleId` stays null (a bulk import has no single id). `error` is a short, PERMANENT-failure
    * message only once failed (never "try again" — a parse/bomb/over-quota failure won't succeed on a
-   * retry). (ADR-0059 §5)
+   * retry). (ADR-0059 §5) Only the importing user may poll a job: anyone else gets the same 404 as an
+   * unknown id, since the result names files, slugs and articles in folders they may not see (INV-9).
    */
-  async getStatus(jobId: string): Promise<ImportJobStatus> {
+  async getStatus(
+    jobId: string,
+    principal?: Principal,
+  ): Promise<ImportJobStatus> {
     const job = await this.queue.getJob(jobId);
-    if (!job) {
+    const callerId = isHumanPrincipal(principal) ? principal.user.id : null;
+    const owner = (job?.data as Partial<ImportJobData> | undefined)?.authorId;
+    if (!job || !callerId || owner !== callerId) {
       throw new NotFoundException(`Import job ${jobId} not found`);
     }
     const state = this.mapState(await job.getState());
