@@ -46,12 +46,12 @@ const RECENT_ACTIVITY_LIMIT = 10;
  * batches over the view so the whole filtered range never sits in memory at once.
  *
  * ponytail: bounded LIMIT/OFFSET loop at 1000 rows/iteration — the laziest strategy that matches the
- * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere`. CEILINGS: (1) deep
- * OFFSET is O(offset) per page, so a multi-hundred-thousand-row export degrades toward the tail (fine
- * for an admin audit dump; a keyset cursor would fix it, but the `recent_activity` UNION-ALL view has
- * no unique stable key — `occurredAt` collides, see #719 — so keyset isn't a one-liner). (2) Not
- * snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window and
- * dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
+ * feed's existing OFFSET pagination and reuses the exact same `buildActivityWhere` and
+ * {@link ACTIVITY_ORDER_BY}. CEILINGS: (1) deep OFFSET is O(offset) per page, so a
+ * multi-hundred-thousand-row export degrades toward the tail (fine for an admin audit dump; a keyset
+ * cursor would fix it, but the `recent_activity` UNION-ALL view exposes no source row id, see #719).
+ * (2) Not snapshot-isolated across batches, so a concurrent insert mid-export can shift the OFFSET window
+ * and dup/skip a boundary row. Acceptable for a "best-effort point-in-time" CSV; tighten only if needed.
  */
 export const ACTIVITY_EXPORT_BATCH_SIZE = 1000;
 
@@ -78,6 +78,19 @@ const ACTIVITY_SELECT_COLUMNS = Prisma.sql`
 const ACTIVITY_FROM = Prisma.sql`
   FROM "recent_activity" ra
   LEFT JOIN "users" u ON u."id" = ra."actorId"
+`;
+
+/**
+ * Newest first, then a fixed order over the columns that tell rows apart (AUD-032). A batch operation
+ * stamps one `occurredAt` on many rows (an offboarding revokes every grant at the same instant), and
+ * Postgres orders ties arbitrarily, so OFFSET pages and export batches could repeat or drop rows at a
+ * boundary. The view has no source row id; every other output column (`actorName`, `subjectName`,
+ * `targetUserName`) is derived from these keys, so rows still tied are byte-identical and their order
+ * cannot change what a page or the CSV shows.
+ */
+const ACTIVITY_ORDER_BY = Prisma.sql`
+  ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action",
+    ra."targetUserId", ra."actorId", ra."summary"
 `;
 
 /**
@@ -291,7 +304,7 @@ export class DashboardService {
         SELECT ${ACTIVITY_SELECT_COLUMNS}
         ${ACTIVITY_FROM}
         ${where}
-        ORDER BY ra."occurredAt" DESC
+        ${ACTIVITY_ORDER_BY}
         LIMIT ${take} OFFSET ${skip}
       `),
       // The COUNT carries the SAME LEFT JOIN + WHERE so a `q` over the actor name counts identically
@@ -335,7 +348,7 @@ export class DashboardService {
         SELECT ${ACTIVITY_SELECT_COLUMNS}
         ${ACTIVITY_FROM}
         ${where}
-        ORDER BY ra."occurredAt" DESC
+        ${ACTIVITY_ORDER_BY}
         LIMIT ${ACTIVITY_EXPORT_BATCH_SIZE} OFFSET ${offset}
       `);
       if (rows.length === 0) break;

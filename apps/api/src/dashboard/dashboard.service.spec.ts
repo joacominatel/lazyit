@@ -497,6 +497,14 @@ describe('DashboardService', () => {
         >
       )[1][0];
 
+    it('orders newest first with a deterministic tiebreak so OFFSET pages never repeat or drop rows (AUD-032)', async () => {
+      await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
+      const text = pageSql().text.replace(/\s+/g, ' ');
+      expect(text).toContain(
+        'ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action", ra."targetUserId", ra."actorId", ra."summary"',
+      );
+    });
+
     it('emits NO WHERE clause when no filter is supplied (backward-compatible)', async () => {
       await service.getActivity({ limit: 20, offset: 0, deleted: 'active' });
       expect(pageSql().text).not.toContain('WHERE');
