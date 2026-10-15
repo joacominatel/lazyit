@@ -240,10 +240,11 @@ export class ConsumablesService {
 
   /**
    * Create. `currentStock` is never set here — it starts at the schema default (0) and only moves
-   * through movements (ADR-0034). Invalid categoryId hits the FK and is mapped to 400. Now `async` so
+   * through movements (ADR-0034). A missing or archived categoryId is a 400. Now `async` so
    * the fire-and-forget search sync can fire on the created row (#873).
    */
   async create(data: CreateConsumable) {
+    await this.assertCategoryLive(data.categoryId);
     const consumable = await this.prisma.consumable.create({ data });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search?.upsert('consumables', projectConsumable(consumable));
@@ -252,13 +253,43 @@ export class ConsumablesService {
 
   /** Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. */
   async update(id: string, data: UpdateConsumable) {
-    await this.assertExists(id);
+    const existing = await this.prisma.consumable.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, categoryId: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Consumable ${id} not found`);
+    }
+    // Filing under an archived category is refused (400); keeping a legacy one is not.
+    if (data.categoryId !== existing.categoryId) {
+      await this.assertCategoryLive(data.categoryId);
+    }
     const consumable = await this.prisma.consumable.update({
       where: { id },
       data,
     });
     this.search?.upsert('consumables', projectConsumable(consumable));
     return consumable;
+  }
+
+  /**
+   * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
+   * without this a consumable could be filed under a category the taxonomy hides (SEC-052). Write-only:
+   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   */
+  private async assertCategoryLive(
+    categoryId: string | null | undefined,
+  ): Promise<void> {
+    if (!categoryId) return;
+    const category = await this.prisma.consumableCategory.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `ConsumableCategory ${categoryId} not found (missing or archived)`,
+      );
+    }
   }
 
   /** Soft delete: set deletedAt (never hard-delete; movements keep the FK alive). */

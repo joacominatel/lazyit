@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   CreateApplication,
   PageQuery,
@@ -145,6 +149,7 @@ export class ApplicationsService {
   }
 
   async create(data: CreateApplication) {
+    await this.assertCategoryLive(this.prisma, data.categoryId);
     const { metadata, ...rest } = data;
     const application = await this.prisma.application.create({
       data: {
@@ -173,10 +178,14 @@ export class ApplicationsService {
     // 404 if missing or already soft-deleted (the read filter hides archived rows).
     const existing = await client.application.findFirst({
       where: { id },
-      select: { id: true },
+      select: { id: true, categoryId: true },
     });
     if (!existing) {
       throw new NotFoundException(`Application ${id} not found`);
+    }
+    // Filing under an archived category is refused (400); keeping a legacy one is not.
+    if (data.categoryId !== existing.categoryId) {
+      await this.assertCategoryLive(client, data.categoryId);
     }
     const { metadata, ...rest } = data;
     const application = await client.application.update({
@@ -190,6 +199,27 @@ export class ApplicationsService {
     });
     this.search.upsert('applications', projectApplication(application));
     return applicationMoneyToWire(application);
+  }
+
+  /**
+   * 400 unless the category a write names is LIVE. A soft-deleted category still passes the foreign key, so
+   * without this an application could be filed under a category the taxonomy hides (SEC-052). Write-only:
+   * reads stay tolerant, and an update that leaves the category unchanged is not checked.
+   */
+  private async assertCategoryLive(
+    client: Prisma.TransactionClient | PrismaService,
+    categoryId: string | null | undefined,
+  ): Promise<void> {
+    if (!categoryId) return;
+    const category = await client.applicationCategory.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) {
+      throw new BadRequestException(
+        `ApplicationCategory ${categoryId} not found (missing or archived)`,
+      );
+    }
   }
 
   /**
