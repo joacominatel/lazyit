@@ -570,6 +570,55 @@ describe('UpdateService', () => {
     });
   });
 
+  describe('getStatus', () => {
+    beforeEach(() => runFindMany.mockResolvedValue([]));
+
+    const cached = (latestVersion: string) => ({
+      id: 'singleton',
+      checkEnabled: false,
+      latestVersion,
+      latestHtmlUrl: null,
+      behindBy: 1,
+      securityRelevant: true,
+      checkedAt: null,
+    });
+
+    it('stops reporting "behind" once the running version reaches the cached latest (AUD-062)', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.4.2')); // cached before upgrading to v1.4.2
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({
+        latestVersion: 'v1.4.2',
+        behindBy: 0,
+        securityRelevant: false,
+      });
+    });
+
+    it('reports nothing behind when the cached latest is older than the running version', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.3.0'));
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({ behindBy: 0, securityRelevant: false });
+    });
+
+    it('serves the cached gap while the cached latest is still newer', async () => {
+      settingsFindFirst.mockResolvedValue(cached('v1.5.0'));
+      const service = await build();
+
+      const status = await service.getStatus();
+
+      expect(status).toMatchObject({
+        latestVersion: 'v1.5.0',
+        behindBy: 1,
+        securityRelevant: true,
+      });
+    });
+  });
+
   describe('cancel', () => {
     const admin: Principal = {
       kind: 'human',

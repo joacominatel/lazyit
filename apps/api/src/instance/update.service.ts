@@ -181,7 +181,7 @@ export class UpdateService implements OnModuleInit {
   /**
    * The whole "Version & updates" card in one read (ADR-0084 §5): running version, opt-in state, the
    * cached latest release + how far behind, when last checked, the active run and recent history. Reads
-   * only the cache — never fetches GitHub. When the check is off, `latestVersion`/`behindBy` reflect
+   * only the cache — never fetches GitHub. When the check is off, `latestVersion` reflects
    * whatever was last cached but the UI keys off `checkEnabled` to show "checks disabled".
    */
   async getStatus(): Promise<UpdateStatus> {
@@ -202,13 +202,16 @@ export class UpdateService implements OnModuleInit {
         ),
       ) ?? null;
     const checkEnabled = settings?.checkEnabled ?? false;
+    const latestVersion = settings?.latestVersion ?? null;
+    // The cache outlives an upgrade and may never refresh (check off, egress blocked): re-derive "behind".
+    const behind = isNewerVersion(latestVersion, this.currentVersion);
     return {
       currentVersion: this.currentVersion,
       checkEnabled,
-      latestVersion: settings?.latestVersion ?? null,
+      latestVersion,
       htmlUrl: settings?.latestHtmlUrl ?? null,
-      behindBy: settings?.behindBy ?? 0,
-      securityRelevant: settings?.securityRelevant ?? false,
+      behindBy: behind ? (settings?.behindBy ?? 0) : 0,
+      securityRelevant: behind ? (settings?.securityRelevant ?? false) : false,
       checkedAt: settings?.checkedAt?.toISOString() ?? null,
       activeRun,
       recentRuns,
