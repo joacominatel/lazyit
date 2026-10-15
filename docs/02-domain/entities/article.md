@@ -84,6 +84,11 @@ deferred.
   god-mode); a non-admin `article:manage` holder must pass the destination check like anyone else. The
   rule is **write-path only** — an article already sitting in a folder its author cannot read is never
   re-validated, and repeating the folder it is already in is not a move.
+- **The home folder is re-checked under a lock.** A create and a move lock the target folder row
+  `FOR SHARE` inside their write transaction and re-check it is live, so an article cannot land in a
+  folder whose delete is committing at the same moment (audit 2026-10-10, AUD-023): the delete's
+  `FOR UPDATE` either sees the new article and refuses, or commits first and the write gets the usual
+  `400`.
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
