@@ -3,7 +3,7 @@ title: "ADR-0050: UserHistory append-only log + a `user` entity in the recent-ac
 tags: [adr, api, database, audit, dashboard, users]
 status: accepted
 created: 2026-06-04
-updated: 2026-06-04
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -76,6 +76,11 @@ requires widening the shared `ActivityEntityType` contract to include `"user"`.
   - Actor: create/update/reset are human-only routes (`@CurrentUser` → `performedById`); offboard/restore
     attribute the full principal (`@CurrentPrincipal` → `ActorService.resolveActor` → human XOR service
     account), CHECK-safe by construction ([[0048-service-accounts]]).
+  - *Amended 2026-10-14 (AUD-019):* create, update and the admin password reset wrote their history row
+    outside the transaction of the change, so a failure between the two left a live change with no audit
+    row. Each now writes the user row and its history rows in one `$transaction`, as offboard, restore
+    and local onboarding already did. The IdP-mirror ordering described above went away with
+    [[0102-remove-bundled-zitadel]]; there is no compensating delete to protect any more.
 - **`recent_activity` view — a fifth `UNION ALL` branch** (`CREATE OR REPLACE VIEW`, new migration,
   same column list/order so the replace is legal): `user_history` → `occurredAt = createdAt`,
   `actorId = performedById`, `entityType = 'user'`, `entityId = userId::text`,

@@ -3,7 +3,7 @@ title: UserHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-06-04
-updated: 2026-10-09
+updated: 2026-10-14
 ---
 
 # UserHistory
@@ -67,20 +67,21 @@ admin-only (issue #1006).
 **Explicit service calls** (no interceptor), **transactional** with the change ([[0033-asset-history-event-model]]),
 all from the [[user]] service:
 
-- `create` → `CREATED`, right after the row is written. Nothing is written to the IdP and a created row is
-  never hard-deleted ([[0102-remove-bundled-zitadel]]).
+- `create` → `CREATED`, in the same transaction as the insert. Nothing is written to the IdP and a created
+  row is never hard-deleted ([[0102-remove-bundled-zitadel]]).
 - `update` → `UPDATED` on a name / email / legajo / username edit (payload `{ fields }`, field names only),
   `DEACTIVATED` / `REACTIVATED` when `isActive` actually flips (a resend of the stored value logs nothing),
   `ROLE_CHANGED` on a role change (payload `{ from, to }`) and `MANAGER_CHANGED` on a manager change — each
-  that fired. The web UI, the API
+  that fired, in the same transaction as the row update. The web UI, the API
   and an AI tool call (`user_update` dispatches to the same `PATCH /users/:id`) share this one emitter, so an
   AI-made change carries its `aiInvocationId`. Until issue #1375 an activation flip and a legajo/username
   edit wrote **no** row, so they never reached Reports; changes made before that release stay absent (no
   backfill — there is no trustworthy source).
 - `requestPasswordReset` → nothing in OIDC mode (it is always a 501; the IdP owns the reset). In local mode (`AUTH_MODE=local`) the admin picks the delivery (#1268), and the event follows
   the choice: `email` → `PASSWORD_RESET_SENT` after the mail is actually accepted by the relay (a 409/503
-  never logs), with `sessionEpoch` bumped only if the admin opted in; `temporary-password` →
-  `PASSWORD_RESET_BY_ADMIN` after the credential is reset, `sessionEpoch` **always** bumped (the stored hash
+  never logs), with `sessionEpoch` bumped only if the admin opted in (in the same transaction as the row);
+  `temporary-password` → `PASSWORD_RESET_BY_ADMIN` in the same transaction as the credential reset,
+  `sessionEpoch` **always** bumped (the stored hash
   was just replaced) and the plaintext returned once ([[0086-local-authentication-mode]] §5).
 - Self-service local flows (`PasswordLifecycleService`, [[0086-local-authentication-mode]] §F4) → `PASSWORD_CHANGED`
   on `POST /auth/change-password` and `PASSWORD_RESET_COMPLETED` on `POST /auth/reset-password` (via a

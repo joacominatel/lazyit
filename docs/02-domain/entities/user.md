@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-14
 ---
 
 # User
@@ -185,7 +185,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > deleted. Creation always starts active; deactivation is a `PATCH`. An inactive account cannot
 > authenticate, so deactivation strips administrator powers like a demotion does: deactivating the
 > **last active ADMIN** is refused (409), and the last-admin guard counts only live, active ADMINs
-> ([[0040-rbac-roles]], SEC-021).
+> ([[0040-rbac-roles]], SEC-021). The check runs inside the write's transaction under one advisory lock
+> on the admin set, so two admins removing each other at the same moment cannot both pass (AUD-041).
 
 > [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
 >
@@ -284,7 +285,9 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > descriptor + `legajo`/`username`, [[0058-user-manager-and-clone-actions]]) **plus two OPTIONAL,
 > list-only activity counts** (`UserListItemSchema` in `@lazyit/shared`, `schemas/user-list.ts`):
 > `assetsInPossession` (active [[asset-assignment]]s, `releasedAt IS NULL` — [[0019-asset-assignment-integrity]])
-> and `appAccesses` (active [[access-grant]]s, `revokedAt IS NULL` — [[0023-access-management-design]]).
+> and `appAccesses` (active [[access-grant]]s, `revokedAt IS NULL` — [[0023-access-management-design]]),
+> each counted only when the asset or application is live: archiving one leaves its open join rows in place,
+> and those are not something the person still holds.
 > They power the [[0030-list-pagination-contract|Users column picker]] (#386). Both are **batched per
 > page** — `findPage` issues exactly **one Prisma `groupBy` per count** over the page's user ids (two
 > queries total, never N+1) and attaches the result to each row (`0` when none). They are **optional +

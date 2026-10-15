@@ -3,7 +3,7 @@ title: "ADR-0040: Minimal RBAC — ADMIN / MEMBER / VIEWER role on User"
 tags: [adr, auth, authz, rbac, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-09-26
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -172,6 +172,11 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   demotions both pass), never under-protects.
   *Amended 2026-09-23 (SEC-021, #1319):* deactivation (`isActive=false`) is also guarded, and the count
   is live **and active** ADMINs — an inactive account cannot authenticate, so it never counts.
+  *Amended 2026-10-14 (AUD-041):* the race description above was backwards. Two near-simultaneous
+  removals both passing **under**-protects: two ADMINs demoting or offboarding each other could leave
+  zero. The guard now runs inside the same transaction as the write: it takes a transaction-scoped
+  advisory lock on the admin set, re-reads the target and re-counts, so the second request waits, sees
+  the first one's result and gets the 409. Who counts as an admin is unchanged.
 - **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
   Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
   another, so a single admin can never quietly elevate/strip their own role. The controller passes
