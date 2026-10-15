@@ -26,6 +26,7 @@ import {
   InfraService,
   INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
   INFRA_NODE_ASSET_REPOINT_ERROR,
+  INFRA_NODE_ASSET_SHARED_ERROR,
 } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -363,6 +364,23 @@ describe('InfraService', () => {
         prisma.infraNode.create,
       );
       expect(arg.data.assetId).toBe('asset-existing');
+    });
+
+    it('refuses to link an asset another LIVE node already links (409, AUD-031)', async () => {
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-taken' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-taken' },
+      });
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
     });
 
     it('makes a graph-only node (no asset) when trackAsAsset is false', async () => {
@@ -2935,6 +2953,51 @@ describe('InfraService', () => {
       expect(arg.data.assetId).toBe('asset-existing');
       // Nothing is deleted on an attach — there was no link to detach.
       expect(assets.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses a first-attach of an asset another LIVE node already links (409, AUD-031)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-b',
+        assetId: null,
+      });
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(
+        service.updateNode('node-b', { assetId: 'asset-of-a' }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-of-a', id: { not: 'node-b' } },
+      });
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('only UN-LINKS an auto-created Asset another LIVE node still links — never archives it (AUD-030)', async () => {
+      // Two nodes already sharing one asset (data from before the attach guard): detaching one of them
+      // must not archive the row the other still uses.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-stale',
+        assetId: 'asset-auto',
+      });
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { _infraAutoCreated: true },
+      });
+      prisma.infraNode.count.mockResolvedValue(1);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-stale',
+        assetId: null,
+      });
+
+      await service.updateNode('node-stale', { assetId: null }, HUMAN);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-auto', id: { not: 'node-stale' } },
+      });
+      expect(assets.remove).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
     });
 
     it('a first-attach to a DISCARDED asset 404s and writes nothing (#1117)', async () => {
@@ -7229,7 +7292,28 @@ describe('InfraService', () => {
       const probe = firstArg<{ where: Record<string, unknown> }>(
         prisma.asset.findFirst,
       );
-      expect(probe.where).toEqual({ serial: 'SN-REAL-123' });
+      expect(probe.where).toEqual({
+        serial: 'SN-REAL-123',
+        infraNodes: { none: { deletedAt: null } },
+      });
+    });
+
+    it('never adopts an Asset another LIVE node already links — that one mints instead (AUD-030)', async () => {
+      // A re-imaged host's new proposal must not share its predecessor's Asset: detaching either node
+      // would then archive or un-link the row the other still uses. The relation filter is not scoped
+      // by the soft-delete extension, so the live-node predicate has to be spelled out.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const probe = firstArg<{ where: Record<string, unknown> }>(
+        prisma.asset.findFirst,
+      );
+      expect(probe.where.infraNodes).toEqual({ none: { deletedAt: null } });
+      expect(assetHistory.record).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
     });
 
     it('does NOT stamp the auto-created marker on an adopted Asset — the load-bearing safety rule', async () => {
