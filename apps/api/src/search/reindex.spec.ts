@@ -1,4 +1,5 @@
 import {
+  MeiliTaskFailedError,
   reindexIndex,
   REINDEX_BATCH_SIZE,
   type ReindexClient,
@@ -26,20 +27,35 @@ interface FakeOptions {
   liveAlreadyExists?: boolean;
   /** Throw from the temp index's addDocuments waitTask to assert failures propagate. */
   failAddDocuments?: boolean;
+  /** Resolve this step's task as `failed` (what meilisearch-js does — no throw) on its Nth call (1-based). */
+  failedTask?: { kind: Op['kind']; call?: number };
 }
+
+type Settled = { status: string; error?: { code: string; message: string } };
 
 function fakeClient(opts: FakeOptions = {}): {
   client: ReindexClient;
   ops: Op[];
 } {
   const ops: Op[] = [];
-  const task = (run?: () => void): { waitTask: () => Promise<unknown> } => ({
-    // Resolve immediately; `run` may throw to simulate a failed Meili task (the production code awaits
-    // waitTask(), so a rejection surfaces there). No `await` needed — return a resolved promise.
-    waitTask: () => {
-      if (run) run();
-      return Promise.resolve({ status: 'succeeded' });
-    },
+  const calls = new Map<Op['kind'], number>();
+  // A step listed in `failedTask` resolves `failed` with an engine error, as the real client does.
+  const outcome = (kind: Op['kind']): Settled => {
+    const n = (calls.get(kind) ?? 0) + 1;
+    calls.set(kind, n);
+    const f = opts.failedTask;
+    return f && f.kind === kind && (f.call ?? 1) === n
+      ? {
+          status: 'failed',
+          error: { code: 'internal', message: `${kind} blew up` },
+        }
+      : { status: 'succeeded' };
+  };
+  const task = (
+    run: () => Settled | void,
+  ): { waitTask: () => Promise<Settled> } => ({
+    // `run` may throw (a transport error) or return a non-succeeded task (an engine-side failure).
+    waitTask: () => Promise.resolve(run() ?? { status: 'succeeded' }),
   });
 
   const client: ReindexClient = {
@@ -49,11 +65,16 @@ function fakeClient(opts: FakeOptions = {}): {
         // The temp uid now carries a per-run suffix (`..._${runId}`, #464), so match on
         // substring rather than `endsWith` to single out the live index.
         if (opts.liveAlreadyExists && !uid.includes('__reindex_tmp')) {
-          // Mirror the real already-exists failure: an Error whose `code` extractCode() reads.
-          throw Object.assign(new Error('index_already_exists'), {
-            code: 'index_already_exists',
-          });
+          // Mirror the real already-exists outcome: the task resolves `failed` with this code.
+          return {
+            status: 'failed',
+            error: {
+              code: 'index_already_exists',
+              message: `Index \`${uid}\` already exists.`,
+            },
+          };
         }
+        return outcome('createIndex');
       }),
     index: (uid) => ({
       addDocuments: (documents: SearchDocument[]) =>
@@ -64,14 +85,17 @@ function fakeClient(opts: FakeOptions = {}): {
             ids: documents.map((d) => d.id),
           });
           if (opts.failAddDocuments) throw new Error('meili add failed');
+          return outcome('addDocuments');
         }),
       updateFilterableAttributes: (attributes: string[]) =>
         task(() => {
           ops.push({ kind: 'updateFilterableAttributes', uid, attributes });
+          return outcome('updateFilterableAttributes');
         }),
       updateSearchableAttributes: (attributes: string[]) =>
         task(() => {
           ops.push({ kind: 'updateSearchableAttributes', uid, attributes });
+          return outcome('updateSearchableAttributes');
         }),
     }),
     swapIndexes: (params) =>
@@ -83,6 +107,7 @@ function fakeClient(opts: FakeOptions = {}): {
           indexes: params[0].indexes,
           params: params[0],
         });
+        return outcome('swap');
       }),
     deleteIndexIfExists: (uid) => {
       ops.push({ kind: 'deleteIndexIfExists', uid });
@@ -342,6 +367,64 @@ describe('reindexIndex (authoritative rebuild)', () => {
     expect(deletes).toEqual([{ kind: 'deleteIndexIfExists', uid: TEMP }]);
     // It must NOT have swapped a half-built index into place.
     expect(ops.some((op) => op.kind === 'swap')).toBe(false);
+  });
+
+  // AUD-006: meilisearch-js resolves waitTask() for a FAILED task (it throws only on timeout), so the
+  // status must be checked or a partial temp index is promoted over the good live one.
+  describe('a task that resolves `failed` (no throw from the client)', () => {
+    it('a failed second batch aborts before the swap and leaves the live index untouched', async () => {
+      const { client, ops } = fakeClient({
+        failedTask: { kind: 'addDocuments', call: 2 },
+      });
+      const big = docs(
+        ...Array.from(
+          { length: REINDEX_BATCH_SIZE * 3 },
+          (_unused, i) => `u${i}`,
+        ),
+      );
+
+      await expect(reindexIndex(client, 'users', big, RUN)).rejects.toThrow(
+        MeiliTaskFailedError,
+      );
+
+      expect(ops.filter((op) => op.kind === 'addDocuments')).toHaveLength(2);
+      expect(ops.some((op) => op.kind === 'swap')).toBe(false);
+      expect(ops.at(-1)).toEqual({ kind: 'deleteIndexIfExists', uid: TEMP });
+    });
+
+    it.each([
+      ['createIndex', 2],
+      ['updateFilterableAttributes', 1],
+    ] as const)(
+      'a failed %s task aborts the rebuild before the swap',
+      async (kind, call) => {
+        const { client, ops } = fakeClient({ failedTask: { kind, call } });
+
+        await expect(
+          reindexIndex(client, 'articles', docs('a1'), RUN),
+        ).rejects.toThrow(`${kind} blew up`);
+        expect(ops.some((op) => op.kind === 'swap')).toBe(false);
+      },
+    );
+
+    it('a failed swap rejects, so the caller never reports a rebuild that did not happen', async () => {
+      const { client } = fakeClient({ failedTask: { kind: 'swap' } });
+
+      await expect(
+        reindexIndex(client, 'users', docs('u1'), RUN),
+      ).rejects.toThrow("Meilisearch task 'swapIndexes' ended failed");
+    });
+
+    it('a failed createIndex on the LIVE index that is not already-exists propagates', async () => {
+      const { client, ops } = fakeClient({
+        failedTask: { kind: 'createIndex', call: 1 },
+      });
+
+      await expect(
+        reindexIndex(client, 'users', docs('u1'), RUN),
+      ).rejects.toThrow(MeiliTaskFailedError);
+      expect(ops.some((op) => op.kind === 'addDocuments')).toBe(false);
+    });
   });
 
   // #464: cross-actor collision. Two actors (e.g. the hourly reconcile sweeper #383 and the boot
