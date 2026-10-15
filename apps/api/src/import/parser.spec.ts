@@ -110,6 +110,13 @@ describe('parseImport — CSV', () => {
     expect(result.reason).toMatch(/empty/i);
   });
 
+  it('fails gracefully on a "__proto__" header (AUD-055)', () => {
+    const result = parseImport(buf('name,__proto__\nA,x\n'), 'csv');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/reserved/i);
+  });
+
   it('fails gracefully on a header-only file (no data rows)', () => {
     const result = parseImport(buf('name,serial\n'), 'csv');
     expect(result.ok).toBe(false);
@@ -285,6 +292,24 @@ describe('parseImport — JSON', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toMatch(/no records/i);
+  });
+
+  // AUD-055: row['__proto__'] = 'x' is a no-op, so the column would read back as Object.prototype.
+  it('fails gracefully on a "__proto__" key instead of producing an unreadable column', () => {
+    const result = parseImport(buf('[{"name":"a","__proto__":"x"}]'), 'json');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/reserved/i);
+  });
+
+  it('backfills a sparse record whose missing key is an Object.prototype name', () => {
+    const result = parseImport(
+      buf('[{"name":"a","constructor":"x"},{"name":"b"}]'),
+      'json',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.rows[1].constructor).toBe('');
   });
 });
 

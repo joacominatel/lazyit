@@ -143,6 +143,17 @@ describe('runParseJob', () => {
     );
   });
 
+  it('records FAILED (never throws) on a JSON record with a "__proto__" key (AUD-055)', async () => {
+    const fake = makeFakePrisma();
+    const result = await runParseJob(
+      job(b64('[{"name":"a","__proto__":"x"}]'), 'json'),
+      fake.prisma,
+    );
+    expect(result.outcome).toBe('failed');
+    expect(fake.sessionUpdates.at(-1)?.data.status).toBe('FAILED');
+    expect(fake.insertedRows).toHaveLength(0);
+  });
+
   it('records FAILED on a header-only CSV (no data rows)', async () => {
     const fake = makeFakePrisma();
     const result = await runParseJob(
