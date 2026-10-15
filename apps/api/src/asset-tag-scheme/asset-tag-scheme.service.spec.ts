@@ -296,7 +296,7 @@ describe('AssetTagSchemeService', () => {
     const result = await service.allocateTag(undefined);
 
     expect(assetTagScheme.update).toHaveBeenCalledWith({
-      where: { id: SINGLETON },
+      where: { id: SINGLETON, nextNumber: { lt: INT4_MAX } },
       data: { nextNumber: { increment: 1 } },
     });
     expect(result).toBe('LAZY-00042-X');
@@ -472,6 +472,37 @@ describe('AssetTagSchemeService', () => {
     expect(preview.tag).toBeNull();
     expect(preview.fromNumber).toBe(INT4_MAX);
     // And the allocator it mirrors really does refuse that same estate.
+    await expect(service.allocateTag(undefined)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  // AUD-045: INT4_MAX itself is not allocatable — consuming it would store INT4_MAX + 1 in an int4.
+  it('allocateTag freezes with a 400 when the next free number IS INT4_MAX (no overflowing increment)', async () => {
+    wireCounter([], schemeRow({ nextNumber: INT4_MAX }));
+    counter = INT4_MAX;
+
+    await expect(service.allocateTag(undefined)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(assetTagScheme.update).not.toHaveBeenCalled();
+  });
+
+  it('previewNextTag reports EXHAUSTED when the next free number IS INT4_MAX', async () => {
+    wireCounter([], schemeRow({ nextNumber: INT4_MAX }));
+    counter = INT4_MAX;
+
+    const preview = await service.previewNextTag({ prefix: 'IT-' });
+
+    expect(preview.exhausted).toBe(true);
+    expect(preview.number).toBeNull();
+  });
+
+  it('allocateTag maps a racer taking the last number (guarded increment matches no row) to a 400', async () => {
+    wireCounter([], schemeRow({ nextNumber: INT4_MAX - 1 }));
+    counter = INT4_MAX - 1;
+    assetTagScheme.update.mockRejectedValue(new FakePrismaKnownError('P2025'));
+
     await expect(service.allocateTag(undefined)).rejects.toBeInstanceOf(
       BadRequestException,
     );
