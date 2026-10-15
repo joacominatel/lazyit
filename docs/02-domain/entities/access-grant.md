@@ -45,7 +45,13 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   contractor/temp silently loses access (#1070). It is skipped when the grant's application or user is
   soft-deleted. On **create**, when both are supplied, `expiresAt` must
   be **on or after** `grantedAt` (a grant can't expire before it starts) — a `@lazyit/shared` cross-field
-  refine returns `400` otherwise (round-2 correctness).
+  refine returns `400` otherwise (round-2 correctness). **Changing the expiry** enforces the same rule
+  against the stored `grantedAt` in the service → `400` (AUD-097). Write-only: an existing row whose
+  expiry already predates its `grantedAt` still reads normally.
+- **Revoke happens once:** the revoke write is conditional on `revokedAt = null`. When two revokes
+  race (an admin and the expiry sweeper, or two admins), the first one wins and keeps its
+  `revokedAt` / actor attribution; the other gets `409` (single) or `already_in_state` (batch) and
+  records no second deprovision run (AUD-043).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,
   `revokedAt` and `expiresAt` are mutable.
 - **Create-time integrity:** `userId` and `applicationId` must reference **live** (non-soft-deleted)
@@ -131,10 +137,13 @@ create/revoke and becomes the actor. Documented via Swagger ([[0018-api-document
   (pass `false` to hide active grants already past `expiresAt`).
 - `GET /access-grants/:id` — one by id (`404` if missing).
 - `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()`,
-  `revokedById = X-User-Id`. Already revoked → `409`.
+  `revokedById = X-User-Id`. Already revoked, or revoked concurrently first → `409`.
+- `POST /access-grants/batch/revoke` — body `{ ids, notes? }`; revokes each active grant in one
+  transaction and returns the per-id outcome. Missing ids are skipped as `not_found`; already (or
+  concurrently) revoked ones as `already_in_state` — never a rollback of the rest.
 - `PATCH /access-grants/:id/notes` — body `{ notes }` (`null` clears). Metadata edit, no actor.
 - `PATCH /access-grants/:id/expiry` — body `{ expiresAt }` (`null` = permanent). Metadata edit,
-  no actor; never revokes/reactivates.
+  no actor; never revokes/reactivates. An `expiresAt` earlier than the grant's `grantedAt` → `400`.
 - **No `DELETE`** — by design (append-only).
 
 Plus the natural sub-resource endpoints on the related entities:

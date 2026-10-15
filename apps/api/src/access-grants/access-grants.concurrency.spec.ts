@@ -79,9 +79,12 @@ function buildHarness() {
 
   const runRows: Array<Record<string, unknown>> = [];
 
-  const grantById: Record<string, { id: string; revokedAt: Date | null }> = {
-    g1: { id: 'g1', revokedAt: null },
-    g2: { id: 'g2', revokedAt: null },
+  const grantById: Record<
+    string,
+    { id: string; userId: string; applicationId: string; revokedAt: null }
+  > = {
+    g1: { id: 'g1', userId: USER, applicationId: APP, revokedAt: null },
+    g2: { id: 'g2', userId: USER, applicationId: APP, revokedAt: null },
   };
 
   const applicationWorkflow = {
@@ -100,16 +103,18 @@ function buildHarness() {
       const ctx = { revokedId: null as string | null, holdsLock: false };
       const tx = {
         accessGrant: {
-          update: async ({ where: { id } }: { where: { id: string } }) => {
+          updateMany: async ({ where: { id } }: { where: { id: string } }) => {
             ctx.revokedId = id; // uncommitted revoke — visible only to this tx
             await barrier(); // both updates land before any count
-            return {
+            return { count: 1 };
+          },
+          findUniqueOrThrow: ({ where: { id } }: { where: { id: string } }) =>
+            Promise.resolve({
               id,
               userId: USER,
               applicationId: APP,
               revokedAt: new Date(),
-            };
-          },
+            }),
           count: () => {
             // active = committed active minus this tx's own (self-visible) revoke. Read happens at
             // call time (synchronously), exactly when the service issues the count under the lock.

@@ -336,6 +336,7 @@ export class AccessGrantsService {
    * Revoke an active grant: set `revokedAt = now()` (+ `revokedById` from the authenticated User,
    * optional `notes`). 404 if missing; 409 if already revoked (revoke is not repeatable). Revoking
    * one grant does not affect any other grant the same user holds on the same application.
+   * A racing revoke (e.g. the expiry sweeper) loses the conditional write and gets the same 409 (AUD-043).
    */
   async revoke(id: string, data: RevokeAccessGrant, principal?: Principal) {
     const grant = await this.findOne(id);
@@ -348,20 +349,20 @@ export class AccessGrantsService {
     const plan = await this.planTrigger('ACCESS_REVOKED', grant.applicationId);
 
     const { updated, runId } = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.accessGrant.update({
+      const revoked = await this.revokeIfActiveInTx(
+        tx,
+        id,
+        new Date(),
+        actor,
+        data.notes,
+      );
+      if (!revoked) {
+        throw new ConflictException(`AccessGrant ${id} is already revoked`);
+      }
+      const runId = await this.recordRevokeRun(tx, plan, grant, actor);
+      const updated = await tx.accessGrant.findUniqueOrThrow({
         where: { id },
-        data: {
-          revokedAt: new Date(),
-          // Attribute the REVOKE action: human → revokedById, service account → revokedBySaId. CHECK-safe
-          // by construction (ADR-0048).
-          ...(actor.userId != null ? { revokedById: actor.userId } : {}),
-          ...(actor.serviceAccountId != null
-            ? { revokedBySaId: actor.serviceAccountId }
-            : {}),
-          ...(data.notes !== undefined ? { notes: data.notes } : {}),
-        },
       });
-      const runId = await this.recordRevokeRun(tx, plan, updated, actor);
       return { updated, runId };
     });
 
@@ -386,15 +387,17 @@ export class AccessGrantsService {
   /**
    * Change the expiry — extend, shorten or clear it (`null` => permanent). A metadata edit, no actor.
    * `expiresAt` is informative: changing it never revokes or reactivates the grant (ADR-0023). 404
-   * if missing.
+   * if missing; 400 if earlier than the stored `grantedAt`, the create schema's rule (AUD-097).
    */
   async updateExpiry(id: string, data: UpdateAccessGrantExpiry) {
-    await this.findOne(id);
+    const grant = await this.findOne(id);
+    const expiresAt = data.expiresAt === null ? null : new Date(data.expiresAt);
+    if (expiresAt !== null && expiresAt.getTime() < grant.grantedAt.getTime()) {
+      throw new BadRequestException('expiresAt must be on or after grantedAt');
+    }
     return this.prisma.accessGrant.update({
       where: { id },
-      data: {
-        expiresAt: data.expiresAt === null ? null : new Date(data.expiresAt),
-      },
+      data: { expiresAt },
     });
   }
 
@@ -404,6 +407,7 @@ export class AccessGrantsService {
    * auditability stays per-grant, exactly as the single-item {@link revoke} records it, never one
    * entry for the whole batch. An id that is missing or already revoked is SKIPPED (reported in the
    * result), not an error, so a partial multi-select still commits. Returns the per-id outcome.
+   * A grant revoked concurrently after the snapshot is skipped too, not a batch rollback (AUD-043).
    */
   async batchRevoke(
     ids: string[],
@@ -421,21 +425,14 @@ export class AccessGrantsService {
       },
     });
     const found = new Map(grants.map((g) => [g.id, g]));
-    const succeeded: string[] = [];
-    const skipped: { id: string; reason: string }[] = [];
-    for (const id of ids) {
-      const g = found.get(id);
-      if (!g) skipped.push({ id, reason: 'not_found' });
-      else if (g.revokedAt !== null)
-        skipped.push({ id, reason: 'already_in_state' });
-      else succeeded.push(id);
-    }
+    const candidates = ids.filter((id) => found.get(id)?.revokedAt === null);
 
+    const revoked = new Set<string>();
     const runIds: string[] = [];
-    if (succeeded.length > 0) {
+    if (candidates.length > 0) {
       // Pre-plan the ACCESS_REVOKED workflow per distinct application (best-effort, before the tx).
       const appIds = [
-        ...new Set(succeeded.map((id) => found.get(id)!.applicationId)),
+        ...new Set(candidates.map((id) => found.get(id)!.applicationId)),
       ];
       const plans = new Map<string, TriggerPlan | null>();
       for (const appId of appIds) {
@@ -444,27 +441,17 @@ export class AccessGrantsService {
 
       const now = new Date();
       await this.prisma.$transaction(async (tx) => {
-        for (const id of succeeded) {
+        for (const id of candidates) {
           const g = found.get(id)!;
-          const updated = await tx.accessGrant.update({
-            where: { id },
-            data: {
-              revokedAt: now,
-              // Per-grant actor attribution (same as the single-item revoke): human → revokedById,
-              // service account → revokedBySaId. CHECK-safe by construction (ADR-0048).
-              ...(actor.userId != null ? { revokedById: actor.userId } : {}),
-              ...(actor.serviceAccountId != null
-                ? { revokedBySaId: actor.serviceAccountId }
-                : {}),
-              // `null` clears the note, omitted (`undefined`) preserves it — matching the single-item
-              // revoke() and updateNotes().
-              ...(notes !== undefined ? { notes } : {}),
-            },
-          });
+          // `null` clears the note, omitted (`undefined`) preserves it — matching revoke()/updateNotes().
+          if (!(await this.revokeIfActiveInTx(tx, id, now, actor, notes))) {
+            continue;
+          }
+          revoked.add(id);
           const runId = await this.recordRevokeRun(
             tx,
             plans.get(g.applicationId) ?? null,
-            updated,
+            g,
             actor,
           );
           if (runId) runIds.push(runId);
@@ -475,7 +462,38 @@ export class AccessGrantsService {
     for (const runId of runIds) {
       await this.enqueueRunSafely(runId);
     }
+
+    const succeeded: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of ids) {
+      if (!found.has(id)) skipped.push({ id, reason: 'not_found' });
+      else if (revoked.has(id)) succeeded.push(id);
+      else skipped.push({ id, reason: 'already_in_state' });
+    }
     return { requested: ids.length, succeeded, skipped };
+  }
+
+  /** False when a concurrent revoke committed first, so its attribution is never overwritten. */
+  private async revokeIfActiveInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+    revokedAt: Date,
+    actor: ActorAttribution,
+    notes: string | null | undefined,
+  ): Promise<boolean> {
+    const { count } = await tx.accessGrant.updateMany({
+      where: { id, revokedAt: null },
+      data: {
+        revokedAt,
+        // CHECK-safe: resolveActor returns at most one of the pair (ADR-0048).
+        ...(actor.userId != null ? { revokedById: actor.userId } : {}),
+        ...(actor.serviceAccountId != null
+          ? { revokedBySaId: actor.serviceAccountId }
+          : {}),
+        ...(notes !== undefined ? { notes } : {}),
+      },
+    });
+    return count === 1;
   }
 
   // --- engine outbox helpers (the INV-5-inverse decoupling) ----------------

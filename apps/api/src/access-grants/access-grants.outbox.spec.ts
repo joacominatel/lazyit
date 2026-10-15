@@ -3,6 +3,7 @@ jest.mock('../../generated/prisma/client', () => ({
   Prisma: {},
 }));
 
+import { ConflictException } from '@nestjs/common';
 import { AccessGrantsService } from './access-grants.service';
 import { ActorService } from '../common/actor.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
@@ -50,8 +51,13 @@ function plan(overrides: Record<string, unknown> = {}) {
 function build() {
   const accessGrant = {
     create: jest.fn(),
-    update: jest.fn(),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn().mockResolvedValue({
+      id: 'g1',
+      userId: USER,
+      applicationId: APP,
+    }),
     findMany: jest.fn(),
     count: jest.fn(),
   };
@@ -195,11 +201,6 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     const h = build();
     h.accessGrant.findUnique.mockResolvedValue(grantRow);
     h.applicationWorkflow.findFirst.mockResolvedValue(plan()); // LAST_ACTIVE_GRANT
-    h.accessGrant.update.mockResolvedValue({
-      id: 'g1',
-      userId: USER,
-      applicationId: APP,
-    });
     h.accessGrant.count.mockResolvedValue(1); // one OTHER active grant remains
 
     await h.service.revoke('g1', {});
@@ -211,11 +212,6 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     const h = build();
     h.accessGrant.findUnique.mockResolvedValue(grantRow);
     h.applicationWorkflow.findFirst.mockResolvedValue(plan());
-    h.accessGrant.update.mockResolvedValue({
-      id: 'g1',
-      userId: USER,
-      applicationId: APP,
-    });
     h.accessGrant.count.mockResolvedValue(0); // none remaining → this was the last
 
     await h.service.revoke('g1', {});
@@ -230,11 +226,6 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     const h = build();
     h.accessGrant.findUnique.mockResolvedValue(grantRow);
     h.applicationWorkflow.findFirst.mockResolvedValue(plan()); // LAST_ACTIVE_GRANT
-    h.accessGrant.update.mockResolvedValue({
-      id: 'g1',
-      userId: USER,
-      applicationId: APP,
-    });
     h.accessGrant.count.mockResolvedValue(0);
 
     await h.service.revoke('g1', {});
@@ -253,11 +244,6 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     h.applicationWorkflow.findFirst.mockResolvedValue(
       plan({ deprovisionPolicy: 'EACH_GRANT' }),
     );
-    h.accessGrant.update.mockResolvedValue({
-      id: 'g1',
-      userId: USER,
-      applicationId: APP,
-    });
     h.accessGrant.count.mockResolvedValue(3); // ignored under EACH_GRANT
 
     await h.service.revoke('g1', {});
@@ -266,6 +252,24 @@ describe('AccessGrant outbox — revoke (LAST_ACTIVE_GRANT)', () => {
     expect(h.accessGrant.count).not.toHaveBeenCalled();
     // EACH_GRANT needs no last-grant decision, so it never takes the serialization lock.
     expect(h.executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('AUD-043: a revoke that loses the conditional write 409s and records no second run', async () => {
+    const h = build();
+    // The pre-check still sees the grant active; a concurrent revoke committed before our write.
+    h.accessGrant.findUnique.mockResolvedValue(grantRow);
+    h.applicationWorkflow.findFirst.mockResolvedValue(
+      plan({ deprovisionPolicy: 'EACH_GRANT' }),
+    );
+    h.accessGrant.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(h.service.revoke('g1', {})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+
+    // No duplicate ACCESS_REVOKED:g1 run (which would hit the unique idempotencyKey as a 500).
+    expect(h.workflowRun.create).not.toHaveBeenCalled();
+    expect(h.queue.add).not.toHaveBeenCalled();
   });
 });
 
@@ -313,11 +317,6 @@ describe('CCOR-5 — the in-tx PENDING run INSERT is determined-safe by invarian
       applicationId: APP,
     });
     h.applicationWorkflow.findFirst.mockResolvedValue(plan());
-    h.accessGrant.update.mockResolvedValue({
-      id: 'g1',
-      userId: USER,
-      applicationId: APP,
-    });
     h.accessGrant.count.mockResolvedValue(0);
 
     await h.service.revoke('g1', {});
