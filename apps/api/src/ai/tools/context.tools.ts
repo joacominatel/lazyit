@@ -89,7 +89,11 @@ const sessionContext = defineTool({
   },
 });
 
-/** Per-entity projection of a search hit; free text other people wrote is wrapped as untrusted. */
+/**
+ * Per-entity projection of a search hit; free text other people wrote is wrapped as untrusted. Each index
+ * comes back only for a principal holding its `<domain>:read` (users: a person whose role may read them) —
+ * the controller drops the others (AUD-015).
+ */
 const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   assets: ['id', 'name', 'assetTag', 'serial', 'status'],
   articles: ['id', 'slug', 'title', 'status'],
@@ -98,7 +102,6 @@ const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   applications: ['id', 'name', 'vendor'],
   infra: ['id', 'label', 'kind', 'status', 'ipAddress', 'assetName'],
   consumables: ['id', 'name', 'sku', 'currentStock', 'unit'],
-  // #1499: only present for a principal holding purchaseOrder:read — the controller drops both otherwise.
   purchases: [
     'id',
     'reference',
@@ -122,7 +125,8 @@ const lazyitSearch = defineTool({
   description:
     'Full-text search across assets, knowledge-base articles, users, locations, applications, ' +
     'infrastructure nodes, consumables, purchases and suppliers. Returns, per entity, the total and the ' +
-    'best hits with their ids. Purchases and suppliers come back only for a caller who may read purchases. ' +
+    'best hits with their ids. Each entity comes back only for a caller who may read it (purchases and ' +
+    'suppliers: one who may read purchases). ' +
     'Use it to find an entity before reading or changing it; never guess an id. It needs text: to ' +
     "LIST records by a filter (every administrator, every low-stock item) use that domain's own search " +
     'tool without a `query` (user_search, asset_search, consumable_search, kb_search…).',

@@ -223,7 +223,8 @@ const infraNodeGet = defineTool({
   description:
     'One infrastructure node by id: what it is, its linked Asset and owners, the nodes it hosts ' +
     '(children), its edges to other nodes and its blast radius — how many nodes go down with it ' +
-    '(transitively, over RUNS_ON and DEPENDS_ON). An edge is `outgoing` when this node is its source ' +
+    '(transitively, over RUNS_ON, DEPENDS_ON and MEMBER_OF — a group takes its members down; an estimate ' +
+    'from the recorded edges, not a guarantee). An edge is `outgoing` when this node is its source ' +
     '("this RUNS_ON peer") and `incoming` when it is the target. detail "full" adds the affected nodes ' +
     'with their hop depth, linked KB articles, nodes sharing its IP address and the facts its agent ' +
     'reported about the host. Find the id with infra_node_search first.',
