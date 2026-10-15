@@ -3,7 +3,7 @@ title: Consumable
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # Consumable
@@ -22,7 +22,9 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 - `name`, `sku?` (unique among **live** rows when present — a PARTIAL unique index
   `WHERE "deletedAt" IS NULL`, freed for reuse / restore on soft delete,
   [[0041-soft-delete-reuse-and-restore]]), `description?`, `notes?`.
-- `categoryId?` — FK → [[consumable-category]], `onDelete: SetNull`.
+- `categoryId?` — FK → [[consumable-category]], `onDelete: SetNull`. A create, or an update that changes
+  it, is a `400` when the category is missing or soft-deleted; a legacy archived category left unchanged
+  is accepted.
 - `currentStock` — Int, **cached** on-hand quantity (default 0). **Never edited directly** — only
   through a [[consumable-movement]], maintained transactionally ([[0034-consumables-design]]). The
   ledger is the source of truth; this column is a derived cache kept in sync in the same transaction.
@@ -43,6 +45,8 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 - `GET /consumables/:id` · `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) ·
   `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
   Create/update do **not** accept `currentStock` (it starts at 0 and changes only via movements).
+  On `PATCH`, `null` clears an optional field (`sku`, `description`, `notes`, `minStock` — which turns
+  the low-stock alert off); `categoryId: null` detaches the category.
 - `POST /consumables/:id/movements` — record a stock movement ([[consumable-movement]]). The actor comes
   from the authenticated principal. An `OUT` may name one **delivery target** and an `IN` may **return**
   a delivery ([[0098-consumable-delivery-targets]]).

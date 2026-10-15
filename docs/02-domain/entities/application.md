@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # Application
@@ -43,6 +43,9 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
   grant on seat count.
 - **Category is optional and `SetNull`** — an application with no category is valid, and deleting a
   category never deletes its applications.
+- **A write never files under an archived category** — create, or an update that changes `categoryId`, is a
+  `400` when the category is missing or soft-deleted. An update that leaves a legacy archived category
+  unchanged is accepted, and reads stay tolerant of it.
 - Soft delete ([[0006-soft-delete-and-auditing]]); reads filter `deletedAt: null`.
 
 > [!note] Purchases ([[0099-purchases-scope-model-and-optionality]], #1465)
@@ -119,7 +122,8 @@ Indexes: `@@index([categoryId])`.
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
 - `POST /applications` — create.
-- `PATCH /applications/:id` — partial update.
+- `PATCH /applications/:id` — partial update. `null` clears an optional field (`description`, `url`,
+  `vendor`, `notes`, `metadata`, the seat fields); `categoryId: null` detaches the category.
 - `DELETE /applications/:id` — soft delete.
 - `POST /applications/:id/restore` — ADMIN-only restore (clears `deletedAt`; re-indexes for search).
   See [[0041-soft-delete-reuse-and-restore]].
