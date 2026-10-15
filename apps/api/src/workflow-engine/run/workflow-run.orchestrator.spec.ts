@@ -171,6 +171,7 @@ function harness(
         state.manualTasks.push(t);
         return t;
       }),
+      findFirst: jest.fn(async () => state.manualTasks.at(-1) ?? null),
     },
     workflowConnection: {
       findFirst: jest.fn(async () => ({
@@ -936,6 +937,29 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
       id: { not: 'run1' },
     });
     expect(state.runStatus).toBe('RUNNING');
+  });
+});
+
+describe('WorkflowRunOrchestrator — failing an escalated task keeps the run retryable (AUD-070)', () => {
+  it('a STOP_FAIL resume marks the escalated step, so retryRun resumes it instead of a 422', async () => {
+    const steps = [restStep('s1', { onFailure: 'ESCALATE_TO_MANUAL' })];
+    const { orchestrator, state, trigger } = harness(steps, {
+      REST: scripted('REST', [failPermanent(500)]),
+    });
+
+    await orchestrator.start('run1');
+    expect(state.runStatus).toBe('AWAITING_INPUT');
+
+    // The operator fails the escalated task: the manual-tasks service resumes at STOP_FAIL.
+    await orchestrator.resume('run1', 'STOP_FAIL');
+
+    expect(state.runStatus).toBe('FAILED');
+    expect(state.runError).toMatchObject({ stepKey: 's1' });
+    await expect(orchestrator.retryRun('run1')).resolves.toMatchObject({
+      retried: true,
+      resumeStepKey: 's1',
+    });
+    expect(trigger.enqueueRetry).toHaveBeenCalledWith('run1', 's1', 2, 0);
   });
 });
 

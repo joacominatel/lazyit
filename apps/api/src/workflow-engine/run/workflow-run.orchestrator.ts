@@ -365,6 +365,11 @@ export class WorkflowRunOrchestrator {
     const steps = WorkflowStepsSchema.parse(run.workflowVersion.steps);
 
     let cursor: string = startCursor ?? steps[0].key;
+    if (isTerminalTarget(cursor)) {
+      // A resume straight to a terminal executes no step, so it needs no context and no grant check.
+      await this.finalizeTerminal(runId, cursor, steps);
+      return;
+    }
     let ctx: Readonly<WorkflowMappingContext>;
     try {
       ctx = await this.contextBuilder.build(runId);
@@ -381,7 +386,7 @@ export class WorkflowRunOrchestrator {
 
     for (let guard = 0; guard < MAX_WALK_STEPS; guard++) {
       if (isTerminalTarget(cursor)) {
-        await this.finalizeTerminal(runId, cursor);
+        await this.finalizeTerminal(runId, cursor, steps);
         return;
       }
       const index = steps.findIndex((s) => s.key === cursor);
@@ -872,6 +877,7 @@ export class WorkflowRunOrchestrator {
   private async finalizeTerminal(
     runId: string,
     terminal: string,
+    steps: readonly WorkflowStep[],
   ): Promise<void> {
     if (terminal === WORKFLOW_END_SUCCESS) {
       await this.setStatus(runId, 'SUCCEEDED');
@@ -882,8 +888,17 @@ export class WorkflowRunOrchestrator {
       await this.setStatus(runId, 'COMPENSATED');
       return;
     }
-    // STOP_FAIL / ESCALATE reached directly as a resume cursor — finalize as a redacted failure.
-    await this.finalizeFailed(runId, terminal, 'terminal');
+    // AUD-070: mark the paused step, not the terminal token, or a later Retry has nothing to resume.
+    const paused = await this.prisma.manualTask.findFirst({
+      where: { runId },
+      orderBy: { createdAt: 'desc' },
+      select: { stepKey: true },
+    });
+    const stepKey =
+      paused && steps.some((s) => s.key === paused.stepKey)
+        ? paused.stepKey
+        : terminal;
+    await this.finalizeFailed(runId, stepKey, 'terminal');
   }
 }
 
