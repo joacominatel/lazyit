@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-01
+updated: 2026-10-14
 ---
 
 # AccessGrant
@@ -42,7 +42,8 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   once it passes `expiresAt`, through the normal `revoke()` path so the deprovision workflow + system
   attribution fire ([[0023-access-management-design]] amended). A proactive **`access_grant_expiring`**
   notification (bell + email, admin broadcast) warns ~14 days before, so the team can re-grant before a
-  contractor/temp silently loses access (#1070). On **create**, when both are supplied, `expiresAt` must
+  contractor/temp silently loses access (#1070). It is skipped when the grant's application or user is
+  soft-deleted. On **create**, when both are supplied, `expiresAt` must
   be **on or after** `grantedAt` (a grant can't expire before it starts) — a `@lazyit/shared` cross-field
   refine returns `400` otherwise (round-2 correctness).
 - **Immutable identity:** `userId`, `applicationId` and `grantedAt` are set once. Only `notes`,

@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-14
 ---
 
 # Asset
@@ -252,7 +252,9 @@ three stored fields are echoed on create/update.
   now + 90d` (the not-yet-lapsed window the dashboard "Needs attention" warranty tile deep-links to),
   `expired` = `warrantyEnd < now`. Assets with no `warrantyEnd` match neither. The same 90-day window
   also drives a proactive **`warranty_expiring`** notification (bell + email, admin broadcast) — a daily
-  look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070).
+  look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070). Each pass
+  sends at most 200 new heads-ups per type, soonest expiry first, so a bulk-imported backlog drains over
+  consecutive days.
   `assetTags` / `serials` (#1387, list only — the CSV export does not take them) are **exact,
   case-sensitive** value lists, comma-separated, at most 200 distinct values each (more → `400`; a value
   cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
