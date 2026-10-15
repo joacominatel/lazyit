@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await -- the structural Prisma/queue doubles implement async interfaces synchronously. */
 import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { ImportSessionService } from './import-session.service';
@@ -63,6 +64,7 @@ describe('ImportSessionService.createAndParse', () => {
     expect(jobData.sessionId).toBe('sess_1');
     expect(jobData.format).toBe('csv');
     expect((added[0].opts as { attempts: number }).attempts).toBe(1);
+    expect((added[0].opts as { jobId: string }).jobId).toBe('sess_1');
   });
 
   it('503s and marks the session FAILED when the broker is unreachable', async () => {
@@ -99,12 +101,9 @@ describe('ImportSessionService.getForOwner', () => {
   ): ImportSessionService {
     const prisma = {
       importSession: {
-        findFirst: async (args: {
-          where: { id: string; ownerId: string };
-        }) => {
+        findFirst: async (args: { where: { id: string; ownerId: string } }) => {
           const found = rows.find(
-            (r) =>
-              r.id === args.where.id && r.ownerId === args.where.ownerId,
+            (r) => r.id === args.where.id && r.ownerId === args.where.ownerId,
           );
           if (!found) return null;
           return {
@@ -154,5 +153,79 @@ describe('ImportSessionService.getForOwner', () => {
     await expect(service.getForOwner('nope', OWNER)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+// AUD-054: a parse job that died outside runParseJob (OOM-killed child, DB error) left the session PARSING.
+describe('ImportSessionService.getForOwner — dead parse reconcile', () => {
+  function setup(status: string, queue: Partial<Queue>) {
+    const updates: { where: unknown; data: Record<string, unknown> }[] = [];
+    const prisma = {
+      importSession: {
+        findFirst: async () => ({
+          id: 'sess_1',
+          entity: 'ASSET',
+          status,
+          detected: null,
+          error: null,
+          rows: [],
+        }),
+        updateMany: async (args: {
+          where: unknown;
+          data: Record<string, unknown>;
+        }) => {
+          updates.push(args);
+          return { count: 1 };
+        },
+      },
+    } as unknown as PrismaService;
+    const service = new ImportSessionService(queue as Queue, prisma);
+    return { service, updates };
+  }
+  const jobIn = (failed: boolean) => ({
+    getJob: async () => ({ isFailed: async () => failed }),
+  });
+
+  it('flips a PARSING session FAILED when its parse job already failed', async () => {
+    const { service, updates } = setup('PARSING', jobIn(true) as never);
+    const result = await service.getForOwner('sess_1', OWNER);
+    expect(result.status).toBe('FAILED');
+    expect(result.error?.phase).toBe('parse');
+    expect(updates).toHaveLength(1);
+    expect(updates[0].where).toEqual({
+      id: 'sess_1',
+      status: { in: ['PENDING', 'PARSING'] },
+    });
+    expect(updates[0].data.status).toBe('FAILED');
+  });
+
+  it('leaves a PARSING session alone while its job is still running', async () => {
+    const { service, updates } = setup('PARSING', jobIn(false) as never);
+    const result = await service.getForOwner('sess_1', OWNER);
+    expect(result.status).toBe('PARSING');
+    expect(updates).toHaveLength(0);
+  });
+
+  it('leaves the session alone when the job is gone or the queue is unreachable', async () => {
+    for (const queue of [
+      { getJob: async () => undefined },
+      {
+        getJob: async () => {
+          throw new Error('connect ECONNREFUSED');
+        },
+      },
+    ]) {
+      const { service, updates } = setup('PARSING', queue as never);
+      const result = await service.getForOwner('sess_1', OWNER);
+      expect(result.status).toBe('PARSING');
+      expect(updates).toHaveLength(0);
+    }
+  });
+
+  it('never consults the queue for a session past parsing', async () => {
+    const getJob = jest.fn();
+    const { service } = setup('PARSED', { getJob } as never);
+    await service.getForOwner('sess_1', OWNER);
+    expect(getJob).not.toHaveBeenCalled();
   });
 });
