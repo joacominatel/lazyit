@@ -487,6 +487,7 @@ export class ArticlesService {
       // Materialize the outgoing `[[slug]]` wiki-link edges from the body (ADR-0059 §3), in the SAME
       // transaction as the article + version write so the edge can never drift from the content.
       await this.rebuildWikiLinks(tx, created.id, created.content);
+      await this.resolveInboundWikiLinks(tx, created.slug, created.id);
       return created;
     });
     // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
@@ -565,6 +566,9 @@ export class ArticlesService {
       if (data.content !== undefined && current.content !== updated.content) {
         await this.rebuildWikiLinks(tx, id, updated.content);
       }
+      if (current.slug !== updated.slug) {
+        await this.resolveInboundWikiLinks(tx, updated.slug, id);
+      }
       return updated;
     });
     // update never changes status (publish/unpublish do), but re-sync defensively: upsert if the
@@ -623,9 +627,13 @@ export class ArticlesService {
     if (article.deletedAt === null) {
       return article; // already live — idempotent
     }
-    const restored = await this.prisma.article.update({
-      where: { id },
-      data: { deletedAt: null, lastEditedById: cu },
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.article.update({
+        where: { id },
+        data: { deletedAt: null, lastEditedById: cu },
+      });
+      await this.resolveInboundWikiLinks(tx, row.slug, row.id);
+      return row;
     });
     // Re-index honoring draft privacy: PUBLISHED is indexed, a DRAFT stays out (ADR-0022 / ADR-0035).
     this.syncSearch(restored);
@@ -1379,6 +1387,18 @@ export class ArticlesService {
         targetSlug,
         resolvedTargetId: idBySlug.get(targetSlug) ?? null,
       })),
+    });
+  }
+
+  /** Forward `[[slug]]` references written before this article took the slug resolve now (ADR-0059 §3). */
+  private async resolveInboundWikiLinks(
+    tx: Prisma.TransactionClient,
+    slug: string,
+    articleId: string,
+  ): Promise<void> {
+    await tx.articleWikiLink.updateMany({
+      where: { targetSlug: slug, resolvedTargetId: null },
+      data: { resolvedTargetId: articleId },
     });
   }
 

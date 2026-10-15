@@ -96,6 +96,7 @@ type ArticleLinkMock = {
 type ArticleWikiLinkMock = {
   deleteMany: jest.Mock;
   createMany: jest.Mock;
+  updateMany: jest.Mock;
   findMany: jest.Mock;
 };
 // ArticleAlias (ADR-0059 §2): current-state join — create / delete / findFirst / findMany.
@@ -169,6 +170,7 @@ describe('ArticlesService', () => {
     articleWikiLink = {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([]),
     };
     articleAlias = {
@@ -2093,6 +2095,81 @@ describe('ArticlesService', () => {
   });
 
   // --- wiki-links: rebuild on save (ADR-0059 §3) ---------------------------
+
+  describe('forward [[slug]] references resolve when the slug appears (AUD-101)', () => {
+    const resolvesTo = (slug: string, id: string) =>
+      expect(articleWikiLink.updateMany).toHaveBeenCalledWith({
+        where: { targetSlug: slug, resolvedTargetId: null },
+        data: { resolvedTargetId: id },
+      });
+
+    it('on create', async () => {
+      await service.create(
+        {
+          title: 'VPN setup',
+          content: 'body',
+          categoryId: 'c1',
+          status: 'PUBLISHED',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      resolvesTo('vpn-setup', 'art1');
+    });
+
+    it('on a soft-delete restore', async () => {
+      article.findFirst.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        deletedAt: new Date(),
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        status: 'PUBLISHED',
+        deletedAt: null,
+      });
+      await service.restore('a', AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+
+    it('on a slug change, and not on an edit that keeps the slug', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        slug: 'vpn',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        categoryId: 'c1',
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn',
+        title: 'VPN guide',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { title: 'VPN guide' }, AUTHOR_PRINCIPAL);
+      expect(articleWikiLink.updateMany).not.toHaveBeenCalled();
+
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { slug: 'vpn-setup' }, AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+  });
 
   describe('wiki-link rebuild on save', () => {
     // The data passed to the last articleWikiLink.createMany.
