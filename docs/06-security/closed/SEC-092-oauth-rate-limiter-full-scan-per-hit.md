@@ -2,7 +2,7 @@
 id: SEC-092
 title: The OAuth per-IP rate limiter scans every bucket on each hit, so the unauthenticated OAuth endpoints have quadratic CPU cost under an IP-rotating flood
 severity: medium
-status: open
+status: fixed
 cwe: CWE-407
 discovered: 2026-10-10
 module: oauth
@@ -91,3 +91,39 @@ has a size cap.
 - [[SEC-083-mcp-query-token-scan-unbounded-before-gates|SEC-083]] — an earlier pre-authentication cost
   bound on the MCP path.
 - Sweep: [[sweep-2026-10-10-backend-audit]] (AUD-005).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `b593db87d` (`fix(api): make the shared rate limiter constant-time per hit and cap its keys`), merged to `dev` in PR #1566 (`2b87faeae`)
+**Fixed by**: audit remediation batch B8 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/oauth/oauth-rate-limit.ts:41-56`: `hit()` drops expired buckets from the front of the map
+  only until the first live one (`pruneExpired`, `:65-70`). A bucket is re-inserted only when its window
+  opens, so the map stays in window-start order and the prune stops at once in the steady state.
+- `apps/api/src/oauth/oauth-rate-limit.ts:50-53`: past `maxKeys` the oldest window is evicted, so a flood
+  degrades the limit, not the process. `RATE_LIMIT_MAX_KEYS = 10_000` (`oauth.constants.ts:54`).
+- `apps/api/src/mcp/mcp-rate-limit.ts:22-38`: the MCP limiters (auth failure included, AUD-039) now reuse
+  the same class instead of their own full-map prune. The infra report guard reuses it too
+  (`apps/api/src/infra/infra-report-rate-limit.guard.ts:69`, PR #1580), and the login, reset and setup
+  guards were made constant-time in PR #1577.
+
+### Tests
+- `apps/api/src/oauth/oauth-rate-limit.spec.ts`: `keeps at most maxKeys buckets, evicting the oldest
+  window (AUD-005)`, `drops expired windows before evicting a live one`, `restarts a key whose own window
+  elapsed, even behind live buckets`.
+- `apps/api/src/infra/infra-report-rate-limit.guard.spec.ts:166-172`: constant work per hit with the map
+  filled to `RATE_LIMIT_MAX_KEYS`.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+- The limiter is still in memory and per replica (behind N replicas the cap is N times the limit), the
+  accepted posture of the other limiters.
+- IPv6 clients are still keyed per full address, not per /64. The size cap bounds the cost; it does not
+  stop one /64 from spreading over many buckets. Not filed.
+
+No data change: the limiters are in memory.

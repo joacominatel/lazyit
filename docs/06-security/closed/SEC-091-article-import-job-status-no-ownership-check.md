@@ -2,7 +2,7 @@
 id: SEC-091
 title: GET /articles/import/:jobId returns any user's import job (no ownership or folder check, sequential job ids)
 severity: medium
-status: open
+status: fixed
 cwe: CWE-639
 discovered: 2026-10-10
 module: articles (import)
@@ -80,3 +80,32 @@ asset import sessions do. A controller test that a second user's poll of a job i
 - [[0059-kb-folders-links-and-import]] §5 · [[0053-async-workers-bullmq-valkey]] ·
   [[0060-kb-folder-access-control]] · [[INVARIANTS]] INV-9.
 - Sweep: [[sweep-2026-10-10-backend-audit]] (AUD-004).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `92bc5c7f0` (`fix(api): only the importer may poll an article import job`), merged to `dev` in PR #1573 (`53a6f8846`)
+**Fixed by**: audit remediation batch B4 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/articles/articles.controller.ts:464-469`: `importStatus` passes the principal.
+- `apps/api/src/articles/import/article-import.service.ts:149-157`: `getStatus` returns the same 404 as an
+  unknown id unless the caller is a human whose id equals the job's `authorId`. Service accounts and
+  anonymous callers get 404. There is no ADMIN exception.
+- `apps/api/src/articles/import/article-import.service.ts:115-117`: new jobs are enqueued with
+  `jobId: randomUUID()`, so ids are no longer sequential.
+
+### Tests
+- `apps/api/src/articles/import/article-import.service.spec.ts:81`: `enqueues under an unguessable job id,
+  never the sequential default`.
+- `:136` `ArticleImportService.getStatus — only the importer may poll (AUD-004)`: `returns the status to the
+  user who started the import`, `404s another user's job, exactly like an unknown id`, `404s a service
+  account and an anonymous caller`, `404s an unknown job id`.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+None. Jobs enqueued before the update keep their sequential ids until they expire (1 hour completed,
+24 hours failed), but they carry `authorId`, so the ownership check covers them. No data change.

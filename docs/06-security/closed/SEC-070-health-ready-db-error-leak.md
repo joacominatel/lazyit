@@ -2,7 +2,7 @@
 id: SEC-070
 title: Unauthenticated /health/ready leaks the raw DB driver error (internal host/port) on failure
 severity: low
-status: open
+status: fixed
 cwe: CWE-209
 discovered: 2026-06-06
 module: health
@@ -107,3 +107,28 @@ deliberately generic and "must not echo the offending column or value"). A unit 
 - CWE-200: Exposure of Sensitive Information to an Unauthorized Actor.
 - ADR-0031 (logging — server-side error capture) · ADR-0035 (fail-soft health) · SEC-009 (the other
   public/anonymous surface; the generic-error principle mirrors `PrismaExceptionFilter`).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `c730a4590` (`fix(api): readiness reports a fixed category instead of raw dependency errors`), merged to `dev` in PR #1568 (`68075ab07`)
+**Fixed by**: audit remediation batch B7 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/health/health.service.ts:91-103`: every dependency failure goes through `down()`, which
+  returns `{ status: 'down', error: 'unreachable' }`. The raw message is logged server-side only, at
+  most once per throttle window per dependency.
+- `apps/api/src/health/health.service.ts:65-71` (database) and `:79-87` (Valkey) both use it, so AUD-018
+  (the same leak through the Valkey error) is closed by the same change.
+
+### Tests
+- `apps/api/src/health/health.service.spec.ts`: `reports NOT ready (status error) when the DB probe throws,
+  regardless of Valkey` asserts `error: 'unreachable'` with no driver text (`:58-61`); the Valkey cases
+  assert the same (`:80`, `:95`); `keeps the failure detail in the server log, once per throttle window`.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+None. The readiness signal (`ready`, `status`) is unchanged for orchestrators. No data change.
