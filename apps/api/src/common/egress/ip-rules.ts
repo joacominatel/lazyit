@@ -36,7 +36,10 @@ export type AddressCategory =
   | 'reserved';
 
 /** Categories an admin MAY allowlist as an internal target (genuine LAN unicast). */
-const ALLOWLISTABLE: ReadonlySet<AddressCategory> = new Set<AddressCategory>(['private', 'uniqueLocal']);
+const ALLOWLISTABLE: ReadonlySet<AddressCategory> = new Set<AddressCategory>([
+  'private',
+  'uniqueLocal',
+]);
 
 /** `true` for a public-Internet address (allowed without any allowlist). */
 export function isPublicCategory(category: AddressCategory): boolean {
@@ -86,7 +89,12 @@ function groupsToBytes(groups: string[]): number[] | null {
       if (v4 === null) {
         return null;
       }
-      out.push((v4 >>> 24) & 0xff, (v4 >>> 16) & 0xff, (v4 >>> 8) & 0xff, v4 & 0xff);
+      out.push(
+        (v4 >>> 24) & 0xff,
+        (v4 >>> 16) & 0xff,
+        (v4 >>> 8) & 0xff,
+        v4 & 0xff,
+      );
     } else {
       if (!/^[0-9a-fA-F]{1,4}$/.test(group)) {
         return null;
@@ -193,7 +201,9 @@ function classifyIpv4Int(ip: number): AddressCategory {
 }
 
 /** The exact bytes of the AWS IPv6 instance-metadata address `fd00:ec2::254` (never allowlistable). */
-const IMDS_V6 = [0xfd, 0x00, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54];
+const IMDS_V6 = [
+  0xfd, 0x00, 0x0e, 0xc2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x54,
+];
 
 /** Classify the 16 bytes of an IPv6 address. */
 function classifyIpv6Bytes(b: Uint8Array): AddressCategory {
@@ -214,11 +224,15 @@ function classifyIpv6Bytes(b: Uint8Array): AddressCategory {
   }
   // IPv4-mapped ::ffff:0:0/96 — re-classify the embedded IPv4 (so ::ffff:127.0.0.1 is loopback).
   if (allZeroUpTo(10) && b[10] === 0xff && b[11] === 0xff) {
-    return classifyIpv4Int(((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15]);
+    return classifyIpv4Int(
+      ((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15],
+    );
   }
   // IPv4-compatible ::/96 (deprecated) — also embeds an IPv4 address.
   if (allZeroUpTo(12)) {
-    return classifyIpv4Int(((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15]);
+    return classifyIpv4Int(
+      ((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15],
+    );
   }
   // NAT64 well-known prefix 64:ff9b::/96 — bytes 4..11 are zero, last 4 embed an IPv4 address.
   if (
@@ -235,7 +249,9 @@ function classifyIpv6Bytes(b: Uint8Array): AddressCategory {
     b[10] === 0 &&
     b[11] === 0
   ) {
-    return classifyIpv4Int(((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15]);
+    return classifyIpv4Int(
+      ((b[12] << 24) >>> 0) + (b[13] << 16) + (b[14] << 8) + b[15],
+    );
   }
   if (IMDS_V6.every((x, i) => b[i] === x)) {
     return 'imds'; // fd00:ec2::254 (sits inside ULA, but never allowlistable)
@@ -252,7 +268,11 @@ function classifyIpv6Bytes(b: Uint8Array): AddressCategory {
   if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) {
     return 'reserved'; // 2001:db8::/32 (documentation)
   }
-  if (b[0] === 0x01 && b[1] === 0x00 && allZeroUpTo(8)) {
+  if (
+    b[0] === 0x01 &&
+    b[1] === 0x00 &&
+    b.subarray(2, 8).every((x) => x === 0)
+  ) {
     return 'reserved'; // 100::/64 (discard-only)
   }
   return 'global';

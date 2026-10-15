@@ -343,6 +343,9 @@ function resetStore() {
 /** The custom-status service with the route's rules: kind guard (409), reassign on delete (400). */
 const statusLabelCount = (id: string) =>
   assets.filter((a) => live(a) && a.statusLabelId === id).length;
+/** The route's guards count archived carriers too (`countAssets`, `includeSoftDeleted`). */
+const statusLabelCarriers = (id: string) =>
+  assets.filter((a) => a.statusLabelId === id).length;
 const statusLabelsService = {
   findAll: jest.fn((deleted: string = 'active') =>
     Promise.resolve(
@@ -376,7 +379,7 @@ const statusLabelsService = {
     if (
       dto.kind !== undefined &&
       dto.kind !== row.kind &&
-      statusLabelCount(id) > 0
+      statusLabelCarriers(id) > 0
     ) {
       throw new ConflictException('in use');
     }
@@ -573,7 +576,7 @@ const assetsService = {
       slice(
         assets.filter(
           (a) =>
-            live(a) &&
+            (page.deleted === 'only' ? !live(a) : live(a)) &&
             (!filters.modelId || a.modelId === filters.modelId) &&
             (!filters.statusLabelId ||
               a.statusLabelId === filters.statusLabelId) &&
@@ -2028,6 +2031,21 @@ describe('taxonomy toolset (#1390)', () => {
       expect(unused.preview!.changes).toEqual([
         { field: 'archived', before: false, after: true, valueKind: 'boolean' },
       ]);
+    });
+
+    it('AUD-094: an ARCHIVED asset carrying the custom status blocks a kind change and needs a target, as the route does', async () => {
+      assets[2].statusLabelId = S.loaner;
+      assets[2].deletedAt = new Date('2026-09-05T00:00:00.000Z');
+      expect(
+        await refused('asset_status_label_update', {
+          status: 'Loaner pool',
+          kind: 'OPERATIONAL',
+        }),
+      ).toMatchObject({ code: 'CONFLICT' });
+      expect(
+        await refused('asset_status_label_archive', { status: 'Loaner pool' }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
     });
 
     it('asset_status_label_archive is a category:delete write: a MEMBER is refused', async () => {

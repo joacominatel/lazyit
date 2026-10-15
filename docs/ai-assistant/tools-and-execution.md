@@ -616,6 +616,12 @@ Warning rules for these tools (§9 has the step-up rule):
   - references: a workflow is `{ id }` or `{ application, trigger }` (at most one live workflow per
     application and trigger); a connection, a sample grant and a credential are taken by id only, so the
     stored input is exactly what the card showed.
+  - a connection a **saved** graph still calls may have been archived since (the archive allows it): the
+    replaced version on a `workflow_author_version` card, the graph an enable card describes and the
+    other workflows a re-point lists read it tolerantly — a 403 or 404 shows that step's destination as
+    "archived or not readable" instead of refusing the card, as `workflows.tools.ts` does (AUD-078). The
+    steps of a **new** version stay strict: a connection that is not live is refused before the card, as
+    the route would refuse it.
 - **`CRITICAL_APPLICATION`** — every AI write on an application with `isCritical = true`: any workflow
   write (authoring, retry, replay, task resolve) and any access grant or revoke (CEO: "Toda
   escritura"). Core requires step-up in the chat; MCP and headless refuse it (below).
@@ -696,7 +702,11 @@ path unit (W2-0, #1315):
 - `tools/index.ts` — imports every per-domain file (pre-wired once)
 - `tools/<domain>.tools.ts` — each exports an `AiToolset`: `tools` and `unexposed` (handlers + reason).
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
-  built yet);
+  built yet). `lazyit_search` returns each index only to a caller holding its `<domain>:read` (users: a
+  person whose role may read them) — the route drops the others (AUD-015). A person's first and last name
+  is wrapped with `untrusted()` in a users hit (AUD-003); `session_context`'s own user — the caller's own
+  name — is intentionally plain, pending a CEO decision (wrapping it would mark most turns untrusted and
+  so turn auto-approve off in practice);
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
@@ -743,12 +753,15 @@ path unit (W2-0, #1315):
   `{ total, offset, items }` and a `truncated` marker with `nextOffset` when more rows exist.
 - `infra_node_get` — input `id`, `detail` (`concise` | `full`), `includeClosedEdges`. Concise: the node
   summary with owners, children, edges (direction + the peer resolved through `listNodePage?ids=`) and
-  the blast-radius size; full adds the affected nodes with hop depth, linked KB articles, IP-conflict
-  peers and a few reported host facts. Lists inside it are capped at 50 with their totals.
+  the blast-radius size — the route's traversal over active `RUNS_ON`, `DEPENDS_ON` and `MEMBER_OF`
+  edges (a group takes its members down), an estimate from the recorded edges; full adds the affected
+  nodes with hop depth, linked KB articles, IP-conflict peers and a few reported host facts. Lists inside
+  it are capped at 50 with their totals.
 - Never projected: `secretRefs` (Secret Manager adjacency, even handles), the raw `specs` blob
   (software list, identifiers, serial, NICs), `reportingSource` / `externalId`, and any agent credential
   data. The label and inventory name of an agent-reported node, the label of any lean row whose
-  provenance the route does not state, and the reported host facts are wrapped with `untrusted()`.
+  provenance the route does not state, the reported host facts and the owners' first and last names
+  (AUD-003) are wrapped with `untrusted()`.
 - Unexposed with reasons: node/edge writes and review-tray curation (v1.1), changes / identity-matches /
   auto-confirm rules reads (v1.1), the canvas bulk reads, the fleet view, agent policy, the `@Res` list,
   `report`, the secret link and the agent binary distribution.
@@ -855,9 +868,14 @@ Accounts holding the route's permission.
   candidates. **A partial page never decides** (review fix F1, the rule the consumables tools apply):
   when the route's substring search matched more rows than the one page a lookup reads (200), the
   entity meant may sit past it, so the reference is refused as `AMBIGUOUS_REFERENCE` asking for the id —
-  unless two exact matches are already on the page, which are named as candidates. In `run` a raw id passes straight to the write handler (a Service Account with write-only
-  grants still works); the preview always reads the target, to name it. An id is recognized by shape —
-  a cuid (`c` + 24 lowercase alphanumerics) or a uuid.
+  unless two exact matches are already on the page, which are named as candidates. An id is recognized
+  by shape — a cuid (`c` + 24 lowercase alphanumerics) or a uuid, in any case (a uuid is compared
+  lower-case, as the route returns it — AUD-076). A cuid-shaped asset reference is read as an id first
+  and, when no live asset has that id, searched as a tag or serial, on the card and in the run alike
+  (AUD-077: a serial can look like a cuid). In `run` a raw id the caller may not read still passes
+  straight to the write handler (a Service Account with write-only grants still works), and a raw user id
+  is never looked up; the preview always reads the target, to name it. A person's name is wrapped with
+  `untrusted()` in owners, labels and cards (AUD-003; the email stays plain).
 - **Ownership is the assignment** (asset-centric): `asset_check_out` opens an `AssetAssignment`
   (`POST /asset-assignments`), `asset_check_in` releases one (`PATCH /asset-assignments/:id/release`).
   Check-in finds the assignment among the asset's live owners (`GET /assets/:id/assignments`); with no
@@ -882,8 +900,11 @@ Accounts holding the route's permission.
   ADMIN-only by **role** (`assertCanListDeleted`), while the restore route needs only `asset:delete` —
   so a Service Account or a non-ADMIN role granted `asset:delete` cannot restore through the tool, though
   it could over HTTP by id (a parity gap, follow-up F5). The list has no id filter, so a raw id scans the
-  five newest-archived pages (1,000 assets) and, when more exist, is refused as `AMBIGUOUS_REFERENCE`
-  asking for the tag or serial; a tag or serial is a `q` search.
+  five newest-archived pages (1,000 assets), then is searched as a tag or serial (AUD-077); when more
+  archived assets exist than the scan reads and the id was not among them, it is refused as
+  `AMBIGUOUS_REFERENCE` asking for the tag or serial. A tag or serial is a `q` search. In `run`, a
+  cuid-shaped reference no archived asset matches, or one the caller may not list, goes straight to the
+  restore route.
 - **Results.** `asset_search` returns `{ total, offset, items }` (model, category, location, current
   owners; never notes or specs) with a `truncated` marker; `asset_get` concise adds notes, cost and
   book value; `full` adds specs, the ownership history (capped at 50), the last 20 history events and
@@ -1105,9 +1126,11 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   the concept — a team-defined name mapped to exactly one built-in status (its *kind*); the built-in status
   drives every rule; setting a custom status sets it. A custom status is named by id or exact name from its
   unpaged route list (entity type `assetStatusLabel`). Refused before a card: a live duplicate name
-  (`CONFLICT`), a kind change while live assets carry it (`CONFLICT`; archived carriers are refused by the
-  route), an archive in use without a destination, a destination equal to the archived one, or both
-  `moveTo` and `moveToStatus` (`INVALID_INPUT`). The archive card shows the assets that move (count + up to
+  (`CONFLICT`), a kind change while any asset carries it (`CONFLICT`), an archive in use without a
+  destination, a destination equal to the archived one, or both `moveTo` and `moveToStatus`
+  (`INVALID_INPUT`). "Carries" counts archived assets too, as the route does (AUD-094): the live
+  `assetCount` plus the total of `GET /assets?statusLabelId=&deleted=only`, which only an ADMIN may list —
+  for anyone else the card counts live assets and the route still decides. The archive card shows the assets that move (count + up to
   five, through `GET /assets?statusLabelId=`) and a `moveAssetsTo` row (an entity for a custom status, the
   status code otherwise); the route moves them and archives in one transaction and returns
   `movedAssetCount`, which the summary names. Restore resolves through `deleted=only` (ADMIN by role — the
@@ -1249,9 +1272,11 @@ a separate remediation, not a supported path here.
   - The offboarding card's asset and grant counts are taken at preview time; a check-out or grant made
     between the preview and the approval is still reclaimed but was not on the card (the precondition
     pins the user row, not its holdings).
-  - The users, KB and access tools wrap person names (AUD-003); the assets, infrastructure, context and
-    workflow-authoring tools still return a person's name plain (an assignee, an owner, the caller) —
-    the same wrapping is a follow-up there.
+  - Every toolset wraps person names (AUD-003): the users, KB and access tools, and since the B20 batch
+    the assets (an owner, a card's person), infrastructure (a node's owners), context (a users search
+    hit) and workflow-authoring (the enable card's sample grantee) tools. The caller's own name in
+    `session_context` is intentionally plain, pending a CEO decision: wrapping it would mark nearly every
+    turn untrusted and so turn auto-approve off in practice.
 
 **Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
@@ -1411,7 +1436,9 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   suppliers already carrying the name — a hint, never a refusal), `supplier_update`, `purchase_link_assets`
   (`apply` is required — `[]` links only; the card shows, per asset, the before → after of each applied field
   that fills or replaces, from `linkPreview`), `purchase_receive` (`quantity` required; the card shows the
-  route's prefill — model, status, location (none when the purchase's delivery location is archived, as the
+  route's prefill — model, status (`IN_STORAGE`, or with `statusLabelId` the custom status as an entity
+  value and the built-in status it sets — AUD-093; a `status` of another kind, or a custom status that is
+  not live, is refused before the card; without `category:read` the card names it by id), location (none when the purchase's delivery location is archived, as the
   route applies none), company, purchase date = the invoice date else today, warranty
   end, cost with its currency — and received before → after), `purchase_receive_stock` (`LEDGER_APPEND`),
   `purchase_cancel_remaining`, `purchase_apply_license` (the card reads `licenseProposal`: seats before →

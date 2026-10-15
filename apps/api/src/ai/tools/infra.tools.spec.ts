@@ -579,8 +579,9 @@ describe('infra toolset (W2-10) — infra_node_search, infra_node_get', () => {
         owners: [
           {
             userId: ID.member,
-            firstName: 'Ana',
-            lastName: 'Ops',
+            // A person may rename themselves: their name reaches the model as data (INV-AI-4).
+            firstName: '<untrusted_content>Ana</untrusted_content>',
+            lastName: '<untrusted_content>Ops</untrusted_content>',
             email: 'ana@example.com',
             deletedAt: null,
           },

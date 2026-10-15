@@ -131,15 +131,21 @@ function assetCore(asset: Row, extra: readonly string[] = []): Row {
   return out;
 }
 
-function personName(user: Row): string {
+/** The raw full name, for matching a reference only; what reaches the model is {@link personName}. */
+function fullName(user: Row): string {
   return `${str(user.firstName) ?? ''} ${str(user.lastName) ?? ''}`.trim();
 }
 
-/** `Ana Ops <ana@example.com>`. */
+/** A person's full name, wrapped: anyone may rename themselves (`PATCH /users/me`, INV-AI-4). */
+function personName(user: Row): string | null {
+  return untrusted(fullName(user));
+}
+
+/** `Ana Ops <ana@example.com>`, the name wrapped as untrusted (the email stays plain). */
 function userLabel(user: Row): string {
   const name = personName(user);
   const email = str(user.email);
-  if (!email) return name || String(user.id);
+  if (!email) return name ?? String(user.id);
   return name ? `${name} <${email}>` : email;
 }
 
@@ -199,37 +205,49 @@ function assetRef(asset: Row, op: AiEntityRef['op']): AiEntityRef {
 
 /**
  * An asset by id, asset tag or serial (§7). A tag or serial is found through `GET /assets?q=` and matched
- * exactly (case-insensitive) — the route's `q` is a substring search, so a partial tag never resolves.
- * With `withLabel: false` a raw id passes straight to the write handler; the preview always reads it.
+ * exactly (case-insensitive) — the route's `q` is a substring search, so a partial tag never resolves. A
+ * cuid-shaped reference is tried as an id first and, when no live asset has that id, searched as a tag or
+ * serial (AUD-077: a serial can look like a cuid). With `withLabel: false` a raw id the caller may not read
+ * still passes straight to the write handler (write-only grants); the preview always reads it.
  */
-function resolveAsset(
+async function resolveAsset(
   rt: AiToolRuntime,
   reference: string,
   withLabel: boolean,
 ): Promise<AiResolvedReference> {
-  return rt.resolve({
-    type: 'asset',
-    reference,
-    ...(withLabel ? {} : { isId: isCuidId }),
-    lookup: async (ref) => {
-      if (isCuidId(ref)) {
-        const asset = await orNull(() =>
-          rt.call(AssetsController, 'findOne', { params: { id: ref } }),
-        );
-        return asset ? [{ id: asset.id, label: assetLabel(asRow(asset)) }] : [];
-      }
-      const page = await rt.call(AssetsController, 'findAll', {
-        query: { q: ref, limit: RESOLVE_PAGE },
-      });
-      return exactOnPage(
-        page,
-        (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
-        ref,
-        "give the asset's id (from asset_search)",
-      ).map((a) => ({ id: String(a.id), label: assetLabel(a) }));
-    },
-  });
+  try {
+    return await rt.resolve({
+      type: 'asset',
+      reference,
+      lookup: async (ref) => {
+        if (isCuidId(ref)) {
+          const asset = await orNull(() =>
+            rt.call(AssetsController, 'findOne', { params: { id: ref } }),
+          );
+          if (asset) return [{ id: asset.id, label: assetLabel(asRow(asset)) }];
+        }
+        const page = await rt.call(AssetsController, 'findAll', {
+          query: { q: ref, limit: RESOLVE_PAGE },
+        });
+        return exactOnPage(
+          page,
+          (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
+          ref,
+          "give the asset's id (from asset_search)",
+        ).map((a) => ({ id: String(a.id), label: assetLabel(a) }));
+      },
+    });
+  } catch (err) {
+    const id = reference.trim();
+    if (!withLabel && isCuidId(id) && isForbidden(err)) {
+      return { type: 'asset', id };
+    }
+    throw err;
+  }
 }
+
+const isForbidden = (err: unknown): boolean =>
+  err instanceof HttpException && err.getStatus() === 403;
 
 /** How many archived pages a restore by raw id scans (newest-archived first) before giving up. */
 const ARCHIVED_SCAN_PAGES = 5;
@@ -237,40 +255,44 @@ const ARCHIVED_SCAN_PAGES = 5;
 /**
  * An ARCHIVED asset by id, tag or serial, through `GET /assets?deleted=only` — the only read that returns
  * a soft-deleted asset (ADMIN-only by role, unlike the restore route — tools-and-execution.md §8.1, F5). A
- * tag or serial is a `q` search; a raw id scans the
- * newest-archived pages, since the list has no id filter.
+ * tag or serial is a `q` search. The list has no id filter, so a cuid-shaped reference scans the
+ * newest-archived pages first, then is searched as a tag or serial (AUD-077). `scanned: false` when the
+ * scan stopped before the end of the archive and found nothing: the id may sit beyond it.
  */
-async function findArchived(rt: AiToolRuntime, ref: string): Promise<Row[]> {
+async function findArchived(
+  rt: AiToolRuntime,
+  ref: string,
+): Promise<{ rows: Row[]; scanned: boolean }> {
   const list = (query: Record<string, string>) =>
     rt.call(AssetsController, 'findAll', {
       query: { deleted: 'only', limit: RESOLVE_PAGE, ...query },
     });
-  if (!isCuidId(ref)) {
-    const page = await list({ q: ref });
-    return exactOnPage(
-      page,
-      (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
-      ref,
-      "give the archived asset's id (from asset_search with archived: true)",
-    );
+  let scanned = true;
+  if (isCuidId(ref)) {
+    const size = Number(RESOLVE_PAGE);
+    scanned = false;
+    for (let i = 0; i < ARCHIVED_SCAN_PAGES; i += 1) {
+      const page = await list({
+        offset: String(i * size),
+        sort: 'updatedAt',
+        dir: 'desc',
+      });
+      const hit = asRows(page.items).find((a) => a.id === ref);
+      if (hit) return { rows: [hit], scanned: true };
+      if ((i + 1) * size >= page.total) {
+        scanned = true;
+        break;
+      }
+    }
   }
-  const size = Number(RESOLVE_PAGE);
-  for (let i = 0; i < ARCHIVED_SCAN_PAGES; i += 1) {
-    const page = await list({
-      offset: String(i * size),
-      sort: 'updatedAt',
-      dir: 'desc',
-    });
-    const hit = asRows(page.items).find((a) => a.id === ref);
-    if (hit) return [hit];
-    if ((i + 1) * size >= page.total) return [];
-  }
-  // Not among the newest-archived pages, and more archived assets exist: it cannot be confirmed either
-  // way, so ask for a reference the search can match exactly instead of answering "not found".
-  throw new AiReferenceError(
-    'AMBIGUOUS_REFERENCE',
-    `Asset ${ref} is not among the ${ARCHIVED_SCAN_PAGES * size} most recently archived assets; give its asset tag or serial`,
+  const page = await list({ q: ref });
+  const rows = exactOnPage(
+    page,
+    (a) => sameText(a.assetTag, ref) || sameText(a.serial, ref),
+    ref,
+    "give the archived asset's id (from asset_search with archived: true)",
   );
+  return { rows, scanned };
 }
 
 /**
@@ -283,9 +305,11 @@ function resolveUser(
   reference: string,
   withLabel: boolean,
 ): Promise<AiResolvedReference> {
+  // A uuid is case-insensitive, and the route returns it lower-case: compare it that way (AUD-076).
+  const trimmed = reference.trim();
   return rt.resolve({
     type: 'user',
-    reference,
+    reference: isUuidId(trimmed) ? trimmed.toLowerCase() : reference,
     ...(withLabel ? {} : { isId: isUuidId }),
     lookup: async (ref) => {
       if (ref.toLowerCase() === 'me') {
@@ -304,7 +328,7 @@ function resolveUser(
         (u) =>
           u.id === ref ||
           sameText(u.email, ref) ||
-          sameText(personName(u), ref) ||
+          sameText(fullName(u), ref) ||
           sameText(u.username, ref) ||
           sameText(u.legajo, ref),
         ref,
@@ -2411,22 +2435,47 @@ const assetArchive = defineTool({
   },
 });
 
-/** The archived asset a restore names, with its row (for the label and the version). */
+/**
+ * The archived asset a restore names, with its row (for the label and the version). With `withLabel: false`
+ * a cuid-shaped reference no archived asset matches — or one the caller may not list (the list is
+ * ADMIN-only) — passes straight to the restore route, the authority on a raw id.
+ */
 async function resolveArchived(
   rt: AiToolRuntime,
   reference: string,
   withLabel: boolean,
 ): Promise<{ resolved: AiResolvedReference; row?: Row }> {
-  const rows = new Map<string, Row>();
+  const id = reference.trim();
+  const rawId = !withLabel && isCuidId(id);
+  let found: { rows: Row[]; scanned: boolean };
+  try {
+    found = await findArchived(rt, id);
+  } catch (err) {
+    if (rawId && isForbidden(err)) return { resolved: { type: 'asset', id } };
+    throw err;
+  }
+  if (rawId && found.rows.length === 0) {
+    return { resolved: { type: 'asset', id } };
+  }
+  if (!found.scanned) {
+    // Not among the newest-archived pages, and more archived assets exist: it cannot be confirmed either
+    // way, so ask for a reference the search can match exactly instead of answering "not found".
+    throw new AiReferenceError(
+      'AMBIGUOUS_REFERENCE',
+      `Asset ${id} is not among the ${ARCHIVED_SCAN_PAGES * Number(RESOLVE_PAGE)} most recently archived assets; give its asset tag or serial`,
+    );
+  }
+  const rows = new Map(found.rows.map((row) => [String(row.id), row]));
   const resolved = await rt.resolve({
     type: 'asset',
-    reference,
-    ...(withLabel ? {} : { isId: isCuidId }),
-    lookup: async (ref) =>
-      (await findArchived(rt, ref)).map((row) => {
-        rows.set(String(row.id), row);
-        return { id: String(row.id), label: assetLabel(row) };
-      }),
+    reference: id,
+    lookup: () =>
+      Promise.resolve(
+        found.rows.map((row) => ({
+          id: String(row.id),
+          label: assetLabel(row),
+        })),
+      ),
   });
   return { resolved, row: rows.get(resolved.id) };
 }
@@ -2624,9 +2673,9 @@ function ownerMatches(
     return identity.kind === 'human' && assignment.userId === identity.userId;
   }
   return (
-    assignment.userId === ref ||
+    sameText(assignment.userId, ref) ||
     sameText(user.email, ref) ||
-    sameText(personName(user), ref) ||
+    sameText(fullName(user), ref) ||
     sameText(user.username, ref) ||
     sameText(user.legajo, ref)
   );
