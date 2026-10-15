@@ -94,6 +94,67 @@ test("validateTemplate accepts the closed filter set", () => {
   }
 });
 
+test("validateTemplate keeps a quoted filter argument whole (AUD-068 parity)", () => {
+  for (const template of [
+    '{{ grantee.email | default:"n|a" }}',
+    "{{ grantee.email | default:'n|a' | upper }}",
+    '{{ grantee.email | default:"{x}" }}',
+    '{{ grantee.email | default:"{{" }}',
+  ]) {
+    const result = validateTemplate(template, ROOTS);
+    expect(result.unknownFilters).toEqual([]);
+    expect(result.unbalanced).toBe(false);
+    expect(result.hasError).toBe(false);
+  }
+});
+
+test("parseTemplate spans a quoted argument holding a single brace, as the server does", () => {
+  expect(parseTemplate('a {{ grantee.email | default:"}" }} b')).toEqual([
+    { type: "literal", text: "a " },
+    {
+      type: "token",
+      raw: 'grantee.email | default:"}"',
+      path: "grantee.email",
+      root: "grantee",
+    },
+    { type: "literal", text: " b" },
+  ]);
+});
+
+test("a quoted argument cannot hide a closing }}", () => {
+  const [token, rest] = parseTemplate('{{ grantee.email | default:"}}" }}');
+  expect(token).toMatchObject({ type: "token", raw: 'grantee.email | default:"' });
+  expect(rest).toEqual({ type: "literal", text: '" }}' });
+});
+
+test("an unclosed quote stays literal and still splits on |", () => {
+  const result = validateTemplate('{{ grantee.email | default:"n|bogus }}', ROOTS);
+  expect(result.unknownFilters).toEqual(['bogus']);
+});
+
+test("parseTemplate matches the previous grammar on unquoted templates", () => {
+  expect(parseTemplate("{{{ application.name }}} {{ a } b }} {{")).toEqual([
+    {
+      type: "token",
+      raw: "{ application.name",
+      path: "{ application.name",
+      root: "{ application",
+    },
+    { type: "literal", text: "} {{ a } b }} {{" },
+  ]);
+  const result = validateTemplate("{{ grantee.email | base64 | lower }} {{", ROOTS);
+  expect(result.unknownFilters).toEqual(["base64"]);
+  expect(result.unbalanced).toBe(true);
+});
+
+test("scanning stays linear on adversarial input", () => {
+  const started = Date.now();
+  parseTemplate("{{".repeat(50_000));
+  parseTemplate(`{{ a${':"x"'.repeat(20_000)}}`);
+  validateTemplate(`{{ a | default:${"x:".repeat(20_000)}`, ROOTS);
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
 test("knownRootsFor includes prior-step outputs (steps.<key>)", () => {
   const prior: WorkflowStep[] = [
     {

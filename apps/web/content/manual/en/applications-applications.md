@@ -35,7 +35,8 @@ Open any application to see its **Details** and edit it. Two shortcuts speed up 
 
 - **Clone** creates a new application pre-filled from an existing one — handy for similar systems.
   The clone is a *separate* application; you grant access to it independently.
-- **Edit** updates any field at any time.
+- **Edit** updates any field at any time. To remove a value, empty the field (or set the category to
+  none) and save.
 
 Creating and editing applications is everyday catalog work, available to administrators and
 members. **Deleting** an application is an administrator-only action.

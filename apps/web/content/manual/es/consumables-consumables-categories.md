@@ -68,6 +68,9 @@ Conviene saber algunas cosas:
 Desde la página de detalle de un consumible o desde el menú de su fila puedes **Editar**, **Clonar**
 o **Eliminar**.
 
+- **Editar** cambia cualquier campo. Vacía un campo y guarda para eliminar el valor; por ejemplo,
+  borra el umbral de reposición para dejar de recibir alertas de stock bajo de ese ítem. Para quitar
+  la categoría, vuelve a elegir la categoría seleccionada.
 - **Clonar** abre un consumible nuevo precargado a partir del original. El SKU se borra y el stock
   empieza en cero, práctico para dar de alta una pieza casi idéntica.
 - **Eliminar** es una eliminación reversible: el consumible se archiva, no se borra, y se conserva su

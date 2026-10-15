@@ -7,7 +7,8 @@ import { buildContextTokens, type ContextToken } from "./context-tokens";
  * server data-mapper grammar (`apps/api/src/workflow-engine/mapping/data-mapper.ts`,
  * `renderTemplate`) so a string composed in the UI renders identically server-side:
  *
- *  - a placeholder is `{{ path | filter | filter:'arg' }}` — `{{` + non-`}` body + `}}`;
+ *  - a placeholder is `{{ path | filter | filter:'arg' }}` — `{{` + body + `}}`, where a quoted filter
+ *    argument may hold `|` or `}` but never `}}`;
  *  - the path is a dotted token (`grantee.email`, `steps.step-1.response`);
  *  - the closed filter set is `lower | upper | trim | default:'…'` (a no-op for any other name).
  *
@@ -15,9 +16,6 @@ import { buildContextTokens, type ContextToken } from "./context-tokens";
  * VALIDATES the surface form so the builder can offer token-assist, highlight spans, and warn before
  * save. The authoritative render (and the security-critical encoding/allowlist) stays server-side.
  */
-
-/** The same placeholder grammar the server mapper uses (`{{` + minimal-non-`}` body + `}}`). */
-const PLACEHOLDER = /\{\{\s*([^}]*?)\s*\}\}/g;
 
 /** A dotted token path: a root word then `.segment` parts (letters, digits, `_`, `-`). */
 const TOKEN_PATH = /^[\w-]+(?:\.[\w-]+)*$/;
@@ -39,13 +37,107 @@ export type TemplateSegment =
       root: string;
     };
 
-/** Split the inner `{{ … }}` expression into its path + filter list (path is part 0). */
-function splitExpr(expr: string): { path: string; filters: string[] } {
-  const parts = expr.split("|");
-  return {
-    path: (parts[0] ?? "").trim(),
-    filters: parts.slice(1).map((f) => f.trim()),
-  };
+/** One `{{ … }}` placeholder: its span in the template and its trimmed inner expression. */
+interface Placeholder {
+  start: number;
+  end: number;
+  expr: string;
+}
+
+/** The server's `findPlaceholders` scan (AUD-068); `dead` keeps a run of unterminated `{{` linear. */
+function findPlaceholders(template: string): Placeholder[] {
+  const found: Placeholder[] = [];
+  const dead = new Uint8Array(template.length + 1);
+  let from = 0;
+  for (;;) {
+    const start = template.indexOf("{{", from);
+    if (start === -1) return found;
+    const end = placeholderEnd(template, start + 2, dead);
+    if (end === -1) {
+      from = start + 1;
+      continue;
+    }
+    found.push({ start, end, expr: template.slice(start + 2, end - 2).trim() });
+    from = end;
+  }
+}
+
+/** Past the closing `}}`, or -1; a `:"…"` argument may hold `}` but not `}}` (the server's rule). */
+function placeholderEnd(template: string, from: number, dead: Uint8Array): number {
+  let i = from;
+  while (i < template.length) {
+    if (dead[i]) return -1;
+    dead[i] = 1;
+    const ch = template[i];
+    if (ch === "}") {
+      return template[i + 1] === "}" ? i + 2 : -1;
+    }
+    if (ch === ":") {
+      let quoteAt = i + 1;
+      while (quoteAt < template.length && /\s/.test(template[quoteAt] ?? "")) {
+        quoteAt += 1;
+      }
+      const quote = template[quoteAt];
+      if (quote === '"' || quote === "'") {
+        const close = template.indexOf(quote, quoteAt + 1);
+        if (close !== -1 && !template.slice(quoteAt + 1, close).includes("}}")) {
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+/** The server's `splitExpression` (`default:"n|a"` stays whole); `bare` drops the quoted arguments. */
+function scanExpression(expr: string): { pieces: string[]; bare: string } {
+  const pieces: string[] = [];
+  let current = "";
+  let bare = "";
+  let quote: string | null = null;
+  let argStart = false;
+  let hasColon = false;
+  for (let i = 0; i < expr.length; i += 1) {
+    const ch = expr[i] ?? "";
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      current += ch;
+      continue;
+    }
+    if (ch === "|") {
+      pieces.push(current);
+      current = "";
+      argStart = false;
+      hasColon = false;
+      bare += ch;
+      continue;
+    }
+    if (
+      argStart &&
+      pieces.length > 0 &&
+      (ch === '"' || ch === "'") &&
+      expr.indexOf(ch, i + 1) !== -1
+    ) {
+      quote = ch;
+    } else if (ch === ":" && !hasColon) {
+      argStart = true;
+    } else if (!/\s/.test(ch)) {
+      argStart = false;
+    }
+    if (ch === ":") hasColon = true;
+    current += ch;
+    if (quote === null) bare += ch;
+  }
+  pieces.push(current);
+  return { pieces, bare };
+}
+
+/** A filter expression's trimmed name (`default` in `default:"x"`). */
+function filterName(expr: string): string {
+  const colon = expr.indexOf(":");
+  return (colon === -1 ? expr : expr.slice(0, colon)).trim();
 }
 
 /**
@@ -56,22 +148,14 @@ function splitExpr(expr: string): { path: string; filters: string[] } {
 export function parseTemplate(template: string): TemplateSegment[] {
   const segments: TemplateSegment[] = [];
   let lastIndex = 0;
-  // The regex is stateful (global) — reset before each parse so repeated calls are independent.
-  PLACEHOLDER.lastIndex = 0;
-  let match: RegExpExecArray | null = PLACEHOLDER.exec(template);
-  while (match !== null) {
-    if (match.index > lastIndex) {
-      segments.push({
-        type: "literal",
-        text: template.slice(lastIndex, match.index),
-      });
+  for (const { start, end, expr } of findPlaceholders(template)) {
+    if (start > lastIndex) {
+      segments.push({ type: "literal", text: template.slice(lastIndex, start) });
     }
-    const expr = match[1] ?? "";
-    const { path } = splitExpr(expr);
+    const path = (scanExpression(expr).pieces[0] ?? "").trim();
     const root = path.split(".")[0]?.trim() ?? "";
-    segments.push({ type: "token", raw: expr.trim(), path, root });
-    lastIndex = match.index + match[0].length;
-    match = PLACEHOLDER.exec(template);
+    segments.push({ type: "token", raw: expr, path, root });
+    lastIndex = end;
   }
   if (lastIndex < template.length) {
     segments.push({ type: "literal", text: template.slice(lastIndex) });
@@ -113,30 +197,39 @@ export function validateTemplate(
   template: string,
   knownRoots: ReadonlySet<string>,
 ): TemplateValidation {
-  const segments = parseTemplate(template);
   const unknownRoots = new Set<string>();
   const malformedPaths = new Set<string>();
   const unknownFilters = new Set<string>();
+  let opens = 0;
+  let closes = 0;
+  let lastIndex = 0;
 
-  for (const segment of segments) {
-    if (segment.type !== "token") continue;
-    const { path, filters } = splitExpr(segment.raw);
+  for (const { start, end, expr } of findPlaceholders(template)) {
+    const { pieces, bare } = scanExpression(expr);
+    const path = (pieces[0] ?? "").trim();
+    const root = path.split(".")[0]?.trim() ?? "";
     if (path === "" || !TOKEN_PATH.test(path)) {
-      malformedPaths.add(segment.raw);
-    } else if (!knownRoots.has(segment.root)) {
-      unknownRoots.add(segment.root);
+      malformedPaths.add(expr);
+    } else if (!knownRoots.has(root)) {
+      unknownRoots.add(root);
     }
-    for (const filter of filters) {
-      const name = (filter.split(":")[0] ?? "").trim();
+    for (const filter of pieces.slice(1)) {
+      const name = filterName(filter);
       if (name !== "" && !TEMPLATE_FILTERS.includes(name as TemplateFilter)) {
         unknownFilters.add(name);
       }
     }
+    // A quoted argument may legitimately hold `{{`, so it is left out of the brace count.
+    const outside = template.slice(lastIndex, start);
+    opens += countOccurrences(outside, "{{") + 1 + countOccurrences(bare, "{{");
+    closes += countOccurrences(outside, "}}") + 1 + countOccurrences(bare, "}}");
+    lastIndex = end;
   }
 
   // Unbalanced when the literal `{{` and `}}` counts differ (a placeholder was opened but not closed).
+  const tail = template.slice(lastIndex);
   const unbalanced =
-    countOccurrences(template, "{{") !== countOccurrences(template, "}}");
+    opens + countOccurrences(tail, "{{") !== closes + countOccurrences(tail, "}}");
 
   return {
     unknownRoots: [...unknownRoots],

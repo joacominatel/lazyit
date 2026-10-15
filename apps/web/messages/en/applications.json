@@ -150,6 +150,7 @@
     "editSubmit": "Save changes",
     "updatedToast": "Grant updated",
     "updateError": "Couldn't update the grant",
+    "expiryBeforeGranted": "The expiry can't be earlier than when the access was granted. Pick a later date.",
     "revokeTitle": "Revoke access?",
     "revokeDescriptionPrefix": "Revoke this grant for ",
     "revokeDescriptionLevel": " ({level})",

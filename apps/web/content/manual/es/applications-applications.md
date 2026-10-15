@@ -39,7 +39,8 @@ configuración repetitiva:
 
 - **Clonar** crea una nueva aplicación precargada a partir de una existente — útil para sistemas
   similares. El clon es una aplicación *aparte*; le otorgas acceso de forma independiente.
-- **Editar** actualiza cualquier campo en cualquier momento.
+- **Editar** actualiza cualquier campo en cualquier momento. Para quitar un valor, vacía el campo (o
+  deja la categoría en ninguna) y guarda.
 
 Crear y editar aplicaciones es trabajo de catálogo cotidiano, disponible para administradores y
 miembros. **Eliminar** una aplicación es una acción solo de administrador.
