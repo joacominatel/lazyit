@@ -1205,13 +1205,12 @@ export class UsersService {
   /**
    * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
    * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
-   * administrable. The single definition of "usable admin" — the 409 guard below and the directory-sync
-   * offboard skip (ADR-0091) both call it, so the count is never duplicated. `client` lets the guard
-   * count inside its own write transaction.
+   * administrable. The single definition of "usable admin". Private so it is only ever counted under the
+   * admin-set lock, through {@link wouldRemoveLastAdmin}.
    */
-  async hasAnotherActiveAdmin(
+  private async hasAnotherActiveAdmin(
     userId: string,
-    client: Pick<Prisma.TransactionClient, 'user'> = this.prisma,
+    client: Pick<Prisma.TransactionClient, 'user'>,
   ): Promise<boolean> {
     const otherAdmins = await client.user.count({
       where: { role: 'ADMIN', isActive: true, id: { not: userId } },
@@ -1236,6 +1235,24 @@ export class UsersService {
     userId: string,
     removesAdminPowers: (target: { role: Role; isActive: boolean }) => boolean,
   ) {
+    if (await this.wouldRemoveLastAdmin(tx, userId, removesAdminPowers)) {
+      throw new ConflictException(
+        'Cannot remove the last administrator. Promote another user to ADMIN first.',
+      );
+    }
+  }
+
+  /**
+   * The lock-and-recount half of {@link assertNotLastAdmin}, for a caller that skips instead of failing
+   * (the directory-sync offboard, ADR-0091). Takes the admin-set advisory lock for the rest of `tx`,
+   * re-reads the target, and returns true when `removesAdminPowers` holds for it and no other live,
+   * active ADMIN exists. The caller must make its write in the same `tx`, after this returns.
+   */
+  async wouldRemoveLastAdmin(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    removesAdminPowers: (target: { role: Role; isActive: boolean }) => boolean,
+  ): Promise<boolean> {
     // $executeRaw, not $queryRaw: pg_advisory_xact_lock returns void (see AccessGrantsService).
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'lazyit.admin_set'}))`;
     const target = await tx.user.findFirst({
@@ -1243,13 +1260,9 @@ export class UsersService {
       select: { role: true, isActive: true },
     });
     if (!target || !removesAdminPowers(target)) {
-      return;
+      return false;
     }
-    if (!(await this.hasAnotherActiveAdmin(userId, tx))) {
-      throw new ConflictException(
-        'Cannot remove the last administrator. Promote another user to ADMIN first.',
-      );
-    }
+    return !(await this.hasAnotherActiveAdmin(userId, tx));
   }
 
   /**
