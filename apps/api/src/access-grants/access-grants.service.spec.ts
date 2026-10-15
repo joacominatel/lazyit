@@ -22,6 +22,8 @@ type GrantMock = {
   findUnique: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
+  updateMany: jest.Mock;
+  findUniqueOrThrow: jest.Mock;
   count: jest.Mock;
 };
 
@@ -41,6 +43,9 @@ type GrantData = {
 };
 type CreateCall = [{ data: GrantData }];
 type UpdateCall = [{ where: { id: string }; data: GrantData }];
+type UpdateManyCall = [
+  { where: { id: string; revokedAt: null }; data: GrantData },
+];
 type FindManyCall = [{ where: Record<string, unknown>; orderBy: unknown }];
 
 const VALID_ACTOR = '11111111-1111-1111-1111-111111111111';
@@ -71,6 +76,8 @@ describe('AccessGrantsService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: jest.fn(),
       count: jest.fn(),
     };
     user = { findFirst: jest.fn(), findUnique: jest.fn() };
@@ -369,12 +376,19 @@ describe('AccessGrantsService', () => {
   // --- revoke -------------------------------------------------------------
   it('revokes an active grant: sets revokedAt + revokedById (HUMAN) + notes', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
-    accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
+    const revokedRow = { id: 'g1', revokedAt: new Date() };
+    accessGrant.findUniqueOrThrow.mockResolvedValue(revokedRow);
 
-    await service.revoke('g1', { notes: 'left the company' }, HUMAN_PRINCIPAL);
+    const result = await service.revoke(
+      'g1',
+      { notes: 'left the company' },
+      HUMAN_PRINCIPAL,
+    );
 
-    const calls = accessGrant.update.mock.calls as UpdateCall[];
-    expect(calls[0][0].where).toEqual({ id: 'g1' });
+    const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
+    // Conditional on still being active, so a racing revoke can't be overwritten (AUD-043).
+    expect(calls[0][0].where).toEqual({ id: 'g1', revokedAt: null });
+    expect(result).toBe(revokedRow);
     expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
     expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
     expect(calls[0][0].data.revokedBySaId).toBeUndefined();
@@ -383,22 +397,20 @@ describe('AccessGrantsService', () => {
 
   it('revokes for a SERVICE-ACCOUNT principal: sets revokedBySaId (revokedById stays null) — ADR-0048', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
-    accessGrant.update.mockResolvedValue({ id: 'g1', revokedAt: new Date() });
 
     await service.revoke('g1', {}, SA_PRINCIPAL);
 
-    const calls = accessGrant.update.mock.calls as UpdateCall[];
+    const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
     expect(calls[0][0].data.revokedBySaId).toBe(SA_ID);
     expect(calls[0][0].data.revokedById).toBeUndefined();
   });
 
   it('revokes without a principal (both revoke actor columns stay unset)', async () => {
     accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
-    accessGrant.update.mockResolvedValue({ id: 'g1' });
 
     await service.revoke('g1', {});
 
-    const calls = accessGrant.update.mock.calls as UpdateCall[];
+    const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
     expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
     expect(calls[0][0].data.revokedById).toBeUndefined();
     expect(calls[0][0].data.revokedBySaId).toBeUndefined();
@@ -413,7 +425,19 @@ describe('AccessGrantsService', () => {
     await expect(service.revoke('g1', {})).rejects.toBeInstanceOf(
       ConflictException,
     );
+    expect(accessGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('AUD-043: a revoke that loses the race to a concurrent revoke gets 409, not an overwrite', async () => {
+    // The pre-check saw the grant active, but another revoke (e.g. the expiry sweeper) committed first.
+    accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
+    accessGrant.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.revoke('g1', {}, HUMAN_PRINCIPAL),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(accessGrant.update).not.toHaveBeenCalled();
+    expect(accessGrant.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it('does not revoke a missing grant', async () => {
@@ -422,7 +446,7 @@ describe('AccessGrantsService', () => {
     await expect(service.revoke('missing', {})).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    expect(accessGrant.update).not.toHaveBeenCalled();
+    expect(accessGrant.updateMany).not.toHaveBeenCalled();
   });
 
   // --- updateNotes --------------------------------------------------------
@@ -491,7 +515,6 @@ describe('AccessGrantsService', () => {
         { id: 'g2', revokedAt: null },
         { id: 'g3', revokedAt: new Date() },
       ]);
-      accessGrant.update.mockResolvedValue({});
 
       const result = await service.batchRevoke(
         ['g1', 'g2', 'g3', 'g4'],
@@ -501,12 +524,12 @@ describe('AccessGrantsService', () => {
       // One transaction wraps the whole batch.
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       // Per-grant: one update per succeeded id (NOT one for the whole batch).
-      expect(accessGrant.update).toHaveBeenCalledTimes(2);
-      const calls = accessGrant.update.mock.calls as UpdateCall[];
-      expect(calls[0][0].where).toEqual({ id: 'g1' });
+      expect(accessGrant.updateMany).toHaveBeenCalledTimes(2);
+      const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
+      expect(calls[0][0].where).toEqual({ id: 'g1', revokedAt: null });
       expect(calls[0][0].data.revokedAt).toBeInstanceOf(Date);
       expect(calls[0][0].data.notes).toBe('offboarding');
-      expect(calls[1][0].where).toEqual({ id: 'g2' });
+      expect(calls[1][0].where).toEqual({ id: 'g2', revokedAt: null });
       // Per-id outcome: g1/g2 succeeded; g3 already revoked; g4 not found.
       expect(result).toEqual({
         requested: 4,
@@ -520,42 +543,62 @@ describe('AccessGrantsService', () => {
 
     it('stamps a HUMAN principal as revokedById on each grant', async () => {
       accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
-      accessGrant.update.mockResolvedValue({});
 
       await service.batchRevoke(['g1'], null, HUMAN_PRINCIPAL);
 
-      const calls = accessGrant.update.mock.calls as UpdateCall[];
+      const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
       expect(calls[0][0].data.revokedById).toBe(VALID_ACTOR);
       expect(calls[0][0].data.revokedBySaId).toBeUndefined();
     });
 
     it('notes: null CLEARS the note; omitted (undefined) PRESERVES it — matching revoke()/updateNotes()', async () => {
       accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
-      accessGrant.update.mockResolvedValue({});
 
       // Explicit null → write `notes: null` (clear the existing note).
       await service.batchRevoke(['g1'], null, HUMAN_PRINCIPAL);
-      let calls = accessGrant.update.mock.calls as UpdateCall[];
+      let calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
       expect('notes' in calls[0][0].data).toBe(true);
       expect(calls[0][0].data.notes).toBeNull();
 
-      accessGrant.update.mockClear();
+      accessGrant.updateMany.mockClear();
 
       // Omitted (undefined) → no `notes` key written (preserve whatever the grant already has).
       await service.batchRevoke(['g1'], undefined, HUMAN_PRINCIPAL);
-      calls = accessGrant.update.mock.calls as UpdateCall[];
+      calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
       expect('notes' in calls[0][0].data).toBe(false);
     });
 
     it('stamps a SERVICE-ACCOUNT principal as revokedBySaId on each grant — ADR-0048', async () => {
       accessGrant.findMany.mockResolvedValue([{ id: 'g1', revokedAt: null }]);
-      accessGrant.update.mockResolvedValue({});
 
       await service.batchRevoke(['g1'], null, SA_PRINCIPAL);
 
-      const calls = accessGrant.update.mock.calls as UpdateCall[];
+      const calls = accessGrant.updateMany.mock.calls as UpdateManyCall[];
       expect(calls[0][0].data.revokedBySaId).toBe(SA_ID);
       expect(calls[0][0].data.revokedById).toBeUndefined();
+    });
+
+    it('AUD-043: a grant revoked concurrently after the snapshot is skipped, the rest still commit', async () => {
+      accessGrant.findMany.mockResolvedValue([
+        { id: 'g1', revokedAt: null },
+        { id: 'g2', revokedAt: null },
+      ]);
+      // g1's conditional write matches nothing: another revoke committed after the snapshot read.
+      accessGrant.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+
+      const result = await service.batchRevoke(
+        ['g1', 'g2'],
+        undefined,
+        HUMAN_PRINCIPAL,
+      );
+
+      expect(result).toEqual({
+        requested: 2,
+        succeeded: ['g2'],
+        skipped: [{ id: 'g1', reason: 'already_in_state' }],
+      });
     });
 
     it('opens no transaction when nothing is revocable', async () => {
