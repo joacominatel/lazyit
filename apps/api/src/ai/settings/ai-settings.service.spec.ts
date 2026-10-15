@@ -723,6 +723,40 @@ describe('AiSettingsService — the enable gate', () => {
     expect(response).not.toHaveProperty('reason');
   });
 
+  it('refuses re-enabling a verified connection whose stored key no longer decrypts (AI_SECRET_KEY changed)', async () => {
+    const { service, tester, current } = setup({
+      row: enabledRow({ enabled: false }),
+      key: OTHER_KEY,
+    });
+    const before = current();
+    await expectRefusal(
+      service.updateSettings(enabledBody(), 'a'),
+      UnprocessableEntityException,
+      'API_KEY_REQUIRED',
+    );
+    expect(tester.test).not.toHaveBeenCalled();
+    expect(current()).toBe(before);
+  });
+
+  it('re-enables a verified connection whose stored key decrypts, without a test', async () => {
+    const { service, tester } = setup({ row: enabledRow({ enabled: false }) });
+    const saved = await service.updateSettings(enabledBody(), 'a');
+    expect(saved.enabled).toBe(true);
+    expect(tester.test).not.toHaveBeenCalled();
+  });
+
+  it('accepts a key typed again in the re-enabling save', async () => {
+    const { service } = setup({
+      row: enabledRow({ enabled: false }),
+      key: OTHER_KEY,
+    });
+    const saved = await service.updateSettings(
+      enabledBody({ apiKey: PROVIDER_KEY }),
+      'a',
+    );
+    expect(saved.enabled).toBe(true);
+  });
+
   it('skips the test when re-saving an enabled, verified, unchanged connection', async () => {
     const { service, tester } = setup({ row: enabledRow() });
     const saved = await service.updateSettings(
