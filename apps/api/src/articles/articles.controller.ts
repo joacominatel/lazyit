@@ -48,7 +48,7 @@ import {
 } from '@lazyit/shared';
 import { ArticlesService } from './articles.service';
 import { ArticleImportService } from './import/article-import.service';
-import { maxImportBytes } from './article-import';
+import { importUploadOptions } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
@@ -445,9 +445,7 @@ export class ArticlesController {
   // service-level file.size check stays as defense in depth. This does not bound .docx decompression
   // (SEC-002) — a limit-compliant zip can still expand during parsing — which is exactly why the
   // parse is deferred to the sandboxed worker child (ADR-0053).
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: maxImportBytes() } }),
-  )
+  @UseInterceptors(FileInterceptor('file', importUploadOptions()))
   importArticle(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: ImportArticleDto,
