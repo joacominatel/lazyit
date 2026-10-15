@@ -266,11 +266,26 @@ export class ImportCommitService {
     // DIRECTORY PERSONS + assignments — that lives in the mapping (`person.fields`). Parse it (defensive,
     // validated at save time) so the AND-check can additionally require `user:manage` when persons are in
     // play. A null mapping (shouldn't reach here past the commit gate) → no person creation implied.
-    const impliesPersons =
-      session.mapping !== null &&
-      (ImportMappingSchema.parse(session.mapping).person?.fields.length ?? 0) >
-        0;
-    await this.assertActorCanCommit(actorUserId, plan, impliesPersons);
+    const mapping =
+      session.mapping === null
+        ? null
+        : ImportMappingSchema.parse(session.mapping);
+    const impliesPersons = (mapping?.person?.fields.length ?? 0) > 0;
+    // A created model find-or-creates its category from modelConfig, so that path writes AssetCategory too (AUD-087).
+    const impliesCategories =
+      Boolean(
+        mapping?.modelConfig?.categoryConst ||
+        mapping?.modelConfig?.categoryColumn,
+      ) &&
+      plan.conflicts.some(
+        (c) => c.entity === 'AssetModel' && c.outcome === 'create',
+      );
+    await this.assertActorCanCommit(
+      actorUserId,
+      plan,
+      impliesPersons,
+      impliesCategories,
+    );
 
     const data: CommitJobData = { sessionId, actorUserId };
     try {
@@ -310,8 +325,12 @@ export class ImportCommitService {
     actorUserId: string,
     plan: ImportResolutionPlan,
     impliesPersons = false,
+    impliesCategories = false,
   ): Promise<void> {
     const required = new Set<Permission>(['asset:write']);
+    if (impliesCategories) {
+      required.add('category:write');
+    }
     // ADR-0069 REDESIGN §7 (Etapa 2): a commit that creates DIRECTORY PERSONS + opens their assignments
     // additionally mutates Users — so require `user:manage` (the user-administration verb that the Users
     // controller's create gates on) explicitly, fail-closed. The assignment itself is `asset:write`
