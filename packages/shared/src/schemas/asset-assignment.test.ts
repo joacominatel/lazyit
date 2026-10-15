@@ -36,3 +36,32 @@ describe("CreateAssetAssignmentSchema — assignedAt", () => {
     );
   });
 });
+
+// Reads stay tolerant: a row stored before the write rule, with a future assignedAt, still parses.
+describe("AssetAssignmentSchema — read shape", () => {
+  const row = {
+    id: "clh1abc0000xyz0000000aaaa",
+    ...base,
+    assignedAt: "2030-01-01T00:00:00.000Z",
+    releasedAt: null,
+    assignedById: null,
+    releasedById: null,
+    notes: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  test("parses a row without the service-account actor keys", () => {
+    expect(AssetAssignmentSchema.safeParse(row).success).toBe(true);
+  });
+
+  test("carries the service-account actor when one acted", () => {
+    const parsed = AssetAssignmentSchema.parse({
+      ...row,
+      assignedBySaId: "clh1abc0000xyz0000000sa01",
+      releasedBySaId: null,
+    });
+    expect(parsed.assignedBySaId).toBe("clh1abc0000xyz0000000sa01");
+    expect(parsed.releasedBySaId).toBeNull();
+  });
+});
