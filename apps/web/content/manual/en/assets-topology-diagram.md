@@ -275,7 +275,8 @@ for nodes you manage yourself.
 Removing a node is a **soft delete**: it comes off the map but its history is kept. Use **Remove
 from map** at the bottom of the details window's **General** tab and confirm. Nothing is destroyed —
 the node (and the asset behind it, if any) can be brought back later. lazyit never hard-deletes this
-data.
+data. Restoring a removed node is refused while its asset is linked to another node on the map, since
+an asset backs one node at a time — detach it from that node first.
 
 ## The details window
 

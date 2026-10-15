@@ -292,7 +292,8 @@ mano para los nodos que gestionás vos.
 Quitar un nodo es un **borrado suave**: sale del mapa pero su historial se conserva. Usa **Quitar
 del mapa**, al final de la pestaña **General** de la ventana de detalle, y confirma. Nada se destruye
 — el nodo (y el activo detrás de él, si lo hay) puede recuperarse más tarde. lazyit nunca borra de
-forma definitiva estos datos.
+forma definitiva estos datos. Restaurar un nodo quitado se rechaza mientras su activo esté vinculado a
+otro nodo del mapa, porque un activo respalda un solo nodo a la vez: desvincúlalo primero de ese nodo.
 
 ## La ventana de detalle
 
