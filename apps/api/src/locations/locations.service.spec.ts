@@ -30,6 +30,8 @@ describe('LocationsService', () => {
   let service: LocationsService;
   let location: PrismaLocationMock;
   let search: SearchMock;
+  // The location-tree advisory lock, taken on the transaction client.
+  let executeRaw: jest.Mock;
 
   beforeEach(async () => {
     location = {
@@ -41,10 +43,15 @@ describe('LocationsService', () => {
     };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
-    const prisma = {
+    executeRaw = jest.fn().mockResolvedValue(0);
+    const prisma: Record<string, unknown> = {
       location,
-      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+      $executeRaw: executeRaw,
     };
+    prisma.$transaction = jest.fn(
+      (arg: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+    );
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -503,6 +510,91 @@ describe('LocationsService', () => {
     expect(location.update).toHaveBeenCalledWith({
       where: { id: 'room5' },
       data: { deletedAt: null },
+    });
+  });
+
+  // --- tree lock: every tree-shape write checks and writes under one advisory lock ---
+
+  const expectLockedBefore = (firstRead: jest.Mock) => {
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw.mock.calls[0]).toContain('lazyit.location_tree');
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      firstRead.mock.invocationCallOrder[0],
+    );
+  };
+
+  it('a move takes the tree lock before its cycle check, so two opposing moves serialize', async () => {
+    seedTree([
+      { id: 'A', parentId: null },
+      { id: 'B', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'A', parentId: 'B' });
+
+    await service.update('A', { parentId: 'B' });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('promoting to root takes the tree lock too', async () => {
+    seedTree([{ id: 'A', parentId: 'B' }]);
+    location.update.mockResolvedValue({ id: 'A', parentId: null });
+
+    await service.update('A', { parentId: null });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('a nested create checks its parent under the tree lock', async () => {
+    seedTree([{ id: 'root', parentId: null }]);
+    location.create.mockResolvedValue({ id: 'child', parentId: 'root' });
+
+    await service.create({ name: 'Rack', type: 'RACK', parentId: 'root' });
+
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('a field-only update and a root create do not take the tree lock', async () => {
+    seedTree([{ id: 'A', parentId: null }]);
+    location.update.mockResolvedValue({ id: 'A', name: 'renamed' });
+    location.create.mockResolvedValue({ id: 'B', parentId: null });
+
+    await service.update('A', { name: 'renamed' });
+    await service.create({ name: 'Site', type: 'OFFICE' });
+
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it('delete and restore run under the tree lock', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'room', parentId: 'hq', deleted: true },
+    ]);
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq');
+    expectLockedBefore(location.findFirst);
+
+    executeRaw.mockClear();
+    location.findFirst.mockClear();
+    location.update.mockResolvedValue({ id: 'room', deletedAt: null });
+    await service.restore('room');
+    expectLockedBefore(location.findFirst);
+  });
+
+  it('the cycle walk ends on a corrupt loop above the parent instead of spinning', async () => {
+    // loopA ↔ loopB is already corrupt; moving X under loopA does not put X in that loop.
+    seedTree([
+      { id: 'loopA', parentId: 'loopB' },
+      { id: 'loopB', parentId: 'loopA' },
+      { id: 'X', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'X', parentId: 'loopA' });
+
+    await service.update('X', { parentId: 'loopA' });
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'X' },
+      data: { parentId: 'loopA' },
     });
   });
 

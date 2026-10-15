@@ -38,9 +38,16 @@ employee". Answers half of the core audit question "what do we have and **where 
   soft-deleted `parentId` is likewise rejected `400`. Only the parent itself must be live: a live
   location that sits under an archived ancestor is a valid parent, and the cycle walk passes through
   archived ancestors, so an archived link cannot hide a loop that restoring it would close (audit
-  2026-10-10, AUD-080). On a (hypothetical) hard delete of a parent
+  2026-10-10, AUD-080). The walk stops at a node it has already visited, so a loop already in the
+  data still ends. On a (hypothetical) hard delete of a parent
   the FK is `onDelete: SetNull`, so children become roots — mirrors `Asset.locationId`; normal
   deletes are soft.
+- **Tree writes are serialized** (audit 2026-10-10 follow-up) — every write that changes the tree's
+  shape (a move, including a promote to root, a nested create, a delete, a restore) runs its checks and
+  its write in **one transaction** holding a single transaction-scoped Postgres **advisory lock** on the
+  location tree. Two opposing moves therefore cannot both pass the cycle check, and a child cannot be
+  created under, or restored into, a parent that is being deleted. Field-only edits and root creates
+  don't take it.
 - Every location is **classified** by a required `type` — hardcoded enum for now, with
   user-managed custom types deferred (see the Known-debt note below and [[0017-location-type-enum]]).
   The same `type` enum doubles as the hierarchy node **kind** (no separate kind field).

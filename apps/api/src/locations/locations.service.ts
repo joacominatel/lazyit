@@ -40,11 +40,14 @@ export const LOCATION_SORT_ALLOWLIST = {
 } as const;
 
 /**
- * Defensive cap on how deep the hierarchy walk (cycle check / ancestry resolution) will recurse. Real
+ * Defensive cap on how deep the ancestry walk (breadcrumb resolution) will recurse. Real
  * location trees are shallow (site → room → rack); this only guards against a walk that never
  * terminates (which the cycle rule makes impossible, so hitting it signals a bug or corrupt data).
  */
 const MAX_HIERARCHY_DEPTH = 32;
+
+// Every tree-shape write checks and writes under this lock, or two opposing moves both pass and close a cycle.
+export const LOCATION_TREE_LOCK = 'lazyit.location_tree';
 
 @Injectable()
 export class LocationsService {
@@ -138,33 +141,51 @@ export class LocationsService {
   async create(data: CreateLocation) {
     // Reject a bad parent BEFORE inserting (missing/soft-deleted → 400). No cycle is possible on
     // create — the new id doesn't exist yet, so it can't appear in the parent's ancestor chain.
-    if (data.parentId != null) {
-      await this.assertParentAssignable(data.parentId);
-    }
-    const location = await this.prisma.location.create({ data });
+    const { parentId } = data;
+    const location =
+      parentId == null
+        ? await this.prisma.location.create({ data })
+        : await this.prisma.$transaction(async (tx) => {
+            await this.lockLocationTree(tx);
+            await this.assertParentAssignable(tx, parentId);
+            return tx.location.create({ data });
+          });
     // Fire-and-forget search sync (ADR-0035): un-awaited, never throws, no-op when Meili is disabled.
     this.search.upsert('locations', projectLocation(location));
     return location;
   }
 
   async update(id: string, data: UpdateLocation) {
-    await this.findOne(id); // 404 if missing or already soft-deleted
     // Re-parenting: reject a cycle (self or a descendant) and a missing/soft-deleted parent (400).
     // `parentId: null` (promote to root) is always allowed; an absent key leaves the parent untouched.
-    if (data.parentId != null) {
-      await this.assertParentAssignable(data.parentId, id);
+    const { parentId } = data;
+    if (parentId === undefined) {
+      await this.findOne(id); // 404 if missing or already soft-deleted
     }
-    const location = await this.prisma.location.update({ where: { id }, data });
+    const location =
+      parentId === undefined
+        ? await this.prisma.location.update({ where: { id }, data })
+        : await this.prisma.$transaction(async (tx) => {
+            await this.lockLocationTree(tx);
+            await this.assertLocationLive(tx, id);
+            if (parentId !== null) {
+              await this.assertParentAssignable(tx, parentId, id);
+            }
+            return tx.location.update({ where: { id }, data });
+          });
     this.search.upsert('locations', projectLocation(location));
     return location;
   }
 
   /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
   async remove(id: string) {
-    await this.findOne(id);
-    const location = await this.prisma.location.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const location = await this.prisma.$transaction(async (tx) => {
+      await this.lockLocationTree(tx);
+      await this.assertLocationLive(tx, id);
+      return tx.location.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
     });
     // Drop from the index so soft-deleted locations never surface in search (ADR-0035).
     this.search.remove('locations', id);
@@ -180,50 +201,75 @@ export class LocationsService {
    * parent is still soft-deleted is a 409 too: restores do not cascade, so restore the parent first.
    */
   async restore(id: string) {
-    const location = await this.prisma.location.findFirst({
-      where: { id },
-      includeSoftDeleted: true,
-    } as Prisma.LocationFindFirstArgs);
-    if (!location) {
-      throw new NotFoundException(`Location ${id} not found`);
-    }
-    if (location.deletedAt === null) {
-      return location; // already live — idempotent
-    }
-    if (location.parentId !== null) {
-      const parent = await this.prisma.location.findFirst({
-        where: { id: location.parentId },
-        select: { id: true },
-      });
-      if (!parent) {
-        throw new ConflictException(
-          `Cannot restore location ${id}: its parent location ${location.parentId} is deleted. Restore the parent first.`,
-        );
+    const { restored, changed } = await this.prisma.$transaction(async (tx) => {
+      await this.lockLocationTree(tx);
+      const location = await tx.location.findFirst({
+        where: { id },
+        includeSoftDeleted: true,
+      } as Prisma.LocationFindFirstArgs);
+      if (!location) {
+        throw new NotFoundException(`Location ${id} not found`);
       }
-    }
-    const restored = await this.prisma.location.update({
-      where: { id },
-      data: { deletedAt: null },
+      if (location.deletedAt === null) {
+        return { restored: location, changed: false }; // already live — idempotent
+      }
+      if (location.parentId !== null) {
+        const parent = await tx.location.findFirst({
+          where: { id: location.parentId },
+          select: { id: true },
+        });
+        if (!parent) {
+          throw new ConflictException(
+            `Cannot restore location ${id}: its parent location ${location.parentId} is deleted. Restore the parent first.`,
+          );
+        }
+      }
+      const updated = await tx.location.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
+      return { restored: updated, changed: true };
     });
     // Re-index the restored location (ADR-0035).
-    this.search.upsert('locations', projectLocation(restored));
+    if (changed) this.search.upsert('locations', projectLocation(restored));
     return restored;
   }
 
   // --- hierarchy (#845) ----------------------------------------------------
 
+  private async lockLocationTree(tx: Prisma.TransactionClient): Promise<void> {
+    // $executeRaw: pg_advisory_xact_lock returns void, which Prisma's pg driver cannot deserialize.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${LOCATION_TREE_LOCK}))`;
+  }
+
+  /** 404 if the location is missing or soft-deleted. */
+  private async assertLocationLive(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<void> {
+    const location = await tx.location.findFirst({
+      where: { id },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new NotFoundException(`Location ${id} not found`);
+    }
+  }
+
   /**
-   * Validate a proposed `parentId` for a location. Rejects (400) when the parent doesn't exist or is
-   * soft-deleted, and — the one hard structural rule — when assigning it would create a CYCLE:
-   * `selfId` being its own parent, or a descendant of `selfId`. Detects the cycle by walking UP from
-   * the proposed parent following `parentId`; if `selfId` shows up anywhere in that chain, the parent
-   * is (transitively) below `selfId`, so the link would close a loop. Only the parent itself must be
-   * live: the walk passes through soft-deleted ancestors (a live node may sit under an archived one, as
-   * the read path tolerates), so an archived link cannot hide a loop that its restore would close.
-   * `selfId` is omitted on create (the row doesn't exist yet, so no cycle is possible — only the
-   * liveness check runs).
+   * Validate a proposed `parentId` for a location, inside the tree-lock transaction that then writes it.
+   * Rejects (400) when the parent doesn't exist or is soft-deleted, and — the one hard structural rule —
+   * when assigning it would create a CYCLE: `selfId` being its own parent, or a descendant of `selfId`.
+   * Detects the cycle by walking UP from the proposed parent following `parentId`; if `selfId` shows up
+   * anywhere in that chain, the parent is (transitively) below `selfId`, so the link would close a loop.
+   * Only the parent itself must be live: the walk passes through soft-deleted ancestors (a live node may
+   * sit under an archived one, as the read path tolerates), so an archived link cannot hide a loop that
+   * its restore would close. The walk stops at a node it has already visited, so a corrupt loop above the
+   * parent cannot spin it. `selfId` is omitted on create (the row doesn't exist yet, so no cycle is
+   * possible — only the liveness check runs).
    */
   private async assertParentAssignable(
+    tx: Prisma.TransactionClient,
     parentId: string,
     selfId?: string,
   ): Promise<void> {
@@ -231,7 +277,7 @@ export class LocationsService {
       throw new BadRequestException('A location cannot be its own parent.');
     }
     // Live rows only: a soft-deleted parent is not a valid parent.
-    const parent = await this.prisma.location.findFirst({
+    const parent = await tx.location.findFirst({
       where: { id: parentId },
       select: { id: true, parentId: true },
     });
@@ -239,24 +285,17 @@ export class LocationsService {
       throw new BadRequestException(`Parent location ${parentId} not found.`);
     }
     if (!selfId) return;
+    const visited = new Set<string>([parentId]);
     let cursor: string | null = parent.parentId;
-    for (let depth = 0; cursor; depth++) {
-      if (depth >= MAX_HIERARCHY_DEPTH) {
-        // Unreachable while the tree stays acyclic — a safety net against corrupt data / a bug.
-        this.logger.error(
-          `Location hierarchy walk exceeded ${MAX_HIERARCHY_DEPTH} levels from parent ${parentId} (self ${selfId}) — aborting to avoid a runaway loop.`,
-        );
-        throw new BadRequestException(
-          'Location hierarchy is too deep to validate.',
-        );
-      }
+    while (cursor && !visited.has(cursor)) {
       if (cursor === selfId) {
         throw new BadRequestException(
           'A location cannot be moved under one of its own descendants.',
         );
       }
+      visited.add(cursor);
       const node: { parentId: string | null } | null =
-        await this.prisma.location.findFirst({
+        await tx.location.findFirst({
           where: { id: cursor },
           select: { parentId: true },
           includeSoftDeleted: true,
