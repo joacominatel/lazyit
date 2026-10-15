@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-08
+updated: 2026-10-14
 ---
 
 # Article
@@ -96,7 +96,11 @@ deferred.
   in the archive (images, binaries, a nested `.docx` in v1, dotfiles) is **reported as skipped, never
   an error**. The result is a **per-item batch** (created / renamed / skipped) polled via the same
   `GET /articles/import/:jobId`; `title`/`slug` form fields are ignored for a `.zip` (each entry
-  derives its own).
+  derives its own). A `.zip` entry whose create fails (attachment storage full, a slug taken by a
+  concurrent write, any other per-entry error) is reported as **skipped** with reason `storage-full`
+  or `failed`; the rest of the batch still imports. A **single-file** import auto-suffixes a slug
+  **derived from the title** the same way; an explicit `slug` field is kept as given and fails the job
+  with a "slug already exists" message when a live article holds it.
 - **Versioning** ([[0042-article-versioning-and-linking]]): create/import write [[article-version]]
   **v1**; an edit that changes `title`/`content`/`excerpt` and a `publish`/`unpublish` (status
   change) append the next version — all **in the same transaction** as the article write, so the
@@ -196,7 +200,9 @@ listings), `@@index([status, publishedAt])` (latest published).
   selective extraction + folder mirroring + slug auto-suffix + best-effort link rewire,
   [[0059-kb-folders-links-and-import]] §5). Async: validates type+size, returns `202 + jobId`;
   `GET /articles/import/:jobId` polls — a single-file job yields `articleId`, a `.zip` yields a
-  per-item `batch` (created/renamed/skipped + counts + `foldersCreated` + `linksResolved`).
+  per-item `batch` (created/renamed/skipped + counts + `foldersCreated` + `linksResolved`). Job ids
+  are random UUIDs, and only the user who started the import may poll it: anyone else gets the same
+  `404` as an unknown id (the result names files, slugs and articles — INV-9).
   `MAX_IMPORT_SIZE_MB` caps the **upload**; a separate entry-count/uncompressed-size quota in the
   sandboxed child bounds the `.zip`'s expansion. Oversize/parse/over-quota → `failed` with a short,
   permanent message.
