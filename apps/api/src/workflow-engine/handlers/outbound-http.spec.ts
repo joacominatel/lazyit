@@ -1,12 +1,35 @@
 import {
   classifyThrownError,
   extractCorrelationId,
+  hasDotSegment,
   httpErrorClass,
   joinUrl,
   MAX_CORRELATION_BODY_BYTES,
   redactHost,
+  tryRevealSecret,
 } from './outbound-http';
+import { CredentialUnavailableError } from './step-handler';
 import { EgressError } from '../../common/egress';
+
+/** A response whose body records whether it was cancelled (the socket released). */
+function trackedResponse(headers: Record<string, string>): {
+  res: Response;
+  cancelled: () => boolean;
+} {
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(new Uint8Array(8));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return {
+    res: new Response(stream, { status: 200, headers }),
+    cancelled: () => cancelled,
+  };
+}
 
 function jsonResponse(
   value: unknown,
@@ -175,5 +198,76 @@ describe('httpErrorClass', () => {
     expect(httpErrorClass(503)).toBe('http-5xx');
     expect(httpErrorClass(404)).toBe('http-4xx');
     expect(httpErrorClass(302)).toBe('http-other');
+  });
+});
+
+describe('hasDotSegment (AUD-016)', () => {
+  it.each([
+    '/v1/users/../disable',
+    '/v1/users/./disable',
+    '..',
+    '/v1/%2e%2e/x',
+    '/v1/.%2E/x',
+    '/v1/users\\..\\x',
+    '/v1/users/..?a=1',
+  ])('flags %s', (path) => {
+    expect(hasDotSegment(path)).toBe(true);
+  });
+
+  it.each([
+    '/v1/users/ada/disable',
+    '/v1/users/...',
+    '/v1/users/a.b',
+    '/v1/users/%252e%252e',
+    '/v1/users?next=../x',
+    '',
+  ])('accepts %s', (path) => {
+    expect(hasDotSegment(path)).toBe(false);
+  });
+
+  it('flags a percent-encoded ".." value exactly as the URL parser collapses it', () => {
+    const path = `/v1/users/${encodeURIComponent('..')}/disable`;
+    expect(new URL(joinUrl('https://h.example.com', path)).pathname).toBe(
+      '/v1/disable',
+    );
+    expect(hasDotSegment(path)).toBe(true);
+  });
+});
+
+describe('extractCorrelationId — releases bodies it does not read (AUD-072)', () => {
+  it('cancels the body when a Location header answers', async () => {
+    const { res, cancelled } = trackedResponse({
+      location: '/users/1',
+      'content-type': 'application/json',
+    });
+    expect(await extractCorrelationId(res)).toBe('/users/1');
+    expect(cancelled()).toBe(true);
+  });
+
+  it('cancels a non-JSON body', async () => {
+    const { res, cancelled } = trackedResponse({ 'content-type': 'text/html' });
+    expect(await extractCorrelationId(res)).toBeNull();
+    expect(cancelled()).toBe(true);
+  });
+});
+
+describe('tryRevealSecret (AUD-071)', () => {
+  it('returns the revealed secret', async () => {
+    await expect(tryRevealSecret(() => Promise.resolve('s'))).resolves.toEqual({
+      ok: true,
+      secret: 's',
+    });
+  });
+
+  it('maps an unavailable credential to ok:false', async () => {
+    await expect(
+      tryRevealSecret(() => Promise.reject(new CredentialUnavailableError())),
+    ).resolves.toEqual({ ok: false });
+  });
+
+  it('lets any other failure propagate', async () => {
+    await expect(
+      tryRevealSecret(() => Promise.reject(new Error('db down'))),
+    ).rejects.toThrow('db down');
   });
 });

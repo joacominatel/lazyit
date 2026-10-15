@@ -3,7 +3,7 @@ title: WorkflowConnection
 tags: [domain, entity, workflow-engine, access, security]
 status: accepted
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-10-14
 ---
 
 # WorkflowConnection
@@ -30,7 +30,10 @@ runtime-loaded).
 - **authenticates with** an optional [[workflow-secret]] (`secretId`, `onDelete: SetNull`, named
   relation `ConnectionCredential`) — a **reference** to the engine's encrypted store, **never** the
   secret itself. Losing the secret row surfaces as "no credential configured", not a deleted
-  connection; **rotation = point `secretId` at a new (or re-encrypted) [[workflow-secret]]**.
+  connection; **rotation = point `secretId` at a new (or re-encrypted) [[workflow-secret]]**. A
+  **revoked** (soft-deleted) or undecryptable secret keeps its `secretId` reference: a run step then
+  fails with error class `config` ("credential unavailable", not retryable) and Test connection reports
+  a failed probe, instead of a `500` or `handler-threw`.
 - **scopes** N [[workflow-secret]]s (`scopedSecrets`, named relation `SecretConnectionScope`) — the
   inverse of `WorkflowSecret.connectionId`: secrets provisioned *for* this connection (a secret may
   also be app-level, with a null `connectionId`).
@@ -53,12 +56,17 @@ runtime-loaded).
   detail, the create/patch responses and the dry-run preview — returns each header **value** as
   `[redacted]` (`WORKFLOW_REDACTED_VALUE`); names stay visible. On `PATCH`, a value equal to
   `[redacted]` keeps the stored value (so a UI round-trip never overwrites it); a `[redacted]` value for
-  a header that is not stored is a `400`. Stored values are never rewritten.
+  a header that is not stored is a `400`. Stored values are never rewritten. Header **names** are
+  matched case-insensitively when the request is built: the auth header (`authorization`, or the
+  `HEADER`-scheme name) and `content-type` always replace a default header of the same name in any
+  case, so a stale `Authorization` default can never be merged into the credential.
 - **CSEC-1 separation covers every credential channel.** `workflow:manage` configures a connection;
   `workflow:secrets` is additionally required to (a) attach/change `secretId`, (b) change the host
   (`baseUrl` / `url`) of a connection that bears a secret **or carries default headers** (before or
   after the patch), or (c) add or change any default-header **value**. Renaming, clearing the secret,
-  removing headers and other non-host edits stay manage-only. `403` otherwise.
+  removing headers and other non-host edits stay manage-only. `403` otherwise. The check and the
+  write run in one transaction holding the connection row (`SELECT … FOR UPDATE`), so a credential
+  attached concurrently is judged rather than missed.
 - **No userinfo in a destination URL** (SEC-076). `https://user:pass@host` would be sent as
   `Authorization: Basic …` from plain config. It is refused on **write** (`CreateWorkflowConnectionSchema`
   and the `PATCH` DTO, via `connectionConfigHasUserinfo`); the read/run-time `WorkflowConnectionConfigSchema`
@@ -124,6 +132,11 @@ seed ([[0046-roles-permissions-v2]]):
 
 The REST / WEBHOOK_OUT call paths are the step handlers (`handlers/rest.handler.ts`,
 `handlers/webhook-out.handler.ts`, `handlers/outbound-http.ts`), reached during a [[workflow-run]].
+A REST step whose rendered path holds a `.` or `..` segment (a context value of `..` would otherwise
+climb out of `baseUrl`'s path once the URL is parsed) fails with error class `invalid-path` before any
+credential is revealed; the dry-run flags it as a warning. A response body the handler does not read
+(a non-2xx, a non-JSON or `Location` answer, a test-connection probe) is cancelled so its socket is
+released at once.
 
 ## Not yet implemented (deferred)
 

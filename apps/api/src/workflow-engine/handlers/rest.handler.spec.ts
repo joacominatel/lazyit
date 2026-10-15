@@ -4,6 +4,8 @@ import type {
 } from '../../common/egress';
 import { RestStepHandler } from './rest.handler';
 import {
+  CREDENTIAL_UNAVAILABLE_REASON,
+  CredentialUnavailableError,
   freezeMappingContext,
   type StepContext,
   type WorkflowMappingContext,
@@ -487,5 +489,220 @@ describe('RestStepHandler — SEC-076 legacy userinfo in the base URL (upgrade-s
     expect(result.status).toBe('SUCCEEDED');
     // The credential is never echoed into the redacted run metadata.
     expect(JSON.stringify(result.metadata)).not.toContain('hunter2');
+  });
+});
+
+/** A transport answering `status` with a streamed body that records whether it was cancelled. */
+function trackedTransport(
+  status: number,
+  headers: Record<string, string> = { 'content-type': 'text/html' },
+): { transport: EgressTransport; cancelled: () => boolean } {
+  let cancelled = false;
+  const transport: EgressTransport = () =>
+    Promise.resolve({
+      status,
+      statusText: '',
+      headers: new Headers(headers),
+      toResponse: () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(new Uint8Array(8));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status, headers },
+        ),
+      discard: () => {},
+    });
+  return { transport, cancelled: () => cancelled };
+}
+
+function granteeWithId(id: string): Readonly<WorkflowMappingContext> {
+  return makeCtx({
+    grantee: {
+      id,
+      email: 'a@b.c',
+      firstName: 'A',
+      lastName: 'B',
+      legajo: null,
+      username: null,
+      manager: { name: null, email: null, isOffboarded: false },
+    },
+  });
+}
+
+const BEARER_CONNECTION: RestConnectionConfig = {
+  kind: 'REST',
+  baseUrl: 'https://api.example.com/rest/api/3',
+  authScheme: 'BEARER',
+};
+
+describe('RestStepHandler — a rendered dot-segment is refused (AUD-016)', () => {
+  it.each(['..', '.'])(
+    'fails a %s value without sending the credentialed request',
+    async (id) => {
+      const handler = new RestStepHandler();
+      const { transport, captured } = makeTransport({ status: 200 });
+      handler.egressOptions = { transport, lookup: publicLookup };
+      const reveal = jest.fn().mockResolvedValue(SECRET);
+
+      const result = await handler.execute(
+        makeCtxFor(
+          BEARER_CONNECTION,
+          makeStep({ path: '/users/{{ grantee.id }}/disable' }),
+          { data: granteeWithId(id), revealSecret: reveal },
+        ),
+      );
+
+      expect(captured).toHaveLength(0);
+      expect(reveal).not.toHaveBeenCalled();
+      expect(result.status).toBe('FAILED');
+      if (result.status === 'FAILED') {
+        expect(result.retryable).toBe(false);
+        expect(result.metadata?.errorClass).toBe('invalid-path');
+      }
+    },
+  );
+
+  it('still sends a value that merely contains dots', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    await handler.execute(
+      makeCtxFor(
+        BEARER_CONNECTION,
+        makeStep({ path: '/users/{{ grantee.id }}' }),
+        {
+          data: granteeWithId('ada.lovelace'),
+          revealSecret: () => Promise.resolve(SECRET),
+        },
+      ),
+    );
+
+    expect(captured[0].url.pathname).toBe('/rest/api/3/users/ada.lovelace');
+  });
+});
+
+describe('RestStepHandler — an unavailable credential is a config failure (AUD-071)', () => {
+  const unavailable = () => Promise.reject(new CredentialUnavailableError());
+
+  it('execute returns FAILED config instead of throwing', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.execute(
+      makeCtxFor(BEARER_CONNECTION, makeStep(), { revealSecret: unavailable }),
+    );
+
+    expect(captured).toHaveLength(0);
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.retryable).toBe(false);
+      expect(result.metadata?.errorClass).toBe('config');
+      expect(result.metadata?.reason).toBe(CREDENTIAL_UNAVAILABLE_REASON);
+    }
+  });
+
+  it('testConnection reports the failure instead of throwing', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.testConnection({
+      connection: BEARER_CONNECTION,
+      revealSecret: unavailable,
+      meta: {},
+    });
+
+    expect(captured).toHaveLength(0);
+    expect(result).toEqual({
+      ok: false,
+      reason: CREDENTIAL_UNAVAILABLE_REASON,
+    });
+  });
+});
+
+describe('RestStepHandler — the injected headers win over case-variant defaults (AUD-091)', () => {
+  it('sends exactly one authorization and content-type, the handler-set ones', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 201 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      ...BEARER_CONNECTION,
+      defaultHeaders: {
+        Authorization: 'Basic stale',
+        'Content-Type': 'text/plain',
+        Accept: 'application/json',
+      },
+    };
+
+    await handler.execute(
+      makeCtxFor(connection, makeStep(), {
+        revealSecret: () => Promise.resolve(SECRET),
+      }),
+    );
+
+    const sent = captured[0].req.headers;
+    expect(sent['authorization']).toBe(`Bearer ${SECRET}`);
+    expect(sent['content-type']).toBe('application/json');
+    expect(sent['accept']).toBe('application/json');
+  });
+
+  it('a HEADER-scheme credential wins over a default header of the same name in another case', async () => {
+    const handler = new RestStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+    const connection: RestConnectionConfig = {
+      kind: 'REST',
+      baseUrl: 'https://api.example.com',
+      authScheme: 'HEADER',
+      authHeaderName: 'X-Api-Key',
+      defaultHeaders: { 'x-api-key': 'stale' },
+    };
+
+    await handler.testConnection({
+      connection,
+      revealSecret: () => Promise.resolve(SECRET),
+      meta: {},
+    });
+
+    expect(captured[0].req.headers['x-api-key']).toBe(SECRET);
+  });
+});
+
+describe('RestStepHandler — unread response bodies are released (AUD-072)', () => {
+  it('cancels the body of a non-2xx response', async () => {
+    const handler = new RestStepHandler();
+    const { transport, cancelled } = trackedTransport(500);
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.execute(
+      makeCtxFor(BEARER_CONNECTION, makeStep(), {
+        revealSecret: () => Promise.resolve(SECRET),
+      }),
+    );
+
+    expect(result.status).toBe('FAILED');
+    expect(cancelled()).toBe(true);
+  });
+
+  it('cancels the body of a test-connection probe', async () => {
+    const handler = new RestStepHandler();
+    const { transport, cancelled } = trackedTransport(200);
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.testConnection({
+      connection: BEARER_CONNECTION,
+      revealSecret: () => Promise.resolve(SECRET),
+      meta: {},
+    });
+
+    expect(result.ok).toBe(true);
+    expect(cancelled()).toBe(true);
   });
 });

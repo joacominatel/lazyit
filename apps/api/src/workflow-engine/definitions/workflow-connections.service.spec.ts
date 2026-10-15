@@ -56,10 +56,16 @@ function build() {
     findFirst: jest.fn().mockResolvedValue({ applicationId: APP }),
   };
   const rolePermission = { findMany: jest.fn() };
+  const $queryRaw = jest.fn<Promise<unknown[]>, [TemplateStringsArray]>(() =>
+    Promise.resolve([]),
+  );
+  const tx = { workflowConnection, workflowSecret, rolePermission, $queryRaw };
+  const $transaction = jest.fn((fn: (client: typeof tx) => Promise<unknown>) =>
+    fn(tx),
+  );
   const prisma = {
-    workflowConnection,
-    workflowSecret,
-    rolePermission,
+    ...tx,
+    $transaction,
   } as unknown as PrismaService;
   const resolver = new PermissionResolverService(prisma);
   // The registry + secret store are only exercised by `test()` (a separate spec); the CSEC-1 SoD path
@@ -72,7 +78,14 @@ function build() {
     registry,
     secrets,
   );
-  return { service, workflowConnection, workflowSecret, rolePermission };
+  return {
+    service,
+    workflowConnection,
+    workflowSecret,
+    rolePermission,
+    $queryRaw,
+    $transaction,
+  };
 }
 
 const secretBearing = {
@@ -414,5 +427,33 @@ describe('SEC-076 — userinfo is refused on edit (write-only), a clean row is n
     h.workflowConnection.findFirst.mockResolvedValue(noSecret);
     const one = await h.service.findOne('c1');
     expect(one.legacyUserinfo).toBe(false);
+  });
+});
+
+describe('WorkflowConnectionsService.update — the SoD gate and the write are atomic (AUD-017)', () => {
+  it('locks the connection row before reading the state the gate judges, inside one transaction', async () => {
+    const h = build();
+    const order: string[] = [];
+    h.$queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+      order.push(`lock:${strings.join('?')}`);
+      return Promise.resolve([]);
+    });
+    h.workflowConnection.findFirst.mockImplementation(() => {
+      order.push('read');
+      return Promise.resolve(noSecret);
+    });
+    h.workflowConnection.update.mockImplementation(() => {
+      order.push('write');
+      return Promise.resolve({ id: 'c1' });
+    });
+
+    await h.service.update('c1', { name: 'Renamed' }, manageOnly);
+
+    expect(h.$transaction).toHaveBeenCalledTimes(1);
+    expect(order).toEqual([
+      'lock:SELECT "id" FROM "workflow_connections" WHERE "id" = ? FOR UPDATE',
+      'read',
+      'write',
+    ]);
   });
 });

@@ -9,11 +9,14 @@ import { mapData } from '../mapping/data-mapper';
 import {
   classifyThrownError,
   DEFAULT_OUTBOUND_TIMEOUT_MS,
+  discardBody,
   extractCorrelationId,
   httpErrorClass,
   redactHost,
+  tryRevealSecret,
 } from './outbound-http';
 import {
+  CREDENTIAL_UNAVAILABLE_REASON,
   isTransientStatus,
   type StepContext,
   type StepHandler,
@@ -59,7 +62,21 @@ export class WebhookOutStepHandler implements StepHandler<
     // 2) Optional HMAC signature over the raw body (signing key revealed in memory).
     let signed = false;
     if (connection.signatureHeader) {
-      const secret = await ctx.revealSecret();
+      const revealed = await tryRevealSecret(ctx.revealSecret);
+      if (!revealed.ok) {
+        return {
+          status: 'FAILED',
+          retryable: false,
+          metadata: {
+            method: 'POST',
+            targetHost,
+            errorClass: 'config',
+            reason: CREDENTIAL_UNAVAILABLE_REASON,
+            mappedFields: mapped.fieldNames,
+          },
+        };
+      }
+      const secret = revealed.secret;
       if (!secret) {
         return {
           status: 'FAILED',
@@ -126,6 +143,7 @@ export class WebhookOutStepHandler implements StepHandler<
       };
     }
 
+    await discardBody(res);
     return {
       status: 'FAILED',
       retryable: isTransientStatus(res.status) && step.idempotent,

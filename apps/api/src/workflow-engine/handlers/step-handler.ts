@@ -150,9 +150,21 @@ export interface StepRequestMeta {
  * Reveal the connection's credential PLAINTEXT at call time, in memory only (INV-6). Returns `null`
  * when the connection has no credential configured (e.g. an unauthenticated REST target, or a
  * WEBHOOK_OUT with no signing secret). The CORE wires this to
- * `SecretService.revealById`. NEVER returned across an API boundary.
+ * `SecretService.revealById`. NEVER returned across an API boundary. Rejects with a
+ * {@link CredentialUnavailableError} when the referenced credential is revoked or cannot be decrypted.
  */
 export type RevealSecret = () => Promise<string | null>;
+
+export const CREDENTIAL_UNAVAILABLE_REASON =
+  "the connection's credential is unavailable (revoked or undecryptable) — attach a new credential to the connection";
+
+/** An expected failure (revoked or undecryptable credential): handlers fail the step, never throw. */
+export class CredentialUnavailableError extends Error {
+  constructor() {
+    super(CREDENTIAL_UNAVAILABLE_REASON);
+    this.name = 'CredentialUnavailableError';
+  }
+}
 
 /**
  * Everything a handler needs to EXECUTE one step. Generic over the connection config + step shapes so

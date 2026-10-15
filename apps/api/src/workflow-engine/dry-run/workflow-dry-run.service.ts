@@ -21,7 +21,7 @@ import {
   freezeMappingContext,
   type WorkflowMappingContext,
 } from '../handlers/step-handler';
-import { joinUrl } from '../handlers/outbound-http';
+import { hasDotSegment, joinUrl } from '../handlers/outbound-http';
 import { mapData, renderTemplate } from '../mapping/data-mapper';
 import {
   classifyFailureEdge,
@@ -396,11 +396,17 @@ export class WorkflowDryRunService {
         request.body = mapped.values;
         headers['content-type'] = 'application/json';
       }
+      const warnings = hasDotSegment(renderedPath)
+        ? [
+            ...auth.warnings,
+            'The rendered path contains a "." or ".." segment — the live run would refuse to send it.',
+          ]
+        : auth.warnings;
       return {
         ...base,
         mappedFields: mapped.fieldNames,
         request,
-        warnings: auth.warnings,
+        warnings,
       };
     }
 

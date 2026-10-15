@@ -459,3 +459,36 @@ describe('WorkflowDryRunService — SEC-078 sample grant must be live', () => {
     });
   });
 });
+
+describe('WorkflowDryRunService — a rendered dot-segment is flagged (AUD-016)', () => {
+  it('warns that the live run would refuse a path whose value is ".."', async () => {
+    const h = makePrisma({
+      grant: {
+        id: 'grant1',
+        applicationId: APP,
+        accessLevel: 'developer',
+        grantedAt: new Date('2026-06-08T00:00:00.000Z'),
+        expiresAt: null,
+        user: {
+          id: '..',
+          email: 'ada@example.com',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          legajo: null,
+          username: null,
+          managerName: null,
+          manager: null,
+        },
+      },
+    });
+
+    const result = await h.service.dryRun(byId, REQUEST_ID);
+
+    expect(result.steps[0].warnings).toEqual(
+      expect.arrayContaining([expect.stringMatching(/"\.\." segment/)]),
+    );
+    expect(result.steps[1].warnings).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/segment/)]),
+    );
+  });
+});

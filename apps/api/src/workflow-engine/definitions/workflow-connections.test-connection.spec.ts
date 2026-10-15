@@ -16,6 +16,7 @@ import type {
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { PermissionResolverService } from '../../auth/permission-resolver.service';
 import type { SecretService } from '../secrets/secret.service';
+import { CredentialUnavailableError } from '../handlers/step-handler';
 
 /**
  * C3 — TEST CONNECTION (frontend §4c). A single bounded, READ-ONLY probe of a connection: it delegates
@@ -249,5 +250,22 @@ describe('WorkflowConnectionsService.test — C3', () => {
     await expect(service.test('missing', REQUEST_ID)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('WorkflowConnectionsService.test — a revoked credential (AUD-071)', () => {
+  it('reports a failed test instead of a 500 when the secret is revoked', async () => {
+    const { service, captured, revealById } = buildService({
+      status: 200,
+      connection: { kind: 'REST', config: REST_CONFIG, secretId: 'sec1' },
+    });
+    revealById.mockRejectedValue(new CredentialUnavailableError());
+
+    const outcome = await service.test('c1', REQUEST_ID);
+
+    expect(captured).toHaveLength(0);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.message).toMatch(/credential is unavailable/);
+    expect(outcome.requestId).toBe(REQUEST_ID);
   });
 });

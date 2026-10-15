@@ -5,6 +5,7 @@ import {
   type WorkflowStep,
   type WorkflowSteps,
 } from '@lazyit/shared';
+import { unknownTemplateFilters } from '../mapping/data-mapper';
 
 /**
  * Graph validations a WorkflowVersion write must satisfy BEYOND the shared `WorkflowStepsSchema` (which
@@ -19,19 +20,47 @@ import {
  *    Escalating a human-cancelled manual task to ANOTHER manual task is meaningless (and re-targets the
  *    same step, a cancel→escalate→cancel loop); at runtime that cursor reaches the walk's terminal
  *    handler and collapses to FAILED. Disallowing it at author-time is the clean prevention.
+ *  - KNOWN FILTERS: every template filter must be in the mapper's closed set (AUD-068).
  *
- * Both run through {@link assertAllStepsReachable} (the single graph-validation entry the version-author
+ * All run through {@link assertAllStepsReachable} (the single graph-validation entry the version-author
  * path already calls). Connection-reference validity (a REST/WEBHOOK step's `connectionId` must exist,
  * belong to the same application, and match the kind) needs the DB and lives in the service, not here.
  */
 
 /**
- * The full author-time graph gate: reachability + the MANUAL failure-edge rule. (Named for its
+ * The full author-time graph gate: reachability + the MANUAL failure-edge rule + known filters. (Named for its
  * historical first check; the version-author path calls this one function.)
  */
 export function assertAllStepsReachable(steps: WorkflowSteps): void {
   assertNoManualEscalationFailureEdge(steps);
   assertEveryStepReachable(steps);
+  assertKnownTemplateFilters(steps);
+}
+
+/** The template strings a step renders: REST path + mapping, webhook mapping, MANUAL prompt. */
+function templatesOf(step: WorkflowStep): string[] {
+  if (step.kind === 'MANUAL') {
+    return [step.prompt];
+  }
+  const mapping = Object.values(step.dataMapping ?? {});
+  return step.kind === 'REST' ? [step.path, ...mapping] : mapping;
+}
+
+/** An unknown filter renders as a silent no-op, so a typo would ship a wrong payload (AUD-068). */
+export function assertKnownTemplateFilters(steps: WorkflowSteps): void {
+  const offending = steps.flatMap((step, index) =>
+    [...new Set(templatesOf(step).flatMap(unknownTemplateFilters))].map(
+      (filter) => ({ index, key: step.key, filter }),
+    ),
+  );
+  if (offending.length > 0) {
+    throw new BadRequestException({
+      message: `Unknown template filter(s): ${offending
+        .map((o) => `"${o.filter}" in step "${o.key}"`)
+        .join(', ')} — the filters are upper, lower, trim and default`,
+      unknownTemplateFilters: offending,
+    });
+  }
 }
 
 /**

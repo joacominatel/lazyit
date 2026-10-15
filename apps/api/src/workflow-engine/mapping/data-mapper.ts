@@ -65,8 +65,57 @@ const FILTERS: Readonly<
   default: (v, arg) => (v === '' ? (arg ?? '') : v),
 });
 
-/** A single `{{ … }}` placeholder: `{{` + minimal-non-`}` + `}}`. */
-const PLACEHOLDER = /\{\{\s*([^}]*?)\s*\}\}/g;
+/** One `{{ … }}` placeholder found in a template: its span and its trimmed inner expression. */
+interface Placeholder {
+  start: number;
+  end: number;
+  expr: string;
+}
+
+/** A scan, not a regex: a quote-aware regex backtracks exponentially on an unterminated `{{`. */
+function findPlaceholders(template: string): Placeholder[] {
+  const found: Placeholder[] = [];
+  let from = 0;
+  for (;;) {
+    const start = template.indexOf('{{', from);
+    if (start === -1) {
+      return found;
+    }
+    const end = placeholderEnd(template, start + 2);
+    if (end === -1) {
+      from = start + 1;
+      continue;
+    }
+    found.push({ start, end, expr: template.slice(start + 2, end - 2).trim() });
+    from = end;
+  }
+}
+
+/** Past the closing `}}`, or -1; a `:"…"` argument may hold `}` but not `}}` (AUD-068). */
+function placeholderEnd(template: string, i: number): number {
+  while (i < template.length) {
+    const ch = template[i];
+    if (ch === '}') {
+      return template[i + 1] === '}' ? i + 2 : -1;
+    }
+    if (ch === ':') {
+      const quoteAt = template.slice(i + 1).search(/\S/) + i + 1;
+      const quote = template[quoteAt];
+      if (quoteAt > i && (quote === '"' || quote === "'")) {
+        const close = template.indexOf(quote, quoteAt + 1);
+        if (
+          close !== -1 &&
+          !template.slice(quoteAt + 1, close).includes('}}')
+        ) {
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+    i += 1;
+  }
+  return -1;
+}
 
 /** The result of mapping a {@link WorkflowDataMapping}. */
 export interface MapResult {
@@ -127,19 +176,65 @@ function scalarToString(value: unknown): string | undefined {
   return undefined;
 }
 
+/** Split on `|` outside a quoted filter argument (`default:"n|a"`); a stray quote stays literal (AUD-068). */
+function splitExpression(expr: string): string[] {
+  const pieces: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let argStart = false;
+  for (let i = 0; i < expr.length; i += 1) {
+    const ch = expr[i];
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+      }
+      current += ch;
+      continue;
+    }
+    if (ch === '|') {
+      pieces.push(current);
+      current = '';
+      argStart = false;
+      continue;
+    }
+    if (
+      argStart &&
+      pieces.length > 0 &&
+      (ch === '"' || ch === "'") &&
+      expr.indexOf(ch, i + 1) !== -1
+    ) {
+      quote = ch;
+    } else if (ch === ':' && !current.includes(':')) {
+      argStart = true;
+    } else if (!/\s/.test(ch)) {
+      argStart = false;
+    }
+    current += ch;
+  }
+  pieces.push(current);
+  return pieces;
+}
+
+/** One filter expression (`name` or `name:arg`) split into its trimmed name and unquoted argument. */
+function parseFilter(expr: string): { name: string; arg?: string } {
+  const colon = expr.indexOf(':');
+  const name = (colon === -1 ? expr : expr.slice(0, colon)).trim();
+  if (colon === -1) {
+    return { name };
+  }
+  return { name, arg: unquote(expr.slice(colon + 1).trim()) };
+}
+
 /** Parse + apply the closed filter chain after the path (`path | filter | filter:arg`). */
 function applyFilters(value: string, filterExprs: string[]): string {
   let out = value;
   for (const expr of filterExprs) {
-    const colon = expr.indexOf(':');
-    const name = (colon === -1 ? expr : expr.slice(0, colon)).trim();
-    const rawArg = colon === -1 ? undefined : expr.slice(colon + 1).trim();
-    const arg = rawArg === undefined ? undefined : unquote(rawArg);
-    const filter = FILTERS[name];
+    const { name, arg } = parseFilter(expr);
+    const filter = Object.hasOwn(FILTERS, name) ? FILTERS[name] : undefined;
     if (filter) {
       out = filter(out, arg);
     }
-    // Unknown filter → no-op (logic-less: never an error path that could leak / inject).
+    // Unknown filter → no-op at render (versions authored before the save-time check still run).
   }
   return out;
 }
@@ -180,14 +275,18 @@ export function renderTemplate(
   ctx: WorkflowMappingContext,
   mode: EncodingMode,
 ): string {
-  return template.replace(PLACEHOLDER, (_match, expr: string) => {
-    const parts = expr.split('|');
+  let out = '';
+  let last = 0;
+  for (const { start, end, expr } of findPlaceholders(template)) {
+    const parts = splitExpression(expr);
     const path = parts[0].trim();
     const filterExprs = parts.slice(1);
     const resolved = resolvePath(ctx, path);
     const withFilters = applyFilters(resolved ?? '', filterExprs);
-    return encode(withFilters, mode);
-  });
+    out += template.slice(last, start) + encode(withFilters, mode);
+    last = end;
+  }
+  return out + template.slice(last);
 }
 
 /**
@@ -198,8 +297,8 @@ export function renderTemplate(
  */
 export function templatePaths(template: string): string[] {
   const paths: string[] = [];
-  for (const match of template.matchAll(PLACEHOLDER)) {
-    const [path = ''] = match[1].split('|');
+  for (const { expr } of findPlaceholders(template)) {
+    const [path = ''] = expr.split('|');
     paths.push(
       path
         .split('.')
@@ -208,6 +307,20 @@ export function templatePaths(template: string): string[] {
     );
   }
   return paths;
+}
+
+/** The filter names a template uses that are not in the closed set — rejected when a version is saved. */
+export function unknownTemplateFilters(template: string): string[] {
+  const unknown: string[] = [];
+  for (const placeholder of findPlaceholders(template)) {
+    for (const expr of splitExpression(placeholder.expr).slice(1)) {
+      const { name } = parseFilter(expr);
+      if (name !== '' && !Object.hasOwn(FILTERS, name)) {
+        unknown.push(name);
+      }
+    }
+  }
+  return unknown;
 }
 
 /**
