@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-08
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -220,6 +220,9 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
   `/users/:id/assignments`). `GET /users/me` stays OPEN (the self-read the frontend gates admin UI
   off). `GET /search` is gated `search:read` (open to all) and additionally drops the `users` facet
   from results for a caller without `user:read`, so a VIEWER cannot enumerate emails via search.
+  *Amended 2026-10-14 (AUD-015):* "open to all" held only for the default matrix. `GET /search` now drops
+  **every** index whose `<domain>:read` the caller lacks (the same read its dedicated routes require), not
+  only `users` and the purchase indexes — see [[0035-search-architecture]], amendment 2026-10-14.
 - **P4 — migrate the existing `@Roles` sites** to `@RequirePermission`, then RETIRE the legacy path.
   (done) The 63 `@Roles` write/lifecycle gates were swapped 1:1 to the `@RequirePermission` whose
   seed-holders EXACTLY equal the old `@Roles` set — **behavior-preserving**, proven by a golden parity
