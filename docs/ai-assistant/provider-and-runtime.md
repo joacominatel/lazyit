@@ -509,7 +509,8 @@ is not an error: it comes back as the step's `finishReason` (`content-filter`) a
   is the request's. The SDK retries a transient failure twice (§6.4), so a failing connection test can
   take the retry back-off before it answers.
 - **The connection test goes through the port** (no separate probe): one `step` with a single tool.
-  Every failure carries a `code` from `AI_RUN_ERROR_CODES`, which the tester maps onto its checks.
+  Every failure carries a `code` from `AI_RUN_ERROR_CODES`, which the tester maps onto its checks and a
+  fixed message per code (only `PROVIDER_UNAVAILABLE` says the provider could not be reached).
 - **Model listing** is **not** on the port. The definitions implement `listModels` and
   `AiModelListService.listModels(config)` (exported, takes an explicit draft connection) exposes it;
   wiring `POST /config/ai/models` to it is a follow-up for the settings unit, which answers the
@@ -1116,10 +1117,10 @@ conversation has an active run → the user message, prefixed with `buildTurnCon
 route only on `CHAT`) and with any user-typed turn-context tag neutralized — every `<` that opens
 something reading as `turn_context`, opening or closing, with whitespace, attributes, line breaks or no
 `>` at all, becomes `&lt;` → one
-transaction that locks the conversation row, re-checks the active run, and writes the QUEUED run, the run
-record and the user message → `run.status QUEUED` → the start job `start-<runId>`. A failed enqueue leaves
-the run QUEUED for the sweeper. Before the user message, a step left unanswered by an earlier run is
-answered (a repair; only when no run is active).
+transaction that locks the conversation row, re-checks the active run, answers a step left unanswered by
+an earlier run (a repair; only when no run is active), and writes the QUEUED run, the run record and the
+user message → `run.status QUEUED` → the start job `start-<runId>`. A failed enqueue leaves the run QUEUED
+for the sweeper.
 
 `advance(runId)` claims QUEUED → RUNNING (a duplicate or stale job does nothing), answers the step a resume
 was waiting on, then loops. Before every step: cancel requested → CANCELLED; AI off → CANCELLED
@@ -1185,8 +1186,11 @@ run's 30 tool calls and `maxStepsPerRun`: past them the model summarizes, and th
 
 **Terminal transitions** (`run-lifecycle.ts` `finalize`) are a compare-and-set from the allowed statuses;
 the winner cancels the run's still-pending approvals (core `cancel`), answers the open step (recorded
-results, decided invocations' stored results, else a synthetic error naming why), and emits `run.status`
-and `run.finished`. Expiry, cancel, AI-disabled and engine-restart all end with a valid history.
+results, decided invocations' stored results, `UNKNOWN_OUTCOME` for an approved write still EXECUTING —
+it may yet take effect, so never "not executed" — else a synthetic error naming why), and emits
+`run.status` and `run.finished`. Answering a step takes the conversation row lock and re-reads the step
+under it, so a finalize and a repair racing for the same step write one tool message. Expiry, cancel,
+AI-disabled and engine-restart all end with a valid history.
 
 **Resume.** When no invocation of the run is `AWAITING_APPROVAL` or `EXECUTING`, AWAITING_APPROVAL →
 QUEUED (compare-and-set, so a double decision resumes once) and the job `resume-<runId>-<stepCount>`.
@@ -1368,7 +1372,9 @@ the equivalent, and lazyit does not use it yet (§13).
 > - **Enable gate order** (a refused save persists nothing): shim mode → 409; no disclosure → 422
 >   `DISCLOSURE_REQUIRED`; no provider/model (or base URL for OpenAI-compatible) → 422
 >   `PROVIDER_NOT_CONFIGURED`; a provider that takes a key, or any stored key, without a usable
->   `AI_SECRET_KEY` → 409; no key for a key-requiring provider → 422 `API_KEY_REQUIRED`; a failing
+>   `AI_SECRET_KEY` → 409; turning it on (from disabled) with a stored key that does not decrypt — even on
+>   a verified connection, e.g. after `AI_SECRET_KEY` changed — → 422 `API_KEY_REQUIRED`; no key for a
+>   key-requiring provider → 422 `API_KEY_REQUIRED`; a failing
 >   inline test → 422 `CONNECTION_TEST_FAILED` with `test`. The 422 body is `{ code, message, test? }`.
 > - **Disclosure** is recorded once (`acknowledgeDisclosure: true` while none is stored), with its
 >   author on the row and a `disclosure.acknowledged` audit row.
@@ -1432,10 +1438,10 @@ the equivalent, and lazyit does not use it yet (§13).
 > | 400 | `BASE_URL_PRIVATE_NOT_ALLOWED` | a private/ULA literal without OpenAI-compatible + `allowPrivateNetwork` | `PUT`, `POST /test` |
 > | 400 | `PRIVATE_NETWORK_PROVIDER_MISMATCH` | `allowPrivateNetwork` on a provider other than OpenAI-compatible | `POST /test` (on `PUT` the schema refuses first) |
 > | 400 | `PROVIDER_OPTIONS_UNSUPPORTED` | provider options the selected provider does not take | `POST /test` (on `PUT` the schema refuses first) |
-> | 400 | `PROVIDER_NOT_CONFIGURED` | a test with no provider or model to test | `POST /test` |
+> | 400 | `PROVIDER_NOT_CONFIGURED` | a test with no provider or model to test, or no base URL for OpenAI-compatible | `POST /test` |
 > | 422 | `DISCLOSURE_REQUIRED` | enable before the egress disclosure is acknowledged | `PUT` |
 > | 422 | `PROVIDER_NOT_CONFIGURED` | enable without a provider, a model, or a required base URL | `PUT` |
-> | 422 | `API_KEY_REQUIRED` | enable a key-requiring provider with no key; `reason: "DESTINATION_CHANGED"` when the stored key was cleared by this save's provider or base-URL change | `PUT` |
+> | 422 | `API_KEY_REQUIRED` | enable a key-requiring provider with no key, or turn the assistant on while its stored key does not decrypt with the current `AI_SECRET_KEY`; `reason: "DESTINATION_CHANGED"` when the stored key was cleared by this save's provider or base-URL change | `PUT` |
 > | 422 | `CONNECTION_TEST_FAILED` | the inline connection test failed; `test` carries the result | `PUT` |
 >
 > A request body the zod schema refuses (the global validation pipe) keeps the pipe's generic 400 shape
@@ -1536,8 +1542,10 @@ the equivalent, and lazyit does not use it yet (§13).
 >   whose stored role disagrees with its message is dropped. A user message is its text without the
 >   runtime's `<turn_context>` prefix; an assistant message keeps text and tool calls (reasoning, provider
 >   options and raw inputs are dropped); a tool message is folded into the calls it answers as the same
->   summary `tool.result` carries (never the result data). A chat proposal (an invocation with the tool-use
->   id) adds an `approval` part with the STORED preview and its outcome (`null` while pending; `approved`
+>   summary `tool.result` carries (never the result data). Tool-use ids are unique within a run only (a
+>   provider numbering calls per response, `call_0`, reuses them), so calls and their invocations are keyed
+>   by run and id, and a tool message answers the latest call with its id. A chat proposal (an invocation
+>   with the tool-use id) adds an `approval` part with the STORED preview and its outcome (`null` while pending; `approved`
 >   once decided and executed). A run's redacted error becomes a `notice` part after its last message.
 >   Message ids are `<conversationId>:<seq>` — the `messageId` of `message.delta`. Every part is validated
 >   against the shared schema; what fails is dropped (read-tolerant).
