@@ -73,7 +73,9 @@ line, the units that came out of it.
   PATCH carries only one of the two). `POST /purchase-orders/:id/lines/:lineId/cancel-remaining { quantity?,
   reason? }` (#1473) cancels every pending unit by default, never more than are pending (`400`), is a `409`
   when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
-  records the change before and after.
+  records the change before and after. Every line update locks in the same order — the purchase (`FOR KEY
+  SHARE`, `FOR UPDATE` for a kind change), then the line `FOR UPDATE` — and checks the quantities it reads
+  under that lock, so it serializes with a cancel and never leaves more cancelled than ordered.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
 - The **kind** of a line that received units — live linked assets, stock moved in, or seats applied —
   cannot change (`409`): its received units would silently stop counting.

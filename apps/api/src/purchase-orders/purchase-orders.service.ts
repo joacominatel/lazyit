@@ -561,13 +561,18 @@ export class PurchaseOrdersService {
   ) {
     const actor = this.actor.resolveActor(principal);
     const updated = await this.prisma.$transaction(async (tx) => {
-      // A kind change is checked against the linked assets: lock the purchase first so a concurrent link
-      // (which takes KEY SHARE on it) cannot slip a unit in between the check and the write.
+      // Purchase, then line, as cancelRemaining: a kind change holds the purchase against a concurrent link.
+      if (data.kind !== undefined) {
+        await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR UPDATE`;
+      } else {
+        await tx.$queryRaw`SELECT "id" FROM "purchase_orders" WHERE "id" = ${purchaseOrderId} FOR KEY SHARE`;
+      }
+      await tx.$queryRaw`SELECT "id" FROM "purchase_order_lines" WHERE "id" = ${lineId} FOR UPDATE`;
+      // Read under the line lock, so the quantity checks see what a concurrent cancel committed.
       const { line: before } = await this.assertLineLive(
         tx,
         purchaseOrderId,
         lineId,
-        { lock: data.kind !== undefined },
       );
       await this.assertModelsLive(tx, [data.assetModelId ?? undefined]);
       const kind = data.kind ?? before.kind;
