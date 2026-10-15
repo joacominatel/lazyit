@@ -282,6 +282,9 @@ detail panel — no silent copy, no drift.
 > | a cuid | **none** | **attach**, after `assets.assertExists` — `404` if that asset is missing or discarded |
 > | a cuid | **an asset** | **`400`** — the re-point |
 >
+> *Amended 2026-10-14 (AUD-031):* the attach row also `409`s when another live node already links
+> that asset — see [[0074-server-reporting-agent]] §3, "one live node per Asset".
+>
 > **Why the line is there.** The two non-null cases are not the same operation. A **first-attach** has
 > no previous link to drop, so it orphans nothing; it was only ever missing the check `createNode`
 > performs — `assets.assertExists`, whose read the soft-delete extension scopes to live rows. Without

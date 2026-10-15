@@ -16,6 +16,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { isServicePrincipal, type Principal } from '../auth/principal';
+import { infraNodeRoleWhere } from './infra-node-role';
 
 /**
  * The permission an agent's service account holds (ADR-0074 §8). Used here ONLY to recognise which
@@ -31,6 +32,12 @@ const AGENT_REPORT_PERMISSION = 'infra:report';
 const AGENT_IDENTITY_WHERE = {
   permissions: { some: { permission: AGENT_REPORT_PERMISSION } },
 } satisfies Prisma.ServiceAccountWhereInput;
+
+/** Children carry their host's `agentVersion`, and `kind` cannot tell a VM guest from a VM host (AUD-057). */
+const AGENT_HOST_WHERE = {
+  source: 'AGENT',
+  ...infraNodeRoleWhere('HOST'),
+} satisfies Prisma.InfraNodeWhereInput;
 
 /**
  * AgentFleetService — the assisted-update READ (ADR-0094 §4, issue #1206). It absorbs epic #1146
@@ -52,9 +59,9 @@ const AGENT_IDENTITY_WHERE = {
  *    tray and the wizard, which is why #1135 took `specs` off it; adding a jsonb projection there would
  *    walk that back for a surface that never renders it. The `specs` projection lives HERE, on a read
  *    an admin navigates to.
- *  - **It does not count container children.** A CONTAINER node is stamped with its HOST's
- *    `agentVersion` on every report (it runs no agent of its own, #1139), so counting one would
- *    inflate every bucket by however many containers a host happens to run.
+ *  - **It does not count container or guest children.** A child node is stamped with its HOST's
+ *    `agentVersion` on every report (it runs no agent of its own, #1139 / ADR-0095), so counting one
+ *    would inflate every bucket by however many containers or VMs a host happens to run.
  */
 @Injectable()
 export class AgentFleetService {
@@ -101,11 +108,7 @@ export class AgentFleetService {
    */
   async getFleet(principal?: Principal): Promise<AgentFleetView> {
     const rows = await this.prisma.infraNode.findMany({
-      where: {
-        // An agent-bearing HOST: discovered by the agent, and not one of its container children.
-        source: 'AGENT',
-        kind: { not: 'CONTAINER' },
-      },
+      where: AGENT_HOST_WHERE,
       orderBy: { label: 'asc' },
       select: {
         id: true,
@@ -200,11 +203,7 @@ export class AgentFleetService {
    */
   async countAgentsMajorBehind(): Promise<number> {
     const rows = await this.prisma.infraNode.findMany({
-      where: {
-        source: 'AGENT',
-        kind: { not: 'CONTAINER' },
-        agentVersion: { not: null },
-      },
+      where: { ...AGENT_HOST_WHERE, agentVersion: { not: null } },
       select: { agentVersion: true },
     });
     return rows.filter(

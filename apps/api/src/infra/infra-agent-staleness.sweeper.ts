@@ -152,10 +152,21 @@ export class InfraAgentStalenessSweeper
         return (node.lastReportedAt?.getTime() ?? 0) < now - perNodeMs;
       });
       if (transitioning.length === 0) return 0;
-      const { count } = await this.prisma.infraNode.updateMany({
-        where: { id: { in: transitioning.map((n) => n.id) } },
+      // Conditional on the snapshot's own report instant (AUD-058): a node that checked in after the
+      // read carries a newer `lastReportedAt` and is neither flipped nor announced.
+      const flipped = await this.prisma.infraNode.updateManyAndReturn({
+        where: {
+          status: { not: 'OFFLINE' },
+          deletedAt: null,
+          OR: transitioning.map((n) => ({
+            id: n.id,
+            lastReportedAt: n.lastReportedAt,
+          })),
+        },
         data: { status: 'OFFLINE' },
+        select: { id: true },
       });
+      const count = flipped.length;
       if (count > 0) {
         this.logger.log(
           `Flipped ${count} stale agent node(s) to OFFLINE, each judged against the staleness threshold it was last served (default ${this.staleAfterMs}ms).`,
@@ -165,11 +176,9 @@ export class InfraAgentStalenessSweeper
       // (emit never throws — a failed nudge must not abort the sweep). Deduped on the node's last-report
       // instant, so a node stuck OFFLINE across many sweeps is not re-selected (status is now OFFLINE)
       // and a genuinely NEW outage (a fresh lastReportedAt) yields a fresh key ⇒ a fresh nudge.
-      // ponytail: emitting for the SNAPSHOT set, not the exact rows updateMany flipped — a node that
-      // reports in between the two queries is excluded from the flip (its lastReportedAt is fresh) yet
-      // may still get one nudge. Accepted: a two-query race window, deduped, on a small agent cohort.
-      // Ceiling: the exact flipped set would need a RETURNING clause (raw SQL) or a per-node update.
+      const flippedIds = new Set(flipped.map((row) => row.id));
       for (const node of transitioning) {
+        if (!flippedIds.has(node.id)) continue;
         await this.notifications.emit({
           type: 'infra.agent_offline',
           dedupeKey: `infra.agent_offline:${node.id}:${node.lastReportedAt?.toISOString() ?? 'never'}`,

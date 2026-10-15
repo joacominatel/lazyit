@@ -26,6 +26,7 @@ import {
   InfraService,
   INFRA_NODE_ASSET_ARCHIVE_PERMISSION_ERROR,
   INFRA_NODE_ASSET_REPOINT_ERROR,
+  INFRA_NODE_ASSET_SHARED_ERROR,
 } from './infra.service';
 import { AgentPolicyService } from './agent-policy.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -206,12 +207,13 @@ describe('InfraService', () => {
   let permissions: { hasAll: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
-  let txEdge: { create: Mock; updateMany: Mock };
+  let txEdge: { create: Mock; createMany: Mock; updateMany: Mock };
   let txNode: { update: Mock };
 
   beforeEach(async () => {
     txEdge = {
       create: jest.fn(),
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     };
     txNode = { update: jest.fn().mockResolvedValue({ id: 'node-keep' }) };
@@ -222,7 +224,8 @@ describe('InfraService', () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
         update: jest.fn(),
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        // Default: a conditional write still matches its row (the confirm claim, AUD-059).
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -362,6 +365,52 @@ describe('InfraService', () => {
         prisma.infraNode.create,
       );
       expect(arg.data.assetId).toBe('asset-existing');
+    });
+
+    it('refuses to link an asset another LIVE node already links (409, AUD-031)', async () => {
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-taken' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-taken' },
+      });
+      expect(prisma.infraNode.create).not.toHaveBeenCalled();
+    });
+
+    it('stamps a typed IP MANUAL, so a later merge or report never overwrites it (AUD-088)', async () => {
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
+
+      await service.createNode(
+        { kind: 'VM', label: 'web-01', ipAddress: '10.0.0.5' },
+        true,
+        HUMAN,
+      );
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data.ipAddress).toBe('10.0.0.5');
+      expect(arg.data.ipAddressSource).toBe('MANUAL');
+    });
+
+    it('leaves the IP provenance at its default when no IP was typed', async () => {
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
+
+      await service.createNode({ kind: 'VM', label: 'web-01' }, true, HUMAN);
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data).not.toHaveProperty('ipAddressSource');
     });
 
     it('makes a graph-only node (no asset) when trackAsAsset is false', async () => {
@@ -2592,6 +2641,67 @@ describe('InfraService', () => {
       expect(arg.data.assetId).toBe('asset-new');
     });
 
+    it('claims the PENDING→CONFIRMED transition with a conditional write BEFORE minting (AUD-059)', async () => {
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: 'node-1', state: 'PENDING', deletedAt: null },
+        data: { state: 'CONFIRMED' },
+      });
+      expect(
+        prisma.infraNode.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(assets.create.mock.invocationCallOrder[0]);
+    });
+
+    it('a confirm that LOSES the claim to a concurrent one mints nothing and writes nothing (AUD-059)', async () => {
+      // The double click: both requests read PENDING, only one conditional write matches the row.
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      prisma.infraNode.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assetHistory.record).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('hands the node back to the tray when the mint fails, so a retry can still mint (AUD-059)', async () => {
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      assets.create.mockRejectedValue(new Error('tag allocation exhausted'));
+
+      await expect(service.confirmNode('node-1', {}, HUMAN)).rejects.toThrow(
+        'tag allocation exhausted',
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'node-1', state: 'CONFIRMED', assetId: null },
+        data: { state: 'PENDING' },
+      });
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
     it('never carries a REPORT DIAGNOSTIC into the minted Asset specs (#1138)', async () => {
       // The repeat-report path strips these, but confirm mints the Asset from the node's WHOLE specs
       // blob — so the guard has to hold on both paths, or the very first thing a confirmed host's
@@ -2934,6 +3044,51 @@ describe('InfraService', () => {
       expect(arg.data.assetId).toBe('asset-existing');
       // Nothing is deleted on an attach — there was no link to detach.
       expect(assets.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses a first-attach of an asset another LIVE node already links (409, AUD-031)', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-b',
+        assetId: null,
+      });
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(
+        service.updateNode('node-b', { assetId: 'asset-of-a' }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-of-a', id: { not: 'node-b' } },
+      });
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('only UN-LINKS an auto-created Asset another LIVE node still links — never archives it (AUD-030)', async () => {
+      // Two nodes already sharing one asset (data from before the attach guard): detaching one of them
+      // must not archive the row the other still uses.
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-stale',
+        assetId: 'asset-auto',
+      });
+      prisma.asset.findFirst.mockResolvedValue({
+        specs: { _infraAutoCreated: true },
+      });
+      prisma.infraNode.count.mockResolvedValue(1);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-stale',
+        assetId: null,
+      });
+
+      await service.updateNode('node-stale', { assetId: null }, HUMAN);
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-auto', id: { not: 'node-stale' } },
+      });
+      expect(assets.remove).not.toHaveBeenCalled();
+      const arg = firstArg<{ data: { assetId: string | null } }>(
+        prisma.infraNode.update,
+      );
+      expect(arg.data.assetId).toBeNull();
     });
 
     it('a first-attach to a DISCARDED asset 404s and writes nothing (#1117)', async () => {
@@ -7228,7 +7383,28 @@ describe('InfraService', () => {
       const probe = firstArg<{ where: Record<string, unknown> }>(
         prisma.asset.findFirst,
       );
-      expect(probe.where).toEqual({ serial: 'SN-REAL-123' });
+      expect(probe.where).toEqual({
+        serial: 'SN-REAL-123',
+        infraNodes: { none: { deletedAt: null } },
+      });
+    });
+
+    it('never adopts an Asset another LIVE node already links — that one mints instead (AUD-030)', async () => {
+      // A re-imaged host's new proposal must not share its predecessor's Asset: detaching either node
+      // would then archive or un-link the row the other still uses. The relation filter is not scoped
+      // by the soft-delete extension, so the live-node predicate has to be spelled out.
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue(null);
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      const probe = firstArg<{ where: Record<string, unknown> }>(
+        prisma.asset.findFirst,
+      );
+      expect(probe.where.infraNodes).toEqual({ none: { deletedAt: null } });
+      expect(assetHistory.record).not.toHaveBeenCalled();
+      expect(assets.create).toHaveBeenCalledTimes(1);
     });
 
     it('does NOT stamp the auto-created marker on an adopted Asset — the load-bearing safety rule', async () => {
@@ -8400,10 +8576,13 @@ describe('InfraService', () => {
         where: { id: 'edge-child' },
         data: { endedAt: expect.any(Date) as Date },
       });
-      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host.
-      expect(txEdge.create).toHaveBeenCalledWith({
-        data: { sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' },
+      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host — as an
+      // ON CONFLICT DO NOTHING insert, never a caught P2002, which would abort the transaction (AUD-060).
+      expect(txEdge.createMany).toHaveBeenCalledWith({
+        data: [{ sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' }],
+        skipDuplicates: true,
       });
+      expect(txEdge.create).not.toHaveBeenCalled();
       // The duplicate is off the map and off the index; no suspicion nudge for a resolved join.
       expect(search.remove).toHaveBeenCalledWith('infra', 'node-guest');
       expect(notifications.emit).not.toHaveBeenCalled();
@@ -8573,8 +8752,7 @@ describe('InfraService', () => {
           .includes("'macs'"),
       );
       const arg = call?.[0] as
-        | { strings?: string[]; values?: unknown[] }
-        | undefined;
+        { strings?: string[]; values?: unknown[] } | undefined;
       return {
         sql: (arg?.strings ?? []).join(' '),
         values: arg?.values ?? [],
