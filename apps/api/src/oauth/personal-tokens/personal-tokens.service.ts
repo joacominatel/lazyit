@@ -70,6 +70,8 @@ export interface VerifiedPersonalToken {
     clientName: string | null;
     scopes: OAuthScope[];
     createdAt: Date;
+    /** Before this verification's stamp. */
+    lastUsedAt: Date | null;
   };
   expiresAt: Date;
 }
@@ -355,6 +357,7 @@ export class PersonalTokensService {
         clientName: grant.label,
         scopes: storedScopes(grant.scopes),
         createdAt: grant.createdAt,
+        lastUsedAt: grant.lastUsedAt,
       },
       expiresAt: grant.expiresAt,
     };

@@ -50,6 +50,8 @@ export const DCR_UNUSED_CLIENT_TTL_MS = 24 * 60 * 60 * 1000;
 export const REGISTER_RATE_LIMIT = { max: 10, windowMs: 60 * 60 * 1000 };
 export const TOKEN_RATE_LIMIT = { max: 60, windowMs: 60 * 1000 };
 export const REVOKE_RATE_LIMIT = { max: 60, windowMs: 60 * 1000 };
+/** Keys one rate limiter tracks at most; past it the oldest window is evicted (AUD-005). */
+export const RATE_LIMIT_MAX_KEYS = 10_000;
 /** Per user: the decision endpoint verifies a password for `lazyit.admin`, so it is brute-force bounded. */
 export const CONSENT_DECISION_RATE_LIMIT = { max: 10, windowMs: 60 * 1000 };
 

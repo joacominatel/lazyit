@@ -244,6 +244,7 @@ export class McpAuthGuard implements CanActivate {
             clientId: null,
             clientName: result.grant.clientName,
             scopes: result.grant.scopes,
+            lastUsedAt: result.grant.lastUsedAt,
           },
           ceiling: scopesToCeiling(result.grant.scopes),
           rateKey: `grant:${result.grant.id}`,

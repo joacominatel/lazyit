@@ -71,6 +71,8 @@ export interface VerifiedAccessToken {
     clientName: string | null;
     /** The granted scopes, in catalog order. */
     scopes: OAuthScope[];
+    /** Before this verification's stamp. */
+    lastUsedAt: Date | null;
   };
   /** The audience the token is bound to — always this instance's canonical `/mcp` URI. */
   resource: string;
@@ -331,16 +333,15 @@ export class OAuthTokenService {
       throw invalidGrant();
     }
 
-    // Atomic rotation: only one presentation of this refresh token can mark it used.
-    const rotated = await this.prisma.oAuthToken.updateMany({
-      where: { id: row.id, usedAt: null },
-      data: { usedAt: now },
-    });
-    if (rotated.count !== 1) throw invalidGrant();
-
     const access = mintOpaqueToken(OAUTH_ACCESS_TOKEN_PREFIX);
     const refresh = mintOpaqueToken(OAUTH_REFRESH_TOKEN_PREFIX);
     await this.prisma.$transaction(async (tx) => {
+      // One presentation wins the burn, and it rolls back with a failed issue so a retry is not reuse.
+      const rotated = await tx.oAuthToken.updateMany({
+        where: { id: row.id, usedAt: null },
+        data: { usedAt: now },
+      });
+      if (rotated.count !== 1) throw invalidGrant();
       await tx.oAuthToken.createMany({
         data: [
           {
@@ -518,6 +519,7 @@ export class OAuthTokenService {
         clientId: grant.client?.clientId ?? null,
         clientName: grant.client?.name ?? null,
         scopes: storedScopes(grant.scopes),
+        lastUsedAt: grant.lastUsedAt,
       },
       resource: config.resource,
       expiresAt: row.expiresAt,

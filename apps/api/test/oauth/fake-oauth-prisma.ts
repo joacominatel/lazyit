@@ -5,7 +5,8 @@
  * `count: 0` exactly as PostgreSQL would.
  *
  * Supported `where` forms: equality (incl. `null` and `Date`), `{ gt, gte, lt, lte, not, in }`, `OR`, and
- * the two relation filters the OAuth code uses (`grants: { none: {} }`, `user: { deletedAt: null }`).
+ * the relation filters the OAuth code uses (`grants: { none: {} }`, `codes: { none: {} }`,
+ * `tokens: { some: … }`, `user: { deletedAt: null }`). `$transaction` rolls back on a throw.
  * Test support only — it lives under `test/`, outside the build.
  */
 
@@ -86,8 +87,16 @@ export class FakeOAuthPrisma {
   readonly aiSettings = this.model('aiSettings', {});
   readonly user = this.model('user', { deletedAt: null }, true);
 
-  $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
-    return fn(this);
+  async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
+    const snapshot = Object.entries(this.tables).map(
+      ([table, rows]) => [table, rows.map((row) => ({ ...row }))] as const,
+    );
+    try {
+      return await fn(this);
+    } catch (err) {
+      for (const [table, rows] of snapshot) this.tables[table] = rows;
+      throw err;
+    }
   }
 
   /* ── the generic model ──────────────────────────────────────────────────────────────────────── */
@@ -116,6 +125,17 @@ export class FakeOAuthPrisma {
         return (condition as Row).none !== undefined
           ? codes.length === 0
           : true;
+      }
+      if (table === 'oAuthGrant' && key === 'tokens') {
+        const { some } = condition as Row;
+        return (
+          some === undefined ||
+          this.tables.oAuthToken.some(
+            (token) =>
+              token.grantId === row.id &&
+              this.matches('oAuthToken', token, some as Row),
+          )
+        );
       }
       if (table === 'oAuthGrant' && key === 'user') {
         const owner = this.tables.user.find((user) => user.id === row.userId);

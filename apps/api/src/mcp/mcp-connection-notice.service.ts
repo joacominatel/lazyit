@@ -18,9 +18,10 @@ const MEMO_LIMIT = 10_000;
  * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo — set only once the
  * notice exists, so a failed send is retried — spares the lookups on every later request. The email copy
  * follows the owner's per-type email opt-out like every emailable type (the allowlist has no mandatory
- * types); the bell copy always lands. The bell forgets after 90 days, so a grant is announced only while it
- * is younger than that: an older grant's notice, if any, was already sent and may have been pruned, and
- * must not be re-sent. Service Accounts have no bell and are never announced.
+ * types); the bell copy always lands. The bell forgets after 90 days, so a grant older than that which was
+ * already used is not announced again (its notice was sent and may have been pruned); one never used
+ * before — `lastUsedAt` still null, as for a personal token minted and kept idle — is announced whatever its
+ * age (AUD-014). Service Accounts have no bell and are never announced.
  *
  * Best-effort and fire-and-forget: a notification problem never fails or delays the MCP request.
  */
@@ -58,7 +59,8 @@ export class McpConnectionNoticeService {
     });
     if (
       !row ||
-      now.getTime() - row.createdAt.getTime() >= NOTIFICATION_RETENTION_MS
+      (grant.lastUsedAt !== null &&
+        now.getTime() - row.createdAt.getTime() >= NOTIFICATION_RETENTION_MS)
     ) {
       this.remember(grant.id);
       return false;

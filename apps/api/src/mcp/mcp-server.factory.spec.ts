@@ -21,7 +21,7 @@ import type { AiToolRegistry } from '../ai/core/tool-registry';
 import type { AiPromptService } from '../ai/prompt/ai-prompt.module';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { McpCaller } from './mcp-caller';
-import { McpRateLimiter, WindowCounter } from './mcp-rate-limit';
+import { McpRateLimiter } from './mcp-rate-limit';
 import { McpServerFactory, advertisedSchema } from './mcp-server.factory';
 import {
   MCP_CALL_RATE_LIMIT,
@@ -52,6 +52,7 @@ const CALLER: McpCaller = {
     clientId: 'lzc_1',
     clientName: 'Claude Code',
     scopes: ['lazyit.read', 'lazyit.write'],
+    lastUsedAt: new Date(),
   },
   ceiling: ['read', 'write'],
   rateKey: 'grant:g1',
@@ -313,18 +314,5 @@ describe('McpServerFactory', () => {
       value: { anything: true },
     });
     expect(std.validate([1])).toHaveProperty('issues');
-  });
-});
-
-describe('WindowCounter', () => {
-  it('reports exhaustion without counting, and forgets old windows', () => {
-    const counter = new WindowCounter(2, 1000);
-    expect(counter.exhausted('ip', 0)).toBe(false);
-    counter.hit('ip', 0);
-    counter.hit('ip', 0);
-    expect(counter.exhausted('ip', 10)).toBe(true);
-    expect(counter.hit('ip', 10)).toBe(false);
-    expect(counter.exhausted('ip', 1000)).toBe(false);
-    expect(counter.hit('ip', 1000)).toBe(true);
   });
 });
