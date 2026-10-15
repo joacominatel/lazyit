@@ -157,9 +157,9 @@ export interface ImportPrismaClient {
 const IMPORT_TX_TIMEOUT_MS = 120_000;
 
 /**
- * The minimal Prisma client the ZIP worker needs (ADR-0059 §5) — a superset of {@link ImportTx}
- * exposed at the TOP level (not just inside `$transaction`), because folder find-or-create and the
- * link-rewire pass span entries. Satisfied structurally by a real PrismaClient.
+ * The minimal Prisma client the ZIP worker needs (ADR-0059 §5): the per-entry and per-folder
+ * transactions, plus the TOP-level root check, slug probe and link-rewire pass that span entries.
+ * Satisfied structurally by a real PrismaClient.
  */
 export interface ZipImportPrismaClient extends ImportPrismaClient {
   articleCategory: {
