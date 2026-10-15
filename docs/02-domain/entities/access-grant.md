@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # AccessGrant
@@ -59,13 +59,14 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
 - **Referential integrity:** the required FKs are `onDelete: Restrict` — a [[user]] or
   [[application]] with grant rows **cannot be hard-deleted**.
 
-> [!note] Actor comes from the `X-User-Id` shim, not the body
-> `grantedById` (on create) and `revokedById` (on revoke) are taken from the optional `X-User-Id`
-> header (the caller → a JWT later), **never** the request body ([[0022-draft-visibility-auth-shim]],
-> [[0023-access-management-design]]). Absent header → `null` actor (system/unknown), allowed by the
-> `SetNull`/optional design. [[asset-assignment]] now follows the **same** pattern — it originally
-> read `assignedById`/`releasedById` from the body (predating the shim) and was converged onto the
-> shim by [[0024-asset-assignment-actor-shim]]. Both append-only joins now agree.
+> [!note] Actor comes from the authenticated principal, not the body
+> The create and revoke actor is the verified principal ([[0038-jit-user-provisioning]],
+> [[0048-service-accounts]]), **never** the request body ([[0023-access-management-design]]): a human
+> lands in `grantedById` / `revokedById`, a service account in `grantedBySaId` / `revokedBySaId`. No
+> principal → `null` actor (system/unknown), allowed by the `SetNull`/optional design. The `X-User-Id`
+> shim is only a dev-mode way to supply that principal ([[0022-draft-visibility-auth-shim]]).
+> [[asset-assignment]] follows the **same** pattern ([[0024-asset-assignment-actor-shim]]), so both
+> append-only joins agree.
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /applications/:id` and `DELETE /users/:id` are **soft** deletes
@@ -127,17 +128,21 @@ Indexes: `@@index([userId])`, `@@index([applicationId])`. **No uniqueness constr
 
 ## Endpoints
 
-`apps/api/src/access-grants/` (`AccessGrantsModule`). The `X-User-Id` header is **optional** on
-create/revoke and becomes the actor. Documented via Swagger ([[0018-api-documentation-swagger]]).
+`apps/api/src/access-grants/` (`AccessGrantsModule`). The authenticated principal is the actor on
+create/revoke (see the note above). Documented via Swagger ([[0018-api-documentation-swagger]]).
 
 - `POST /access-grants` — open a grant. `userId`/`applicationId` must be live → else `400` (FK
-  errors also map to `400`). `grantedById` = `X-User-Id` (null if absent).
+  errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
 - `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=` — list, newest first.
   `activeOnly` **defaults to true** (`revokedAt = null`); `includeExpired` **defaults to true**
   (pass `false` to hide active grants already past `expiresAt`).
+- `GET /access-grants/mine?activeOnly=&includeExpired=&limit=&offset=&page=` — the caller's **own**
+  grants, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to false** (revoked
+  history included). A self-read: any authenticated human, no `accessGrant:read` needed; the user id
+  comes only from the principal, never a parameter. Service accounts get `403`.
 - `GET /access-grants/:id` — one by id (`404` if missing).
-- `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()`,
-  `revokedById = X-User-Id`. Already revoked, or revoked concurrently first → `409`.
+- `PATCH /access-grants/:id/revoke` — body `{ notes? }`; sets `revokedAt = now()` and the principal in
+  `revokedById` or `revokedBySaId`. Already revoked, or revoked concurrently first → `409`.
 - `POST /access-grants/batch/revoke` — body `{ ids, notes? }`; revokes each active grant in one
   transaction and returns the per-id outcome. Missing ids are skipped as `not_found`; already (or
   concurrently) revoked ones as `already_in_state` — never a rollback of the rest.
@@ -154,8 +159,8 @@ Plus the natural sub-resource endpoints on the related entities:
 
 ## Not yet implemented (deferred)
 
-- A soft-delete-time guard on apps/users with active grants; **retrofitting [[asset-assignment]]** to the
-  same `X-User-Id` actor pattern. (Auto-revoke on `expiresAt` is now implemented — see `expiresAt` above.)
+- A soft-delete-time guard on apps/users with active grants. (Auto-revoke on `expiresAt` is now
+  implemented — see `expiresAt` above.)
 
 Related: [[user]] · [[application]] · [[application-category]] · [[access-request]] ·
 [[asset-assignment]] · [[service-account]] · [[shared-package]] · [[0023-access-management-design]] ·
