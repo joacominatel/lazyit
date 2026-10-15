@@ -543,6 +543,7 @@ const prisma = {
   articleWikiLink: {
     deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
   aiToolInvocation: {
     create: jest.fn(({ data }: { data: Record<string, unknown> }) => {

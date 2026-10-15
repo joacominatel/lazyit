@@ -96,6 +96,7 @@ type ArticleLinkMock = {
 type ArticleWikiLinkMock = {
   deleteMany: jest.Mock;
   createMany: jest.Mock;
+  updateMany: jest.Mock;
   findMany: jest.Mock;
 };
 // ArticleAlias (ADR-0059 §2): current-state join — create / delete / findFirst / findMany.
@@ -117,6 +118,7 @@ describe('ArticlesService', () => {
   let asset: { findFirst: jest.Mock };
   let application: { findFirst: jest.Mock };
   let prisma: { $transaction: jest.Mock };
+  let queryRaw: jest.Mock;
   // ActorService is mocked; guard validation lives in jwt-auth.guard.spec.ts. By default it echoes
   // a present user's id back (any caller with a User "exists") and maps undefined to anonymous.
   let actor: ActorService;
@@ -169,6 +171,7 @@ describe('ArticlesService', () => {
     articleWikiLink = {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([]),
     };
     articleAlias = {
@@ -187,7 +190,18 @@ describe('ArticlesService', () => {
     //   - interactive callback form (create/update/publish/unpublish/import): invoke the callback
     //     with a `tx` exposing the same model mocks, so the snapshot write hits articleVersion and
     //     the wiki-link rebuild hits articleWikiLink (ADR-0059 §3).
-    const tx = { article, articleVersion, articleLink, articleWikiLink };
+    // `$queryRaw` is the folder row lock (AUD-023); `articleCategory` is the re-check under it.
+    queryRaw = jest.fn().mockResolvedValue([]);
+    const tx = {
+      article,
+      articleVersion,
+      articleLink,
+      articleWikiLink,
+      $queryRaw: queryRaw,
+      get articleCategory() {
+        return articleCategory;
+      },
+    };
     prisma = {
       $transaction: jest.fn(
         (
@@ -1055,6 +1069,73 @@ describe('ArticlesService', () => {
   // (ADR-0060 §1), so `PATCH /articles/:id` with a `categoryId` is an AUTHORIZATION write. Moving
   // INTO a folder the actor cannot read is refused; moving OUT of a restricted folder into a more
   // permissive one stays allowed by decision (the widening is confirmed in the UI, not blocked).
+  describe('a folder deleted mid-write cannot take the article (AUD-023)', () => {
+    // The pre-transaction check passes; the folder is soft-deleted before the transaction locks it.
+    const deletedBeforeLock = () =>
+      articleCategory.findFirst
+        .mockResolvedValueOnce({ id: 'c1' })
+        .mockResolvedValueOnce(null);
+
+    it('create locks the folder FOR SHARE and re-checks it is live inside the transaction', async () => {
+      await service.create(
+        { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+        AUTHOR_PRINCIPAL,
+      );
+      const [sql, id] = queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        string,
+      ];
+      expect(sql.join('?')).toMatch(/FOR SHARE/);
+      expect(id).toBe('c1');
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        article.create.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('create is refused with the usual 400 when the folder is gone under the lock', async () => {
+      deletedBeforeLock();
+      await expect(
+        service.create(
+          { title: 'T', content: 'body', categoryId: 'c1', status: 'DRAFT' },
+          AUTHOR_PRINCIPAL,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.create).not.toHaveBeenCalled();
+    });
+
+    it('a move is refused with the usual 400 when the destination is gone under the lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      deletedBeforeLock();
+      await expect(
+        service.update('a', { categoryId: 'dest' }, AUTHOR_PRINCIPAL),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(article.update).not.toHaveBeenCalled();
+      expect(queryRaw.mock.calls[0]).toContain('dest');
+    });
+
+    it('an edit that does not move the article takes no folder lock', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        categoryId: 'home',
+        title: 't',
+        content: 'body',
+        excerpt: null,
+      });
+      await service.update('a', { title: 'New' }, AUTHOR_PRINCIPAL);
+      expect(queryRaw).not.toHaveBeenCalled();
+    });
+  });
+
   describe('article move — folder destination guard (ADR-0060 §9, #1296)', () => {
     const inFolder = (categoryId: string, authorId = AUTHOR) => ({
       id: 'a',
@@ -1654,6 +1735,31 @@ describe('ArticlesService', () => {
       });
     });
 
+    it('clears the live excerpt when the restored version had none (AUD-047)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        title: 'New title',
+        content: 'new body',
+        excerpt: 'internal note, see ticket 123',
+      });
+      articleVersion.findFirst.mockResolvedValueOnce({
+        id: 5,
+        articleId: 'a',
+        version: 1,
+        title: 'Old title',
+        content: 'old body',
+        excerpt: null,
+        status: 'PUBLISHED',
+      });
+
+      await service.restoreVersion('a', 1, AUTHOR_PRINCIPAL);
+
+      expect(lastUpdate()).toMatchObject({ excerpt: null });
+      expect(lastVersion()).toMatchObject({ excerpt: null });
+    });
+
     it('404s when the requested version does not exist (and writes nothing)', async () => {
       article.findFirst.mockResolvedValue({
         id: 'a',
@@ -2068,6 +2174,81 @@ describe('ArticlesService', () => {
   });
 
   // --- wiki-links: rebuild on save (ADR-0059 §3) ---------------------------
+
+  describe('forward [[slug]] references resolve when the slug appears (AUD-101)', () => {
+    const resolvesTo = (slug: string, id: string) =>
+      expect(articleWikiLink.updateMany).toHaveBeenCalledWith({
+        where: { targetSlug: slug, resolvedTargetId: null },
+        data: { resolvedTargetId: id },
+      });
+
+    it('on create', async () => {
+      await service.create(
+        {
+          title: 'VPN setup',
+          content: 'body',
+          categoryId: 'c1',
+          status: 'PUBLISHED',
+        },
+        AUTHOR_PRINCIPAL,
+      );
+      resolvesTo('vpn-setup', 'art1');
+    });
+
+    it('on a soft-delete restore', async () => {
+      article.findFirst.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        deletedAt: new Date(),
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        status: 'PUBLISHED',
+        deletedAt: null,
+      });
+      await service.restore('a', AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+
+    it('on a slug change, and not on an edit that keeps the slug', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        slug: 'vpn',
+        authorId: AUTHOR,
+        status: 'PUBLISHED',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        categoryId: 'c1',
+      });
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn',
+        title: 'VPN guide',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { title: 'VPN guide' }, AUTHOR_PRINCIPAL);
+      expect(articleWikiLink.updateMany).not.toHaveBeenCalled();
+
+      article.update.mockResolvedValueOnce({
+        id: 'a',
+        slug: 'vpn-setup',
+        title: 'VPN',
+        content: 'body',
+        excerpt: null,
+        status: 'PUBLISHED',
+        categoryId: 'c1',
+      });
+      await service.update('a', { slug: 'vpn-setup' }, AUTHOR_PRINCIPAL);
+      resolvesTo('vpn-setup', 'a');
+    });
+  });
 
   describe('wiki-link rebuild on save', () => {
     // The data passed to the last articleWikiLink.createMany.

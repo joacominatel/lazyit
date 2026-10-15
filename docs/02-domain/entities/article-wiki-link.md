@@ -3,7 +3,7 @@ title: ArticleWikiLink
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-10-14
 ---
 
 # ArticleWikiLink
@@ -40,6 +40,11 @@ fast link resolution. Introduced in [[0059-kb-folders-links-and-import]]. Distin
   `@lazyit/shared`); it strips a `|display` alias and a `#heading` anchor and `slugify`s the target.
 - **Best-effort resolution.** Each `targetSlug` is resolved to a **live** article id in one query
   (`resolvedTargetId`), else null — a forward reference. A save never blocks on an unresolved slug.
+- **Forward references resolve when the slug appears.** Creating or importing an article, restoring a
+  soft-deleted one, and changing an article's slug each set `resolvedTargetId` on every still-unresolved
+  edge (`resolvedTargetId IS NULL`) whose `targetSlug` is that slug, in the same transaction — so the
+  source shows up in the new article's backlinks without being re-edited. An edge already resolved to
+  another (possibly soft-deleted) article is left alone.
 - **Backlinks** ("References") are the reverse read: all rows whose `resolvedTargetId` = an article
   (`GET /articles/:id/backlinks`), returning the **source** id/slug/title for the list.
 - **Access still applies** — the backlink read **404s if the target isn't readable** and **ANDs the

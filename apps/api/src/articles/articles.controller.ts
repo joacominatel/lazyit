@@ -460,11 +460,14 @@ export class ArticlesController {
   @RequirePermission('article:write')
   @ApiOperation({
     summary:
-      'Poll the status of an async article import (ADR-0053 / ADR-0059 §5). state ∈ queued|active|completed|failed. On a completed SINGLE-file import articleId is set; on a completed .zip import batch carries the per-item outcome (created/renamed/skipped + counts + foldersCreated + linksResolved) and articleId is null. error is a short, permanent-failure message once failed. 404 for an unknown jobId.',
+      'Poll the status of an async article import (ADR-0053 / ADR-0059 §5). state ∈ queued|active|completed|failed. On a completed SINGLE-file import articleId is set; on a completed .zip import batch carries the per-item outcome (created/renamed/skipped + counts + foldersCreated + linksResolved) and articleId is null. error is a short, permanent-failure message once failed. Only the importing user may poll a job; 404 for an unknown jobId or one started by someone else.',
   })
   @ApiOkResponse({ type: ImportJobStatusDto })
-  importStatus(@Param('jobId') jobId: string) {
-    return this.imports.getStatus(jobId);
+  importStatus(
+    @Param('jobId') jobId: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.imports.getStatus(jobId, principal);
   }
 
   @Patch(':id')

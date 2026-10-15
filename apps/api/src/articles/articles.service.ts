@@ -158,6 +158,11 @@ const ARTICLE_AUTHOR_INCLUDE = {
   author: { select: { firstName: true, lastName: true, deletedAt: true } },
 } satisfies Prisma.ArticleInclude;
 
+// restoreVersion re-applies a snapshot's null excerpt; the PATCH contract still cannot clear it.
+type ArticleUpdateInput = Omit<UpdateArticle, 'excerpt'> & {
+  excerpt?: string | null;
+};
+
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; the author — or, since
  * #877, an ADMIN / `article:manage` holder — may write) is enforced here from the authenticated User
@@ -460,6 +465,7 @@ export class ArticlesService {
     await this.assertCategoryUsable(data.categoryId);
     const slug = data.slug ?? this.deriveSlug(data.title);
     const article = await this.prisma.$transaction(async (tx) => {
+      await this.lockLiveFolder(tx, data.categoryId);
       const created = await tx.article.create({
         data: {
           slug,
@@ -482,6 +488,7 @@ export class ArticlesService {
       // Materialize the outgoing `[[slug]]` wiki-link edges from the body (ADR-0059 §3), in the SAME
       // transaction as the article + version write so the edge can never drift from the content.
       await this.rebuildWikiLinks(tx, created.id, created.content);
+      await this.resolveInboundWikiLinks(tx, created.slug, created.id);
       return created;
     });
     // Index PUBLISHED only; a DRAFT is author-private (ADR-0022) so it must never be searchable —
@@ -504,7 +511,7 @@ export class ArticlesService {
    * read is refused — ADR-0060 §9) and, unlike other metadata, it DOES append a version so the move is
    * auditable. Moving OUT of a restricted folder into a more permissive one stays allowed by design.
    */
-  async update(id: string, data: UpdateArticle, principal?: Principal) {
+  async update(id: string, data: ArticleUpdateInput, principal?: Principal) {
     const cu = this.requireAuthor(principal);
     const manageAny = await this.canManageAny(principal);
     const current = await this.loadOwned(id, cu, manageAny, principal);
@@ -520,6 +527,9 @@ export class ArticlesService {
     }
     const { metadata, ...rest } = data;
     const article = await this.prisma.$transaction(async (tx) => {
+      if (data.categoryId && data.categoryId !== current.categoryId) {
+        await this.lockLiveFolder(tx, data.categoryId);
+      }
       const updated = await tx.article.update({
         where: { id },
         data: {
@@ -559,6 +569,9 @@ export class ArticlesService {
       // untouched, so the edges are left as-is (the `[[slug]]`s in the body didn't move).
       if (data.content !== undefined && current.content !== updated.content) {
         await this.rebuildWikiLinks(tx, id, updated.content);
+      }
+      if (current.slug !== updated.slug) {
+        await this.resolveInboundWikiLinks(tx, updated.slug, id);
       }
       return updated;
     });
@@ -618,9 +631,13 @@ export class ArticlesService {
     if (article.deletedAt === null) {
       return article; // already live — idempotent
     }
-    const restored = await this.prisma.article.update({
-      where: { id },
-      data: { deletedAt: null, lastEditedById: cu },
+    const restored = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.article.update({
+        where: { id },
+        data: { deletedAt: null, lastEditedById: cu },
+      });
+      await this.resolveInboundWikiLinks(tx, row.slug, row.id);
+      return row;
     });
     // Re-index honoring draft privacy: PUBLISHED is indexed, a DRAFT stays out (ADR-0022 / ADR-0035).
     this.syncSearch(restored);
@@ -761,14 +778,12 @@ export class ArticlesService {
         `Version ${version} of article ${id} not found`,
       );
     }
-    // excerpt is restored only when the old version had one (UpdateArticle's excerpt is a
-    // non-empty string); a version without an excerpt leaves the current excerpt untouched.
     return this.update(
       id,
       {
         title: snapshot.title,
         content: snapshot.content,
-        ...(snapshot.excerpt ? { excerpt: snapshot.excerpt } : {}),
+        excerpt: snapshot.excerpt,
       },
       principal,
     );
@@ -1282,6 +1297,21 @@ export class ArticlesService {
     }
   }
 
+  // A folder delete holds FOR UPDATE on its rows, so this waits it out and the re-read then sees it gone.
+  private async lockLiveFolder(
+    tx: Prisma.TransactionClient,
+    categoryId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT "id" FROM "article_categories" WHERE "id" = ${categoryId} FOR SHARE`;
+    const live = await tx.articleCategory.findFirst({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!live) {
+      throw this.unusableCategory(categoryId);
+    }
+  }
+
   /**
    * The 400 an unusable `categoryId` raises. Shared by the "not live" check and the move-destination
    * visibility check so an INVISIBLE folder is byte-for-byte indistinguishable from a NON-EXISTENT
@@ -1376,6 +1406,18 @@ export class ArticlesService {
         targetSlug,
         resolvedTargetId: idBySlug.get(targetSlug) ?? null,
       })),
+    });
+  }
+
+  /** Forward `[[slug]]` references written before this article took the slug resolve now (ADR-0059 §3). */
+  private async resolveInboundWikiLinks(
+    tx: Prisma.TransactionClient,
+    slug: string,
+    articleId: string,
+  ): Promise<void> {
+    await tx.articleWikiLink.updateMany({
+      where: { targetSlug: slug, resolvedTargetId: null },
+      data: { resolvedTargetId: articleId },
     });
   }
 
