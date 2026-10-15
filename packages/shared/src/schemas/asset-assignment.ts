@@ -47,13 +47,19 @@ export const AssetAssignmentSchema = z.object({
 /**
  * Payload to open an assignment. `assetId` + `userId` are required. `assignedAt` is optional
  * and defaults to `now()` in the DB — pass it only to backdate an imported/historical record.
+ * It may not lie in the future: a release stamps `releasedAt = now()`, which would land before it.
  * A duplicate *active* `(assetId, userId)` pair is rejected (409) by the partial unique index.
  * The actor (`assignedById`) is NOT in the body — it comes from the `X-User-Id` shim.
  */
 export const CreateAssetAssignmentSchema = z.strictObject({
   assetId: z.cuid(),
   userId: z.uuid(),
-  assignedAt: z.iso.datetime().optional(),
+  assignedAt: z.iso
+    .datetime()
+    .refine((value) => Date.parse(value) <= Date.now(), {
+      message: "assignedAt cannot be in the future",
+    })
+    .optional(),
   notes: optionalText(2000),
 });
 
