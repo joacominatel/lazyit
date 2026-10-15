@@ -133,8 +133,17 @@ export function ConsumableForm({
     };
 
     if (consumable) {
+      // An emptied field is omitted on create but must be sent as null to clear it on a PATCH.
+      const data = {
+        ...payload,
+        sku: payload.sku ?? null,
+        categoryId: payload.categoryId ?? null,
+        description: payload.description ?? null,
+        minStock: payload.minStock ?? null,
+        notes: payload.notes ?? null,
+      };
       updateConsumable.mutate(
-        { id: consumable.id, data: payload },
+        { id: consumable.id, data },
         {
           onSuccess: (updated) => {
             toast.success(t("form.savedToast"));

@@ -65,6 +65,9 @@ A few things worth knowing:
 
 From a consumable's detail page or its row menu you can **Edit**, **Clone** or **Delete** it.
 
+- **Edit** changes any field. Empty a field and save to remove the value — for example, clear the
+  reorder threshold to stop low-stock alerts for that item. To drop the category, pick the selected
+  category again.
 - **Clone** opens a new consumable pre-filled from the original. The SKU is cleared and the stock
   starts at zero — handy for stocking a near-identical part.
 - **Delete** is a soft delete: the consumable is archived, not erased, and its movement history is
