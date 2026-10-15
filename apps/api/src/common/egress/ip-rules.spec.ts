@@ -58,6 +58,85 @@ describe('classifyIp — IPv4', () => {
   });
 });
 
+describe('classifyIp — IPv4 reserved-range edges', () => {
+  const cases: Array<[string, AddressCategory]> = [
+    ['0.255.255.255', 'unspecified'],
+    ['9.255.255.255', 'global'],
+    ['126.255.255.255', 'global'],
+    ['128.0.0.1', 'global'],
+    ['169.253.255.255', 'global'],
+    ['169.255.0.1', 'global'],
+    ['192.167.255.255', 'global'],
+    ['223.255.255.255', 'global'],
+    ['240.0.0.0', 'reserved'],
+    ['255.255.255.254', 'reserved'],
+    ['192.0.0.255', 'reserved'],
+    ['192.0.1.1', 'global'],
+    ['192.0.2.0', 'reserved'],
+    ['192.0.2.255', 'reserved'],
+    ['192.0.3.1', 'global'],
+    ['192.88.98.255', 'global'],
+    ['192.88.99.255', 'reserved'],
+    ['192.88.100.1', 'global'],
+    ['198.17.255.255', 'global'],
+    ['198.19.255.255', 'reserved'],
+    ['198.20.0.1', 'global'],
+    ['198.51.99.255', 'global'],
+    ['198.51.100.255', 'reserved'],
+    ['198.51.101.1', 'global'],
+    ['203.0.112.255', 'global'],
+    ['203.0.113.255', 'reserved'],
+    ['203.0.114.1', 'global'],
+  ];
+
+  it.each(cases)('classifies %s as %s', (addr, expected) => {
+    expect(classifyIp(addr)).toBe(expected);
+  });
+});
+
+describe('classifyIp — IPv6 reserved-range edges', () => {
+  const cases: Array<[string, AddressCategory]> = [
+    // 100::/64 discard-only (AUD-065: was classed global)
+    ['100::', 'reserved'],
+    ['100::1', 'reserved'],
+    ['100::ffff:ffff:ffff:ffff', 'reserved'],
+    ['100:0:0:1::1', 'global'],
+    ['100:1::1', 'global'],
+    ['101::1', 'global'],
+    // 2001:db8::/32 documentation
+    ['2001:db8:ffff:ffff::1', 'reserved'],
+    ['2001:db9::1', 'global'],
+    ['2001:db7::1', 'global'],
+    // ff00::/8 multicast
+    ['ff00::', 'multicast'],
+    ['ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'multicast'],
+    // fe80::/10 link-local, fc00::/7 ULA
+    ['febf:ffff::1', 'linkLocal'],
+    ['fdff:ffff::1', 'uniqueLocal'],
+    ['fbff::1', 'global'],
+    // ::/128 and ::1/128
+    ['::2', 'unspecified'],
+    ['::0.0.0.1', 'loopback'],
+    // IPv4-compatible ::/96 and NAT64 64:ff9b::/96 re-classify the embedded IPv4
+    ['::10.0.0.1', 'private'],
+    ['::169.254.169.254', 'imds'],
+    ['64:ff9b::7f00:1', 'loopback'],
+    ['64:ff9b::10.0.0.1', 'private'],
+    ['64:ff9b::a9fe:a9fe', 'imds'],
+    ['64:ff9b::808:808', 'global'],
+    // IPv4-mapped carries every IPv4 category through
+    ['::ffff:100.64.0.1', 'cgnat'],
+    ['::ffff:224.0.0.1', 'multicast'],
+    ['::ffff:255.255.255.255', 'broadcast'],
+    ['::ffff:192.0.2.1', 'reserved'],
+    ['::ffff:0.0.0.0', 'unspecified'],
+  ];
+
+  it.each(cases)('classifies %s as %s', (addr, expected) => {
+    expect(classifyIp(addr)).toBe(expected);
+  });
+});
+
 describe('classifyIp — IPv6', () => {
   const cases: Array<[string, AddressCategory]> = [
     ['::1', 'loopback'],
