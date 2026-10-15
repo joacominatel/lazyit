@@ -224,7 +224,8 @@ describe('InfraService', () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn(),
         update: jest.fn(),
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        // Default: a conditional write still matches its row (the confirm claim, AUD-059).
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       infraEdge: {
         findFirst: jest.fn(),
@@ -2609,6 +2610,67 @@ describe('InfraService', () => {
       }>(prisma.infraNode.update);
       expect(arg.data.state).toBe('CONFIRMED');
       expect(arg.data.assetId).toBe('asset-new');
+    });
+
+    it('claims the PENDING→CONFIRMED transition with a conditional write BEFORE minting (AUD-059)', async () => {
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(prisma.infraNode.updateMany).toHaveBeenCalledWith({
+        where: { id: 'node-1', state: 'PENDING', deletedAt: null },
+        data: { state: 'CONFIRMED' },
+      });
+      expect(
+        prisma.infraNode.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(assets.create.mock.invocationCallOrder[0]);
+    });
+
+    it('a confirm that LOSES the claim to a concurrent one mints nothing and writes nothing (AUD-059)', async () => {
+      // The double click: both requests read PENDING, only one conditional write matches the row.
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      prisma.infraNode.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await service.confirmNode('node-1', {}, HUMAN);
+
+      expect(assets.create).not.toHaveBeenCalled();
+      expect(assetHistory.record).not.toHaveBeenCalled();
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('hands the node back to the tray when the mint fails, so a retry can still mint (AUD-059)', async () => {
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {},
+      });
+      assets.create.mockRejectedValue(new Error('tag allocation exhausted'));
+
+      await expect(service.confirmNode('node-1', {}, HUMAN)).rejects.toThrow(
+        'tag allocation exhausted',
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'node-1', state: 'CONFIRMED', assetId: null },
+        data: { state: 'PENDING' },
+      });
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
 
     it('never carries a REPORT DIAGNOSTIC into the minted Asset specs (#1138)', async () => {

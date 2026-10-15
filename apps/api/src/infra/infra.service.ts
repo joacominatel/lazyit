@@ -3448,6 +3448,13 @@ export class InfraService {
       return this.getNodeDetail(id, principal);
     }
 
+    // Claim before minting: of two concurrent confirms only one may mint an Asset (AUD-059).
+    const claimed = await this.prisma.infraNode.updateMany({
+      where: { id, state: 'PENDING', deletedAt: null },
+      data: { state: 'CONFIRMED' },
+    });
+    if (claimed.count === 0) return this.getNodeDetail(id, principal);
+
     const trackAsAsset = dto.trackAsAsset ?? true;
     const label = dto.label ?? node.label;
 
@@ -3455,36 +3462,15 @@ export class InfraService {
     // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
     let assetId = node.assetId ?? undefined;
     if (trackAsAsset && !node.assetId) {
-      const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
-      // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
-      // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
-      // `specs.host.hardware.serial`, so on a unique-serial collision we retry WITHOUT the serial
-      // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
-      const host = (hostSpecs.host ?? {}) as AgentReportHost;
-      const serial = sanitizeSerial(host);
-
-      // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
-      // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
-      const adopted = await this.adoptableAsset(hostSpecs, serial);
-      if (adopted) {
-        // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
-        // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
-        // already carries it. The node's label/kind/state transitions below are unchanged.
-        //
-        // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
-        // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
-        // stamping it here would mean a later detach silently deleted the operator's curated
-        // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
-        // is left intact and merely un-linked"). See {@link detachAsset}.
-        await this.recordAgentLink(adopted.id, node, principal);
-        assetId = adopted.id;
-      } else {
-        assetId = await this.mintBackingAsset(
-          hostSpecs,
-          serial,
-          label,
-          principal,
-        );
+      try {
+        assetId = await this.resolveBackingAsset(node, label, principal);
+      } catch (err) {
+        // Hand the node back to the tray so a retry can mint; the claim alone linked nothing.
+        await this.prisma.infraNode.updateMany({
+          where: { id, state: 'CONFIRMED', assetId: null },
+          data: { state: 'PENDING' },
+        });
+        throw err;
       }
     }
 
@@ -3500,6 +3486,44 @@ export class InfraService {
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
+  }
+
+  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link. */
+  private async resolveBackingAsset(
+    node: {
+      id: string;
+      specs: Prisma.JsonValue | null;
+      reportingSource: string | null;
+      externalId: string | null;
+    },
+    label: string,
+    principal?: Principal,
+  ): Promise<string> {
+    const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
+    // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
+    // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
+    // `specs.host.hardware.serial`, so on a unique-serial collision we retry WITHOUT the serial
+    // rather than fail the confirm. `modelId` is deliberately left null (no AssetModel auto-create).
+    const host = (hostSpecs.host ?? {}) as AgentReportHost;
+    const serial = sanitizeSerial(host);
+
+    // ADOPTION (ADR-0093 §3), BEFORE minting anything: if this report's serial corroborates a live
+    // Asset, LINK that Asset instead of manufacturing a second row for one physical machine.
+    const adopted = await this.adoptableAsset(hostSpecs, serial);
+    if (adopted) {
+      // No Asset is created, `modelId` is untouched (an adopted row may already carry a human's),
+      // and `Asset.serial` is NOT written — adoption is KEYED on the serial, so the row provably
+      // already carries it. The node's label/kind/state transitions below are unchanged.
+      //
+      // AND THE PROVENANCE MARKER IS NOT STAMPED. That is the load-bearing safety rule of this
+      // whole feature: `detachAsset` SOFT-DELETES an asset carrying `_infraAutoCreated`, so
+      // stamping it here would mean a later detach silently deleted the operator's curated
+      // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
+      // is left intact and merely un-linked"). See {@link detachAsset}.
+      await this.recordAgentLink(adopted.id, node, principal);
+      return adopted.id;
+    }
+    return this.mintBackingAsset(hostSpecs, serial, label, principal);
   }
 
   /**
