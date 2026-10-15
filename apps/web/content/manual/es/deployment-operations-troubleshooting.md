@@ -62,16 +62,15 @@ oculta) al arrancar y devuelve un error limpio en la importación en lugar de co
 
 ## Problemas de inicio de sesión
 
-- **El ayudante de arranque termina con código distinto de cero.** Falla de forma ruidosa a propósito, y
-  la API y la web no arrancan hasta que tenga éxito. Lee su registro; las causas habituales son una
-  discrepancia entre la URL del emisor y el dominio externo de autenticación, o credenciales obsoletas
-  frente a una base de datos de proveedor nueva.
-- **La clave maestra tiene la longitud equivocada.** La clave maestra del proveedor de identidad debe
-  ser de **exactamente 32 bytes** — más corta *o* más larga fallan en el primer arranque. Genera una de
-  la longitud correcta y defínela en el archivo de entorno.
-- **Tipo producción local: el navegador no llega a la página de inicio de sesión.** Asegúrate de que
-  `auth.localhost` resuelve a `127.0.0.1` (añádelo a tu archivo de hosts si tu sistema no asigna
-  `*.localhost` automáticamente), y de que la URL del emisor incluye el puerto HTTPS alto.
+- **El script de arranque o la API se niegan a arrancar por restos del proveedor de identidad
+  incluido.** Esta versión ya no lo incluye, y no se cambió nada. Consulta
+  [Actualizaciones](/help/deployment-operations-upgrades#retiro-del-proveedor-de-identidad-incluido).
+- **OIDC: la API no arranca.** Con `AUTH_MODE=oidc` la API exige `OIDC_ISSUER` y `OIDC_JWKS_URI`, y su
+  error indica cuál falta. Defínela en el archivo de entorno y recrea la API.
+- **OIDC: tu proveedor rechaza el inicio de sesión.** Comprueba que la URI de redirección registrada en
+  el proveedor sea exactamente `https://tudominio.com/api/auth/callback/oidc`, y que `AUTH_ISSUER` y
+  `OIDC_ISSUER` coincidan con el issuer que anuncia tu proveedor. Consulta
+  [Proveedor de identidad](/help/deployment-operations-identity-provider).
 
 ## El navegador avisa sobre el certificado (local)
 

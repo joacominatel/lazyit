@@ -22,13 +22,12 @@ hace cada uno, para que sepas qué registros leer y qué es seguro reiniciar. El
 | **migrate** | Trabajo puntual de migración + semilla | Se ejecuta una vez por despliegue y termina. Aplica las migraciones antes de que arranque la API. |
 | **valkey** | Intermediario de trabajos en segundo plano | Respalda los trabajos asíncronos (p. ej. la importación de documentos, el motor de flujos). |
 | **meilisearch** | Motor de búsqueda | Da soporte a la búsqueda transversal. Reconstruible desde la base de datos. |
-| **zitadel** | El proveedor de identidad incluido | Gestiona el inicio de sesión. Tiene su propia base de datos. |
-| **zitadel_db** | PostgreSQL del proveedor de identidad | Separada de la base de datos de la aplicación. |
 
-Con el proveedor de identidad incluido, un par de pequeños ayudantes puntuales se ejecutan en el primer
-arranque para configurar el inicio de sesión automáticamente: se completan y terminan. Con tu propio
-proveedor de identidad, los servicios de Zitadel se eliminan (consulta
-[Proveedor de identidad](/help/deployment-operations-identity-provider)).
+En la pila no corre ningún proveedor de identidad. Con cuentas locales, lazyit gestiona el inicio de
+sesión él mismo; con tu propio proveedor OIDC, el inicio de sesión pasa por un servicio que administras
+en otro sitio (consulta [Proveedor de identidad](/help/deployment-operations-identity-provider)).
+También puede correr, de forma opcional, un contenedor auxiliar de **backup** — consulta
+[Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Cómo encajan las piezas
 
@@ -39,24 +38,19 @@ proveedor de identidad, los servicios de Zitadel se eliminan (consulta
   **meilisearch** sincronizado a medida que cambian los datos.
 - **migrate** se ejecuta primero en cada despliegue: aplica las migraciones y una pequeña semilla
   idempotente, luego termina. La API espera a que finalice con éxito antes de arrancar.
-- El inicio de sesión pasa por **zitadel** (o por tu propio proveedor). La API y la web validan los
-  tokens que emite.
+- El inicio de sesión lo gestionan **web** y **api** — contra las cuentas propias de lazyit, o
+  validando los tokens que emite tu proveedor OIDC.
 
-## Dos bases de datos — ambas importan
+## Una sola base de datos
 
-La pila ejecuta **dos** bases de datos PostgreSQL: la de la aplicación (**db**) y la propia del proveedor
-de identidad (**zitadel_db**). Están separadas a propósito para poder respaldarlas de forma independiente
-y para que cambiar a tu propio proveedor de identidad sea una eliminación limpia.
-
-Esta separación es lo más importante que hay que entender para la recuperación ante desastres: respaldar
-solo la base de datos de la aplicación deja a todo el mundo **sin poder iniciar sesión**, porque las
-cuentas viven en la base de datos del proveedor de identidad. Consulta
+La pila ejecuta **una** base de datos PostgreSQL, la de la aplicación (**db**). Guarda tus datos y, con
+cuentas locales, también las credenciales de inicio de sesión. Consulta
 [Copias de seguridad y restauración](/help/deployment-operations-backups-restore).
 
 ## Qué es y qué no es objetivo de copia de seguridad
 
-- **db** y **zitadel_db** guardan estado real: **respalda ambas.**
-- **meilisearch** es reconstruible: su índice se rehace desde las bases de datos con un comando de
+- **db** guarda estado real: **respáldala.**
+- **meilisearch** es reconstruible: su índice se rehace desde la base de datos con un comando de
   reindexado, así que sus datos no necesitan copia.
 - **valkey** solo guarda el estado de los trabajos en curso (PostgreSQL es el sistema de registro),
   así que tampoco es objetivo de copia. Sus datos sobreviven a los reinicios para no perder trabajos

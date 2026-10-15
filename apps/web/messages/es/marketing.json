@@ -107,7 +107,7 @@
       "locked": "Cifrado en el cliente",
       "item1": "DATABASE_URL",
       "item2": "STRIPE_SECRET_KEY",
-      "item3": "ZITADEL_SA_KEY"
+      "item3": "SMTP_PASSWORD"
     },
     "dashboard": {
       "assets": "Activos",

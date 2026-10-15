@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-09-23
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -17,6 +17,12 @@ Builds on [[0005-id-strategy]], [[0006-soft-delete-and-auditing]], [[0007-flexib
 [[0041-soft-delete-reuse-and-restore]], [[0046-roles-permissions-v2]], [[0053-async-workers-bullmq-valkey]],
 [[0054-applications-workflow-engine]] (transactional-outbox), [[0063-configurable-asset-tag-scheme]],
 [[0068-asset-tag-existing-estate-awareness]].
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: §A.4's manual provision-account
+endpoint is withdrawn with the bundled Zitadel. A directory person becomes an account through the JIT email
+link (OIDC) or `POST /users/:id/provision-local-account` (local mode, [[0086-local-authentication-mode]]
+§5). The `skipIdpWriteBack` create opt (§A.3) is now named `directoryOnly`, since there is no IdP block left
+to skip.
 
 ## Context
 

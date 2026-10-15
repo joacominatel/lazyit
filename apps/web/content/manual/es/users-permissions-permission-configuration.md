@@ -96,9 +96,9 @@ otro permiso: si lo quitas, sigue quitado en todas las actualizaciones siguiente
 
 ## Los permisos se quedan dentro de lazyit
 
-Estos permisos son **solo de lazyit**. Nunca se escriben en tu proveedor de identidad — el proveedor no
-sabe nada de ellos. Solo los tres roles generales se reflejan en el proveedor (cuando hay uno
-configurado); el ajuste fino de permisos que haces aquí vive por completo dentro de lazyit.
+Estos permisos son **solo de lazyit**. Ni ellos ni los roles se escriben nunca en tu proveedor de
+identidad — el proveedor no sabe nada de ellos. Los roles y el ajuste fino de permisos que haces aquí
+viven por completo dentro de lazyit.
 
 Consulta [Roles](/help/users-permissions-roles) para el modelo de roles y
 [Permisos](/help/permissions) para el modelo de área/acción y los valores por defecto que se publican.

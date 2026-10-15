@@ -745,10 +745,9 @@ const userUpdate = defineTool({
       const before = managerText(current.manager);
       if (!sameManager(current.manager, manager.body)) {
         changes.push({ field: 'manager', before, after: manager.label });
-        // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. It
-        // is local-only (never mirrored to the IdP) and the route records it as an append-only
-        // MANAGER_CHANGED history row — LEDGER_APPEND, a non-step-up code, so the elevated preview still
-        // carries a warning. Combined with another identity field, IDENTITY_CHANGE still applies.
+        // CEO decision (2026-09-24): a manager change is NOT an identity change and needs no step-up. The
+        // route records it as an append-only MANAGER_CHANGED history row — LEDGER_APPEND, a non-step-up
+        // code, so the elevated preview still carries a warning. Combined with another identity field, IDENTITY_CHANGE still applies.
         warnings.add('LEDGER_APPEND');
       }
     }
@@ -757,11 +756,6 @@ const userUpdate = defineTool({
         'Nothing to change: every value given already matches the user.',
       );
     }
-    // A role, name or email change on an IdP-linked account is mirrored to the identity provider.
-    const mirrored = changes.some((c) =>
-      ['role', 'email', 'firstName', 'lastName'].includes(c.field),
-    );
-    if (mirrored && current.externalId) warnings.add('EXTERNAL_PROVISIONING');
 
     const target = userRefOf(current, 'updated');
     return previewOf(
@@ -880,8 +874,9 @@ const userOffboard = defineTool({
   description:
     'Offboard (archive) a user who left (administrators), in one step: their active application ' +
     'access grants are revoked, their assigned assets are released back to inventory, their Secret ' +
-    'Manager vault memberships are dropped, their sessions end and, when linked, their identity-provider ' +
-    'account is deactivated. It can be undone only partly: user_restore brings the account back but ' +
+    'Manager vault memberships are dropped and their sessions end. An account in an external identity ' +
+    'provider is not disabled there; that stays with the operator. It can be undone only partly: ' +
+    'user_restore brings the account back but ' +
     'not the grants, the assets or the vault memberships. lazyit refuses to offboard the last active administrator.',
   domain: 'users',
   class: 'write',
@@ -943,7 +938,6 @@ const userOffboard = defineTool({
         })),
       });
     }
-    if (current.externalId) warnings.push('EXTERNAL_DEPROVISIONING');
     const exposure = await criticalExposure(rt, String(current.id), grants);
     const criticalChanges: AiToolPreview['changes'] = [];
     if (touchesCritical(exposure)) {
@@ -1156,7 +1150,7 @@ export const usersToolset: AiToolset = {
     ),
     unexposed(
       UsersController,
-      ['provisionAccount', 'passwordResetCapabilities'],
+      ['passwordResetCapabilities'],
       'Deferred to v1.1 as elevated with step-up, only where no credential is returned (tools-and-execution.md §3, §7 "elevated, after v1").',
     ),
     unexposed(

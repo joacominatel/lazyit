@@ -59,15 +59,16 @@ and returns a clean error on import instead of hanging.
 
 ## Sign-in problems
 
-- **The bootstrap helper exits non-zero.** It fails loud on purpose, and the API and web app won't
-  start until it succeeds. Read its log; the usual causes are a mismatch between the issuer URL and the
-  external auth domain, or stale credentials left over against a fresh provider database.
-- **The master key is the wrong length.** The identity-provider master key must be **exactly 32
-  bytes** — shorter *or* longer both fail at first boot. Generate one of the right length and set it in
-  the environment file.
-- **Local prod-like: the browser can't reach the sign-in page.** Make sure `auth.localhost` resolves
-  to `127.0.0.1` (add it to your hosts file if your system doesn't map `*.localhost` automatically),
-  and that the issuer URL includes the high HTTPS port.
+- **The startup script or the API refuses to start over a leftover of the bundled identity
+  provider.** This version no longer ships one, and nothing was changed. See
+  [Upgrades](/help/deployment-operations-upgrades#bundled-identity-provider-removed).
+- **OIDC: the API won't start.** With `AUTH_MODE=oidc` the API requires `OIDC_ISSUER` and
+  `OIDC_JWKS_URI`, and its error names the one that is missing. Set it in the environment file and
+  recreate the API.
+- **OIDC: your provider rejects the sign-in.** Check that the redirect URI registered in the provider is
+  exactly `https://yourdomain.com/api/auth/callback/oidc`, and that `AUTH_ISSUER` and `OIDC_ISSUER`
+  match the issuer your provider advertises. See
+  [Identity provider](/help/deployment-operations-identity-provider).
 
 ## The browser warns about the certificate (local)
 

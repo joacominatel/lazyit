@@ -19,6 +19,8 @@ pages ship in the frontend lane per CLAUDE.md #3/#7.
 offboard of an **active** person now bumps `User.sessionEpoch`, revoking their local sessions — the
 reconcile's one sanctioned `sessionEpoch` write (see Hard invariants and
 [[0086-local-authentication-mode]] §8).
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: with the IdP write-back gone, the
+`users.service.create` opt this record calls `skipIdpWriteBack` is named `directoryOnly`; the rail is unchanged.
 
 ## Context
 

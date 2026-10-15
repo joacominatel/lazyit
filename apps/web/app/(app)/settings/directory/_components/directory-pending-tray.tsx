@@ -14,20 +14,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 /** How many of the newest directory persons to preview in the tray (the rest live under the Users link). */
 const PREVIEW_LIMIT = 8;
 
-/**
- * The PENDING review tray for AD/LDAP-discovered persons (issue #839, ADR-0091). The directory sync creates
- * LOGIN-LESS `directoryOnly` VIEWER persons (no Zitadel mirror, no password) — the same `directoryOnly`
- * rows the bulk import creates — so there is NO new entity or confirm/discard endpoint: the review surface
- * IS the existing Users list, and this tray is the at-a-glance preview of the newest arrivals right where
- * the sync is configured (`GET /users?directoryOnly=true`, ADR-0069 §0 #2). Each person is a real User that
- * an operator can open, edit, provision a login for, or offboard from the Users section — this tray just
- * surfaces them and links through.
- *
- * ponytail: read-only preview + deep-link, NOT a bespoke approve/reject queue — the persons already exist
- * as Users; reusing the Users list (its own search/sort/paging, the shared "Directory" badge) is the whole
- * feature. Renders nothing while loading, when the caller can't read users, or when none exist — no empty
- * tray noise.
- */
+// Read-only preview of the newest login-less directory persons (ADR-0091); the Users list is the queue.
 export function DirectoryPendingTray() {
   const t = useTranslations("settings.directory.tray");
   const { relative } = useFormatters();

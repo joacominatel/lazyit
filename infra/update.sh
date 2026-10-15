@@ -9,19 +9,18 @@
 # THE SEQUENCE (each step is useful and safe on its own — Mailcow's update.sh pattern):
 #   0. Re-exec from a temp copy  — so `git checkout <tag>` can swap update.sh mid-run without pulling the
 #                                  rug from under the running process.
-#   1. Single-flight lock        — two admins (or a double-click) can never race an update.
+#   1. Single-flight lock        — two admins (or a double-click) can never race an update. An install still
+#                                  wired to the removed bundled Zitadel is REFUSED before it (ADR-0102 §7).
 #   2. Pre-flight                — docker + daemon, compose v2, CLEAN git tree, disk headroom, stack health.
-#   3. Verified pg_dump          — MANDATORY. Dump the app DB — plus zitadel_db on a bundled-Zitadel install
-#                                  (the auth mode is read from .env.prod as start.sh does; local and BYOI
-#                                  have no zitadel_db) — verify each is restorable (pg_restore -l), and only
-#                                  then keep it. A failed/unverifiable dump ABORTS the update — there is no
-#                                  override flag. Paths + sizes are printed (proof).
+#   3. Verified pg_dump          — MANDATORY. Dump the app DB, verify it is restorable (pg_restore -l), and
+#                                  only then keep it. A failed/unverifiable dump ABORTS the update — there is
+#                                  no override flag. Path + size are printed (proof).
 #   4. Tag trust + checkout      — fetch master + the tag from origin over HTTPS/SSH; apply the tag only if it
 #                                  is an annotated vX.Y.Z tag on origin/master. A signature is verified when
 #                                  present (a BAD one stops), never required — CI tags are unsigned (ADR-0083).
 #   5. Missing-env → FAIL LOUD   — diff the target tag's .env.prod.example keys vs the live .env.prod; on a
 #                                  gap, print the EXACT lines to add and STOP. Keys start.sh leaves unset for
-#                                  this install's mode (Zitadel/OIDC keys, WEB_ORIGIN in lan) are not gaps.
+#                                  this install's auth mode (OIDC keys in local, WEB_ORIGIN in lan) are not gaps.
 #                                  This script NEVER writes .env.prod (a human eyeball on the DR-linchpin file
 #                                  is the cheapest insurance).
 #   6. Build BEFORE swap         — the slow, failure-prone step runs while the OLD stack still serves.
@@ -35,7 +34,7 @@
 #
 # RED LINES (ADR-0084 — non-negotiable, enforced below):
 #   - NEVER writes / rotates / regenerates infra/env/.env.prod or the DR linchpins; NEVER runs `down -v`.
-#   - NO update proceeds without a fresh, VERIFIED pre-update backup of every database the install runs.
+#   - NO update proceeds without a fresh, VERIFIED pre-update backup of the database.
 #   - NO silent automated DB restore — a migrated rollback is a printed, human-run, confirm-gated action.
 #   - NO docker socket is mounted anywhere; this is a HOST script the operator runs — the app never executes it.
 #
@@ -76,6 +75,7 @@ COMPOSE_BASE="compose.yaml"
 COMPOSE_PROD="infra/docker-compose.prod.yaml"
 BACKUP_DIR="backups"
 LOCK_DIR=".update.lock"          # atomic single-flight lock (mkdir is atomic)
+PROD_PROJECT="lazyit-prod"       # the prod compose project (volumes are lazyit-prod_*), as in start.sh
 
 # Health-gate polling.
 HEALTH_TRIES=60                  # up to ~5 min (60 × 5s) for the new stack to become ready.
@@ -95,10 +95,10 @@ PREV_REF=""
 MIGRATIONS_BEFORE=""
 MIGRATIONS_AFTER=""
 BACKUP_APP=""
-BACKUP_ZITADEL=""
 BACKUP_LABEL=""
 DC=""
-INSTALL_MODE=""                  # local | byoi | bundled — read from the live .env.prod (install_auth_mode)
+INSTALL_MODE=""                  # local | byoi — read from the live .env.prod (install_auth_mode)
+LOCK_HELD=0                      # 1 once THIS run created the lock; only then may it remove it
 TAG_TRUST_ERROR=""               # set by verify_release_tag when it refuses a tag (the fail_hard reason)
 TAG_TRUST_COMMIT=""              # set by verify_release_tag on success: the verified commit step 4 checks out
 
@@ -120,12 +120,13 @@ USAGE
   ./infra/update.sh --help
 
 WHAT IT DOES
-  Backs up the database (verified; Zitadel's too on a bundled install) BEFORE anything, checks that the
+  Backs up the database (verified) BEFORE anything, checks that the
   tag is a published release (an annotated vX.Y.Z tag on origin's master, fetched over HTTPS or SSH; a
   signature, when the tag has one, must not be bad), checks out the target, checks for new required env vars (and STOPS if any are
   missing — it never edits .env.prod), builds the new images while the old stack still serves, then
   swaps and health-gates. If it fails before any migration ran it auto-rolls-back; if a migration ran
   it STOPS and prints the exact, human-run restore commands (never an automatic DB restore).
+  An install still wired to the removed bundled Zitadel is refused before any of this (ADR-0102).
 
 OPTIONS
   --yes, -y     Skip the interactive "proceed?" confirmation (the backup + tag checks still run).
@@ -139,7 +140,8 @@ EOF
 
 # ---------- cleanup / lock ----------------------------------------------------
 release_lock() {
-  [ -n "${LOCK_DIR:-}" ] && [ -d "$LOCK_DIR" ] && rmdir "$LOCK_DIR" 2>/dev/null || true
+  [ "$LOCK_HELD" = 1 ] && [ -d "$LOCK_DIR" ] && rmdir "$LOCK_DIR" 2>/dev/null || true
+  LOCK_HELD=0
 }
 cleanup() {
   release_lock
@@ -214,6 +216,7 @@ main() {
 
   # The canonical prod compose command (verbatim from start.sh / the runbooks).
   DC="docker compose -f $COMPOSE_BASE -f $COMPOSE_PROD --profile prod --env-file $ENV_FILE"
+  refuse_bundled_leftovers
   INSTALL_MODE=$(install_auth_mode)
 
   cat >&2 <<EOF
@@ -229,6 +232,7 @@ EOF
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     die "another update appears to be running (lock '$LOCK_DIR' exists). If you are SURE none is, remove it: rmdir $LOCK_DIR"
   fi
+  LOCK_HELD=1
   ok "lock acquired ($LOCK_DIR)"
 
   # ---------- 2. PRE-FLIGHT ----------
@@ -273,10 +277,8 @@ EOF
 
   # ---------- confirm (skippable) ----------
   if [ "$ASSUME_YES" -ne 1 ]; then
-    _what="the database"
-    [ "$INSTALL_MODE" != "bundled" ] || _what="both databases (app + Zitadel)"
-    printf '\n  This will back up %s, then update %s -> %s with a brief (~60s) outage.\n  Proceed? [y/N]: ' \
-      "$_what" "$FROM_VERSION" "$TARGET_TAG" >&2
+    printf '\n  This will back up the database, then update %s -> %s with a brief (~60s) outage.\n  Proceed? [y/N]: ' \
+      "$FROM_VERSION" "$TARGET_TAG" >&2
     IFS= read -r _ans || _ans=""
     case "$_ans" in y|Y|yes|YES) : ;; *) release_lock; die "aborted by operator (no changes made)." ;; esac
   fi
@@ -299,7 +301,7 @@ EOF
   fi
 
   # ---------- 3. MANDATORY VERIFIED BACKUP ----------
-  step "Backing up the database(s) (mandatory, verified)"
+  step "Backing up the database (mandatory, verified)"
   backup_databases
 
   # ---------- 4. TAG TRUST + CHECKOUT ----------
@@ -378,29 +380,20 @@ EOF
 
   stamp "done"
   print_success
-  hint_legacy_meili_volume "lazyit-prod"   # print-only (#1216) — never removes a volume
+  hint_legacy_meili_volume "$PROD_PROJECT"   # print-only (#1216) — never removes a volume
 }
 
-# backup_databases — step 3: the app DB always; zitadel_db only on a bundled install, since local and BYOI
-#   run no zitadel_db (compose profile oidc, ADR-0086). Any failed dump aborts via fail_backup.
+# backup_databases — step 3: the app DB, the only database lazyit runs (ADR-0102). A failed dump aborts.
 backup_databases() {
   mkdir -p "$BACKUP_DIR"
   _ts=$(date +%Y%m%d-%H%M%S)
   _sha=$(printf '%s' "$PREV_REF" | cut -c1-12)
   BACKUP_LABEL="pre-update-${FROM_VERSION}-${_sha}-${_ts}"
   BACKUP_APP="$BACKUP_DIR/${BACKUP_LABEL}-app.dump"
-  BACKUP_ZITADEL=""
 
   dump_verify "db" "$BACKUP_APP" || fail_backup "app"
-  if [ "$INSTALL_MODE" = "bundled" ]; then
-    BACKUP_ZITADEL="$BACKUP_DIR/${BACKUP_LABEL}-zitadel.dump"
-    dump_verify "zitadel_db" "$BACKUP_ZITADEL" || fail_backup "zitadel"
-  fi
-  ok "backups verified:"
-  info "  app     -> $BACKUP_APP ($(wc -c < "$BACKUP_APP" | tr -d ' ') bytes)"
-  if [ -n "$BACKUP_ZITADEL" ]; then
-    info "  zitadel -> $BACKUP_ZITADEL ($(wc -c < "$BACKUP_ZITADEL" | tr -d ' ') bytes)"
-  fi
+  ok "backup verified:"
+  info "  app -> $BACKUP_APP ($(wc -c < "$BACKUP_APP" | tr -d ' ') bytes)"
 }
 
 # =============================================================================
@@ -693,27 +686,46 @@ verify_gpg_tag_signature() {
   return 1
 }
 
-# install_auth_mode — local | byoi | bundled, detected exactly as start.sh detects an existing install.
-install_auth_mode() {
-  _am=$(grep -E '^AUTH_MODE=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)
-  if [ "$_am" = "local" ]; then
-    printf 'local'
-  elif grep -qE '^ZITADEL_MASTERKEY=' "$ENV_FILE"; then
-    printf 'bundled'
-  else
-    printf 'byoi'
+# env_value <key> — the value of the ACTIVE <key>= line in .env.prod (empty when absent or commented).
+env_value() {
+  grep -E "^$1=" "$ENV_FILE" | head -n1 | cut -d= -f2- || true
+}
+
+# refuse_bundled_leftovers — stop before the lock, changing nothing, while .env.prod still wires the removed
+#   bundled Zitadel (ADR-0102 §7). Same signals and runbook as start.sh's refuse_bundled_leftovers.
+refuse_bundled_leftovers() {
+  # A local-auth install never used the IdP, so a stray Zitadel volume next to it is no reason to stop.
+  [ "$(env_value AUTH_MODE)" = "local" ] && return 0
+  _rb_signal=""
+  if grep -qE '^ZITADEL_MASTERKEY=' "$ENV_FILE"; then
+    _rb_signal="an active ZITADEL_MASTERKEY"
+  elif grep -qE '^(OIDC_ISSUER|OIDC_JWKS_URI|AUTH_ISSUER|AUTH_INTERNAL_ISSUER)=.*zitadel:8080' "$ENV_FILE"; then
+    _rb_signal="an issuer or JWKS URL pointing at zitadel:8080"
+  elif [ -z "$(env_value OIDC_CLIENT_ID)" ] \
+      && docker volume ls -q 2>/dev/null | grep -qx "${PROD_PROJECT}_zitadel_db_data"; then
+    _rb_signal="the ${PROD_PROJECT}_zitadel_db_data volume and no OIDC_CLIENT_ID"
   fi
+  [ -n "$_rb_signal" ] || return 0
+  die "$ENV_FILE belongs to a bundled-Zitadel install ($_rb_signal).
+  The bundled Zitadel was removed (ADR-0102); nothing was changed — no lock taken, no backup, no checkout,
+  no container or volume touched (${PROD_PROJECT}_zitadel_db_data and ${PROD_PROJECT}_zitadel_secrets stay as they are).
+  Stay on the previous release, or follow docs/05-runbooks/migrate-off-bundled-zitadel.md."
+}
+
+# install_auth_mode — local | byoi, detected exactly as start.sh detects an existing install.
+install_auth_mode() {
+  if [ "$(env_value AUTH_MODE)" = "local" ]; then printf 'local'; else printf 'byoi'; fi
 }
 
 # env_key_not_applicable <key> — 0 when start.sh comments <key> out for this install's mode (render_env_file),
 #   so its absence from .env.prod is by design. lan = a port-only LAZYIT_SITE_ADDRESS (ADR-0087).
 env_key_not_applicable() {
   case "$INSTALL_MODE:$1" in
-    local:ZITADEL_*|local:OIDC_*|local:AUTH_ISSUER|local:AUTH_INTERNAL_ISSUER|local:AUTH_CLIENT_*) return 0 ;;
-    byoi:ZITADEL_*|byoi:OIDC_JWKS_URI|byoi:AUTH_INTERNAL_ISSUER) return 0 ;;
+    local:OIDC_*|local:AUTH_ISSUER|local:AUTH_CLIENT_*) return 0 ;;
+    byoi:OIDC_CLIENT_SECRET|byoi:SESSION_SIGNING_SECRET) return 0 ;;
   esac
   if [ "$1" = "WEB_ORIGIN" ]; then
-    case "$(grep -E '^LAZYIT_SITE_ADDRESS=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)" in
+    case "$(env_value LAZYIT_SITE_ADDRESS)" in
       :[0-9]*) return 0 ;;
     esac
   fi
@@ -815,7 +827,7 @@ handle_failure() {
   A forward-only migration was applied, so there is NO automatic rollback: the
   ONLY way back to $FROM_VERSION is to RESTORE the pre-update backup below. This
   is a RESTORE POINT, not an undo — restoring DISCARDS everything written to the
-  databases since the backup was taken (a few minutes ago). Read that twice.
+  database since the backup was taken (a few minutes ago). Read that twice.
 
   If you can fix forward (recommended for a small data-loss window), do that instead.
 
@@ -831,15 +843,8 @@ print_restore_commands() {
   cat <<EOF
     # 1) Go back to the previous version's code:
     git checkout $PREV_REF
-    # 2) Restore the database(s) from the verified pre-update dumps (DROPS data written since):
+    # 2) Restore the database from the verified pre-update dump (DROPS data written since):
     $DC exec -T db sh -c 'pg_restore --clean --if-exists -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < $BACKUP_APP
-EOF
-  if [ -n "$BACKUP_ZITADEL" ]; then
-    cat <<EOF
-    $DC exec -T zitadel_db sh -c 'pg_restore --clean --if-exists -U "\$POSTGRES_USER" -d "\$POSTGRES_DB"' < $BACKUP_ZITADEL
-EOF
-  fi
-  cat <<EOF
     # 3) Rebuild + bring the previous version back up:
     $DC build && $DC up -d
     # Full procedure: docs/05-runbooks/backups.md
@@ -862,19 +867,15 @@ hint_legacy_meili_volume() {
 }
 
 print_success() {
-  _zitadel_point=""
-  if [ -n "$BACKUP_ZITADEL" ]; then
-    _zitadel_point=$(printf '\n      restore point (zitadel): %s' "$BACKUP_ZITADEL")
-  fi
   cat >&2 <<EOF
 
 ============================================================================
   lazyit updated: $FROM_VERSION  ->  $TARGET_TAG   ✔
 ============================================================================
   The new version is healthy. The previous checkout, its images and the
-  pre-update backups are KEPT until you're confident — nothing was pruned:
-      restore point (app):     $BACKUP_APP$_zitadel_point
-      previous code ref:       $PREV_REF ($FROM_VERSION)
+  pre-update backup are KEPT until you're confident — nothing was pruned:
+      restore point:       $BACKUP_APP
+      previous code ref:   $PREV_REF ($FROM_VERSION)
 
   If something looks wrong, you can restore the pre-update state:
 $(print_restore_commands)

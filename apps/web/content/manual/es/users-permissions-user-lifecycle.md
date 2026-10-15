@@ -16,8 +16,9 @@ Todo esto vive en la sección de **Usuarios** y requiere la capacidad **Gestiona
 
 Elige **Nuevo usuario** y completa la identidad de la persona:
 
-- **Nombre y apellido**, y **Correo** — el correo es la clave de vinculación de cuenta con tu proveedor
-  de identidad, debe ser único, y un cambio se refleja en el proveedor.
+- **Nombre y apellido**, y **Correo** — el correo debe ser único. Con tu propio proveedor OIDC es además
+  la clave de vinculación: el primer inicio de sesión de la persona se vincula a este registro por
+  correo verificado. Un cambio posterior se queda en lazyit y no se envía al proveedor.
 - **Rol** — por defecto es solo lectura; defínelo aquí o cámbialo más tarde. Ver
   [Roles](/help/users-permissions-roles).
 - **Número de empleado** y **Nombre de usuario** (ambos opcionales) — datos de directorio, únicos entre
@@ -27,16 +28,13 @@ Elige **Nuevo usuario** y completa la identidad de la persona:
   credencial.
 - **Responsable** (opcional) — un usuario de lazyit existente **o** un nombre de texto libre, no ambos.
 
-**Credencial de inicio de sesión.** Cuando lazyit puede definir la credencial — el proveedor de identidad
-incluido, o una instancia en la que lazyit gestiona las contraseñas por su cuenta — defines una
-**contraseña temporal** para que la persona pueda iniciar sesión; deberá elegir la suya en el primer
-inicio, y se muestra una sola vez para la entrega. Dónde acaba esa contraseña depende de quién gestiona
-las contraseñas: con el proveedor de identidad incluido se define en el proveedor y lazyit no guarda
-nada, mientras que en una instancia que gestiona lazyit se guarda solo como **hash** — nunca la
-contraseña que escribiste, así que nadie, ni siquiera un administrador, puede volver a leerla. En
-cualquiera de los dos casos, perder la entrega no es un callejón sin salida: restablece la contraseña
-(más abajo) en lugar de intentar consultarla. Si usas tu propio proveedor de identidad, este paso no
-aparece — gestiona la credencial en tu proveedor.
+**Credencial de inicio de sesión.** Con **cuentas locales**, defines una **contraseña temporal** para
+que la persona pueda iniciar sesión; deberá elegir la suya en el primer inicio, y se muestra una sola
+vez para la entrega. lazyit la guarda solo como **hash** — nunca la contraseña que escribiste, así que
+nadie, ni siquiera un administrador, puede volver a leerla. Perder la entrega no es un callejón sin
+salida: restablece la contraseña (más abajo) en lugar de intentar consultarla. Con tu propio proveedor
+OIDC este paso no aparece — crea a la persona en tu proveedor con el mismo correo y gestiona allí la
+credencial.
 
 **Punto de partida (opcional).** Puedes asignar un activo y conceder acceso a una aplicación desde el
 mismo formulario de creación, para que la persona empiece con lo que necesita.
@@ -59,11 +57,12 @@ Al abrir un usuario ves su ficha, organizada como la página de un activo.
   La pestaña abierta queda en la dirección de la página, así un enlace compartido abre en la misma
   pestaña.
 - **La columna lateral** tiene el **Perfil**: rol (editable con *Gestionar usuarios*), responsable,
-  legajo, nombre de usuario, correo y fechas. Para una persona de directorio también ofrece crear su
-  cuenta de acceso.
+  legajo, nombre de usuario, correo y fechas. Para una persona de directorio también explica cómo darle
+  una cuenta de acceso.
 
-El encabezado deja a mano **Restablecer contraseña** y **Editar**. **Clonar** y **Dar de baja** están en
-el menú **⋯** al lado, con Dar de baja separado para que no se elija por error.
+El encabezado deja a mano **Restablecer contraseña** (solo con cuentas locales) y **Editar**. **Clonar**
+y **Dar de baja** están en el menú **⋯** al lado, con Dar de baja separado para que no se elija por
+error.
 
 ## Clonar un usuario
 
@@ -81,16 +80,11 @@ una aplicación dada de baja.
 ## Restablecer una contraseña
 
 En la página de detalle de un usuario, **Restablecer contraseña** inicia el restablecimiento de la
-contraseña de esa persona. Lo que hace depende de quién gestiona las contraseñas en tu instancia, y la
-acción se adapta sola — nunca tienes que recordar en qué modo estás.
+contraseña de esa persona. Solo existe con **cuentas locales**, donde lazyit gestiona las contraseñas.
+Con tu propio proveedor OIDC la acción no aparece: la credencial es del proveedor, así que restablécela
+allí.
 
-**Cuando un proveedor de identidad gestiona las contraseñas.** lazyit pide a tu proveedor que envíe por
-correo a la persona un enlace de restablecimiento. lazyit nunca ve ni define la contraseña — solo
-dispara al proveedor, y la entrega depende de que el correo del proveedor esté configurado. La acción no
-está disponible para un usuario inactivo (reactívalo primero) ni para una cuenta sin vínculo con el
-proveedor de identidad (en ese caso el restablecimiento se gestiona por completo en tu proveedor).
-
-**Cuando lazyit gestiona las contraseñas.** Eliges cómo le llega el restablecimiento a la persona:
+Eliges cómo le llega el restablecimiento a la persona:
 
 - **Enviar un enlace de restablecimiento por correo** — la persona recibe en su dirección un enlace de
   un solo uso y elige su propia contraseña; lazyit nunca la ve. La confirmación te indica exactamente a
@@ -140,6 +134,12 @@ a medio dar de baja (archivada pero conservando acceso).
 **Se cierra su sesión en todas partes.** En una instancia con **cuentas locales**, dar de baja termina las
 sesiones de la persona en todos sus dispositivos a la vez — también aquella en la que marcó **Mantener la
 sesión iniciada**. Desactivarla (desmarcar **Activo** al editarla) hace lo mismo.
+
+**Con tu propio proveedor OIDC, desactívala también allí.** lazyit no toca la cuenta de la persona en tu
+proveedor, pero sí rechaza su inicio de sesión en lazyit, haya entrado antes o no. Si nunca había
+entrado, esto depende de que tu proveedor marque su correo como verificado. Para que vuelva a entrar,
+[restáurala](#restaurar-un-usuario). Aun así, desactiva la cuenta en tu proveedor dentro del mismo proceso
+de salida: es lo que le corta el acceso a todo lo demás a lo que tu proveedor le da entrada.
 
 **Rota los secretos que pudo leer.** Si la persona era miembro de alguna bóveda de secretos, la
 confirmación lista esas bóvedas (con cuántos secretos tiene cada una) como recordatorio para **rotar esos
@@ -198,30 +198,26 @@ lista de Usuarios es el único lugar donde navegas y gestionas la membresía de 
 ## Personas de directorio
 
 Una persona de **directorio** es un usuario sin acceso — creada por la
-[importación masiva](/help/assets-bulk-import) como el "asignado a" de un activo, sin cuenta en tu
-proveedor de identidad. Le dan un propietario registrado a un activo antes de que ese propietario pueda
-iniciar sesión.
+[importación masiva](/help/assets-bulk-import) como el "asignado a" de un activo, sin cuenta de
+acceso. Le dan un propietario registrado a un activo antes de que ese propietario pueda iniciar sesión.
 
 - **En la lista de Usuarios** una persona de directorio lleva una insignia **Directorio** junto a su
   nombre, y el **filtro de directorio** (junto al filtro de estado) acota la lista a *Solo directorio*,
   *Solo cuentas*, o todos.
-- **Se vinculan a una cuenta real en el primer inicio de sesión** a través de tu proveedor de identidad,
-  cuando el correo verificado coincide — momento en el que la insignia desaparece y pasan a ser una
+- **Con tu propio proveedor OIDC, se vinculan a una cuenta real en el primer inicio de sesión**, cuando
+  el correo verificado coincide — momento en el que la insignia desaparece y pasan a ser una
   cuenta normal. Una persona de directorio importada **sin un correo real nunca se vincula
   automáticamente**.
-- **Dale una cuenta ahora.** En la página de una persona de directorio hay una acción, solo para
-  administradores (Gestionar usuarios), para darla de alta; lo que hace depende de cómo tu instancia
-  autentica a las personas:
-  - **Proveedor de identidad integrado** — **Crear cuenta OIDC** la aprovisiona en el proveedor de
-    identidad de inmediato. El proveedor exige un correo real, así que el botón está deshabilitado hasta
-    que la persona tenga uno — edita la persona y agrega un correo real primero.
-  - **Modo de autenticación local** — **Dar de alta con una contraseña temporal** crea su acceso aquí
-    mismo y muestra una **contraseña temporal de un solo uso** para entregar. La contraseña se muestra
-    **una sola vez** (cópiala en ese momento), la persona **debe cambiarla en el primer inicio de sesión**,
-    y dar de alta **conserva su rol actual** — nunca otorga acceso adicional. No hace falta correo.
-  - **Tu propio proveedor OIDC (BYOI)** — lazyit no puede crear cuentas por ti, así que la opción se
-    reemplaza por una breve nota; las personas importadas inician sesión a través de tu proveedor de
-    identidad.
+- **Dale una cuenta ahora.** Lo que ofrece la página de una persona de directorio depende de cómo tu
+  instancia autentica a las personas:
+  - **Cuentas locales** — una acción solo para administradores (Gestionar usuarios), **Dar de alta con
+    una contraseña temporal**, crea su acceso aquí mismo y muestra una **contraseña temporal de un solo
+    uso** para entregar. La contraseña se muestra **una sola vez** (cópiala en ese momento), la persona
+    **debe cambiarla en el primer inicio de sesión**, y dar de alta **conserva su rol actual** — nunca
+    otorga acceso adicional. No hace falta correo.
+  - **Tu propio proveedor OIDC** — lazyit no puede crear cuentas en tu proveedor, así que en lugar de la
+    acción aparece una breve nota: crea a la persona allí con el mismo correo verificado, y su primer
+    inicio de sesión vincula la cuenta a este registro.
 
 ## Restaurar un usuario
 

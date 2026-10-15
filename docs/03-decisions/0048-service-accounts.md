@@ -3,7 +3,7 @@ title: "ADR-0048: Service Accounts — a non-human principal with a lazyit-nativ
 tags: [adr, auth, authz, service-accounts, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-09-26
+updated: 2026-10-09
 deciders: [Joaquín Minatel]
 ---
 
@@ -19,6 +19,9 @@ role). It re-affirms the auth INVARIANTS ([[INVARIANTS]]) and adds the service-a
 (INV-SA-1…4). The backend is delivered in this wave; the **frontend admin UI is delivered as a
 fast-follow** (the `/settings/service-accounts` screen, gated on `settings:manage`), and the
 **Zitadel machine-user mirror is deferred** to a future ADR (the IdP seam stays open; BYOI no-ops).
+
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the deferred Zitadel machine-user
+mirror will not be built, and the `IdentityProvider` seam it would have used is retired.
 
 ## Context
 

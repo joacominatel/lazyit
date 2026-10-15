@@ -68,7 +68,7 @@ interface LocalPerson {
 /** Typed views of the recorded mock-call arguments, so reads are lint-safe (no `any` member access). */
 type CreateDto = { email: string; firstName: string; lastName: string };
 type CreateOpts = {
-  skipIdpWriteBack?: boolean;
+  directoryOnly?: boolean;
   directorySource?: string;
   directorySourceId?: string;
   directoryAttrs?: Record<string, unknown>;
@@ -241,7 +241,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
     expect(Object.keys(dto).sort()).toEqual(['email', 'firstName', 'lastName']);
     expect(dto.email).toBe('ada@corp.com');
     expect(actorId).toBeUndefined(); // system actor — the rail can't thread a service-account actor
-    expect(createOpts.skipIdpWriteBack).toBe(true);
+    expect(createOpts.directoryOnly).toBe(true);
     expect(createOpts.directorySource).toBe('ad');
     expect(createOpts.directorySourceId).toBe('G1');
   });

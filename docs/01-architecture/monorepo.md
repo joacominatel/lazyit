@@ -3,7 +3,7 @@ title: Monorepo Layout
 tags: [architecture]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-23
+updated: 2026-10-09
 ---
 
 # Monorepo Layout
@@ -18,11 +18,10 @@ lazyit/
 ├── packages/
 │   └── shared/      # @lazyit/shared — types & zod schemas shared front↔back
 ├── docs/            # this vault
-├── compose.yaml             # dev backing services (Postgres, Meilisearch, Valkey; Zitadel behind --profile oidc)
+├── compose.yaml             # every service; unprofiled = dev backing services (Postgres, Meilisearch, Valkey)
 ├── compose.override.yaml    # dev-only overrides (loopback port bindings), auto-loaded
 ├── infra/
-│   ├── docker-compose.prod.yaml  # the `prod` profile (Caddy, full containerized stack)
-│   └── docker-compose.oidc.yaml  # the `oidc` overlay (bundled Zitadel; ADR-0086) — opt-in
+│   └── docker-compose.prod.yaml  # the `prod` profile (Caddy, full containerized stack)
 ├── .env.example
 ├── turbo.json
 └── package.json     # workspace root: workspaces = ["apps/*", "packages/*"]

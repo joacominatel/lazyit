@@ -137,10 +137,10 @@ Honest scope: this is what's **built and usable right now**, not a wishlist.
 - 📖 **In-app Manual** — a built-in `/help` manual that documents lazyit itself, in **English
   and Spanish**.
 
-The whole UI is available in **English and Spanish**. Authentication is **OIDC** against a
-self-hosted identity provider: **Zitadel is bundled**, and because everything speaks standard
-OIDC you can **bring your own IdP** (Azure AD, Okta, Keycloak, Authentik…) by changing a few
-env vars — no code changes.
+The whole UI is available in **English and Spanish**. Authentication is **built-in accounts** by
+default — no identity provider to run. If you already have one, lazyit speaks standard **OIDC**:
+**bring your own IdP** (Entra ID, Okta, Keycloak, Authentik…) by setting a few env vars — no code
+changes.
 
 ---
 
@@ -170,13 +170,13 @@ cd lazyit
 ```
 
 You'll need **Docker + Docker Compose v2** and **OpenSSL**. ~4 GB RAM and 20 GB free disk is a
-comfortable floor (the stack runs Postgres, Valkey, Meilisearch and a bundled Zitadel).
+comfortable floor (the stack runs Postgres, Valkey, Meilisearch, the API, the web app and Caddy).
 Full runbook: [`docs/05-runbooks/deploy-self-hosted.md`](docs/05-runbooks/deploy-self-hosted.md).
 
 > [!IMPORTANT]
-> **Back up the generated `infra/env/.env.prod` off-host, encrypted.** It holds the
-> unrotatable `ZITADEL_MASTERKEY` and the key that encrypts stored credentials — lose it and a
-> restored backup can't be decrypted. `start.sh` never regenerates or overwrites it.
+> **Back up the generated `infra/env/.env.prod` off-host, encrypted.** It holds the database
+> password and the unrotatable `WORKFLOW_SECRET_KEY` that encrypts stored credentials — lose it and
+> a restored backup can't be decrypted. `start.sh` never regenerates or overwrites it.
 
 ### Run it for development
 
@@ -187,11 +187,11 @@ The fast, native loop: backing services in Docker, the apps on your machine via
 ```sh
 bun install                              # install every workspace
 
-cp .env.example .env                     # root: Postgres, Meili, dev Zitadel
+cp .env.example .env                     # root: Postgres, Meili
 cp apps/api/.env.example apps/api/.env   # api:  DATABASE_URL, PORT, auth
 cp apps/web/.env.example apps/web/.env   # web:  API URL + Auth.js vars
 
-bun run db:up                            # start Postgres + Meili + Zitadel in Docker
+bun run db:up                            # start Postgres + Meili + Valkey in Docker
 
 cd apps/api && bunx prisma migrate dev && bunx prisma db seed && cd -   # migrate + seed
 
@@ -204,8 +204,9 @@ Prisma workflow: [`docs/04-development/setup.md`](docs/04-development/setup.md).
 
 > [!NOTE]
 > Local dev can use a zero-config auth **shim** (`AUTH_MODE=shim`) that trusts an `X-User-Id`
-> header instead of validating tokens, so you can run the whole stack without bootstrapping
-> Zitadel. The shim is **dev/test only — it must never run in production.**
+> header instead of validating tokens, so you can call the API without signing in. For the real
+> sign-in flow, `bun run dev:fresh` wires local accounts. The shim is **dev/test only — it must
+> never run in production.**
 
 ---
 
@@ -221,8 +222,8 @@ all behind a single reverse proxy in production:
 - **`packages/shared`** — `@lazyit/shared`: the zod schemas and types both apps agree on, so
   there's one definition of every contract, not two that drift.
 
-In production, only Caddy is exposed; Postgres, Valkey, Meilisearch, the API, the web app and
-Zitadel all stay on an internal Docker network. The deep dive lives in
+In production, only Caddy is exposed; Postgres, Valkey, Meilisearch, the API and the web app all
+stay on an internal Docker network. The deep dive lives in
 [`docs/01-architecture/`](docs/01-architecture/stack.md).
 
 ---

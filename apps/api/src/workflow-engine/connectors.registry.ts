@@ -7,8 +7,7 @@ import type { StepHandler } from './handlers/step-handler';
 
 /**
  * ConnectorRegistry — the `kind` → {@link StepHandler} lookup the engine CORE (Phase 1b-B) uses to
- * select the executor for a step (capability-by-key, mirroring the in-tree `IdentityProvider` factory;
- * never `instanceof`).
+ * select the executor for a step (capability-by-key, never `instanceof`).
  *
  * v1 registers the three declarative handlers: REST + WEBHOOK_OUT + MANUAL. The RESERVED kinds
  * (`SDK` / `MCP` / `PREBUILT` / `CUSTOM`) are intentionally absent — {@link get} returns `undefined`

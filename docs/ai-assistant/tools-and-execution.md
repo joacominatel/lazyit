@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -44,7 +44,9 @@ CEO decisions (settled, not re-litigated here):
   append-only audit log.
 - New permission `ai:use` (ADMIN + MEMBER by default) in the [[0046-roles-permissions-v2]] catalog gates
   chat and headless use; MCP is gated by its own `ai:connect` (ADMIN + MEMBER by default; CEO, round 2).
-- OIDC/Zitadel is being removed (#1310): nothing here depends on it.
+- Nothing here depends on an external IdP. (At design time all OIDC was to be removed, #1310; it was
+  later narrowed by [[0102-remove-bundled-zitadel]]: only the bundled Zitadel was removed, and generic
+  OIDC stays opt-in.)
 
 ## 2. Repository facts
 
@@ -216,7 +218,7 @@ Legend:
 | users | restore | user:manage | W | v1 `user_restore`, `elevated` (built, W2-9) |
 | users | clone | user:manage | W | v1.1 |
 | users | provision-local-account | user:manage | W | EXCL (returns a temporary password in cleartext, [R24]; CEO round 2) |
-| users | reset-password, provision-account, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
+| users | reset-password, password-reset-capabilities | user:manage | W | v1.1, `elevated` with step-up — only where the response carries no credential; otherwise EXCL |
 | dashboard | summary | dashboard:read | R | v1 `dashboard_summary` (built, W2-9) |
 | dashboard | activity | logs:read | R | v1 `activity_list` (built, W2-9) |
 | dashboard | activity filters (the Reports select menus) | logs:read | R | not in the v1 cut (`activity_list` filters by actor and action directly) |
@@ -1200,8 +1202,8 @@ a separate remediation, not a supported path here.
     target (nothing exists yet). The input has no `password`: the route's optional temporary password is
     a credential (INV-AI-5).
   - `user_update` (`elevated`, destructive): `ROLE_CHANGE` for a role change; `IDENTITY_CHANGE` for email,
-    name, username, legajo or activation (`isActive`); `EXTERNAL_PROVISIONING` when a role, name or email
-    change is mirrored to the IdP (the account has an `externalId`). A **manager** change is not an
+    name, username, legajo or activation (`isActive`). Nothing is mirrored to an IdP
+    ([[0102-remove-bundled-zitadel]]), so no external warning applies. A **manager** change is not an
     identity change and needs no step-up (CEO decision 2026-09-24): it is local-only and the route records
     it as an append-only `MANAGER_CHANGED` history row, so it carries the non-step-up `LEDGER_APPEND` —
     the elevated preview still has a warning. Bundled with an identity field, `IDENTITY_CHANGE` (and so
@@ -1210,7 +1212,7 @@ a separate remediation, not a supported path here.
     can redirect a future external approval or notification. The card shows the change; no password.
   - `user_offboard` (`write`, destructive, ext): `SOFT_DELETE`; `CASCADE_RELEASES_ASSIGNMENTS` and
     `CASCADE_REVOKES_GRANTS` with the `impacted` assets and grants (grants warned even when the caller
-    cannot count them); `EXTERNAL_DEPROVISIONING` when the IdP account is deactivated; always
+    cannot count them); no IdP account is deactivated ([[0102-remove-bundled-zitadel]] §5); always
     `IRREVERSIBLE` with a `secretVaultMemberships` change row — the route hard-drops the user's Secret
     Manager vault memberships and `user_restore` does not bring them back. The preview cannot count them:
     the Secret Manager is a structural exclusion (ADR-0061), so the card says "any held". No step-up (it
@@ -1231,8 +1233,8 @@ a separate remediation, not a supported path here.
     restored role is above VIEWER (its powers come back); grants, assets and vault memberships are not
     restored, and the description says so. A live user is refused before any card (400).
 - **Unexposed with reasons:** `roleCounts` and `activityFilters` (not in the v1 cut), `remove` (the
-  `DELETE` alias of offboard), `clone` (v1.1), `provisionAccount` and `passwordResetCapabilities` (v1.1,
-  `elevated`), `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
+  `DELETE` alias of offboard), `clone` (v1.1), `passwordResetCapabilities` (v1.1, `elevated`),
+  `resetPassword` and `provisionLocalAccount` (structural exclusion), the activity CSV
   export, the security audit logs and notifications (v1.1).
 - **Known limits and follow-ups.**
   - A non-ADMIN human an operator gave `user:manage` can restore through the route but not through the

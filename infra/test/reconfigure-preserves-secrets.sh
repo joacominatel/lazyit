@@ -177,6 +177,72 @@ if grep -qE '^DIRECTORY_SECRET_KEY=' infra/env/.env.prod.example; then
 fi
 grep -qE '^#[[:space:]]*DIRECTORY_SECRET_KEY=' infra/env/.env.prod.example \
   || { echo "FAIL: .env.prod.example has no commented DIRECTORY_SECRET_KEY placeholder (the render loop and the #1459 append both key off it)"; fail=1; }
+# The --yes default is local auth: no OIDC client line and nothing of the removed bundled Zitadel is active.
+if grep -qE '^(OIDC_[A-Z_]*|AUTH_ISSUER|AUTH_CLIENT_ID|AUTH_CLIENT_SECRET|AUTH_INTERNAL_ISSUER|ZITADEL_[A-Z_]*|LAZYIT_DOMAIN)=' "$ENVF3"; then
+  echo "FAIL: a fresh local render carries an active OIDC or Zitadel key: $(grep -E '^(OIDC_|AUTH_ISSUER|AUTH_CLIENT|AUTH_INTERNAL|ZITADEL_|LAZYIT_DOMAIN)' "$ENVF3" | cut -d= -f1 | tr '\n' ' ')"; fail=1
+fi
+
+# ---------------------------------------------------------------------------
+# The example (ADR-0102): infra/update.sh stops on every ACTIVE example key a live .env.prod lacks, so no
+# auth-mode-specific key may be active — and each OIDC placeholder the BYOI render fills must exist once.
+# ---------------------------------------------------------------------------
+if grep -qE '^(OIDC_[A-Z_]*|AUTH_ISSUER|AUTH_CLIENT_ID|AUTH_CLIENT_SECRET|AUTH_INTERNAL_ISSUER|SESSION_SIGNING_SECRET|IDENTITY_PROVIDER_TYPE|ZITADEL_[A-Z_]*|LAZYIT_DOMAIN)=' infra/env/.env.prod.example; then
+  echo "FAIL: .env.prod.example carries an active auth-mode-specific or Zitadel key — infra/update.sh would stop instances that do not use it"; fail=1
+fi
+for _k in OIDC_ISSUER OIDC_JWKS_URI OIDC_CLIENT_ID AUTH_ISSUER AUTH_CLIENT_ID AUTH_CLIENT_SECRET; do
+  [ "$(grep -cE "^# ${_k}=" infra/env/.env.prod.example)" -eq 1 ] \
+    || { echo "FAIL: .env.prod.example must carry exactly one '# ${_k}=' placeholder (the BYOI render fills it)"; fail=1; }
+done
+
+# ---------------------------------------------------------------------------
+# Scenario 4 — a FRESH interactive BYOI install (ADR-0102): the operator's IdP values land on the OIDC
+# client lines, AUTH_MODE=oidc, and no local-only, Zitadel or IDENTITY_PROVIDER_TYPE key is written.
+# Answers: network mode, auth mode, issuer, JWKS URI, client id, client secret, internal Postgres, backup.
+# ---------------------------------------------------------------------------
+ENVF4="$WORK/.env.prod.byoi"
+printf 'local\nbyoi\nhttps://login.example.com\nhttps://login.example.com/oauth2/keys\nlazyit-web\nCLIENTsentinel\ny\nn\n' \
+  | LAZYIT_ENV_FILE="$ENVF4" LAZYIT_SKIP_DOCKER=1 LAZYIT_SKIP_BRINGUP=1 sh infra/start.sh >"$WORK/byoi.log" 2>&1 \
+  || { cat "$WORK/byoi.log"; echo "FAIL: start.sh (fresh BYOI render) exited non-zero"; exit 1; }
+assert_kv_in() { # FILE KEY EXPECTED
+  _got=$(grep -E "^$2=" "$1" | head -n1 | cut -d= -f2- || true)
+  [ "$_got" = "$3" ] || { echo "FAIL: BYOI render: $2 is '${_got:-<missing>}', expected '$3'"; fail=1; }
+  [ "$(grep -cE "^$2=" "$1")" -le 1 ] || { echo "FAIL: BYOI render: $2 is written more than once"; fail=1; }
+}
+assert_kv_in "$ENVF4" AUTH_MODE          oidc
+assert_kv_in "$ENVF4" OIDC_ISSUER        https://login.example.com
+assert_kv_in "$ENVF4" AUTH_ISSUER        https://login.example.com
+assert_kv_in "$ENVF4" OIDC_JWKS_URI      https://login.example.com/oauth2/keys
+assert_kv_in "$ENVF4" OIDC_CLIENT_ID     lazyit-web
+assert_kv_in "$ENVF4" AUTH_CLIENT_ID     lazyit-web
+assert_kv_in "$ENVF4" AUTH_CLIENT_SECRET CLIENTsentinel
+if grep -qE '^(SESSION_SIGNING_SECRET|IDENTITY_PROVIDER_TYPE|AUTH_INTERNAL_ISSUER|ZITADEL_[A-Z_]*|LAZYIT_DOMAIN)=' "$ENVF4"; then
+  echo "FAIL: BYOI render wrote a local-only, Zitadel or IDENTITY_PROVIDER_TYPE key"; fail=1
+fi
+if grep -qE '^OIDC_CLIENT_SECRET=' "$ENVF4"; then
+  echo "FAIL: BYOI render wrote OIDC_CLIENT_SECRET — the API never reads it; the secret belongs on AUTH_CLIENT_SECRET only"; fail=1
+fi
+if grep -c 'CLIENTsentinel' "$ENVF4" | grep -qvx 1; then
+  echo "FAIL: BYOI render must carry the client secret exactly once (AUTH_CLIENT_SECRET)"; fail=1
+fi
+if grep -v '^[[:space:]]*#' "$ENVF4" | grep -qi 'zitadel'; then echo "FAIL: BYOI render has an active line mentioning zitadel"; fail=1; fi
+_p4=$(stat -c '%a' "$ENVF4" 2>/dev/null || stat -f '%Lp' "$ENVF4")
+[ "$_p4" = "600" ] || { echo "FAIL: BYOI render is mode $_p4, not 600"; fail=1; }
+
+# ---------------------------------------------------------------------------
+# Scenario 5 — the bundled Zitadel is no longer offered: the auth question names only local and byoi,
+# and a 'bundled' answer falls back to local auth.
+# ---------------------------------------------------------------------------
+ENVF5="$WORK/.env.prod.bundled-answer"
+printf 'local\nbundled\ny\nn\n' \
+  | LAZYIT_ENV_FILE="$ENVF5" LAZYIT_SKIP_DOCKER=1 LAZYIT_SKIP_BRINGUP=1 sh infra/start.sh >"$WORK/bundled.log" 2>&1 \
+  || { cat "$WORK/bundled.log"; echo "FAIL: start.sh ('bundled' answer) exited non-zero"; exit 1; }
+# Piped answers leave no newline after a prompt, so cut the line at the [default] marker.
+_q5=$(grep '5) Authentication' "$WORK/bundled.log" | sed 's/\[local\]:.*//')
+case "$_q5" in *"'byoi'"*) : ;; *) echo "FAIL: the auth question does not offer byoi"; fail=1 ;; esac
+if printf '%s' "$_q5" | grep -qi 'bundled\|zitadel'; then echo "FAIL: the auth question still offers the bundled Zitadel"; fail=1; fi
+grep -q "unrecognized choice 'bundled'" "$WORK/bundled.log" || { echo "FAIL: a 'bundled' answer was not reported as unrecognized"; fail=1; }
+_am5=$(grep -E '^AUTH_MODE=' "$ENVF5" | head -n1 | cut -d= -f2- || true)
+[ "$_am5" = "local" ] || { echo "FAIL: a 'bundled' answer rendered AUTH_MODE='${_am5:-<missing>}', expected local"; fail=1; }
 
 [ "$fail" -eq 0 ] || { echo "reconfigure-preserves-secrets: FAILED"; exit 1; }
-echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (SMTP_SECRET_KEY, AI_SECRET_KEY and DIRECTORY_SECRET_KEY added when absent; AI_SECRET_KEY and DIRECTORY_SECRET_KEY written on a fresh render)"
+echo "reconfigure-preserves-secrets: OK — all secrets preserved across --reconfigure (SMTP_SECRET_KEY, AI_SECRET_KEY and DIRECTORY_SECRET_KEY added when absent; AI_SECRET_KEY and DIRECTORY_SECRET_KEY written on a fresh render; fresh local and BYOI renders carry only their own auth keys)"

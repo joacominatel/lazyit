@@ -23,20 +23,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api/client";
 import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { notifyError } from "@/lib/api/notify-error";
-import type { IdpChoice } from "./types";
 import { StepConfigure } from "./step-configure";
 import { StepCreateAdmin } from "./step-create-admin";
 import { StepDone } from "./step-done";
 import { StepWelcome } from "./step-welcome";
+import { idpChoiceFor, type StepId, stepsFor } from "./wizard-flow";
 import { WizardSteps } from "./wizard-steps";
 
 /**
- * First-run setup wizard (ADR-0043 Phase 3 §5c / §7a). A short full-screen flow whose steps adapt to
- * the chosen IdP:
- *   - Bundled Zitadel (happy path): Welcome → Administrator → Done (the "Configure" step is a no-op —
- *     the sidecar already provisioned the project/app — so it is dropped to keep first-run short).
- *   - BYOI (bring your own OIDC): Welcome → Configure → Administrator → Done (the Configure step
- *     re-shows the three env vars so the operator can confirm them before creating the first ADMIN).
+ * First-run setup wizard (ADR-0043 §5c / §7a, ADR-0086 §6, ADR-0102). A short full-screen flow whose
+ * steps follow the server-reported auth mode:
+ *   - Local accounts: Welcome → Administrator → Done.
+ *   - Your own OIDC provider: Welcome → Configure → Administrator → Done (the Configure step re-shows the
+ *     environment variables so the operator can confirm them before creating the first ADMIN).
  *
  * Driven by `GET /config/status`. Once `isConfigured` (an ADMIN exists), the wizard SELF-LOCKS: it
  * redirects to /login (which forwards an already-signed-in operator to the dashboard), so a
@@ -44,47 +43,23 @@ import { WizardSteps } from "./wizard-steps";
  * into the create-admin POST. The final "Done" CTA closes the loop by sending the operator to /login
  * so they can sign in as the ADMIN they just created.
  */
-
-/** Logical step ids — render order, not contiguous numbers (the visible step list adapts per path). */
-type StepId = "welcome" | "configure" | "admin" | "done";
-
 export function SetupWizard() {
   const t = useTranslations("setup");
   const router = useRouter();
   const { data: status, isLoading, isError, error, refetch } = useConfigStatus();
 
   const [step, setStep] = useState<StepId>("welcome");
-  // The operator's explicit IdP pick, if any. Until they pick, the effective choice DERIVES from the
-  // server-detected integration mode (computed below) — so the radio pre-selects the posture the
-  // instance is actually wired for without a setState-in-effect. The choice only drives copy/guidance;
-  // the backend authoritatively reports the real mode.
-  const [userChoice, setUserChoice] = useState<IdpChoice | null>(null);
   const [createdEmail, setCreatedEmail] = useState<string | null>(null);
 
-  // The server-reported mode drives the wizard fork. Local mode (ADR-0086) is deploy-fixed and immutable,
-  // so it is NEVER overridden by an operator pick; the OIDC modes keep the zitadel/byoi copy toggle.
-  const detectedChoice: IdpChoice =
-    status?.integrationMode === "local"
-      ? "local"
-      : status?.integrationMode === "generic-oidc"
-        ? "byoi"
-        : "zitadel";
-  const idpChoice: IdpChoice =
-    detectedChoice === "local" ? "local" : (userChoice ?? detectedChoice);
-
-  // The bundled-Zitadel path drops the no-op "Configure" step; BYOI keeps it. The step list is
-  // derived from the live choice so the progress indicator and the Back/Continue jumps agree.
-  const steps = useMemo<{ id: StepId; label: string }[]>(() => {
-    const middle: { id: StepId; label: string }[] =
-      idpChoice === "byoi"
-        ? [{ id: "configure", label: t("steps.configure") }]
-        : [];
-    return [
-      { id: "welcome", label: t("steps.welcome") },
-      ...middle,
-      { id: "admin", label: t("steps.admin") },
-      { id: "done", label: t("steps.done") },
-    ];
+  const idpChoice = idpChoiceFor(status?.integrationMode);
+  const steps = useMemo(() => {
+    const labels: Record<StepId, string> = {
+      welcome: t("steps.welcome"),
+      configure: t("steps.configure"),
+      admin: t("steps.admin"),
+      done: t("steps.done"),
+    };
+    return stepsFor(idpChoice).map((id) => ({ id, label: labels[id] }));
   }, [idpChoice, t]);
 
   const currentIndex = Math.max(
@@ -166,11 +141,9 @@ export function SetupWizard() {
     );
   }
 
-  function handleAdminCreated(email: string, mirrored: boolean) {
+  function handleAdminCreated(email: string) {
     setCreatedEmail(email);
-    toast.success(
-      mirrored ? t("toast.adminCreatedMirrored") : t("toast.adminCreated"),
-    );
+    toast.success(t("toast.adminCreated"));
     goTo("done");
   }
 
@@ -186,15 +159,11 @@ export function SetupWizard() {
       </CardHeader>
 
       {step === "welcome" && (
-        <StepWelcome
-          choice={idpChoice}
-          onChoiceChange={setUserChoice}
-          onNext={goNext}
-        />
+        <StepWelcome choice={idpChoice} onNext={goNext} />
       )}
 
       {step === "configure" && (
-        <StepConfigure choice={idpChoice} onBack={goBack} onNext={goNext} />
+        <StepConfigure onBack={goBack} onNext={goNext} />
       )}
 
       {step === "admin" && (

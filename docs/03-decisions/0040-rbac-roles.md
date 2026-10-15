@@ -16,6 +16,10 @@ accepted — 2026-06-01 (CEO decision). Builds directly on [[0038-jit-user-provi
 authorization side of [[0016-auth-strategy-deferred]]. This is the authorization layer that ADR-0038
 deliberately did not add: ADR-0038 sets `request.user`, ADR-0040 decides **what that user may do**.
 
+**Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the `IdentityProvider` scaffold, the
+`IDENTITY_PROVIDER_TYPE` variable and the IdP role mirror described under Consequences are gone; the mode is
+read from `AUTH_MODE` and roles are never written to an IdP. DB-first authorization is unchanged.
+
 ## Context
 
 The May 2026 review's #1 finding: lazyit had **authentication but no authorization**. The global

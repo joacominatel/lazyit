@@ -40,7 +40,6 @@ import { ServiceAccountAuthenticator } from '../../auth/service-account-authenti
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
 import { LocalProvisioningService } from '../../auth/local/local-provisioning.service';
 import { PasswordLifecycleService } from '../../auth/local/password-lifecycle.service';
-import { IDENTITY_PROVIDER } from '../../auth/identity/identity-provider.interface';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
@@ -497,14 +496,6 @@ const grants = {
     Promise.resolve(GRANTS[userId] ?? []),
   ),
 };
-const idp = {
-  kind: 'local',
-  supportsManagement: false,
-  createUser: jest.fn(),
-  deactivateUser: jest.fn().mockResolvedValue(undefined),
-  grantRole: jest.fn().mockResolvedValue(undefined),
-  updateUser: jest.fn().mockResolvedValue(undefined),
-};
 
 // ─── Actors and contexts ───────────────────────────────────────────────────────────────────────────
 
@@ -732,7 +723,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         { provide: ArticlesService, useValue: {} },
         { provide: AssetHistoryService, useValue: { record: jest.fn() } },
         { provide: WorkflowTriggerService, useValue: {} },
-        { provide: IDENTITY_PROVIDER, useValue: idp },
         { provide: LocalProvisioningService, useValue: {} },
         { provide: PasswordLifecycleService, useValue: {} },
         {
@@ -1264,10 +1254,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           updatedAt: T0.toISOString(),
         },
       });
-      // IdP-linked account: the role is mirrored to the identity provider.
-      expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'ROLE_CHANGE'].sort(),
-      );
+      // Nothing is written to the identity provider (ADR-0102), even for an IdP-linked account.
+      expect(preview.warnings).toEqual(['ROLE_CHANGE']);
 
       // Without the password step-up the action stays pending.
       await expect(tools.approve(action.id, chat(ADMIN))).rejects.toMatchObject(
@@ -1291,7 +1279,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       });
       expect(users.get(ID.member)!.role).toBe('VIEWER');
-      expect(idp.grantRole).toHaveBeenCalledWith('zitadel-sub-ana', 'VIEWER');
       expect(events(action.id)).toEqual(['PROPOSED', 'APPROVED', 'EXECUTED']);
       expect(ledger.find((e) => e.event === 'APPROVED')).toMatchObject({
         approverUserId: ID.admin,
@@ -1311,7 +1298,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         stepUpVerified: true,
       });
       expect(replay).toMatchObject({ status: 'SUCCEEDED', replayed: true });
-      expect(idp.grantRole).toHaveBeenCalledTimes(1);
       expect(history).toHaveLength(1);
     });
 
@@ -1343,7 +1329,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
       ]);
       expect(preview.warnings.sort()).toEqual(
-        ['EXTERNAL_PROVISIONING', 'IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
+        ['IDENTITY_CHANGE', 'LEDGER_APPEND'].sort(),
       );
       // A manager bundled with an identity field still needs the password.
       expect(preview.stepUpRequired).toBe(true);
@@ -1851,7 +1837,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         'SOFT_DELETE',
         'CASCADE_RELEASES_ASSIGNMENTS',
         'CASCADE_REVOKES_GRANTS',
-        'EXTERNAL_DEPROVISIONING',
         'IRREVERSIBLE',
       ]);
       expect(preview.changes).toContainEqual({
@@ -1887,7 +1872,6 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       });
       expect(JSON.stringify(approved.result)).not.toContain('Prod DB root');
       expect(users.get(ID.member)!.deletedAt).toBeInstanceOf(Date);
-      expect(idp.deactivateUser).toHaveBeenCalledWith('zitadel-sub-ana');
       expect(history).toEqual([
         expect.objectContaining({
           eventType: 'DELETED',

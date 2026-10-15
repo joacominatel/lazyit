@@ -3,7 +3,7 @@ title: ServiceAccount
 tags: [domain, entity, auth, authn, authz, service-accounts]
 status: accepted
 created: 2026-06-03
-updated: 2026-06-03
+updated: 2026-10-09
 ---
 
 # ServiceAccount
@@ -122,7 +122,8 @@ unified principal to the right audit actor column.
 >   write a null-attributed row ([[INVARIANTS]] INV-SA-4).
 > - **[[service-account-audit-log]] has no SA actor column** — an SA that self-manages SAs records
 >   `actorId = null` (honest); adding an SA actor column there is a future ADR/migration.
-> - **Zitadel machine-user mirror deferred** — the IdP seam stays open; BYOI no-ops (a future ADR).
+> - **No IdP machine-user mirror** — the deferred Zitadel mirror will not be built and the IdP seam is
+>   retired ([[0102-remove-bundled-zitadel]] §6).
 
 Related: [[service-account-permission]] · [[service-account-audit-log]] · [[user]] · [[role-permission]] ·
 [[shared-package]] · [[0048-service-accounts]] · [[0046-roles-permissions-v2]] ·

@@ -2,7 +2,7 @@
 id: SEC-022
 title: isActive (and other non-mirrored fields) persist on IdP-failure revert despite a 503
 severity: low
-status: open
+status: fixed
 cwe: CWE-460
 discovered: 2026-06-06
 module: users
@@ -85,3 +85,36 @@ row byte-identical to before (currently `isActive` would differ).
 - CWE-460 (Improper Cleanup on Thrown Exception) / CWE-636 (Not Failing Securely).
 - INVARIANTS INV-5 (no-split-brain write-back) · ADR-0043 §3 (write-back) · SEC-021 (last-admin via
   `isActive`).
+
+## Resolution
+
+**Status**: no longer applicable
+**Fixed in**: commit `d65e8d713` (`del(api): remove the IdP write-back from the users module (#1543)`),
+merged into the epic integration branch by PR #1552; the `IdentityProvider` seam itself went in PR #1554
+(epic #1543, [[0102-remove-bundled-zitadel|ADR-0102]] §1 and §6)
+**Fixed by**: security review (epic #1543)
+**Date**: 2026-10-09
+
+### Changes
+- No fix was written for this finding. The path it describes no longer exists: ADR-0102 removed the
+  bundled Zitadel, the role and profile write-back, and the revert that ran when the mirror failed.
+- `apps/api/src/users/users.service.ts:795` (`update`) now writes the row once
+  (`prisma.user.update` at `:861-879`), records history in one transaction (`:906-934`), re-indexes
+  search (`:937`) and returns (`:938`). It makes no IdP call, has no revert branch, and cannot throw the
+  "Your change was not saved" 503. A PATCH that carries `isActive` with a name, email or role change
+  commits all of them or none of them.
+- `apps/api/src/users/users.service.ts:958` (`updateOwnProfile`) delegates to `update` with the name keys
+  only (`:968`), so it inherits the same single write.
+- `apps/api/src/auth/identity/` (the Management client, both adapters and the interface) is deleted;
+  `grep -rn "idp\." apps/api/src` returns nothing outside tests.
+
+### Tests added
+- None. There is no mirror left to fail, so the regression test the finding asked for has nothing to
+  force. The existing `apps/api/src/users/users.service.spec.ts` suite covers the single-write `update`.
+
+### Verification
+Read on the integration branch `feat/issue-1543-remove-bundled-zitadel` at `340645acb`. The
+`users`, `config` and `auth` Jest suites pass there.
+
+### Residual risk
+None for this finding. INV-5, the invariant it measured against, is retired in [[INVARIANTS]].

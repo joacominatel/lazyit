@@ -99,13 +99,9 @@
   "directoryBadge": "Directorio",
   "directory": {
     "provision": {
-      "action": "Crear cuenta OIDC",
       "title": "Persona de directorio",
       "description": "Esta persona la agregó la importación masiva y todavía no tiene acceso. Dale una cuenta para que pueda iniciar sesión.",
-      "needsEmail": "Esta persona necesita un correo real antes de poder tener una cuenta. Edita la persona y agrégalo primero.",
-      "unsupported": "Crear cuentas solo está disponible con el proveedor de identidad integrado. Cuando usas tu propio proveedor OIDC, las personas importadas inician sesión a través de tu proveedor de identidad.",
-      "success": "{name} ya tiene una cuenta OIDC.",
-      "error": "No se pudo crear la cuenta. Inténtalo de nuevo."
+      "unsupported": "Con el inicio de sesión OIDC, las cuentas viven en tu proveedor de identidad. Crea a esta persona allí con el mismo correo verificado, y su primer inicio de sesión vincula la cuenta a este registro."
     },
     "provisionLocal": {
       "action": "Dar de alta con una contraseña temporal",
@@ -213,7 +209,7 @@
     "lastName": "Apellido",
     "lastNameRequired": "El apellido es obligatorio",
     "email": "Correo",
-    "emailHelp": "La clave de vinculación de la cuenta con el proveedor de identidad. Debe ser única; un cambio se refleja en el proveedor de identidad.",
+    "emailHelp": "Debe ser único. Con el inicio de sesión OIDC, un cambio aquí no se envía a tu proveedor de identidad.",
     "legajo": "Legajo",
     "legajoPlaceholder": "ej. 10293",
     "legajoHelp": "Opcional. El número de legajo/ficha de nómina o RR. HH. Debe ser único entre los usuarios activos.",
@@ -260,7 +256,7 @@
       "title": "Credencial de inicio de sesión",
       "description": "Define una contraseña temporal para que pueda iniciar sesión. Se le pedirá que elija la suya en el primer ingreso.",
       "passwordLabel": "Contraseña temporal",
-      "passwordHelp": "De un solo uso, solo para entregar. lazyit nunca la conserva de forma legible — solo guarda un hash, o la define en tu proveedor de identidad — y se reemplaza la primera vez que el usuario inicia sesión.",
+      "passwordHelp": "De un solo uso, solo para entregar. lazyit solo guarda un hash, nunca la contraseña legible, y se reemplaza la primera vez que el usuario inicia sesión.",
       "passwordRequired": "Define una contraseña temporal para que el usuario nuevo pueda iniciar sesión.",
       "generate": "Generar",
       "show": "Mostrar contraseña",
@@ -383,21 +379,8 @@
   },
   "passwordReset": {
     "button": "Restablecer contraseña",
-    "disabledNoIdp": "Esta cuenta no tiene vínculo con un proveedor de identidad, por lo que el restablecimiento de contraseña lo gestiona tu proveedor de identidad.",
     "disabledInactive": "Este usuario está inactivo — reactívalo antes de restablecer su contraseña.",
     "disabledDirectoryOnly": "Esta persona todavía no tiene cuenta de inicio de sesión. Primero dale de alta con una contraseña temporal.",
-    "confirmTitle": "¿Enviar un restablecimiento de contraseña?",
-    "confirmBody": "Tu proveedor de identidad enviará a <strong>{email}</strong> un enlace para restablecer su contraseña. lazyit nunca ve ni establece la contraseña; la entrega depende de que el SMTP del proveedor esté configurado.",
-    "send": "Enviar correo de restablecimiento",
-    "toast": {
-      "sentTitle": "Correo de restablecimiento de contraseña enviado a través del proveedor de identidad",
-      "sentDescription": "La entrega depende de que el SMTP de tu proveedor de identidad esté configurado.",
-      "managedTitle": "El restablecimiento de contraseña lo gestiona tu proveedor de identidad",
-      "managedDescription": "lazyit no puede ejecutar un restablecimiento para esta cuenta — gestiona la contraseña en tu proveedor de identidad.",
-      "inactiveTitle": "Este usuario está inactivo",
-      "inactiveDescription": "Reactívalo antes de restablecer su contraseña.",
-      "error": "No se pudo enviar el restablecimiento de contraseña"
-    },
     "local": {
       "title": "Restablecer la contraseña de {name}",
       "intro": "lazyit gestiona las contraseñas en esta instancia, así que elige cómo le llega el restablecimiento a esta persona.",

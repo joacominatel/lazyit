@@ -11,8 +11,8 @@ import { notifyError } from "@/lib/api/notify-error";
 import { TemporaryPasswordReveal } from "./temporary-password-reveal";
 
 /**
- * Local-mode onboarding (ADR-0086 §5 amendment, issue #1072) — the counterpart to the OIDC
- * {@link ProvisionAccountButton} when `AUTH_MODE=local`. After a bulk import every person lands as a
+ * Local-mode onboarding (ADR-0086 §5 amendment, issue #1072), rendered by {@link ProvisionAccountButton}
+ * when `AUTH_MODE=local`. After a bulk import every person lands as a
  * login-less directory row and, in local mode, ALL self-service onboarding paths are closed by
  * construction. So an ADMIN explicitly mints a ONE-TIME temporary password here: the person becomes a
  * real login account (keeping their role — no privilege widening) and must change the password at first

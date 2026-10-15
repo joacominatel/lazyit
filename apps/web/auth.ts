@@ -8,14 +8,14 @@
  *
  * Optional Docker DNS workaround:
  *   AUTH_INTERNAL_ISSUER — Internal base URL reachable from within the Docker network
- *                          (e.g. http://zitadel:8080). When set, server-side OIDC calls
+ *                          (e.g. http://idp.internal:8080). When set, server-side OIDC calls
  *                          (discovery, token exchange, userinfo) have their request URL
  *                          rewritten from the external AUTH_ISSUER origin to this internal
  *                          origin, which may not resolve inside the container otherwise. The
  *                          browser-facing authorization redirect continues to use AUTH_ISSUER.
  *
- * The IdP is Zitadel by default (ADR-0037), but any OIDC-compliant provider works
- * with no code changes — BYOI by env vars.
+ * Any OIDC-compliant provider works with no code changes — bring your own IdP by env vars
+ * (ADR-0102).
  *
  * Session strategy: JWT (no DB session). The IdP's access token is stored in the
  * encrypted session cookie so the frontend can attach it as Bearer on API calls.
@@ -31,14 +31,7 @@ import type {} from "next-auth/jwt";
 import { LoginRequestSchema, type LoginResponse } from "@lazyit/shared";
 
 import { apiFetch } from "@/lib/api/client";
-import { loadWebBootstrapOidcFile } from "@/lib/auth/bootstrap-file";
 import { loginClientHeaders } from "@/lib/auth/login-client-headers";
-
-// Zero-touch bootstrap (ADR-0043 Phase 3): before any AUTH_* read below, back-fill them from the
-// sidecar's oidc-client.json (mounted read-only) for any var the operator did not set, so the
-// bundled-Zitadel flow needs NO hand-copied client id/secret. Explicit AUTH_* env always wins; a
-// Node-runtime-only, fail-soft no-op on Edge / when the file is absent (BYOI + `next build`).
-loadWebBootstrapOidcFile();
 
 declare module "next-auth" {
   interface User {
@@ -175,8 +168,8 @@ const externalIssuer = process.env.AUTH_ISSUER;
 // the provider `issuer` and the endpoints in its discovery document — all at the external auth
 // origin (e.g. https://auth.localhost:8443), which does NOT resolve inside the Docker network.
 // When AUTH_INTERNAL_ISSUER is set, this wrapper rewrites those requests to the internal Docker
-// origin (e.g. http://zitadel:8080) and sets X-Forwarded-* so Zitadel resolves the right instance
-// and keeps emitting the canonical external issuer. The browser-facing authorization redirect is
+// origin (e.g. http://idp.internal:8080) and sets X-Forwarded-* so an IdP that resolves its tenant by
+// host keeps emitting the canonical external issuer. The browser-facing authorization redirect is
 // built from the discovery document and never passes through this fetch, so it stays external.
 const forwardedFetch: typeof fetch = Object.assign(
   (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -207,9 +200,9 @@ const oidcServerFetch: typeof fetch = internalIssuer ? forwardedFetch : fetch;
  *
  * The token endpoint is read from the provider's discovery document
  * (`{issuer}/.well-known/openid-configuration`) so this stays provider-agnostic (BYOI) —
- * no hard-coded Zitadel path. Discovery + token POST run server-side via `oidcServerFetch`
+ * no hard-coded IdP path. Discovery + token POST run server-side via `oidcServerFetch`
  * (honouring the Docker internal-issuer rewrite). Client auth uses `client_secret_post`
- * (client_id + secret in the body), which Zitadel's discovery advertises alongside basic;
+ * (client_id + secret in the body), which most IdPs advertise alongside basic in discovery;
  * this matches the confidential web client the provider is already configured as.
  *
  * Returns the refreshed token fields on success, or `{ error }` on any failure so the
@@ -263,7 +256,7 @@ async function refreshAccessToken(refreshToken: string): Promise<
 
 /**
  * Generic OIDC provider. Auth.js runs discovery from `issuer`
- * (`{issuer}/.well-known/openid-configuration`) — no Zitadel-specific code.
+ * (`{issuer}/.well-known/openid-configuration`) — no vendor-specific code.
  * BYOI: replace these three env vars to swap IdPs.
  *
  * When AUTH_INTERNAL_ISSUER is set, the custom fetch (above) rewrites server-side OIDC
@@ -289,16 +282,15 @@ const oidcProvider = {
   // Request the standard identity scopes so the IdP returns the user's
   // `name`/`email` claims — without this the provider asks for `openid` only
   // and `session.user.name` stays empty (the topbar shows "—"). NB: the IdP
-  // (e.g. Zitadel) must also grant these scopes and emit the claims (for
-  // Zitadel: enable "User Info inside ID Token" on the app) — see ADR-0037/0039.
+  // must also grant these scopes and emit the claims in the ID token — see ADR-0039.
   //
   // `offline_access` asks the IdP for a `refresh_token` so the `jwt` callback can
-  // silently renew the access token before it expires (issue #658). Zitadel grants
+  // silently renew the access token before it expires (issue #658). Most IdPs grant
   // it for confidential web clients. If the IdP does NOT return a refresh_token, the
   // refresh logic degrades gracefully to the existing #657 global-401 path — the
   // session is never broken by a missing refresh_token.
   // `prompt=login` forces the IdP to re-authenticate rather than reuse an existing browser
-  // session, so Zitadel skips its shared account-picker (issue #952: a brand-new employee was
+  // session, so the IdP skips its shared account-picker (issue #952: a brand-new employee was
   // shown OTHER people's accounts on a machine that had prior sessions). The per-user `ui_locales`
   // param is passed dynamically at sign-in time from the /login page (the active next-intl locale).
   authorization: { params: { scope: "openid profile email offline_access", prompt: "login" } },

@@ -360,7 +360,7 @@ function makeCategories() {
 /**
  * A UsersService double for the directory-person branch (ADR-0069 REDESIGN §4.5). Records every create()
  * call (payload + opts) and mints a uuid-shaped id. The commit only ever calls it with
- * `{ skipIdpWriteBack: true }`.
+ * `{ directoryOnly: true }`.
  */
 function makeUsers() {
   const calls: { data: any; actorId: any; opts: any }[] = [];
@@ -1755,7 +1755,7 @@ describe('ImportCommitService.commit', () => {
 
   // ===== Etapa 2: directory person + AssetAssignment (ADR-0069 REDESIGN §4.5/§4.6) ===============
   describe('directory person + assignment (Etapa 2)', () => {
-    it('creates a directory person (skipIdpWriteBack) and opens its assignment', async () => {
+    it('creates a directory person (directoryOnly) and opens its assignment', async () => {
       const state = sessionWithPerson(
         [
           {
@@ -1778,10 +1778,10 @@ describe('ImportCommitService.commit', () => {
 
       expect(result.committed).toBe(1);
       expect(result.failed).toBe(0);
-      // The person is created via UsersService with skipIdpWriteBack + import provenance + directoryOnly.
+      // The person is created via UsersService as a directory-only person with import provenance.
       expect(users.create).toHaveBeenCalledTimes(1);
       const { data, opts } = users._calls[0];
-      expect(opts.skipIdpWriteBack).toBe(true);
+      expect(opts.directoryOnly).toBe(true);
       expect(opts.createdPayload).toEqual({
         source: 'import',
         sessionId: 'sess-1',

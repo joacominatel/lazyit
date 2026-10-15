@@ -31,6 +31,22 @@ import { z } from 'zod';
  */
 const urlMessage = 'must be an absolute URL (e.g. https://auth.example.com)';
 
+const BUNDLED_ZITADEL_HOST = 'zitadel:8080';
+const BUNDLED_ZITADEL_MESSAGE =
+  'is a leftover of the bundled Zitadel, which this version no longer ships (ADR-0102). Refusing to start so the instance does not run half-wired — follow docs/05-runbooks/migrate-off-bundled-zitadel.md, then start again';
+
+const LEGACY_IDP_TYPE_WARNING =
+  'IDENTITY_PROVIDER_TYPE=zitadel is no longer supported (the bundled Zitadel was removed, ADR-0102) and is ignored; remove the variable to silence this warning.';
+
+function pointsAtBundledZitadel(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url).host === BUNDLED_ZITADEL_HOST;
+  } catch {
+    return false;
+  }
+}
+
 export const BootConfigSchema = z
   .object({
     NODE_ENV: z.string().optional(),
@@ -49,6 +65,7 @@ export const BootConfigSchema = z
     // mode (asserted below); distinct from AUTH_SECRET (Auth.js cookie key). Optional here so the other
     // modes still boot without it.
     SESSION_SIGNING_SECRET: z.string().optional(),
+    ZITADEL_MASTERKEY: z.string().optional(),
     // Optional so the example .env still boots (ADR-0035 fail-soft search; import-size guard).
     MEILI_HOST: z.url(urlMessage).optional(),
     MAX_IMPORT_SIZE_MB: z.coerce.number().positive().optional(),
@@ -93,7 +110,20 @@ export const BootConfigSchema = z
     message:
       'AUTH_TRUST_HOST=true (LAN host-agnostic mode) requires AUTH_MODE=local — OIDC bakes its external domain and cannot be reached at an arbitrary Host',
     path: ['AUTH_TRUST_HOST'],
-  });
+  })
+  // Bundled-Zitadel tripwire (ADR-0102 §7): only OIDC mode reads these, so a stale value elsewhere is inert.
+  .refine((c) => c.AUTH_MODE !== 'oidc' || !c.ZITADEL_MASTERKEY?.trim(), {
+    message: BUNDLED_ZITADEL_MESSAGE,
+    path: ['ZITADEL_MASTERKEY'],
+  })
+  .refine(
+    (c) => c.AUTH_MODE !== 'oidc' || !pointsAtBundledZitadel(c.OIDC_ISSUER),
+    { message: BUNDLED_ZITADEL_MESSAGE, path: ['OIDC_ISSUER'] },
+  )
+  .refine(
+    (c) => c.AUTH_MODE !== 'oidc' || !pointsAtBundledZitadel(c.OIDC_JWKS_URI),
+    { message: BUNDLED_ZITADEL_MESSAGE, path: ['OIDC_JWKS_URI'] },
+  );
 
 export type BootConfig = z.infer<typeof BootConfigSchema>;
 
@@ -106,6 +136,13 @@ export function validateBootConfig(
 ): BootConfig {
   const result = BootConfigSchema.safeParse(env);
   if (result.success) {
+    // Read-tolerated, never fatal (ADR-0102 §4); local mode never read it, so it stays silent there.
+    if (
+      result.data.AUTH_MODE !== 'local' &&
+      env.IDENTITY_PROVIDER_TYPE?.trim().toLowerCase() === 'zitadel'
+    ) {
+      console.warn(LEGACY_IDP_TYPE_WARNING);
+    }
     return result.data;
   }
   const issues = result.error.issues

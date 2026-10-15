@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-09-26
+updated: 2026-10-09
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -34,7 +34,8 @@ updated: 2026-09-26
   authenticated via OAuth; scripts = Service Account ([[0048-service-accounts]], [[0080-service-account-secret-retrieval]]).
 - **"OAuth 2.1 desde el día uno."** All OIDC (bundled Zitadel + BYOI) will be removed (issue #1310), so lazyit
   is its own authorization server on top of the **local** session and this design adds **zero** dependency
-  on Zitadel/OIDC.
+  on Zitadel/OIDC. (#1310 was later narrowed by [[0102-remove-bundled-zitadel]]: only the bundled Zitadel
+  was removed, and generic OIDC stays opt-in; the MCP design is unaffected.)
 - Over MCP, **the client owns confirmation UX**; the user's permissions bound what can happen.
 - The AI may do **anything the user can**, except the Secret Manager (zero-knowledge,
   [[0061-secret-manager-zero-knowledge]]), operations that return a credential in cleartext (SA token

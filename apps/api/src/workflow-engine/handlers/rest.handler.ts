@@ -31,7 +31,7 @@ import {
  * enforces the v1 public-only posture (private/loopback/metadata denied by default; DNS-rebinding
  * pinned; redirects re-validated). It never logs secrets or bodies (INV-6).
  *
- * Retry posture mirrors `zitadel-management.service.ts`: a 4xx (other than 408/429) is PERMANENT
+ * Retry posture (`RETRYABLE_HTTP_STATUSES` in step-handler.ts): a 4xx (other than 408/429) is PERMANENT
  * (`retryable: false`); a 5xx/429/408 or a network/timeout error is TRANSIENT — but only retryable
  * when the step is declared `idempotent`, so a non-idempotent create is single-shot (a lost-response
  * retry must not double-provision). The handler itself NEVER retries; it returns the flag for the CORE.

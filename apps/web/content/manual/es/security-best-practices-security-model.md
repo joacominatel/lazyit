@@ -11,31 +11,31 @@ Esta página explica, en términos sencillos, cómo lazyit decide **quién eres*
 No necesitas configurar nada de esto para estar seguro — son valores por defecto razonables — pero
 entender cómo funciona te ayuda a operar bien la instancia.
 
-## La identidad la aporta tu proveedor, no lazyit
+## Cómo inicias sesión
 
-lazyit **no** almacena contraseñas de inicio de sesión. La autenticación se delega a un **proveedor
-de identidad (IdP)** que habla OIDC — ya sea el servicio de inicio de sesión incluido con lazyit, o
-tu propio proveedor (el SSO de tu empresa). Eliges cuál en la primera ejecución; consulta
-[Primeros pasos](/help/getting-started).
+El inicio de sesión funciona de una de dos formas, elegida una sola vez al desplegar la instancia;
+consulta [Primeros pasos](/help/getting-started).
 
-Esa única decisión define todo el modelo de seguridad:
+- **Cuentas locales (la opción por defecto).** lazyit se encarga del inicio de sesión. Guarda cada
+  contraseña solo como **hash argon2id** — una huella lenta, con sal y de un solo sentido — nunca la
+  contraseña en sí, así que nadie, ni siquiera un administrador, puede volver a leerla. Los intentos
+  fallidos repetidos se ralentizan y se limitan, y lazyit emite su propia sesión firmada. En esta
+  versión el inicio de sesión es solo con contraseña.
+- **Tu propio proveedor OIDC.** La autenticación se delega en un **proveedor de identidad (IdP)** que
+  administras, como el SSO de tu empresa. lazyit nunca ve, define ni almacena una contraseña de inicio
+  de sesión: las reglas de contraseñas, el multifactor, la política de bloqueo y los restablecimientos
+  de cuenta viven en ese proveedor — configúralos allí. lazyit confía en la identidad que afirma tu
+  proveedor: tras un inicio de sesión exitoso, te identifica por el identificador de cuenta estable que
+  envía el proveedor, no por algo que un usuario pueda escribir.
 
-- **Tu proveedor es dueño de la credencial de inicio de sesión.** Cuando usas tu propio proveedor,
-  lazyit nunca ve, define ni almacena una contraseña de inicio de sesión. Las reglas de contraseñas,
-  el doble factor, la política de bloqueo y los restablecimientos de cuenta viven en ese proveedor —
-  configúralos allí.
-- **lazyit confía en la identidad que afirma tu proveedor.** Tras un inicio de sesión exitoso, lazyit
-  te identifica por el identificador de cuenta estable que envía el proveedor, no por algo que un
-  usuario pueda escribir. Trata a ese proveedor como la fuente de verdad sobre *quién está iniciando
-  sesión*.
+> Con cuentas locales, la solidez de tu inicio de sesión es la solidez de tus contraseñas — usa
+> contraseñas largas y únicas. Con tu propio proveedor, es la solidez de tu IdP: activa la
+> autenticación multifactor y una política de contraseñas sensata **allí**. Si hoy necesitas
+> multifactor, conecta tu propio proveedor.
 
-> Como la identidad está delegada, la solidez de tu inicio de sesión es la solidez de tu IdP. Activa
-> la autenticación multifactor y una política de contraseñas sensata **en tu proveedor** — ahí es
-> donde corresponden esos controles.
+## Las cuentas se vinculan por correo verificado (OIDC)
 
-## Las cuentas se vinculan por correo verificado
-
-La primera vez que alguien inicia sesión a través de tu proveedor, lazyit vincula ese inicio de
+La primera vez que alguien inicia sesión a través de tu propio proveedor, lazyit vincula ese inicio de
 sesión a un registro de usuario de lazyit por **correo verificado**. Esto te permite crear de
 antemano a una persona en lazyit y que su cuenta "simplemente funcione" la primera vez que inicie
 sesión.
@@ -64,7 +64,7 @@ genérico no necesita saber nada sobre los roles de lazyit.
 
 Después de iniciar sesión, mantienes una sesión en tu navegador. Cerrar sesión la termina. En el día
 a día, esa sesión es lo que prueba ante lazyit quién eres; el trabajo pesado de *probar tu identidad*
-ya ocurrió en tu proveedor.
+ya ocurrió al iniciar sesión.
 
 En una instancia con **cuentas locales**, una sesión dura 12 horas salvo que la persona marque
 **Mantener la sesión iniciada**, que la conserva hasta que cierre sesión. Esa sesión no tiene ningún
@@ -106,10 +106,10 @@ en la app. Lo que cambia es adónde van los datos y quién decide:
 
 ## Lo que esto te da
 
-- **Ninguna base de datos de contraseñas que filtrar.** lazyit no guarda contraseñas de inicio de
-  sesión — ahí no hay nada que robar.
-- **Un solo lugar para aplicar la política de inicio de sesión** — tu proveedor de identidad — en vez
-  de dos.
+- **Ninguna contraseña legible.** Con cuentas locales lazyit solo guarda hashes argon2id; con tu
+  propio proveedor no guarda ninguna contraseña de inicio de sesión.
+- **Un solo lugar para aplicar la política de inicio de sesión** — lazyit con cuentas locales, o tu
+  proveedor de identidad — nunca dos.
 - **Autorización resistente a manipulación** — tus derechos se leen de la base de datos de lazyit,
   nunca de un token que un cliente pudiera falsificar.
 - **Secretos honestos** — el Gestor de Secretos está cifrado de modo que el propio servidor no puede

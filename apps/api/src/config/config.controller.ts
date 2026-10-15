@@ -44,7 +44,9 @@ class ConfigStatusDto extends createZodDto(ConfigStatusSchema) {}
 class CsrfTokenDto extends createZodDto(CsrfTokenSchema) {}
 class SetupAdminDto extends createZodDto(SetupAdminSchema) {}
 class SetupResultDto extends createZodDto(SetupResultSchema) {}
-class RolePermissionMatrixDto extends createZodDto(RolePermissionMatrixSchema) {}
+class RolePermissionMatrixDto extends createZodDto(
+  RolePermissionMatrixSchema,
+) {}
 class UpdateRolePermissionsDto extends createZodDto(
   UpdateRolePermissionsSchema,
 ) {}
@@ -105,8 +107,8 @@ export class ConfigController {
     description:
       'First-run bootstrap. 409 once any ADMIN exists (one-time gate). Requires a valid X-CSRF-Token ' +
       'header (from GET /config/status or GET /config/csrf). Rate-limited per IP. The role is locked ' +
-      'to ADMIN. On zitadel mode with a configured Management credential the ADMIN is mirrored into ' +
-      'the IdP, but a mirror failure degrades to a local-only ADMIN (never hard-blocks first-run).',
+      'to ADMIN. Local mode requires an initial password; OIDC mode creates the ADMIN without one ' +
+      'and makes no identity-provider call (the IdP links it on first sign-in). `mirrored` is always false.',
   })
   @ApiCreatedResponse({ type: SetupResultDto })
   async setup(
@@ -124,7 +126,8 @@ export class ConfigController {
       success: true,
       adminId: outcome.adminId,
       email: outcome.email,
-      mirrored: outcome.mirrored,
+      // Always false since ADR-0102; still emitted because older web builds read it.
+      mirrored: false,
       setupCompletedAt: outcome.setupCompletedAt.toISOString(),
     };
   }
@@ -153,7 +156,8 @@ export class ConfigController {
   @UseGuards(ServicePrincipalForbiddenGuard)
   @Put('permissions')
   @ApiOperation({
-    summary: 'Replace the MEMBER + VIEWER permission sets (ADMIN — settings:manage)',
+    summary:
+      'Replace the MEMBER + VIEWER permission sets (ADMIN — settings:manage)',
     description:
       'Replaces the MEMBER and VIEWER permission sets wholesale (a full PUT). The ADMIN row is ' +
       'IMMUTABLE — the strict body cannot name it (an ADMIN/extra key → 400); every permission must ' +
@@ -176,7 +180,7 @@ export class ConfigController {
     description:
       'Returns { role, permissions: Permission[] } for the CALLER, resolved via the ' +
       'PermissionResolverService — exactly what the guard enforces (ADMIN → the full catalog; ' +
-      'MEMBER/VIEWER → their DB rows). Lets the frontend derive can(\'domain:action\') without ' +
+      "MEMBER/VIEWER → their DB rows). Lets the frontend derive can('domain:action') without " +
       'polluting the User wire shape. No permission gate beyond authentication.',
   })
   @ApiOkResponse({ type: MyPermissionsDto })

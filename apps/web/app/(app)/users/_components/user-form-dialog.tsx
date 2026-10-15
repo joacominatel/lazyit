@@ -156,8 +156,7 @@ export function UserFormDialog({
             onOpenChange(false);
           },
           // The API's own message takes precedence (surfaced verbatim with the request id) — e.g. a
-          // duplicate email (409) or an identity-provider write-back failure (503). The fallback only
-          // applies if the response carried no message.
+          // duplicate email (409). The fallback only applies if the response carried no message.
           onError: (error) => notifyError(error, t("toast.updateError")),
         },
       );

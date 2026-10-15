@@ -81,19 +81,26 @@ function echoUpsertedUser(args: { create: Record<string, unknown> }) {
   return { ...DB_USER, ...args.create };
 }
 
-// jitProvision calls user.findFirst with three distinguishable shapes:
-//   { where: { externalId }, includeSoftDeleted: true } — the sub lookup (includes soft-deleted);
-//   { where: { email } }                                — the account-link-by-email lookup (LIVE);
-//   { where: { id } }                                   — the post-claim refetch (LIVE).
+// jitProvision calls user.findFirst with four distinguishable shapes:
+//   { where: { externalId }, includeSoftDeleted: true }             — the sub lookup (includes soft-deleted);
+//   { where: { email } }                                            — the account-link-by-email lookup (LIVE);
+//   { where: { email, deletedAt: { not: null } }, includeSoftDeleted } — the offboarded-email lookup;
+//   { where: { id } }                                               — the post-claim refetch (LIVE).
 // `routeFindFirst` builds a findFirst impl from per-shape handlers so the linking tests can return
 // different rows for the email lookup vs. the refetch without ordering assumptions.
 function routeFindFirst(handlers: {
   byExternalId?: (sub: unknown) => unknown;
   byEmail?: (email: unknown) => unknown;
+  byDeletedEmail?: (email: unknown) => unknown;
   byId?: (id: unknown) => unknown;
 }) {
   return (args: { where?: Record<string, unknown> }) => {
     const where = args.where ?? {};
+    if ('deletedAt' in where && 'email' in where) {
+      return handlers.byDeletedEmail
+        ? handlers.byDeletedEmail(where.email)
+        : null;
+    }
     if ('externalId' in where) {
       return handlers.byExternalId
         ? handlers.byExternalId(where.externalId)
@@ -1047,6 +1054,193 @@ describe('JwtAuthGuard', () => {
           }),
         );
       });
+
+      describe('offboarded before the first sign-in (ADR-0102 §5)', () => {
+        const OFFBOARDED = {
+          ...DB_USER,
+          id: '22222222-2222-2222-2222-222222222222',
+          email: 'gone@corp.com',
+          externalId: null,
+          deletedAt: new Date('2026-10-01T00:00:00Z'),
+        };
+        const offboardedByEmail = (email: unknown) =>
+          email === OFFBOARDED.email ? { id: OFFBOARDED.id } : null;
+
+        function deletedEmailCall() {
+          return (
+            prismaUser.findFirst.mock.calls as Array<[Record<string, unknown>]>
+          ).find((c) => 'deletedAt' in ((c[0]?.where as object) ?? {}));
+        }
+
+        it('refuses with the same 403 as the soft-deleted-by-sub path and creates nothing', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-never-signed-in',
+              email: 'Gone@Corp.com',
+              email_verified: true,
+              given_name: 'Gone',
+              family_name: 'Person',
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          const attempt = guard.canActivate(
+            makeCtx({ headers: { authorization: 'Bearer t' } }),
+          );
+
+          await expect(attempt).rejects.toBeInstanceOf(ForbiddenException);
+          await expect(attempt).rejects.toThrow('Account has been deactivated');
+          expect(prismaUser.upsert).not.toHaveBeenCalled();
+          expect(prismaUser.updateMany).not.toHaveBeenCalled();
+          expect(deletedEmailCall()![0]).toEqual({
+            where: { email: 'gone@corp.com', deletedAt: { not: null } },
+            select: { id: true },
+            includeSoftDeleted: true,
+          });
+        });
+
+        it('returns the same 403 body as a soft-deleted sub (no enumeration of why)', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: { sub: 'oidc-sub-001' },
+          });
+          prismaUser.findFirst.mockResolvedValue({
+            ...DB_USER,
+            deletedAt: new Date(),
+          });
+          const bySub = await guard
+            .canActivate(makeCtx({ headers: { authorization: 'Bearer t' } }))
+            .catch((e: ForbiddenException) => e.getResponse());
+
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-never-signed-in',
+              email: 'gone@corp.com',
+              email_verified: true,
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          const byEmail = await guard
+            .canActivate(makeCtx({ headers: { authorization: 'Bearer t' } }))
+            .catch((e: ForbiddenException) => e.getResponse());
+
+          expect(byEmail).toEqual(bySub);
+        });
+
+        it('creates a fresh user as before when the offboarded row has a different email', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-new-hire',
+              email: 'new.hire@corp.com',
+              email_verified: true,
+              given_name: 'New',
+              family_name: 'Hire',
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          await expect(
+            guard.canActivate(
+              makeCtx({ headers: { authorization: 'Bearer t' } }),
+            ),
+          ).resolves.toBe(true);
+          expect(prismaUser.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { externalId: 'oidc-sub-new-hire' },
+            }),
+          );
+        });
+
+        it('still links a LIVE unclaimed row holding the email, even if an offboarded row shares it', async () => {
+          const LIVE = {
+            ...OFFBOARDED,
+            id: '33333333-3333-3333-3333-333333333333',
+            deletedAt: null,
+          };
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-rehired',
+              email: 'gone@corp.com',
+              email_verified: true,
+            },
+          });
+          let claimed = false;
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => LIVE,
+              byDeletedEmail: offboardedByEmail,
+              byId: () =>
+                claimed ? { ...LIVE, externalId: 'oidc-sub-rehired' } : LIVE,
+            }),
+          );
+          prismaUser.updateMany.mockImplementation(() => {
+            claimed = true;
+            return Promise.resolve({ count: 1 });
+          });
+          const req: Record<string, unknown> = {
+            headers: { authorization: 'Bearer t' },
+          };
+
+          await expect(guard.canActivate(makeCtx(req))).resolves.toBe(true);
+          expect(prismaUser.updateMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { id: LIVE.id, externalId: null },
+            }),
+          );
+          expect((req.user as { id: string }).id).toBe(LIVE.id);
+          expect(prismaUser.upsert).not.toHaveBeenCalled();
+        });
+
+        it('keeps the current behaviour on an UNVERIFIED email: no offboarded lookup, a fresh row is created', async () => {
+          (jose.jwtVerify as jest.Mock).mockResolvedValue({
+            payload: {
+              sub: 'oidc-sub-unverified',
+              email: 'gone@corp.com',
+              email_verified: false,
+            },
+          });
+          prismaUser.findFirst.mockImplementation(
+            routeFindFirst({
+              byExternalId: () => null,
+              byEmail: () => null,
+              byDeletedEmail: offboardedByEmail,
+            }),
+          );
+          prismaUser.upsert.mockImplementation(echoUpsertedUser);
+
+          await expect(
+            guard.canActivate(
+              makeCtx({ headers: { authorization: 'Bearer t' } }),
+            ),
+          ).resolves.toBe(true);
+          expect(deletedEmailCall()).toBeUndefined();
+          expect(prismaUser.upsert).toHaveBeenCalledWith(
+            expect.objectContaining({
+              where: { externalId: 'oidc-sub-unverified' },
+            }),
+          );
+        });
+      });
     });
 
     it('throws UnauthorizedException when OIDC_ISSUER is not configured', async () => {
@@ -1247,56 +1441,183 @@ describe('JwtAuthGuard', () => {
         expect(fetchMock).not.toHaveBeenCalled();
       });
 
-      it('rewrites discovery + userinfo to the internal origin with X-Forwarded-* when OIDC_JWKS_URI is set', async () => {
-        process.env.OIDC_JWKS_URI = 'http://zitadel:8080/oauth/v2/keys';
+      // Answers discovery and userinfo per host; any other URL (or a host mapped to `null`) is a network error.
+      function idp(routes: Record<string, unknown>) {
+        fetchMock.mockImplementation(
+          (input: unknown): Promise<FakeResponse> => {
+            const url = String(input);
+            const body = routes[url];
+            return body === undefined || body === null
+              ? Promise.reject(new Error(`ENOTFOUND ${url}`))
+              : Promise.resolve(jsonResponse(body));
+          },
+        );
+      }
+      function upsertedEmail(): unknown {
+        const [args] = prismaUser.upsert.mock.calls[0] as [
+          { create: { email: unknown } },
+        ];
+        return args.create.email;
+      }
+      function tokenCalls(): FetchCall[] {
+        return (fetchMock.mock.calls as FetchCall[]).filter(
+          (c) =>
+            (c[1]?.headers as Record<string, string> | undefined)
+              ?.Authorization !== undefined,
+        );
+      }
+
+      it('co-located IdP: reads discovery from the issuer and sends userinfo to the internal origin', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
         (jose.jwtVerify as jest.Mock).mockResolvedValue({
           payload: { sub: 'oidc-sub-internal' },
         });
         prismaUser.findFirst.mockResolvedValue(null);
         prismaUser.upsert.mockImplementation(echoUpsertedUser);
-
-        fetchMock.mockImplementation(
-          (input: unknown): Promise<FakeResponse> => {
-            const url = String(input);
-            if (url.includes('/.well-known/openid-configuration')) {
-              // Discovery advertises the EXTERNAL userinfo endpoint.
-              return Promise.resolve(
-                jsonResponse({
-                  userinfo_endpoint:
-                    'https://auth.example.com/oidc/v1/userinfo',
-                }),
-              );
-            }
-            return Promise.resolve(
-              jsonResponse({ email: 'internal@corp.com' }),
-            );
+        idp({
+          'https://auth.example.com/.well-known/openid-configuration': {
+            userinfo_endpoint: 'https://auth.example.com/oidc/v1/userinfo',
           },
-        );
+          'http://idp:8080/oidc/v1/userinfo': { email: 'internal@corp.com' },
+        });
 
         await guard.canActivate(
           makeCtx({ headers: { authorization: 'Bearer access.token' } }),
         );
 
-        // Both requests must target the internal origin (zitadel:8080), not auth.example.com.
         const discoveryCall = findCall(
           fetchMock,
           '/.well-known/openid-configuration',
         );
-        const userinfoCall = findCall(fetchMock, '/oidc/v1/userinfo');
-        expect(String(discoveryCall![0])).toBe(
-          'http://zitadel:8080/.well-known/openid-configuration',
+        expect(discoveryCall![1]?.headers).not.toHaveProperty(
+          'X-Forwarded-Host',
         );
-        expect(String(userinfoCall![0])).toBe(
-          'http://zitadel:8080/oidc/v1/userinfo',
-        );
-        // X-Forwarded-* derived from the external issuer host.
-        expect(discoveryCall![1]?.headers).toMatchObject({
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'http://idp:8080/oidc/v1/userinfo',
+        ]);
+        expect(tokenCalls()[0][1]?.headers).toMatchObject({
           'X-Forwarded-Host': 'auth.example.com',
-        });
-        expect(userinfoCall![1]?.headers).toMatchObject({
-          'X-Forwarded-Host': 'auth.example.com',
+          'X-Forwarded-Proto': 'https',
           Authorization: 'Bearer access.token',
         });
+        expect(upsertedEmail()).toBe('internal@corp.com');
+      });
+
+      it('co-located IdP behind split DNS: retries discovery on the internal origin with X-Forwarded-*', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-split-dns' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://auth.example.com/.well-known/openid-configuration': null,
+          'http://idp:8080/.well-known/openid-configuration': {
+            userinfo_endpoint: 'https://auth.example.com/oidc/v1/userinfo',
+          },
+          'http://idp:8080/oidc/v1/userinfo': { email: 'split@corp.com' },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        const retry = findCall(
+          fetchMock,
+          'http://idp:8080/.well-known/openid-configuration',
+        );
+        expect(retry![1]?.headers).toMatchObject({
+          'X-Forwarded-Host': 'auth.example.com',
+        });
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'http://idp:8080/oidc/v1/userinfo',
+        ]);
+        expect(upsertedEmail()).toBe('split@corp.com');
+      });
+
+      it('external IdP with userinfo on another host: the token goes only to the discovered host, unrewritten', async () => {
+        process.env.OIDC_ISSUER =
+          'https://login.microsoftonline.com/tenant/v2.0';
+        process.env.OIDC_JWKS_URI =
+          'https://login.microsoftonline.com/tenant/discovery/v2.0/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'entra-sub' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://login.microsoftonline.com/tenant/v2.0/.well-known/openid-configuration':
+            { userinfo_endpoint: 'https://graph.microsoft.com/oidc/userinfo' },
+          'https://graph.microsoft.com/oidc/userinfo': {
+            email: 'entra@corp.com',
+          },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'https://graph.microsoft.com/oidc/userinfo',
+        ]);
+        expect(tokenCalls()[0][1]?.headers).not.toHaveProperty(
+          'X-Forwarded-Host',
+        );
+        expect(upsertedEmail()).toBe('entra@corp.com');
+      });
+
+      it('external IdP whose JWKS lives on a third host: the token is never sent to the JWKS host', async () => {
+        process.env.OIDC_ISSUER = 'https://accounts.google.com';
+        process.env.OIDC_JWKS_URI =
+          'https://www.googleapis.com/oauth2/v3/certs';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'google-sub' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({
+          'https://accounts.google.com/.well-known/openid-configuration': {
+            userinfo_endpoint:
+              'https://openidconnect.googleapis.com/v1/userinfo',
+          },
+          'https://openidconnect.googleapis.com/v1/userinfo': {
+            email: 'g@corp.com',
+          },
+        });
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(tokenCalls().map((c) => String(c[0]))).toEqual([
+          'https://openidconnect.googleapis.com/v1/userinfo',
+        ]);
+        expect(findCall(fetchMock, 'www.googleapis.com')).toBeUndefined();
+      });
+
+      it('discovery failure: provisions from the token claims, never sends the token, and warns once', async () => {
+        process.env.OIDC_JWKS_URI = 'http://idp:8080/oauth/v2/keys';
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-nodisc', email: 'claims@corp.com' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        idp({});
+        const warnSpy = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+        await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(upsertedEmail()).toBe('claims@corp.com');
+        expect(tokenCalls()).toHaveLength(0);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        warnSpy.mockRestore();
       });
     });
   });

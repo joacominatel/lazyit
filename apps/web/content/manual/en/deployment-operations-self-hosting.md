@@ -25,7 +25,7 @@ real instance.
 - A **backup location** off the host — see [Backups & restore](/help/deployment-operations-backups-restore).
 
 A small team (up to ~50 assets) runs comfortably on **2 vCPU / 4 GB RAM / 20 GB disk**. The stack
-runs eight long-lived containers plus a one-shot migration job; grow the host with your data.
+runs six long-lived containers plus a one-shot migration job; grow the host with your data.
 
 ## The recommended path: the guided bootstrap
 
@@ -38,7 +38,7 @@ The fastest, safest first deploy is the bundled bootstrap script. From the repos
 It checks prerequisites, asks about six questions (your domain, TLS choice, ports, identity provider,
 database), then **generates the environment file with strong random secrets**, brings the whole stack
 up, and points you at the in-app setup wizard. It is **idempotent and non-destructive** — re-running
-it on an existing install just brings the stack up; it never regenerates the unrotatable master keys
+it on an existing install just brings the stack up; it never regenerates the unrotatable encryption keys
 and has no teardown path.
 
 Useful flags:
@@ -53,7 +53,7 @@ When it finishes it prints your URL and the single next step: open **`https://<y
 create the first administrator. The script never creates a user — that is the setup wizard's job.
 
 > Back the generated environment file (`infra/env/.env.prod`) up off-host, encrypted. It holds the
-> master keys; lose it and a restored backup is unreadable. See
+> encryption keys; lose it and a restored backup is unreadable. See
 > [Backups & restore](/help/deployment-operations-backups-restore).
 
 ## The manual path
@@ -68,8 +68,8 @@ docker compose -f compose.yaml -f infra/docker-compose.prod.yaml \
   --profile prod --env-file infra/env/.env.prod up -d --build
 ```
 
-The `chmod 600` is **not optional**: the file holds the database password, the identity-provider
-master key, the session secret and more. The default permissions are world-readable.
+The `chmod 600` is **not optional**: the file holds the database password, the encryption keys, the
+session secrets and more. The default permissions are world-readable.
 
 ## What a deploy looks like
 
@@ -135,7 +135,8 @@ signed in just needs to sign in again.
 ## What's next
 
 - [Services](/help/deployment-operations-services) — what each container does.
-- [Identity provider](/help/deployment-operations-identity-provider) — bundled sign-in vs. your own.
+- [Identity provider](/help/deployment-operations-identity-provider) — local accounts or your own OIDC
+  provider.
 - [Reverse proxy & TLS](/help/deployment-operations-reverse-proxy-tls) — Caddy and certificates.
 - [Backups & restore](/help/deployment-operations-backups-restore) — what to save, and how to recover.
 - [Troubleshooting](/help/deployment-operations-troubleshooting) — when a container won't come up.

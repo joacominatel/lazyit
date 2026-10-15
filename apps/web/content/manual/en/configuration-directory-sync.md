@@ -19,10 +19,12 @@ account, searches a subtree you choose, and **creates a login-less "directory pe
 matching entry. That is the whole feature.
 
 - It **never writes anything back** to your directory. lazyit only reads.
-- It is **not a way to log in.** A directory person has **no password and no single sign-on** — importing
-  someone does not let them sign in. It is a record of a person (a name and email you can assign assets to,
-  grant access for, and track), not an account. To give an imported person a real login, use **Provision
-  account** on their profile in the **Users** section.
+- It is **not a way to log in.** A directory person has **no password and no single sign-on** —
+  importing someone does not let them sign in. It is a record of a person (a name and email you can
+  assign assets to, grant access for, and track), not an account. To give an imported person a real
+  login, open their profile in **Users**: with local accounts, onboard them with a temporary password;
+  with your own OIDC provider, create them in the provider with the same verified email and their first
+  sign-in links the two.
 - It **does not change how permissions work.** Everyone imported is a plain viewer-level person. Directory
   groups (`memberOf`) are recorded for reference only and grant nothing.
 
@@ -101,9 +103,9 @@ what happened:
 
 ## Reviewing imported people
 
-At the bottom of the page, **Directory people to review** previews the most recently imported people. Each one links
-to their profile, where you can edit them, **provision a login**, or offboard them. Use **View all in
-Users** to open the full, searchable list filtered to directory people.
+At the bottom of the page, **Directory people to review** previews the most recently imported people.
+Each one links to their profile, where you can edit them, give them a login, or offboard them. Use
+**View all in Users** to open the full, searchable list filtered to directory people.
 
 ## Upgrading an existing instance
 

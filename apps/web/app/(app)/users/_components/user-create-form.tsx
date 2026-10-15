@@ -184,22 +184,8 @@ function PasswordChecklist({ password }: { password: string }) {
   );
 }
 
-/**
- * Full-page, asset-style user-creation flow (ADR-0064, issue #411). The admin configures identity,
- * RBAC role and — on the bundled-Zitadel management path only — a one-time temporary password, and
- * optionally assigns one asset and/or grants one application access, all in a single comfortable page.
- *
- * The credential section is gated by `requiresAdminPassword` from `GET /config/status` (the same flag
- * the first-run wizard reads): present only when the bundled IdP manages credentials, hidden entirely
- * under BYOI so no password UI shows and no password is ever sent. Client validation reuses the shared
- * `CreateUserSchema` (which already carries the optional `password` validated by `TempPasswordSchema`)
- * so the form never duplicates a rule the server owns.
- *
- * Submit orchestration is best-effort (ADR-0064 §1): create the user FIRST, then fan out the optional
- * asset assignment and app grant. A failed assignment/grant never un-creates the user — it toasts a
- * non-blocking warning. On the management path the just-set temporary password is shown ONCE in a
- * hand-off confirmation before navigating to the new user's detail page.
- */
+// The temp-password section exists only when lazyit owns credentials (local mode); under OIDC none is sent.
+// Assign and grant run after the create and never undo it (ADR-0064 §1).
 export function UserCreateForm() {
   const t = useTranslations("users.create");
   const tForm = useTranslations("users.form");
@@ -207,13 +193,8 @@ export function UserCreateForm() {
   const tc = useTranslations("common");
   const router = useRouter();
 
-  // Capability flag — `requiresAdminPassword` is the bundled-Zitadel management signal (BYOI → false).
-  // Same hook the first-run wizard uses; `mounted` holds the credential section back until after
-  // hydration. `/config/status` is never prefetched for this page, so the SERVER always resolves it
-  // absent (`requiresPassword` false), but the client cache can be WARM (the auth/first-run flow reads
-  // it) and resolve it present on the FIRST client render — flipping the credential FieldSet into
-  // existence and mismatching the server tree (#939). Gating on `mounted` (false on the server and the
-  // first client render) keeps both passes identical; the section reveals on the next render.
+  // `requiresAdminPassword` is true when lazyit owns credentials (local mode). The status may be warm on
+  // the first client render but never on the server, so `mounted` gates the section (#939).
   const { data: status } = useConfigStatus();
   const requiresPassword = status?.requiresAdminPassword ?? false;
   const mounted = useMounted();
@@ -223,7 +204,7 @@ export function UserCreateForm() {
   const grantAccess = useGrantAccess();
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  // The shown-once hand-off: the created user's id + the temp password we set on the IdP.
+  // The shown-once hand-off: the created user's id + the temp password just set.
   const [handoff, setHandoff] = useState<{
     userId: string;
     name: string;
@@ -249,9 +230,7 @@ export function UserCreateForm() {
     useWatch({ control: form.control, name: "password" }) ?? "";
 
   const onSubmit = form.handleSubmit(async (values) => {
-    // On the management path the temporary password is REQUIRED (no SMTP on the bundled IdP — without
-    // it the new user can't log in, ADR-0064 §2/§3). The shared `CreateUserSchema` keeps `password`
-    // optional (correct for BYOI, where it's never sent), so the page enforces requiredness here.
+    // The shared schema keeps `password` optional (OIDC never sends one), so requiredness lives here.
     if (requiresPassword && values.password === "") {
       form.setError("password", {
         type: "required",

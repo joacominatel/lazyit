@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-09
 ---
 
 # Security summary
@@ -151,6 +151,25 @@ Snapshot of the security review. Updated each sweep. Method:
    **✅ Closed the same day**: every write selects through `CATEGORY_PUBLIC_SELECT`. A runtime response
    serializer, which would close the class across the API, is the approved follow-up.
 
+17. **2026-10-09 — Bundled Zitadel removed (epic #1543, posture change).** Not a sweep:
+   [[0102-remove-bundled-zitadel|ADR-0102]] removed the bundled IdP, the role and profile write-back, the
+   deactivate mirror inside offboarding and the create-compensation hard delete. Generic OIDC (BYOI)
+   stays opt-in. [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] is **✅ closed as no longer
+   applicable**: the revert path it described is gone (PR #1552). SEC-012 was re-verified and stays open
+   at Low, its context updated to BYOI only. In [[INVARIANTS]], INV-4 and INV-6 were rewritten, INV-5 was
+   retired, and INV-1, -3, -8, INV-DIR-1 and -2 were corrected.
+
+18. **2026-10-09 — RBAC delegation ceiling (from the custom-roles analysis, #1560).** One finding, filed
+   from the analysis of custom roles and verified against `feat/issue-1543-remove-bundled-zitadel` at
+   `36f355450` (the same code is on `dev`):
+   [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] (**Medium**): a MEMBER or
+   VIEWER role that an ADMIN granted `user:manage` can create, promote, reset or restore an ADMIN, because
+   no subset rule bounds what a user administrator may assign. A role granted `settings:manage` can add
+   `user:manage` to itself through `PUT /config/permissions`. The shipped defaults grant neither verb to a
+   non-ADMIN role, so it needs a deliberate delegation. ADR-0046 accepts that delegation, but treats it as
+   bounded, which it is not. ADR-0048 already classes both verbs ADMIN-equivalent for service accounts.
+   Custom roles (#1560) would make the delegation common.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -162,8 +181,8 @@ consent page, `/account/ai`).
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 0 |
-| Low | 11 |
+| Medium | 1 |
+| Low | 10 |
 | Info | 0 |
 | **Total open** | **11** |
 
@@ -177,7 +196,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
-| [[SEC-022-isactive-not-rolled-back-on-idp-revert\|SEC-022]] | 🟡 Low | users | `isActive` not reverted on a Zitadel write-back 503 (bounded INV-5 divergence) |
 | [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
 | [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
@@ -185,9 +203,18 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
+| [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] | 🟠 Medium | users / config | A non-ADMIN role delegated `user:manage` or `settings:manage` can make itself ADMIN (no subset rule, matrix self-edit) |
 
 ## Top findings
 
+0. **SEC-088 — open (Medium).** Delegating `user:manage` or `settings:manage` to MEMBER or VIEWER hands
+   that role ADMIN: nothing bounds the roles a user administrator assigns, and a matrix editor can widen
+   their own role. It is not exposed on the shipped defaults. The fix direction is a subset rule on
+   `user:manage` writes (only ADMIN assigns or acts on ADMIN) and an ADMIN-only `role:manage` for the
+   matrix. It ships standalone or with #1560.
+0. **SEC-022 ✅ Closed (no longer applicable).** Moved to `closed/` (2026-10-09, epic #1543): the Zitadel
+   write-back and its field-scoped revert were removed (PR #1552), so `update` is one local write and a
+   co-PATCHed `isActive` can no longer survive a "your change was not saved" 503. No data change.
 0. **SEC-087 ✅ Closed.** Born closed (fixed 2026-10-05, #1301): KB folder create, update, delete,
    restore and access-rules responses use the public folder select, so `accessRules` reaches only a
    `settings:manage` reader, through the GET. No data change.

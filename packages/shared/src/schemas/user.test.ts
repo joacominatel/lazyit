@@ -69,8 +69,8 @@ describe("CreateUserSchema (SEC-006)", () => {
   });
 });
 
-// ADR-0064 (issue #411) — optional admin-provisioned TEMPORARY password. Honored only on the bundled-
-// Zitadel management path by the API; here we just guard the wire contract (optional + complexity).
+// ADR-0064 (issue #411) — optional admin-provisioned TEMPORARY password. Honored only in local mode by
+// the API; here we just guard the wire contract (optional + complexity).
 describe("CreateUserSchema temporary password (ADR-0064)", () => {
   const valid = { email: "a@b.com", firstName: "Ada", lastName: "Lovelace" };
 
@@ -98,8 +98,8 @@ describe("CreateUserSchema temporary password (ADR-0064)", () => {
   });
 
   // The policy mirrors the bootstrap SetupPasswordSchema rule-for-rule (min 8 / max 70 / upper / lower /
-  // digit / symbol) so Zitadel never rejects an admin-provisioned temp password mid-mirror.
-  test("TempPasswordSchema enforces the Zitadel default complexity policy", () => {
+  // digit / symbol).
+  test("TempPasswordSchema enforces the shared password policy", () => {
     expect(TempPasswordSchema.safeParse("Str0ng!Pass").success).toBe(true);
     expect(TempPasswordSchema.safeParse("nouppercas3!").success).toBe(false);
     expect(TempPasswordSchema.safeParse("NOLOWERCASE3!").success).toBe(false);

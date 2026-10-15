@@ -17,7 +17,6 @@ host. Everything else stays on the internal network.
 - **Routes by path on a single origin.** The browser calls one origin; Caddy sends page requests to
   the web app and requests under `/api/` to the API (stripping the `/api` prefix). Because everything
   is same-origin, one web image works on any domain.
-- **Serves the identity provider** at the `auth.` subdomain of your domain, with its own certificate.
 - **Adds baseline security headers** to every response and strips the server banner.
 
 Caddy's configuration lives in `infra/caddy/Caddyfile`. For most deployments you don't edit it — you
@@ -44,7 +43,6 @@ it only on a local network you control — see
 For a public, trusted-HTTPS deployment, set these in `infra/env/.env.prod`:
 
 - Your **site address** to your fully-qualified domain name.
-- Your **domain** (used to build the `auth.` subdomain for sign-in).
 - The public origin URL (`https://yourdomain.com`, no trailing slash).
 - An **ACME contact email** for Let's Encrypt — **and** uncomment the `email` line in the Caddyfile.
 - The published **ports** to the standard `80` and `443` (the defaults are high ports for local

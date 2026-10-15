@@ -64,9 +64,9 @@ Two guardrails protect the instance from being locked out or quietly escalated:
 
 ## A note on your identity provider
 
-If you bring your own identity provider (BYOI), roles are managed **locally in lazyit** — they are not
-read from a token and are used only for authorization inside the app. lazyit keeps its own copy of the
-role; you assign and change it here, in the Users section.
+Roles are managed **locally in lazyit**, whichever way people sign in. With your own OIDC provider they
+are not read from a token and are never sent to the provider; they are used only for authorization
+inside the app. You assign and change them here, in the Users section.
 
 For the full breakdown of what each role can do — and how to tune Member and Viewer — see
 [Permissions](/help/permissions) and [Permission configuration](/help/users-permissions-permission-configuration).

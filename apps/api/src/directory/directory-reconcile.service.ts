@@ -349,7 +349,7 @@ export class DirectoryReconcileService {
   }
 
   /**
-   * Create a NEW directory person into the PENDING tray via the sanctioned skipIdpWriteBack rail
+   * Create a NEW directory person into the PENDING tray via the sanctioned directoryOnly rail
    * (users.service.create) — which FORCES role VIEWER, leaves externalId null, grants no login, and stamps
    * directoryOnly=true + our directorySource/directorySourceId. firstName+lastName are required (skip the
    * entry if AD gives neither). Email is the mapped mail IFF it does not collide with a live user, else a
@@ -390,7 +390,7 @@ export class DirectoryReconcileService {
         { email, firstName, lastName },
         undefined, // system actor: the create rail can't thread a service-account actor
         {
-          skipIdpWriteBack: true,
+          directoryOnly: true,
           directorySource: DIRECTORY_SOURCE_AD,
           directorySourceId: guid,
           directoryAttrs: directoryAttrs as Prisma.InputJsonValue,
