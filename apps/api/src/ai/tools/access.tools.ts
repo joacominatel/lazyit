@@ -65,7 +65,7 @@ import { searchText } from './search-text';
  * What never leaves this file: an application's free-form `metadata` blob (neither read nor written),
  * any workflow definition, connection or secret (the workflow engine and the Secret Manager are
  * structurally excluded), and any credential. Free text other people wrote (descriptions, notes,
- * justifications, denial reasons) is wrapped as untrusted content.
+ * justifications, denial reasons, access levels, person names) is wrapped as untrusted content.
  */
 
 type Row = Record<string, unknown>;
@@ -150,8 +150,9 @@ function accessParams(level: unknown): {
   hasLevel: 'yes' | 'no';
   level: string;
 } {
+  // A request's level is requester-authored, and an approval copies it onto the grant (AUD-095).
   return typeof level === 'string' && level.length > 0
-    ? { hasLevel: 'yes', level }
+    ? { hasLevel: 'yes', level: untrusted(level)! }
     : { hasLevel: 'no', level: '' };
 }
 
@@ -265,11 +266,18 @@ const applicationReference = z
 /** Resolve `"me"` or a user id. `"me"` is the calling human; a Service Account has no person. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A person's full name, wrapped: names are self-editable profile text (INV-AI-4). */
+function personName(row: Row): string | null {
+  return untrusted(
+    [str(row.firstName), str(row.lastName)]
+      .filter((part): part is string => !!part)
+      .join(' '),
+  );
+}
+
 /** "Ana Ops <ana@example.com>" — how a directory row is named in a candidate list. */
 function personLabel(row: Row): string {
-  const name = [str(row.firstName), str(row.lastName)]
-    .filter((part): part is string => !!part)
-    .join(' ');
+  const name = personName(row);
   const email = str(row.email);
   return (
     [name || null, email ? `<${email}>` : null].filter(Boolean).join(' ') ||
@@ -374,9 +382,7 @@ async function readPerson(rt: AiToolRuntime, id: string): Promise<Person> {
     if (httpStatus(err) !== 404) throw err;
     return { id, display: `user ${id}`, status: 'missing', usable: false };
   }
-  const name = [str(row.firstName), str(row.lastName)]
-    .filter((part): part is string => !!part)
-    .join(' ');
+  const name = personName(row);
   const email = str(row.email);
   const display =
     [name || null, email ? `<${email}>` : null].filter(Boolean).join(' ') ||
@@ -571,6 +577,7 @@ function grantSummary(row: unknown): Row {
   const source = asRow(row);
   const out = pick(source, GRANT_FIELDS);
   out.state = grantState(source);
+  if ('accessLevel' in out) out.accessLevel = untrusted(str(out.accessLevel));
   out.notes = untrusted(str(source.notes));
   return out;
 }
@@ -604,6 +611,7 @@ function requestSummary(row: unknown): Row {
   const source = asRow(row);
   const out = pick(source, REQUEST_FIELDS);
   out.state = requestState(source);
+  if ('accessLevel' in out) out.accessLevel = untrusted(str(out.accessLevel));
   out.justification = untrusted(str(source.justification));
   out.deniedReason = untrusted(str(source.deniedReason));
   return out;
@@ -1260,7 +1268,7 @@ const accessGrantRevoke = defineTool({
       type: 'accessGrant',
       id: input.grantId,
       op: 'updated',
-      label: `${appName ?? applicationId}${str(grant.accessLevel) ? ` (${str(grant.accessLevel)})` : ''}`,
+      label: `${appName ?? applicationId}${str(grant.accessLevel) ? ` (${untrusted(str(grant.accessLevel))})` : ''}`,
       parent: { type: 'application', id: applicationId },
     };
     const name = appName ?? `application ${applicationId}`;
@@ -1321,7 +1329,7 @@ const accessGrantRevoke = defineTool({
         after: appName ?? applicationId,
         valueKind: 'entity',
       },
-      { field: 'accessLevel', after: grant.accessLevel ?? null },
+      { field: 'accessLevel', after: untrusted(str(grant.accessLevel)) },
       { field: 'isCritical', after: critical, valueKind: 'boolean' },
       { field: 'status', before: 'active', after: 'revoked' },
     ];
@@ -1707,7 +1715,7 @@ const accessRequestDecide = defineTool({
         valueKind: 'entity',
       },
       { field: 'isCritical', after: critical, valueKind: 'boolean' },
-      { field: 'accessLevel', after: request.accessLevel ?? null },
+      { field: 'accessLevel', after: untrusted(str(request.accessLevel)) },
       { field: 'justification', after: untrusted(str(request.justification)) },
       {
         field: 'status',

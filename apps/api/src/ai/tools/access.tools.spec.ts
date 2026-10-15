@@ -12,6 +12,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import {
   AiActionPreviewSchema,
   AiToolResultSchema,
+  aiToolResultSourceRef,
   DEFAULT_ROLE_PERMISSIONS,
   type AiToolClass,
   type AiToolResult,
@@ -63,6 +64,7 @@ import { AssetAssignmentsService } from '../../asset-assignments/asset-assignmen
 import { ActorService } from '../../common/actor.service';
 import { VaultSetupNudgeService } from '../../notifications/vault-setup-nudge.service';
 import { AiToolService } from '../core/ai-tool.service';
+import { untrustedRefsOf } from '../runtime/agent-loop';
 import { mapToolError } from '../core/error-mapper';
 import { AiToolDispatcher } from '../core/tool-dispatcher';
 import { AiToolExecutor } from '../core/tool-executor';
@@ -1367,6 +1369,39 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         applicationId: VPN,
       });
     });
+
+    it('AUD-095: the requester-authored access level alone marks the turn untrusted', async () => {
+      requests.set(REQ, { ...requests.get(REQ)!, justification: null });
+      const result = await tools.invoke(
+        'access_request_list',
+        { status: 'PENDING' },
+        chat(actor('ADMIN')),
+      );
+      expect(data(result).items).toEqual([
+        expect.objectContaining({
+          id: REQ,
+          accessLevel: '<untrusted_content>user</untrusted_content>',
+          justification: null,
+        }),
+      ]);
+      expect(untrustedRefsOf(result, 'access_request_list')).toEqual([
+        aiToolResultSourceRef('access_request_list'),
+      ]);
+
+      // An approval copies the level onto the grant: the same text, with no notes beside it.
+      for (const [id, row] of grants) grants.set(id, { ...row, notes: null });
+      const listed = await tools.invoke(
+        'access_grant_list',
+        { user: ID.grantee },
+        chat(actor('ADMIN')),
+      );
+      expect(JSON.stringify(data(listed).items)).toContain(
+        '"accessLevel":"<untrusted_content>developer</untrusted_content>"',
+      );
+      expect(untrustedRefsOf(listed, 'access_grant_list')).toEqual([
+        aiToolResultSourceRef('access_grant_list'),
+      ]);
+    });
   });
 
   // ─── Chat writes: propose → approve ────────────────────────────────────────────────────────────
@@ -1597,7 +1632,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         'CRITICAL_APPLICATION',
       ]);
       expect(action(preview)).toBe(
-        'Give Gina Doe <gina@example.com> "admin" access to VPN until 2026-12-31. ' +
+        'Give <untrusted_content>Gina Doe</untrusted_content> <gina@example.com> "<untrusted_content>admin</untrusted_content>" access to VPN until 2026-12-31. ' +
           'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN. ' +
           'VPN is a critical application: confirm with your password.',
       );
@@ -1648,7 +1683,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       );
       expect(done.result).toMatchObject({
         ok: true,
-        summary: `Granted user ${ID.grantee} "admin" access to VPN.`,
+        summary: `Granted user ${ID.grantee} "<untrusted_content>admin</untrusted_content>" access to VPN.`,
         entityRefs: [
           expect.objectContaining({
             type: 'accessGrant',
@@ -1728,7 +1763,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         target: {
           type: 'accessGrant',
           id: GRANT,
-          label: 'Jira (developer)',
+          label: 'Jira (<untrusted_content>developer</untrusted_content>)',
           parent: { type: 'application', id: APP },
         },
         precondition: {
@@ -1737,7 +1772,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         },
       });
       expect(action(act.preview)).toBe(
-        `Remove Gina Doe <gina@example.com>'s "developer" access to Jira. ` +
+        `Remove <untrusted_content>Gina Doe</untrusted_content> <gina@example.com>'s "<untrusted_content>developer</untrusted_content>" access to Jira. ` +
           'No automatic deprovisioning workflow is set up for Jira: nothing changes outside lazyit.',
       );
       // F7: the revoke REPLACES the notes — the card shows what is lost, as untrusted text, and says so.
@@ -1772,7 +1807,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       const done = await tools.approve(again.id, chat(actor('ADMIN')));
       expect(done.status).toBe('SUCCEEDED');
       expect(done.result).toMatchObject({
-        summary: `Revoked user ${ID.grantee}'s "developer" access to application ${APP}.`,
+        summary: `Revoked user ${ID.grantee}'s "<untrusted_content>developer</untrusted_content>" access to application ${APP}.`,
         entityRefs: expect.arrayContaining([
           expect.objectContaining({
             type: 'accessGrant',
@@ -1824,7 +1859,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         elevated: false,
       });
       expect(action(act.preview)).toBe(
-        'Ask for "viewer" access to Jira for yourself. The people who can grant access are notified and approve or deny it.',
+        'Ask for "<untrusted_content>viewer</untrusted_content>" access to Jira for yourself. The people who can grant access are notified and approve or deny it.',
       );
       const done = await tools.approve(act.id, chat(actor('VIEWER')));
       expect(done.status).toBe('SUCCEEDED');
@@ -1835,7 +1870,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       });
       expect(done.result).toMatchObject({
         summary:
-          'Requested "viewer" access to Jira; it now waits for an approver.',
+          'Requested "<untrusted_content>viewer</untrusted_content>" access to Jira; it now waits for an approver.',
       });
     });
 
@@ -1864,7 +1899,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         },
       });
       expect(action(act.preview)).toBe(
-        'Approve the request: give Vic Doe <vic@example.com> "user" access to VPN. An access grant is created and Vic Doe <vic@example.com> is notified. ' +
+        'Approve the request: give <untrusted_content>Vic Doe</untrusted_content> <vic@example.com> "<untrusted_content>user</untrusted_content>" access to VPN. An access grant is created and <untrusted_content>Vic Doe</untrusted_content> <vic@example.com> is notified. ' +
           'This triggers automatic provisioning (creating the account in VPN) after approval, through the workflow set up for VPN. ' +
           'VPN is a critical application: confirm with your password.',
       );
@@ -1892,7 +1927,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       );
       const grantId = requests.get(REQ)!.grantId as string;
       expect(done.result).toMatchObject({
-        summary: `Approved the request: user ${ID.viewer} now has "user" access to application ${VPN} (grant ${grantId}).`,
+        summary: `Approved the request: user ${ID.viewer} now has "<untrusted_content>user</untrusted_content>" access to application ${VPN} (grant ${grantId}).`,
         entityRefs: [
           expect.objectContaining({
             type: 'accessRequest',
@@ -2006,7 +2041,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         application: APP,
       });
       expect(action(act.preview)).toBe(
-        'Give Gina Doe <gina@example.com> access to Jira. ' +
+        'Give <untrusted_content>Gina Doe</untrusted_content> <gina@example.com> access to Jira. ' +
           'This may trigger automatic provisioning (creating the account in Jira) if a workflow is configured for this application.',
       );
       expect(act.preview!.warnings).toEqual([
@@ -2034,7 +2069,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         ]),
       );
       expect(action(last.preview)).toBe(
-        `Remove Gina Doe <gina@example.com>'s "developer" access to VPN. ` +
+        `Remove <untrusted_content>Gina Doe</untrusted_content> <gina@example.com>'s "<untrusted_content>developer</untrusted_content>" access to VPN. ` +
           'This triggers automatic deprovisioning (removing the account in VPN), through the workflow set up for VPN. ' +
           'VPN is a critical application: confirm with your password.',
       );
@@ -2049,7 +2084,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       });
       expect(kept.preview!.warnings).toEqual(['CRITICAL_APPLICATION']);
       expect(action(kept.preview)).toBe(
-        `Remove Gina Doe <gina@example.com>'s "developer" access to VPN. ` +
+        `Remove <untrusted_content>Gina Doe</untrusted_content> <gina@example.com>'s "<untrusted_content>developer</untrusted_content>" access to VPN. ` +
           'The user keeps other access to VPN, so its deprovisioning workflow does not run. ' +
           'VPN is a critical application: confirm with your password.',
       );
@@ -2075,7 +2110,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         decision: 'approve',
       });
       expect(action(approve.preview)).toMatch(
-        /^You are deciding your own request\. Approve the request: give you "user" access to VPN\. An access grant is created and you are notified\. /,
+        /^You are deciding your own request\. Approve the request: give you "<untrusted_content>user<\/untrusted_content>" access to VPN\. An access grant is created and you are notified\. /,
       );
       expect(approve.preview!.stepUpRequired).toBe(true);
       const deny = await propose(actor('ADMIN'), 'access_request_decide', {
@@ -2084,7 +2119,7 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         reason: 'Not needed after all',
       });
       expect(action(deny.preview)).toBe(
-        'You are deciding your own request. Deny your request for "user" access to VPN. You are notified with your reason. ' +
+        'You are deciding your own request. Deny your request for "<untrusted_content>user</untrusted_content>" access to VPN. You are notified with your reason. ' +
           'VPN is a critical application: confirm with your password.',
       );
     });
@@ -2100,7 +2135,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         expect.arrayContaining([
           {
             field: 'user',
-            after: 'Gina Doe <gina@example.com>',
+            after:
+              '<untrusted_content>Gina Doe</untrusted_content> <gina@example.com>',
             valueKind: 'entity',
           },
           { field: 'userStatus', after: 'active' },
@@ -2109,7 +2145,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       );
       expect(act.preview!.impacted[0].sample[0]).toMatchObject({
         id: ID.grantee,
-        label: 'Gina Doe <gina@example.com>',
+        label:
+          '<untrusted_content>Gina Doe</untrusted_content> <gina@example.com>',
       });
       expect(JSON.stringify(act.preview)).not.toContain('never-projected');
       expect(usersService.findOneSerialized).toHaveBeenCalledWith(ID.grantee);
@@ -2129,7 +2166,9 @@ describe('access toolset (W2-6) — applications, access grants, access requests
       expect(
         (inactive as { result: { error: { message: string } } }).result.error
           .message,
-      ).toContain('Gina Doe <gina@example.com> is inactive');
+      ).toContain(
+        '<untrusted_content>Gina Doe</untrusted_content> <gina@example.com> is inactive',
+      );
 
       directory[ID.grantee] = {
         ...directory[ID.grantee],
@@ -2208,14 +2247,16 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         expect.arrayContaining([
           {
             field: 'requester',
-            after: 'Vic Doe <vic@example.com>',
+            after:
+              '<untrusted_content>Vic Doe</untrusted_content> <vic@example.com>',
             valueKind: 'entity',
           },
           { field: 'requesterStatus', after: 'active' },
         ]),
       );
       expect(act.preview!.target).toMatchObject({
-        label: 'VPN — Vic Doe <vic@example.com>',
+        label:
+          'VPN — <untrusted_content>Vic Doe</untrusted_content> <vic@example.com>',
       });
 
       directory[ID.viewer] = { ...directory[ID.viewer], isActive: false };

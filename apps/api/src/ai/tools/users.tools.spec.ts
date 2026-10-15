@@ -8,6 +8,7 @@ import { getLoggerToken } from 'nestjs-pino';
 import {
   AiActionPreviewSchema,
   AiToolResultSchema,
+  aiToolResultSourceRef,
   DEFAULT_ROLE_PERMISSIONS,
   type Permission,
   type Role,
@@ -63,6 +64,7 @@ import { AiToolDispatcher } from '../core/tool-dispatcher';
 import { AiToolExecutor } from '../core/tool-executor';
 import { bind, type AiExecutionContext } from '../core/tool-descriptor';
 import { AI_TOOLSETS, AiToolRegistry } from '../core/tool-registry';
+import { untrustedRefsOf } from '../runtime/agent-loop';
 import { usersToolset } from './users.tools';
 
 /**
@@ -910,8 +912,51 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       );
       expect(result).toMatchObject({
         ok: true,
-        data: { total: 1, items: [{ id: ID.member, username: 'aops' }] },
+        data: {
+          total: 1,
+          items: [
+            {
+              id: ID.member,
+              username: '<untrusted_content>aops</untrusted_content>',
+            },
+          ],
+        },
       });
+    });
+
+    it('AUD-003: self-editable identity strings are wrapped, so a turn that lists users is marked untrusted', async () => {
+      // The attack: anyone may rename themselves through PATCH /users/me.
+      users.set(ID.member, {
+        ...users.get(ID.member)!,
+        lastName: INJECTION,
+      });
+      const result = await tools.invoke(
+        'user_search',
+        { role: 'MEMBER' },
+        chat(ADMIN),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        data: {
+          items: [
+            {
+              id: ID.member,
+              email: 'ana@example.com',
+              firstName: '<untrusted_content>Ana</untrusted_content>',
+              lastName: `<untrusted_content>${INJECTION}</untrusted_content>`,
+              username: '<untrusted_content>aops</untrusted_content>',
+              legajo: '<untrusted_content>L-100</untrusted_content>',
+              manager: {
+                type: 'external',
+                name: '<untrusted_content>Head of IT</untrusted_content>',
+              },
+            },
+          ],
+        },
+      });
+      expect(untrustedRefsOf(result, 'user_search')).toEqual([
+        aiToolResultSourceRef('user_search'),
+      ]);
     });
 
     it('isActive filters activation in ONE call, with the same rows as GET /users?isActive= (#1375)', async () => {
@@ -1104,7 +1149,10 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       const data = (result as { data: Record<string, Record<string, unknown>> })
         .data;
       expect(data.user).toMatchObject({
-        manager: { type: 'external', name: 'Head of IT' },
+        manager: {
+          type: 'external',
+          name: '<untrusted_content>Head of IT</untrusted_content>',
+        },
         createdAt: T0.toISOString(),
       });
       expect(data.assignments.items).toEqual([
@@ -1119,7 +1167,7 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       expect(data.accessGrants.items).toEqual([
         expect.objectContaining({
           id: 'ckgrant00000000000000001',
-          accessLevel: 'admin',
+          accessLevel: '<untrusted_content>admin</untrusted_content>',
         }),
       ]);
       const dir = await tools.invoke(
@@ -1246,7 +1294,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           type: 'user',
           id: ID.member,
           op: 'updated',
-          label: 'Ana Ops <ana@example.com>',
+          label:
+            '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
         },
         changes: [{ field: 'role', before: 'MEMBER', after: 'VIEWER' }],
         precondition: {
@@ -1324,8 +1373,9 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         { field: 'isActive', before: true, after: false, valueKind: 'boolean' },
         {
           field: 'manager',
-          before: 'Head of IT',
-          after: 'Admin User <admin@example.com>',
+          before: '<untrusted_content>Head of IT</untrusted_content>',
+          after:
+            '<untrusted_content>Admin User</untrusted_content> <admin@example.com>',
         },
       ]);
       expect(preview.warnings.sort()).toEqual(
@@ -1492,8 +1542,9 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
       expect(moved.action.preview!.changes).toEqual([
         {
           field: 'manager',
-          before: 'Admin User',
-          after: 'Viewer User <viewer@example.com>',
+          before: '<untrusted_content>Admin User</untrusted_content>',
+          after:
+            '<untrusted_content>Viewer User</untrusted_content> <viewer@example.com>',
         },
       ]);
     });
