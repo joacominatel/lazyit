@@ -211,3 +211,10 @@ ADMIN, which is the intended behaviour.
 - [[SEC-011-service-account-coarse-meta-permission-escalation|SEC-011]] — the same verbs found
   ADMIN-equivalent for service accounts.
 - Issue #1560 (custom roles) and its analysis comment, which proposed `role:manage` and the subset rule.
+
+## Triage note (2026-10-15, after the 2026-10-10 audit remediation)
+
+Still open: AUD-002 is a **pending CEO decision** (the subset rule for `user:manage`). PR #1571 changed
+`users.service.ts` (history in the same transaction, the last-admin guard under the `lazyit.admin_set`
+lock, AUD-019/041) but not who may assign or act on which role. The escalation paths described above are
+unchanged.

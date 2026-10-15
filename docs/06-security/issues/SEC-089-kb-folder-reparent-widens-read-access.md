@@ -115,3 +115,11 @@ position.
 - [[0060-kb-folder-access-control]] §1, §3, §9 · [[0059-kb-folders-links-and-import]] · [[INVARIANTS]] INV-9.
 - Sweep: [[sweep-2026-10-10-backend-audit]] (AUD-001). Related: AUD-010 (the same unlocked move can
   race into a folder cycle).
+
+## Triage note (2026-10-15, after the 2026-10-10 audit remediation)
+
+Still open: AUD-001 is a **pending CEO decision** (the recommendation is to require `settings:manage` for
+a re-parent or a create under a restricted ancestor, with an ADR-0060 amendment). PR #1569 changed the
+code around it without changing who may move a folder: a move now checks and writes under the folder-tree
+advisory lock (`article-categories.service.ts:239-241`, `:468-469`), which closed the AUD-010 cycle race.
+That locked `update` transaction is where the authorization check would go.

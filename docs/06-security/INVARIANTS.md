@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # Security invariants — auth & authorization
@@ -210,9 +210,12 @@ always leave exactly one administrator.
   `assertNotLastAdmin` runs before a demotion away from ADMIN, a deactivation (`isActive=false`) and an
   offboard/delete, and counts only live (`deletedAt: null`) **and active** (`isActive: true`) ADMINs —
   an inactive account cannot authenticate, so it never keeps the instance administrable (SEC-021).
-- `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls the same
-  predicate (`UsersService.hasAnotherActiveAdmin`) and **skips** the last active ADMIN instead of
-  deactivating them ([[0091-on-prem-ad-ldap-directory-source]], SEC-021).
+- `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls
+  `UsersService.wouldRemoveLastAdmin` inside its own write transaction, under the same
+  `lazyit.admin_set` advisory lock as the `PATCH /users` and offboard guards, and **skips** the last
+  active ADMIN instead of deactivating them ([[0091-on-prem-ad-ldap-directory-source]], SEC-021;
+  AUD-041, PR #1575). Every last-admin check takes that lock first (`users.service.ts`
+  `wouldRemoveLastAdmin`, PR #1571), so two concurrent removals cannot leave zero admins.
 
 ## INV-8 — Permissions resolve from `RolePermission` DB rows, never a token claim; the ADMIN set is immutable/full
 
@@ -801,7 +804,10 @@ the card showed is the one control injected text cannot forge.
 **Rule.** No stored content — an article, a note, a description, a search result, a form answer built
 from lazyit lists — can alter tool availability, approval requirements, tool metadata or the system
 prompt. Other-authored free text reaches the model wrapped in `<untrusted_content>`, and a turn that read
-it shows the untrusted-source banner and is never auto-approved. Provider web-search results count as
+it shows the untrusted-source banner and is never auto-approved. Identity strings a person can edit
+(first and last name, `username`, `legajo`, an external manager's name, an article author's name) count
+as other-authored text and are wrapped too (SEC-090, PRs #1567 and #1592); the caller's own name in
+`session_context` is left plain, pending a CEO decision. Provider web-search results count as
 untrusted for the rest of the conversation, and so does a purchase document read by
 `purchase_document_read` (#1478): its entity ref of type `purchaseDocument` is a conversation-wide source
 (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`), so every later turn starts untrusted, its proposals carry the
