@@ -18,10 +18,10 @@ import IORedis, { type RedisOptions } from 'ioredis';
  *     the Worker's BLOCKING commands (brpoplpush). Producer fail-fast is achieved orthogonally via
  *     `enableOfflineQueue: false` (a never-ready connection rejects writes IMMEDIATELY instead of
  *     buffering them). Verified against the BullMQ + ioredis docs.
- *   - A BOUNDED `retryStrategy` caps both the backoff and the number of attempts, then gives up
- *     (returns null) so reconnection is finite — no infinite loop.
+ *   - The `retryStrategy` caps the backoff but NEVER gives up: a given-up client never reconnects, so
+ *     a Valkey restart would strand the queues until an API restart (AUD-009, ADR-0053 amendment).
  *   - The `error` event is THROTTLED: first error logged loudly, then at most one per interval, so a
- *     permanent outage can never flood the logs.
+ *     permanent outage can never flood the logs. The throttle re-arms on every successful reconnect.
  *   - The resolved URL is logged at boot with any password REDACTED, so a misconfig is visible.
  */
 
@@ -31,14 +31,12 @@ import IORedis, { type RedisOptions } from 'ioredis';
  */
 export const DEFAULT_REDIS_URL = 'redis://127.0.0.1:6379';
 
-/** Max reconnection attempts before ioredis gives up (bounded — never retry forever). */
-export const REDIS_MAX_RECONNECT_ATTEMPTS = 20;
 /** Cap on the per-attempt reconnect backoff (ms). */
 export const REDIS_MAX_BACKOFF_MS = 3000;
 /** Linear backoff step (ms) per attempt, capped by {@link REDIS_MAX_BACKOFF_MS}. */
 export const REDIS_BACKOFF_STEP_MS = 200;
 /** Minimum gap between throttled "still failing" error logs (ms) — the anti-flood window. */
-export const REDIS_ERROR_LOG_THROTTLE_MS = 10_000;
+export const REDIS_ERROR_LOG_THROTTLE_MS = 60_000;
 
 /** The subset of NestJS `Logger` this module needs — narrowed so tests can pass a plain spy. */
 export interface ConnectionLogger {
@@ -89,36 +87,21 @@ export function redactRedisUrl(url: string): string {
 }
 
 export interface RetryStrategyDeps {
-  maxAttempts?: number;
   maxBackoffMs?: number;
   stepMs?: number;
-  /** Called once, with the attempt count, when the strategy permanently gives up. */
-  onGiveUp?: (attempts: number) => void;
 }
 
 /**
- * Build a BOUNDED ioredis `retryStrategy`: capped linear backoff, then a permanent give-up (returns
- * `null`) once {@link RetryStrategyDeps.maxAttempts} is exceeded. Returning `null` tells ioredis to
- * stop scheduling reconnections — the key to ending the infinite `ECONNREFUSED` loop. `onGiveUp`
- * fires exactly once so the operator gets a single CRITICAL line, not a stream.
+ * Build the ioredis `retryStrategy`: linear backoff capped at {@link REDIS_MAX_BACKOFF_MS}, retried for
+ * as long as the broker is down. It always returns a number — ioredis treats anything else as "stop
+ * reconnecting" and the client would never come back on its own.
  */
 export function buildRetryStrategy(
   deps: RetryStrategyDeps = {},
-): (times: number) => number | null {
-  const maxAttempts = deps.maxAttempts ?? REDIS_MAX_RECONNECT_ATTEMPTS;
+): (times: number) => number {
   const maxBackoffMs = deps.maxBackoffMs ?? REDIS_MAX_BACKOFF_MS;
   const stepMs = deps.stepMs ?? REDIS_BACKOFF_STEP_MS;
-  let gaveUp = false;
-  return (times: number): number | null => {
-    if (times > maxAttempts) {
-      if (!gaveUp) {
-        gaveUp = true;
-        deps.onGiveUp?.(times - 1);
-      }
-      return null;
-    }
-    return Math.min(times * stepMs, maxBackoffMs);
-  };
+  return (times: number): number => Math.min(times * stepMs, maxBackoffMs);
 }
 
 /**
@@ -157,7 +140,7 @@ export function createErrorLogThrottler(
 /**
  * The ioredis options for the shared BullMQ connection. Pure (no side effects) so the contract —
  * `maxRetriesPerRequest: null` (BullMQ blocking requirement) + `enableOfflineQueue: false` (producer
- * fail-fast) + a bounded `retryStrategy` — is unit-testable without opening a socket.
+ * fail-fast) + a capped, never-give-up `retryStrategy` — is unit-testable without opening a socket.
  */
 export function redisConnectionOptions(
   retry: RetryStrategyDeps = {},
@@ -171,7 +154,7 @@ export function redisConnectionOptions(
     // ECONNREFUSED), queue.add() rejects IMMEDIATELY rather than buffering the job offline forever
     // (which made the import POST hang as a 202 that never resolved).
     enableOfflineQueue: false,
-    // BOUNDED reconnection — capped backoff, finite attempts, then give up (no infinite loop).
+    // Capped backoff, never gives up — the client must come back after a Valkey restart.
     retryStrategy: buildRetryStrategy(retry),
   };
 }
@@ -182,13 +165,15 @@ export function attachConnectionLogging(
   logger: ConnectionLogger,
   redactedUrl: string,
 ): void {
-  const logError = createErrorLogThrottler(logger);
+  let logError = createErrorLogThrottler(logger);
   client.on('error', (err: Error) => logError(err));
-  client.on('ready', () =>
+  client.on('ready', () => {
+    // Re-arm so the first error of the NEXT outage is logged loudly again.
+    logError = createErrorLogThrottler(logger);
     logger.log(
       `Connected to Redis/Valkey at ${redactedUrl}; async queue ready.`,
-    ),
-  );
+    );
+  });
   client.on('end', () =>
     logger.warn(`Redis/Valkey connection ended (${redactedUrl}).`),
   );
@@ -196,7 +181,7 @@ export function attachConnectionLogging(
 
 /**
  * Build the shared ioredis connection for BullMQ. Logs the resolved (redacted) URL at boot, installs
- * the bounded retry + throttled error logging, and returns the live client (cast to BullMQ's
+ * the capped retry + throttled error logging, and returns the live client (typed as BullMQ's
  * `ConnectionOptions` — BullMQ reuses the instance and duplicates it for its subscriber/blocking
  * clients, the documented "reuse an ioredis connection" pattern).
  *
@@ -222,18 +207,10 @@ export function buildRedisConnection(
     logger.log(`BullMQ/Valkey connection target: ${redactedUrl}`);
   }
 
-  const onGiveUp = (attempts: number): void => {
-    logger.error(
-      `Giving up reconnecting to Redis/Valkey at ${redactedUrl} after ${attempts} attempts. The ` +
-        `async queue is DEGRADED: article imports return 503 until the broker is reachable and the ` +
-        `API is restarted. Check REDIS_URL and that the 'valkey' service is up. (issue #257)`,
-    );
-  };
-
-  const client = createClient(url, redisConnectionOptions({ onGiveUp }));
+  const client = createClient(url, redisConnectionOptions());
   attachConnectionLogging(client, logger, redactedUrl);
 
-  return client as unknown as ConnectionOptions;
+  return client;
 }
 
 /**

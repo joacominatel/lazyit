@@ -3,7 +3,7 @@ title: Deploy to a Self-Hosted Host
 tags: [runbook, docker, deployment]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-14
 ---
 
 # Runbook — deploy lazyit to a self-hosted host
@@ -329,9 +329,9 @@ New migrations are applied automatically by the `migrate` job on the next `up` (
 > ```
 >
 > Without it the api falls back to `redis://127.0.0.1:6379` (itself, no Valkey there). The api no
-> longer floods on this misconfig — it logs the resolved URL (redacted) at boot, bounds reconnection,
-> and 503s the import instead of hanging — but async import stays broken until `REDIS_URL` is set
-> (issue #257). See **[[docker-build-troubleshooting]]** for the symptom/diagnosis.
+> longer floods on this misconfig — it logs the resolved URL (redacted) at boot, keeps retrying with a
+> capped backoff and a throttled log (one "still failing" line a minute), and 503s the import instead of
+> hanging — but async import stays broken until `REDIS_URL` is set (issue #257). See **[[docker-build-troubleshooting]]** for the symptom/diagnosis.
 
 > **Upgrade note — `WORKFLOW_SECRET_KEY` before enabling the Applications Workflow Engine (ADR-0054).**
 > The engine encrypts its connector credentials (`WorkflowSecret`, AES-256-GCM) with this key and
