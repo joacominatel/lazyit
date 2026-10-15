@@ -85,9 +85,9 @@ export class AiServiceAccountAccessService {
     });
   }
 
-  /** A live Service Account (the soft-delete extension hides revoked ones), else 404. */
+  /** A live Service Account, else 404. `findFirst`: the soft-delete extension does not filter `findUnique`. */
   private async requireAccount(serviceAccountId: string): Promise<void> {
-    const account = await this.prisma.serviceAccount.findUnique({
+    const account = await this.prisma.serviceAccount.findFirst({
       where: { id: serviceAccountId },
       select: { id: true },
     });
