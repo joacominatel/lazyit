@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   type OnModuleInit,
@@ -223,8 +224,9 @@ export class UpdateService implements OnModuleInit {
    * row (RED LINE: the API never executes an update).
    *
    * Guards: the target must be strictly NEWER than the running version (nothing to update to otherwise);
-   * and if a run is already in flight, we refuse a second (single-flight at the app layer — the host
-   * script has its own lock file too). `requestedByUserId` is the enqueuing human (the controller's
+   * and if a run is already in flight, we refuse a second (single-flight: the read gives the friendly 400,
+   * the `update_runs_single_active_key` partial unique index turns a concurrent loser into a 409, and the
+   * host script has its own lock file too). `requestedByUserId` is the enqueuing human (the controller's
    * HumanOnlyGuard already refused a service principal).
    */
   async enqueue(
@@ -254,14 +256,26 @@ export class UpdateService implements OnModuleInit {
     const requestedByUserId =
       principal && isHumanPrincipal(principal) ? principal.user.id : null;
 
-    const created = await this.prisma.updateRun.create({
-      data: {
-        requestedByUserId,
-        fromVersion: this.currentVersion,
-        toVersion,
-        status: 'requested',
-      },
-    });
+    const created = await this.prisma.updateRun
+      .create({
+        data: {
+          requestedByUserId,
+          fromVersion: this.currentVersion,
+          toVersion,
+          status: 'requested',
+        },
+      })
+      .catch((err: unknown) => {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          throw new ConflictException(
+            'Another update was enqueued at the same moment. Refresh to see it before enqueuing again.',
+          );
+        }
+        throw err;
+      });
     this.logger.log(
       `Update enqueued: ${this.currentVersion} → ${toVersion} (run #${created.id}). Operator must run: ./infra/update.sh ${toVersion}`,
     );

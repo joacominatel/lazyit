@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { Prisma } from '../../generated/prisma/client';
 import { UpdateService, UPDATE_CANCELLED_REASON } from './update.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,7 +10,15 @@ import type { Principal } from '../auth/principal';
 // No DB / no real Prisma client — the service only touches updateSettings + updateRun, both mocked.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: { PrismaClientKnownRequestError: class extends Error {} },
+  Prisma: {
+    PrismaClientKnownRequestError: class extends Error {
+      code: string;
+      constructor(message: string, opts: { code: string }) {
+        super(message);
+        this.code = opts.code;
+      }
+    },
+  },
 }));
 
 const USER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -532,6 +541,32 @@ describe('UpdateService', () => {
         status: 'requested',
         toVersion: 'v1.5.0',
       });
+    });
+
+    it('answers 409 when a concurrent enqueue wins the one-active-run index (AUD-061)', async () => {
+      runFindFirst.mockResolvedValue(null); // both requests passed the read
+      runCreate.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+      const service = await build();
+
+      await expect(
+        service.enqueue({ toVersion: 'v1.5.0' }, admin),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('does not mask other insert failures as a conflict', async () => {
+      runFindFirst.mockResolvedValue(null);
+      const boom = new Error('connection lost');
+      runCreate.mockRejectedValue(boom);
+      const service = await build();
+
+      await expect(
+        service.enqueue({ toVersion: 'v1.5.0' }, admin),
+      ).rejects.toBe(boom);
     });
   });
 
