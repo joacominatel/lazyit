@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     );
     console.log(
       `\n  ✓ Password reset for ADMIN ${result.email} (id ${result.id}).\n` +
-        '  Every existing session for this account is now revoked — they must sign in again with the new password.\n',
+        '  Every existing session and any emailed reset link for this account is now revoked — they must sign in again with the new password.\n',
     );
   } catch (err) {
     fail(err instanceof Error ? err.message : String(err));

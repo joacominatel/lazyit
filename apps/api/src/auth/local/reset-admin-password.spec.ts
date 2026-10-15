@@ -4,40 +4,41 @@ import {
   resetAdminPassword,
   type LiveAdminCandidate,
   type ResetAdminPasswordClient,
+  type ResetAdminPasswordTx,
 } from './reset-admin-password';
 
-/** A fake `PrismaClient.user` delegate recording every `update` call, for asserting the write. */
+type UserUpdate = Parameters<ResetAdminPasswordTx['user']['update']>[0];
+type TokenRevoke = Parameters<
+  ResetAdminPasswordTx['passwordResetToken']['updateMany']
+>[0];
+
+/** A fake `PrismaClient` recording every write made inside its transaction. */
 function fakeClient(user: LiveAdminCandidate | null): {
   client: ResetAdminPasswordClient;
-  updates: Array<{
-    where: { id: string };
-    data: {
-      passwordHash: string;
-      passwordUpdatedAt: Date;
-      sessionEpoch: { increment: number };
-      mcpCredentialEpoch: { increment: number };
-    };
-  }>;
+  updates: UserUpdate[];
+  tokenRevokes: TokenRevoke[];
 } {
-  const updates: Array<{
-    where: { id: string };
-    data: {
-      passwordHash: string;
-      passwordUpdatedAt: Date;
-      sessionEpoch: { increment: number };
-      mcpCredentialEpoch: { increment: number };
-    };
-  }> = [];
-  const client: ResetAdminPasswordClient = {
+  const updates: UserUpdate[] = [];
+  const tokenRevokes: TokenRevoke[] = [];
+  const tx: ResetAdminPasswordTx = {
     user: {
-      findFirst: () => Promise.resolve(user),
       update: (args) => {
         updates.push(args);
         return Promise.resolve(undefined);
       },
     },
+    passwordResetToken: {
+      updateMany: (args) => {
+        tokenRevokes.push(args);
+        return Promise.resolve({ count: 1 });
+      },
+    },
   };
-  return { client, updates };
+  const client: ResetAdminPasswordClient = {
+    user: { findFirst: () => Promise.resolve(user) },
+    $transaction: (fn) => fn(tx),
+  };
+  return { client, updates, tokenRevokes };
 }
 
 describe('resetAdminPassword (F1d recovery-CLI core, #994)', () => {
@@ -130,5 +131,27 @@ describe('resetAdminPassword (F1d recovery-CLI core, #994)', () => {
       'N3wPassw0rd!',
     );
     expect(verified.valid).toBe(true);
+  });
+
+  it('marks every outstanding reset token used, so an emailed link cannot undo the recovery (AUD-081)', async () => {
+    const { client, updates, tokenRevokes } = fakeClient({
+      id: 'u-admin',
+      email: 'admin@x.test',
+      role: 'ADMIN',
+    });
+
+    await resetAdminPassword(
+      client,
+      credentials,
+      'admin@x.test',
+      'N3wPassw0rd!',
+    );
+
+    expect(tokenRevokes).toEqual([
+      {
+        where: { userId: 'u-admin', usedAt: null },
+        data: { usedAt: updates[0].data.passwordUpdatedAt },
+      },
+    ]);
   });
 });
