@@ -3,7 +3,7 @@ title: "ADR-0084: Update awareness & guided update — check, weekly email, upda
 tags: [adr, updates, versioning, deployment, infra, notifications, settings]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-14
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -34,6 +34,10 @@ run for a target other than a still-`requested` run can no longer insert its own
 proceeds without live status, so cancel the pending request first. Separately, `update-status` serves
 `behindBy` and `securityRelevant` as 0/false whenever the cached latest release is not newer than the running
 version, so an upgrade clears the "behind" badge without waiting for the next check.
+*Corrected 2026-10-15 (PR #1589):* `update.sh` no longer needs the pending request cancelled first. When it
+records its run for a target other than a still-`requested` run, it marks that request `failed` with a
+"Superseded by an operator-run update to <tag>" reason (never deleted) and inserts its own row, both in one
+transaction; a request for the same target is still claimed as before.
 
 ## Context
 

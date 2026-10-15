@@ -141,3 +141,20 @@ parent: a `findFirst({ where: { id } })` that returns `null` (the read filter hi
   hard delete), ADR-0041 (soft-delete reuse/restore)
 - Precedent: `article-categories.service.ts` `remove()` in-use guard (ADR-0021/0019)
 - Related: SEC-040 (the soft-deleted parent leaking through the asset include — same root cause)
+
+## Triage note (2026-10-15, after the 2026-10-10 audit remediation)
+
+Still open; the delete-time half is unchanged. Re-checked on `dev` at `03d715e66`:
+`asset-categories.service.ts:82-88`, `asset-models.service.ts:161-166` and the location `remove()` still
+soft-delete without an in-use guard or a detach. The location case is AUD-024, which is a **pending CEO
+decision** (refuse while in use, like KB folders, or detach). The Manual still says assets "become
+location-less", which is not what happens; it is left alone until that decision.
+
+What the remediation did change around it:
+- The create-time half for assets was closed by SEC-030 (#1476); applications and consumables by
+  SEC-052 (#1584). `AssetModel.categoryId` on a model write is still not checked against a live category.
+- AUD-080 (PR #1581): restoring a location whose parent is archived is a 409 ("restore the parent
+  first"), and the parent guard checks only that the parent itself is live.
+- AUD-023 (PRs #1569, #1573, #1582) closed the KB folder analogue (folder remove and the article
+  writes check emptiness and liveness under the folder lock). KB folders are outside this finding's three
+  modules.

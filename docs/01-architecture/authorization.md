@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -114,7 +114,11 @@ three roles **except** two tighter tiers:
 - the **pre-tightened reads** — `accessGrant:read`, `accessRequest:read`, `user:read` and
   `purchaseOrder:read` (`VIEWER_DENIED_READS`) — seeded
   to ADMIN + MEMBER only. So a **VIEWER can no longer enumerate the access map or the user directory, nor
-  see purchases and suppliers** (it gets 403); `GET /search` additionally drops the `users` facet for a caller without `user:read`.
+  see purchases and suppliers** (it gets 403). `GET /search` queries only the indexes whose own
+  `<domain>:read` the caller holds (`INDEX_READ_PERMISSION` in `search.service.ts`: `asset:read`,
+  `article:read`, `user:read`, `location:read`, `application:read`, `infra:read`, `consumable:read`, and
+  `purchaseOrder:read` for purchases and suppliers), so a caller lacking one gets no hits from that
+  index (AUD-015, PR #1570).
 - the **admin-only reads** — `ADMIN_ONLY_READS`, today just `logs:read` — seeded to **ADMIN only**
   (excluded from BOTH MEMBER and VIEWER, strictly tighter than the pre-tightening; the two sets are
   disjoint). `logs:read` is the **first admin-only read** (issue #175): it gates the estate-wide

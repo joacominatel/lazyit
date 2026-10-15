@@ -2,7 +2,7 @@
 id: SEC-090
 title: User names reach the AI model without the untrusted-content wrapper, so a self-edited name can carry an injection with no banner and auto-approve stays on
 severity: medium
-status: open
+status: fixed
 cwe: CWE-1427
 discovered: 2026-10-10
 module: ai (tools — users, kb)
@@ -99,3 +99,44 @@ change.
 - [[SEC-080-untrusted-source-provenance-inert-for-real-read-tools|SEC-080]] — the provenance fix this
   depends on.
 - Sweep: [[sweep-2026-10-10-backend-audit]] (AUD-003).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `3d881cf1b` (`fix(api): wrap user-authored identity strings and access levels as untrusted in AI tools`), merged to `dev` in PR #1567 (`de6ac4b7c`); follow-up commits `08d2563ce` (`fix(api): wrap person names in the assets, infra, context and workflow-authoring AI tools`) and `91b9dd381` (`fix(api): keep the caller's own name plain in session_context`), merged in PR #1592 (`03d715e66`)
+**Fixed by**: audit remediation batches B3 and B20 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/ai/tools/users.tools.ts:106-114`: `userLabel` wraps the name with `untrusted()`.
+  `:121` lists the user-authored fields (`firstName`, `lastName`, `legajo`, `username`); `userSummary`
+  (`:157-176`) and `managerOf` / `managerText` (`:132-154`) wrap them, the external manager name included.
+- `apps/api/src/ai/tools/kb.tools.ts:173-174`: article author first and last names are wrapped.
+- `apps/api/src/ai/tools/access.tools.ts:580-581`, `:614-616`: the requester-authored `accessLevel`
+  (AUD-095) is wrapped next to the notes and justification.
+- PR #1592 wrapped the remaining person names: asset owners and labels (`assets.tools.ts:141`), infra node
+  owners (`infra.tools.ts:80-81`), `session_context` user search hits (`context.tools.ts:183`) and the
+  workflow-authoring sample grantee.
+- `apps/api/src/ai/runtime/agent-loop.ts:190` (`untrustedRefsOf`) is unchanged: it marks any result that
+  carries the wrapper, so a turn that read a name now shows the banner and turns auto-approve off.
+- [[INVARIANTS]] INV-AI-4 now states that editable identity strings count as other-authored text.
+
+### Tests
+- `apps/api/src/ai/tools/users.tools.spec.ts:929`: `AUD-003: self-editable identity strings are wrapped,
+  so a turn that lists users is marked untrusted`.
+- `apps/api/src/ai/tools/kb.tools.spec.ts` and `access.tools.spec.ts`: wrapped author names and access
+  levels; `apps/api/src/ai/core/tool-route-parity.spec.ts`: `lazyit_search wraps a person's name in a users
+  hit: anyone may rename themselves (INV-AI-4)`.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+- The caller's **own** name in `session_context` stays plain (`91b9dd381`): wrapping it would turn
+  auto-approve off in nearly every turn. INV-AI-4 targets text other people wrote; this is a pending CEO
+  decision, not a gap in this finding's attack (the attacker edits *their own* name, which reaches other
+  users wrapped).
+- Other free text the remediation ledger routed as follow-ups (asset name and serial in some views,
+  article titles in `asset_get`, taxonomy refusal messages) is outside this finding's scope.
+- Wrapping changes the AI tool descriptions, so the toolset hash changes and conversations started
+  before the update become read-only (`VERSION_CHANGED`, by design). No stored data changes.

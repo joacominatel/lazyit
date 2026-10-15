@@ -193,6 +193,11 @@ en adelante), el botón desaparece y esa actualización debe terminar o reconcil
 interrumpirla a mitad podría dejar las bases de datos y los respaldos desincronizados. La solicitud
 cancelada se conserva en el historial de actualizaciones como registro.
 
+No hace falta cancelar primero para actualizar a otra versión. Si ejecutas `update.sh` en el host para
+otra versión mientras una solicitud sigue pendiente, el script reemplaza esa solicitud: queda marcada
+como fallida con la nota "Superseded by an operator-run update", se conserva en el historial, y la
+sección sigue la actualización que realmente ejecutaste.
+
 ### Si una actualización falla — el punto de restauración
 
 El respaldo previo a la actualización es un **punto de restauración**, no un deshacer mágico. Si la

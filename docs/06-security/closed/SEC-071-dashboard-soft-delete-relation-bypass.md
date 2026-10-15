@@ -2,7 +2,7 @@
 id: SEC-071
 title: Dashboard counts include grants/history tied to soft-deleted entities (nested-relation soft-delete bypass)
 severity: low
-status: open
+status: fixed
 cwe: CWE-840
 discovered: 2026-06-06
 module: dashboard
@@ -127,3 +127,38 @@ location's or an offboarded user's data through the relation graph. Recommended 
 - CWE-840: Business Logic Errors. CWE-200: Exposure of Sensitive Information (the history-payload slice).
 - ADR-0032 (soft-delete extension — top-level only; "revisit if an include must hide soft-deleted
   relations") · ADR-0006 (soft delete) · ADR-0030/0050 (dashboard/activity).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `a8061e1b4` (`fix(api): count only live assets, applications and consumables on the dashboard and the users list`), merged to `dev` in PR #1571 (`cbad486b3`)
+**Fixed by**: audit remediation batch B2 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/dashboard/dashboard.service.ts:162`, `:168`, `:174`: `activeGrants`, `expiringSoon` and
+  `onCriticalApps` require `application: { is: { deletedAt: null } }`; the false comment is gone
+  (`:102-106` now says the parent's `deletedAt: null` is explicit).
+- `:156`: the "assigned" count requires a live asset (AUD-020); `:179`, `:185`: consumable totals count
+  live consumables only (AUD-063).
+- `:200-201`: `recentActivity` reads only history of live assets, matching the `recent_activity` view.
+- `apps/api/src/users/users.service.ts:261`, `:310`: the users-list `assetsInPossession` / `appAccesses`
+  counts use the same live-parent filter (AUD-020).
+
+### Tests
+- `apps/api/src/dashboard/dashboard.service.spec.ts`: `counts active grants on LIVE applications only
+  (SEC-071)`, `filters critical-app grants to active grants on LIVE isCritical applications (SEC-071)`,
+  `maps recent activity newest-first with ISO timestamps` (asserts the live-asset filter, `:312-313`),
+  plus the AUD-020 and AUD-063 cases; `apps/api/src/users/users.service.spec.ts` for the list counts.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+- Soft-deleting an application still does not revoke its grants; whether it should is a product call
+  this finding left open. Expiry notifications skip grants on soft-deleted applications or users since
+  PR #1568 (AUD-064).
+- The class-level gap (nested reads are not soft-delete scoped) stays open under
+  [[SEC-040-soft-deleted-parent-leaks-via-asset-includes|SEC-040]].
+
+No data change: only read filters changed.

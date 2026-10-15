@@ -106,3 +106,11 @@ Re-verified 2026-10-09 on the epic #1543 integration branch (`340645acb`) after 
 removed. The finding still holds: the guard and the boot contract are unchanged apart from line numbers.
 It stays open at **Low**. The references, the mitigating context and the Zitadel-specific
 recommendation were updated to the BYOI-only posture.
+
+## Triage note (2026-10-15, after the 2026-10-10 audit remediation)
+
+Still open: AUD-012 is a **pending CEO decision** (making `OIDC_CLIENT_ID` required changes boot
+requirements on live installs; the batch recommendation is to keep it optional with a loud boot warning).
+PR #1577 touched `jwt-auth.guard.ts` only to add a timeout to the first-login discovery and userinfo
+fetches (AUD-036); the audience option is still set only when `OIDC_CLIENT_ID` is
+(`apps/api/src/auth/jwt-auth.guard.ts:410-413`).

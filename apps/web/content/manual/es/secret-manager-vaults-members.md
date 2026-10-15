@@ -134,7 +134,9 @@ Las bóvedas se comparten gestionando **miembros**:
   la capacidad de leer los secretos de la bóveda. Solo puedes conceder acceso a una bóveda de la que tú
   mismo seas miembro — no puedes compartir un acceso que no tienes. La persona debe haber abierto el
   Gestor de Secretos y configurado su propia contraseña al menos una vez; si no lo ha hecho, lazyit te
-  indica que se lo pidas primero.
+  indica que se lo pidas primero. La persona también debe tener una cuenta activa con la que inicie
+  sesión: no se puede conceder acceso a una persona desactivada, ni a una persona solo de directorio
+  sin inicio de sesión.
 - **Revocar acceso** — elige **Revocar acceso** en la tarjeta de un miembro para quitarlo. Ya no podrá
   leer los secretos de la bóveda. Una bóveda siempre debe conservar al menos una persona como miembro,
   así que no puedes revocar al último — agrega otro miembro primero.

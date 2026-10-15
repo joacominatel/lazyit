@@ -83,6 +83,9 @@ los activos que la referencian — esos activos simplemente quedan sin ubicació
 registro se conserva para el historial. lazyit prioriza la auditabilidad por sobre la prolijidad
 estricta.
 
+Un administrador puede recuperar una ubicación quitada desde la vista de archivados. Restaurar una
+ubicación cuyo padre sigue quitado se rechaza: restaura primero el padre.
+
 ## Qué sigue
 
 - [Conceptos de activos](/help/assets-asset-basics) — registra unidades y fija su ubicación.

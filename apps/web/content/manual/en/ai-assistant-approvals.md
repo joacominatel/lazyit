@@ -40,7 +40,7 @@ Text other people wrote — an article, a note, a description — is shown as pl
 ### "Based on content written by others"
 
 If the assistant read content other people wrote before proposing the change — an article, a note, a
-search excerpt, a web page — the card shows a yellow **Based on content written by others** note, with
+person's name, a search excerpt, a web page — the card shows a yellow **Based on content written by others** note, with
 links to what it read when there is a single page to link. Such content can hide instructions meant to
 trick an AI. **Check that the change is really what you asked for.**
 
@@ -166,8 +166,8 @@ While it is on:
   - anything critical — roles, identity and sign-in, access grants, credentials, applications marked
     critical, any *Sensitive change*, anything that needs your password;
   - any change proposed **after the assistant read free text** — someone else's, or your own — in the
-    same turn: an article, a note, a description, a search excerpt, the options you picked in one of its
-    forms;
+    same turn: an article, a note, a description, a person's name, a search excerpt, the options you
+    picked in one of its forms;
   - **every change in a chat where the assistant has searched the web**, for the rest of that chat;
   - **every purchase change** — a purchase, its lines, a supplier, receiving units, linking assets,
     applying a license;

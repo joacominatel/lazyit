@@ -155,7 +155,7 @@ export type AssetTagNextPreviewQuery = z.infer<
  * stepped over, which is exactly the signal the operator needs to tell a working counter from a
  * broken one.
  *
- * `exhausted` mirrors the allocator's int4-ceiling freeze: when the first free slot is past
+ * `exhausted` mirrors the allocator's int4-ceiling freeze: when the first free slot is at or past
  * `INT4_MAX` there is nothing allocatable, so `number` and `tag` are BOTH null. Outside that case
  * both are non-null — they always move together (enforced below), so a caller never has to reason
  * about a tag with no number behind it.

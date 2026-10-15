@@ -127,7 +127,9 @@ Vaults are shared by managing **members**:
 - **Grant access** — open a vault, choose **Grant access**, and pick a person. They gain the ability
   to read the vault's secrets. You can only grant access to a vault you are a member of yourself — you
   cannot share access you do not have. The person must have opened the Secret Manager and set up their
-  own password at least once; if they haven't, lazyit tells you to ask them to do so first.
+  own password at least once; if they haven't, lazyit tells you to ask them to do so first. The
+  person must also have an active account they sign in with: a deactivated person, or a
+  directory-only person with no login, cannot be granted access.
 - **Revoke access** — choose **Revoke access** on a member's card to remove them. They can no longer
   read the vault's secrets. A vault must always keep at least one person as a member, so you cannot
   revoke the last one — add another member first.

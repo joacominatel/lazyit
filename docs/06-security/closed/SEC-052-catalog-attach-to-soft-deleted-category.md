@@ -2,7 +2,7 @@
 id: SEC-052
 title: Applications & Consumables can be created/updated with a categoryId pointing at a soft-deleted category (soft-delete FK bypass)
 severity: low
-status: open
+status: fixed
 cwe: CWE-1284
 discovered: 2026-06-06
 module: applications
@@ -89,3 +89,38 @@ review rule would cover applications, consumables, assets (model/location) unifo
   parent) · CWE-20.
 - ADR-0006 (soft delete) · ADR-0023 (application category SetNull) · ADR-0034 (consumable category
   SetNull) · sentinel SKILL §1 (soft-delete / FK note).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `71b3e60b1` (`fix(api): refuse an archived category on application and consumable writes`), merged to `dev` in PR #1584 (`93a278057`)
+**Fixed by**: audit remediation batch B15 (closure recorded by the final docs step)
+**Date**: 2026-10-15
+
+### Evidence (on `dev` at `03d715e66`)
+- `apps/api/src/applications/applications.service.ts:152` (create) and `:187-188` (update, only when
+  `categoryId` changes) call `assertCategoryLive` (`:214-226`), which looks the category up with
+  `deletedAt: null` and returns 400 when it is missing or archived.
+- `apps/api/src/consumables/consumables.service.ts:247` (create) and `:267-268` (update) do the same
+  (`assertCategoryLive`, `:283-294`).
+- The AI tools write through the same controllers (for example `consumable_create` calls
+  `ConsumablesController.create`, `apps/api/src/ai/tools/consumables.tools.ts:386-388`), so they inherit
+  the check.
+
+### Tests
+- `apps/api/src/applications/applications.service.spec.ts:296` and
+  `apps/api/src/consumables/consumables.service.spec.ts:378`, `archived category on write (AUD-025,
+  SEC-052)`: create refuses an archived or missing category with 400 and writes nothing; create files
+  under a live category; update refuses moving to an archived category; update keeps a legacy archived
+  category without re-checking it.
+
+### Verification
+Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over the oauth rate limiter, the AI users / kb / access tools and tool-route parity, health, dashboard, article import, applications, consumables and directory-reconcile suites — 11 suites, 795 tests passed.
+
+### Residual risk
+- Restoring an application or consumable does not re-check its category (the SEC-060 pattern for
+  articles). Not filed here.
+- Soft-deleting a category still does not detach its items (AUD-085, pending CEO decision).
+
+No data change: rows already on an archived category keep it, and an update that leaves `categoryId`
+unchanged is accepted (write-only validation).

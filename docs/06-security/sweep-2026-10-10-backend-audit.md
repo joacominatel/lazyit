@@ -3,7 +3,7 @@ title: Sweep 2026-10-10 — Full backend audit (verified, after epic #1543)
 tags: [security, sweep, audit, backend]
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Sweep 2026-10-10 — Full backend audit
@@ -56,6 +56,122 @@ AUD-018 to [[SEC-070-health-ready-db-error-leak|SEC-070]], AUD-020 to
 
 Line numbers below are as the verifiers left them. Only AUD-001, AUD-003, AUD-004, AUD-005 and
 AUD-099 were re-checked against `dev` for this record.
+
+## Remediation status
+
+Recorded 2026-10-15 from the merged PRs on `dev` (#1565–#1592) and verified against their bodies and the
+code at `03d715e66`. Of 105 entries: 90 fixed, 4 fixed with a follow-up, 1 partly fixed,
+1 already resolved, and 9 pending a CEO decision. Closed findings: SEC-052, SEC-070, SEC-071,
+SEC-090, SEC-091 and SEC-092; SEC-089, SEC-088, SEC-041 and SEC-012 stay open on the pending entries.
+Follow-ups that are not one entry's remainder are tracked outside this note.
+
+| Entry | Status | PR | Note |
+| --- | --- | --- | --- |
+| AUD-001 | Pending CEO decision | — | KB folder re-parent authorization ([[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]]). #1569 put the move under the folder-tree lock, where the check would go. |
+| AUD-002 | Pending CEO decision | — | Subset rule for `user:manage` ([[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]]). |
+| AUD-003 | Fixed | #1567, #1592 | [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] closed. The caller's own name in `session_context` stays plain, pending a CEO decision. |
+| AUD-004 | Fixed | #1573 | [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] closed. |
+| AUD-005 | Fixed | #1566 | [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] closed. |
+| AUD-006 | Fixed | #1570 |  |
+| AUD-007 | Fixed | #1572 |  |
+| AUD-008 | Fixed | #1568 |  |
+| AUD-009 | Fixed | #1568 |  |
+| AUD-010 | Fixed | #1569 |  |
+| AUD-011 | Fixed | #1573 |  |
+| AUD-012 | Pending CEO decision | — | Make `OIDC_CLIENT_ID` required ([[SEC-012-oidc-audience-not-validated\|SEC-012]]). |
+| AUD-013 | Fixed | #1577 | The web localizes the 429 (#1583). |
+| AUD-014 | Fixed, follow-up | #1566 | Never-used grants are announced at any age. An OAuth grant kept alive by refreshes alone past 90 days is still not announced; closing that needs an additive `OAuthGrant.announcedAt` (pending CEO decision). |
+| AUD-015 | Fixed | #1570 | The web hides chips per domain read (#1583). |
+| AUD-016 | Fixed | #1579 |  |
+| AUD-017 | Fixed | #1579 |  |
+| AUD-018 | Fixed | #1568 | With [[SEC-070-health-ready-db-error-leak\|SEC-070]], closed. |
+| AUD-019 | Fixed | #1571 |  |
+| AUD-020 | Fixed | #1571 | With [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]], closed. |
+| AUD-021 | Fixed | #1578 |  |
+| AUD-022 | Fixed | #1569 |  |
+| AUD-023 | Fixed | #1569, #1573, #1582 |  |
+| AUD-024 | Pending CEO decision | — | Location soft-delete with live children or assets: refuse or detach ([[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]]). |
+| AUD-025 | Fixed | #1584 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] closed. |
+| AUD-026 | Fixed | #1581 |  |
+| AUD-027 | Fixed | #1581 |  |
+| AUD-028 | Fixed | #1586 |  |
+| AUD-029 | Fixed | #1586 |  |
+| AUD-030 | Fixed | #1580 | Follow-up: restoring a node whose asset another node now links is refused in #1594 (open). |
+| AUD-031 | Fixed | #1580 |  |
+| AUD-032 | Fixed | #1571 |  |
+| AUD-033 | Fixed | #1591 |  |
+| AUD-034 | Fixed | #1577 |  |
+| AUD-035 | Fixed | #1590 |  |
+| AUD-036 | Fixed | #1577 |  |
+| AUD-037 | Fixed | #1577 |  |
+| AUD-038 | Fixed | #1566 |  |
+| AUD-039 | Fixed | #1566 |  |
+| AUD-040 | Pending CEO decision | — | Which admins count for the last-admin guard. |
+| AUD-041 | Fixed | #1571, #1575 | Finishes [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] under concurrency, the sync path included. |
+| AUD-042 | Fixed | #1588 |  |
+| AUD-043 | Fixed | #1585 |  |
+| AUD-044 | Fixed | #1581 |  |
+| AUD-045 | Fixed | #1581 |  |
+| AUD-046 | Fixed | #1573, #1574 |  |
+| AUD-047 | Fixed | #1573 |  |
+| AUD-048 | Fixed, follow-up | #1578, #1582 | New uploads and KB imports store UTF-8 names. Repairing names already stored as mojibake is a pending CEO decision. |
+| AUD-049 | Fixed | #1578 |  |
+| AUD-050 | Fixed | #1570 | In-process writes during a rebuild are replayed; writes from another process are left to the reconcile. |
+| AUD-051 | Fixed | #1576 |  |
+| AUD-052 | Fixed | #1576 |  |
+| AUD-053 | Fixed | #1576 |  |
+| AUD-054 | Fixed | #1576 |  |
+| AUD-055 | Fixed | #1576 |  |
+| AUD-056 | Fixed | #1586 |  |
+| AUD-057 | Fixed | #1580 |  |
+| AUD-058 | Fixed | #1580 |  |
+| AUD-059 | Fixed | #1580 |  |
+| AUD-060 | Fixed | #1580 |  |
+| AUD-061 | Fixed | #1587, #1589 |  |
+| AUD-062 | Fixed | #1587 |  |
+| AUD-063 | Fixed | #1571 |  |
+| AUD-064 | Fixed | #1568 |  |
+| AUD-065 | Fixed | #1591 |  |
+| AUD-066 | Fixed | #1591 |  |
+| AUD-067 | Fixed | #1591 |  |
+| AUD-068 | Fixed | #1579 |  |
+| AUD-069 | Fixed | #1572 |  |
+| AUD-070 | Fixed | #1572 |  |
+| AUD-071 | Fixed, follow-up | #1579 | Typed "credential unavailable" failure. Whether revoking a secret clears or flags `connection.secretId` is a pending CEO decision. |
+| AUD-072 | Fixed | #1579 |  |
+| AUD-073 | Fixed | #1590 |  |
+| AUD-074 | Fixed | #1590 |  |
+| AUD-075 | Fixed | #1590 |  |
+| AUD-076 | Fixed | #1592 |  |
+| AUD-077 | Fixed | #1592 |  |
+| AUD-078 | Fixed | #1592 |  |
+| AUD-079 | Fixed | #1592 |  |
+| AUD-080 | Fixed | #1581 |  |
+| AUD-081 | Fixed | #1577 |  |
+| AUD-082 | Fixed | #1566 |  |
+| AUD-083 | Pending CEO decision | — | Personal-token list and DELETE permission semantics. |
+| AUD-084 | Fixed | #1584 |  |
+| AUD-085 | Pending CEO decision | — | Whether soft-deleting a category detaches its items. |
+| AUD-086 | Pending CEO decision | — | Managers attaching to foreign drafts they cannot read. |
+| AUD-087 | Fixed | #1576 |  |
+| AUD-088 | Fixed | #1580 |  |
+| AUD-089 | Pending CEO decision | — | Vault nudge "exactly once" versus the 90-day prune. |
+| AUD-090 | Fixed | #1568 |  |
+| AUD-091 | Fixed, follow-up | #1579 | Header names are lower-cased. Rejecting reserved header names in the shared schema is a follow-up. |
+| AUD-092 | Fixed | #1590 |  |
+| AUD-093 | Fixed | #1592 |  |
+| AUD-094 | Fixed | #1592 |  |
+| AUD-095 | Fixed | #1567, #1592 |  |
+| AUD-096 | Fixed | #1588 |  |
+| AUD-097 | Partly fixed | #1585 | The expiry edit checks `grantedAt`. The expiry semantics (auto-revoke versus "informative") are a pending CEO decision. |
+| AUD-098 | Fixed | #1581 |  |
+| AUD-099 | Already resolved | #1565 | [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] closed; no code change. |
+| AUD-100 | Fixed | #1581 |  |
+| AUD-101 | Fixed | #1573 |  |
+| AUD-102 | Fixed | #1580 | Follow-up: the disambiguated key avoids the child separators in #1594 (open). |
+| AUD-103 | Fixed | #1591 |  |
+| AUD-104 | Fixed | #1592 |  |
+| AUD-105 | Fixed | #1588 |  |
 
 ## The verified report
 

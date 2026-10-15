@@ -168,3 +168,16 @@ With the fix: 13 passed. Full API suite (`node node_modules/.bin/jest`): 174 sui
   on an ADMIN row. The existing CLIs (`set-role`, `reset-admin-password`) do not reactivate.
 - The check-then-act window is unchanged: the same bounded race ADR-0040 already accepts.
 
+## Addendum (2026-10-15, 2026-10-10 audit)
+
+The residual "check-then-act window" above is closed. PR #1571 (AUD-041) makes every last-admin check take
+a transaction-scoped advisory lock on `lazyit.admin_set` inside the write transaction and judge the target
+as it stands under the lock (`users.service.ts` `wouldRemoveLastAdmin`, `:1251-1266`), so two admins
+demoting or offboarding each other leave one ADMIN and one 409. PR #1575 runs the directory offboard's
+check through the same method in the offboard's own transaction
+(`directory-reconcile.service.ts:419-427`), which finishes this finding's guarantee on the sync path
+under concurrency. `hasAnotherActiveAdmin` is now private and only counted under that lock. Tests:
+`users.service.spec.ts` `concurrent removal of the last two admins (AUD-041)`;
+`directory-reconcile.service.spec.ts` `a concurrent demotion of the other admin and the offboard cannot
+both land: one ADMIN remains`. Who counts as an admin (directory-only or password-less accounts) is
+AUD-040, a pending CEO decision.
