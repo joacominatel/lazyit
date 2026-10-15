@@ -71,7 +71,8 @@ the reverse.
   Imported / directory-only rows land `passwordHash=null` and cannot log in until an admin provisions one.
   **Self-service password lifecycle (local mode, [[0086-local-authentication-mode]] §F4):** `POST /auth/change-password`
   (authenticated — verifies the current password, sets the new one, **bumps `sessionEpoch`**, clears
-  `mustChangePassword`), plus the public `POST /auth/forgot-password` (enumeration-safe; mints a single-use
+  `mustChangePassword`; wrong current passwords share the step-up per-account backoff and answer
+  `429 STEP_UP_RATE_LIMITED` past five), plus the public `POST /auth/forgot-password` (enumeration-safe; mints a single-use
   SHA-256-hashed reset token, ≤1h TTL, in `PasswordResetToken`, and emails the link if SMTP is configured)
   and `POST /auth/reset-password` (consumes the token, sets the new password, bumps the epoch, invalidates
   sibling tokens). A `mustChangePassword=true` user is **walled off** from every non-exempt route with a

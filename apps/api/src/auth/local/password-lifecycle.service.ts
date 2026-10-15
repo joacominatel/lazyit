@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   Optional,
@@ -19,6 +21,7 @@ import {
 } from '../../smtp/email.mailer';
 import { LocalCredentialService } from './local-credential.service';
 import { hashResetToken, mintResetToken } from './password-reset-token';
+import { PasswordStepUpVerifier } from './password-step-up.verifier';
 import { UserSessionStore, type SessionDeviceMeta } from './user-session.store';
 
 /** The calling session of a password change (issue #1420): which row it is, and the request's device. */
@@ -82,17 +85,21 @@ export class AdminResetLinkError extends Error {
 export class PasswordLifecycleService {
   private readonly logger = new Logger(PasswordLifecycleService.name);
   private readonly sessions: UserSessionStore;
+  private readonly stepUp: PasswordStepUpVerifier;
 
-  // The session store is provided by AuthModule; @Optional with an equivalent default so a service built
-  // by hand from the four original dependencies (the existing specs) behaves the same.
+  // The session store and the step-up verifier are provided by AuthModule; @Optional with equivalent
+  // defaults so a service built by hand from the four original dependencies (the existing specs) behaves
+  // the same.
   constructor(
     private readonly prisma: PrismaService,
     private readonly credentials: LocalCredentialService,
     private readonly history: UserHistoryService,
     private readonly smtp: SmtpService,
     @Optional() sessions?: UserSessionStore,
+    @Optional() stepUp?: PasswordStepUpVerifier,
   ) {
     this.sessions = sessions ?? new UserSessionStore(prisma);
+    this.stepUp = stepUp ?? new PasswordStepUpVerifier(credentials);
   }
 
   /** True when the instance runs first-party local auth (AUTH_MODE=local, ADR-0086). */
@@ -138,14 +145,20 @@ export class PasswordLifecycleService {
       throw new ForbiddenException('This account cannot change a password.');
     }
 
-    // Verify the CURRENT password against the stored hash (constant-time / fail-closed via the credential
-    // service's dummy-hash path). A null/empty stored hash never verifies → generic 401. Same 401 for a
-    // wrong password: nothing distinguishes "no local password set" from "wrong password".
-    const result = await this.credentials.verify(
-      user.passwordHash,
-      currentPassword,
-    );
-    if (!result.valid) {
+    // The step-up verifier's per-account backoff keeps a stolen session from guessing it online (AUD-013).
+    const check = await this.stepUp.verify(user, currentPassword);
+    if (!check.ok) {
+      if (check.reason === 'locked') {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.TOO_MANY_REQUESTS,
+            message: 'Too many wrong passwords; wait before trying again.',
+            code: 'STEP_UP_RATE_LIMITED',
+            retryAfterSec: check.retryAfterSec,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
       throw new UnauthorizedException('Invalid credentials');
     }
 

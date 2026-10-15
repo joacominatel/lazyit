@@ -142,6 +142,9 @@ organization's single sign-on), your profile also has a **Change your password**
 - Enter your **current** password, then your **new** password twice. The new password must meet the
   live checklist (length, upper- and lower-case, a number and a symbol) and must differ from the
   current one.
+- After five wrong **current** passwords lazyit makes you wait before trying again ("Too many wrong
+  passwords"), for a time that grows with each failure, up to 15 minutes. The wait is shared with the
+  password confirmations in the AI chat and on the MCP consent screen.
 - On success you **stay signed in on this device**; every *other* session is signed out, and your AI
   apps and personal tokens are disconnected — so a password change is also how you boot a forgotten,
   shared, lost or stolen session.
