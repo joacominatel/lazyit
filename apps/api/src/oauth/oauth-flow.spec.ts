@@ -782,6 +782,29 @@ describe('token endpoint: refresh_token', () => {
     );
   });
 
+  it('leaves the refresh token unspent when issuing its successor fails, so a retry is not reuse', async () => {
+    const user = seedUser(h);
+    const { clientId, tokens } = await connect(h, user);
+    const request = {
+      refresh_token: tokens.refresh_token,
+      client_id: clientId,
+    };
+    h.prisma.oAuthToken.createMany.mockRejectedValueOnce(
+      new Error('connection reset'),
+    );
+    await expect(h.tokens.refresh(request)).rejects.toThrow('connection reset');
+
+    jest.useFakeTimers({ now: Date.now() + REFRESH_REUSE_GRACE_MS + 1_000 });
+    const refreshed = await h.tokens.refresh(request);
+    expect(
+      await h.tokens.verifyAccessToken(refreshed.access_token),
+    ).toMatchObject({ ok: true });
+    expect(h.prisma.tables.oAuthGrant[0]).toMatchObject({ deletedAt: null });
+    expect(
+      h.prisma.tables.oAuthAuditLog.map((row) => row.action as string),
+    ).not.toContain('REFRESH_REUSE_DETECTED');
+  });
+
   it('never widens the scope, and does not narrow it silently', async () => {
     const user = seedUser(h);
     const { clientId, tokens } = await connect(h, user, {
