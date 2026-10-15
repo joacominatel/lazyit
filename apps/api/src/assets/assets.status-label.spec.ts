@@ -41,8 +41,15 @@ function setup() {
     ({ where }: { where: { id: string } }) =>
       Promise.resolve(labels.get(where.id) ?? null) as Promise<unknown>,
   );
+  const assetFindFirst: Mock = jest.fn();
+  const assetFindMany: Mock = jest.fn();
   const tx = {
-    asset: { create: jest.fn(), update: jest.fn() },
+    asset: {
+      create: jest.fn(),
+      update: jest.fn(),
+      findFirst: assetFindFirst,
+      findMany: assetFindMany,
+    },
     assetModel: { findFirst: jest.fn() },
     location: { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) },
     assetStatusLabel: { findFirst: findLabel },
@@ -50,8 +57,8 @@ function setup() {
   };
   const prisma = {
     asset: {
-      findFirst: jest.fn(),
-      findMany: jest.fn(),
+      findFirst: assetFindFirst,
+      findMany: assetFindMany,
       count: jest.fn(),
     },
     assetModel: { findFirst: jest.fn() },
@@ -486,6 +493,109 @@ describe('AssetsService — custom statuses in bulk (ADR-0101)', () => {
         statusLabelId: LABEL.id,
       });
     }
+  });
+});
+
+// AUD-044: the status/label decision must come from a row locked inside the write's transaction, or a
+// concurrent label change slips between the read and the write and breaks statusLabelId ⇒ status == kind.
+describe('AssetsService — status writes decide from the locked row (AUD-044)', () => {
+  const RETIRED_LABEL = {
+    id: 'clabelretired000000000001',
+    name: 'Scrapped',
+    kind: 'RETIRED' as const,
+    color: null,
+  };
+  const sqlOf = (call: unknown[]) => (call[0] as string[]).join('?');
+
+  it('update locks the asset row FOR UPDATE before reading the snapshot it decides from', async () => {
+    const { service, prisma, tx } = setup();
+    // The committed row a concurrent PATCH just left: RETIRED under a RETIRED-kind custom status.
+    prisma.asset.findFirst.mockResolvedValue({
+      id: 'a1',
+      status: 'RETIRED',
+      statusLabelId: RETIRED_LABEL.id,
+      statusLabel: { id: RETIRED_LABEL.id, name: RETIRED_LABEL.name },
+      locationId: null,
+      modelId: null,
+      specs: null,
+    });
+    tx.asset.update.mockImplementation(({ data }: { data: object }) => ({
+      id: 'a1',
+      purchaseCost: null,
+      salvageValue: null,
+      ...data,
+    }));
+
+    await service.update('a1', { status: 'OPERATIONAL' });
+
+    const lock = tx.$queryRaw.mock.calls.findIndex((c: unknown[]) =>
+      /FROM "assets" .*FOR UPDATE/.test(sqlOf(c)),
+    );
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(tx.$queryRaw.mock.invocationCallOrder[lock]).toBeLessThan(
+      prisma.asset.findFirst.mock.invocationCallOrder[0],
+    );
+    // Decided from that row: the status changes, so the RETIRED-kind label is cleared with it.
+    expect(tx.asset.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: { status: 'OPERATIONAL', statusLabelId: null },
+    });
+  });
+
+  it('update locks the named custom status before the asset row (the order a label archive takes)', async () => {
+    const { service, prisma, tx } = setup();
+    prisma.asset.findFirst.mockResolvedValue({
+      id: 'a1',
+      status: 'OPERATIONAL',
+      statusLabelId: null,
+      statusLabel: null,
+      locationId: null,
+      modelId: null,
+      specs: null,
+    });
+    tx.asset.update.mockResolvedValue({
+      id: 'a1',
+      purchaseCost: null,
+      salvageValue: null,
+    });
+
+    await service.update('a1', { statusLabelId: LABEL.id });
+
+    const sql = (tx.$queryRaw.mock.calls as unknown[][]).map(sqlOf);
+    expect(sql).toHaveLength(2);
+    expect(sql[0]).toContain('"asset_status_labels"');
+    expect(sql[0]).toContain('FOR SHARE');
+    expect(sql[1]).toContain('"assets"');
+    expect(sql[1]).toContain('FOR UPDATE');
+  });
+
+  it('batch status locks the asset rows FOR UPDATE and decides from the rows read after the lock', async () => {
+    const { service, prisma, tx } = setup();
+    // A concurrent PATCH just gave a2 a custom status of another kind; the batch must see it.
+    prisma.asset.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'a2',
+          status: 'IN_MAINTENANCE',
+          statusLabelId: LABEL.id,
+          statusLabel: { id: LABEL.id, name: LABEL.name },
+        },
+      ])
+      .mockResolvedValue([]);
+
+    await service.batchSetStatus(['a2'], { status: 'OPERATIONAL' });
+
+    const lock = tx.$queryRaw.mock.calls.findIndex((c: unknown[]) =>
+      /FROM "assets" .*FOR UPDATE/.test(sqlOf(c)),
+    );
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(tx.$queryRaw.mock.invocationCallOrder[lock]).toBeLessThan(
+      prisma.asset.findMany.mock.invocationCallOrder[0],
+    );
+    expect(tx.asset.update).toHaveBeenCalledWith({
+      where: { id: 'a2' },
+      data: { status: 'OPERATIONAL', statusLabelId: null },
+    });
   });
 });
 

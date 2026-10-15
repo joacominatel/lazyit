@@ -40,8 +40,13 @@ describe('AssetsService.update — plain edits through the AI path', () => {
       ]),
     );
     written = [];
+    const findFirst = jest.fn(({ where }: { where: { id: string } }) =>
+      Promise.resolve(rows.has(where.id) ? { ...rows.get(where.id) } : null),
+    );
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       asset: {
+        findFirst,
         update: jest.fn(
           ({ where, data }: { where: { id: string }; data: object }) => {
             const next = { ...rows.get(where.id), ...data };
@@ -58,13 +63,7 @@ describe('AssetsService.update — plain edits through the AI path', () => {
       },
     };
     const prisma = {
-      asset: {
-        findFirst: jest.fn(({ where }: { where: { id: string } }) =>
-          Promise.resolve(
-            rows.has(where.id) ? { ...rows.get(where.id) } : null,
-          ),
-        ),
-      },
+      asset: { findFirst },
       $transaction: jest.fn((fn: (client: typeof tx) => unknown) => fn(tx)),
     };
     service = new AssetsService(

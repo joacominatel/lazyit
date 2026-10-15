@@ -24,6 +24,13 @@ import {
 import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 
+/** The int4-ceiling freeze (ADR-0063): a clean 400 instead of an integer overflow. */
+class CounterExhaustedException extends BadRequestException {
+  constructor() {
+    super('Asset-tag counter exhausted (reached the maximum sequence value).');
+  }
+}
+
 /**
  * AssetTagSchemeService — the brain behind lazyit's first instance-config entity (ADR-0063, #363):
  * the org-wide, single-row, OPT-IN scheme that auto-assigns a running asset tag on create.
@@ -195,7 +202,8 @@ export class AssetTagSchemeService {
    *
    * The pre-skip is why the {@link MAX_ALLOCATION_ATTEMPTS} cap can't false-409 under dense occupancy:
    * a whole occupied block is skipped in step 3 in one shot, not one P2002 at a time. The freeze at
-   * the int4 ceiling (ADR-0063) is preserved — a clean 400 rather than an overflow.
+   * the int4 ceiling (ADR-0063) is preserved — a clean 400 rather than an overflow. The counter holds
+   * the NEXT number in an int4, so the last allocatable number is `INT4_MAX - 1`.
    *
    * @param knownNextNumber the caller's already-read counter; when omitted the row is read here. Only a
    *   FLOOR for the skip walk — the atomic increment is what durably allocates, so a slightly stale hint
@@ -220,11 +228,9 @@ export class AssetTagSchemeService {
       from = current?.nextNumber ?? 1;
     }
     const target = await this.findNextFreeNumber(affixes, from);
-    if (target > INT4_MAX) {
-      // The free slot is past the int4 ceiling — freeze with a clean 400 (ADR-0063 edge case).
-      throw new BadRequestException(
-        'Asset-tag counter exhausted (reached the maximum sequence value).',
-      );
+    if (target >= INT4_MAX) {
+      // Consuming it would store target + 1, past the int4 ceiling — freeze with a clean 400 (ADR-0063).
+      throw new CounterExhaustedException();
     }
     // JUMP forward in one shot — only when there is a contiguous occupied block to skip. In the steady
     // state (counter already past the occupied range → target === from) this is SKIPPED, leaving the
@@ -239,12 +245,26 @@ export class AssetTagSchemeService {
         data: { nextNumber: target },
       });
     }
-    // CONSUME atomically: the post-increment value minus one is the number we allocated.
-    const updated = await this.prisma.assetTagScheme.update({
-      where: { id: AssetTagSchemeService.SINGLETON_ID },
-      data: { nextNumber: { increment: 1 } },
-    });
-    return updated.nextNumber - 1;
+    // CONSUME atomically: the post-increment value minus one is the number we allocated. The `lt` guard
+    // catches a racer that took the last number after our check: no row matches, Prisma raises P2025.
+    try {
+      const updated = await this.prisma.assetTagScheme.update({
+        where: {
+          id: AssetTagSchemeService.SINGLETON_ID,
+          nextNumber: { lt: INT4_MAX },
+        },
+        data: { nextNumber: { increment: 1 } },
+      });
+      return updated.nextNumber - 1;
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2025'
+      ) {
+        throw new CounterExhaustedException();
+      }
+      throw err;
+    }
   }
 
   /**
@@ -261,7 +281,7 @@ export class AssetTagSchemeService {
    * so it drives {@link nextFreeNumber} itself over an occupied set it accumulates per projected row.
    * Same walk, different arity — it cannot reuse a helper that re-reads the estate for every step.
    *
-   * The returned number may exceed `INT4_MAX` (every slot up to the ceiling occupied); each caller
+   * The returned number may reach `INT4_MAX` (every slot below the ceiling occupied); each caller
    * decides what that means — allocation freezes with a 400, the preview reports `exhausted`.
    */
   private async findNextFreeNumber(
@@ -292,7 +312,7 @@ export class AssetTagSchemeService {
    * check `enabled`: with the scheme off nothing is allocated at all, so it is the CALLER's job to
    * label a disabled-scheme answer as a shape rather than a promise.
    *
-   * Past the int4 ceiling it does NOT throw the allocator's 400: it returns `exhausted: true` with a
+   * At the int4 ceiling it does NOT throw the allocator's 400: it returns `exhausted: true` with a
    * null number/tag, so an operator typing in the editor sees a state rather than an error per
    * keystroke. The allocator's freeze is unchanged.
    */
@@ -340,7 +360,7 @@ export class AssetTagSchemeService {
     const target = await this.findNextFreeNumber(affixes, fromNumber);
     // Everything in [fromNumber, target) was occupied — that difference IS the skip count.
     const skippedCount = target - fromNumber;
-    if (target > INT4_MAX) {
+    if (target >= INT4_MAX) {
       return {
         fromNumber,
         number: null,
@@ -532,6 +552,10 @@ export class AssetTagSchemeService {
    * Bounded retry on a live-tag P2002 (a concurrent grab took the slot): each retry advances to the
    * next free number (gaps accepted). Returns false (counted as `skipped`) if it can't allocate a
    * unique tag within the budget — so a single hot-spot row never aborts the whole backfill.
+   *
+   * The write is conditional on the row still being live and still carrying `fromTag`, the tag read
+   * when the backfill started: a tag set by hand (or by another apply) during a long run is kept, the
+   * row is skipped, and the history never records a stale `from`. The number consumed is a gap.
    */
   private async retagOne(
     assetId: string,
@@ -551,11 +575,12 @@ export class AssetTagSchemeService {
       const allocated = await this.consumeNextFreeNumber(affixes);
       const tag = renderAssetTag(affixes, allocated);
       try {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.asset.update({
-            where: { id: assetId },
+        return await this.prisma.$transaction(async (tx) => {
+          const { count } = await tx.asset.updateMany({
+            where: { id: assetId, assetTag: fromTag, deletedAt: null },
             data: { assetTag: tag },
           });
+          if (count === 0) return false;
           await this.history.record(tx, {
             assetId,
             // Reuse the existing append-only writer + a generic update event (the enum carries no
@@ -564,11 +589,11 @@ export class AssetTagSchemeService {
             payload: { field: 'assetTag', from: fromTag, to: tag },
             actor,
           });
+          return true;
         });
-        return true;
       } catch (err) {
         if (isUniqueTagCollision(err)) continue; // a concurrent grab — advance and retry.
-        throw err; // anything else (incl. a vanished/soft-deleted row) propagates.
+        throw err; // anything else propagates.
       }
     }
     return false; // exhausted the budget for this row → skipped, batch continues.

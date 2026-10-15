@@ -133,7 +133,10 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
     $transaction: jest.fn((arg: unknown) =>
       Array.isArray(arg)
         ? Promise.all(arg)
-        : (arg as (tx: unknown) => unknown)({ asset }),
+        : (arg as (tx: unknown) => unknown)({
+            asset,
+            $queryRaw: jest.fn().mockResolvedValue([]),
+          }),
     ),
   };
 

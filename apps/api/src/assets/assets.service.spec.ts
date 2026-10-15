@@ -62,6 +62,9 @@ type PrismaAssetMock = {
 type TxAssetMock = {
   create: jest.Mock;
   update: jest.Mock;
+  // update() and batchSetStatus() re-read the locked rows inside the transaction (AUD-044).
+  findFirst: jest.Mock;
+  findMany: jest.Mock;
 };
 
 type TxAssetModelMock = {
@@ -266,13 +269,21 @@ describe('AssetsService', () => {
       count: jest.fn(),
     };
     // The transaction client the writes go through; $transaction runs the callback with it.
-    tx = { create: jest.fn(), update: jest.fn() };
+    tx = {
+      create: jest.fn(),
+      update: jest.fn(),
+      findFirst: asset.findFirst,
+      findMany: asset.findMany,
+    };
     txAssetModel = { findFirst: jest.fn() };
     txClient = { asset: tx } as TxClientMock;
     // keep existing transaction assertions focused on the asset delegate
     Object.defineProperty(txClient, 'assetModel', { value: txAssetModel });
     location = { findFirst: jest.fn().mockResolvedValue({ id: 'l1' }) };
     Object.defineProperty(txClient, 'location', { value: location });
+    Object.defineProperty(txClient, '$queryRaw', {
+      value: jest.fn().mockResolvedValue([]),
+    });
     // receiveBatch does ONE non-tx model lookup upfront (for the "<ModelName> #<seq>" default name).
     prismaAssetModel = { findFirst: jest.fn() };
     prisma = {
@@ -1656,8 +1667,9 @@ describe('AssetsService', () => {
 
     await service.update('a1', { status: 'RETIRED' });
 
+    // The snapshot is read inside the transaction, after locking the row (AUD-044).
     expect(asset.findFirst).toHaveBeenCalledWith({
-      where: { id: 'a1' },
+      where: { id: 'a1', deletedAt: null },
       select: {
         id: true,
         status: true,
@@ -1705,14 +1717,14 @@ describe('AssetsService', () => {
     });
   });
 
-  it('update throws NotFound (and never opens a transaction) when the asset is missing', async () => {
+  it('update throws NotFound (and writes nothing) when the asset is missing', async () => {
     asset.findFirst.mockResolvedValue(null);
 
     await expect(
       service.update('missing', { status: 'RETIRED' }),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(tx.update).not.toHaveBeenCalled();
+    expect(history.record).not.toHaveBeenCalled();
   });
 
   it('update resolves a HUMAN principal and stamps userId onto every change event', async () => {

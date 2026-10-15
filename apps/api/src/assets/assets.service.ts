@@ -512,9 +512,9 @@ export class AssetsService {
    *   - `status` alone → kept label when the status does not change (the label maps to it, by the
    *     invariant), cleared when it does;
    *   - neither → nothing.
+   * `label` is the custom status `statusLabelId` names, already resolved and locked by the caller.
    */
-  private async updateStatus(
-    tx: Prisma.TransactionClient,
+  private updateStatus(
     before: {
       status: AssetStatus;
       statusLabelId?: string | null;
@@ -522,10 +522,11 @@ export class AssetsService {
     },
     status: AssetStatus | undefined,
     statusLabelId: string | null | undefined,
-  ): Promise<{
+    label: LiveStatusLabel | undefined,
+  ): {
     write: { status?: AssetStatus; statusLabelId?: string | null };
     toLabel: { id: string; name: string } | null;
-  }> {
+  } {
     const current = before.statusLabel ?? null;
     if (statusLabelId === null) {
       return {
@@ -533,8 +534,7 @@ export class AssetsService {
         toLabel: null,
       };
     }
-    if (statusLabelId !== undefined) {
-      const label = await this.liveStatusLabel(tx, statusLabelId);
+    if (label) {
       this.assertStatusAgrees(status, label);
       return {
         write: { status: label.kind, statusLabelId: label.id },
@@ -1191,30 +1191,37 @@ export class AssetsService {
     },
   ) {
     const actor = this.actor.resolveActor(principal);
-    const before = await this.prisma.asset.findFirst({
-      where: { id },
-      select: {
-        id: true,
-        status: true,
-        statusLabelId: true,
-        statusLabel: { select: { id: true, name: true } },
-        locationId: true,
-        modelId: true,
-        specs: true,
-        ...ASSET_PLAIN_FIELDS_SELECT,
-      },
-    });
-    if (!before) {
-      throw new NotFoundException(`Asset ${id} not found`);
-    }
     const { specs, status, statusLabelId, ...rest } = data;
     const updated = await this.prisma.$transaction(async (tx) => {
+      // Lock order matches a label archive (label, then assets): the named custom status first, then
+      // the asset row, so the status decision below reads a row no concurrent write can change.
+      const label =
+        typeof statusLabelId === 'string'
+          ? await this.liveStatusLabel(tx, statusLabelId)
+          : undefined;
+      await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ${id} FOR UPDATE`;
+      const before = await tx.asset.findFirst({
+        where: { id, deletedAt: null },
+        select: {
+          id: true,
+          status: true,
+          statusLabelId: true,
+          statusLabel: { select: { id: true, name: true } },
+          locationId: true,
+          modelId: true,
+          specs: true,
+          ...ASSET_PLAIN_FIELDS_SELECT,
+        },
+      });
+      if (!before) {
+        throw new NotFoundException(`Asset ${id} not found`);
+      }
       // The custom status and the built-in status move together (ADR-0101, invariant in updateStatus).
-      const statusChange = await this.updateStatus(
-        tx,
+      const statusChange = this.updateStatus(
         before,
         status,
         statusLabelId,
+        label,
       );
       // Moving the asset to an archived location or model is refused (400); keeping a legacy one is not.
       if (rest.locationId !== before.locationId) {
@@ -1476,68 +1483,70 @@ export class AssetsService {
     if (status === undefined) {
       throw new BadRequestException(ASSET_STATUS_REQUIRED_MESSAGE);
     }
-    const live = await this.prisma.asset.findMany({
-      where: { id: { in: ids } },
-      select: {
-        id: true,
-        status: true,
-        statusLabelId: true,
-        statusLabel: { select: { id: true, name: true } },
-      },
-    });
-    const current = new Map(live.map((a) => [a.id, a]));
     const succeeded: string[] = [];
     const skipped: { id: string; reason: string }[] = [];
-    for (const id of ids) {
-      const asset = current.get(id);
-      if (!asset) skipped.push({ id, reason: 'not_found' });
-      else if (
-        asset.status === status &&
-        (label === null
-          ? !bare || asset.statusLabelId === null
-          : asset.statusLabelId === label.id)
-      )
-        skipped.push({ id, reason: 'already_in_state' });
-      else succeeded.push(id);
-    }
+    await this.prisma.$transaction(async (tx) => {
+      // Re-check the custom status under its lock: archived or re-kinded since the read above → 400.
+      if (label) {
+        const locked = await this.liveStatusLabel(tx, label.id);
+        if (locked.kind !== label.kind) {
+          throw new ConflictException(
+            `The custom status "${locked.name}" changed while the batch ran; retry`,
+          );
+        }
+      }
+      // Then the asset rows, in id order, so each skip-or-write decision reads a row nobody can change.
+      await tx.$queryRaw`SELECT "id" FROM "assets" WHERE "id" = ANY(${ids}::text[]) ORDER BY "id" FOR UPDATE`;
+      const live = await tx.asset.findMany({
+        where: { id: { in: ids }, deletedAt: null },
+        select: {
+          id: true,
+          status: true,
+          statusLabelId: true,
+          statusLabel: { select: { id: true, name: true } },
+        },
+      });
+      const current = new Map(live.map((a) => [a.id, a]));
+      for (const id of ids) {
+        const asset = current.get(id);
+        if (!asset) skipped.push({ id, reason: 'not_found' });
+        else if (
+          asset.status === status &&
+          (label === null
+            ? !bare || asset.statusLabelId === null
+            : asset.statusLabelId === label.id)
+        )
+          skipped.push({ id, reason: 'already_in_state' });
+        else succeeded.push(id);
+      }
+      for (const id of succeeded) {
+        const asset = current.get(id)!;
+        await tx.asset.update({
+          where: { id },
+          data: {
+            status,
+            ...(label
+              ? { statusLabelId: label.id }
+              : asset.statusLabelId
+                ? { statusLabelId: null }
+                : {}),
+          },
+        });
+        await this.history.record(tx, {
+          assetId: id,
+          eventType: 'STATUS_CHANGED',
+          payload: statusChangedPayload(
+            asset.status,
+            status,
+            asset.statusLabel,
+            label,
+          ),
+          actor,
+        });
+      }
+    });
 
     if (succeeded.length > 0) {
-      await this.prisma.$transaction(async (tx) => {
-        // Re-check the custom status under its lock: archived or re-kinded since the read above → 400.
-        if (label) {
-          const locked = await this.liveStatusLabel(tx, label.id);
-          if (locked.kind !== label.kind) {
-            throw new ConflictException(
-              `The custom status "${locked.name}" changed while the batch ran; retry`,
-            );
-          }
-        }
-        for (const id of succeeded) {
-          const asset = current.get(id)!;
-          await tx.asset.update({
-            where: { id },
-            data: {
-              status,
-              ...(label
-                ? { statusLabelId: label.id }
-                : asset.statusLabelId
-                  ? { statusLabelId: null }
-                  : {}),
-            },
-          });
-          await this.history.record(tx, {
-            assetId: id,
-            eventType: 'STATUS_CHANGED',
-            payload: statusChangedPayload(
-              asset.status,
-              status,
-              asset.statusLabel,
-              label,
-            ),
-            actor,
-          });
-        }
-      });
       // One read for the whole batch (not one per id — #596): gather every changed row, then
       // fire-and-forget a search upsert per row (same contract as the single-item paths).
       const rows = await this.prisma.asset.findMany({

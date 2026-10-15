@@ -12,9 +12,10 @@ import { optionalText } from "./primitives";
  * ID note: `assetId` references Asset (`cuid`), while `userId` / `assignedById` /
  * `releasedById` reference User (`uuid`, @db.Uuid). See docs/03-decisions/0005-id-strategy.md.
  *
- * Actor note: `assignedById` / `releasedById` are recorded by the API from the optional
- * `X-User-Id` shim (the caller → a JWT later), **never** from the request body — so the
- * create/release payloads below do not carry them. See docs/03-decisions/0024-asset-assignment-actor-shim.md.
+ * Actor note: the API records the actor from the authenticated principal, **never** from the
+ * request body — a human in `assignedById` / `releasedById`, a service account in
+ * `assignedBySaId` / `releasedBySaId` — so the create/release payloads below do not carry them.
+ * See docs/03-decisions/0048-service-accounts.md.
  */
 
 /**
@@ -31,6 +32,9 @@ export const AssetAssignmentSchema = z.object({
   // Optional audit FKs — who assigned / released. null when the system acted or it's unknown.
   assignedById: z.uuid().nullable(),
   releasedById: z.uuid().nullable(),
+  // The service-account actor, set instead of the human one (ADR-0048). `.nullish()`: added later.
+  assignedBySaId: z.cuid().nullish(),
+  releasedBySaId: z.cuid().nullish(),
   notes: z.string().nullable(),
   // Check-out acknowledgement (ADR-0089 Part B, #1029): additive lifecycle metadata, set once by the
   // OWN owner (`acknowledgedById` always equals `userId`). `.nullish()` (not `.nullable()`) per the
@@ -47,20 +51,26 @@ export const AssetAssignmentSchema = z.object({
 /**
  * Payload to open an assignment. `assetId` + `userId` are required. `assignedAt` is optional
  * and defaults to `now()` in the DB — pass it only to backdate an imported/historical record.
+ * It may not lie in the future: a release stamps `releasedAt = now()`, which would land before it.
  * A duplicate *active* `(assetId, userId)` pair is rejected (409) by the partial unique index.
- * The actor (`assignedById`) is NOT in the body — it comes from the `X-User-Id` shim.
+ * The actor is NOT in the body — it comes from the authenticated principal.
  */
 export const CreateAssetAssignmentSchema = z.strictObject({
   assetId: z.cuid(),
   userId: z.uuid(),
-  assignedAt: z.iso.datetime().optional(),
+  assignedAt: z.iso
+    .datetime()
+    .refine((value) => Date.parse(value) <= Date.now(), {
+      message: "assignedAt cannot be in the future",
+    })
+    .optional(),
   notes: optionalText(2000),
 });
 
 /**
  * Payload to release an active assignment (`PATCH /asset-assignments/:id/release`). Sets
- * `releasedAt = now()`. Only `notes` (optional) — if given it replaces the note. The actor
- * (`releasedById`) is NOT in the body — it comes from the `X-User-Id` shim.
+ * `releasedAt = now()`. Only `notes` (optional) — if given it replaces the note. The actor is NOT
+ * in the body — it comes from the authenticated principal.
  */
 export const ReleaseAssetAssignmentSchema = z.strictObject({
   notes: optionalText(2000),

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -175,7 +176,8 @@ export class LocationsService {
    * `includeSoftDeleted` escape hatch (the soft-delete read filter would hide it otherwise), 404s if
    * it never existed, and is idempotent if the row is already live. Re-indexes for search on success.
    * The partial unique index frees the name on delete, so a restore can collide with a row created in
-   * the meantime — Prisma surfaces that as a 409 via the global PrismaExceptionFilter.
+   * the meantime — Prisma surfaces that as a 409 via the global PrismaExceptionFilter. A location whose
+   * parent is still soft-deleted is a 409 too: restores do not cascade, so restore the parent first.
    */
   async restore(id: string) {
     const location = await this.prisma.location.findFirst({
@@ -187,6 +189,17 @@ export class LocationsService {
     }
     if (location.deletedAt === null) {
       return location; // already live — idempotent
+    }
+    if (location.parentId !== null) {
+      const parent = await this.prisma.location.findFirst({
+        where: { id: location.parentId },
+        select: { id: true },
+      });
+      if (!parent) {
+        throw new ConflictException(
+          `Cannot restore location ${id}: its parent location ${location.parentId} is deleted. Restore the parent first.`,
+        );
+      }
     }
     const restored = await this.prisma.location.update({
       where: { id },
@@ -204,8 +217,11 @@ export class LocationsService {
    * soft-deleted, and — the one hard structural rule — when assigning it would create a CYCLE:
    * `selfId` being its own parent, or a descendant of `selfId`. Detects the cycle by walking UP from
    * the proposed parent following `parentId`; if `selfId` shows up anywhere in that chain, the parent
-   * is (transitively) below `selfId`, so the link would close a loop. `selfId` is omitted on create
-   * (the row doesn't exist yet, so no cycle is possible — only the existence check runs).
+   * is (transitively) below `selfId`, so the link would close a loop. Only the parent itself must be
+   * live: the walk passes through soft-deleted ancestors (a live node may sit under an archived one, as
+   * the read path tolerates), so an archived link cannot hide a loop that its restore would close.
+   * `selfId` is omitted on create (the row doesn't exist yet, so no cycle is possible — only the
+   * liveness check runs).
    */
   private async assertParentAssignable(
     parentId: string,
@@ -214,37 +230,38 @@ export class LocationsService {
     if (selfId && parentId === selfId) {
       throw new BadRequestException('A location cannot be its own parent.');
     }
-    let cursor: string | null = parentId;
+    // Live rows only: a soft-deleted parent is not a valid parent.
+    const parent = await this.prisma.location.findFirst({
+      where: { id: parentId },
+      select: { id: true, parentId: true },
+    });
+    if (!parent) {
+      throw new BadRequestException(`Parent location ${parentId} not found.`);
+    }
+    if (!selfId) return;
+    let cursor: string | null = parent.parentId;
     for (let depth = 0; cursor; depth++) {
       if (depth >= MAX_HIERARCHY_DEPTH) {
         // Unreachable while the tree stays acyclic — a safety net against corrupt data / a bug.
         this.logger.error(
-          `Location hierarchy walk exceeded ${MAX_HIERARCHY_DEPTH} levels from parent ${parentId} (self ${selfId ?? 'n/a'}) — aborting to avoid a runaway loop.`,
+          `Location hierarchy walk exceeded ${MAX_HIERARCHY_DEPTH} levels from parent ${parentId} (self ${selfId}) — aborting to avoid a runaway loop.`,
         );
         throw new BadRequestException(
           'Location hierarchy is too deep to validate.',
         );
       }
-      // Live rows only: a soft-deleted parent is not a valid parent.
-      const node: { id: string; parentId: string | null } | null =
-        await this.prisma.location.findFirst({
-          where: { id: cursor },
-          select: { id: true, parentId: true },
-        });
-      if (!node) {
-        // The first miss is the proposed parent itself (bad input); a later miss is a broken chain.
-        throw new BadRequestException(
-          cursor === parentId
-            ? `Parent location ${parentId} not found.`
-            : `Broken parent chain at ${cursor}.`,
-        );
-      }
-      if (node.id === selfId) {
+      if (cursor === selfId) {
         throw new BadRequestException(
           'A location cannot be moved under one of its own descendants.',
         );
       }
-      cursor = node.parentId;
+      const node: { parentId: string | null } | null =
+        await this.prisma.location.findFirst({
+          where: { id: cursor },
+          select: { parentId: true },
+          includeSoftDeleted: true,
+        } as Prisma.LocationFindFirstArgs);
+      cursor = node?.parentId ?? null;
     }
   }
 
