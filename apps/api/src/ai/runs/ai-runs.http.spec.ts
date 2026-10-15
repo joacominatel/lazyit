@@ -283,8 +283,7 @@ describe('the run projection and the submit repair (AUD-075 follow-up)', () => {
     // A finalize whose answer never landed leaves the step open for the next submit to repair.
     const messages = h.rt.prisma.tables.aiMessage;
     messages.rows = messages.rows.filter(
-      (row: { runId: string | null; role: string }) =>
-        !(row.runId === runA && row.role === 'tool'),
+      (row) => !(row.runId === runA && row.role === 'tool'),
     );
     const conversationId = h.rt.run(runA).conversationId as string;
 
@@ -305,8 +304,7 @@ describe('the run projection and the submit repair (AUD-075 follow-up)', () => {
     await h.rt.drain();
     const runB = second.body.runId as string;
     const repairs = messages.rows.filter(
-      (row: { runId: string | null; role: string }) =>
-        row.runId === null && row.role === 'tool',
+      (row) => row.runId === null && row.role === 'tool',
     );
     expect(repairs).toHaveLength(1);
 
