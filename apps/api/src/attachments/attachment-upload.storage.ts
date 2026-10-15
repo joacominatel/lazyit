@@ -26,6 +26,16 @@ export function attachmentsUploadStorage(): StorageEngine {
   });
 }
 
+/** The `FileInterceptor` options every attachment upload route shares. */
+export function attachmentsUploadOptions(maxBytes: number) {
+  return {
+    storage: attachmentsUploadStorage(),
+    limits: { fileSize: maxBytes },
+    // Browsers send the filename as raw UTF-8; multer's latin1 default stored "garantía" as "garantÃ­a".
+    defParamCharset: 'utf8',
+  };
+}
+
 /**
  * Build the `Content-Disposition` value for a served attachment (ADR-0082 §4): `inline` ONLY for
  * the raster image types the KB renders; everything else — PDFs included — is `attachment`
