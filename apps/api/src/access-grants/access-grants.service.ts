@@ -387,15 +387,17 @@ export class AccessGrantsService {
   /**
    * Change the expiry — extend, shorten or clear it (`null` => permanent). A metadata edit, no actor.
    * `expiresAt` is informative: changing it never revokes or reactivates the grant (ADR-0023). 404
-   * if missing.
+   * if missing; 400 if earlier than the stored `grantedAt`, the create schema's rule (AUD-097).
    */
   async updateExpiry(id: string, data: UpdateAccessGrantExpiry) {
-    await this.findOne(id);
+    const grant = await this.findOne(id);
+    const expiresAt = data.expiresAt === null ? null : new Date(data.expiresAt);
+    if (expiresAt !== null && expiresAt.getTime() < grant.grantedAt.getTime()) {
+      throw new BadRequestException('expiresAt must be on or after grantedAt');
+    }
     return this.prisma.accessGrant.update({
       where: { id },
-      data: {
-        expiresAt: data.expiresAt === null ? null : new Date(data.expiresAt),
-      },
+      data: { expiresAt },
     });
   }
 

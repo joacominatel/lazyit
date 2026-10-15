@@ -475,8 +475,14 @@ describe('AccessGrantsService', () => {
   });
 
   // --- updateExpiry -------------------------------------------------------
+  const GRANTED_AT = new Date('2026-01-01T12:00:00.000Z');
+
   it('updates the expiry, converting the ISO string to a Date', async () => {
-    accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
+    accessGrant.findUnique.mockResolvedValue({
+      id: 'g1',
+      revokedAt: null,
+      grantedAt: GRANTED_AT,
+    });
     accessGrant.update.mockResolvedValue({ id: 'g1' });
 
     await service.updateExpiry('g1', { expiresAt: '2027-01-01T00:00:00.000Z' });
@@ -486,7 +492,11 @@ describe('AccessGrantsService', () => {
   });
 
   it('clears the expiry (permanent grant) when passed null', async () => {
-    accessGrant.findUnique.mockResolvedValue({ id: 'g1', revokedAt: null });
+    accessGrant.findUnique.mockResolvedValue({
+      id: 'g1',
+      revokedAt: null,
+      grantedAt: GRANTED_AT,
+    });
     accessGrant.update.mockResolvedValue({ id: 'g1', expiresAt: null });
 
     await service.updateExpiry('g1', { expiresAt: null });
@@ -495,6 +505,33 @@ describe('AccessGrantsService', () => {
       where: { id: 'g1' },
       data: { expiresAt: null },
     });
+  });
+
+  it('AUD-097: rejects an expiry earlier than the stored grantedAt with 400', async () => {
+    accessGrant.findUnique.mockResolvedValue({
+      id: 'g1',
+      revokedAt: null,
+      grantedAt: GRANTED_AT,
+    });
+
+    await expect(
+      service.updateExpiry('g1', { expiresAt: '2026-01-01T00:00:00.000Z' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(accessGrant.update).not.toHaveBeenCalled();
+  });
+
+  it('accepts an expiry exactly at grantedAt (on or after, like create)', async () => {
+    accessGrant.findUnique.mockResolvedValue({
+      id: 'g1',
+      revokedAt: null,
+      grantedAt: GRANTED_AT,
+    });
+    accessGrant.update.mockResolvedValue({ id: 'g1' });
+
+    await service.updateExpiry('g1', { expiresAt: GRANTED_AT.toISOString() });
+
+    const calls = accessGrant.update.mock.calls as UpdateCall[];
+    expect(calls[0][0].data.expiresAt).toEqual(GRANTED_AT);
   });
 
   it('does not update the expiry of a missing grant', async () => {
