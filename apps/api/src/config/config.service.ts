@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { ConfigStatus, IntegrationMode, SetupAdmin } from '@lazyit/shared';
-import { Role } from '../../generated/prisma/client';
+import { Role, type Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectUser } from '../search/search.documents';
@@ -142,18 +142,13 @@ export class ConfigService {
         input.password,
         { mustChangePassword: false },
       );
-      const admin = await this.prisma.user.create({
-        data: {
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          role: Role.ADMIN,
-          ...credential,
-        },
+      const admin = await this.createFirstAdmin({
+        email: input.email,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        role: Role.ADMIN,
+        ...credential,
       });
-      // Immutability enforcement WRITE side (ADR-0086 §1): persist the mode marker at first setup so every
-      // subsequent boot refuses to start if AUTH_MODE is flipped on this now-populated instance.
-      await this.persistAuthModeMarker();
       this.search.upsert('users', projectUser(admin));
       this.auditSetup('setup', admin.id, admin.email, ip, { mode: 'local' });
       return {
@@ -164,16 +159,12 @@ export class ConfigService {
     }
 
     // OIDC: the operator's IdP owns the credential and JIT links the admin on first sign-in (ADR-0102).
-    const admin = await this.prisma.user.create({
-      data: {
-        email: input.email,
-        firstName: input.firstName,
-        lastName: input.lastName,
-        role: Role.ADMIN,
-      },
+    const admin = await this.createFirstAdmin({
+      email: input.email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      role: Role.ADMIN,
     });
-    // Immutability enforcement WRITE side (ADR-0086 §1): persist the 'oidc' mode marker at first setup.
-    await this.persistAuthModeMarker();
     this.search.upsert('users', projectUser(admin));
     this.auditSetup('setup', admin.id, admin.email, ip, {});
     return {
@@ -181,6 +172,19 @@ export class ConfigService {
       email: admin.email,
       setupCompletedAt: admin.createdAt,
     };
+  }
+
+  /**
+   * Create the first ADMIN and persist the auth-mode marker (the immutability WRITE side, ADR-0086 §1) in
+   * one transaction. Apart, a failed marker write left an admin behind: every retry then 409s and the
+   * instance boots with no guard against an `AUTH_MODE` flip (AUD-034).
+   */
+  private createFirstAdmin(data: Prisma.UserCreateInput) {
+    return this.prisma.$transaction(async (tx) => {
+      const admin = await tx.user.create({ data });
+      await this.persistAuthModeMarker(tx);
+      return admin;
+    });
   }
 
   /**
@@ -193,9 +197,11 @@ export class ConfigService {
    * `AUTH_MODE` is guaranteed present + one of shim|local|oidc here (boot-config asserts it before the app
    * boots). The fallback to 'oidc' is defensive dead-code for the type — it is never taken at runtime.
    */
-  private async persistAuthModeMarker(): Promise<void> {
+  private async persistAuthModeMarker(
+    tx: Pick<Prisma.TransactionClient, 'instanceConfig'>,
+  ): Promise<void> {
     const authMode = process.env.AUTH_MODE ?? 'oidc';
-    await this.prisma.instanceConfig.upsert({
+    await tx.instanceConfig.upsert({
       where: { id: 'singleton' },
       create: { id: 'singleton', authMode },
       update: { authMode },

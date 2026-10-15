@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { FixedWindowRateLimiter } from '../../oauth/oauth-rate-limit';
 
 /**
  * PasswordResetRateLimitGuard — a small in-memory fixed-window per-IP rate limiter for the PUBLIC
@@ -28,41 +29,24 @@ const MAX_ATTEMPTS = 10;
 /** Sliding window length. */
 const WINDOW_MS = 60 * 1000; // 1 minute
 
-interface Bucket {
-  count: number;
-  /** Epoch-ms when the current window started; reset once `now - windowStart > WINDOW_MS`. */
-  windowStart: number;
-}
-
 @Injectable()
 export class PasswordResetRateLimitGuard implements CanActivate {
   private readonly logger = new Logger(PasswordResetRateLimitGuard.name);
-  private readonly buckets = new Map<string, Bucket>();
+  private readonly limiter = new FixedWindowRateLimiter(
+    MAX_ATTEMPTS,
+    WINDOW_MS,
+  );
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const key = this.clientKey(request);
-    const now = Date.now();
-
-    this.prune(now);
-
-    const bucket = this.buckets.get(key);
-    if (!bucket || now - bucket.windowStart > WINDOW_MS) {
-      this.buckets.set(key, { count: 1, windowStart: now });
-      return true;
-    }
-
-    if (bucket.count >= MAX_ATTEMPTS) {
-      this.logger.warn(
-        `password-reset rate limit exceeded (${bucket.count} attempts) from ${key}`,
-      );
+    if (!this.limiter.hit(key)) {
+      this.logger.warn(`password-reset rate limit exceeded from ${key}`);
       throw new HttpException(
         'Too many attempts. Please wait a minute and try again.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-
-    bucket.count += 1;
     return true;
   }
 
@@ -72,14 +56,5 @@ export class PasswordResetRateLimitGuard implements CanActivate {
    */
   private clientKey(request: Request): string {
     return request.ip || request.socket?.remoteAddress || 'unknown';
-  }
-
-  /** Drop windows that have fully elapsed so the map stays bounded. */
-  private prune(now: number): void {
-    for (const [key, bucket] of this.buckets) {
-      if (now - bucket.windowStart > WINDOW_MS) {
-        this.buckets.delete(key);
-      }
-    }
   }
 }

@@ -134,9 +134,9 @@ puntos marcados **Nuevo** y decidí de nuevo. Mirá
 ### "Demasiadas contraseñas incorrectas. Probá de nuevo en …"
 
 **Causa:** cinco contraseñas incorrectas seguidas. lazyit bloquea los intentos por un tiempo que crece
-con cada fallo, de un segundo hasta 15 minutos. La cuenta es compartida entre las tarjetas del chat y la
-pantalla de consentimiento de MCP. **Solución:** esperá el tiempo indicado; el botón **Aprobar** vuelve
-solo.
+con cada fallo, de un segundo hasta 15 minutos. La cuenta es compartida entre las tarjetas del chat, la
+pantalla de consentimiento de MCP y la contraseña actual cuando cambiás tu contraseña. **Solución:**
+esperá el tiempo indicado; el botón **Aprobar** vuelve solo.
 
 ### "La confirmación con contraseña no está disponible con tu forma de iniciar sesión"
 

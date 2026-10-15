@@ -9,7 +9,7 @@ import { join, relative } from 'node:path';
 const ALLOWED = new Set([
   // Sign-in: its own per-account backoff and per-IP limiter (ADR-0086 §3).
   'auth/local/login.service.ts',
-  // Change password: the current password, behind the session and its own rate limit.
+  // Change password: only through the step-up primitive (AUD-013); `stepUp.verify(` trips the scan.
   'auth/local/password-lifecycle.service.ts',
   // THE step-up primitive (chat approvals and the OAuth consent).
   'auth/local/password-step-up.verifier.ts',

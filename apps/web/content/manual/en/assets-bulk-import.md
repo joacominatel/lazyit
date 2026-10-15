@@ -49,6 +49,9 @@ object) becomes one asset.
   the upload is refused with a clear message — upgrade this server (or re-export from a matching
   version) before importing. Ordinary spreadsheet or third-party files have no such line and import
   normally.
+- If the background parse cannot finish — typically a file too large or too complex to process — the
+  upload is marked **failed** with a message instead of spinning; split or simplify the file and upload
+  it again. A column literally named `__proto__` is refused too: rename it first.
 
 ## 2. Confirm the summary
 
@@ -234,6 +237,9 @@ follows a **keep-partial** rule:
   succeeded.
 - If a value was taken by someone else between the preview and the commit, that row is recorded as a
   **failure** (not silently dropped), and the rest continue.
+- If the background job itself hits a transient error (for example a brief database outage), it
+  **retries automatically** and resumes after the rows already saved. The import is marked failed only
+  when the retries are exhausted.
 
 The result report shows how many rows were **created**, **failed** and **skipped**, plus the
 **import run** id for your audit trail. If some rows failed, fix them in your file and run the
@@ -262,4 +268,5 @@ how many rows will update live assets **before** you commit, so it's never a sur
 - **Sessions expire.** An in-progress import session is kept for 24 hours and then discarded. The
   audit ledger of a *completed* import is permanent.
 - **Permissions still apply at commit.** Beyond `import:run`, creating a new model or location during
-  a conflict needs the matching write permission; the importer checks this before writing anything.
+  a conflict needs the matching write permission, and so does the category a new model brings with it;
+  the importer checks this before writing anything.

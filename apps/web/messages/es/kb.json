@@ -227,7 +227,9 @@
         "directory": "Entrada de carpeta (sin contenido)",
         "dotfile": "Archivo oculto (dotfile)",
         "unsupported-type": "Tipo de archivo no compatible",
-        "empty": "Archivo vacío"
+        "empty": "Archivo vacío",
+        "failed": "No se pudo importar",
+        "storage-full": "El almacenamiento de adjuntos está lleno"
       },
       "showAll": "Mostrar todos ({count})",
       "collapse": "Contraer",

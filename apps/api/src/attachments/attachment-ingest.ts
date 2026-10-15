@@ -13,6 +13,7 @@ import {
 } from './attachment-storage';
 import { sniffAttachment } from './magic-bytes';
 import { RASTER_FORMATS, reencodeRaster } from './attachment-reencode';
+import { lockBlob, type BlobLockClient } from './blob-lock';
 
 /**
  * DI-free ingest of embedded KB-import images through the attachments pipeline (ADR-0082 §5 — the
@@ -73,6 +74,8 @@ export interface AttachmentIngestPrisma {
       };
     }): Promise<{ id: string }>;
   };
+  // Optional only because the importer's declared transaction type predates the blob lock; Prisma's has it.
+  $executeRaw?: BlobLockClient['$executeRaw'];
 }
 
 /**
@@ -118,8 +121,7 @@ export async function assertWithinAttachmentBudget(
 
 /** Result of ingesting one image: the minted attachment id, or a short skip reason (never thrown). */
 export type IngestImageResult =
-  | { ok: true; attachmentId: string }
-  | { ok: false; reason: string };
+  { ok: true; attachmentId: string } | { ok: false; reason: string };
 
 /**
  * Ingest ONE decoded image through the full attachments pipeline and mint its `Attachment` row bound
@@ -184,6 +186,8 @@ export async function ingestArticleImage(
     await mkdir(tmpDir, { recursive: true });
     await writeFile(tmpPath, reencoded);
     const sha256 = await sha256OfFile(tmpPath);
+    // Held until the import transaction commits the row (AUD-021).
+    if (prisma.$executeRaw) await lockBlob(prisma as BlobLockClient, sha256);
     await promoteBlob(tmpPath, sha256);
     const row = await prisma.attachment.create({
       data: {

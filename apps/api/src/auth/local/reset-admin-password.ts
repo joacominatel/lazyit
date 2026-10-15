@@ -4,7 +4,7 @@
  * reset (a gap the ADR explicitly accepts). Pure-ish and framework-agnostic, mirroring the
  * `reindexIndex` precedent (`src/search/reindex.ts`): it depends only on the small
  * {@link ResetAdminPasswordClient} / {@link ResetAdminPasswordCredentials} surfaces (structural
- * subsets of Prisma's `user` delegate and `LocalCredentialService`), so it is unit-testable with a
+ * subsets of `PrismaClient` and `LocalCredentialService`), so it is unit-testable with a
  * fake client and carries NO Nest/DI dependency of its own. The `apps/api/scripts/reset-admin-
  * password.ts` CLI is a thin wrapper that wires the real `PrismaClient` + `LocalCredentialService`
  * around this function.
@@ -25,21 +25,9 @@ export interface LiveAdminCandidate {
   role: string;
 }
 
-/**
- * The minimal Prisma `user` delegate surface this needs — a structural subset of the real
- * `PrismaClient.user`, so the real client satisfies it and a fake one is trivial to mock. Callers
- * MUST filter `deletedAt: null` themselves (a raw `PrismaClient`, as used by the CLI, has no
- * soft-delete extension — see `set-role.ts`'s precedent) and match on email OR username.
- */
-export interface ResetAdminPasswordClient {
+/** The writes {@link resetAdminPassword} makes, inside one transaction. */
+export interface ResetAdminPasswordTx {
   user: {
-    findFirst(args: {
-      where: {
-        deletedAt: null;
-        OR: Array<{ email: string } | { username: string }>;
-      };
-      select: { id: true; email: true; role: true };
-    }): Promise<LiveAdminCandidate | null>;
     update(args: {
       where: { id: string };
       data: {
@@ -50,6 +38,31 @@ export interface ResetAdminPasswordClient {
       };
     }): Promise<unknown>;
   };
+  passwordResetToken: {
+    updateMany(args: {
+      where: { userId: string; usedAt: null };
+      data: { usedAt: Date };
+    }): Promise<unknown>;
+  };
+}
+
+/**
+ * The minimal Prisma surface this needs — a structural subset of the real `PrismaClient`, so the real
+ * client satisfies it and a fake one is trivial to mock. Callers MUST filter `deletedAt: null`
+ * themselves (a raw `PrismaClient`, as used by the CLI, has no soft-delete extension — see
+ * `set-role.ts`'s precedent) and match on email OR username.
+ */
+export interface ResetAdminPasswordClient {
+  user: {
+    findFirst(args: {
+      where: {
+        deletedAt: null;
+        OR: Array<{ email: string } | { username: string }>;
+      };
+      select: { id: true; email: true; role: true };
+    }): Promise<LiveAdminCandidate | null>;
+  };
+  $transaction<T>(fn: (tx: ResetAdminPasswordTx) => Promise<T>): Promise<T>;
 }
 
 /** The minimal hashing surface — satisfied by `LocalCredentialService`. */
@@ -71,7 +84,8 @@ export interface ResetAdminPasswordResult {
  * (the app's argon2id, so the result verifies exactly like any app-set hash), sets
  * `passwordHash`/`passwordUpdatedAt`, and increments `sessionEpoch` by 1 (revokes every existing
  * session for the account, ADR-0086 §3) and `mcpCredentialEpoch` by 1 (revokes every MCP connection and
- * personal token, ADR-0097 decision 8 as amended).
+ * personal token, ADR-0097 decision 8 as amended) — and marks every outstanding password-reset token
+ * used, in the same transaction.
  */
 export async function resetAdminPassword(
   prisma: ResetAdminPasswordClient,
@@ -106,17 +120,25 @@ export async function resetAdminPassword(
   }
 
   const passwordHash = await credentials.hash(password);
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      passwordHash,
-      passwordUpdatedAt: new Date(),
-      // Revoke every existing session for this account (ADR-0086 §3) — a stale token minted before
-      // the reset compares its `epoch` claim against the row's (now-bumped) `sessionEpoch` and fails.
-      sessionEpoch: { increment: 1 },
-      // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
-      mcpCredentialEpoch: { increment: 1 },
-    },
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        passwordUpdatedAt: now,
+        // Revoke every existing session for this account (ADR-0086 §3) — a stale token minted before
+        // the reset compares its `epoch` claim against the row's (now-bumped) `sessionEpoch` and fails.
+        sessionEpoch: { increment: 1 },
+        // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
+        mcpCredentialEpoch: { increment: 1 },
+      },
+    });
+    // An emailed reset link still in flight would overwrite the recovered password (AUD-081).
+    await tx.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: now },
+    });
   });
 
   return { id: user.id, email: user.email };

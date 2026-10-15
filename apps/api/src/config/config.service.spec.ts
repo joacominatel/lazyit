@@ -63,6 +63,7 @@ describe('ConfigService', () => {
   let service: ConfigService;
   let user: PrismaUserMock;
   let instanceConfig: { upsert: jest.Mock };
+  let transaction: jest.Mock;
   let provisioning: {
     credentialFields: jest.Mock;
     generateTempPassword: jest.Mock;
@@ -83,7 +84,11 @@ describe('ConfigService', () => {
     };
     // instance_config marker (ADR-0086 §1): setup upserts the auth-mode marker on success.
     instanceConfig = { upsert: jest.fn().mockResolvedValue(undefined) };
-    const prisma = { user, instanceConfig };
+    // setup's admin row and mode marker commit in one transaction (AUD-034); the tx client is the same mocks.
+    transaction = jest.fn((fn: (tx: unknown) => unknown) =>
+      Promise.resolve(fn({ user, instanceConfig })),
+    );
+    const prisma = { user, instanceConfig, $transaction: transaction };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
     // Local provisioning primitive (ADR-0086 §5): hashes the local admin's password on setup.
     provisioning = {
@@ -275,6 +280,28 @@ describe('ConfigService', () => {
         create: { id: 'singleton', authMode: 'oidc' },
         update: { authMode: 'oidc' },
       });
+    });
+
+    it('creates the admin and writes the marker in ONE transaction, so a failed marker leaves no admin (AUD-034)', async () => {
+      user.count.mockResolvedValue(0);
+      const txUser = { create: jest.fn().mockResolvedValue(makeAdminRow()) };
+      const txInstanceConfig = {
+        upsert: jest.fn().mockRejectedValue(new Error('connection reset')),
+      };
+      transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
+        Promise.resolve(fn({ user: txUser, instanceConfig: txInstanceConfig })),
+      );
+
+      await expect(
+        service.setup(SETUP_INPUT_NO_PASSWORD, '203.0.113.7'),
+      ).rejects.toThrow('connection reset');
+
+      expect(txUser.create).toHaveBeenCalledTimes(1);
+      expect(txInstanceConfig.upsert).toHaveBeenCalledTimes(1);
+      // Nothing outside the transaction: its rollback takes the admin row with it.
+      expect(user.create).not.toHaveBeenCalled();
+      expect(instanceConfig.upsert).not.toHaveBeenCalled();
+      expect(search.upsert).not.toHaveBeenCalled();
     });
 
     it('409s when an ADMIN already exists (idempotent one-time gate) and never creates a row', async () => {

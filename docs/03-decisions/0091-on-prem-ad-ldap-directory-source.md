@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-10-05
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -96,6 +96,10 @@ uniques.
   rest of the sweep continues. The next run re-evaluates, so they are offboarded as soon as another active
   ADMIN exists. The predicate is the same one the `PATCH /users` last-admin guard uses
   (`UsersService.hasAnotherActiveAdmin`, [[0040-rbac-roles]]).
+  *Amended 2026-10-14 (AUD-041):* the check runs inside the offboard's own transaction, through
+  `UsersService.wouldRemoveLastAdmin`, under the same admin-set advisory lock as the `PATCH /users` and
+  offboard guards, and judges the person as they stand under that lock. A sync offboard racing an admin
+  demotion of the other remaining ADMIN therefore serialises with it, and one ADMIN always remains.
   *Amended 2026-10-05 (#1311):* "only when *we* set it" is enforced by never stamping what we did not
   deactivate. The sweep **skips a person who is already inactive** — nothing written, counted as
   `skipped` — so a manual deactivation never carries `directoryOffboardedAt` and a reappearance leaves it

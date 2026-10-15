@@ -227,7 +227,9 @@
         "directory": "Folder entry (no content)",
         "dotfile": "Hidden file (dotfile)",
         "unsupported-type": "Unsupported file type",
-        "empty": "Empty file"
+        "empty": "Empty file",
+        "failed": "Could not be imported",
+        "storage-full": "Attachment storage is full"
       },
       "showAll": "Show all {count}",
       "collapse": "Collapse",

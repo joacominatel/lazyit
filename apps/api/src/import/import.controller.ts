@@ -29,8 +29,6 @@ import {
   ImportSessionViewSchema,
   ImportCommitResultSchema,
   type ImportEntity,
-  type ImportMapping,
-  type ImportResolutionPlan,
 } from '@lazyit/shared';
 import { ImportSessionService } from './import-session.service';
 import { ImportDryRunService } from './dry-run.service';
@@ -43,9 +41,13 @@ import { isServicePrincipal, type Principal } from '../auth/principal';
 
 // Wire DTOs — the request bodies are validated by the global ZodValidationPipe against these shapes.
 class ImportMappingDto extends createZodDto(ImportMappingSchema) {}
-class ImportResolutionPlanDto extends createZodDto(ImportResolutionPlanSchema) {}
+class ImportResolutionPlanDto extends createZodDto(
+  ImportResolutionPlanSchema,
+) {}
 // Response envelopes (for OpenAPI).
-class ImportSessionAcceptedDto extends createZodDto(ImportSessionAcceptedSchema) {}
+class ImportSessionAcceptedDto extends createZodDto(
+  ImportSessionAcceptedSchema,
+) {}
 class ImportSessionViewDto extends createZodDto(ImportSessionViewSchema) {}
 class ImportDryRunReportDto extends createZodDto(ImportDryRunReportSchema) {}
 class ImportCommitResultDto extends createZodDto(ImportCommitResultSchema) {}
@@ -112,25 +114,39 @@ export class ImportController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     if (!file) {
-      throw new BadRequestException('A file is required (multipart field "file").');
+      throw new BadRequestException(
+        'A file is required (multipart field "file").',
+      );
     }
     // Phase 1 targets Asset only; the field is accepted for forward-compatibility but validated against
     // the frozen enum (unknown value → 400).
-    const entity: ImportEntity = entityRaw
-      ? ImportEntitySchema.parse(entityRaw)
-      : 'asset';
+    let entity: ImportEntity = 'asset';
+    if (entityRaw) {
+      const parsed = ImportEntitySchema.safeParse(entityRaw);
+      if (!parsed.success) {
+        throw new BadRequestException(
+          `Unsupported import entity. Supported: ${ImportEntitySchema.options.join(', ')}.`,
+        );
+      }
+      entity = parsed.data;
+    }
     const format = detectImportFormat(file.originalname);
-    return this.sessions.createAndParse(this.ownerId(principal), entity, format, {
-      originalname: file.originalname,
-      buffer: file.buffer,
-      size: file.size,
-    });
+    return this.sessions.createAndParse(
+      this.ownerId(principal),
+      entity,
+      format,
+      {
+        originalname: file.originalname,
+        buffer: file.buffer,
+        size: file.size,
+      },
+    );
   }
 
   @Get(':id')
   @ApiOperation({
     summary:
-      'Poll an import session (owner-scoped): status, detected shape (headers/dialect/encoding/rowCount) and parsed rows. 404 for an unknown id or another owner\'s session. (ADR-0069)',
+      "Poll an import session (owner-scoped): status, detected shape (headers/dialect/encoding/rowCount) and parsed rows. 404 for an unknown id or another owner's session. (ADR-0069)",
   })
   @ApiOkResponse({ type: ImportSessionViewDto })
   status(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
@@ -150,7 +166,7 @@ export class ImportController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     const owner = this.ownerId(principal);
-    await this.sessions.setMapping(id, owner, dto as unknown as ImportMapping);
+    await this.sessions.setMapping(id, owner, dto);
     return this.sessions.getForOwner(id, owner);
   }
 
@@ -161,7 +177,10 @@ export class ImportController {
       'Run the dry-run for a MAPPED session (owner-scoped) — WRITES NOTHING. Returns per-row outcomes, the deduped conflict set and the per-row asset-tag decisions for the operator to resolve. (ADR-0069 §5/§6/§7)',
   })
   @ApiOkResponse({ type: ImportDryRunReportDto })
-  runDryRun(@Param('id') id: string, @CurrentPrincipal() principal?: Principal) {
+  runDryRun(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
     return this.dryRun.dryRun(id, this.ownerId(principal));
   }
 
@@ -169,7 +188,7 @@ export class ImportController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      "Freeze the operator's resolved conflict plan onto a session and advance it to DRY_RUN (owner-scoped). The plan is the immutable input the commit replays. (ADR-0069 §6)",
+      "Freeze the operator's resolved conflict plan onto a session and advance it to DRY_RUN (owner-scoped). 409 unless the session is MAPPED or DRY_RUN with a confirmed mapping. The plan is the immutable input the commit replays. (ADR-0069 §6)",
   })
   @ApiOkResponse({ type: ImportSessionViewDto })
   async savePlan(
@@ -178,11 +197,7 @@ export class ImportController {
     @CurrentPrincipal() principal?: Principal,
   ) {
     const owner = this.ownerId(principal);
-    await this.dryRun.saveResolutionPlan(
-      id,
-      owner,
-      dto as unknown as ImportResolutionPlan,
-    );
+    await this.dryRun.saveResolutionPlan(id, owner, dto);
     return this.sessions.getForOwner(id, owner);
   }
 

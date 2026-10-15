@@ -38,6 +38,13 @@ como una cuenta de servicio.
 Elige un archivo `.md`, `.txt` o `.docx`, escoge una categoría y un estado, e **Importar**. El archivo
 se procesa y vas directamente al nuevo artículo. Los archivos grandes tardan un momento.
 
+El slug del artículo (su dirección) se construye a partir de su título, que sale del nombre del
+archivo. Si ese slug ya está ocupado, se le añade un sufijo numérico (`-2`, `-3`, …), igual que en una
+importación en lote. Un nombre de archivo sin letras ni números no puede generar un slug: la
+importación falla y te pide renombrar el archivo e importarlo de nuevo. Una importación por la API
+que indica su propio slug lo conserva tal cual, y falla con un mensaje de "slug ya existente" si otro
+artículo lo tiene.
+
 > [!NOTE]
 > La pantalla **Nuevo artículo** también te deja arrastrar un archivo sobre el formulario, pero ese
 > atajo lee el archivo en tu navegador, así que solo admite `.md`, `.markdown` y `.txt`. **Los
@@ -69,7 +76,12 @@ para que nada quede en silencio:
 - **Renombrados** — importados, pero con sufijo automático en el slug para evitar un choque (se muestra
   el nombre solicitado).
 - **Omitidos** — entradas que no se importaron, con el motivo (una entrada de carpeta, un archivo
-  oculto, un tipo no admitido o un archivo vacío).
+  oculto, un tipo no admitido, un archivo vacío, el almacenamiento de adjuntos lleno o un error al
+  crear ese artículo concreto).
+
+Una entrada que falla no detiene el resto: aparece como omitida y las demás entradas se importan
+igualmente. Corrige la causa (por ejemplo, libera almacenamiento de adjuntos) e importa de nuevo los
+archivos omitidos.
 
 El resumen también informa cuántas carpetas se crearon y cuántos enlaces wiki se reconectaron.
 Revísalo y luego cierra el diálogo — una importación en lote no te lleva a un único artículo.
@@ -99,9 +111,10 @@ que un runbook migrado de Word o Markdown conserva sus capturas:
   **SVG** o HTML — no se importan. Expórtalos a PNG primero.
 - Cada imagen pasa las **mismas comprobaciones que una subida en el editor**: se verifica su tipo real,
   se vuelve a codificar (eliminando metadatos de cámara/ubicación) y cuenta contra el **límite de
-  almacenamiento** de adjuntos de tu instancia. Una imagen ilegible se descarta del artículo; si el
-  almacenamiento de adjuntos está **lleno**, toda la importación falla con un mensaje claro — libera
-  espacio (o pide a tu administrador que suba el límite) e importa de nuevo. Los documentos con una
+  almacenamiento** de adjuntos de tu instancia. Una imagen ilegible se descarta del artículo. Si el
+  almacenamiento de adjuntos está **lleno**, una importación de un solo archivo falla con un mensaje
+  claro, y en un `.zip` esa entrada se omite mientras las demás se importan — libera espacio (o pide
+  a tu administrador que suba el límite) e impórtala de nuevo. Los documentos con una
   cantidad muy grande de imágenes incrustadas conservan solo las primeras varias docenas.
 
 Las referencias que escribas tú a imágenes ya subidas en lazyit (enlaces `attachment:`) se conservan

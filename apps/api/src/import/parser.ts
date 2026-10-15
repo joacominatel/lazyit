@@ -318,7 +318,7 @@ function parseJson(text: string): ParseResult {
   // Backfill missing keys to '' so every row has every header (a sparse JSON record is legal).
   for (const row of rows) {
     for (const h of headers) {
-      if (!(h in row)) row[h] = '';
+      if (!Object.hasOwn(row, h)) row[h] = '';
     }
   }
 
@@ -369,9 +369,16 @@ export function parseImport(buffer: Buffer, format: ImportFormat): ParseResult {
     return { ok: false, reason: incompatibleReason };
   }
   const result = format === 'csv' ? parseCsv(text) : parseJson(text);
-  // Stamp the real BOM detection (the CSV path can't see the original buffer).
-  if (result.ok) {
-    result.dialect.hadBom = hadBom;
+  if (!result.ok) return result;
+  // Assigning row['__proto__'] is a silent no-op, so the column would read back as Object.prototype (AUD-055).
+  if (result.headers.includes('__proto__')) {
+    return {
+      ok: false,
+      reason:
+        'The file has a column named "__proto__", which is a reserved name. Rename that column and upload it again.',
+    };
   }
+  // Stamp the real BOM detection (the CSV path can't see the original buffer).
+  result.dialect.hadBom = hadBom;
   return result;
 }

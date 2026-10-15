@@ -2406,4 +2406,80 @@ describe('ImportCommitService.commit', () => {
       expect(lastCall[1]).not.toContain('user:manage');
     });
   });
+
+  // AUD-087: a created model find-or-creates its category from modelConfig, so that path writes AssetCategory.
+  describe('enqueueCommit AND-check for categories created through a model', () => {
+    const createModel = plan({
+      conflicts: [
+        {
+          entity: 'AssetModel',
+          field: 'modelId',
+          normalizedValue: 'X1',
+          outcome: 'create',
+          targetId: null,
+        },
+      ],
+    });
+    const rows: FixtureRow[] = [
+      {
+        id: 1,
+        rowIndex: 0,
+        status: 'VALID',
+        raw: { Name: 'A', Status: 'active', Model: 'X1', Category: 'Laptop' },
+      },
+    ];
+
+    it('requires category:write when a created model carries a category — denies (403) without it', async () => {
+      const permissions = makePermissions(async (_role, required: string[]) => {
+        return !required.includes('category:write');
+      });
+      const { service, queue } = makeService(
+        sessionWithMapping(rows, createModel, MODEL_CONFIG_MAPPING),
+        { permissions },
+      );
+
+      await expect(
+        service.enqueueCommit('sess-1', OWNER),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(queue.add).not.toHaveBeenCalled();
+      const required = permissions.hasAll.mock.calls[0][1] as string[];
+      expect([...required].sort()).toEqual(
+        ['asset:write', 'assetModel:write', 'category:write'].sort(),
+      );
+    });
+
+    it('does NOT require category:write when the model only matches, or modelConfig has no category', async () => {
+      const matchModel = plan({
+        conflicts: [
+          {
+            entity: 'AssetModel',
+            field: 'modelId',
+            normalizedValue: 'X1',
+            outcome: 'match',
+            targetId: 'cmod000000000000000000001',
+          },
+        ],
+      });
+      const noCategory = mapping({
+        columns: [
+          { field: 'name', column: 'Name' },
+          { field: 'status', column: 'Status' },
+        ],
+        enums: [],
+        references: [{ field: 'modelId', column: 'Model' }],
+        modelConfig: { manufacturerColumn: 'Manufacturer' },
+      });
+
+      for (const state of [
+        sessionWithMapping(rows, matchModel, MODEL_CONFIG_MAPPING),
+        sessionWithMapping(rows, createModel, noCategory),
+      ]) {
+        const permissions = makePermissions(async () => true);
+        const { service } = makeService(state, { permissions });
+        await service.enqueueCommit('sess-1', OWNER);
+        const required = permissions.hasAll.mock.calls[0][1] as string[];
+        expect(required).not.toContain('category:write');
+      }
+    });
+  });
 });

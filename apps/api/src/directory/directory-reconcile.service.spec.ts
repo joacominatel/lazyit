@@ -21,15 +21,16 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 // transform it. The reconcile only uses the fake UsersService below, so a bare stub is enough.
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
-import { Logger } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { DirectoryReconcileService } from './directory-reconcile.service';
+import type { Prisma } from '../../generated/prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { DirectoryConnectionService } from './directory-connection.service';
 import type {
   DirectoryEntry,
   DirectoryLdapClient,
 } from './directory-ldap.client';
-import type { UsersService } from '../users/users.service';
+import { UsersService } from '../users/users.service';
 import type { UserHistoryService } from '../user-history/user-history.service';
 
 /**
@@ -176,12 +177,26 @@ function makeService(opts: {
   const ldap = { fetchEntries } as unknown as DirectoryLdapClient;
 
   const usersCreate = jest.fn().mockResolvedValue({ id: 'new-person' });
-  const hasAnotherActiveAdmin = jest
-    .fn()
-    .mockResolvedValue(opts.anotherActiveAdmin ?? true);
+  // Stands in for the locked check: judges the person against the predicate the reconcile passes.
+  const wouldRemoveLastAdmin = jest.fn(
+    (
+      _tx: unknown,
+      id: string,
+      removesAdminPowers: (t: { role: string; isActive: boolean }) => boolean,
+    ) => {
+      const person = opts.localPeople.find((p) => p.id === id);
+      const target = {
+        role: person?.role ?? 'MEMBER',
+        isActive: person?.isActive ?? false,
+      };
+      return Promise.resolve(
+        removesAdminPowers(target) && !(opts.anotherActiveAdmin ?? true),
+      );
+    },
+  );
   const users = {
     create: usersCreate,
-    hasAnotherActiveAdmin,
+    wouldRemoveLastAdmin,
   } as unknown as UsersService;
 
   const historyRecord = jest.fn().mockResolvedValue({});
@@ -202,7 +217,7 @@ function makeService(opts: {
     txUserUpdate,
     txUserUpdateMany,
     usersCreate,
-    hasAnotherActiveAdmin,
+    wouldRemoveLastAdmin,
     historyRecord,
     recordRun,
   };
@@ -682,22 +697,22 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       const warn = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
-      const {
-        service,
-        txUserUpdateMany,
-        historyRecord,
-        hasAnotherActiveAdmin,
-      } = makeService({
-        graceDays: 7,
-        localPeople: [goneAdmin, goneMember],
-        entries: [],
-        anotherActiveAdmin: false,
-      });
+      const { service, txUserUpdateMany, historyRecord, wouldRemoveLastAdmin } =
+        makeService({
+          graceDays: 7,
+          localPeople: [goneAdmin, goneMember],
+          entries: [],
+          anotherActiveAdmin: false,
+        });
 
       const result = await service.reconcile();
 
       expect(result.ok).toBe(true);
-      expect(hasAnotherActiveAdmin).toHaveBeenCalledWith('u-admin');
+      expect(wouldRemoveLastAdmin).toHaveBeenCalledWith(
+        expect.anything(),
+        'u-admin',
+        expect.any(Function),
+      );
       expect(result.counts.offboarded).toBe(1);
       expect(result.counts.skipped).toBe(1);
       // Only the member is written; the admin row is untouched (no isActive flip, no history).
@@ -733,8 +748,8 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
       expect(data.isActive).toBe(false);
     });
 
-    it('never consults the predicate for a non-admin or an already-inactive admin', async () => {
-      const { service, hasAnotherActiveAdmin } = makeService({
+    it('offboards a non-admin even with no other active ADMIN, and never reaches the check for an inactive admin', async () => {
+      const { service, wouldRemoveLastAdmin, txUserUpdateMany } = makeService({
         graceDays: 7,
         localPeople: [goneMember, { ...goneAdmin, isActive: false }],
         entries: [],
@@ -745,7 +760,183 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
 
       expect(result.counts.offboarded).toBe(1);
       expect(result.counts.skipped).toBe(1);
-      expect(hasAnotherActiveAdmin).not.toHaveBeenCalled();
+      expect(wouldRemoveLastAdmin).toHaveBeenCalledTimes(1);
+      expect(nthCall<[unknown, string]>(wouldRemoveLastAdmin, 0)[1]).toBe(
+        'u-member',
+      );
+      expect(nthCall<[UpdateManyArg]>(txUserUpdateMany, 0)[0].where.id).toBe(
+        'u-member',
+      );
+    });
+
+    it('runs the check in the offboard transaction, before the write', async () => {
+      const { service, wouldRemoveLastAdmin, txUserUpdateMany } = makeService({
+        graceDays: 7,
+        localPeople: [goneAdmin],
+        entries: [],
+        anotherActiveAdmin: true,
+      });
+
+      await service.reconcile();
+
+      const [checkTx] = nthCall<[{ user: { updateMany: jest.Mock } }]>(
+        wouldRemoveLastAdmin,
+        0,
+      );
+      expect(checkTx.user.updateMany).toBe(txUserUpdateMany);
+      expect(wouldRemoveLastAdmin.mock.invocationCallOrder[0]).toBeLessThan(
+        txUserUpdateMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    // AUD-041: the sync offboarding one of the last two admins while an operator demotes the other. The
+    // real UsersService check runs over a tiny in-memory "database" whose advisory lock is held until its
+    // transaction settles, and every read yields once so the two interleave like concurrent requests.
+    it('a concurrent demotion of the other admin and the offboard cannot both land: one ADMIN remains', async () => {
+      type Row = {
+        role: string;
+        isActive: boolean;
+        deletedAt: Date | null;
+      };
+      const rows: Record<string, Row> = {
+        'u-admin': { role: 'ADMIN', isActive: true, deletedAt: null },
+        'u-other': { role: 'ADMIN', isActive: true, deletedAt: null },
+      };
+      const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+      const user = {
+        findMany: jest.fn().mockResolvedValue([goneAdmin]),
+        findFirst: jest.fn(async ({ where }: { where: { id: string } }) => {
+          await tick();
+          const row = rows[where.id];
+          return row && row.deletedAt === null ? { ...row } : null;
+        }),
+        count: jest.fn(
+          async ({
+            where,
+          }: {
+            where: { role: string; isActive: boolean; id: { not: string } };
+          }) => {
+            await tick();
+            return Object.entries(rows).filter(
+              ([id, r]) =>
+                id !== where.id.not &&
+                r.role === where.role &&
+                r.isActive === where.isActive &&
+                r.deletedAt === null,
+            ).length;
+          },
+        ),
+        update: jest.fn(
+          async ({
+            where,
+            data,
+          }: {
+            where: { id: string };
+            data: { role: string };
+          }) => {
+            await tick();
+            rows[where.id].role = data.role;
+            return {};
+          },
+        ),
+        updateMany: jest.fn(
+          async ({ where }: { where: { id: string; isActive: boolean } }) => {
+            await tick();
+            const row = rows[where.id];
+            if (!row || row.isActive !== where.isActive || row.deletedAt) {
+              return { count: 0 };
+            }
+            row.isActive = false;
+            return { count: 1 };
+          },
+        ),
+      };
+      let held: Promise<void> = Promise.resolve();
+      const prisma = {
+        user,
+        $transaction: jest.fn(
+          async (fn: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+            let release: () => void = () => undefined;
+            const tx = {
+              user,
+              $executeRaw: jest.fn(async () => {
+                const previous = held;
+                held = new Promise<void>((resolve) => (release = resolve));
+                await previous;
+                return 0;
+              }),
+            } as unknown as Prisma.TransactionClient;
+            try {
+              return await fn(tx);
+            } finally {
+              release();
+            }
+          },
+        ),
+      } as unknown as PrismaService;
+      const users = new UsersService(
+        prisma,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      );
+      const config = {
+        resolveConfig: jest.fn().mockResolvedValue({}),
+        getAttributeMap: jest.fn().mockResolvedValue({}),
+        getOffboardGraceDays: jest.fn().mockResolvedValue(7),
+        getServiceAccountId: jest.fn().mockResolvedValue(null),
+        recordRun: jest.fn().mockResolvedValue(undefined),
+      } as unknown as DirectoryConnectionService;
+      const ldap = {
+        fetchEntries: jest.fn().mockResolvedValue([]),
+      } as unknown as DirectoryLdapClient;
+      const history = {
+        record: jest.fn().mockResolvedValue({}),
+      } as unknown as UserHistoryService;
+      const service = new DirectoryReconcileService(
+        prisma,
+        config,
+        ldap,
+        users,
+        history,
+      );
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      // The demotion goes through the same lock-and-recount the PATCH /users guard uses.
+      const demote = prisma.$transaction(async (tx) => {
+        if (
+          await users.wouldRemoveLastAdmin(
+            tx,
+            'u-other',
+            (t) => t.role === 'ADMIN',
+          )
+        ) {
+          throw new ConflictException('last admin');
+        }
+        await tx.user.update({
+          where: { id: 'u-other' },
+          data: { role: 'MEMBER' },
+        });
+      });
+      const [sync, demotion] = await Promise.allSettled([
+        service.reconcile(),
+        demote,
+      ]);
+
+      const liveAdmins = Object.values(rows).filter(
+        (r) => r.role === 'ADMIN' && r.isActive && r.deletedAt === null,
+      ).length;
+      expect(liveAdmins).toBe(1);
+      expect(sync.status).toBe('fulfilled');
+      const offboarded =
+        sync.status === 'fulfilled' ? sync.value.counts.offboarded : -1;
+      expect(offboarded + (demotion.status === 'fulfilled' ? 1 : 0)).toBe(1);
     });
   });
 

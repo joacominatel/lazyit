@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Logger as NestLogger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ jest.mock('../../smtp/email.mailer', () => ({
 import { renderPasswordResetEmail } from '../../smtp/email.mailer';
 import { PasswordLifecycleService } from './password-lifecycle.service';
 import { LocalCredentialService } from './local-credential.service';
+import { PasswordStepUpVerifier } from './password-step-up.verifier';
 import { hashResetToken } from './password-reset-token';
 
 const VALID_ID = '11111111-1111-1111-1111-111111111111';
@@ -345,6 +347,36 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(txUserUpdateMany).not.toHaveBeenCalled();
       expect(historyRecord).not.toHaveBeenCalled();
+    });
+
+    it('backs off repeated wrong current passwords with a 429, even for the right one (AUD-013)', async () => {
+      const stepUp = new PasswordStepUpVerifier(credentials);
+      stepUp.now = () => 1_000_000;
+      service = new PasswordLifecycleService(
+        prisma as never,
+        credentials,
+        { record: historyRecord } as never,
+        { resolveConfig } as never,
+        undefined,
+        stepUp,
+      );
+      const hash = await credentials.hash('right-pw');
+      const user = makeUser({ passwordHash: hash });
+      for (let i = 0; i < 6; i++) {
+        await expect(
+          service.changePassword(user as never, 'wrong-pw', 'NewPass1!'),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+
+      const locked = await service
+        .changePassword(user as never, 'right-pw', 'NewPass1!')
+        .catch((err: unknown) => err);
+      expect(locked).toBeInstanceOf(HttpException);
+      expect((locked as HttpException).getStatus()).toBe(429);
+      expect((locked as HttpException).getResponse()).toMatchObject({
+        code: 'STEP_UP_RATE_LIMITED',
+      });
+      expect(txUserUpdateMany).not.toHaveBeenCalled();
     });
 
     it('F-2: rejects a new password identical to the current one (defeats forced-rotation bypass)', async () => {

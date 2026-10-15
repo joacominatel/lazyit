@@ -11,6 +11,7 @@ import {
   sha256OfFile,
 } from './attachment-storage';
 import { RASTER_FORMATS, reencodeRaster } from './attachment-reencode';
+import { lockBlob, tryLockBlob } from './blob-lock';
 
 /**
  * BullMQ SANDBOXED processor for the `attachment-reencode` queue (ADR-0082 §3 / ADR-0053). Raster
@@ -80,20 +81,26 @@ const processor = async (
 
     const newSha = await sha256OfFile(tmpPath);
     const newSize = (await stat(tmpPath)).size;
-    await promoteBlob(tmpPath, newSha);
-    await prisma.attachment.update({
-      where: { id: row.id },
-      data: { sha256: newSha, byteSize: newSize },
+    await prisma.$transaction(async (tx) => {
+      await lockBlob(tx, newSha);
+      await promoteBlob(tmpPath, newSha);
+      await tx.attachment.update({
+        where: { id: row.id },
+        data: { sha256: newSha, byteSize: newSize },
+      });
     });
     if (newSha !== row.sha256) {
       // Reclaim the pre-encode blob unless something else (any row, incl. soft-deleted — the GC's
-      // audit trail) still points at it. Dedup-safe by construction.
-      const stillReferenced = await prisma.attachment.count({
-        where: { sha256: row.sha256 },
+      // audit trail) still points at it. Under the blob lock; a contested one is left to the GC's pass 3.
+      await prisma.$transaction(async (tx) => {
+        if (!(await tryLockBlob(tx, row.sha256))) return;
+        const stillReferenced = await tx.attachment.count({
+          where: { sha256: row.sha256 },
+        });
+        if (stillReferenced === 0) {
+          await rm(src, { force: true });
+        }
       });
-      if (stillReferenced === 0) {
-        await rm(src, { force: true });
-      }
     }
     return { ok: true };
   } catch (err) {

@@ -84,7 +84,8 @@ export class PasswordLifecycleController {
       'Verifies the current password, sets the new one (strength-enforced), revokes all OTHER sessions ' +
       '(session-epoch bump) and clears any forced-change flag. Returns a fresh session token (and its ' +
       '`expiresAt`) so the caller stays logged in; a "keep me signed in" session keeps that property. ' +
-      'Only functional in AUTH_MODE=local.',
+      'Wrong current passwords share the step-up per-account backoff: past five, 429 `STEP_UP_RATE_LIMITED` ' +
+      'with `retryAfterSec`. Only functional in AUTH_MODE=local.',
   })
   @ApiOkResponse({ type: ChangePasswordResponseDto })
   async changePassword(

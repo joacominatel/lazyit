@@ -31,6 +31,9 @@ import type { ImportFormat } from './parser';
 /** Session TTL — the wizard is short-lived; a GC sweeper hard-deletes expired sessions (later wave). */
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
+const PARSE_CRASHED_MESSAGE =
+  'The file could not be processed. It may be too large or too complex; try a smaller file.';
+
 /** Map the @lazyit/shared lowercase entity literal to the Prisma uppercase enum member. */
 const PRISMA_ENTITY: Record<ImportEntity, 'ASSET'> = { asset: 'ASSET' };
 
@@ -115,6 +118,8 @@ export class ImportSessionService {
         // A parse failure is PERMANENT (a malformed file won't parse on a retry) — and a re-run would
         // just kill another child if it was a bomb (SEC-002). The worker records FAILED on the session.
         attempts: 1,
+        // Keyed by session so a read can find a parse that died outside runParseJob (OOM-killed child).
+        jobId: session.id,
         removeOnComplete: { age: 3600, count: 1000 },
         removeOnFail: { age: 24 * 3600, count: 1000 },
       });
@@ -170,6 +175,14 @@ export class ImportSessionService {
       throw new NotFoundException(`Import session ${sessionId} not found`);
     }
 
+    if (session.status === 'PENDING' || session.status === 'PARSING') {
+      const error = await this.failDeadParse(session.id);
+      if (error) {
+        session.status = 'FAILED';
+        session.error = error;
+      }
+    }
+
     const detected = (session.detected as DetectedShape | null) ?? null;
     return {
       id: session.id,
@@ -190,6 +203,24 @@ export class ImportSessionService {
         raw: r.raw as Record<string, string>,
       })),
     };
+  }
+
+  /** A parse job BullMQ already failed (OOM-killed child, DB error) never wrote FAILED itself (AUD-054). */
+  private async failDeadParse(
+    sessionId: string,
+  ): Promise<{ phase: string; message: string } | null> {
+    try {
+      const job = await this.queue.getJob(sessionId);
+      if (!job || !(await job.isFailed())) return null;
+    } catch {
+      return null;
+    }
+    const error = { phase: 'parse', message: PARSE_CRASHED_MESSAGE };
+    await this.prisma.importSession.updateMany({
+      where: { id: sessionId, status: { in: ['PENDING', 'PARSING'] } },
+      data: { status: 'FAILED', error },
+    });
+    return error;
   }
 
   /**

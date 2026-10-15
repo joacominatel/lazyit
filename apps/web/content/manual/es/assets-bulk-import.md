@@ -50,6 +50,10 @@ fila (u objeto) se convierte en un activo.
   que importas, la subida se rechaza con un mensaje claro — actualiza este servidor (o re-exporta desde
   una versión compatible) antes de importar. Las hojas de cálculo o archivos de terceros habituales no
   tienen esa línea y se importan con normalidad.
+- Si el análisis en segundo plano no puede terminar — normalmente un archivo demasiado grande o complejo
+  para procesar — la subida se marca como **fallida** con un mensaje en lugar de quedarse esperando;
+  divide o simplifica el archivo y vuelve a subirlo. También se rechaza una columna llamada literalmente
+  `__proto__`: renómbrala antes.
 
 ## 2. Confirma el resumen
 
@@ -253,6 +257,9 @@ Cuando el plan está listo, la importación se ejecuta en segundo plano. Es **po
   éxito.
 - Si alguien tomó un valor entre la vista previa y la confirmación, esa fila se registra como un
   **fallo** (no se descarta en silencio), y el resto continúa.
+- Si el propio trabajo en segundo plano sufre un error transitorio (por ejemplo, una caída breve de la
+  base de datos), **reintenta automáticamente** y continúa después de las filas ya guardadas. La
+  importación se marca como fallida solo cuando se agotan los reintentos.
 
 El informe de resultados muestra cuántas filas se **crearon**, **fallaron** y se **omitieron**, además
 del id de la **ejecución de importación** para tu auditoría. Si algunas filas fallaron, corrígelas en
@@ -284,5 +291,5 @@ vigentes **antes** de confirmar, así que nunca es una sorpresa.
 - **Las sesiones expiran.** Una sesión de importación en curso se conserva 24 horas y luego se
   descarta. El registro de auditoría de una importación *completada* es permanente.
 - **Los permisos siguen aplicándose al confirmar.** Más allá de `import:run`, crear un modelo o una
-  ubicación nuevos durante un conflicto requiere el permiso de escritura correspondiente; el importador
-  lo comprueba antes de escribir nada.
+  ubicación nuevos durante un conflicto requiere el permiso de escritura correspondiente, igual que la
+  categoría que trae consigo un modelo nuevo; el importador lo comprueba antes de escribir nada.

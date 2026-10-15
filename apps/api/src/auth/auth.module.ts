@@ -57,9 +57,9 @@ import { ServiceAccountAuthenticator } from './service-account-authenticator';
     // ConfigService.setup + UsersService.create/requestPasswordReset in their local branches. Global so
     // both feature modules inject it without importing the local module.
     LocalProvisioningService,
-    // The ONE password step-up primitive (SEC-082): the chat's elevated approvals (AiRuntimeModule) and the
-    // OAuth consent's `lazyit.admin` grant (OAuthModule) inject this SAME instance, so one per-account
-    // backoff covers both surfaces.
+    // The ONE password step-up primitive (SEC-082): the chat's elevated approvals (AiRuntimeModule), the
+    // OAuth consent's `lazyit.admin` grant (OAuthModule) and change-password's current-password check
+    // (LocalAuthModule) inject this SAME instance, so one per-account backoff covers every surface.
     PasswordStepUpVerifier,
     // DB-first principal re-load + SA bearer verification (ADR-0097, R1/R10), shared by the guard's
     // branches, the AI tool layer and `/mcp`.

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   assetImportDescriptor,
   coerceRow,
@@ -32,6 +36,8 @@ import { PrismaService } from '../prisma/prisma.service';
  *
  * SECURITY: every session read is OWNER-SCOPED (no IDOR — ADR-0069 §11); logs stay PII-free.
  */
+
+const PLANNABLE_STATUSES = ['MAPPED', 'DRY_RUN'] as const;
 
 /** The resolution probe for one entity (cached per distinct natural-key value). */
 interface ResolveResult {
@@ -282,12 +288,34 @@ export class ImportDryRunService {
     ownerId: string,
     plan: ImportResolutionPlan,
   ): Promise<void> {
-    const updated = await this.prisma.importSession.updateMany({
+    const session = await this.prisma.importSession.findFirst({
       where: { id: sessionId, ownerId },
+      select: { status: true, mapping: true },
+    });
+    if (!session) {
+      throw new NotFoundException(`Import session ${sessionId} not found`);
+    }
+    const notPlannable = () =>
+      new ConflictException(
+        `Import session ${sessionId} cannot take a resolution plan in status ${session.status}; confirm a mapping first, and a plan can no longer change once the commit has started.`,
+      );
+    // Rewinding a COMMITTING/COMMITTED/FAILED session to DRY_RUN would reopen it to a second commit (AUD-051).
+    if (
+      !(PLANNABLE_STATUSES as readonly string[]).includes(session.status) ||
+      session.mapping === null
+    ) {
+      throw notPlannable();
+    }
+    const updated = await this.prisma.importSession.updateMany({
+      where: {
+        id: sessionId,
+        ownerId,
+        status: { in: [...PLANNABLE_STATUSES] },
+      },
       data: { resolutionPlan: plan, status: 'DRY_RUN' },
     });
     if (updated.count === 0) {
-      throw new NotFoundException(`Import session ${sessionId} not found`);
+      throw notPlannable();
     }
   }
 

@@ -3,7 +3,7 @@ title: Attachment
 tags: [domain, entity, attachments, storage]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # Attachment
@@ -55,7 +55,9 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
   `Cache-Control: private`, `Content-Disposition: attachment` (inline only for raster images).
 - **Blob-first write.** Streamed to `tmp/` on the same volume (multer diskStorage — never memory),
   hashed, atomically renamed to its sha path, **then** the row is inserted. A crash in between
-  leaves an unreferenced blob for the GC — never a row without bytes.
+  leaves an unreferenced blob for the GC — never a row without bytes. The promote and the row insert
+  hold a per-`sha256` advisory lock, and every reclaimer re-checks and unlinks under it, so an upload
+  that deduplicates onto a blob can never lose it to the GC or the re-encode cleanup.
 - **Raster re-encode.** png/jpg/webp/gif are re-encoded by a sandboxed sharp worker after upload
   (strips EXIF/GPS, neutralizes polyglots; best-effort — failure keeps the original). `sha256` /
   `byteSize` change in place; `id` and the content URL are stable.
@@ -63,7 +65,7 @@ The row is **metadata only**. The bytes live on the api's `attachments_data` Doc
   **507 "storage full"**, never a 500 or a partial write.
 - **Soft delete + the four-pin GC** ([[0006-soft-delete-and-auditing]] reconciled with a finite
   disk): delete stamps `deletedAt`; the daily BullMQ sweep (24 h grace) soft-deletes
-  never-referenced article images, then unlinks a blob **only** when no live row shares its sha AND
+  never-referenced article images (walking every candidate, oldest first), then unlinks a blob **only** when no live row shares its sha AND
   no article body (live **or soft-deleted**) or [[article-version]] snapshot references any of its
   rows — a version restore can never surface a broken image. The metadata row survives the bytes as
   the audit trail.
@@ -124,7 +126,7 @@ live in `@lazyit/shared` (`packages/shared/src/schemas/attachment.ts`).
 | `sha256` | `string` | content hash = the on-disk blob key (dedup); indexed. |
 | `byteSize` | `int` | size of the stored blob. |
 | `mimeType` | `string` | **server-derived**, allowlisted — the served Content-Type. |
-| `originalName` | `string` | client filename — metadata only, never a path/key. |
+| `originalName` | `string` | client filename, decoded as UTF-8 — metadata only, never a path/key. Rows uploaded before the UTF-8 fix may hold latin1 mojibake (`garantÃ­a.pdf`); they are served as stored. |
 | `uploadedById` | `uuid?` | optional FK → [[user]] (`@db.Uuid`), `onDelete: SetNull`. |
 | `label` | `string?` | optional document type label (#1476); `NULL` on every row that predates it. |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | mutable domain entity ([[0006-soft-delete-and-auditing]]); registered in the soft-delete read filter. |
