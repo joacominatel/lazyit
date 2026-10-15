@@ -704,9 +704,12 @@ path unit (W2-0, #1315):
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
   built yet). `lazyit_search` returns each index only to a caller holding its `<domain>:read` (users: a
   person whose role may read them) — the route drops the others (AUD-015). A person's first and last name
-  is wrapped with `untrusted()` in a users hit (AUD-003); `session_context`'s own user — the caller's own
-  name — is intentionally plain, pending a CEO decision (wrapping it would mark most turns untrusted and
-  so turn auto-approve off in practice);
+  is wrapped with `untrusted()` in a users hit (AUD-003), and so are an asset hit's name and serial, an
+  article hit's title, and an infrastructure hit's label and asset name — a hit does not say whether a
+  reporting agent wrote them. `session_context` wraps the name and serial of the caller's assigned assets
+  for the same reason (the lean `mine` rows carry no specs), so a caller who holds assets starts a turn
+  that read it as untrusted; its own user — the caller's own name — is intentionally plain, pending a CEO
+  decision (wrapping it would mark most turns untrusted and so turn auto-approve off in practice);
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
@@ -911,7 +914,8 @@ Accounts holding the route's permission.
   the linked KB articles — a facet the caller may not read (`article:read`) is reported
   `unavailable`, not failed. `reference_lookup` pages the unpaged taxonomies itself; KB folders never
   carry their access rules. Notes, descriptions, specs and history payloads are wrapped with
-  `untrusted()`, and so are an asset's **name and serial** when a reporting agent may have written them
+  `untrusted()`, and so are the linked articles' titles and an asset's **name and serial** when a
+  reporting agent may have written them
   (review fix F3, mirroring the infra tools): the asset carries `specs._infraAutoCreated` (the node
   created it from the reported hostname) or `specs.host` (agent-linked), or the row does not say — the
   lean `asset_search` rows carry no specs, so their names and serials are always wrapped. Such an asset's
@@ -1118,8 +1122,10 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   scheme is instance configuration (its own tools, #1394 — see below; its backfill stays unexposed); KB folder
   access rules are authorization configuration (`elevated`, after v1).
 - **Untrusted content:** descriptions, notes, attribute dictionaries and model specs in results, and the
-  names in summaries, are wrapped with `untrusted()`; entity-ref labels are not (the follow-up already
-  recorded for the KB tools).
+  names in summaries, are wrapped with `untrusted()`; so is the stored name a category or custom-status
+  refusal quotes (a no-op update, a kind change or an archive blocked by its carriers). Matching still
+  compares the raw names. Entity-ref labels are not wrapped (the follow-up already recorded for the KB
+  tools).
 - **Custom asset statuses (#1524, [[0101-custom-asset-statuses]]).** Four more tools in the same file, under
   the category permissions: `asset_status_label_create`, `asset_status_label_update`·D,
   `asset_status_label_archive`·D and `asset_status_label_restore` (idempotent). Every description opens with
