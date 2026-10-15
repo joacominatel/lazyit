@@ -9,6 +9,7 @@ import {
 import type { Request } from 'express';
 import { type Principal, isServicePrincipal } from '../auth/principal';
 import { parseEnvInt } from '../common/parse-env-int';
+import { FixedWindowRateLimiter } from '../oauth/oauth-rate-limit';
 
 /**
  * InfraReportRateLimitGuard — an in-memory fixed-window rate limiter for `POST /infra/report`
@@ -34,7 +35,8 @@ import { parseEnvInt } from '../common/parse-env-int';
  * few-replica deploy, no `@nestjs/throttler` dependency to pull in. PER-REPLICA CAVEAT: behind N
  * replicas the effective cap is N×{@link INFRA_REPORT_MAX_PER_WINDOW_DEFAULT}/window — accepted,
  * because the hard PENDING cap in `InfraService.ingestReport` (the row-count ceiling this pairs with)
- * is DB-truth and therefore replica-proof. The map self-prunes.
+ * is DB-truth and therefore replica-proof. The counting is the shared {@link FixedWindowRateLimiter}:
+ * constant work per hit and a bounded key map.
  */
 
 /**
@@ -49,16 +51,9 @@ export const INFRA_REPORT_MAX_PER_WINDOW_DEFAULT = 120;
 /** Fixed window length — one minute, matching the sibling limiters. */
 export const INFRA_REPORT_WINDOW_MS_DEFAULT = 60 * 1000;
 
-interface Bucket {
-  count: number;
-  /** Epoch-ms when the current window started; reset once `now - windowStart > windowMs`. */
-  windowStart: number;
-}
-
 @Injectable()
 export class InfraReportRateLimitGuard implements CanActivate {
   private readonly logger = new Logger(InfraReportRateLimitGuard.name);
-  private readonly buckets = new Map<string, Bucket>();
 
   // Read once at construction (the guard is a singleton provider): unlike the PENDING cap, changing a
   // rate limit mid-flight would silently reinterpret buckets already in the map, so this one is pinned
@@ -71,34 +66,26 @@ export class InfraReportRateLimitGuard implements CanActivate {
     'INFRA_REPORT_WINDOW_MS',
     INFRA_REPORT_WINDOW_MS_DEFAULT,
   );
+  private readonly limiter = new FixedWindowRateLimiter(
+    this.maxPerWindow,
+    this.windowMs,
+  );
 
   canActivate(context: ExecutionContext): boolean {
     const request = context
       .switchToHttp()
       .getRequest<Request & { principal?: Principal }>();
     const key = this.callerKey(request);
-    const now = Date.now();
 
-    // Opportunistic prune so the map cannot grow unbounded across many callers.
-    this.prune(now);
-
-    const bucket = this.buckets.get(key);
-    if (!bucket || now - bucket.windowStart > this.windowMs) {
-      this.buckets.set(key, { count: 1, windowStart: now });
-      return true;
-    }
-
-    if (bucket.count >= this.maxPerWindow) {
+    if (!this.limiter.hit(key)) {
       this.logger.warn(
-        `infra report rate limit exceeded (${bucket.count} reports) from ${key}`,
+        `infra report rate limit exceeded (${this.maxPerWindow} reports per ${this.windowMs}ms) from ${key}`,
       );
       throw new HttpException(
         'Too many inventory reports. Slow the agent report interval, or raise INFRA_REPORT_MAX_PER_WINDOW.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
-
-    bucket.count += 1;
     return true;
   }
 
@@ -114,14 +101,5 @@ export class InfraReportRateLimitGuard implements CanActivate {
       return `sa:${request.principal.serviceAccount.id}`;
     }
     return `ip:${request.ip || request.socket?.remoteAddress || 'unknown'}`;
-  }
-
-  /** Drop windows that have fully elapsed so the map stays bounded. */
-  private prune(now: number): void {
-    for (const [key, bucket] of this.buckets) {
-      if (now - bucket.windowStart > this.windowMs) {
-        this.buckets.delete(key);
-      }
-    }
   }
 }
