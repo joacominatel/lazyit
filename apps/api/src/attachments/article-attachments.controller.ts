@@ -22,7 +22,7 @@ import { createZodDto } from 'nestjs-zod';
 import { ARTICLE_IMAGE_MAX_MB, AttachmentSchema } from '@lazyit/shared';
 import { AttachmentsService } from './attachments.service';
 import {
-  attachmentsUploadStorage,
+  attachmentsUploadOptions,
   contentDispositionFor,
 } from './attachment-upload.storage';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -63,10 +63,10 @@ export class ArticleAttachmentsController {
   // diskStorage to attachments/tmp (NEVER memoryStorage — ADR-0082 red line) + the hard multer cap
   // so an oversized stream aborts early (413) instead of filling the disk; the service re-checks.
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: attachmentsUploadStorage(),
-      limits: { fileSize: ARTICLE_IMAGE_MAX_MB * 1024 * 1024 },
-    }),
+    FileInterceptor(
+      'file',
+      attachmentsUploadOptions(ARTICLE_IMAGE_MAX_MB * 1024 * 1024),
+    ),
   )
   upload(
     @Param('articleId') articleId: string,
