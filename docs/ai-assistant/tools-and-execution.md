@@ -704,7 +704,9 @@ path unit (W2-0, #1315):
   `context.tools.ts` holds the reference tools (`session_context`, `lazyit_search`; `navigate_to` is not
   built yet). `lazyit_search` returns each index only to a caller holding its `<domain>:read` (users: a
   person whose role may read them) — the route drops the others (AUD-015). A person's first and last name
-  is wrapped with `untrusted()` in a users hit and in `session_context`'s own user (AUD-003);
+  is wrapped with `untrusted()` in a users hit (AUD-003); `session_context`'s own user — the caller's own
+  name — is intentionally plain, pending a CEO decision (wrapping it would mark most turns untrusted and
+  so turn auto-approve off in practice);
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
@@ -1271,10 +1273,10 @@ a separate remediation, not a supported path here.
     between the preview and the approval is still reclaimed but was not on the card (the precondition
     pins the user row, not its holdings).
   - Every toolset wraps person names (AUD-003): the users, KB and access tools, and since the B20 batch
-    the assets (an owner, a card's person), infrastructure (a node's owners), context (`session_context`'s
-    own user, a users search hit) and workflow-authoring (the enable card's sample grantee) tools. A
-    turn that calls `session_context` therefore carries the untrusted-source marker, like one that reads a
-    user, and is not auto-approved.
+    the assets (an owner, a card's person), infrastructure (a node's owners), context (a users search
+    hit) and workflow-authoring (the enable card's sample grantee) tools. The caller's own name in
+    `session_context` is intentionally plain, pending a CEO decision: wrapping it would mark nearly every
+    turn untrusted and so turn auto-approve off in practice.
 
 **Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /

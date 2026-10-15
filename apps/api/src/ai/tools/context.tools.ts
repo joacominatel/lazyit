@@ -72,12 +72,8 @@ const sessionContext = defineTool({
     });
     return {
       data: {
-        user: {
-          ...pick(me, ['id', 'email', 'role']),
-          // A name is self-editable profile text: wrapped like every other name (INV-AI-4).
-          firstName: untrusted(text((me as Row).firstName)),
-          lastName: untrusted(text((me as Row).lastName)),
-        },
+        // The caller's own name stays plain (pending a CEO decision): wrapping it would mark most turns untrusted.
+        user: pick(me, ['id', 'firstName', 'lastName', 'email', 'role']),
         permissions: permissions.permissions,
         version: version.current,
         assignedAssets: {
