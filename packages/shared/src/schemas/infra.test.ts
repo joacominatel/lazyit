@@ -465,6 +465,25 @@ describe("AgentReportSchema v2 — forward-compat at the ROOT (the #1138 decisio
 
 });
 
+describe("AgentReportSchema — a host externalId cannot impersonate a child key (AUD-102)", () => {
+  test.each([
+    ["the container separator", "machine-id/container/redis"],
+    ["the guest separator", "machine-id/guest/101"],
+  ])("rejects %s", (_label, externalId) => {
+    expect(AgentReportSchema.safeParse({ ...V1_REPORT, externalId }).success).toBe(false);
+  });
+
+  test("still accepts the identities collectors actually send, including a lone slash", () => {
+    for (const externalId of [
+      "4c4c4544003139108047b7c04f375a32",
+      "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "host/with-a-slash",
+    ]) {
+      expect(AgentReportSchema.safeParse({ ...V1_REPORT, externalId }).success).toBe(true);
+    }
+  });
+});
+
 // ── Skew recording: what the server did not understand (#1138) ────────────────────────────────────
 
 /** Parse a body and diff it against its own parse — exactly what the API handler does. */

@@ -1246,9 +1246,16 @@ export const AgentReportSchema = z.object({
   /**
    * The stable per-OS-install dedup key — `/etc/machine-id` on Linux, the MachineGuid on Windows, the
    * platform UUID on macOS. One host = one node, forever. Still the PRIMARY key; `host.identifiers`
-   * corroborates it (#1141) but never replaces it.
+   * corroborates it (#1141) but never replaces it. It may not carry a child-key separator: the server
+   * would read the host as a container/guest child of itself (AUD-102).
    */
-  externalId: z.string().min(1).max(AGENT_EXTERNAL_ID_MAX),
+  externalId: z
+    .string()
+    .min(1)
+    .max(AGENT_EXTERNAL_ID_MAX)
+    .refine((id) => !isContainerChildExternalId(id) && !isGuestChildExternalId(id), {
+      message: "externalId must not contain '/container/' or '/guest/' — those separators are reserved for child keys",
+    }),
   /** When the agent gathered this report (ISO-8601). */
   reportedAt: z.iso.datetime(),
   host: z.object({
