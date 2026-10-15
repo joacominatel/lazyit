@@ -768,6 +768,10 @@ export class InfraService {
         // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
         // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
         assetId: assetId ?? null,
+        // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
+        ...(data.ipAddress !== undefined
+          ? { ipAddressSource: 'MANUAL' as const }
+          : {}),
         ...(specs !== undefined
           ? { specs: specs as Prisma.InputJsonValue }
           : {}),

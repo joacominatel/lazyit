@@ -384,6 +384,35 @@ describe('InfraService', () => {
       expect(prisma.infraNode.create).not.toHaveBeenCalled();
     });
 
+    it('stamps a typed IP MANUAL, so a later merge or report never overwrites it (AUD-088)', async () => {
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
+
+      await service.createNode(
+        { kind: 'VM', label: 'web-01', ipAddress: '10.0.0.5' },
+        true,
+        HUMAN,
+      );
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data.ipAddress).toBe('10.0.0.5');
+      expect(arg.data.ipAddressSource).toBe('MANUAL');
+    });
+
+    it('leaves the IP provenance at its default when no IP was typed', async () => {
+      assets.create.mockResolvedValue({ id: 'asset-new' });
+      prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
+
+      await service.createNode({ kind: 'VM', label: 'web-01' }, true, HUMAN);
+
+      const arg = firstArg<{ data: Record<string, unknown> }>(
+        prisma.infraNode.create,
+      );
+      expect(arg.data).not.toHaveProperty('ipAddressSource');
+    });
+
     it('makes a graph-only node (no asset) when trackAsAsset is false', async () => {
       prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
 
