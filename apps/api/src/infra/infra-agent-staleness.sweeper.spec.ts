@@ -23,6 +23,13 @@ type StaleNode = {
 };
 /** The single-arg tuple of a `NotificationsService.emit` call — cast `mock.calls` to read it typed. */
 type EmitCall = [EmitNotificationInput];
+type FlipArgs = {
+  where: {
+    status: unknown;
+    deletedAt: null;
+    OR: { id: string; lastReportedAt: Date | null }[];
+  };
+};
 
 /**
  * Wire a sweeper over a fake `infraNode` (the pre-query `findMany` returns the transitioning set; the
@@ -32,11 +39,14 @@ type EmitCall = [EmitNotificationInput];
  */
 function makeSweeper(transitioning: StaleNode[]) {
   const findMany = jest.fn().mockResolvedValue(transitioning);
+  // Default: every row the per-node filter decided is still stale at write time and flips.
   const updateMany = jest
     .fn()
-    .mockResolvedValue({ count: transitioning.length });
+    .mockImplementation((args: FlipArgs) =>
+      Promise.resolve(args.where.OR.map((clause) => ({ id: clause.id }))),
+    );
   const prisma = {
-    infraNode: { findMany, updateMany },
+    infraNode: { findMany, updateManyAndReturn: updateMany },
   } as unknown as PrismaService;
   const emit = jest.fn().mockResolvedValue('notif-id');
   const notifications = { emit } as unknown as NotificationsService;
@@ -121,12 +131,45 @@ describe('InfraAgentStalenessSweeper (ADR-0074 §4 / #852)', () => {
     ]);
 
     expect(await sweeper.sweep()).toBe(1);
-    // The bulk flip now addresses the decided set by id — it cannot re-run the per-node comparison.
-    const arg = (updateMany.mock.calls as unknown[][])[0][0] as {
-      where: { id: { in: string[] } };
-    };
-    expect(arg.where.id.in).toEqual(['n-tight']);
+    // The bulk flip addresses the decided set by id, each pinned to the report instant it was judged on.
+    const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+    expect(arg.where.OR).toEqual([
+      { id: 'n-tight', lastReportedAt: tenMinutesAgo },
+    ]);
     expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  // ── The read→write race (AUD-058) ───────────────────────────────────────────────────────────────
+
+  it('the flip is conditional: still not OFFLINE, still live, and still on the snapshot report instant', async () => {
+    const last = new Date('2026-06-30T00:00:00.000Z');
+    const { sweeper, updateMany } = makeSweeper([
+      { id: 'n1', label: 'web-01', lastReportedAt: last },
+    ]);
+
+    await sweeper.sweep();
+
+    const arg = (updateMany.mock.calls as unknown[][])[0][0] as FlipArgs;
+    expect(arg.where).toEqual({
+      status: { not: 'OFFLINE' },
+      deletedAt: null,
+      OR: [{ id: 'n1', lastReportedAt: last }],
+    });
+  });
+
+  it('a node that reported between the read and the flip is neither counted nor announced', async () => {
+    const last = new Date('2026-06-30T00:00:00.000Z');
+    const { sweeper, updateMany, emit } = makeSweeper([
+      { id: 'n-stale', label: 'web-01', lastReportedAt: last },
+      { id: 'n-back', label: 'db-01', lastReportedAt: last },
+    ]);
+    // n-back checked in after the snapshot, so its row no longer matches the conditional write.
+    updateMany.mockResolvedValueOnce([{ id: 'n-stale' }]);
+
+    expect(await sweeper.sweep()).toBe(1);
+    expect(emit).toHaveBeenCalledTimes(1);
+    const input = (emit.mock.calls as EmitCall[])[0][0];
+    expect(input.metadata).toMatchObject({ nodeId: 'n-stale' });
   });
 
   it('a node that was NEVER served a policy falls back to the env default — the pre-#1140 behaviour', async () => {
