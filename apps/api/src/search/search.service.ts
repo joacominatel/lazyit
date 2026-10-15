@@ -109,6 +109,9 @@ export function articleFolderFilter(
   return `categoryId IN [${quoted}]`;
 }
 
+/** Live writes made while a rebuild of one index runs: the latest document per id, `null` = removed. */
+type RebuildJournal = Map<string, SearchDocument | null>;
+
 /** Per-index result block returned to the caller: the raw hits and Meili's total estimate. */
 export interface SearchEntityResult {
   hits: unknown[];
@@ -155,6 +158,8 @@ export type SearchResults = Partial<Record<SearchIndex, SearchEntityResult>> & {
 @Injectable()
 export class SearchService {
   private readonly client: Meilisearch | undefined;
+  // AUD-050: one journal per in-flight rebuild of an index, replayed onto the live index after its swap.
+  private readonly journals = new Map<SearchIndex, Set<RebuildJournal>>();
 
   constructor(
     @InjectPinoLogger(SearchService.name)
@@ -194,6 +199,7 @@ export class SearchService {
    */
   upsert(index: SearchIndex, doc: SearchDocument): void {
     if (!this.client) return;
+    this.journal(index, doc.id, doc);
     this.client
       .index(index)
       .addDocuments([doc], { primaryKey: 'id' })
@@ -214,6 +220,7 @@ export class SearchService {
    */
   upsertMany(index: SearchIndex, docs: SearchDocument[]): void {
     if (!this.client || docs.length === 0) return;
+    for (const doc of docs) this.journal(index, doc.id, doc);
     this.client
       .index(index)
       .addDocuments(docs, { primaryKey: 'id' })
@@ -231,6 +238,7 @@ export class SearchService {
    */
   remove(index: SearchIndex, id: string): void {
     if (!this.client) return;
+    this.journal(index, id, null);
     this.client
       .index(index)
       .deleteDocument(id)
@@ -381,16 +389,59 @@ export class SearchService {
   }
 
   /**
-   * Authoritatively (re)build one index from its full live `docs` set (issue #370 self-heal), reusing
-   * the zero-downtime temp-index-swap of {@link reindexIndex}. No-op in disabled mode. The Meili client
-   * structurally satisfies the small `ReindexClient` surface the rebuild needs (no cast required).
+   * Authoritatively (re)build one index from its full live set (issue #370 self-heal), reusing the
+   * zero-downtime temp-index-swap of {@link reindexIndex}. Returns the number of documents indexed; a
+   * no-op returning 0 in disabled mode. The Meili client structurally satisfies the small
+   * `ReindexClient` surface the rebuild needs (no cast required).
+   *
+   * **Writes during the rebuild (AUD-050).** The swap replaces the live index with a snapshot, so an
+   * `upsert`/`remove` this process makes while the rebuild runs would be lost with the old index. Each
+   * one is journaled (latest per id) from the moment the rebuild starts and replayed onto the live
+   * index after a successful swap. Pass `source` as a loader so the database read happens after the
+   * journal opens; an array snapshot read earlier leaves the window between that read and this call.
+   * Writes from another process (`reindex:all`, a second API replica) are not journaled; the hourly
+   * reconcile repairs them.
    */
   async rebuildIndex(
     index: SearchIndex,
-    docs: SearchDocument[],
-  ): Promise<void> {
-    if (!this.client) return;
-    await reindexIndex(this.client, index, docs);
+    source: SearchDocument[] | (() => Promise<SearchDocument[]>),
+  ): Promise<number> {
+    if (!this.client) return 0;
+    const journal: RebuildJournal = new Map();
+    const active = this.journals.get(index) ?? new Set<RebuildJournal>();
+    this.journals.set(index, active);
+    active.add(journal);
+    let docs: SearchDocument[];
+    try {
+      docs = typeof source === 'function' ? await source() : source;
+      await reindexIndex(this.client, index, docs);
+    } finally {
+      active.delete(journal);
+      if (active.size === 0) this.journals.delete(index);
+    }
+    this.replay(index, journal);
+    return docs.length;
+  }
+
+  /** Record a live write in every journal of an in-flight rebuild of `index` (AUD-050). */
+  private journal(
+    index: SearchIndex,
+    id: string,
+    doc: SearchDocument | null,
+  ): void {
+    for (const journal of this.journals.get(index) ?? []) {
+      journal.set(id, doc);
+    }
+  }
+
+  /** Re-send the journaled writes onto the freshly swapped live index (fire-and-forget, like the sync). */
+  private replay(index: SearchIndex, journal: RebuildJournal): void {
+    const upserts: SearchDocument[] = [];
+    for (const [id, doc] of journal) {
+      if (doc === null) this.remove(index, id);
+      else upserts.push(doc);
+    }
+    this.upsertMany(index, upserts);
   }
 
   /**

@@ -6,6 +6,9 @@ import { FolderAccessService } from '../article-categories/folder-access.service
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { VisibleFolders } from '../article-categories/folder-access.service';
+import { reindexIndex } from './reindex';
+
+const reindexMock = reindexIndex as jest.Mock;
 
 // Mock the Meili client with an explicit factory: jest can't transform the ESM `meilisearch`
 // package, so we must never load the real module. The constructor is a jest mock whose
@@ -18,6 +21,8 @@ jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
   Prisma: {},
 }));
+// rebuildIndex delegates the swap to reindexIndex (covered in reindex.spec); here only its timing matters.
+jest.mock('./reindex', () => ({ reindexIndex: jest.fn() }));
 
 // Typed handles for the mocked index methods (addDocuments/deleteDocument return a thenable in the
 // real client; here they're plain jest mocks whose resolved/rejected value we control per test).
@@ -998,6 +1003,76 @@ describe('SearchService', () => {
       expect(result.assets).toEqual({ hits: [], total: 0 });
     });
 
+    // --- live writes during a rebuild (AUD-050) ---------------------------------
+    describe('rebuildIndex write journal', () => {
+      it('replays removes and upserts made mid-rebuild onto the swapped live index (latest per id)', async () => {
+        let swap!: () => void;
+        reindexMock.mockImplementationOnce(
+          () => new Promise<void>((resolve) => (swap = resolve)),
+        );
+        const rebuilding = service.rebuildIndex('articles', [
+          { id: 'ar1' },
+          { id: 'ar2' },
+        ]);
+
+        // An article unpublished and another edited twice while the snapshot is being built.
+        service.remove('articles', 'ar1');
+        service.upsert('articles', { id: 'ar2', title: 'v1' });
+        service.upsert('articles', { id: 'ar2', title: 'v2' });
+        index.addDocuments.mockClear();
+        index.deleteDocument.mockClear();
+        client.index.mockClear();
+
+        swap();
+        await expect(rebuilding).resolves.toBe(2);
+
+        expect(client.index).toHaveBeenCalledWith('articles');
+        expect(index.deleteDocument).toHaveBeenCalledWith('ar1');
+        expect(index.addDocuments).toHaveBeenCalledTimes(1);
+        expect(index.addDocuments).toHaveBeenCalledWith(
+          [{ id: 'ar2', title: 'v2' }],
+          { primaryKey: 'id' },
+        );
+      });
+
+      it('journals a write made while the loader is still reading the database', async () => {
+        await service.rebuildIndex('users', () => {
+          service.remove('users', 'u9');
+          return Promise.resolve([{ id: 'u1' }]);
+        });
+
+        // Once live, once replayed after the swap.
+        expect(index.deleteDocument).toHaveBeenCalledTimes(2);
+        expect(index.deleteDocument).toHaveBeenLastCalledWith('u9');
+      });
+
+      it('replays nothing after a failed rebuild (no swap happened, the live index took the write)', async () => {
+        reindexMock.mockImplementationOnce(() => {
+          service.remove('users', 'u1');
+          return Promise.reject(new Error('swap failed'));
+        });
+
+        await expect(service.rebuildIndex('users', [])).rejects.toThrow(
+          'swap failed',
+        );
+        expect(index.deleteDocument).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not journal writes to another index, or after the rebuild finished', async () => {
+        reindexMock.mockImplementationOnce(() => {
+          service.upsert('assets', { id: 'a1' });
+          return Promise.resolve();
+        });
+
+        await service.rebuildIndex('users', []);
+        service.remove('users', 'u1');
+        await service.rebuildIndex('users', []);
+
+        expect(index.addDocuments).toHaveBeenCalledTimes(1);
+        expect(index.deleteDocument).toHaveBeenCalledTimes(1);
+      });
+    });
+
     // --- engine health (issue #1216) ------------------------------------------
     describe('isHealthy', () => {
       it('reports the client health check', async () => {
@@ -1092,6 +1167,15 @@ describe('SearchService', () => {
       const logger = loggerMock();
       const service = await buildService(logger);
       expect(await service.isHealthy()).toBe(false);
+    });
+
+    it('rebuildIndex is a no-op that never runs the loader', async () => {
+      delete process.env.MEILI_HOST;
+      const service = await buildService(loggerMock());
+      const load = jest.fn();
+      expect(await service.rebuildIndex('assets', load)).toBe(0);
+      expect(load).not.toHaveBeenCalled();
+      expect(reindexMock).not.toHaveBeenCalled();
     });
   });
 
