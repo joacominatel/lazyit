@@ -1654,6 +1654,31 @@ describe('ArticlesService', () => {
       });
     });
 
+    it('clears the live excerpt when the restored version had none (AUD-047)', async () => {
+      article.findFirst.mockResolvedValue({
+        id: 'a',
+        status: 'PUBLISHED',
+        authorId: AUTHOR,
+        title: 'New title',
+        content: 'new body',
+        excerpt: 'internal note, see ticket 123',
+      });
+      articleVersion.findFirst.mockResolvedValueOnce({
+        id: 5,
+        articleId: 'a',
+        version: 1,
+        title: 'Old title',
+        content: 'old body',
+        excerpt: null,
+        status: 'PUBLISHED',
+      });
+
+      await service.restoreVersion('a', 1, AUTHOR_PRINCIPAL);
+
+      expect(lastUpdate()).toMatchObject({ excerpt: null });
+      expect(lastVersion()).toMatchObject({ excerpt: null });
+    });
+
     it('404s when the requested version does not exist (and writes nothing)', async () => {
       article.findFirst.mockResolvedValue({
         id: 'a',

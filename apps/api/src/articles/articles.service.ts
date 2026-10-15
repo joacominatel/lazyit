@@ -158,6 +158,11 @@ const ARTICLE_AUTHOR_INCLUDE = {
   author: { select: { firstName: true, lastName: true, deletedAt: true } },
 } satisfies Prisma.ArticleInclude;
 
+// restoreVersion re-applies a snapshot's null excerpt; the PATCH contract still cannot clear it.
+type ArticleUpdateInput = Omit<UpdateArticle, 'excerpt'> & {
+  excerpt?: string | null;
+};
+
 /**
  * Knowledge-base articles. Authorship/visibility (DRAFT private to its author; the author — or, since
  * #877, an ADMIN / `article:manage` holder — may write) is enforced here from the authenticated User
@@ -504,7 +509,7 @@ export class ArticlesService {
    * read is refused — ADR-0060 §9) and, unlike other metadata, it DOES append a version so the move is
    * auditable. Moving OUT of a restricted folder into a more permissive one stays allowed by design.
    */
-  async update(id: string, data: UpdateArticle, principal?: Principal) {
+  async update(id: string, data: ArticleUpdateInput, principal?: Principal) {
     const cu = this.requireAuthor(principal);
     const manageAny = await this.canManageAny(principal);
     const current = await this.loadOwned(id, cu, manageAny, principal);
@@ -761,14 +766,12 @@ export class ArticlesService {
         `Version ${version} of article ${id} not found`,
       );
     }
-    // excerpt is restored only when the old version had one (UpdateArticle's excerpt is a
-    // non-empty string); a version without an excerpt leaves the current excerpt untouched.
     return this.update(
       id,
       {
         title: snapshot.title,
         content: snapshot.content,
-        ...(snapshot.excerpt ? { excerpt: snapshot.excerpt } : {}),
+        excerpt: snapshot.excerpt,
       },
       principal,
     );
