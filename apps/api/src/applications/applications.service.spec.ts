@@ -4,11 +4,11 @@ import { ApplicationsService } from './applications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 
-// Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
-// `Prisma` only for the InputJsonValue type (erased at runtime), so an empty object is enough.
+// Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
+// the sentinel a `metadata: null` update writes to clear the jsonb column.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: {},
+  Prisma: { DbNull: 'DbNull' },
 }));
 // ApplicationsService transitively imports the ESM `meilisearch` package (via SearchService); jest
 // can't transform it. SearchService is replaced by a mock below; this stub stops the real load.
@@ -342,6 +342,41 @@ describe('ApplicationsService', () => {
 
       expect(applicationCategory.findFirst).not.toHaveBeenCalled();
       expect(application.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('clearing fields with null (AUD-084)', () => {
+    it('detaches the category and clears the text fields', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: 'c1' });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', {
+        categoryId: null,
+        description: null,
+        url: null,
+        vendor: null,
+        notes: null,
+      });
+
+      expect(applicationCategory.findFirst).not.toHaveBeenCalled();
+      const calls = application.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data).toEqual({
+        categoryId: null,
+        description: null,
+        url: null,
+        vendor: null,
+        notes: null,
+      });
+    });
+
+    it('clears metadata to SQL NULL (Prisma.DbNull)', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: null });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', { metadata: null });
+
+      const calls = application.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data).toEqual({ metadata: 'DbNull' });
     });
   });
 

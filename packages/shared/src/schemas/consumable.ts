@@ -54,18 +54,19 @@ export const CreateConsumableSchema = z.strictObject({
 
 /**
  * Partial update; any subset of the editable fields (an empty body is rejected). `currentStock` is
- * NOT updatable here.
+ * NOT updatable here. `null` clears an optional field — `categoryId: null` detaches the category,
+ * `minStock: null` turns the low-stock alert off.
  */
 export const UpdateConsumableSchema = requireAtLeastOneKey(
   z
     .strictObject({
       name: z.string().trim().min(1).max(200),
-      sku: z.string().trim().min(1).max(100),
-      categoryId: z.cuid(),
-      description: z.string().trim().min(1).max(1000),
-      minStock: int4({ min: 0, example: 5 }),
+      sku: z.string().trim().min(1).max(100).nullable(),
+      categoryId: z.cuid().nullable(),
+      description: z.string().trim().min(1).max(1000).nullable(),
+      minStock: int4({ min: 0, example: 5 }).nullable(),
       unit: z.string().trim().min(1).max(50),
-      notes: z.string().trim().min(1).max(2000),
+      notes: z.string().trim().min(1).max(2000).nullable(),
       // Toggling it never rewrites the past: each delivery SNAPSHOTS the flag when it is made (ADR-0098).
       returnable: z.boolean(),
     })

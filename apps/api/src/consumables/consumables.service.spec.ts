@@ -428,6 +428,26 @@ describe('ConsumablesService', () => {
     });
   });
 
+  it('null clears the optional fields, detaches the category and turns off the low-stock threshold (AUD-084)', async () => {
+    consumable.findFirst.mockResolvedValue({ id: 'k1', categoryId: 'c1' });
+    consumable.update.mockResolvedValue({ id: 'k1' });
+    const cleared = {
+      sku: null,
+      categoryId: null,
+      description: null,
+      minStock: null,
+      notes: null,
+    };
+
+    await service.update('k1', cleared);
+
+    expect(consumableCategory.findFirst).not.toHaveBeenCalled();
+    expect(consumable.update).toHaveBeenCalledWith({
+      where: { id: 'k1' },
+      data: cleared,
+    });
+  });
+
   it('does not update a missing consumable', async () => {
     consumable.findFirst.mockResolvedValue(null);
 

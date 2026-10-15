@@ -251,7 +251,10 @@ export class ConsumablesService {
     return consumable;
   }
 
-  /** Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. */
+  /**
+   * Partial update. `currentStock` is not updatable here. 404 if missing or already soft-deleted. `null`
+   * clears an optional field (and detaches the category).
+   */
   async update(id: string, data: UpdateConsumable) {
     const existing = await this.prisma.consumable.findFirst({
       where: { id, deletedAt: null },

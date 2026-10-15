@@ -193,7 +193,12 @@ export class ApplicationsService {
       data: {
         ...applicationMoneyToDb(rest),
         ...(metadata !== undefined
-          ? { metadata: metadata as Prisma.InputJsonValue }
+          ? {
+              metadata:
+                metadata === null
+                  ? Prisma.DbNull
+                  : (metadata as Prisma.InputJsonValue),
+            }
           : {}),
       },
     });
