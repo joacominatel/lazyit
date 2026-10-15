@@ -552,6 +552,10 @@ export class AssetTagSchemeService {
    * Bounded retry on a live-tag P2002 (a concurrent grab took the slot): each retry advances to the
    * next free number (gaps accepted). Returns false (counted as `skipped`) if it can't allocate a
    * unique tag within the budget — so a single hot-spot row never aborts the whole backfill.
+   *
+   * The write is conditional on the row still being live and still carrying `fromTag`, the tag read
+   * when the backfill started: a tag set by hand (or by another apply) during a long run is kept, the
+   * row is skipped, and the history never records a stale `from`. The number consumed is a gap.
    */
   private async retagOne(
     assetId: string,
@@ -571,11 +575,12 @@ export class AssetTagSchemeService {
       const allocated = await this.consumeNextFreeNumber(affixes);
       const tag = renderAssetTag(affixes, allocated);
       try {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.asset.update({
-            where: { id: assetId },
+        return await this.prisma.$transaction(async (tx) => {
+          const { count } = await tx.asset.updateMany({
+            where: { id: assetId, assetTag: fromTag, deletedAt: null },
             data: { assetTag: tag },
           });
+          if (count === 0) return false;
           await this.history.record(tx, {
             assetId,
             // Reuse the existing append-only writer + a generic update event (the enum carries no
@@ -584,11 +589,11 @@ export class AssetTagSchemeService {
             payload: { field: 'assetTag', from: fromTag, to: tag },
             actor,
           });
+          return true;
         });
-        return true;
       } catch (err) {
         if (isUniqueTagCollision(err)) continue; // a concurrent grab — advance and retry.
-        throw err; // anything else (incl. a vanished/soft-deleted row) propagates.
+        throw err; // anything else propagates.
       }
     }
     return false; // exhausted the budget for this row → skipped, batch continues.
