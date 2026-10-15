@@ -4,11 +4,11 @@ import { ApplicationsService } from './applications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 
-// Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
-// `Prisma` only for the InputJsonValue type (erased at runtime), so an empty object is enough.
+// Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma.DbNull` is
+// the sentinel a `metadata: null` update writes to clear the jsonb column.
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: {},
+  Prisma: { DbNull: 'DbNull' },
 }));
 // ApplicationsService transitively imports the ESM `meilisearch` package (via SearchService); jest
 // can't transform it. SearchService is replaced by a mock below; this stub stops the real load.
@@ -36,6 +36,7 @@ describe('ApplicationsService', () => {
   let service: ApplicationsService;
   let application: ApplicationMock;
   let accessGrant: AccessGrantMock;
+  let applicationCategory: { findFirst: jest.Mock };
   let search: SearchMock;
 
   beforeEach(async () => {
@@ -49,12 +50,14 @@ describe('ApplicationsService', () => {
     // Derived seatsUsed (#949) reads distinct active-grant (applicationId, userId) pairs. Default to an
     // empty set so the existing findOne/findPage cases just see 0 seats used.
     accessGrant = { findMany: jest.fn().mockResolvedValue([]) };
+    applicationCategory = { findFirst: jest.fn() };
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
     // findPage runs [findMany, count] inside $transaction(array) — resolve each promise in the array.
     const prisma = {
       application,
       accessGrant,
+      applicationCategory,
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
 
@@ -287,6 +290,93 @@ describe('ApplicationsService', () => {
       name: undefined,
       vendor: 'Atlassian',
       description: undefined,
+    });
+  });
+
+  describe('archived category on write (AUD-025, SEC-052)', () => {
+    it('create refuses an archived or missing category with 400 and writes nothing', async () => {
+      applicationCategory.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.create({ name: 'Jira', isCritical: false, categoryId: 'cat1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(applicationCategory.findFirst).toHaveBeenCalledWith({
+        where: { id: 'cat1', deletedAt: null },
+        select: { id: true },
+      });
+      expect(application.create).not.toHaveBeenCalled();
+    });
+
+    it('create files under a live category', async () => {
+      applicationCategory.findFirst.mockResolvedValue({ id: 'cat1' });
+      application.create.mockResolvedValue({ id: 'app1', categoryId: 'cat1' });
+
+      await service.create({
+        name: 'Jira',
+        isCritical: false,
+        categoryId: 'cat1',
+      });
+
+      const calls = application.create.mock.calls as DataCall[];
+      expect(calls[0][0].data.categoryId).toBe('cat1');
+    });
+
+    it('update refuses moving to an archived category with 400 and writes nothing', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: null });
+      applicationCategory.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.update('app1', { categoryId: 'archived' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(application.update).not.toHaveBeenCalled();
+    });
+
+    it('update keeps a legacy archived category without re-checking it', async () => {
+      application.findFirst.mockResolvedValue({
+        id: 'app1',
+        categoryId: 'legacy',
+      });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', { categoryId: 'legacy', vendor: 'X' });
+
+      expect(applicationCategory.findFirst).not.toHaveBeenCalled();
+      expect(application.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('clearing fields with null (AUD-084)', () => {
+    it('detaches the category and clears the text fields', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: 'c1' });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', {
+        categoryId: null,
+        description: null,
+        url: null,
+        vendor: null,
+        notes: null,
+      });
+
+      expect(applicationCategory.findFirst).not.toHaveBeenCalled();
+      const calls = application.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data).toEqual({
+        categoryId: null,
+        description: null,
+        url: null,
+        vendor: null,
+        notes: null,
+      });
+    });
+
+    it('clears metadata to SQL NULL (Prisma.DbNull)', async () => {
+      application.findFirst.mockResolvedValue({ id: 'app1', categoryId: null });
+      application.update.mockResolvedValue({ id: 'app1' });
+
+      await service.update('app1', { metadata: null });
+
+      const calls = application.update.mock.calls as UpdateCall[];
+      expect(calls[0][0].data).toEqual({ metadata: 'DbNull' });
     });
   });
 
