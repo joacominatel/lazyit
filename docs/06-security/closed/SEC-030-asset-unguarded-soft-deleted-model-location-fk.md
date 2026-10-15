@@ -2,7 +2,7 @@
 id: SEC-030
 title: Asset create/update accept a soft-deleted modelId/locationId (no liveness guard)
 severity: low
-status: open
+status: fixed
 cwe: CWE-672
 discovered: 2026-06-06
 module: assets
@@ -96,3 +96,37 @@ pattern instead of per-module memory.
 - CWE-672: Operation on a Resource after Expiration or Release.
 - ADR-0006 (soft delete & auditing), ADR-0032 (soft-delete read filter), ADR-0004 (asset-centric), ADR-0007 (specs).
 - Sentinel skill §1 "Soft-delete bypass" (the FK-to-soft-deleted-parent class).
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `8bd0271d2` (`fix(api): refuse an archived location or model when creating, receiving or moving an asset (#1476)`), merged to `dev` in PR #1484
+**Closed by**: the 2026-10-10 backend audit ([[sweep-2026-10-10-backend-audit]], AUD-099), which found the finding still open after the fix
+**Date**: 2026-10-14 (record); the fix landed 2026-10-02
+
+### Evidence (on `dev` at `a4ca679ea`)
+- `apps/api/src/assets/assets.service.ts:424-455`: `assertLocationLive` and `assertModelLive` return 400
+  for a missing or soft-deleted location or model.
+- `apps/api/src/assets/assets.service.ts:943-959`: `create` checks the location and resolves the model
+  with `deletedAt: null` inside the write transaction, so an archived parent is a 400.
+- `apps/api/src/assets/assets.service.ts:1050-1057`: `receiveBatch` checks the model and the location
+  once, up front.
+- `apps/api/src/assets/assets.service.ts:1219-1225`: `update` checks a location or model that changes.
+  An unchanged legacy reference is not re-checked, so an asset already on an archived parent stays
+  editable (write-only validation, tolerant read).
+- The asset import writes through `AssetsService.create` and `update`
+  (`apps/api/src/import/import-commit.service.ts:726`, `:810`), so it inherits the check.
+
+### Tests
+- `apps/api/src/assets/assets.service.spec.ts`, `describe('archived references are refused on write (#1476 review)')`:
+  create into an archived location, bulk receive into an archived location, and moving to an archived
+  location or model are 400s; keeping a legacy one is not checked.
+
+### Not covered here
+- The read side (an archived model or location returned inline by the asset includes) is
+  [[SEC-040-soft-deleted-parent-leaks-via-asset-includes|SEC-040]], still open.
+- Linking an asset to a purchase line with `apply=['modelId']` copies the line's model without a
+  liveness check (`purchase-receiving.service.ts`). That is a separate write path, recorded as AUD-029
+  (Low) in the sweep and not filed as a SEC.
+
+No data change: assets that already reference an archived model or location keep it until edited.

@@ -3,7 +3,7 @@ title: Security summary / dashboard
 tags: [security, dashboard]
 status: draft
 created: 2026-05-25
-updated: 2026-10-09
+updated: 2026-10-14
 ---
 
 # Security summary
@@ -170,6 +170,27 @@ Snapshot of the security review. Updated each sweep. Method:
    bounded, which it is not. ADR-0048 already classes both verbs ADMIN-equivalent for service accounts.
    Custom roles (#1560) would make the delegation common.
 
+19. **2026-10-10 — Full backend audit, verified (after epic #1543).** 44 finder agents (39 domain units
+   and 5 cross-cutting sweeps) over `apps/api` and `packages/shared`, then adversarial verification:
+   187 raw reports, 126 upheld, 105 entries after deduplication (1 High, 10 Medium, 94 Low; no
+   Critical) → [[sweep-2026-10-10-backend-audit]]. The High entry and the Medium security entries were
+   re-verified on `dev` at `a4ca679ea` and filed:
+   [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] (**High**): a `category:write` holder,
+   MEMBER by default, can move a KB folder out from under a restricted ancestor (or create one under
+   it), which changes who reads the whole subtree with no ACL check and no audit row.
+   [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] (**Medium**): user names reach
+   the AI model unwrapped, and any user can edit their own, so an injection in a name shows no
+   untrusted-source banner and leaves auto-approve on.
+   [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] (**Medium**): any `article:write`
+   holder can poll another user's import job by its sequential id and read its file names, slugs and
+   article ids, folder-hidden ones included.
+   [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] (**Medium**): the anonymous OAuth
+   endpoints' per-IP limiter scans its whole map on every hit, so an IP-rotating flood stalls the API.
+   AUD-002 is SEC-088 and AUD-012 is SEC-012, both already open. AUD-099 found
+   [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] fixed by #1476 but still open;
+   it is **✅ closed**. The Medium data-integrity and bug entries and every Low entry stay in the sweep
+   note as the remediation backlog, grouped into batches there.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -180,11 +201,11 @@ consent page, `/account/ai`).
 | Severity | Count |
 | --- | --- |
 | Critical | 0 |
-| High | 0 |
-| Medium | 1 |
-| Low | 10 |
+| High | 1 |
+| Medium | 4 |
+| Low | 9 |
 | Info | 0 |
-| **Total open** | **11** |
+| **Total open** | **14** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -196,7 +217,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-012-oidc-audience-not-validated\|SEC-012]] | 🟡 Low | auth | OIDC token audience unvalidated when `OIDC_CLIENT_ID` unset (audience confusion under BYOI) |
-| [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] | 🟡 Low | assets | Asset create/update accept a soft-deleted `modelId`/`locationId` (no live-parent guard) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
 | [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete) |
 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] | 🟡 Low | applications | App/consumable create/update attach to a soft-deleted `categoryId` (no `assertCategoryUsable`) |
@@ -204,9 +224,23 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-070-health-ready-db-error-leak\|SEC-070]] | 🟡 Low | health | `GET /health/ready` leaks raw pg driver error (internal host/IP/port) to anonymous callers |
 | [[SEC-071-dashboard-soft-delete-relation-bypass\|SEC-071]] | 🟡 Low | dashboard | Dashboard aggregates count soft-deleted apps/assets via nested relations (same class as SEC-040) |
 | [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] | 🟠 Medium | users / config | A non-ADMIN role delegated `user:manage` or `settings:manage` can make itself ADMIN (no subset rule, matrix self-edit) |
+| [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] | 🔴 High | article-categories | A `category:write` holder can re-parent or create a KB folder around a restricted ancestor and widen who reads it |
+| [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] | 🟠 Medium | ai | User names reach the AI model unwrapped: no untrusted-source banner, auto-approve stays on |
+| [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] | 🟠 Medium | articles | `GET /articles/import/:jobId` returns any user's import job (no ownership check, sequential ids) |
+| [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] | 🟠 Medium | oauth | The anonymous OAuth endpoints' per-IP limiter scans every bucket on each hit (CPU DoS) |
 
 ## Top findings
 
+0. **SEC-089 — open (High).** A MEMBER can move a KB folder out from under a restricted ancestor and so
+   expose every article in it to every `article:read` holder, or hide a public folder under a
+   restricted one, with no ACL check and no trace. The fix treats a folder move as an authorization
+   write, like the article move in ADR-0060 §9, and needs an ADR-0060 amendment.
+0. **SEC-090 / SEC-091 / SEC-092 — open (Medium).** From the 2026-10-10 audit: unwrapped user names in
+   AI tool results (INV-AI-4), another user's import job readable by id (INV-9), and a CPU-bound
+   flood on the anonymous OAuth endpoints. Each has a contained fix with no data change.
+0. **SEC-030 ✅ Closed.** Moved to `closed/` (2026-10-14, recorded by the 2026-10-10 audit): asset
+   create, receive and move refuse an archived location or model since #1476, and an unchanged legacy
+   reference stays editable. No data change.
 0. **SEC-088 — open (Medium).** Delegating `user:manage` or `settings:manage` to MEMBER or VIEWER hands
    that role ADMIN: nothing bounds the roles a user administrator assigns, and a matrix editor can widen
    their own role. It is not exposed on the shipped defaults. The fix direction is a subset rule on
@@ -267,7 +301,7 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
    last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
    of offboarding them).
-6. **Systemic soft-delete / nested-relation class (SEC-030/040/041/052/060/071; SEC-050 ✅ closed).**
+6. **Systemic soft-delete / nested-relation class (SEC-040/041/052/060/071; SEC-030 and SEC-050 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
