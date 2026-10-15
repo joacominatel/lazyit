@@ -1051,6 +1051,16 @@ describe('connected apps', () => {
     expect(await h.grants.listForAdmin(user.id)).toEqual([]);
   });
 
+  it('drops a grant once it holds no live token (the refresh token idled out and was swept)', async () => {
+    const user = seedUser(h);
+    await connect(h, user);
+    const sweeper = new OAuthSweeper(h.prisma as never);
+    await sweeper.sweep(new Date(Date.now() + 31 * 24 * 3600_000));
+    expect(h.prisma.tables.oAuthGrant[0]).toMatchObject({ deletedAt: null });
+    expect(await h.grants.listMine(user)).toEqual([]);
+    expect(await h.grants.listForAdmin(user.id)).toEqual([]);
+  });
+
   it('lets the owner revoke, hides other users’ grants (404), and lets an admin revoke any', async () => {
     const owner = seedUser(h);
     const stranger = seedUser(h);

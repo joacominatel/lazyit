@@ -65,7 +65,8 @@ export function toOAuthGrantWire(
 
 /**
  * "Connected apps" (R9): a user's own delegations and, for admins, everyone's — with revoke. Only LIVE
- * grants are listed: not revoked (soft-deleted), not expired, and still bound to the user's current
+ * grants are listed: not revoked (soft-deleted), not expired, still holding an unexpired token (an OAuth
+ * grant whose refresh token idled out cannot act again), and still bound to the user's current
  * `mcpCredentialEpoch` (a grant from before a password change is already dead and would only confuse; a
  * web logout does not move that counter, so it leaves the list intact — ADR-0097 decision 8, amended).
  *
@@ -82,12 +83,14 @@ export class GrantsService {
   ) {}
 
   async listMine(user: User): Promise<OAuthGrant[]> {
+    const now = new Date();
     const rows = await this.prisma.oAuthGrant.findMany({
       where: {
         userId: user.id,
         deletedAt: null,
         mcpCredentialEpoch: user.mcpCredentialEpoch,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        tokens: { some: { expiresAt: { gt: now } } },
       },
       include: { client: true },
       orderBy: { createdAt: 'desc' },
@@ -97,11 +100,13 @@ export class GrantsService {
   }
 
   async listForAdmin(userId: string | undefined): Promise<AdminOAuthGrant[]> {
+    const now = new Date();
     const rows = await this.prisma.oAuthGrant.findMany({
       where: {
         ...(userId ? { userId } : {}),
         deletedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        tokens: { some: { expiresAt: { gt: now } } },
         user: { deletedAt: null },
       },
       include: { client: true, user: { select: { mcpCredentialEpoch: true } } },
