@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { HealthService } from './health.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,16 +46,19 @@ describe('HealthService', () => {
   });
 
   it('reports NOT ready (status error) when the DB probe throws, regardless of Valkey', async () => {
-    queryRaw.mockRejectedValue(new Error('connection refused'));
+    queryRaw.mockRejectedValue(
+      new Error("Can't reach database server at `db:5432`"),
+    );
     ping.mockResolvedValue('PONG');
 
     const report = await service.readiness();
 
     expect(report.ready).toBe(false);
     expect(report.status).toBe('error');
+    // SEC-070: the anonymous body never carries the driver message (internal host/port).
     expect(report.checks.database).toEqual({
       status: 'down',
-      error: 'connection refused',
+      error: 'unreachable',
     });
     // Valkey being up cannot rescue an unready DB.
     expect(report.checks.valkey).toEqual({ status: 'up' });
@@ -62,7 +66,7 @@ describe('HealthService', () => {
 
   it('stays ready but DEGRADED (non-gating) when the DB is up but the Valkey PING fails', async () => {
     queryRaw.mockResolvedValue([{ '?column?': 1 }]);
-    ping.mockRejectedValue(new Error("Stream isn't writeable"));
+    ping.mockRejectedValue(new Error('connect ECONNREFUSED 172.18.0.5:6379'));
 
     const report = await service.readiness();
 
@@ -70,10 +74,12 @@ describe('HealthService', () => {
     expect(report.ready).toBe(true);
     expect(report.status).toBe('degraded');
     expect(report.checks.database).toEqual({ status: 'up' });
+    // AUD-018: the Valkey error is not echoed either.
     expect(report.checks.valkey).toEqual({
       status: 'down',
-      error: "Stream isn't writeable",
+      error: 'unreachable',
     });
+    expect(JSON.stringify(report)).not.toContain('172.18.0.5');
   });
 
   it('treats an unexpected PING reply as Valkey down (degraded), still ready', async () => {
@@ -86,7 +92,22 @@ describe('HealthService', () => {
     expect(report.status).toBe('degraded');
     expect(report.checks.valkey).toEqual({
       status: 'down',
-      error: 'unexpected PING reply: LOADING',
+      error: 'unreachable',
     });
+  });
+
+  it('keeps the failure detail in the server log, once per throttle window', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    queryRaw.mockResolvedValue([{ '?column?': 1 }]);
+    ping.mockRejectedValue(new Error('connect ECONNREFUSED 172.18.0.5:6379'));
+
+    await service.readiness();
+    await service.readiness();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('172.18.0.5');
+    warn.mockRestore();
   });
 });

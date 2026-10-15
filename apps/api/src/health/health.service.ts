@@ -1,13 +1,16 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { HEALTH_REDIS, type HealthRedisClient } from './health-redis';
 
 /** A single dependency's health, reported in the readiness payload. */
 export interface DependencyHealth {
   status: 'up' | 'down';
-  /** Error summary when `status === 'down'` (never the raw stack — kept terse for a probe). */
+  /** A fixed category when `status === 'down'`; the driver detail goes to the server log only. */
   error?: string;
 }
+
+/** Minimum gap between logged failures per dependency (ms) — the route is anonymous and pollable. */
+export const HEALTH_FAILURE_LOG_THROTTLE_MS = 60_000;
 
 /** Shape of `GET /health/ready` — `ready` gates orchestrator traffic; `valkey` is observability only. */
 export interface ReadinessReport {
@@ -32,6 +35,9 @@ export interface ReadinessReport {
  */
 @Injectable()
 export class HealthService {
+  private readonly logger = new Logger(HealthService.name);
+  private readonly lastLoggedAt = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(HEALTH_REDIS) private readonly valkey: HealthRedisClient,
@@ -61,10 +67,7 @@ export class HealthService {
       await this.prisma.$queryRaw`SELECT 1`;
       return { status: 'up' };
     } catch (err) {
-      return {
-        status: 'down',
-        error: err instanceof Error ? err.message : String(err),
-      };
+      return this.down('database', err);
     }
   }
 
@@ -78,12 +81,24 @@ export class HealthService {
       const reply = await this.valkey.ping();
       return reply === 'PONG'
         ? { status: 'up' }
-        : { status: 'down', error: `unexpected PING reply: ${reply}` };
+        : this.down('valkey', `unexpected PING reply: ${reply}`);
     } catch (err) {
-      return {
-        status: 'down',
-        error: err instanceof Error ? err.message : String(err),
-      };
+      return this.down('valkey', err);
     }
+  }
+
+  /** The raw message names internal hosts and ports, so it stays in the log (SEC-070, AUD-018). */
+  private down(dependency: string, err: unknown): DependencyHealth {
+    const now = Date.now();
+    const last = this.lastLoggedAt.get(dependency);
+    if (last === undefined || now - last >= HEALTH_FAILURE_LOG_THROTTLE_MS) {
+      this.lastLoggedAt.set(dependency, now);
+      this.logger.warn(
+        `Readiness check: ${dependency} is down: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    return { status: 'down', error: 'unreachable' };
   }
 }
