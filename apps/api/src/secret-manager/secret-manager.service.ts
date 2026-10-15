@@ -72,8 +72,8 @@ import {
  * vault (the authorization twin of the client-side crypto rule — the server cannot verify the wrap is
  * correct, but it CAN refuse a grant from a non-member). Enforced in {@link grantMembership}.
  *
- * AUDIT (§10): every mutation appends exactly one METADATA-ONLY {@link SecretAuditLog} row inside the
- * same transaction — never a value, key, or blob.
+ * AUDIT (§10): every mutation appends METADATA-ONLY {@link SecretAuditLog} rows inside the same
+ * transaction — never a value, key, or blob.
  */
 @Injectable()
 export class SecretManagerService {
@@ -318,17 +318,15 @@ export class SecretManagerService {
   }
 
   /**
-   * Rename a vault. Requires `secret:manage` (the controller). 409 on a live name collision. Audited via
-   * VAULT_CREATED is wrong — a rename is a metadata edit; we do NOT add a new audit action for it in v1
-   * (the catalog has no VAULT_UPDATED), so a rename is intentionally not audited beyond the row's
-   * updatedAt. (Reported as out-of-scope: a VAULT_RENAMED audit action would need a schema enum bump.)
+   * Rename a vault. Requires `secret:manage` (the controller). 409 on a live name collision. Audited
+   * VAULT_RENAMED (metadata only — the names are not recorded, only that a rename happened).
    */
   async renameVault(
     principal: Principal | undefined,
     vaultId: string,
     dto: UpdateSecretVault,
   ): Promise<SecretVaultWire> {
-    this.requireHumanId(principal);
+    const userId = this.requireHumanId(principal);
     await this.getLiveVaultOr404(vaultId);
     const clash = await this.prisma.secretVault.findFirst({
       where: { name: dto.name, id: { not: vaultId } },
@@ -337,9 +335,17 @@ export class SecretManagerService {
     if (clash) {
       throw new ConflictException('A vault with this name already exists');
     }
-    const updated = await this.prisma.secretVault.update({
-      where: { id: vaultId },
-      data: { name: dto.name },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.secretVault.update({
+        where: { id: vaultId },
+        data: { name: dto.name },
+      });
+      await this.writeAudit(tx, {
+        action: 'VAULT_RENAMED',
+        actorId: userId,
+        vaultId,
+      });
+      return row;
     });
     return this.vaultToWire(updated);
   }

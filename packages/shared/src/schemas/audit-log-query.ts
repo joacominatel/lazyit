@@ -61,6 +61,8 @@ export const SECRET_AUDIT_ACTIONS = [
   "ITEMS_FETCHED",
   // A human member revealed a single item's value in the UI (#870, ADR-0080). Metadata only.
   "ITEM_REVEALED",
+  // A vault was renamed (AUD-096). Metadata only.
+  "VAULT_RENAMED",
 ] as const;
 export const SecretAuditActionSchema = z.enum(SECRET_AUDIT_ACTIONS);
 export type SecretAuditAction = z.infer<typeof SecretAuditActionSchema>;

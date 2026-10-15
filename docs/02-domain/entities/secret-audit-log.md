@@ -3,7 +3,7 @@ title: SecretAuditLog
 tags: [domain, entity, secret-manager, security, audit, append-only]
 status: accepted
 created: 2026-06-13
-updated: 2026-06-23
+updated: 2026-10-14
 ---
 
 # SecretAuditLog
@@ -44,7 +44,7 @@ compromising the zero-knowledge guarantee.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | `Int` — autoincrement() | PK — a log/history table, never exposed externally ([[0005-id-strategy]]). |
-| `action` | `SecretAuditAction` enum | One of: `VAULT_CREATED`, `VAULT_DELETED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_DELETED`, `MEMBERSHIP_GRANTED`, `MEMBERSHIP_REVOKED`, `KEYPAIR_CREATED`, `KEYPAIR_RESET`, `PASSWORD_CHANGED`, `ITEMS_EXPORTED`, `SA_KEYPAIR_CREATED`, `ITEMS_FETCHED`, `ITEM_REVEALED`. (`RECOVERY_KEY_REGENERATED` is DORMANT — left in the enum but no longer written, ADR-0066.) `ITEMS_EXPORTED` (#612) records a vault secret EXPORT: decryption + the `.env`/JSON build happen entirely client-side (INV-10), so this row is metadata-only — WHO exported WHICH vault, when, never a value. `ITEMS_FETCHED` ([[0080-programmatic-secret-retrieval]]) is a *machine* (service-account) whole-vault read (`serviceAccountId` set, no `itemId`). `ITEM_REVEALED` (#870) records a *human* member REVEALING a **single** item's value in the UI (`actorId` + `vaultId` + `itemId`): the decrypt is client-side (INV-10), so the row records only the **fact** of the reveal — WHO revealed WHICH item, when — never the value. |
+| `action` | `SecretAuditAction` enum | One of: `VAULT_CREATED`, `VAULT_DELETED`, `ITEM_CREATED`, `ITEM_UPDATED`, `ITEM_DELETED`, `MEMBERSHIP_GRANTED`, `MEMBERSHIP_REVOKED`, `KEYPAIR_CREATED`, `KEYPAIR_RESET`, `PASSWORD_CHANGED`, `ITEMS_EXPORTED`, `SA_KEYPAIR_CREATED`, `ITEMS_FETCHED`, `ITEM_REVEALED`, `VAULT_RENAMED`. (`RECOVERY_KEY_REGENERATED` is DORMANT — left in the enum but no longer written, ADR-0066.) `ITEMS_EXPORTED` (#612) records a vault secret EXPORT: decryption + the `.env`/JSON build happen entirely client-side (INV-10), so this row is metadata-only — WHO exported WHICH vault, when, never a value. `ITEMS_FETCHED` ([[0080-programmatic-secret-retrieval]]) is a *machine* (service-account) whole-vault read (`serviceAccountId` set, no `itemId`). `ITEM_REVEALED` (#870) records a *human* member REVEALING a **single** item's value in the UI (`actorId` + `vaultId` + `itemId`): the decrypt is client-side (INV-10), so the row records only the **fact** of the reveal — WHO revealed WHICH item, when — never the value. `VAULT_RENAMED` (AUD-096) records a vault rename (`actorId` + `vaultId`); neither the old nor the new name is stored on the row. |
 | `actorId` | `String?` (`@db.Uuid`) | FK → `User.id`, `onDelete: SetNull`. Null if the actor was later deleted. |
 | `vaultId` | `String?` | Plain string reference (no FK) — survives vault deletion. |
 | `itemId` | `String?` | Plain string reference (no FK) — survives item deletion. |

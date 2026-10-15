@@ -283,8 +283,7 @@ class FakePrisma {
       return false;
     const vaultMembers = (
       where.vault as
-        | { memberships?: { some?: { userId?: string } } }
-        | undefined
+        { memberships?: { some?: { userId?: string } } } | undefined
     )?.memberships?.some;
     if (vaultMembers?.userId) {
       const isMember = this.memberships.some(
@@ -1304,6 +1303,40 @@ describe('SecretManagerService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
       const renamed = await svc.renameVault(alice, other, { name: 'Renamed' });
       expect(renamed.name).toBe('Renamed');
+    });
+
+    it('a rename writes one VAULT_RENAMED audit row with no names on it (AUD-096)', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice, 'Before');
+      const auditBefore = db.audit.length;
+
+      await svc.renameVault(alice, vaultId, { name: 'After' });
+
+      expect(db.audit.slice(auditBefore)).toEqual([
+        {
+          action: 'VAULT_RENAMED',
+          actorId: 'alice',
+          serviceAccountId: null,
+          vaultId,
+          itemId: null,
+          targetUserId: null,
+          targetServiceAccountId: null,
+        },
+      ]);
+    });
+
+    it('a colliding rename writes no audit row', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      await makeVault(svc, alice, 'Taken');
+      const other = await makeVault(svc, alice, 'Free');
+      const auditBefore = db.audit.length;
+
+      await expect(
+        svc.renameVault(alice, other, { name: 'Taken' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(db.audit.length).toBe(auditBefore);
     });
   });
 
