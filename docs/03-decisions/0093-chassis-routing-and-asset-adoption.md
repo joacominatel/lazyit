@@ -152,6 +152,9 @@ On the `trackAsAsset && !node.assetId` branch of `confirmNode`, before minting a
    `INFRA_AUTO_ASSET_MARKER` is **NOT** stamped (§4). The node's `label`, `kind` and `state`
    transitions are unchanged.
 
+> **Amended 2026-10-14 (AUD-030):** step 3's probe also skips an Asset another live node already
+> links, so that case mints — see [[0074-server-reporting-agent]] §3, "one live node per Asset".
+
 The superseded behaviour is named plainly:
 
 > ~~*"A unique-serial collision (`assets_serial_active_key`) **retries without the serial** rather
