@@ -1305,7 +1305,7 @@ export class UsersService {
       await this.assertNotLastAdmin(tx, id, (t) => t.role === 'ADMIN');
 
       // Lock order: lazyit.admin_set (above), then this row; a vault grant share-locks it, so none lands mid-offboard.
-      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${id} FOR UPDATE`;
+      await tx.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id} FOR UPDATE`;
 
       // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
       // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).

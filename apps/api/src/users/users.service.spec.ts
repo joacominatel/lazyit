@@ -57,8 +57,6 @@ type TxMock = {
   };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
-  // The offboarding row lock (FOR UPDATE on the user) that vault grants wait on.
-  $queryRaw: jest.Mock;
   accessGrant: { updateMany: jest.Mock; create: jest.Mock };
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
@@ -146,7 +144,6 @@ describe('UsersService', () => {
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
-      $queryRaw: jest.fn().mockResolvedValue([]),
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
@@ -1545,7 +1542,8 @@ describe('UsersService', () => {
             let release: () => void = () => undefined;
             const client: TxMock = {
               ...tx,
-              $executeRaw: jest.fn(async () => {
+              $executeRaw: jest.fn(async (sql: TemplateStringsArray) => {
+                if (!sql.join('?').includes('pg_advisory_xact_lock')) return 1;
                 const previous = held;
                 held = new Promise<void>((resolve) => (release = resolve));
                 await previous;
@@ -1616,17 +1614,18 @@ describe('UsersService', () => {
 
       await service.remove('u-1', { userId: 'actor-99' });
 
-      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-      const [sql, userId] = tx.$queryRaw.mock.calls[0] as [
-        TemplateStringsArray,
-        string,
-      ];
-      expect(sql.join('?')).toBe(
-        'SELECT "id" FROM "users" WHERE "id" = ? FOR UPDATE',
+      // Call 1 is the admin-set advisory lock, call 2 the user row lock.
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+      const calls = tx.$executeRaw.mock.calls as Array<
+        [TemplateStringsArray, ...unknown[]]
+      >;
+      expect(calls[0][0].join('?')).toContain('pg_advisory_xact_lock');
+      expect(calls[0][1]).toBe('lazyit.admin_set');
+      expect(calls[1][0].join('?')).toBe(
+        'SELECT 1 FROM "users" WHERE "id" = ? FOR UPDATE',
       );
-      expect(userId).toBe('u-1');
-      const rowLock = tx.$queryRaw.mock.invocationCallOrder[0];
-      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(rowLock);
+      expect(calls[1][1]).toBe('u-1');
+      const rowLock = tx.$executeRaw.mock.invocationCallOrder[1];
       expect(rowLock).toBeLessThan(
         tx.vaultMembership.findMany.mock.invocationCallOrder[0],
       );
