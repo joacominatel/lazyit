@@ -74,6 +74,12 @@ const NOT_EXECUTED: FallbackAnswer = {
   ...messagePhrase(phrase('refusal.runEndedBeforeCall')),
 };
 
+/** An approved write still running when its run ends may yet take effect: never answered "not executed". */
+const STILL_EXECUTING: FallbackAnswer = {
+  code: 'UNKNOWN_OUTCOME',
+  ...messagePhrase(phrase('refusal.outcomeUnknown')),
+};
+
 /** What a call still pending when its run ends is answered, absent a fallback. */
 const RUN_ENDED = messagePhrase(phrase('refusal.runEnded'));
 
@@ -204,7 +210,8 @@ export class AiRunLifecycle {
 
   /**
    * The outcome of every call of a step, in call order: the recorded output, the pending invocation's
-   * stored result once it is decided, or the `fallback` error — so every call is answered (§8 invariant 5).
+   * stored result once it is decided, `UNKNOWN_OUTCOME` while it is still EXECUTING, or the `fallback`
+   * error — so every call is answered (§8 invariant 5).
    */
   async outcomesOf(
     record: StepRecord,
@@ -226,6 +233,7 @@ export class AiRunLifecycle {
         });
         continue;
       }
+      let answer = fallback;
       if (recorded && 'invocationId' in recorded) {
         const row = await this.prisma.aiToolInvocation.findUnique({
           where: { id: recorded.invocationId },
@@ -240,11 +248,12 @@ export class AiRunLifecycle {
           });
           continue;
         }
+        if (action?.status === 'EXECUTING') answer = STILL_EXECUTING;
       }
       const kind = callKindOf(
         this.registry.get(call.toolName)?.descriptor.class ?? 'read',
       );
-      const synthetic = errorResult(kind, fallback);
+      const synthetic = errorResult(kind, answer);
       outcomes.push({
         toolCallId: call.toolCallId,
         toolName: call.toolName,

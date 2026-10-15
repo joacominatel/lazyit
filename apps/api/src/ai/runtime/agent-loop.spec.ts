@@ -1031,6 +1031,25 @@ describe('cancel', () => {
     });
   });
 
+  it('answers a write still executing at the cancel UNKNOWN_OUTCOME, never "nothing was executed"', async () => {
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
+    });
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+    // The approval claimed the write (AWAITING_APPROVAL → EXECUTING) and it has not returned yet.
+    rt.prisma.tables.aiToolInvocation.rows[0].status = 'EXECUTING';
+    await rt.orchestrator.cancel(runId, HUMAN);
+    expect(status(runId)).toBe('CANCELLED');
+    const [answer] = toolMessages(conversationId)[0];
+    expect(answer).toMatchObject({
+      toolCallId: 'w',
+      isError: true,
+      output: { ok: false, error: { code: 'UNKNOWN_OUTCOME' } },
+    });
+    expect(JSON.stringify(answer.output)).not.toMatch(/nothing was executed/);
+  });
+
   it("another principal's run is not found", async () => {
     const { runId } = await chat();
     await expect(rt.orchestrator.cancel(runId, SERVICE)).rejects.toMatchObject({
