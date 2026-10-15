@@ -600,6 +600,9 @@ const prisma = {
       return Promise.resolve(data);
     }),
   },
+  // The folder writes' advisory lock and row lock.
+  $executeRaw: jest.fn(() => Promise.resolve(0)),
+  $queryRaw: jest.fn(() => Promise.resolve([])),
   /** The array form runs the queries (already issued); the callback form is all-or-nothing on the AI tables. */
   $transaction: jest.fn(async (arg: unknown): Promise<unknown> => {
     if (Array.isArray(arg)) return Promise.all(arg);

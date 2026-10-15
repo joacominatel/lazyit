@@ -56,6 +56,9 @@ describe('ArticleCategoriesService', () => {
     articleAlias: ArticleAliasMock;
     $transaction: jest.Mock;
   };
+  // The folder-tree advisory lock ($executeRaw) and the folder row lock ($queryRaw), on the tx.
+  let executeRaw: jest.Mock;
+  let queryRaw: jest.Mock;
   // PermissionResolverService (ADR-0046) — mocked. Drives the #554 accessRules read gate: hasAll()
   // returns true only for a `settings:manage` caller. Defaults to FALSE (no rules) so the pre-#554
   // read tests assert the public shape; the accessRules tests override it per-case.
@@ -90,11 +93,15 @@ describe('ArticleCategoriesService', () => {
       deleteMany: jest.fn(),
     };
 
+    executeRaw = jest.fn().mockResolvedValue(0);
+    queryRaw = jest.fn().mockResolvedValue([]);
     // $transaction: by default, immediately invoke the callback with a tx that mirrors the mocks.
     const txProxy = {
       articleAlias,
       article,
       articleCategory,
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
     };
     prisma = {
       articleCategory,
@@ -149,11 +156,27 @@ describe('ArticleCategoriesService', () => {
     await service.create(dto);
 
     expect(articleCategory.findFirst).toHaveBeenCalledWith({
-      where: { id: 'p1' },
+      where: { id: 'p1', deletedAt: null },
       select: { id: true },
     });
     expect(articleCategory.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: dto }),
+    );
+  });
+
+  it("checks a nested create's parent and inserts it under the folder-tree lock, in one transaction (AUD-023)", async () => {
+    articleCategory.findFirst.mockResolvedValue({ id: 'p1' });
+    articleCategory.create.mockResolvedValue({ id: 'c2' });
+
+    await service.create({ name: 'Linux', parentId: 'p1' });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const lock = executeRaw.mock.invocationCallOrder[0];
+    expect(lock).toBeLessThan(
+      articleCategory.findFirst.mock.invocationCallOrder[0],
+    );
+    expect(lock).toBeLessThan(
+      articleCategory.create.mock.invocationCallOrder[0],
     );
   });
 
@@ -406,10 +429,10 @@ describe('ArticleCategoriesService', () => {
     await service.remove('c1');
 
     expect(article.count).toHaveBeenCalledWith({
-      where: { categoryId: 'c1' },
+      where: { categoryId: 'c1', deletedAt: null },
     });
     expect(articleCategory.count).toHaveBeenCalledWith({
-      where: { parentId: 'c1' },
+      where: { parentId: 'c1', deletedAt: null },
     });
     const calls = articleCategory.update.mock.calls as Array<
       [{ where: { id: string }; data: { deletedAt: Date } }]
@@ -437,6 +460,22 @@ describe('ArticleCategoriesService', () => {
       ConflictException,
     );
     expect(articleCategory.update).not.toHaveBeenCalled();
+  });
+
+  it('locks the tree and the folder row before the emptiness checks, all in one transaction (AUD-023)', async () => {
+    articleCategory.findFirst.mockResolvedValue({ id: 'c1' });
+    article.count.mockResolvedValue(0);
+    articleCategory.count.mockResolvedValue(0);
+    articleCategory.update.mockResolvedValue({ id: 'c1' });
+
+    await service.remove('c1');
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    const firstCheck = article.count.mock.invocationCallOrder[0];
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(firstCheck);
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(firstCheck);
+    // The row lock names exactly this folder.
+    expect(queryRaw.mock.calls[0]).toContainEqual(['c1']);
   });
 
   it('does not soft-delete a missing folder', async () => {
@@ -480,33 +519,22 @@ describe('ArticleCategoriesService', () => {
 
   describe('folder cycle guard (ADR-0059 §1)', () => {
     /**
-     * Drive the move: the first findFirst is the existence check (findOne), the second is the
-     * parent-usable check, and the rest are the DFS walk UP the chain. `chain` maps a folder id to
-     * its parentId so the walk can be replayed deterministically.
+     * Drive a move: every live-folder lookup (the subject, then the parent) succeeds, and the tree walk
+     * reads `edges` — every folder's parent, soft-deleted folders included.
      */
-    const wireWalk = (
-      subject: { id: string; deletedAt: null },
-      parentUsable: { id: string },
-      chain: Record<string, string | null>,
-    ) => {
-      articleCategory.findFirst
-        .mockResolvedValueOnce(subject) // findOne existence
-        .mockResolvedValueOnce(parentUsable) // assertParentUsable
-        .mockImplementation((args: { where: { id: string } }) =>
-          Promise.resolve({ parentId: chain[args.where.id] ?? null }),
-        );
+    const wireTree = (edges: Record<string, string | null>) => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          Promise.resolve({ id: args.where.id }),
+      );
+      articleCategory.findMany.mockResolvedValue(
+        Object.entries(edges).map(([id, parentId]) => ({ id, parentId })),
+      );
     };
 
     it('allows reparenting under an unrelated folder (no cycle)', async () => {
       // A is the subject; move under C whose chain is C -> B -> (root). Never reaches A.
-      wireWalk(
-        { id: 'A', deletedAt: null },
-        { id: 'C' },
-        {
-          C: 'B',
-          B: null,
-        },
-      );
+      wireTree({ A: null, B: null, C: 'B' });
       articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'C' });
 
       await service.update('A', { parentId: 'C' });
@@ -515,14 +543,7 @@ describe('ArticleCategoriesService', () => {
 
     it('rejects (400) a move that makes the folder its own ancestor', async () => {
       // Subject A; proposed parent C whose chain is C -> B -> A → closing a cycle.
-      wireWalk(
-        { id: 'A', deletedAt: null },
-        { id: 'C' },
-        {
-          C: 'B',
-          B: 'A',
-        },
-      );
+      wireTree({ A: null, B: 'A', C: 'B' });
 
       await expect(
         service.update('A', { parentId: 'C' }),
@@ -531,14 +552,61 @@ describe('ArticleCategoriesService', () => {
     });
 
     it('rejects (400) a folder set as its own parent', async () => {
-      articleCategory.findFirst
-        .mockResolvedValueOnce({ id: 'A', deletedAt: null }) // findOne
-        .mockResolvedValueOnce({ id: 'A' }); // assertParentUsable
+      wireTree({ A: null });
 
       await expect(
         service.update('A', { parentId: 'A' }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('sees through a soft-deleted folder in the chain (AUD-022)', async () => {
+      // C -> D -> A where D is soft-deleted: restoring D after the move would close the loop.
+      wireTree({ A: null, D: 'A', C: 'D' });
+
+      await expect(
+        service.update('A', { parentId: 'C' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(articleCategory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ includeSoftDeleted: true }),
+      );
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a pre-existing loop elsewhere in the tree', async () => {
+      wireTree({ A: null, X: 'Y', Y: 'X', C: 'X' });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'C' });
+
+      await service.update('A', { parentId: 'C' });
+      expect(articleCategory.update).toHaveBeenCalled();
+    });
+
+    it('checks and writes a move in one transaction, under the folder-tree lock (AUD-010)', async () => {
+      wireTree({ A: null, B: null });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: 'B' });
+
+      await service.update('A', { parentId: 'B' });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(executeRaw).toHaveBeenCalledTimes(1);
+      expect(executeRaw.mock.calls[0]).toContain('lazyit.folder_tree');
+      const lock = executeRaw.mock.invocationCallOrder[0];
+      expect(lock).toBeLessThan(
+        articleCategory.findFirst.mock.invocationCallOrder[0],
+      );
+      expect(lock).toBeLessThan(
+        articleCategory.findMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('a move to the root also takes the lock', async () => {
+      wireTree({ A: 'B', B: null });
+      articleCategory.update.mockResolvedValue({ id: 'A', parentId: null });
+
+      await service.update('A', { parentId: null });
+
+      expect(executeRaw).toHaveBeenCalledTimes(1);
+      expect(articleCategory.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -597,31 +665,20 @@ describe('ArticleCategoriesService', () => {
 
   describe('removeCascade', () => {
     /**
-     * Wire up the BFS tree walk mock: `findFirst` (findOne existence check) returns the root
-     * folder, then `findMany` returns the children at each level as keyed in `childrenMap`.
-     * After the tree walk, the $transaction callback fires the tx mocks directly.
-     *
-     * `childrenMap` maps a folder id to the ids of its DIRECT children. Omit a key (or map it to [])
-     * to indicate a leaf.
+     * Wire up the tree: `findFirst` (the live check) returns the root folder, and the one `findMany`
+     * returns every folder's edge, built from `childrenMap` (a folder id → its DIRECT children).
      */
     const wireTree = (
       rootId: string,
       childrenMap: Record<string, string[]> = {},
     ) => {
-      // findOne (existence check) — returns a live folder
-      articleCategory.findFirst.mockResolvedValue({
-        id: rootId,
-        deletedAt: null,
-      });
-
-      // BFS findMany calls: each call receives { where: { parentId: X }, select: { id: true }, ... }
-      articleCategory.findMany.mockImplementation(
-        (args: { where?: { parentId?: string } }) => {
-          const pid = args?.where?.parentId;
-          const ids = pid && childrenMap[pid] ? childrenMap[pid] : [];
-          return Promise.resolve(ids.map((id) => ({ id })));
-        },
-      );
+      articleCategory.findFirst.mockResolvedValue({ id: rootId });
+      articleCategory.findMany.mockResolvedValue([
+        { id: rootId, parentId: null },
+        ...Object.entries(childrenMap).flatMap(([parentId, ids]) =>
+          ids.map((id) => ({ id, parentId })),
+        ),
+      ]);
     };
 
     it('cascade soft-deletes a nested subtree (root > child > grandchild) + all their articles; counts are correct', async () => {
@@ -705,13 +762,54 @@ describe('ArticleCategoriesService', () => {
     });
 
     it('404s on a missing or already-soft-deleted folder', async () => {
-      articleCategory.findFirst.mockResolvedValue(null); // findOne returns nothing
+      articleCategory.findFirst.mockResolvedValue(null); // the live check finds nothing
 
       await expect(service.removeCascade('gone')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      // Transaction must NOT be entered if the root folder is gone.
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(articleAlias.deleteMany).not.toHaveBeenCalled();
+      expect(article.updateMany).not.toHaveBeenCalled();
+      expect(articleCategory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('terminates on a parentId cycle in the data and deletes each folder once (AUD-010)', async () => {
+      // root -> b -> root: the state two racing opposing moves used to leave behind.
+      articleCategory.findFirst.mockResolvedValue({ id: 'root' });
+      articleCategory.findMany.mockResolvedValue([
+        { id: 'root', parentId: 'b' },
+        { id: 'b', parentId: 'root' },
+      ]);
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await expect(service.removeCascade('root')).resolves.toEqual({
+        deletedFolders: 2,
+        deletedArticles: 0,
+      });
+      expect(articleCategory.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['root', 'b'] } }),
+        }),
+      );
+    });
+
+    it('walks and locks the subtree inside the transaction, before any write (AUD-023)', async () => {
+      wireTree('root', { root: ['child'] });
+      articleAlias.deleteMany.mockResolvedValue({ count: 0 });
+      article.updateMany.mockResolvedValue({ count: 0 });
+      article.findMany.mockResolvedValue([]);
+      articleCategory.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.removeCascade('root');
+
+      const firstWrite = articleAlias.deleteMany.mock.invocationCallOrder[0];
+      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        articleCategory.findMany.mock.invocationCallOrder[0],
+      );
+      expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(firstWrite);
+      expect(queryRaw.mock.calls[0]).toContainEqual(['root', 'child']);
     });
 
     it('a descendant article authored by ANOTHER user is soft-deleted by the cascade (ADMIN override)', async () => {
@@ -897,6 +995,60 @@ describe('ArticleCategoriesService', () => {
       const restored = await service.restore('c1');
       expect(restored).toMatchObject({ id: 'c1' });
       expect(restored).not.toHaveProperty('accessRules');
+    });
+
+    it('restore of a sub-folder under a LIVE parent succeeds', async () => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          args.where.id === 'c1'
+            ? Promise.resolve({
+                ...STORED_ROW,
+                parentId: 'p1',
+                deletedAt: new Date('2026-01-03T00:00:00Z'),
+              })
+            : Promise.resolve({ id: 'p1' }),
+      );
+
+      await service.restore('c1');
+
+      expect(articleCategory.findFirst).toHaveBeenCalledWith({
+        where: { id: 'p1', deletedAt: null },
+        select: { id: true },
+      });
+      expect(articleCategory.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { deletedAt: null } }),
+      );
+    });
+
+    it('refuses (409) to restore a sub-folder whose parent is still deleted (AUD-022)', async () => {
+      articleCategory.findFirst.mockImplementation(
+        (args: { where: { id: string } }) =>
+          args.where.id === 'c1'
+            ? Promise.resolve({
+                ...STORED_ROW,
+                parentId: 'p1',
+                deletedAt: new Date('2026-01-03T00:00:00Z'),
+              })
+            : Promise.resolve(null),
+      );
+
+      await expect(service.restore('c1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(articleCategory.update).not.toHaveBeenCalled();
+    });
+
+    it('restore checks the parent and writes under the folder-tree lock', async () => {
+      articleCategory.findFirst.mockImplementation(
+        rowFor({ ...STORED_ROW, deletedAt: new Date('2026-01-03T00:00:00Z') }),
+      );
+
+      await service.restore('c1');
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        articleCategory.findFirst.mock.invocationCallOrder[0],
+      );
     });
 
     it('restore of an already-live folder returns it without accessRules', async () => {
