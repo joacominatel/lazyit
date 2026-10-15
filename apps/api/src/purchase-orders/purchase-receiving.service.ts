@@ -276,7 +276,11 @@ export class PurchaseReceivingService {
       lineId,
     );
     assertAssetLine(line);
-    const values = lineValues(purchase, line);
+    const offered = lineValues(purchase, line);
+    // An archived model is never applied (the link refuses it): offer it as UNAVAILABLE.
+    const values = (await this.modelLive(this.prisma, offered.modelId))
+      ? offered
+      : { ...offered, modelId: null };
     const rows = await this.prisma.asset.findMany({
       where: { id: { in: assetIds }, deletedAt: null },
       select: LINK_ASSET_SELECT,
@@ -348,6 +352,7 @@ export class PurchaseReceivingService {
       );
       assertAssetLine(line);
       const values = lineValues(purchase, line);
+      const modelLive = await this.modelLive(tx, values.modelId);
       const rows = await this.lockAssets(tx, data.assetIds);
 
       const linked: AssetWire[] = [];
@@ -375,6 +380,11 @@ export class PurchaseReceivingService {
         }
         const fields = data.applyByAsset?.[assetId] ?? data.apply ?? [];
         const write = appliedData(fields, diffAsset(row, values), values);
+        if (!modelLive && write.applied.includes('modelId')) {
+          throw new BadRequestException(
+            `AssetModel ${values.modelId} is archived: map the line to a live model, or leave modelId out of apply`,
+          );
+        }
         const updated = await tx.asset.update({
           where: { id: assetId },
           data: { ...write.data, purchaseOrderLineId: lineId },
@@ -519,6 +529,19 @@ export class PurchaseReceivingService {
   }
 
   /** Lock the named asset rows for the transaction, then read the live ones. */
+  /** Whether the line's model may be written onto an asset — live, as every asset write requires. */
+  private async modelLive(
+    client: Tx | PrismaService,
+    modelId: string | null,
+  ): Promise<boolean> {
+    if (modelId === null) return true;
+    const model = await client.assetModel.findFirst({
+      where: { id: modelId, deletedAt: null },
+      select: { id: true },
+    });
+    return model !== null;
+  }
+
   private async lockAssets(
     tx: Tx,
     assetIds: string[],

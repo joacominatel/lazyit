@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # PurchaseOrderLine
@@ -103,7 +103,7 @@ by the API and available to the web):
 | `purchaseCost` | `purchaseCost` **and** `purchaseCurrency` | the line's unit price with the purchase's currency label — cost and currency move together |
 | `warrantyEnd` | `warrantyEnd` | that purchase date + `warrantyMonths` (calendar months, UTC, clamped to the month's last day) |
 | `company` | `company` | the purchase's company |
-| `modelId` | `modelId` | the line's asset model (writes a `MODEL_CHANGED` history event too) |
+| `modelId` | `modelId` | the line's asset model while live (writes a `MODEL_CHANGED` history event too). An archived one reads `UNAVAILABLE` in the preview, and a link that would apply it is a `400` with nothing written |
 
 A field the purchase has no value for is never applied (never a clear). The diff action per asset and field
 is `FILL` (asset empty), `REPLACE` (different value; cost compares amount **and** label, trimmed and
