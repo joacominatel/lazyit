@@ -102,57 +102,74 @@ const userRef = z
     'The user: id, email, username, legajo (employee number) or "me" (always the person you act for).',
   );
 
-/** "Ana Ops <ana@example.com>" — what a person recognizes on a card or a chip. */
+/** "Ana Ops <ana@example.com>" — what a person recognizes on a card or a chip. The name is self-editable: wrapped. */
 function userLabel(row: Row): string {
-  const name = [str(row.firstName), str(row.lastName)]
-    .filter((part): part is string => !!part)
-    .join(' ');
+  const name = untrusted(
+    [str(row.firstName), str(row.lastName)]
+      .filter((part): part is string => !!part)
+      .join(' '),
+  );
   const email = str(row.email);
-  return email ? `${name} <${email}>`.trim() : name || String(row.id);
+  return email ? `${name ?? ''} <${email}>`.trim() : (name ?? String(row.id));
 }
 
 function userRefOf(row: Row, op: AiEntityRef['op']): AiEntityRef {
   return { type: 'user', id: String(row.id), op, label: userLabel(row) };
 }
 
-/** The manager descriptor the route resolves (display fields only, ADR-0058). */
+/** The identity strings a person or a directory sync wrote (a user renames themselves): untrusted (INV-AI-4). */
+const USER_AUTHORED = ['firstName', 'lastName', 'legajo', 'username'] as const;
+
+/** `row` with each of `fields` that it carries wrapped with `untrusted()`. */
+function wrapFields(row: Row, fields: readonly string[]): Row {
+  for (const field of fields) {
+    if (field in row) row[field] = untrusted(str(row[field]));
+  }
+  return row;
+}
+
+/** The manager descriptor the route resolves (display fields only, ADR-0058); names wrapped as untrusted. */
 function managerOf(value: unknown): Row | null {
   const manager = asRow(value);
   if (manager.type === 'user') {
-    return pick(manager, [
-      'type',
-      'id',
-      'firstName',
-      'lastName',
-      'isOffboarded',
-    ]);
+    return wrapFields(
+      pick(manager, ['type', 'id', 'firstName', 'lastName', 'isOffboarded']),
+      ['firstName', 'lastName'],
+    );
   }
-  if (manager.type === 'external') return pick(manager, ['type', 'name']);
+  if (manager.type === 'external') {
+    return wrapFields(pick(manager, ['type', 'name']), ['name']);
+  }
   return null;
 }
 
 function managerText(value: unknown): string | null {
   const manager = asRow(value);
   if (manager.type === 'user') {
-    return `${str(manager.firstName) ?? ''} ${str(manager.lastName) ?? ''}`.trim();
+    return untrusted(
+      `${str(manager.firstName) ?? ''} ${str(manager.lastName) ?? ''}`.trim(),
+    );
   }
-  return manager.type === 'external' ? str(manager.name) : null;
+  return manager.type === 'external' ? untrusted(str(manager.name)) : null;
 }
 
 /** The concise user shape every tool shares. Never `externalId`, a hash, an epoch or a credential flag. */
 function userSummary(row: Row): Row {
   return {
-    ...pick(row, [
-      'id',
-      'email',
-      'firstName',
-      'lastName',
-      'role',
-      'isActive',
-      'directoryOnly',
-      'legajo',
-      'username',
-    ]),
+    ...wrapFields(
+      pick(row, [
+        'id',
+        'email',
+        'firstName',
+        'lastName',
+        'role',
+        'isActive',
+        'directoryOnly',
+        'legajo',
+        'username',
+      ]),
+      USER_AUTHORED,
+    ),
     manager: managerOf(row.manager),
     ...(row.deletedAt ? { archivedAt: iso(row.deletedAt) } : {}),
   };
@@ -536,7 +553,9 @@ const userGet = defineTool({
               ...(full
                 ? {
                     items: grants.slice(0, AI_TOOL_LIST_MAX_LIMIT).map((g) => ({
-                      ...pick(g, ['id', 'applicationId', 'accessLevel']),
+                      ...pick(g, ['id', 'applicationId']),
+                      // Copied from the request when one was approved: requester-authored.
+                      accessLevel: untrusted(str(g.accessLevel)),
                       grantedAt: iso(g.grantedAt),
                       expiresAt: iso(g.expiresAt),
                       notes: untrusted(str(g.notes)),

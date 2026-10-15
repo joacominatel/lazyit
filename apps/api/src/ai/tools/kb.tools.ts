@@ -169,8 +169,9 @@ function author(value: unknown): Row | null {
   const row = asRow(value);
   if (Object.keys(row).length === 0) return null;
   return {
-    firstName: clipOrNull(str(row.firstName), KB_NAME_MAX),
-    lastName: clipOrNull(str(row.lastName), KB_NAME_MAX),
+    // Self-editable profile names: other-authored text (INV-AI-4).
+    firstName: untrusted(clipOrNull(str(row.firstName), KB_NAME_MAX)),
+    lastName: untrusted(clipOrNull(str(row.lastName), KB_NAME_MAX)),
     formerMember: row.deletedAt !== null && row.deletedAt !== undefined,
   };
 }

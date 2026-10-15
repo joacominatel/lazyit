@@ -1007,7 +1007,11 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         title: '<untrusted_content>VPN setup</untrusted_content>',
         status: 'PUBLISHED',
         folderId: F.public,
-        author: { firstName: 'Otto', lastName: 'User', formerMember: false },
+        author: {
+          firstName: '<untrusted_content>Otto</untrusted_content>',
+          lastName: '<untrusted_content>User</untrusted_content>',
+          formerMember: false,
+        },
         linkCount: 1,
       });
       // concise: no excerpt, never a body.
