@@ -1035,7 +1035,9 @@ model UpdateRun {
   updatedAt         DateTime  @updatedAt
 
   // No deletedAt: an append-only ledger (ADR-0006), like WorkflowRun. Indexes: the active-run /
-  // reconcile scan by status, and the newest-first history list by createdAt.
+  // reconcile scan by status, and the newest-first history list by createdAt. At most one ACTIVE run
+  // (status not done/failed/rolled_back) via the partial unique index `update_runs_single_active_key`
+  // (raw SQL in the migration; Prisma can't express partial indexes — prisma-migrations.md §3).
   @@index([status])
   @@index([createdAt])
   @@map("update_runs")

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   type OnModuleInit,
@@ -180,7 +181,7 @@ export class UpdateService implements OnModuleInit {
   /**
    * The whole "Version & updates" card in one read (ADR-0084 §5): running version, opt-in state, the
    * cached latest release + how far behind, when last checked, the active run and recent history. Reads
-   * only the cache — never fetches GitHub. When the check is off, `latestVersion`/`behindBy` reflect
+   * only the cache — never fetches GitHub. When the check is off, `latestVersion` reflects
    * whatever was last cached but the UI keys off `checkEnabled` to show "checks disabled".
    */
   async getStatus(): Promise<UpdateStatus> {
@@ -201,13 +202,16 @@ export class UpdateService implements OnModuleInit {
         ),
       ) ?? null;
     const checkEnabled = settings?.checkEnabled ?? false;
+    const latestVersion = settings?.latestVersion ?? null;
+    // The cache outlives an upgrade and may never refresh (check off, egress blocked): re-derive "behind".
+    const behind = isNewerVersion(latestVersion, this.currentVersion);
     return {
       currentVersion: this.currentVersion,
       checkEnabled,
-      latestVersion: settings?.latestVersion ?? null,
+      latestVersion,
       htmlUrl: settings?.latestHtmlUrl ?? null,
-      behindBy: settings?.behindBy ?? 0,
-      securityRelevant: settings?.securityRelevant ?? false,
+      behindBy: behind ? (settings?.behindBy ?? 0) : 0,
+      securityRelevant: behind ? (settings?.securityRelevant ?? false) : false,
       checkedAt: settings?.checkedAt?.toISOString() ?? null,
       activeRun,
       recentRuns,
@@ -223,8 +227,9 @@ export class UpdateService implements OnModuleInit {
    * row (RED LINE: the API never executes an update).
    *
    * Guards: the target must be strictly NEWER than the running version (nothing to update to otherwise);
-   * and if a run is already in flight, we refuse a second (single-flight at the app layer — the host
-   * script has its own lock file too). `requestedByUserId` is the enqueuing human (the controller's
+   * and if a run is already in flight, we refuse a second (single-flight: the read gives the friendly 400,
+   * the `update_runs_single_active_key` partial unique index turns a concurrent loser into a 409, and the
+   * host script has its own lock file too). `requestedByUserId` is the enqueuing human (the controller's
    * HumanOnlyGuard already refused a service principal).
    */
   async enqueue(
@@ -254,14 +259,26 @@ export class UpdateService implements OnModuleInit {
     const requestedByUserId =
       principal && isHumanPrincipal(principal) ? principal.user.id : null;
 
-    const created = await this.prisma.updateRun.create({
-      data: {
-        requestedByUserId,
-        fromVersion: this.currentVersion,
-        toVersion,
-        status: 'requested',
-      },
-    });
+    const created = await this.prisma.updateRun
+      .create({
+        data: {
+          requestedByUserId,
+          fromVersion: this.currentVersion,
+          toVersion,
+          status: 'requested',
+        },
+      })
+      .catch((err: unknown) => {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          throw new ConflictException(
+            'Another update was enqueued at the same moment. Refresh to see it before enqueuing again.',
+          );
+        }
+        throw err;
+      });
     this.logger.log(
       `Update enqueued: ${this.currentVersion} → ${toVersion} (run #${created.id}). Operator must run: ./infra/update.sh ${toVersion}`,
     );
