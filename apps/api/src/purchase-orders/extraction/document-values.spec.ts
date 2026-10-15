@@ -37,6 +37,29 @@ describe('readAmount — printed amounts to minor units, never guessed (#1477)',
     expect(readAmount(text)).toEqual(minor(expected));
   });
 
+  it.each([
+    ['.50', 50],
+    [',50', 50],
+    ['$ .75', 75],
+    ['$.75', 75],
+    ['Total: .99', 99],
+    ['Total: ,99', 99],
+    ['Total: 1.234,56', 123_456],
+    ['Total: 1,234.56', 123_456],
+    ['Subtotal: 1.234.567', 123_456_700],
+    ['Imp.1.500,00', 150_000],
+  ])(
+    'a leading decimal separator stays with the number, never a 100x amount: %s → %d',
+    (text, expected) => {
+      expect(readAmount(text)).toEqual(minor(expected));
+    },
+  );
+
+  it('a leading separator before thousands groups does not read', () => {
+    expect(readAmount('.1.234,56')).toEqual(fails('UNREADABLE'));
+    expect(readAmount('Total: ,1,234')).toEqual(fails('UNREADABLE'));
+  });
+
   it('a single separator before exactly three digits is ambiguous without a hint', () => {
     expect(readAmount('1.150')).toEqual(fails('AMBIGUOUS'));
     expect(readAmount('1,150')).toEqual(fails('AMBIGUOUS'));
@@ -94,6 +117,7 @@ describe('the document decimal separator (#1477)', () => {
     expect(revealedDecimal('1,234.56')).toBe('.');
     expect(revealedDecimal('1.234.567')).toBe(',');
     expect(revealedDecimal('12,5')).toBe(',');
+    expect(revealedDecimal('Total: .99')).toBe('.');
     expect(revealedDecimal('1.150')).toBeNull();
     expect(revealedDecimal('4')).toBeNull();
   });
