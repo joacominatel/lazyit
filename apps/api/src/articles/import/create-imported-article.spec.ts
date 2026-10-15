@@ -7,6 +7,7 @@ import {
   type ImportTx,
 } from './create-imported-article';
 import type { ImportJobData } from './import-job.types';
+import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
 
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 
@@ -24,8 +25,11 @@ const baseData = (overrides: Partial<ImportJobData> = {}): ImportJobData => ({
   ...overrides,
 });
 
-/** A Prisma double that records the writes and echoes a created row back from the create args. */
-function makePrisma() {
+/**
+ * A Prisma double that records the writes and echoes a created row back from the create args.
+ * `liveSlugs` are held by existing live articles; a create on one of them fails like the unique index.
+ */
+function makePrisma(liveSlugs: string[] = []) {
   const articleCreate = jest.fn(
     (args: {
       data: {
@@ -38,27 +42,46 @@ function makePrisma() {
         publishedAt: Date | null;
       };
     }): Promise<ImportedArticleRow> =>
-      Promise.resolve({
-        id: 'art1',
-        slug: args.data.slug,
-        title: args.data.title,
-        content: args.data.content,
-        excerpt: null,
-        status: args.data.status as ImportedArticleRow['status'],
-        categoryId: args.data.categoryId,
-      }),
+      liveSlugs.includes(args.data.slug)
+        ? Promise.reject(
+            Object.assign(new Error('Unique constraint failed'), {
+              code: 'P2002',
+            }),
+          )
+        : Promise.resolve({
+            id: 'art1',
+            slug: args.data.slug,
+            title: args.data.title,
+            content: args.data.content,
+            excerpt: null,
+            status: args.data.status as ImportedArticleRow['status'],
+            categoryId: args.data.categoryId,
+          }),
   );
+  const articleFindMany = jest.fn(
+    (args: { where: { slug: { in: string[] } } }) =>
+      Promise.resolve(
+        args.where.slug.in
+          .filter((slug) => liveSlugs.includes(slug))
+          .map((slug) => ({ id: `live-${slug}`, slug })),
+      ),
+  );
+  const wikiLinkUpdateMany = jest.fn(() => Promise.resolve({ count: 0 }));
   const versionCreate = jest.fn((args: { data: Record<string, unknown> }) =>
     Promise.resolve(args),
   );
   const tx = {
-    article: { create: articleCreate },
+    article: { create: articleCreate, findMany: articleFindMany },
     articleVersion: { create: versionCreate },
+    articleWikiLink: {
+      createMany: jest.fn(() => Promise.resolve({ count: 0 })),
+      updateMany: wikiLinkUpdateMany,
+    },
   } as unknown as ImportTx;
   const prisma: ImportPrismaClient = {
     $transaction: <T>(fn: (t: ImportTx) => Promise<T>) => fn(tx),
   };
-  return { prisma, articleCreate, versionCreate };
+  return { prisma, articleCreate, versionCreate, wikiLinkUpdateMany };
 }
 
 describe('runImportJob (the async import worker create path, ADR-0053)', () => {
@@ -146,5 +169,36 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
     expect(result).toEqual({ kind: 'single', articleId: 'art1' });
     const data = articleCreate.mock.calls[0][0].data as { content: string };
     expect(data.content).toContain('Datacenter Runbook');
+  });
+
+  it('auto-suffixes a derived slug that a live article already holds (AUD-046)', async () => {
+    const { prisma, articleCreate } = makePrisma(['runbook', 'runbook-2']);
+    await runImportJob(baseData({ originalname: 'runbook.md' }), prisma);
+    const data = articleCreate.mock.calls[0][0].data as { slug: string };
+    expect(data.slug).toBe('runbook-3');
+  });
+
+  it('keeps an explicit slug and fails with the slug-taken message when it is held (AUD-046)', async () => {
+    const { prisma } = makePrisma(['runbook']);
+    await expect(
+      runImportJob(baseData({ slug: 'runbook' }), prisma),
+    ).rejects.toThrow(IMPORT_SLUG_TAKEN_MESSAGE);
+  });
+
+  it('fails with the slug-derivation message on a title with no slug characters (AUD-046)', async () => {
+    const { prisma, articleCreate } = makePrisma();
+    await expect(
+      runImportJob(baseData({ originalname: '日本語.md' }), prisma),
+    ).rejects.toThrow(/Could not derive a slug/);
+    expect(articleCreate).not.toHaveBeenCalled();
+  });
+
+  it('resolves earlier forward [[links]] to the new article (AUD-101)', async () => {
+    const { prisma, wikiLinkUpdateMany } = makePrisma();
+    await runImportJob(baseData({ originalname: 'vpn-setup.md' }), prisma);
+    expect(wikiLinkUpdateMany).toHaveBeenCalledWith({
+      where: { targetSlug: 'vpn-setup', resolvedTargetId: null },
+      data: { resolvedTargetId: 'art1' },
+    });
   });
 });

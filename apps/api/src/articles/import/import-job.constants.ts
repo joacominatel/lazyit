@@ -10,6 +10,10 @@ export const ARTICLE_IMPORT_QUEUE = 'article-import';
 /** The job name added to the queue (BullMQ groups jobs by name within a queue). */
 export const ARTICLE_IMPORT_JOB_NAME = 'import-article';
 
+/** Thrown by the worker when the import's slug is held by a live article; matched by the status mapper. */
+export const IMPORT_SLUG_TAKEN_MESSAGE =
+  'The import slug is already in use by another article';
+
 /** Default Node heap cap (MB) for the sandboxed import child (see {@link importChildHeapMb}). */
 const DEFAULT_IMPORT_HEAP_MB = 256;
 

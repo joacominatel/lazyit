@@ -149,6 +149,7 @@ function makePrisma(opts?: { failVersion?: boolean }) {
     },
     articleWikiLink: {
       createMany: jest.fn(() => Promise.resolve({ count: 0 })),
+      updateMany: jest.fn(() => Promise.resolve({ count: 0 })),
     },
     attachment,
   } as unknown as ImportTx;

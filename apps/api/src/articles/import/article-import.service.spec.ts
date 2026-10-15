@@ -5,6 +5,7 @@ import { ArticleImportService } from './article-import.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Principal } from '../../auth/principal';
 import type { UploadedImportFile } from './import-job.types';
+import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
 
 // Stub the generated Prisma client so the test never loads the real one (no DB / no native engine).
 // ArticleImportService → PrismaService → ../../generated/prisma/client; this short-circuits that load
@@ -180,6 +181,38 @@ describe('ArticleImportService.getStatus — only the importer may poll (AUD-004
     await expect(service.getStatus('nope', HUMAN)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('ArticleImportService.getStatus — slug failures are not reported as corrupt (AUD-046)', () => {
+  const failedWith = (failedReason: string) =>
+    jest.fn().mockResolvedValue({
+      data: { authorId: HUMAN_ID },
+      getState: jest.fn().mockResolvedValue('failed'),
+      failedReason,
+      returnvalue: undefined,
+    });
+
+  it('maps a taken slug to an actionable message', async () => {
+    const service = makeService(
+      jest.fn(),
+      failedWith(IMPORT_SLUG_TAKEN_MESSAGE),
+    );
+    const status = await service.getStatus('job-1', HUMAN);
+    expect(status.error).toMatch(/slug already exists/i);
+    expect(status.error).not.toMatch(/corrupt/i);
+  });
+
+  it('maps an underivable slug to an actionable message', async () => {
+    const service = makeService(
+      jest.fn(),
+      failedWith(
+        'Could not derive a slug from the title; provide an explicit slug',
+      ),
+    );
+    const status = await service.getStatus('job-1', HUMAN);
+    expect(status.error).toMatch(/rename the file/i);
+    expect(status.error).not.toMatch(/corrupt/i);
   });
 });
 

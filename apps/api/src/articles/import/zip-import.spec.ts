@@ -50,7 +50,10 @@ const baseZipData = (
  * the rewire. `seedSlugs` pre-populates existing live article slugs (to exercise auto-suffix against
  * the DB, not just within the batch).
  */
-function makePrisma(seedSlugs: string[] = []) {
+function makePrisma(
+  seedSlugs: string[] = [],
+  failCreate?: (slug: string) => Error | undefined,
+) {
   let nextArticleId = 1;
   let nextFolderId = 1;
   const articles: ImportedArticleRow[] = [];
@@ -82,6 +85,16 @@ function makePrisma(seedSlugs: string[] = []) {
           categoryId: string;
         };
       }): Promise<ImportedArticleRow> => {
+        const forced = failCreate?.(args.data.slug);
+        if (forced) return Promise.reject(forced);
+        // The live-only partial unique index on slug.
+        if (existingBySlug.has(args.data.slug)) {
+          return Promise.reject(
+            Object.assign(new Error('Unique constraint failed'), {
+              code: 'P2002',
+            }),
+          );
+        }
         const row: ImportedArticleRow = {
           id: `art-${nextArticleId++}`,
           slug: args.data.slug,
@@ -134,15 +147,18 @@ function makePrisma(seedSlugs: string[] = []) {
         Promise.resolve(
           args.where.id === ROOT
             ? { id: ROOT, deletedAt: null }
-            : (folders.has(args.where.id)
-                ? { id: args.where.id, deletedAt: null }
-                : null),
+            : folders.has(args.where.id)
+              ? { id: args.where.id, deletedAt: null }
+              : null,
         ),
       findFirst: (args: {
         where: { name: string; parentId: string | null };
       }) => {
         for (const f of folders.values()) {
-          if (f.name === args.where.name && f.parentId === args.where.parentId) {
+          if (
+            f.name === args.where.name &&
+            f.parentId === args.where.parentId
+          ) {
             return Promise.resolve(f);
           }
         }
@@ -255,13 +271,17 @@ describe('runZipImportJob — folder mirroring (ADR-0059 §5 / §1)', () => {
     // Folders created: Servers, Servers/Linux, Workstations, Workstations/Linux = 4 (root pre-exists).
     expect(batch.foldersCreated).toBe(4);
     const byName = [...folders.values()];
-    const servers = byName.find((f) => f.name === 'Servers' && f.parentId === ROOT);
+    const servers = byName.find(
+      (f) => f.name === 'Servers' && f.parentId === ROOT,
+    );
     expect(servers).toBeDefined();
     const serversLinux = byName.find(
       (f) => f.name === 'Linux' && f.parentId === servers!.id,
     );
     expect(serversLinux).toBeDefined();
-    const ws = byName.find((f) => f.name === 'Workstations' && f.parentId === ROOT);
+    const ws = byName.find(
+      (f) => f.name === 'Workstations' && f.parentId === ROOT,
+    );
     const wsLinux = byName.find(
       (f) => f.name === 'Linux' && f.parentId === ws!.id,
     );
@@ -280,7 +300,10 @@ describe('runZipImportJob — folder mirroring (ADR-0059 §5 / §1)', () => {
     const { prisma } = makePrisma();
     const buf = await buildZip({ 'a.md': '# A' });
     await expect(
-      runZipImportJob(baseZipData(buf, { categoryId: 'missing-folder' }), prisma),
+      runZipImportJob(
+        baseZipData(buf, { categoryId: 'missing-folder' }),
+        prisma,
+      ),
     ).rejects.toThrow(/live folder/i);
   });
 });
@@ -315,6 +338,69 @@ describe('runZipImportJob — slug auto-suffix + rename reporting (ADR-0059 §3/
   });
 });
 
+describe('runZipImportJob — collisions and per-entry failures never abort the batch (AUD-011)', () => {
+  it('skips past an EXISTING suffixed slug instead of colliding with it', async () => {
+    const { prisma } = makePrisma(['setup', 'setup-2']);
+    const buf = await buildZip({
+      'setup.md': '# Setup',
+      'other.md': '# Other',
+    });
+    const { batch } = await runZipImportJob(baseZipData(buf), prisma);
+    const item = batch.items.find((it) => it.path === 'setup.md')!;
+    expect(item.outcome).toBe('renamed');
+    expect(item.slug).toBe('setup-3');
+    expect(item.requestedSlug).toBe('setup');
+    expect(batch.createdCount).toBe(1);
+  });
+
+  it('reports a failed entry in the batch and keeps importing the rest', async () => {
+    const { prisma, articles } = makePrisma([], (slug) => {
+      if (slug === 'broken') return new Error('connection reset');
+      if (slug === 'pictures') {
+        return new Error(
+          'Attachment storage is full (the 10 MB total limit would be exceeded).',
+        );
+      }
+      return undefined;
+    });
+    const buf = await buildZip({
+      'a.md': '# A',
+      'broken.md': '# Broken',
+      'pictures.md': '# Pictures',
+      'z.md': '# Z',
+    });
+    const { batch } = await runZipImportJob(baseZipData(buf), prisma);
+    expect(articles.map((a) => a.slug).sort()).toEqual(['a', 'z']);
+    const broken = batch.items.find((it) => it.path === 'broken.md')!;
+    expect(broken).toMatchObject({
+      outcome: 'skipped',
+      articleId: null,
+      slug: null,
+      reason: 'failed',
+    });
+    const pictures = batch.items.find((it) => it.path === 'pictures.md')!;
+    expect(pictures.reason).toBe('storage-full');
+    expect(batch.createdCount).toBe(2);
+    expect(batch.skippedCount).toBe(2);
+  });
+
+  it('reports a unique-index race on one entry instead of failing the job', async () => {
+    const { prisma } = makePrisma([], (slug) =>
+      slug === 'raced'
+        ? Object.assign(new Error('Unique constraint failed'), {
+            code: 'P2002',
+          })
+        : undefined,
+    );
+    const buf = await buildZip({ 'raced.md': '# R', 'fine.md': '# F' });
+    const { batch } = await runZipImportJob(baseZipData(buf), prisma);
+    expect(batch.items.find((it) => it.path === 'raced.md')?.reason).toBe(
+      'failed',
+    );
+    expect(batch.createdCount).toBe(1);
+  });
+});
+
 describe('runZipImportJob — skipped-entry reporting (ADR-0059 §5)', () => {
   it('reports every skipped entry with a reason, never as an error', async () => {
     const { prisma } = makePrisma();
@@ -327,8 +413,14 @@ describe('runZipImportJob — skipped-entry reporting (ADR-0059 §5)', () => {
     expect(batch.createdCount).toBe(1);
     const skipped = batch.items.filter((it) => it.outcome === 'skipped');
     expect(skipped.length).toBe(batch.skippedCount);
-    expect(skipped.some((s) => s.path === 'photo.jpg' && s.reason === 'unsupported-type')).toBe(true);
-    expect(skipped.some((s) => s.path === '.hidden.md' && s.reason === 'dotfile')).toBe(true);
+    expect(
+      skipped.some(
+        (s) => s.path === 'photo.jpg' && s.reason === 'unsupported-type',
+      ),
+    ).toBe(true);
+    expect(
+      skipped.some((s) => s.path === '.hidden.md' && s.reason === 'dotfile'),
+    ).toBe(true);
     // Every skipped item carries a reason and no article id.
     for (const s of skipped) {
       expect(s.reason).not.toBeNull();

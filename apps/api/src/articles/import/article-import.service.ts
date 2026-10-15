@@ -31,6 +31,7 @@ import {
 import {
   ARTICLE_IMPORT_JOB_NAME,
   ARTICLE_IMPORT_QUEUE,
+  IMPORT_SLUG_TAKEN_MESSAGE,
 } from './import-job.constants';
 import { isQueueUnavailableError } from '../../queue/redis-connection';
 import type {
@@ -206,6 +207,12 @@ export class ArticleImportService {
     // §7, issue #918). Permanent until space is freed — the whole import failed, never half-imported.
     if (r.includes('storage is full')) {
       return 'The import contains images but attachment storage is full. Ask your administrator to free space (or raise ATTACHMENTS_MAX_TOTAL_MB), then re-import.';
+    }
+    if (r.includes(IMPORT_SLUG_TAKEN_MESSAGE)) {
+      return 'An article with this slug already exists. Choose a different slug and import again.';
+    }
+    if (r.includes('Could not derive a slug')) {
+      return 'An article address (slug) could not be built from this title. Rename the file (or set a title or slug) using letters or numbers, then import again.';
     }
     if (r.includes('Unsupported file type')) {
       return 'That file type is not supported. Use a .md, .txt, .docx or .zip file.';

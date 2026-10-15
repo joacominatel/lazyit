@@ -8,6 +8,7 @@ import {
 } from '@lazyit/shared';
 import { parseImportFile, titleFromFilename } from '../article-import';
 import { extractZipEntries, type ZipExtractOptions } from './zip-extract';
+import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
 import type { AttachmentIngestPrisma } from '../../attachments/attachment-ingest';
 import type { ArticleRow } from '../../search/search.documents';
 import type {
@@ -89,13 +90,17 @@ export interface ImportTx {
       data: { content: string; readingMinutes: number };
     }): Promise<unknown>;
     findMany(args: {
-      where: { slug: { in: string[] } };
+      where: { slug: { in: string[] }; deletedAt?: null };
       select: { id: true; slug: true };
     }): Promise<Array<{ id: string; slug: string }>>;
   };
   articleVersion: { create(args: ArticleVersionCreateArgs): Promise<unknown> };
   articleWikiLink: {
     createMany(args: ArticleWikiLinkCreateManyArgs): Promise<unknown>;
+    updateMany(args: {
+      where: { targetSlug: string; resolvedTargetId: null };
+      data: { resolvedTargetId: string };
+    }): Promise<{ count: number }>;
   };
   // The TRANSACTIONAL attachment client (satisfied by Prisma's interactive-transaction client).
   // The image round-trip mints its `Attachment` rows on THIS client so they ride the article's
@@ -155,7 +160,7 @@ export interface ZipImportPrismaClient extends ImportPrismaClient {
   };
   article: {
     findMany(args: {
-      where: { slug: { in: string[] } };
+      where: { slug: { in: string[] }; deletedAt?: null };
       select: { id: true; slug: true };
     }): Promise<Array<{ id: string; slug: string }>>;
   };
@@ -212,6 +217,40 @@ function deriveSlug(title: string): string {
     );
   }
   return slug;
+}
+
+/** Skip reasons for a `.zip` entry whose create failed, alongside the extractor's own. */
+type ZipEntryFailureReason = 'storage-full' | 'failed';
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === 'P2002'
+  );
+}
+
+// Probes the DB per candidate: existing suffixed slugs (`setup-2`) can't be derived from the base alone.
+async function freeSlug(
+  client: { article: Pick<ImportTx['article'], 'findMany'> },
+  base: string,
+  taken: Set<string> = new Set(),
+): Promise<string> {
+  for (;;) {
+    const candidate = nextAvailableSlug(base, (c) => taken.has(c));
+    const live = await client.article.findMany({
+      where: { slug: { in: [candidate] }, deletedAt: null },
+      select: { id: true, slug: true },
+    });
+    if (live.length === 0) return candidate;
+    taken.add(candidate);
+  }
+}
+
+function entryFailureReason(err: unknown): ZipEntryFailureReason {
+  return err instanceof Error && /storage is full/i.test(err.message)
+    ? 'storage-full'
+    : 'failed';
 }
 
 /**
@@ -341,24 +380,41 @@ export async function runImportJob(
   }
 
   const title = data.title ?? titleFromFilename(data.originalname);
-  const slug = data.slug ?? deriveSlug(title);
+  // An explicit slug is the caller's choice and is kept as-is; a derived one auto-suffixes (ADR-0059 §3).
+  const explicitSlug = data.slug;
+  const base = explicitSlug ?? deriveSlug(title);
 
-  const article = await prisma.$transaction(
-    (tx) =>
-      createArticleWithVersion(
-        tx,
-        {
-          slug,
-          title,
-          content,
-          status: data.status,
-          categoryId: data.categoryId,
-          authorId: data.authorId,
-        },
-        resolveContent,
-      ),
-    { timeout: IMPORT_TX_TIMEOUT_MS },
-  );
+  let article: ImportedArticleRow;
+  try {
+    article = await prisma.$transaction(
+      async (tx) => {
+        const created = await createArticleWithVersion(
+          tx,
+          {
+            slug: explicitSlug ?? (await freeSlug(tx, base)),
+            title,
+            content,
+            status: data.status,
+            categoryId: data.categoryId,
+            authorId: data.authorId,
+          },
+          resolveContent,
+        );
+        // Earlier forward references to this slug resolve now (ADR-0059 §3).
+        await tx.articleWikiLink.updateMany({
+          where: { targetSlug: created.slug, resolvedTargetId: null },
+          data: { resolvedTargetId: created.id },
+        });
+        return created;
+      },
+      { timeout: IMPORT_TX_TIMEOUT_MS },
+    );
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new Error(IMPORT_SLUG_TAKEN_MESSAGE);
+    }
+    throw err;
+  }
 
   await indexIfPublished(article, index);
   return { kind: 'single', articleId: article.id };
@@ -422,7 +478,7 @@ async function resolveFolder(
  *  4. Best-effort intra-batch `[[link]]` rewire: re-resolve still-unresolved edges to the freshly
  *     created batch slugs. Unresolved degrades to the §3 tooltip — never a failure.
  * Returns the per-item batch result. Throws only on a hard failure (corrupt zip, over-quota, or a
- * missing root folder); a per-entry hiccup is reported, never fatal.
+ * missing root folder); a per-entry failure is reported as a skip (`failed` / `storage-full`).
  */
 export async function runZipImportJob(
   data: ImportJobData,
@@ -461,16 +517,10 @@ export async function runZipImportJob(
     });
   }
 
-  // Seed the slug-collision predicate with the live slugs that collide with any derived base, so the
-  // first auto-suffix is correct against EXISTING articles too (not just within the batch). One query.
   const requestedSlugs = entries.map((e) =>
     slugify(titleFromFilename(e.fileName)),
   );
-  const existing = await prisma.article.findMany({
-    where: { slug: { in: requestedSlugs.filter((s) => s !== '') } },
-    select: { id: true, slug: true },
-  });
-  const takenSlugs = new Set(existing.map((e) => e.slug));
+  const takenSlugs = new Set<string>();
   const folderCache = new Map<string, string>();
   const foldersCreated = { count: 0 };
   // slug → created article id, for the post-batch link rewire (only batch-minted articles).
@@ -493,46 +543,56 @@ export async function runZipImportJob(
       });
       continue;
     }
-    // AUTO-SUFFIX on collision (§3). nextAvailableSlug is PURE; record the minted slug before the
-    // next call so a within-batch duplicate gets its own suffix.
-    const finalSlug = nextAvailableSlug(base, (c) => takenSlugs.has(c));
-    takenSlugs.add(finalSlug);
+    // Earlier entries are already committed, so a failure here is this entry's, never the batch's.
+    try {
+      const finalSlug = await freeSlug(prisma, base, takenSlugs);
+      takenSlugs.add(finalSlug);
 
-    const homeFolderId = await resolveFolder(
-      prisma,
-      data.categoryId,
-      entry.folderSegments,
-      folderCache,
-      foldersCreated,
-    );
+      const homeFolderId = await resolveFolder(
+        prisma,
+        data.categoryId,
+        entry.folderSegments,
+        folderCache,
+        foldersCreated,
+      );
 
-    const article = await prisma.$transaction(
-      (tx) =>
-        createArticleWithVersion(
-          tx,
-          {
-            slug: finalSlug,
-            title,
-            content: entry.content,
-            status: data.status,
-            categoryId: homeFolderId,
-            authorId: data.authorId,
-          },
-          resolveContent,
-        ),
-      { timeout: IMPORT_TX_TIMEOUT_MS },
-    );
-    created.push(article);
-    batchSlugToId.set(finalSlug, article.id);
+      const article = await prisma.$transaction(
+        (tx) =>
+          createArticleWithVersion(
+            tx,
+            {
+              slug: finalSlug,
+              title,
+              content: entry.content,
+              status: data.status,
+              categoryId: homeFolderId,
+              authorId: data.authorId,
+            },
+            resolveContent,
+          ),
+        { timeout: IMPORT_TX_TIMEOUT_MS },
+      );
+      created.push(article);
+      batchSlugToId.set(finalSlug, article.id);
 
-    items.push({
-      path: entry.path,
-      outcome: finalSlug === base ? 'created' : 'renamed',
-      articleId: article.id,
-      slug: finalSlug,
-      requestedSlug: finalSlug === base ? null : base,
-      reason: null,
-    });
+      items.push({
+        path: entry.path,
+        outcome: finalSlug === base ? 'created' : 'renamed',
+        articleId: article.id,
+        slug: finalSlug,
+        requestedSlug: finalSlug === base ? null : base,
+        reason: null,
+      });
+    } catch (err) {
+      items.push({
+        path: entry.path,
+        outcome: 'skipped',
+        articleId: null,
+        slug: null,
+        requestedSlug: null,
+        reason: entryFailureReason(err),
+      });
+    }
   }
 
   // Best-effort intra-batch `[[link]]` rewire (§5): an edge created earlier in the batch may point at
