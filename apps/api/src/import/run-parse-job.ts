@@ -90,8 +90,7 @@ export async function runParseJob(
 ): Promise<ParseJobResult> {
   const { sessionId, format } = data;
 
-  // Mark PARSING up front so a crash mid-parse leaves an observable state (the child can be OOM-killed
-  // by a bomb after this point; the session then reads PARSING until the GC sweep or a re-run).
+  // A crash after this point fails the job; ImportSessionService.getForOwner then flips the session FAILED.
   await prisma.importSession.update({
     where: { id: sessionId },
     data: { status: 'PARSING' },
