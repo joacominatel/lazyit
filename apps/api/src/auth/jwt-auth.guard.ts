@@ -36,6 +36,9 @@ import {
 } from './local/local-credential.service';
 import { UserSessionStore } from './local/user-session.store';
 
+// A hung IdP would otherwise hold a first sign-in for undici's ~300s headers timeout (AUD-036).
+const IDP_FETCH_TIMEOUT_MS = 5_000;
+
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -705,7 +708,10 @@ export class JwtAuthGuard implements CanActivate {
         Object.assign(headers, this.forwardedHeaders(issuer));
       }
 
-      const res = await fetch(requestUrl, { headers });
+      const res = await fetch(requestUrl, {
+        headers,
+        signal: AbortSignal.timeout(IDP_FETCH_TIMEOUT_MS),
+      });
       if (!res.ok) {
         this.logger.warn(
           `OIDC userinfo request returned ${res.status}; falling back to token claims for JIT provisioning`,
@@ -760,6 +766,7 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const res = await fetch(url, {
         headers: { Accept: 'application/json', ...extraHeaders },
+        signal: AbortSignal.timeout(IDP_FETCH_TIMEOUT_MS),
       });
       if (!res.ok) {
         return null;
