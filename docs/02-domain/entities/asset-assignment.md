@@ -3,7 +3,7 @@ title: AssetAssignment
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-05-25
+updated: 2026-10-14
 ---
 
 # AssetAssignment
@@ -22,8 +22,9 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 - **belongs to** one [[asset]] (`assetId`, required, `onDelete: Restrict`).
 - **belongs to** one [[user]] — the owner (`userId`, required, `onDelete: Restrict`).
 - **optionally references** a [[user]] as `assignedBy` and/or `releasedBy` — audit of who acted
-  (`onDelete: SetNull`; `null` when the system acted or it's unknown). Recorded from the
-  `X-User-Id` shim, not the body — see the callout below.
+  (`onDelete: SetNull`; `null` when the system acted or it's unknown) — or, when a
+  [[service-account]] acted, that account as `assignedBySa` / `releasedBySa`. Recorded from the
+  authenticated principal, never the body — see the callout below.
 - **optionally references** a [[user]] as `acknowledgedBy` (`onDelete: SetNull`) — who confirmed
   receipt (ADR-0089 Part B, #1029). By the self-scoped write it always equals `userId` (the owner
   acknowledges their OWN assignment). See "Check-out acknowledgement" below.
@@ -48,6 +49,10 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
   decommissioned asset or a departed user. Mirrors the same guard on [[access-grant]]
   (`assertUsable`); the soft-delete read filter ([[0032-soft-delete-middleware]]) makes the lookup
   return null for deleted rows, so the check is a single `findFirst`.
+- **`assignedAt` is never in the future (audit 2026-10-10, AUD-026):** it exists to backdate an
+  imported or historical record, but a future value is a `400` on create — a release stamps
+  `releasedAt = now()`, which would land before it and store the ownership interval inverted.
+  Write-only: rows stored before the rule still load and release as before.
 - **Immutable identity:** `assetId`, `userId` and `assignedAt` are set once and never change. The
   mutable lifecycle metadata is `notes`, `releasedAt`, and the acknowledgement fields below.
   Reassigning a single owner = release that assignment + create a new one.
@@ -64,22 +69,17 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 - **Referential integrity ([[0019-asset-assignment-integrity]]):** the required FKs are
   `onDelete: Restrict` — an [[asset]] or [[user]] with assignment rows **cannot be hard-deleted**.
 
-> [!note] Actor comes from the `X-User-Id` shim, not the body
-> `assignedById` (on open) and `releasedById` (on release) are taken from the optional `X-User-Id`
-> header (the caller → a JWT later), **never** the request body
-> ([[0022-draft-visibility-auth-shim]], [[0024-asset-assignment-actor-shim]]). Absent header →
-> `null` actor (system/unknown), allowed by the `SetNull`/optional design; a present header must be
-> a well-formed id for a **live** (non-soft-deleted) user, else `400`. This converges AssetAssignment
-> onto [[access-grant]]'s actor pattern — [[0024-asset-assignment-actor-shim]] superseded the
-> original body-based design of [[0019-asset-assignment-integrity]] (a breaking contract change,
-> safe pre-auth with no external clients).
+> [!note] The actor is the authenticated principal, never the body
+> The actor of an open or a release is resolved from the verified principal
+> (`@CurrentPrincipal()` → `request.principal`, `ActorService.resolveActor`), **never** from the
+> request body. A human lands in `assignedById` / `releasedById`; a [[service-account]] lands in
+> `assignedBySaId` / `releasedBySaId` instead, with a DB **CHECK** enforcing at most one actor per
+> slot — never a fake human ([[0048-service-accounts]], [[INVARIANTS]] INV-SA-4). `null` in both
+> means the system acted or the actor is unknown.
 >
-> **Now actor = the verified principal.** With auth live, the actor is resolved from the verified
-> principal (`@CurrentPrincipal()` → `request.principal`), not a token claim; the `X-User-Id` header is
-> the dev-only shim. When the caller is a [[service-account]] the attribution lands in
-> `assignedBySaId` / `releasedBySaId` instead (`ActorService.resolveActor`), with a DB **CHECK**
-> enforcing at most one actor per slot — never a fake human ([[0048-service-accounts]],
-> [[INVARIANTS]] INV-SA-4).
+> History: [[0024-asset-assignment-actor-shim]] first moved the actor from the body to the
+> `X-User-Id` header ([[0022-draft-visibility-auth-shim]]). That header now survives only under
+> `AUTH_MODE=shim` (dev and test), where the guard resolves it into the same principal.
 
 > [!warning] Soft delete vs hard delete — `Restrict` is a DB safety net
 > The API's `DELETE /assets/:id` and `DELETE /users/:id` are **soft** deletes (`UPDATE deletedAt`),
@@ -91,8 +91,8 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 ## Conventions
 
 - **ID:** `cuid()` — non-sensitive domain entity ([[0005-id-strategy]]). Note `userId` /
-  `assignedById` / `releasedById` are **`uuid`** (`@db.Uuid`) because [[user]] uses `uuid`;
-  `assetId` is `cuid`.
+  `assignedById` / `releasedById` / `acknowledgedById` are **`uuid`** (`@db.Uuid`) because [[user]]
+  uses `uuid`; `assetId` and the service-account columns are `cuid`.
 - **Timestamps:** `createdAt`, `updatedAt`. **No `deletedAt`** — `releasedAt` expresses lifecycle,
   not soft delete ([[0006-soft-delete-and-auditing]]).
 
@@ -100,7 +100,7 @@ Ownership is **many-to-many and concurrent**: an asset may have several active o
 
 Prisma model `AssetAssignment` → table `asset_assignments`. Validation schemas
 (`AssetAssignmentSchema`, `CreateAssetAssignmentSchema`, `ReleaseAssetAssignmentSchema`,
-`UpdateAssetAssignmentNotesSchema`) live in `@lazyit/shared`
+`UpdateAssetAssignmentNotesSchema`, `AcknowledgeAssignmentSchema`) live in `@lazyit/shared`
 (`packages/shared/src/schemas/asset-assignment.ts`).
 
 | Field | Type | Notes |
@@ -108,31 +108,40 @@ Prisma model `AssetAssignment` → table `asset_assignments`. Validation schemas
 | `id` | `cuid` | `@default(cuid())`. |
 | `assetId` | `cuid` | FK → [[asset]], required, `onDelete: Restrict`. |
 | `userId` | `uuid` | FK → [[user]] (owner), required, `@db.Uuid`, `onDelete: Restrict`. |
-| `assignedAt` | `datetime` | `@default(now())`; part of identity. Optional on create — pass it only to backdate an imported record. |
+| `assignedAt` | `datetime` | `@default(now())`; part of identity. Optional on create — pass it only to backdate an imported record; a future value is a `400`. |
 | `releasedAt` | `datetime?` | `null` while active; set to end the assignment. Not a soft delete. |
 | `assignedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** who assigned (null = system/unknown). |
 | `releasedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** who released. |
 | `assignedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** who assigned. At-most-one-actor CHECK with `assignedById`. |
 | `releasedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** who released. At-most-one-actor CHECK with `releasedById`. |
+| `acknowledgedAt` | `datetime?` | When the owner confirmed receipt (ADR-0089 Part B). `null` = not acknowledged. Set once. |
+| `acknowledgedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. Always equals `userId` (self-scoped write). |
+| `acknowledgeNote` | `string?` | Optional note captured at acknowledgement (the wire body field is `note`). |
 | `notes` | `string?` | optional free text (assignment or release reason); editable; `null` clears. |
 | `createdAt` | `datetime` | `@default(now())`. |
 | `updatedAt` | `datetime` | `@updatedAt`. |
 
 Indexes: `@@index([assetId])`, `@@index([userId])`, plus the partial unique index above.
 
+The shared read schema carries every column above. The acknowledgement fields and
+`assignedBySaId` / `releasedBySaId` are `.nullish()` there because they were added to an existing
+schema.
+
 ## Endpoints
 
 `apps/api/src/asset-assignments/` (`AssetAssignmentsModule`):
 
-- `POST /asset-assignments` — open an assignment; body `{ assetId, userId, assignedAt?, notes? }`.
-  Optional `X-User-Id` header → `assignedById` (a bad/dead actor → `400`). Duplicate *active*
-  `(asset, user)` → `409`; invalid `assetId`/`userId` → `400` (FK).
-- `GET /asset-assignments?assetId=&userId=&activeOnly=` — list, newest first. `activeOnly`
+- `POST /asset-assignments` — open an assignment (`asset:write`); body
+  `{ assetId, userId, assignedAt?, notes? }`. The actor comes from the principal. Duplicate *active*
+  `(asset, user)` → `409`; a missing or soft-deleted `assetId`/`userId` → `400`; an `assignedAt` in
+  the future → `400`.
+- `GET /asset-assignments?assetId=&userId=&activeOnly=` — list (`asset:read`), newest first. `activeOnly`
   **defaults to `true`** (only `releasedAt = null`); pass `activeOnly=false` to include released.
-- `GET /asset-assignments/:id` — one by id (`404` if missing).
-- `PATCH /asset-assignments/:id/release` — body `{ notes? }`; optional `X-User-Id` header →
-  `releasedById` (a bad/dead actor → `400`); sets `releasedAt = now()`. Already released → `409`.
-- `PATCH /asset-assignments/:id/notes` — body `{ notes }` (`null` clears). The only free edit.
+- `GET /asset-assignments/:id` — one by id (`asset:read`; `404` if missing).
+- `PATCH /asset-assignments/:id/release` (`asset:write`) — body `{ notes? }`; sets
+  `releasedAt = now()` and the releasing actor from the principal. Already released → `409`.
+- `PATCH /asset-assignments/:id/notes` (`asset:write`) — body `{ notes }` (`null` clears). The only
+  free edit.
 - `POST /asset-assignments/:id/acknowledge` — **self-service** acknowledgement of receipt (ADR-0089
   Part B, #1029); body `{ note? }`. Any authenticated **human**; **no permission** — the authorization
   is "it's your OWN active assignment" (the `/access-requests/mine` self-scope carve-out), and a
