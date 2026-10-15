@@ -364,6 +364,15 @@ export class SecretManagerService {
     await this.getLiveVaultOr404(vaultId);
     const now = new Date();
     const deleted = await this.prisma.$transaction(async (tx) => {
+      // Waits out in-flight grants/item writes (they hold FOR SHARE); later ones then see the vault gone.
+      await tx.$queryRaw`SELECT "id" FROM "secret_vaults" WHERE "id" = ${vaultId} FOR UPDATE`;
+      const live = await tx.secretVault.findFirst({
+        where: { id: vaultId },
+        select: { id: true },
+      });
+      if (!live) {
+        throw new NotFoundException('Vault not found');
+      }
       // Soft-delete the live items (the extension's update is NOT auto-filtered, so scope to live rows).
       await tx.secretItem.updateMany({
         where: { vaultId, deletedAt: null },
@@ -669,8 +678,10 @@ export class SecretManagerService {
    * GRANT a member: store the DEK already wrapped to the target's public key (client-produced). Requires
    * `secret:manage` (controller) AND — the NO-GRANT-WHAT-YOU-CANT-READ fence (ADR-0061 §4) — the GRANTER
    * must be a LIVE member of the vault (else 403). The server cannot verify the wrap is cryptographically
-   * correct (zero-knowledge); it enforces the AUTHORIZATION fence and stores the blob. 409 if the target
-   * is already a member. Audited MEMBERSHIP_GRANTED.
+   * correct (zero-knowledge); it enforces the AUTHORIZATION fence and stores the blob. The target must be
+   * a live, active user with a login (404 otherwise) and not already a member (409). The checks and the
+   * insert run under a share lock on the vault row, so a concurrent deleteVault cannot strand the new row
+   * under a dead vault. Audited MEMBERSHIP_GRANTED.
    */
   async grantMembership(
     principal: Principal | undefined,
@@ -697,6 +708,13 @@ export class SecretManagerService {
       );
     }
     const created = await this.prisma.$transaction(async (tx) => {
+      await this.assertLiveVaultMembershipTx(
+        tx,
+        granterId,
+        vaultId,
+        'You must be a member of this vault to grant access',
+      );
+      await this.assertGrantableUserTx(tx, dto.userId);
       const row = await tx.vaultMembership.create({
         data: {
           vaultId,
@@ -878,6 +896,12 @@ export class SecretManagerService {
       );
     }
     const created = await this.prisma.$transaction(async (tx) => {
+      await this.assertLiveVaultMembershipTx(
+        tx,
+        granterId,
+        vaultId,
+        'You must be a member of this vault to grant access',
+      );
       const row = await tx.serviceAccountVaultMembership.create({
         data: {
           vaultId,
@@ -1232,17 +1256,34 @@ export class SecretManagerService {
 
   /**
    * IN-TRANSACTION re-assertion of vault liveness + caller membership (the #425 TOCTOU fence). Run as the
-   * FIRST statement of an item create/update transaction so the guard and the write share one snapshot:
-   * if a concurrent {@link deleteVault} soft-deleted the vault (and hard-dropped this membership) after the
-   * out-of-tx pre-checks, the re-read sees the vault gone and aborts — no live item is left under a dead
-   * vault. Throws the same NotFound/Forbidden the pre-checks would (no information leak vs. the happy path).
+   * FIRST statement of an item create/update or grant transaction. It takes a SHARE lock on the vault row
+   * ({@link lockLiveVaultTx}), which {@link deleteVault}'s FOR UPDATE waits on, so the check and the write
+   * hold until commit: a concurrent delete either commits first (the re-read sees the vault gone and this
+   * aborts) or runs after our commit (and its drops see our row). Throws the same NotFound/Forbidden the
+   * pre-checks would (no information leak vs. the happy path).
    */
   private async assertLiveVaultMembershipTx(
     tx: PrismaTypes.TransactionClient,
     userId: string,
     vaultId: string,
+    message = 'You are not a member of this vault',
   ): Promise<void> {
-    // The soft-delete read filter applies to tx reads too, so a soft-deleted vault reads as absent.
+    await this.lockLiveVaultTx(tx, vaultId);
+    const member = await tx.vaultMembership.findUnique({
+      where: { vaultId_userId: { vaultId, userId } },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new ForbiddenException(message);
+    }
+  }
+
+  /** SHARE-lock the vault row, then re-read it under the soft-delete filter (404 if it is gone). */
+  private async lockLiveVaultTx(
+    tx: PrismaTypes.TransactionClient,
+    vaultId: string,
+  ): Promise<void> {
+    await tx.$queryRaw`SELECT "id" FROM "secret_vaults" WHERE "id" = ${vaultId} FOR SHARE`;
     const vault = await tx.secretVault.findFirst({
       where: { id: vaultId },
       select: { id: true },
@@ -1250,12 +1291,22 @@ export class SecretManagerService {
     if (!vault) {
       throw new NotFoundException('Vault not found');
     }
-    const member = await tx.vaultMembership.findUnique({
-      where: { vaultId_userId: { vaultId, userId } },
+  }
+
+  /**
+   * The grant target must be a live, active user with a login (404 otherwise): a directory-only person
+   * has no keypair, and a wrapped DEK handed to a deactivated user would come back on reactivation.
+   */
+  private async assertGrantableUserTx(
+    tx: PrismaTypes.TransactionClient,
+    userId: string,
+  ): Promise<void> {
+    const user = await tx.user.findFirst({
+      where: { id: userId, isActive: true, directoryOnly: false },
       select: { id: true },
     });
-    if (!member) {
-      throw new ForbiddenException('You are not a member of this vault');
+    if (!user) {
+      throw new NotFoundException('User not found');
     }
   }
 

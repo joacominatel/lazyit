@@ -147,6 +147,17 @@ class FakePrisma {
   audit: AuditRow[] = [];
   users: { id: string; firstName: string; lastName: string; email: string }[] =
     [];
+  // Grant-target state: any id not listed here is a live, active login user; `null` = no such row.
+  userState: Record<
+    string,
+    {
+      deletedAt?: Date | null;
+      isActive?: boolean;
+      directoryOnly?: boolean;
+    } | null
+  > = {};
+  // Every raw lock statement, in order (the row-lock SQL only — no params).
+  locks: string[] = [];
   private seq = 0;
 
   private newId(prefix: string): string {
@@ -441,6 +452,36 @@ class FakePrisma {
       this.audit.push(data);
       return data;
     },
+  };
+
+  // -- user (grant-target eligibility) --------------------------------------------
+  readonly user = {
+    findFirst: ({
+      where,
+    }: {
+      where: { id: string; isActive?: boolean; directoryOnly?: boolean };
+      select?: unknown;
+    }) => {
+      const state = where.id in this.userState ? this.userState[where.id] : {};
+      if (state === null || (state.deletedAt ?? null) !== null) return null;
+      if (
+        where.isActive !== undefined &&
+        (state.isActive ?? true) !== where.isActive
+      )
+        return null;
+      if (
+        where.directoryOnly !== undefined &&
+        (state.directoryOnly ?? false) !== where.directoryOnly
+      )
+        return null;
+      return { id: where.id };
+    },
+  };
+
+  // -- $queryRaw (row locks) ------------------------------------------------------
+  $queryRaw = (strings: TemplateStringsArray): Promise<unknown[]> => {
+    this.locks.push(strings.join('?'));
+    return Promise.resolve([]);
   };
 
   // -- $transaction -------------------------------------------------------------
@@ -833,6 +874,59 @@ describe('SecretManagerService', () => {
       // The label edit was NOT applied (the transaction aborted before the update).
       const row = db.items.find((it) => it.id === item.id);
       expect(row?.label).toBe('L');
+    });
+
+    it('grantMembership aborts (404) and writes NO membership when the vault dies inside the transaction', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const auditBefore = db.audit.length;
+
+      raceDeleteVault(db, vaultId);
+
+      await expect(
+        svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(db.memberships.some((m) => m.userId === 'carol')).toBe(false);
+      expect(db.audit.length).toBe(auditBefore);
+    });
+
+    it('grant share-locks the vault row that deleteVault locks for update (AUD-042)', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+
+      await svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP });
+      expect(db.locks).toEqual([
+        'SELECT "id" FROM "secret_vaults" WHERE "id" = ? FOR SHARE',
+      ]);
+
+      db.locks = [];
+      await svc.deleteVault(alice, vaultId);
+      expect(db.locks).toEqual([
+        'SELECT "id" FROM "secret_vaults" WHERE "id" = ? FOR UPDATE',
+      ]);
+    });
+  });
+
+  describe('grant target eligibility (AUD-042)', () => {
+    it.each([
+      ['a missing user', null],
+      ['a soft-deleted user', { deletedAt: new Date() }],
+      ['a deactivated user', { isActive: false }],
+      ['a directory-only person', { directoryOnly: true }],
+    ])('refuses %s with a 404 and writes nothing', async (_label, state) => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      db.userState.carol = state;
+      const auditBefore = db.audit.length;
+
+      await expect(
+        svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(db.memberships.some((m) => m.userId === 'carol')).toBe(false);
+      expect(db.audit.length).toBe(auditBefore);
     });
   });
 

@@ -150,8 +150,7 @@ class FakePrisma {
     findFirst: ({ where }: { where: Record<string, unknown> }) => {
       const some = (
         where.serviceAccountMemberships as
-          | { some?: { serviceAccountId?: string } }
-          | undefined
+          { some?: { serviceAccountId?: string } } | undefined
       )?.some;
       return (
         this.vaults.find((v) => {
@@ -173,8 +172,7 @@ class FakePrisma {
     findMany: ({ where }: { where?: Record<string, unknown> } = {}) => {
       const some = (
         where?.serviceAccountMemberships as
-          | { some?: { serviceAccountId?: string } }
-          | undefined
+          { some?: { serviceAccountId?: string } } | undefined
       )?.some;
       return this.vaults.filter((v) => {
         if (v.deletedAt !== null) return false;
@@ -379,6 +377,8 @@ class FakePrisma {
       return data;
     },
   };
+
+  $queryRaw = (): Promise<unknown[]> => Promise.resolve([]);
 
   $transaction = async <T>(fn: (tx: this) => Promise<T>): Promise<T> =>
     fn(this);
@@ -588,6 +588,20 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
         svc.grantServiceAccountMembership(human('alice'), vaultId, grant),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('404 and no row when a concurrent deleteVault lands before the insert (AUD-042)', async () => {
+      const { svc, db } = build();
+      const { vaultId } = seed(db, { humanMemberId: 'alice' });
+      const realTransaction = db.$transaction.bind(db);
+      db.$transaction = async <T>(fn: (tx: FakePrisma) => Promise<T>) => {
+        db.vaults[0].deletedAt = new Date();
+        return realTransaction(fn);
+      };
+      await expect(
+        svc.grantServiceAccountMembership(human('alice'), vaultId, grant),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(db.saMemberships).toHaveLength(0);
+    });
   });
 
   // ── revoke SA membership ──────────────────────────────────────────────────────
@@ -628,12 +642,15 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
     it('returns granted SA members with non-secret display metadata', async () => {
       const { svc, db } = build();
       const { vaultId, saId } = seed(db, { humanMemberId: 'alice' });
-      Object.assign(db.serviceAccounts.find((s) => s.id === saId)!, {
-        name: 'CI Runner',
-        description: 'nightly deploy',
-        tokenPrefix: 'lzit_sa_ci',
-        isActive: true,
-      });
+      Object.assign(
+        db.serviceAccounts.find((s) => s.id === saId)!,
+        {
+          name: 'CI Runner',
+          description: 'nightly deploy',
+          tokenPrefix: 'lzit_sa_ci',
+          isActive: true,
+        },
+      );
       await svc.grantServiceAccountMembership(human('alice'), vaultId, {
         serviceAccountId: saId,
         ...WRAP,
@@ -672,9 +689,12 @@ describe('SecretManagerService — SA programmatic retrieval (ADR-0080)', () => 
       });
       // Revoke the SA = soft delete. The membership row is NOT dropped (only a keypair rotation does that),
       // so without the nested `serviceAccount: { deletedAt: null }` guard it would resurface as a live member.
-      Object.assign(db.serviceAccounts.find((s) => s.id === saId)!, {
-        deletedAt: new Date(),
-      });
+      Object.assign(
+        db.serviceAccounts.find((s) => s.id === saId)!,
+        {
+          deletedAt: new Date(),
+        },
+      );
       expect(db.saMemberships).toHaveLength(1); // the crypto row still exists
 
       const members = await svc.listServiceAccountMembers(
