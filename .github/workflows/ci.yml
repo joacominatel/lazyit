@@ -188,6 +188,10 @@ jobs:
       - name: Test update.sh auth-mode handling
         run: sh infra/test/update-mode-aware.sh
 
+      # infra/update.sh's UpdateRun row (ADR-0084 §4): a pending request for another target is superseded as failed, never deleted, in the insert's transaction, so the one-active-run index holds. No Docker.
+      - name: Test update.sh UpdateRun row
+        run: sh infra/test/update-run-row.sh
+
       # --cache-dir=.turbo makes turbo read/write the cache at the path persisted by actions/cache
       # above (its default is node_modules/.cache/turbo, which isn't cached). Still builds all three
       # workspaces; on a cache hit unchanged ones are replayed instead of recompiled.
