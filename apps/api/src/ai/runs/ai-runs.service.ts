@@ -27,6 +27,7 @@ import {
   AI_TRANSCRIPT_FORMATS,
   projectTranscript,
   storedUserText,
+  type TranscriptRow,
 } from '../conversations/transcript-projection';
 import { neutralizeTurnContext } from '../runtime/limits';
 import { AgentRunOrchestrator } from '../runtime/agent-run.orchestrator';
@@ -304,7 +305,7 @@ export class AiRunsService {
   private async projectRun(run: AiRun): Promise<AiPersistedMessage[]> {
     const conversationId = run.conversationId;
     if (!conversationId) return [];
-    const [rows, invocations] = await Promise.all([
+    const [own, invocations] = await Promise.all([
       this.prisma.aiMessage.findMany({
         where: {
           conversationId,
@@ -312,29 +313,65 @@ export class AiRunsService {
           format: { in: [...AI_TRANSCRIPT_FORMATS] },
         },
         orderBy: { seq: 'asc' },
-        select: {
-          seq: true,
-          role: true,
-          format: true,
-          content: true,
-          runId: true,
-          createdAt: true,
-        },
+        select: TRANSCRIPT_ROW,
       }),
       this.prisma.aiToolInvocation.findMany({
         where: { runId: run.id, toolUseId: { not: null } },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
+    const repairs = await this.repairsOf(conversationId, own);
     return projectTranscript({
       conversationId,
-      rows,
+      rows: [...own, ...repairs],
       invocations,
       runs: [run],
       classOf: (name) => this.registry.get(name)?.descriptor.class,
     });
   }
+
+  /**
+   * The submit repair answers a step a run left open with a tool message that has no run id. It belongs to
+   * this run when it sits after the run's first message and before the next run's first model message;
+   * the projection then folds it into the latest call with its id, as the conversation does (AUD-075).
+   */
+  private async repairsOf(
+    conversationId: string,
+    own: readonly TranscriptRow[],
+  ): Promise<TranscriptRow[]> {
+    if (own.length === 0) return [];
+    const next = await this.prisma.aiMessage.findFirst({
+      where: {
+        conversationId,
+        runId: { not: null },
+        format: AI_MESSAGE_FORMAT_MODEL,
+        seq: { gt: own[own.length - 1].seq },
+      },
+      orderBy: { seq: 'asc' },
+      select: { seq: true },
+    });
+    return this.prisma.aiMessage.findMany({
+      where: {
+        conversationId,
+        runId: null,
+        role: 'tool',
+        format: AI_MESSAGE_FORMAT_MODEL,
+        seq: { gt: own[0].seq, ...(next ? { lt: next.seq } : {}) },
+      },
+      orderBy: { seq: 'asc' },
+      select: TRANSCRIPT_ROW,
+    });
+  }
 }
+
+const TRANSCRIPT_ROW = {
+  seq: true,
+  role: true,
+  format: true,
+  content: true,
+  runId: true,
+  createdAt: true,
+} as const;
 
 /** A stored status this build does not know is a newer build's: shown as FAILED, never as active. */
 export function runStatusOf(status: string | undefined): AiRunStatus {

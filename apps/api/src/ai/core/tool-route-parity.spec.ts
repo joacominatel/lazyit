@@ -633,9 +633,9 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         items: [
           {
             id: 'asset1',
-            name: 'Laptop',
+            name: '<untrusted_content>Laptop</untrusted_content>',
             assetTag: 'LT-1',
-            serial: 'S1',
+            serial: '<untrusted_content>S1</untrusted_content>',
             status: 'OPERATIONAL',
           },
         ],
@@ -680,7 +680,7 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
       ).data.assets.hits;
       expect(hits[0]).toEqual({
         id: 'asset1',
-        name: 'Laptop',
+        name: '<untrusted_content>Laptop</untrusted_content>',
         assetTag: 'LT-1',
         serial: null,
         status: 'OPERATIONAL',

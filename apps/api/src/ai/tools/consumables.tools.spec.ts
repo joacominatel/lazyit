@@ -1190,6 +1190,29 @@ describe('consumables toolset (W2-7)', () => {
       );
     });
 
+    it('consumable_update tells the model that null clears each nullable field (#1584)', async () => {
+      const [update] = (await tools.list(mcp(actor('ADMIN')))).filter(
+        (t) => t.name === 'consumable_update',
+      );
+      const properties = (
+        update.inputSchema as {
+          properties: Record<
+            string,
+            { anyOf?: Array<{ type?: unknown }>; description?: string }
+          >;
+        }
+      ).properties;
+      const nullable = Object.entries(properties).filter(([, p]) =>
+        (p.anyOf ?? []).some((branch) => branch.type === 'null'),
+      );
+      expect(nullable.map(([field]) => field).sort()).toEqual(
+        ['categoryId', 'description', 'minStock', 'notes', 'sku'].sort(),
+      );
+      for (const [, p] of nullable) {
+        expect(p.description).toMatch(/null clears it/);
+      }
+    });
+
     it('annotates the writes from their class: update is destructive, a movement is not idempotent', async () => {
       const listing = await tools.list(mcp(actor('ADMIN')));
       const byName = Object.fromEntries(listing.map((t) => [t.name, t]));

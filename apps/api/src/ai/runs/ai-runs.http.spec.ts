@@ -22,6 +22,7 @@ import request from 'supertest';
 import { AiRunSchema } from '@lazyit/shared';
 import { CONFIG, SA_ID, TOOLS } from '../runtime/runtime.harness-spec';
 import { buildHttp, type HttpHarness } from './ai-http.harness-spec';
+import { AiRunsService } from './ai-runs.service';
 
 /**
  * `/ai/runs` over HTTP (W3-1; synthesis §4.4, §4.7): creation on the channel of the principal (chat for a
@@ -251,6 +252,83 @@ describe('GET /ai/runs/:id and cancel — owner only', () => {
       .post(`/ai/runs/${body.runId}/cancel`)
       .set('X-Test-Principal', 'A')
       .expect(200, { runId: body.runId, status: 'CANCELLED' });
+  });
+});
+
+describe('the run projection and the submit repair (AUD-075 follow-up)', () => {
+  it("shows a run's step answered by the next submit's repair, which carries no run id, and keeps reused call ids apart", async () => {
+    // A read next to a write waiting for approval: the step's tool message waits for the decision.
+    h.rt.model.push({
+      toolCalls: [
+        {
+          toolCallId: 'call_0',
+          toolName: TOOLS.read.descriptor.name,
+          input: {},
+        },
+        {
+          toolCallId: 'call_1',
+          toolName: TOOLS.write.descriptor.name,
+          input: { id: 'a1' },
+        },
+      ],
+    });
+    const first = await create('A');
+    await h.rt.drain();
+    const runA = first.body.runId as string;
+    await http()
+      .post(`/ai/runs/${runA}/cancel`)
+      .set('X-Test-Principal', 'A')
+      .expect(200);
+    await h.rt.drain();
+    // A finalize whose answer never landed leaves the step open for the next submit to repair.
+    const messages = h.rt.prisma.tables.aiMessage;
+    messages.rows = messages.rows.filter(
+      (row) => !(row.runId === runA && row.role === 'tool'),
+    );
+    const conversationId = h.rt.run(runA).conversationId as string;
+
+    h.rt.model.push(
+      {
+        toolCalls: [
+          {
+            toolCallId: 'call_0',
+            toolName: TOOLS.read.descriptor.name,
+            input: {},
+          },
+        ],
+      },
+      { text: 'Done.' },
+    );
+    const second = await create('A', { prompt: 'again', conversationId });
+    expect(second.status).toBe(202);
+    await h.rt.drain();
+    const runB = second.body.runId as string;
+    const repairs = messages.rows.filter(
+      (row) => row.runId === null && row.role === 'tool',
+    );
+    expect(repairs).toHaveLength(1);
+
+    const service = h.app.get(AiRunsService);
+    const toolParts = async (runId: string) => {
+      const snapshot = await service.snapshot(h.rt.run(runId) as never, 0);
+      return snapshot.messages.flatMap((m) =>
+        m.parts.filter((p) => p.type === 'tool'),
+      );
+    };
+    const [readA] = await toolParts(runA);
+    expect(readA).toMatchObject({
+      toolCallId: 'call_0',
+      name: TOOLS.read.descriptor.name,
+      result: { toolCallId: 'call_0' },
+    });
+    expect(readA.status).not.toBe('EXECUTING');
+    const [callB] = await toolParts(runB);
+    expect(callB).toMatchObject({
+      toolCallId: 'call_0',
+      name: TOOLS.read.descriptor.name,
+      status: 'SUCCEEDED',
+      result: { status: 'ok' },
+    });
   });
 });
 

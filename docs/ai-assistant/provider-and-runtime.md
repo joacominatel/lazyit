@@ -1715,7 +1715,9 @@ replayed (sequence numbers are compared, never counted); otherwise — no header
 foreign position — a `run.snapshot` whose `seq` is `lastSeq(runId)` read **before** the database load, so an
 event published during the load is sent again rather than lost (the reducer tolerates the duplicate). The
 snapshot carries the run's own messages (the §9.1 projection limited to the run), its pending approvals with
-their stored previews, and its status. Then the held and live events follow, each `id: <runId>:<seq>`,
+their stored previews, and its status. "The run's own messages" include the submit repair's tool message,
+which has no run id: one that sits after the run's first message and before the next run's first model
+message answers this run's open step (`GET /ai/runs/:id` reads the same projection). Then the held and live events follow, each `id: <runId>:<seq>`,
 `event: <type>`. **Closing:** live, on `run.finished` (it follows the terminal `run.status` and carries usage
 and error, so the stream waits for it) or on `run.status AWAITING_APPROVAL`; a snapshot whose status is
 terminal or `AWAITING_APPROVAL` closes after it; a replay is sent whole — it may cross a pause that is

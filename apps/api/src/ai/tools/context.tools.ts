@@ -78,9 +78,12 @@ const sessionContext = defineTool({
         version: version.current,
         assignedAssets: {
           total: assets.total,
-          items: assets.items.map((a) =>
-            pick(a, ['id', 'name', 'assetTag', 'serial', 'status']),
-          ),
+          // A lean row does not say whether a reporting agent wrote the name or serial (assets.tools.ts).
+          items: assets.items.map((a) => ({
+            ...pick(a, ['id', 'assetTag', 'status']),
+            name: untrusted(text(a.name)),
+            serial: untrusted(text(a.serial)),
+          })),
         },
         activeAccess: {
           total: grants.total,
@@ -99,12 +102,12 @@ const sessionContext = defineTool({
  * the controller drops the others (AUD-015).
  */
 const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
-  assets: ['id', 'name', 'assetTag', 'serial', 'status'],
-  articles: ['id', 'slug', 'title', 'status'],
+  assets: ['id', 'assetTag', 'status'],
+  articles: ['id', 'slug', 'status'],
   users: ['id', 'email'],
   locations: ['id', 'name', 'type'],
   applications: ['id', 'name', 'vendor'],
-  infra: ['id', 'label', 'kind', 'status', 'ipAddress', 'assetName'],
+  infra: ['id', 'kind', 'status', 'ipAddress'],
   consumables: ['id', 'name', 'sku', 'currentStock', 'unit'],
   purchases: [
     'id',
@@ -117,11 +120,14 @@ const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   suppliers: ['id', 'name', 'taxId'],
 };
 const HIT_UNTRUSTED_TEXT: Partial<Record<SearchEntity, readonly string[]>> = {
-  assets: ['notes'],
-  articles: ['excerpt'],
+  // A hit does not say whether a reporting agent wrote the name or serial, so both are wrapped.
+  assets: ['name', 'serial', 'notes'],
+  articles: ['title', 'excerpt'],
   // Anyone may rename themselves (`PATCH /users/me`).
   users: ['firstName', 'lastName'],
   applications: ['description'],
+  // An agent-reported node's label is its hostname, and so is its auto-created asset's name.
+  infra: ['label', 'assetName'],
   consumables: ['description'],
 };
 

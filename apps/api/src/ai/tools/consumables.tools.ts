@@ -459,14 +459,16 @@ const consumableUpdate = defineTool({
     .strictObject({
       consumable: reference,
       name: UPDATE_FIELDS.name,
-      sku: UPDATE_FIELDS.sku,
+      sku: UPDATE_FIELDS.sku.describe('null clears it.'),
       categoryId: UPDATE_FIELDS.categoryId.describe(
-        'A consumable category id.',
+        'A consumable category id; null clears it.',
       ),
-      description: UPDATE_FIELDS.description,
-      minStock: UPDATE_FIELDS.minStock.describe('Reorder threshold.'),
+      description: UPDATE_FIELDS.description.describe('null clears it.'),
+      minStock: UPDATE_FIELDS.minStock.describe(
+        'Reorder threshold; null clears it (no low-stock alert).',
+      ),
       unit: UPDATE_FIELDS.unit,
-      notes: UPDATE_FIELDS.notes,
+      notes: UPDATE_FIELDS.notes.describe('null clears it.'),
     })
     .refine((v) => UPDATE_FIELD_NAMES.some((f) => v[f] !== undefined), {
       error: 'At least one field must be provided to update',
