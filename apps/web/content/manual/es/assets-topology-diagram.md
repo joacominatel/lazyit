@@ -203,6 +203,11 @@ de que confirmes:
   queda tal cual estaba: mismos dueños, mismo historial, mismos documentos. No se archiva nada.
   **Esta solo requiere gestionar topología**: no se borra nada, así que no se cobra nada extra.
 
+Un activo respalda un solo nodo a la vez. Vincular un activo que otro nodo ya tiene vinculado se
+rechaza: desvinculalo primero de ese nodo. Si un registro anterior ya tiene dos nodos sobre un mismo
+activo, desvincular cualquiera de ellos **solo quita el vínculo**, aunque lazyit haya creado el
+activo, porque el otro nodo todavía lo usa.
+
 lazyit sabe en cuál de los dos casos estás porque marca los registros que crea él mismo, y nunca le
 pone esa marca a un registro que curaste vos. Si un nodo está desvinculado, ese mismo panel ofrece un
 buscador para vincular cualquier activo de tu inventario. No se puede cambiar de un solo paso el

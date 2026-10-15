@@ -77,6 +77,9 @@ Locations are **soft-deleted**, never destroyed. Removing a location does **not*
 that point to it — those assets simply become location-less for that link, and the record is kept for
 history. lazyit favors auditability over strict tidiness.
 
+An admin can bring a removed location back from the archived view. Restoring a location whose parent
+is still removed is refused — restore the parent first.
+
 ## What's next
 
 - [Asset basics](/help/assets-asset-basics) — register units and set their location.

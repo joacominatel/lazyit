@@ -193,6 +193,11 @@ run, before you commit:
   stays exactly as it was: same owners, same history, same documents. Nothing is archived. **This
   one needs only manage-topology** — nothing is deleted, so nothing extra is charged for it.
 
+An asset backs one node at a time. Linking an asset that another node already links is refused —
+detach it from that node first. If an older record already has two nodes on one asset, detaching
+either of them **only removes the link**, even for an asset lazyit created, because the other node
+still uses it.
+
 lazyit knows which case you are in because it marks the records it creates itself, and it never puts
 that mark on a record you curated. If a node is currently unlinked, the same panel offers a search
 box to link any asset in your inventory. You cannot swap the asset of a node that already has one in

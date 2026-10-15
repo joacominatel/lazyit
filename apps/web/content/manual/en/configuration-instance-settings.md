@@ -177,6 +177,11 @@ still just *requested* — once the host script has actually started (backing up
 is gone and that update must finish or be reconciled, because interrupting it mid-run could leave the
 databases and backups out of step. The cancelled request is kept in the update history for the record.
 
+You don't have to cancel first to update to a different version. If you run `update.sh` on the host for
+another version while a request is still pending, the script supersedes that request: it is marked
+failed with a "Superseded by an operator-run update" note, kept in the history, and the section follows
+the update you actually ran.
+
 ### If an update fails — the restore point
 
 The pre-update backup is a **restore point**, not a magic undo. If the update fails **before** the
