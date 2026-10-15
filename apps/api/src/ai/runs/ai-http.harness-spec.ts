@@ -225,7 +225,7 @@ function extendPrisma(
     aiConversation,
     aiServiceAccountSettings,
     serviceAccount: {
-      findUnique: ({ where }: Row) =>
+      findFirst: ({ where }: Row) =>
         Promise.resolve(
           serviceAccounts.has(where.id) ? { id: where.id } : null,
         ),
