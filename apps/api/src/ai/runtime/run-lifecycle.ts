@@ -187,8 +187,11 @@ export class AiRunLifecycle {
    * The conversation's open step: the latest step record when the latest provider message is the
    * assistant message it describes (its calls not answered yet); null when there is nothing to answer.
    */
-  async openStep(conversationId: string): Promise<StepRecord | null> {
-    const rows = await this.prisma.aiMessage.findMany({
+  async openStep(
+    conversationId: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<StepRecord | null> {
+    const rows = await db.aiMessage.findMany({
       where: { conversationId },
       orderBy: { seq: 'desc' },
       take: 12,
@@ -216,6 +219,7 @@ export class AiRunLifecycle {
   async outcomesOf(
     record: StepRecord,
     fallback: FallbackAnswer = NOT_EXECUTED,
+    db: Prisma.TransactionClient = this.prisma,
   ): Promise<ChatModelToolOutcome[]> {
     const byCall = new Map<string, StepOutcome>();
     for (const outcome of record.outcomes) {
@@ -235,7 +239,7 @@ export class AiRunLifecycle {
       }
       let answer = fallback;
       if (recorded && 'invocationId' in recorded) {
-        const row = await this.prisma.aiToolInvocation.findUnique({
+        const row = await db.aiToolInvocation.findUnique({
           where: { id: recorded.invocationId },
         });
         const action = row ? toPendingAction(row) : null;
@@ -266,23 +270,28 @@ export class AiRunLifecycle {
 
   /**
    * Answer the conversation's open step, if any, with ONE tool message carrying every call's result
-   * (Anthropic rejects a history with an unanswered tool use). Idempotent: an answered step is left as is.
+   * (Anthropic rejects a history with an unanswered tool use). The step is read under the conversation row
+   * lock (the one `submit` takes), so concurrent callers answer it exactly once; an answered step is left
+   * as is. Runs inside `tx` when given, else in a transaction of its own.
    */
   async answerOpenStep(
     conversationId: string,
     runId: string | null,
     fallback: FallbackAnswer = NOT_EXECUTED,
+    tx?: Prisma.TransactionClient,
   ): Promise<boolean> {
-    const record = await this.openStep(conversationId);
-    if (!record) return false;
-    const outcomes = await this.outcomesOf(record, fallback);
-    const message = this.model.toolResultsMessage(outcomes);
-    await this.prisma.$transaction((tx) =>
-      this.append(tx, conversationId, runId, [
+    const answer = async (db: Prisma.TransactionClient): Promise<boolean> => {
+      await db.$queryRaw`SELECT "id" FROM "ai_conversations" WHERE "id" = ${conversationId} FOR UPDATE`;
+      const record = await this.openStep(conversationId, db);
+      if (!record) return false;
+      const outcomes = await this.outcomesOf(record, fallback, db);
+      const message = this.model.toolResultsMessage(outcomes);
+      await this.append(db, conversationId, runId, [
         { role: roleOf(message), content: message },
-      ]),
-    );
-    return true;
+      ]);
+      return true;
+    };
+    return tx ? answer(tx) : this.prisma.$transaction(answer);
   }
 
   /** Mark a conversation read-only (idempotent: the first reason stays). */

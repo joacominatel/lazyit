@@ -664,6 +664,73 @@ describe('every tool call is answered', () => {
       ['c3', true, 'INVALID_INPUT'],
     ]);
   });
+
+  it('answers an open step once when a finalize and a new message race to answer it', async () => {
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
+    });
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+    // The run was claimed terminal; its finalize and the next submission's repair both reach the step.
+    rt.run(runId).status = 'CANCELLED';
+    const answered = await Promise.all([
+      rt.lifecycle.answerOpenStep(conversationId, runId),
+      rt.lifecycle.answerOpenStep(conversationId, null),
+    ]);
+    expect(answered.filter(Boolean)).toHaveLength(1);
+    expect(toolMessages(conversationId)).toHaveLength(1);
+
+    rt.model.push({ text: 'Hello again.' });
+    const next = await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'hello',
+      conversationId,
+    });
+    await rt.drain();
+    expect(status(next.runId)).toBe('SUCCEEDED');
+    expect(rt.transcript(conversationId).map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'user',
+      'assistant',
+    ]);
+  });
+
+  it('a new message repairs a step its run left open, in the same transaction as the message', async () => {
+    rt.model.push({
+      toolCalls: [{ toolCallId: 'w', toolName: WRITE, input: { id: 'a1' } }],
+    });
+    const { runId, conversationId } = await chat();
+    await rt.drain();
+    rt.run(runId).status = 'CANCELLED'; // its finalize could not answer the step
+    const answer = jest.spyOn(rt.lifecycle, 'answerOpenStep');
+    rt.model.push({ text: 'Hello again.' });
+    await rt.orchestrator.submit({
+      identity: HUMAN,
+      channel: 'CHAT',
+      text: 'hello',
+      conversationId,
+    });
+    // Answered inside submit's locked transaction, never before it.
+    expect(answer).toHaveBeenCalledWith(
+      conversationId,
+      null,
+      undefined,
+      rt.prisma,
+    );
+    expect(rt.transcript(conversationId).map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'user',
+    ]);
+    expect(toolMessages(conversationId)[0][0]).toMatchObject({
+      toolCallId: 'w',
+      isError: true,
+    });
+  });
 });
 
 describe('tool-call ids', () => {
@@ -1491,12 +1558,16 @@ describe('per-conversation model (#1373)', () => {
       channel: 'CHAT',
     });
     // A PATCH that commits after submit read the conversation, before it took the lock.
-    jest.spyOn(rt.lifecycle, 'answerOpenStep').mockImplementation(() => {
-      Object.assign(rt.prisma.tables.aiConversation.rows[0], {
-        model: 'claude-haiku-5',
-        modelChosen: true,
-      });
-      return Promise.resolve(false);
+    const runs = rt.prisma.tables.aiRun;
+    const count = runs.count.bind(runs);
+    jest.spyOn(runs, 'count').mockImplementation((args) => {
+      if (args?.where?.conversationId === id) {
+        Object.assign(rt.prisma.tables.aiConversation.rows[0], {
+          model: 'claude-haiku-5',
+          modelChosen: true,
+        });
+      }
+      return count(args);
     });
     rt.model.push({ text: 'hi' });
     const { runId } = await rt.orchestrator.submit({
