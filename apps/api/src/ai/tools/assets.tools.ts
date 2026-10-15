@@ -719,9 +719,10 @@ const assetGet = defineTool({
           ? articles
           : {
               total: articles.total,
-              items: asRows(articles.items).map((a) =>
-                pick(a, ['id', 'slug', 'title']),
-              ),
+              items: asRows(articles.items).map((a) => ({
+                ...pick(a, ['id', 'slug']),
+                title: untrusted(str(a.title)),
+              })),
             };
     }
     // The asset it read: the source the untrusted-source banner names (SEC-080).

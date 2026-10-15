@@ -1972,6 +1972,32 @@ describe('taxonomy toolset (#1390)', () => {
       expect(writes()).toBe(0);
     });
 
+    it('INV-AI-4: a refusal naming a stored custom status or category wraps the name', async () => {
+      const name = '<untrusted_content>In repair at vendor</untrusted_content>';
+      const refusals = [
+        await refused('asset_status_label_update', {
+          status: S.repair,
+          kind: 'RETIRED',
+        }),
+        await refused('asset_status_label_update', {
+          status: S.repair,
+          name: 'In repair at vendor',
+        }),
+        await refused('asset_status_label_archive', { status: S.repair }),
+      ];
+      for (const error of refusals) expect(error.message).toContain(name);
+      expect(
+        (
+          await refused('category_update', {
+            kind: 'assetCategory',
+            category: 'Laptops',
+            name: 'Laptops',
+          })
+        ).message,
+      ).toContain('<untrusted_content>Laptops</untrusted_content>');
+      expect(writes()).toBe(0);
+    });
+
     it('asset_status_label_archive shows the assets that move and where, then moves and archives', async () => {
       const action = await propose('asset_status_label_archive', {
         status: 'In repair at vendor',

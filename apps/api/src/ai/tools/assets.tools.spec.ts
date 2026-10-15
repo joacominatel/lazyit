@@ -486,7 +486,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
           {
             id: ANY_STRING,
             slug: 'laptop-runbook',
-            title: 'Laptop runbook',
+            title: '<untrusted_content>Laptop runbook</untrusted_content>',
           },
         ],
       });

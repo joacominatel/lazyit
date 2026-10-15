@@ -681,7 +681,9 @@ const categoryUpdate = defineTool({
         });
       }
     }
-    if (changes.length === 0) nothingToChange(String(current.name));
+    if (changes.length === 0) {
+      nothingToChange(String(untrusted(str(current.name))));
+    }
     const target = categoryRef(current, 'updated');
     return previewOf({
       target,
@@ -1641,7 +1643,7 @@ const assetStatusLabelUpdate = defineTool({
     const { status, ...fields } = input;
     const { row } = await resolveStatusLabel(rt, status);
     const changes = diff(row, STATUS_LABEL_SCALARS, fields);
-    if (changes.length === 0) nothingToChange(String(row.name));
+    if (changes.length === 0) nothingToChange(String(untrusted(str(row.name))));
     if (input.name !== undefined && input.name !== row.name) {
       await assertStatusLabelNameFree(rt, input.name, String(row.id));
     }
@@ -1649,7 +1651,7 @@ const assetStatusLabelUpdate = defineTool({
     const carriers = kindChange ? await statusLabelCarriers(rt, row) : 0;
     if (kindChange && carriers > 0) {
       throw new ConflictException(
-        `${carriers} asset(s) carry the custom status "${String(row.name)}", so its built-in status cannot ` +
+        `${carriers} asset(s) carry the custom status "${String(untrusted(str(row.name)))}", so its built-in status cannot ` +
           `change from ${String(row.kind)} to ${input.kind}. Move them to another status first, or create ` +
           'a new custom status.',
       );
@@ -1777,7 +1779,7 @@ const assetStatusLabelArchive = defineTool({
     const carriers = await statusLabelCarriers(rt, row);
     if (carriers > 0 && target === null) {
       throw new BadRequestException(
-        `${carriers} asset(s) carry the custom status "${String(row.name)}": say where they go with moveTo ` +
+        `${carriers} asset(s) carry the custom status "${String(untrusted(str(row.name)))}": say where they go with moveTo ` +
           '(another custom status) or moveToStatus (a built-in status), then propose again.',
       );
     }
