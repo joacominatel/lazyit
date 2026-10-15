@@ -3,6 +3,7 @@ import {
   mapData,
   renderTemplate,
   templatePaths,
+  unknownTemplateFilters,
 } from './data-mapper';
 import {
   freezeMappingContext,
@@ -261,5 +262,74 @@ describe('data-mapper — templatePaths (the parser the AI previews share)', () 
 
   it('returns nothing for a literal', () => {
     expect(templatePaths('plain text')).toEqual([]);
+  });
+});
+
+describe('filter arguments are quote-aware (AUD-068)', () => {
+  const ctx = makeCtx({ steps: { s: { blank: '' } } });
+
+  it('keeps a "|" inside a quoted default', () => {
+    expect(
+      renderTemplate('{{ steps.s.blank | default:"n|a" }}', ctx, 'json'),
+    ).toBe('n|a');
+    expect(
+      renderTemplate(
+        "{{ steps.s.blank | default:'n|a' | upper }}",
+        ctx,
+        'json',
+      ),
+    ).toBe('N|A');
+  });
+
+  it('accepts a lone "}" inside a quoted default', () => {
+    expect(
+      renderTemplate('[{{ steps.s.blank | default:"}" }}]', ctx, 'json'),
+    ).toBe('[}]');
+  });
+
+  it('leaves a stray (unbalanced) quote literal, exactly as before', () => {
+    expect(
+      renderTemplate(
+        "{{ steps.s.blank | default:it's }} and {{ application.name }}",
+        ctx,
+        'json',
+      ),
+    ).toBe("it's and Jira");
+  });
+
+  it('never resolves a prototype key as a filter', () => {
+    expect(
+      renderTemplate('{{ application.name | constructor }}', ctx, 'json'),
+    ).toBe('Jira');
+  });
+
+  it('lists the filters outside the closed set', () => {
+    expect(
+      unknownTemplateFilters(
+        '{{ grantee.email | lower | slugify }} {{ grant.id | default:"a|b" }} {{ x | }}',
+      ),
+    ).toEqual(['slugify']);
+    expect(unknownTemplateFilters('{{ a | constructor }}')).toEqual([
+      'constructor',
+    ]);
+  });
+});
+
+describe('placeholder scanning stays linear (AUD-068)', () => {
+  it('renders an unterminated placeholder full of quoted arguments as a literal, fast', () => {
+    const template = `{{ a${':"x"'.repeat(5000)}}`;
+    const started = Date.now();
+    expect(renderTemplate(template, makeCtx(), 'json')).toBe(template);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('matches the previous grammar on ordinary templates', () => {
+    const ctx = makeCtx();
+    expect(
+      renderTemplate('{{{ application.name }}} {{ a } b }} {{', ctx, 'json'),
+    ).toBe('} {{ a } b }} {{');
+    expect(templatePaths('x {{ grantee . email | lower }} {{ a } }}')).toEqual([
+      'grantee.email',
+    ]);
   });
 });
