@@ -598,6 +598,13 @@ const prisma = {
       Promise.resolve(stepRuns.filter((s) => matches(s, where))),
     ),
   },
+  // The runs service refuses a re-drive of a revoked grant and takes a lineage advisory lock (AUD-007/069).
+  accessGrant: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ revokedAt: null, user: { deletedAt: null } }),
+  },
+  $executeRaw: jest.fn().mockResolvedValue(0),
   workflowVersion: {
     findUnique: jest.fn(({ where }: { where: { id: number } }) =>
       Promise.resolve(VERSIONS[where.id] ?? null),
@@ -1875,6 +1882,9 @@ describe('workflow operations toolset (W2-13)', () => {
     });
 
     it('chat: previews a new run on the latest version and every host it may call; creates it on approval', async () => {
+      // A live or SUCCEEDED run of the same grant event would refuse the replay (AUD-007).
+      runs.get(RUN_OK)!.status = 'FAILED';
+      runs.get(RUN_WAIT)!.status = 'FAILED';
       const proposal = await tools.propose(
         'workflow_run_replay',
         { run: RUN_EARLY },
