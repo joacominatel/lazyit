@@ -821,7 +821,8 @@ leak through a tool would be a leak in the test.
   destination is more visible; any action on **another person's article** (the `article:manage` bypass,
   T3), which also names it in `untrustedSources`. Unpublishing your own article is a standard card with
   `VISIBILITY_CHANGE`. Every write on an existing article carries a precondition on its `updatedAt`.
-- Untrusted content: titles, excerpts, bodies and metadata in results are wrapped with `untrusted()`.
+- Untrusted content: titles, excerpts, bodies, metadata and author names in results are wrapped with
+  `untrusted()` (a person renames themselves through `PATCH /users/me`; AUD-003).
 - Route behaviour the tools inherit, unchanged: a Service Account is admitted by the guards and refused by
   the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
@@ -829,7 +830,7 @@ leak through a tool would be a leak in the test.
   transfer (no file tools); folder delete (a cascading one included) and restore (v1.1, declared in
   `reference.tools.ts`), a folder move, and folder access rules (`elevated`, after v1).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
-  - entity-ref labels (article titles) and author names in results are not wrapped as untrusted;
+  - entity-ref labels (article titles) are not wrapped as untrusted;
   - the folder is an entity of type `category`, which the web cannot tell apart from the other
     category kinds (no `articleFolder` entity type yet);
   - a member without `article:manage` gets the elevated card for someone else's published article, and
@@ -1194,9 +1195,15 @@ a separate remediation, not a supported path here.
   grants facet — reported `unavailable` without that permission, never a failure). `dashboard_summary`
   (`expiringWithinDays`, `detail: full` adds the recent asset history) and `activity_list` (the feed's
   filters; `actor` is a uuid or `"me"`; `limit` ≤ 50). Never projected: `externalId`, password and
-  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes,
-  imported `directoryAttrs`, an activity row's `subjectName` (entity names, some agent-reported) and a
-  history `payload`. The feed's `summary` is a fixed server phrase and is not wrapped.
+  session material, the raw manager columns. Wrapped with `untrusted()`: assignment and grant notes, a
+  grant's access level (an approval copies the requester's text onto it), imported `directoryAttrs`, an
+  activity row's `subjectName` (entity names, some agent-reported) and a history `payload`. So are the
+  identity strings a person or a directory sync wrote (AUD-003): first and last name, `username`,
+  `legajo` and the manager's name (a lazyit user's or the free-text one), in results and in the name part
+  of every user label — entity refs, summaries, reference candidates and card values (the email stays
+  plain). Anyone may rename themselves through `PATCH /users/me`, so a turn that read a user carries the
+  untrusted-source marker and nothing proposed after it is auto-approved. The feed's `summary` is a fixed
+  server phrase and is not wrapped.
 - **Writes and warnings.** Previews leave `stepUpRequired` to core (it derives it from the warnings).
   - `user_create` (`elevated`): always `IDENTITY_CHANGE`, plus `ROLE_CHANGE` for a role above VIEWER. No
     target (nothing exists yet). The input has no `password`: the route's optional temporary password is
@@ -1242,8 +1249,9 @@ a separate remediation, not a supported path here.
   - The offboarding card's asset and grant counts are taken at preview time; a check-out or grant made
     between the preview and the approval is still reclaimed but was not on the card (the precondition
     pins the user row, not its holdings).
-  - Person names (actor, target, user first/last names) are returned plain, as in the other toolsets;
-    wrapping directory names with `untrusted()` would be a cross-toolset decision.
+  - The users, KB and access tools wrap person names (AUD-003); the assets, infrastructure, context and
+    workflow-authoring tools still return a person's name plain (an assignee, an owner, the caller) —
+    the same wrapping is a follow-up there.
 
 **Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
@@ -1275,7 +1283,10 @@ actor attribution and workflow outbox ([[0054-applications-workflow-engine]]) un
   is revoked automatically shortly", "revoked on … by user …", "pending: waiting for someone who can
   grant access…", "approved by user … on …; access grant … was created", "denied by …"). Never
   projected: an application's free-form `metadata`, any workflow definition, connection, engine Service
-  Account or secret. Descriptions, notes, justifications and denial reasons are `untrusted()`.
+  Account or secret. Descriptions, notes, justifications, denial reasons and access levels are
+  `untrusted()` — a request's level is the requester's own text and an approval copies it onto the grant
+  (AUD-095), so it is wrapped in results, in summaries and on the cards. So is the person's name on a
+  card, in a summary or in a reference candidate (AUD-003; the email stays plain).
 - **Writes.** Every preview's first `changes` row is `action`: one sentence saying who gets or loses
   what access on which application, and what happens outside lazyit. That last part comes from the
   guarded `GET /workflows?applicationId=` (headers only, `workflow:read`; bound as a facet, removed from

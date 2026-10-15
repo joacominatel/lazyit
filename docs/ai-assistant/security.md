@@ -362,7 +362,8 @@ Channels: **CH** chat · **MCP** MCP resource server · **AS** OAuth authorizati
 
 | Source | Who can write it | Evidence |
 | --- | --- | --- |
-| Access-request `justification` | **any user, VIEWER included** | [R] `access-request.ts:44,70`; `permission.ts:277` |
+| Access-request `justification` and `accessLevel` (copied onto the grant on approval) | **any user, VIEWER included** | [R] `access-request.ts:44,70`; `permission.ts:277` |
+| A person's first and last name; `username`, `legajo`, the manager's name | **any signed-in user** (own name, `PATCH /users/me`); admins; directory sync | [R] `user.ts` `UpdateOwnProfileSchema`; AUD-003 |
 | KB articles, links, imported `.docx` | MEMBER+ (`article:write`); import | [R] [[0021-knowledge-base-design]], [[0059-kb-folders-links-and-import]] |
 | Asset `notes`, `specs` jsonb, names, `Application.url` | MEMBER+ | [R] `asset.ts:88`; DEF-004 |
 | Agent-reported hostnames and package lists | **any host holding the fleet-wide token** | [R] [[0074-server-reporting-agent]] |
