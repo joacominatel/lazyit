@@ -21,6 +21,17 @@ describe('HumanOnlyGuard (SA-not-a-subject at the HTTP edge)', () => {
     expect(() => guard.canActivate(ctx(sa))).toThrow(ForbiddenException);
   });
 
+  it('does not name the Secret Manager, since infra and update routes reuse it (AUD-105)', () => {
+    const sa: Principal = {
+      kind: 'service',
+      serviceAccount: { id: 'sa1' } as never,
+      permissions: new Set(),
+    };
+    expect(() => guard.canActivate(ctx(sa))).toThrow(
+      'Service accounts cannot use this endpoint; it requires a human user.',
+    );
+  });
+
   it('lets a human principal through', () => {
     const human: Principal = {
       kind: 'human',

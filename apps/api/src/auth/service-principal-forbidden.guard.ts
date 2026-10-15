@@ -7,6 +7,10 @@ import {
 import type { Request } from 'express';
 import { type Principal, isServicePrincipal } from './principal';
 
+// Both service-account guards are reused across many unrelated controllers, so this names no feature.
+export const SERVICE_ACCOUNT_FORBIDDEN_MESSAGE =
+  'Service accounts cannot use this endpoint; it requires a human user.';
+
 /**
  * Layer-2 runtime backstop for INV-SA-3 (SEC-011, ADR-0048 Fork #3).
  *
@@ -16,6 +20,7 @@ import { type Principal, isServicePrincipal } from './principal';
  *   - `ServiceAccountsController` (every route) — a bot must never manage bots.
  *   - `GET /config/permissions` and `PUT /config/permissions` — a bot must never read or rewrite the
  *     human MEMBER/VIEWER authorization matrix.
+ * Many other human-only controllers reuse it, hence the feature-neutral message.
  *
  * WHY A SEPARATE GUARD (not a change to RolesGuard):
  * The refusal is unconditional on the caller's grants — even if a service account somehow holds
@@ -33,9 +38,7 @@ export class ServicePrincipalForbiddenGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { principal?: Principal }>();
     if (isServicePrincipal(request.principal)) {
-      throw new ForbiddenException(
-        'Service accounts cannot manage service accounts or the permission matrix.',
-      );
+      throw new ForbiddenException(SERVICE_ACCOUNT_FORBIDDEN_MESSAGE);
     }
     return true;
   }
