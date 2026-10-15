@@ -271,7 +271,8 @@ audit.
   matrix nothing changes, since every role holds the other reads. It matters when an admin edits a role or
   grants a service account `search:read` without a domain read. Same two layers: the controller drops the
   index from the request, and `SearchService.search` drops it again (an absent principal reads nothing).
-  The `users` facet keeps its stricter rule as built: a human caller whose role holds `user:read`.
+  The `users` facet keeps its stricter rule as built: a human caller whose role holds `user:read`. The
+  web palette hides each filter chip without its index's read permission.
 
 ## Deferred (explicit)
 

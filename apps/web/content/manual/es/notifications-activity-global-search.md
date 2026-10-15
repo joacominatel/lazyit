@@ -77,8 +77,8 @@ Los resultados de la búsqueda respetan el control de acceso:
 - **Todos los demás tipos de registro** siguen la misma regla: aparecen solo para quien tiene un rol que
   puede ver ese tipo de registro. Los roles por defecto pueden verlos todos, así que esto solo importa
   cuando un Administrador le quita un permiso a un rol — por ejemplo, un rol que ya no puede ver activos
-  no obtiene resultados ni conteo de activos. Una cuenta de servicio busca solo en lo que cubren sus
-  propios permisos.
+  no obtiene resultados, ni conteo, ni la ficha de filtro Activos. Una cuenta de servicio busca solo en
+  lo que cubren sus propios permisos.
 
 Por eso dos personas pueden obtener resultados distintos para la misma consulta — por diseño.
 

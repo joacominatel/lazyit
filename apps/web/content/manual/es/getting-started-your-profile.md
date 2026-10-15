@@ -154,9 +154,9 @@ inicio de sesión único de tu organización), tu perfil también tiene un panel
   lista de requisitos en vivo (longitud, mayúscula y minúscula, un número y un símbolo) y debe ser
   distinta de la actual.
 - Después de cinco contraseñas **actuales** incorrectas lazyit te hace esperar antes de reintentar
-  ("Too many wrong passwords"), por un tiempo que crece con cada fallo, hasta 15 minutos. La espera es
-  compartida con las confirmaciones con contraseña del chat de IA y de la pantalla de consentimiento
-  de MCP.
+  ("Demasiadas contraseñas incorrectas"), por un tiempo que crece con cada fallo, hasta 15 minutos, y
+  te dice cuánto falta. La espera es compartida con las confirmaciones con contraseña del chat de IA y
+  de la pantalla de consentimiento de MCP.
 - Al cambiarla **seguís con la sesión iniciada en este dispositivo**; cualquier *otra* sesión se cierra
   y tus apps de IA y tokens personales se desconectan, así que cambiar la contraseña también sirve para
   cerrar una sesión olvidada, compartida, perdida o robada.

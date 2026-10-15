@@ -20,6 +20,7 @@ import { useChangePassword } from "@/lib/api/hooks/use-password-lifecycle";
 import { notifyError } from "@/lib/api/notify-error";
 import { isSessionRevoked } from "@/lib/api/session-revoked";
 import { setSessionToken } from "@/lib/api/session-token";
+import { stepUpLockoutMessage } from "@/lib/api/step-up-lockout";
 import { toast } from "sonner";
 
 /**
@@ -70,6 +71,7 @@ export function ChangePasswordForm({
   onSuccess?: () => void;
 }) {
   const t = useTranslations("auth.changePassword");
+  const tStepUp = useTranslations("ai.approval.errors");
   const { update } = useSession();
   const change = useChangePassword();
 
@@ -106,6 +108,11 @@ export function ChangePasswordForm({
           if (isSessionRevoked(error)) {
             toast.error(t("sessionRevoked"));
             handleAuthExpiry(error);
+            return;
+          }
+          const lockout = stepUpLockoutMessage(error, tStepUp);
+          if (lockout) {
+            form.setError("currentPassword", { message: lockout });
             return;
           }
           if (error instanceof ApiError && error.status === 401) {
