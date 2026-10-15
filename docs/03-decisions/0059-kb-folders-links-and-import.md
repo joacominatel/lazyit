@@ -15,6 +15,8 @@ deciders: [Joaquín Minatel]
 > Ratified 2026-06-11 in a CTO/CEO design session. **Implemented in #364** (merged on `feat/kb-secrets`): folders, article-alias, article-wiki-link, and `.zip` import are all built and shipped.
 >
 > **Amendment 2026-10-14 (backend audit, AUD-101):** the §3 "on-create pass" now exists. Creating or importing an article, restoring a soft-deleted one, and changing a slug each resolve the still-unresolved edges whose `targetSlug` is that slug, in the write transaction, so a forward reference starts working without re-editing its source.
+>
+> **Amendment 2026-10-14 (audit follow-up):** the same pass also takes over edges whose `resolvedTargetId` still points at a **soft-deleted** article, since `resolvedTargetId` caches "the slug resolves to a live article" and the slug is the truth. The worker's own `[[slug]]` resolution now skips soft-deleted articles, as the service's always did.
 
 The third wave for the Knowledge Base. [[0021-knowledge-base-design]] shipped the **simple wiki** (one
 `Article` + a **flat** [[article-category]], `LIKE`-only search, no versioning, no linking).

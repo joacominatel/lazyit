@@ -84,11 +84,12 @@ deferred.
   god-mode); a non-admin `article:manage` holder must pass the destination check like anyone else. The
   rule is **write-path only** — an article already sitting in a folder its author cannot read is never
   re-validated, and repeating the folder it is already in is not a move.
-- **The home folder is re-checked under a lock.** A create and a move lock the target folder row
-  `FOR SHARE` inside their write transaction and re-check it is live, so an article cannot land in a
-  folder whose delete is committing at the same moment (audit 2026-10-10, AUD-023): the delete's
-  `FOR UPDATE` either sees the new article and refuses, or commits first and the write gets the usual
-  `400`.
+- **The home folder is re-checked under a lock.** A create, a move and each import write lock the
+  target folder row `FOR SHARE` inside their write transaction and re-check it is live, so an article
+  cannot land in a folder whose delete is committing at the same moment (audit 2026-10-10, AUD-023):
+  the delete's `FOR UPDATE` either sees the new article and refuses, or commits first and the write
+  gets the usual `400` — for an import, a single file fails with a "folder was deleted" message and a
+  `.zip` entry is reported as skipped (`failed`).
 - **Author-only writes.** Only the author may edit, delete, publish or unpublish. The caller is
   identified by the `X-User-Id` shim until real auth lands ([[0022-draft-visibility-auth-shim]]);
   on create, `authorId` is taken from the caller, **never** the body.
@@ -233,8 +234,8 @@ INV-9, SEC-074).
 ## Not yet implemented (deferred)
 
 - **Tags**; **export** (md/pdf) — still deferred ([[0021-knowledge-base-design]]). *(Edit history
-  and full-text-over-content shipped in [[0042-article-versioning-and-linking]].)*
-- **Rollback** — replay a past [[article-version]] onto the live article ([[0042]]).
+  and full-text-over-content shipped in [[0042-article-versioning-and-linking]]; restoring a past
+  [[article-version]] onto the live article shipped in #848.)*
 - ~~**Slug auto-suffixing** on collision~~ — the `nextAvailableSlug` **util shipped** (#392,
   [[0059-kb-folders-links-and-import]] §3); wiring it into the **interactive single-create** path
   (currently still `409`) is a small follow-up. **per-category `metadata`** validation still deferred.

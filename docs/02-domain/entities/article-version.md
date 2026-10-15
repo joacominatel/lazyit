@@ -56,8 +56,10 @@ this runbook say last quarter?"). A bad edit no longer destroys the prior body.
   - `publish` / `unpublish` → snapshot (they change `status`); an idempotent no-op does not.
 - **Visibility mirrors the article reads.** A DRAFT's history is visible only to its author (404 to
   anyone else), so a private draft's snapshots never leak ([[0022-draft-visibility-auth-shim]]).
-- **No rollback** yet — this records history; replaying a past version onto the live article is
-  deferred ([[0042-article-versioning-and-linking]]).
+- **Restore to a version** (#848) — `POST /articles/:id/versions/:version/restore` replays that
+  version's title, content and excerpt through the normal edit path, so it appends a **new** version
+  and never rewrites history. Status is not restored; the article keeps its current published or
+  draft state.
 
 ## Conventions
 
