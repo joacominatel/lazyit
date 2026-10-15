@@ -221,14 +221,18 @@ export class AiSettingsService implements AiSettingsReader {
     const row = await this.findRow();
     const provider = draft.provider ?? parseProvider(row?.provider ?? null);
     const model = draft.model ?? row?.model ?? null;
-    if (!provider || !model) {
-      throw badRequest(
-        'PROVIDER_NOT_CONFIGURED',
-        'Choose a provider and a model before testing the connection.',
-      );
-    }
     const baseUrl =
       draft.baseUrl !== undefined ? draft.baseUrl : (row?.baseUrl ?? null);
+    if (
+      !provider ||
+      !model ||
+      (AI_PROVIDER_DESCRIPTORS[provider].requiresBaseUrl && !baseUrl)
+    ) {
+      throw badRequest(
+        'PROVIDER_NOT_CONFIGURED',
+        'Choose a provider and a model (and a base URL where required) before testing the connection.',
+      );
+    }
     const allowPrivateNetwork =
       draft.allowPrivateNetwork ?? row?.allowPrivateNetwork ?? false;
     const providerOptions =

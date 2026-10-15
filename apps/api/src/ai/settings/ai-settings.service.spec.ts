@@ -1212,6 +1212,16 @@ describe('AiSettingsService — connection test (draft)', () => {
     );
   });
 
+  it('400s an OpenAI-compatible test with no base URL, without calling the provider', async () => {
+    const { service, tester } = setup();
+    await expectRefusal(
+      service.testConnection({ provider: 'openai-compatible', model: 'llama' }),
+      BadRequestException,
+      'PROVIDER_NOT_CONFIGURED',
+    );
+    expect(tester.test).not.toHaveBeenCalled();
+  });
+
   it('model suggestions come from the provider descriptor', async () => {
     const { service } = setup();
     await expect(
