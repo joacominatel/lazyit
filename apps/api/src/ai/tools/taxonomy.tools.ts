@@ -1613,6 +1613,7 @@ const assetStatusLabelUpdate = defineTool({
   bindings: [
     bind(AssetStatusLabelsController, 'update'),
     bind(AssetStatusLabelsController, 'findAll'),
+    bind(AssetsController, 'findAll'),
   ],
   async run(input, rt) {
     const { status, ...body } = input;
@@ -1644,8 +1645,9 @@ const assetStatusLabelUpdate = defineTool({
     if (input.name !== undefined && input.name !== row.name) {
       await assertStatusLabelNameFree(rt, input.name, String(row.id));
     }
-    const carriers = typeof row.assetCount === 'number' ? row.assetCount : 0;
-    if (input.kind !== undefined && input.kind !== row.kind && carriers > 0) {
+    const kindChange = input.kind !== undefined && input.kind !== row.kind;
+    const carriers = kindChange ? await statusLabelCarriers(rt, row) : 0;
+    if (kindChange && carriers > 0) {
       throw new ConflictException(
         `${carriers} asset(s) carry the custom status "${String(row.name)}", so its built-in status cannot ` +
           `change from ${String(row.kind)} to ${input.kind}. Move them to another status first, or create ` +
@@ -1661,6 +1663,24 @@ const assetStatusLabelUpdate = defineTool({
     });
   },
 });
+
+/**
+ * The assets carrying a custom status, archived ones included — what the route's kind guard and its
+ * archive count (AUD-094); `assetCount` is live assets only. Archived assets are listed for an ADMIN only:
+ * for anyone else the live count is all the card can know, and the route still decides.
+ */
+async function statusLabelCarriers(
+  rt: AiToolRuntime,
+  row: Row,
+): Promise<number> {
+  const live = typeof row.assetCount === 'number' ? row.assetCount : 0;
+  const archived = await unlessForbidden(() =>
+    rt.call(AssetsController, 'findAll', {
+      query: { statusLabelId: String(row.id), deleted: 'only', limit: '1' },
+    }),
+  );
+  return live + (typeof archived?.total === 'number' ? archived.total : 0);
+}
 
 /** Where an archive moves the assets of the custom status: another custom status, or a built-in one. */
 async function archiveTarget(
@@ -1754,7 +1774,7 @@ const assetStatusLabelArchive = defineTool({
   async preview(input, rt) {
     const { resolved, row } = await resolveStatusLabel(rt, input.status);
     const target = await archiveTarget(rt, input, resolved.id);
-    const carriers = typeof row.assetCount === 'number' ? row.assetCount : 0;
+    const carriers = await statusLabelCarriers(rt, row);
     if (carriers > 0 && target === null) {
       throw new BadRequestException(
         `${carriers} asset(s) carry the custom status "${String(row.name)}": say where they go with moveTo ` +
