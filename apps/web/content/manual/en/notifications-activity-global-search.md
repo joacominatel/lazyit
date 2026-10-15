@@ -72,8 +72,8 @@ Search results respect access control:
 - **Every other kind of record** follows the same rule: it appears only for someone whose role can view
   that kind of record. The default roles can view all of them, so this only matters when an
   Administrator removes a permission from a role — for example, a role that can no longer view assets
-  gets no asset results and no asset count. A service account searches only what its own permissions
-  cover.
+  gets no asset results, no asset count, and no Assets filter chip. A service account searches only
+  what its own permissions cover.
 
 So two people may get different results for the same query — by design.
 

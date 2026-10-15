@@ -25,19 +25,45 @@ const holding =
   (permission: Permission) =>
     held.includes(permission);
 
+const DOMAIN_READS: Permission[] = [
+  "asset:read",
+  "article:read",
+  "user:read",
+  "location:read",
+  "application:read",
+  "infra:read",
+  "consumable:read",
+];
+
 describe("purchases in global search (#1499)", () => {
   test("a viewer with purchaseOrder:read gets the Purchases and Suppliers chips", () => {
-    const visible = visibleSearchEntities(SEARCH_ENTITIES, holding("purchaseOrder:read"));
+    const visible = visibleSearchEntities(
+      SEARCH_ENTITIES,
+      holding(...DOMAIN_READS, "purchaseOrder:read"),
+    );
     expect(visible).toContain("purchases");
     expect(visible).toContain("suppliers");
     expect(visible).toEqual([...SEARCH_ENTITIES]);
   });
 
   test("without purchaseOrder:read (a Viewer by default) both chips are hidden, the rest stay", () => {
-    const visible = visibleSearchEntities(SEARCH_ENTITIES, holding());
+    const visible = visibleSearchEntities(SEARCH_ENTITIES, holding(...DOMAIN_READS));
     expect(visible).not.toContain("purchases");
     expect(visible).not.toContain("suppliers");
     expect(visible).toEqual(SEARCH_ENTITIES.filter((e) => e !== "purchases" && e !== "suppliers"));
+  });
+
+  test("every chip follows its own domain read, like the API's per-index gate (AUD-015)", () => {
+    const withoutAssets = visibleSearchEntities(
+      SEARCH_ENTITIES,
+      holding(...DOMAIN_READS.filter((p) => p !== "asset:read"), "purchaseOrder:read"),
+    );
+    expect(withoutAssets).toEqual(SEARCH_ENTITIES.filter((e) => e !== "assets"));
+
+    expect(visibleSearchEntities(SEARCH_ENTITIES, holding("consumable:read"))).toEqual([
+      "consumables",
+    ]);
+    expect(visibleSearchEntities(SEARCH_ENTITIES, holding())).toEqual([]);
   });
 
   test("a purchase hit links to its page, a supplier hit to the supplier page", () => {
