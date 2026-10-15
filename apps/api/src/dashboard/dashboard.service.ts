@@ -85,10 +85,12 @@ const ACTIVITY_FROM = Prisma.sql`
  * pillars into a single typed {@link DashboardSummary}. No persisted "dashboard" entity, no schema
  * change — every figure is derived from existing tables.
  *
- * Soft delete (ADR-0032): reads on soft-deletable models (Asset, Application, Consumable, Article)
- * are auto-scoped to `deletedAt: null` by the Prisma extension, so `count`/`groupBy` here already
- * exclude soft-deleted rows. The lifecycle joins (AssetAssignment, AccessGrant) are NOT
- * soft-deletable, so their close markers (`releasedAt` / `revokedAt`) are filtered explicitly.
+ * Soft delete (ADR-0032): top-level reads on Asset, Application and Article are auto-scoped to
+ * `deletedAt: null` by the Prisma extension. Consumable is deliberately outside the extension, so its
+ * reads filter `deletedAt: null` explicitly. The lifecycle joins (AssetAssignment, AccessGrant) and the
+ * append-only AssetHistory are not soft-deletable: archiving the parent leaves their rows in place, and
+ * the extension never scopes a relation filter, so they filter their close markers (`releasedAt` /
+ * `revokedAt`) AND the parent's `deletedAt: null` explicitly (SEC-071).
  *
  * The queries are independent, so they run concurrently in one `Promise.all` round-trip-ish batch.
  */
@@ -133,34 +135,41 @@ export class DashboardService {
         where: { warrantyEnd: { gt: now, lte: warrantyCutoff } },
       }),
       this.prisma.asset.groupBy({ by: ['status'], _count: { _all: true } }),
-      // Distinct assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
+      // Distinct live assets holding >=1 active assignment. groupBy collapses multi-owner assets to one
       // row each, so its length is the distinct-asset count.
       this.prisma.assetAssignment
-        .groupBy({ by: ['assetId'], where: { releasedAt: null } })
+        .groupBy({
+          by: ['assetId'],
+          where: { releasedAt: null, asset: { is: { deletedAt: null } } },
+        })
         .then((rows) => rows.length),
 
       // --- Access ------------------------------------------------------------
-      this.prisma.accessGrant.count({ where: { revokedAt: null } }),
+      this.prisma.accessGrant.count({
+        where: { revokedAt: null, application: { is: { deletedAt: null } } },
+      }),
       this.prisma.accessGrant.count({
         where: {
           revokedAt: null,
           expiresAt: { gt: now, lte: expiryCutoff },
+          application: { is: { deletedAt: null } },
         },
       }),
-      // Active grants on critical apps. `application` is a relation filter; the related Application
-      // is auto-soft-delete-filtered, so grants whose app is soft-deleted are excluded.
       this.prisma.accessGrant.count({
-        where: { revokedAt: null, application: { is: { isCritical: true } } },
+        where: {
+          revokedAt: null,
+          application: { is: { isCritical: true, deletedAt: null } },
+        },
       }),
 
       // --- Consumables -------------------------------------------------------
-      this.prisma.consumable.count(),
+      this.prisma.consumable.count({ where: { deletedAt: null } }),
       // currentStock <= minStock, only for consumables that declare a minStock. Prisma can't compare
       // two columns, so we filter `minStock != null` and post-filter the rows; the set is small
       // (a low-stock alert list) so selecting the two ints and comparing in-process is cheap.
       this.prisma.consumable
         .findMany({
-          where: { minStock: { not: null } },
+          where: { deletedAt: null, minStock: { not: null } },
           select: { currentStock: true, minStock: true },
         })
         .then(
@@ -176,6 +185,7 @@ export class DashboardService {
 
       // --- Recent activity ---------------------------------------------------
       this.prisma.assetHistory.findMany({
+        where: { asset: { is: { deletedAt: null } } },
         orderBy: { id: 'desc' },
         take: RECENT_ACTIVITY_LIMIT,
         select: {

@@ -215,11 +215,12 @@ describe('DashboardService', () => {
     expect(windowMs).toBe(90 * 24 * 60 * 60 * 1000);
   });
 
-  it('counts active assignments as distinct assets via groupBy on assetId', async () => {
+  it('counts active assignments on LIVE assets as distinct assets via groupBy on assetId (AUD-020)', async () => {
     await service.getSummary();
+    // An archived asset keeps its open assignment row; without the parent filter "assigned" > total.
     expect(prisma.assetAssignment.groupBy).toHaveBeenCalledWith({
       by: ['assetId'],
-      where: { releasedAt: null },
+      where: { releasedAt: null, asset: { is: { deletedAt: null } } },
     });
   });
 
@@ -245,6 +246,10 @@ describe('DashboardService', () => {
       >
     )[1][0];
     expect(expiringArgs.where.revokedAt).toBeNull();
+    // Grants on an archived application are not live access (SEC-071).
+    expect(expiringArgs.where).toMatchObject({
+      application: { is: { deletedAt: null } },
+    });
     const { gt, lte } = expiringArgs.where.expiresAt;
     expect(gt.getTime()).toBeGreaterThanOrEqual(before);
     expect(gt.getTime()).toBeLessThanOrEqual(after);
@@ -252,13 +257,27 @@ describe('DashboardService', () => {
     expect(windowMs).toBe(10 * 24 * 60 * 60 * 1000);
   });
 
-  it('filters critical-app grants to active grants on isCritical applications', async () => {
+  it('counts active grants on LIVE applications only (SEC-071)', async () => {
     await service.getSummary();
-    // 3rd accessGrant.count call is onCriticalApps.
+    // 1st accessGrant.count call is activeGrants.
+    expect(
+      (prisma.accessGrant.count.mock.calls as Array<[unknown]>)[0][0],
+    ).toEqual({
+      where: { revokedAt: null, application: { is: { deletedAt: null } } },
+    });
+  });
+
+  it('filters critical-app grants to active grants on LIVE isCritical applications (SEC-071)', async () => {
+    await service.getSummary();
+    // 3rd accessGrant.count call is onCriticalApps. The relation filter is not auto-scoped by the
+    // soft-delete extension, so the application's deletedAt is spelled out.
     expect(
       (prisma.accessGrant.count.mock.calls as Array<[unknown]>)[2][0],
     ).toEqual({
-      where: { revokedAt: null, application: { is: { isCritical: true } } },
+      where: {
+        revokedAt: null,
+        application: { is: { isCritical: true, deletedAt: null } },
+      },
     });
   });
 
@@ -266,9 +285,18 @@ describe('DashboardService', () => {
     const { consumables } = await service.getSummary();
     expect(consumables.total).toBe(7);
     expect(consumables.lowStock).toBe(3);
+    // Consumable is outside the soft-delete extension, so an archived item must be excluded here or it
+    // keeps the low-stock alert lit (AUD-063).
     expect(prisma.consumable.findMany).toHaveBeenCalledWith({
-      where: { minStock: { not: null } },
+      where: { deletedAt: null, minStock: { not: null } },
       select: { currentStock: true, minStock: true },
+    });
+  });
+
+  it('counts only live consumables in the total (AUD-063)', async () => {
+    await service.getSummary();
+    expect(prisma.consumable.count).toHaveBeenCalledWith({
+      where: { deletedAt: null },
     });
   });
 
@@ -280,7 +308,12 @@ describe('DashboardService', () => {
   it('maps recent activity newest-first with ISO timestamps', async () => {
     const { recentActivity } = await service.getSummary();
     expect(prisma.assetHistory.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { id: 'desc' }, take: 10 }),
+      expect.objectContaining({
+        // A decommissioned asset's events drop out, as they do in the recent_activity view (SEC-071).
+        where: { asset: { is: { deletedAt: null } } },
+        orderBy: { id: 'desc' },
+        take: 10,
+      }),
     );
     expect(recentActivity).toHaveLength(2);
     expect(recentActivity[0]).toEqual({

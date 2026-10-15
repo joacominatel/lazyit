@@ -264,9 +264,10 @@ export class UsersService {
    *     ../access-grants/access-grants.service AccessGrant}s (`revokedAt: null`, ADR-0023).
    *
    * Each count is one Prisma `groupBy` by `userId` over the WHOLE page's ids (`userId IN (<page>)`),
-   * filtered to the ACTIVE lifecycle (released/revoked rows are excluded). Both joins are append-only
-   * (no `deletedAt`), so there is no soft-delete filter to apply here. A user with no rows is absent
-   * from its groupBy result and defaults to `0`. An empty page skips both queries entirely.
+   * filtered to the ACTIVE lifecycle (released/revoked rows are excluded) on a LIVE parent. Archiving an
+   * asset or application leaves its open join rows in place, and the soft-delete extension never scopes a
+   * relation filter (ADR-0032), so the parent's `deletedAt: null` is spelled out here. A user with no rows
+   * is absent from its groupBy result and defaults to `0`. An empty page skips both queries entirely.
    */
   private async attachActivityCounts(
     rows: SerializedUser[],
@@ -281,12 +282,20 @@ export class UsersService {
     const [assetGroups, grantGroups] = await Promise.all([
       this.prisma.assetAssignment.groupBy({
         by: ['userId'],
-        where: { userId: { in: userIds }, releasedAt: null },
+        where: {
+          userId: { in: userIds },
+          releasedAt: null,
+          asset: { is: { deletedAt: null } },
+        },
         _count: { _all: true },
       }),
       this.prisma.accessGrant.groupBy({
         by: ['userId'],
-        where: { userId: { in: userIds }, revokedAt: null },
+        where: {
+          userId: { in: userIds },
+          revokedAt: null,
+          application: { is: { deletedAt: null } },
+        },
         _count: { _all: true },
       }),
     ]);

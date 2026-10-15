@@ -1736,22 +1736,31 @@ describe('UsersService', () => {
         expect(prismaMock.accessGrant.groupBy).toHaveBeenCalledTimes(1);
       });
 
-      it('counts ACTIVE assignments/grants only (releasedAt: null / revokedAt: null), grouped by userId over the page', async () => {
+      it('counts ACTIVE assignments/grants on LIVE assets/apps only, grouped by userId over the page (AUD-020)', async () => {
         user.findMany.mockResolvedValue([{ id: 'u1' }, { id: 'u2' }]);
         user.count.mockResolvedValue(2);
 
         await service.findPage({}, { limit: 50, offset: 0, deleted: 'active' });
 
-        // Assets-in-possession = active assignments (ADR-0019): releasedAt IS NULL, scoped to the page.
+        // Assets-in-possession = active assignments (ADR-0019) on a live asset: an archived laptop's open
+        // assignment is not something the person still holds.
         expect(prismaMock.assetAssignment.groupBy).toHaveBeenCalledWith({
           by: ['userId'],
-          where: { userId: { in: ['u1', 'u2'] }, releasedAt: null },
+          where: {
+            userId: { in: ['u1', 'u2'] },
+            releasedAt: null,
+            asset: { is: { deletedAt: null } },
+          },
           _count: { _all: true },
         });
-        // App-accesses = active grants (ADR-0023): revokedAt IS NULL, scoped to the page.
+        // App-accesses = active grants (ADR-0023) on a live application.
         expect(prismaMock.accessGrant.groupBy).toHaveBeenCalledWith({
           by: ['userId'],
-          where: { userId: { in: ['u1', 'u2'] }, revokedAt: null },
+          where: {
+            userId: { in: ['u1', 'u2'] },
+            revokedAt: null,
+            application: { is: { deletedAt: null } },
+          },
           _count: { _all: true },
         });
       });
