@@ -5,7 +5,10 @@ import { ArticleImportService } from './article-import.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { Principal } from '../../auth/principal';
 import type { UploadedImportFile } from './import-job.types';
-import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
+import {
+  IMPORT_FOLDER_GONE_MESSAGE,
+  IMPORT_SLUG_TAKEN_MESSAGE,
+} from './import-job.constants';
 
 // Stub the generated Prisma client so the test never loads the real one (no DB / no native engine).
 // ArticleImportService → PrismaService → ../../generated/prisma/client; this short-circuits that load
@@ -200,6 +203,16 @@ describe('ArticleImportService.getStatus — slug failures are not reported as c
     );
     const status = await service.getStatus('job-1', HUMAN);
     expect(status.error).toMatch(/slug already exists/i);
+    expect(status.error).not.toMatch(/corrupt/i);
+  });
+
+  it('maps a target folder deleted before the import ran to an actionable message (AUD-023)', async () => {
+    const service = makeService(
+      jest.fn(),
+      failedWith(IMPORT_FOLDER_GONE_MESSAGE),
+    );
+    const status = await service.getStatus('job-1', HUMAN);
+    expect(status.error).toMatch(/folder .*deleted/i);
     expect(status.error).not.toMatch(/corrupt/i);
   });
 

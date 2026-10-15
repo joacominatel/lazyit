@@ -19,10 +19,11 @@ import {
   folderVisible,
   type FolderTreeCache,
 } from './folder-access.service';
-import { expandFolderSubtrees, type FolderTreeEdge } from './folder-tree';
-
-// Every tree-shape write checks and writes under this lock, or two opposing moves both pass and close a cycle.
-const FOLDER_TREE_LOCK = 'lazyit.folder_tree';
+import {
+  expandFolderSubtrees,
+  FOLDER_TREE_LOCK,
+  type FolderTreeEdge,
+} from './folder-tree';
 
 /** Shape returned by a successful cascade delete. */
 export interface CascadeDeleteResult {

@@ -31,6 +31,7 @@ import {
 import {
   ARTICLE_IMPORT_JOB_NAME,
   ARTICLE_IMPORT_QUEUE,
+  IMPORT_FOLDER_GONE_MESSAGE,
   IMPORT_SLUG_TAKEN_MESSAGE,
 } from './import-job.constants';
 import { isQueueUnavailableError } from '../../queue/redis-connection';
@@ -210,6 +211,9 @@ export class ArticleImportService {
     }
     if (r.includes(IMPORT_SLUG_TAKEN_MESSAGE)) {
       return 'An article with this slug already exists. Choose a different slug and import again.';
+    }
+    if (r.includes(IMPORT_FOLDER_GONE_MESSAGE)) {
+      return 'The folder chosen for this import was deleted before the import ran. Choose another folder and import again.';
     }
     if (r.includes('Could not derive a slug')) {
       return 'An article address (slug) could not be built from this title. Rename the file (or set a title or slug) using letters or numbers, then import again.';

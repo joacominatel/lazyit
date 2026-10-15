@@ -14,6 +14,10 @@ export const ARTICLE_IMPORT_JOB_NAME = 'import-article';
 export const IMPORT_SLUG_TAKEN_MESSAGE =
   'The import slug is already in use by another article';
 
+/** Thrown by the worker when the import's target folder is gone; matched by the status mapper. */
+export const IMPORT_FOLDER_GONE_MESSAGE =
+  'The import target folder does not reference a live folder';
+
 /** Default Node heap cap (MB) for the sandboxed import child (see {@link importChildHeapMb}). */
 const DEFAULT_IMPORT_HEAP_MB = 256;
 

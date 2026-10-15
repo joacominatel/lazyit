@@ -7,7 +7,11 @@ import {
   type ImportTx,
 } from './create-imported-article';
 import type { ImportJobData } from './import-job.types';
-import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
+import {
+  IMPORT_FOLDER_GONE_MESSAGE,
+  IMPORT_SLUG_TAKEN_MESSAGE,
+} from './import-job.constants';
+import { claimableWikiLinksWhere } from '../wiki-link-claim';
 
 const AUTHOR = '11111111-1111-1111-1111-111111111111';
 
@@ -28,8 +32,14 @@ const baseData = (overrides: Partial<ImportJobData> = {}): ImportJobData => ({
 /**
  * A Prisma double that records the writes and echoes a created row back from the create args.
  * `liveSlugs` are held by existing live articles; a create on one of them fails like the unique index.
+ * `deletedSlugs` are held only by soft-deleted articles; `deletedFolders` are soft-deleted folders.
  */
-function makePrisma(liveSlugs: string[] = []) {
+function makePrisma(
+  liveSlugs: string[] = [],
+  opts: { deletedSlugs?: string[]; deletedFolders?: string[] } = {},
+) {
+  const deletedSlugs = opts.deletedSlugs ?? [];
+  const deletedFolders = opts.deletedFolders ?? [];
   const articleCreate = jest.fn(
     (args: {
       data: {
@@ -58,30 +68,55 @@ function makePrisma(liveSlugs: string[] = []) {
             categoryId: args.data.categoryId,
           }),
   );
+  // The worker's client has no soft-delete extension: a deleted holder matches unless the query filters it.
   const articleFindMany = jest.fn(
-    (args: { where: { slug: { in: string[] } } }) =>
-      Promise.resolve(
-        args.where.slug.in
+    (args: { where: { slug: { in: string[] }; deletedAt?: null } }) =>
+      Promise.resolve([
+        ...args.where.slug.in
           .filter((slug) => liveSlugs.includes(slug))
           .map((slug) => ({ id: `live-${slug}`, slug })),
+        ...(args.where.deletedAt === null
+          ? []
+          : args.where.slug.in
+              .filter((slug) => deletedSlugs.includes(slug))
+              .map((slug) => ({ id: `deleted-${slug}`, slug }))),
+      ]),
+  );
+  const queryRaw = jest.fn(() => Promise.resolve([]));
+  const folderFindFirst = jest.fn(
+    (args: { where: { id: string; deletedAt?: null } }) =>
+      Promise.resolve(
+        args.where.deletedAt === null && deletedFolders.includes(args.where.id)
+          ? null
+          : { id: args.where.id },
       ),
   );
+  const wikiLinkCreateMany = jest.fn(() => Promise.resolve({ count: 0 }));
   const wikiLinkUpdateMany = jest.fn(() => Promise.resolve({ count: 0 }));
   const versionCreate = jest.fn((args: { data: Record<string, unknown> }) =>
     Promise.resolve(args),
   );
   const tx = {
+    $queryRaw: queryRaw,
+    articleCategory: { findFirst: folderFindFirst },
     article: { create: articleCreate, findMany: articleFindMany },
     articleVersion: { create: versionCreate },
     articleWikiLink: {
-      createMany: jest.fn(() => Promise.resolve({ count: 0 })),
+      createMany: wikiLinkCreateMany,
       updateMany: wikiLinkUpdateMany,
     },
   } as unknown as ImportTx;
   const prisma: ImportPrismaClient = {
     $transaction: <T>(fn: (t: ImportTx) => Promise<T>) => fn(tx),
   };
-  return { prisma, articleCreate, versionCreate, wikiLinkUpdateMany };
+  return {
+    prisma,
+    articleCreate,
+    versionCreate,
+    wikiLinkUpdateMany,
+    wikiLinkCreateMany,
+    queryRaw,
+  };
 }
 
 describe('runImportJob (the async import worker create path, ADR-0053)', () => {
@@ -193,12 +228,58 @@ describe('runImportJob (the async import worker create path, ADR-0053)', () => {
     expect(articleCreate).not.toHaveBeenCalled();
   });
 
-  it('resolves earlier forward [[links]] to the new article (AUD-101)', async () => {
+  it('takes over earlier [[links]] to its slug, unresolved or left on a soft-deleted holder (AUD-101)', async () => {
     const { prisma, wikiLinkUpdateMany } = makePrisma();
     await runImportJob(baseData({ originalname: 'vpn-setup.md' }), prisma);
     expect(wikiLinkUpdateMany).toHaveBeenCalledWith({
-      where: { targetSlug: 'vpn-setup', resolvedTargetId: null },
+      where: claimableWikiLinksWhere('vpn-setup'),
       data: { resolvedTargetId: 'art1' },
     });
+  });
+
+  it('never resolves a [[link]] to a soft-deleted article', async () => {
+    const { prisma, wikiLinkCreateMany } = makePrisma(['live-one'], {
+      deletedSlugs: ['gone'],
+    });
+    await runImportJob(
+      baseData({ contentBase64: b64('See [[gone]] and [[live-one]]') }),
+      prisma,
+    );
+    expect(wikiLinkCreateMany).toHaveBeenCalledWith({
+      data: [
+        { sourceArticleId: 'art1', targetSlug: 'gone', resolvedTargetId: null },
+        {
+          sourceArticleId: 'art1',
+          targetSlug: 'live-one',
+          resolvedTargetId: 'live-live-one',
+        },
+      ],
+    });
+  });
+});
+
+describe('runImportJob — a folder deleted while the job waited (AUD-023)', () => {
+  it('locks the target folder FOR SHARE inside the transaction before creating', async () => {
+    const { prisma, queryRaw, articleCreate } = makePrisma();
+    await runImportJob(baseData(), prisma);
+    const [sql, id] = queryRaw.mock.calls[0] as unknown as [
+      TemplateStringsArray,
+      string,
+    ];
+    expect(sql.join('?')).toMatch(/FOR SHARE/);
+    expect(id).toBe('c1');
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      articleCreate.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('fails the job with the folder-gone message and creates nothing', async () => {
+    const { prisma, articleCreate } = makePrisma([], {
+      deletedFolders: ['c1'],
+    });
+    await expect(runImportJob(baseData(), prisma)).rejects.toThrow(
+      IMPORT_FOLDER_GONE_MESSAGE,
+    );
+    expect(articleCreate).not.toHaveBeenCalled();
   });
 });

@@ -137,6 +137,10 @@ function makePrisma(opts?: { failVersion?: boolean }) {
     },
   };
   const tx = {
+    $queryRaw: jest.fn(() => Promise.resolve([])),
+    articleCategory: {
+      findFirst: jest.fn(() => Promise.resolve({ id: 'c1' })),
+    },
     article: {
       create: articleCreate,
       update: articleUpdate,
