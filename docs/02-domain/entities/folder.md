@@ -61,7 +61,8 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   folder tree. Two opposing moves therefore cannot both pass the cycle check, and a sub-folder cannot be
   created under a folder that is being deleted. A delete also locks its folder rows `FOR UPDATE`, which
   waits out an article insert already in flight into them (the FK's key-share lock) so the emptiness
-  check or the cascade sees it.
+  check or the cascade sees it. Article creation does not lock its folder yet, so an article whose
+  folder check ran before the delete began can still land after it (the open half of AUD-023).
 - **Restore needs a live parent** (AUD-022) — restoring a sub-folder whose parent is still soft-deleted
   is a **409**: restore the parent first. Restores do not cascade ([[0041-soft-delete-reuse-and-restore]]),
   so without this a folder could come back live under a deleted one, unreachable for every non-admin.
