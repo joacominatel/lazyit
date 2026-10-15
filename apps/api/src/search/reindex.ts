@@ -24,9 +24,41 @@ import type { SearchIndex } from './search.service';
 /** Documents are added in chunks of this size so a single payload never blows Meili's limit. */
 export const REINDEX_BATCH_SIZE = 1000;
 
+/** The finished task `waitTask()` resolves to (a structural subset of the client's `Task`). */
+interface SettledTask {
+  status: string;
+  error?: { code?: string; message?: string } | null;
+}
+
 /** An enqueued Meili task whose completion can be awaited (the `EnqueuedTaskPromise` shape). */
 interface AwaitableTask {
-  waitTask(): Promise<unknown>;
+  waitTask(): Promise<SettledTask>;
+}
+
+/**
+ * A Meili task that finished in any state but `succeeded`. meilisearch-js resolves `waitTask()` for a
+ * `failed` or `canceled` task and throws only on timeout, so the status is checked here (AUD-006).
+ * `code` carries the engine's error code, which {@link isIndexAlreadyExists} reads.
+ */
+export class MeiliTaskFailedError extends Error {
+  readonly code: string | undefined;
+
+  constructor(step: string, task: SettledTask) {
+    super(
+      `Meilisearch task '${step}' ended ${task.status}` +
+        (task.error?.message ? `: ${task.error.message}` : ''),
+    );
+    this.name = 'MeiliTaskFailedError';
+    this.code = task.error?.code;
+  }
+}
+
+/** Await a task and throw unless it succeeded. */
+async function settle(task: AwaitableTask, step: string): Promise<void> {
+  const done = await task.waitTask();
+  if (done.status !== 'succeeded') {
+    throw new MeiliTaskFailedError(step, done);
+  }
 }
 
 /** The single index surface the rebuild needs: batched adds + filterable-attribute settings. */
@@ -99,12 +131,12 @@ function chunk<T>(docs: T[], size: number): T[][] {
 
 /**
  * Ensure an index exists so the later `swapIndexes` has both sides to swap. `createIndex` enqueues
- * a task that *fails* (rather than the call rejecting) when the index already exists, so we await
+ * a task that *fails* (rather than the call rejecting) when the index already exists, so we settle
  * the task and swallow only that benign already-exists outcome — any other failure propagates.
  */
 async function ensureIndex(client: ReindexClient, uid: string): Promise<void> {
   try {
-    await client.createIndex(uid, { primaryKey: 'id' }).waitTask();
+    await settle(client.createIndex(uid, { primaryKey: 'id' }), 'createIndex');
   } catch (err) {
     if (isIndexAlreadyExists(err)) return;
     throw err;
@@ -113,7 +145,7 @@ async function ensureIndex(client: ReindexClient, uid: string): Promise<void> {
 
 /** True when a Meili task/error reports the index already exists (idempotent createIndex). */
 function isIndexAlreadyExists(err: unknown): boolean {
-  // A failed Meili task surfaces `{ error: { code } }`; the API error surfaces `{ cause: { code } }`.
+  // A failed task surfaces as MeiliTaskFailedError `{ code }`; the API error as `{ cause: { code } }`.
   // Match either, plus the message, so a minor client-shape change doesn't make ensureIndex brittle.
   const code = extractCode(err);
   if (code === 'index_already_exists') return true;
@@ -138,7 +170,7 @@ function extractCode(err: unknown): string | undefined {
  * Authoritatively rebuild one index from its full live `docs` set, zero-downtime via index swap.
  *
  * Steps: ensure the live index exists (first-deploy safe) → create a fresh, run-unique temp index →
- * add `docs` in batches (awaiting each task so a failure is loud, not silently "enqueued") →
+ * add `docs` in batches (settling each task so a failure is loud, not silently "enqueued") →
  * atomically swap the temp index with the live one → delete the temp index (which, post-swap, now
  * holds the stale documents).
  *
@@ -151,8 +183,9 @@ function extractCode(err: unknown): string | undefined {
  * the uid is assertable in tests. Because the uid is unique per run there is no shared leftover to
  * pre-delete (a prior run's temp had a different uid), so we no longer drop a temp before creating.
  *
- * Throws if any Meili task fails, so the caller can exit non-zero — an operator must never see a
- * green "done" over a partial rebuild.
+ * Every task is settled: one that ends `failed` or `canceled` throws {@link MeiliTaskFailedError}
+ * before the swap, so a partial temp index is never promoted and the caller can exit non-zero — an
+ * operator must never see a green "done" over a partial rebuild (AUD-006).
  */
 export async function reindexIndex(
   client: ReindexClient,
@@ -166,38 +199,44 @@ export async function reindexIndex(
 
   await ensureIndex(client, index);
   try {
-    await client.createIndex(tempUid, { primaryKey: 'id' }).waitTask();
+    await settle(
+      client.createIndex(tempUid, { primaryKey: 'id' }),
+      'createIndex',
+    );
 
     // Apply the per-index filterable attributes (ADR-0060 §5) on the temp index BEFORE the swap, so the
     // live index always carries the right settings after a rebuild (the article `categoryId` becomes
     // filterable for folder-access scoping).
     const filterable = FILTERABLE_ATTRIBUTES[index];
     if (filterable !== undefined) {
-      await client
-        .index(tempUid)
-        .updateFilterableAttributes(filterable)
-        .waitTask();
+      await settle(
+        client.index(tempUid).updateFilterableAttributes(filterable),
+        'updateFilterableAttributes',
+      );
     }
 
     // #1499: and the searchable attributes, for the indexes that pin them (dates must not match a query).
     const searchable = SEARCHABLE_ATTRIBUTES[index];
     if (searchable !== undefined) {
-      await client
-        .index(tempUid)
-        .updateSearchableAttributes(searchable)
-        .waitTask();
+      await settle(
+        client.index(tempUid).updateSearchableAttributes(searchable),
+        'updateSearchableAttributes',
+      );
     }
 
     for (const batch of chunk(docs, REINDEX_BATCH_SIZE)) {
-      await client
-        .index(tempUid)
-        .addDocuments(batch, { primaryKey: 'id' })
-        .waitTask();
+      await settle(
+        client.index(tempUid).addDocuments(batch, { primaryKey: 'id' }),
+        'addDocuments',
+      );
     }
 
     // Atomic swap: queries against `index` see the old, complete data right up to the swap, then the
     // freshly-built data — never an empty or half-built index.
-    await client.swapIndexes([{ indexes: [index, tempUid] }]).waitTask();
+    await settle(
+      client.swapIndexes([{ indexes: [index, tempUid] }]),
+      'swapIndexes',
+    );
   } finally {
     // Dispose THIS run's own temp index (the per-run uid), never another concurrent rebuild's
     // (#464). After a successful swap it holds the *stale* docs; after a failure it holds a partial

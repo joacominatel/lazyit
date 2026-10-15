@@ -3,7 +3,7 @@ title: "ADR-0035: Cross-cutting search architecture (Meilisearch)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-10-03
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -244,6 +244,34 @@ search as not built). Nine indexes in all.
   rebuilds — cheaply, to empty — on every boot, as for any other empty index. A supplier rename re-projects
   all of its purchases, which is fine at small-team sizes and one engine task, but grows with the supplier's
   purchase count.
+
+## Amendment (2026-10-14) — failed tasks, writes during a rebuild, per-index read gate (backend audit)
+
+**Status: accepted (technical, within this ADR's direction).** Three fixes from the 2026-10-10 backend
+audit.
+
+- **A failed Meili task fails the rebuild (AUD-006).** meilisearch-js resolves `waitTask()` for a task that
+  ends `failed` or `canceled` and throws only on timeout. `reindexIndex` now checks every task's status
+  (temp create, settings, each document batch, the swap) and throws `MeiliTaskFailedError` on anything
+  but `succeeded`, before the swap. A partial temp index is never promoted; the self-heal and reconcile
+  log the index as failed, and `reindex:all` exits non-zero.
+- **Writes made during a rebuild are replayed (AUD-050).** The swap promotes a point-in-time snapshot, so
+  an `upsert`/`remove` sent to the live index while the rebuild ran was discarded with the old index (an
+  article unpublished mid-rebuild stayed searchable until the next pass). `SearchService` now journals its
+  own sync writes per in-flight rebuild — the latest per id — from the moment `rebuildIndex` starts, and
+  replays them onto the live index after a successful swap. The boot self-heal and the reconcile hand the
+  database read to `rebuildIndex` as a loader, so the read happens after the journal opens. **Bound:**
+  writes from another process (a manual `reindex:all`, a second API replica) are not journaled; the next
+  reconcile pass (hourly by default) repairs them.
+- **Every index follows its read permission (AUD-015).** `search:read` gates the endpoint; each index is
+  then searched only for a principal holding the `<domain>:read` its dedicated GET routes require
+  (`INDEX_READ_PERMISSION` in `search.service.ts`: `asset:read`, `article:read`, `user:read`,
+  `location:read`, `application:read`, `infra:read`, `consumable:read`, and `purchaseOrder:read` for
+  purchases and suppliers). This extends the 2026-10-03 purchases rule to every index; on the default
+  matrix nothing changes, since every role holds the other reads. It matters when an admin edits a role or
+  grants a service account `search:read` without a domain read. Same two layers: the controller drops the
+  index from the request, and `SearchService.search` drops it again (an absent principal reads nothing).
+  The `users` facet keeps its stricter rule as built: a human caller whose role holds `user:read`.
 
 ## Deferred (explicit)
 

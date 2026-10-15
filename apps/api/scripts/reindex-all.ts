@@ -11,8 +11,12 @@
  * from the live set, then atomically swap it into place). Unlike the previous additive-only
  * `addDocuments`, this **evicts ghost documents** — soft-deleted USER PII or unpublished/deleted
  * articles whose fire-and-forget `remove()` was dropped — instead of leaving them searchable
- * forever. Every Meili task is awaited, so the script reports honest success/failure and exits
- * non-zero if any index fails to rebuild.
+ * forever. Every Meili task is awaited and its status checked, so the script reports honest
+ * success/failure and exits non-zero if any index fails to rebuild.
+ *
+ * It runs outside the API, so a live write the API makes to an index while this script rebuilds it is
+ * not replayed after the swap (the API journals only its own rebuilds); the next hourly reconcile
+ * repairs it (AUD-050).
  *
  * Run from apps/api: `bun run reindex:all`. Bun auto-loads `.env` (DATABASE_URL, MEILI_*).
  */

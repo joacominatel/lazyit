@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import type { Permission } from '@lazyit/shared';
 import { Meilisearch } from 'meilisearch';
 import type { MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
@@ -22,24 +23,51 @@ export const SEARCH_INDEXES = [
   'applications',
   'infra', // topology nodes (ADR-0070 v1) — kind/status/state filterable (see reindex.ts)
   'consumables', // #873 — name/sku/description searchable; currentStock/unit for the lean hit preview
-  // #1499 (ADR-0099): served only to a caller holding `purchaseOrder:read` — the controller drops both
-  // for anyone else (search.controller.ts), so a VIEWER never sees a hit or a count.
-  'purchases',
+  'purchases', // #1499 (ADR-0099)
   'suppliers',
 ] as const;
 
 export type SearchIndex = (typeof SEARCH_INDEXES)[number];
 
 /**
- * The indexes that need `purchaseOrder:read` on top of `search:read` (#1499, ADR-0099 D-A / INV-PO-1): a
- * VIEWER is denied purchases by default, and search must not be a side door to them — no hit, no count.
- * Enforced twice: the controller drops them from the request, and {@link SearchService.search} drops them
- * again for any caller, so a future direct caller of the service cannot get them ungated.
+ * The read permission each index requires on top of `search:read` — the same one its dedicated GET
+ * routes require (ADR-0046 P3; #1499 / INV-PO-1 for purchases and suppliers; AUD-015 for the rest).
+ * Search must never be a side door to an entity type the caller cannot read: no hit, no count. Enforced
+ * twice: the controller drops unreadable indexes from the request, and {@link SearchService.search}
+ * drops them again, so a future direct caller of the service cannot get them ungated.
  */
-export const PURCHASE_INDEXES: readonly SearchIndex[] = [
-  'purchases',
-  'suppliers',
-];
+export const INDEX_READ_PERMISSION: Record<SearchIndex, Permission> = {
+  assets: 'asset:read',
+  articles: 'article:read',
+  users: 'user:read',
+  locations: 'location:read',
+  applications: 'application:read',
+  infra: 'infra:read',
+  consumables: 'consumable:read',
+  purchases: 'purchaseOrder:read',
+  suppliers: 'purchaseOrder:read',
+};
+
+/**
+ * `indexes` minus every index whose read permission ({@link INDEX_READ_PERMISSION}) `principal` lacks,
+ * resolved per principal (a service account by its direct grants). An absent principal reads none.
+ */
+export async function readableIndexes(
+  permissions: PermissionResolverService,
+  indexes: readonly SearchIndex[],
+  principal: Principal | undefined,
+): Promise<SearchIndex[]> {
+  const needed = [...new Set(indexes.map((i) => INDEX_READ_PERMISSION[i]))];
+  const held = new Set<Permission>();
+  await Promise.all(
+    needed.map(async (permission) => {
+      if (await permissions.principalHas(principal, permission)) {
+        held.add(permission);
+      }
+    }),
+  );
+  return indexes.filter((index) => held.has(INDEX_READ_PERMISSION[index]));
+}
 
 /**
  * What each index is allowed to **return** in a hit — pinned to the shared `*HitSchema` (the wire
@@ -109,6 +137,9 @@ export function articleFolderFilter(
   return `categoryId IN [${quoted}]`;
 }
 
+/** Live writes made while a rebuild of one index runs: the latest document per id, `null` = removed. */
+type RebuildJournal = Map<string, SearchDocument | null>;
+
 /** Per-index result block returned to the caller: the raw hits and Meili's total estimate. */
 export interface SearchEntityResult {
   hits: unknown[];
@@ -124,9 +155,10 @@ export interface SearchArgs {
   /** Per-index hit cap (1..50, defaulted by the controller). */
   limit: number;
   /**
-   * The caller's unified PRINCIPAL (ADR-0060 §5). Drives the article folder-access post-filter: ADMIN
-   * sees every hit (§5), a non-admin only hits whose home folder they may see, a service account fails
-   * closed on restricted folders (§8). Omitted = anonymous → only PUBLIC-folder article hits.
+   * The caller's unified PRINCIPAL (ADR-0060 §5). Decides which indexes are searched at all
+   * ({@link readableIndexes}) and drives the article folder-access post-filter: ADMIN sees every hit
+   * (§5), a non-admin only hits whose home folder they may see, a service account fails closed on
+   * restricted folders (§8). Omitted = anonymous → no index is readable, so nothing is searched.
    */
   principal?: Principal;
 }
@@ -155,6 +187,8 @@ export type SearchResults = Partial<Record<SearchIndex, SearchEntityResult>> & {
 @Injectable()
 export class SearchService {
   private readonly client: Meilisearch | undefined;
+  // AUD-050: one journal per in-flight rebuild of an index, replayed onto the live index after its swap.
+  private readonly journals = new Map<SearchIndex, Set<RebuildJournal>>();
 
   constructor(
     @InjectPinoLogger(SearchService.name)
@@ -162,7 +196,7 @@ export class SearchService {
     // ADR-0060 §5: the read-path folder-access evaluator, used to post-filter article hits so a
     // restricted article never surfaces to a non-matching caller (INV-9, the search-leak fix).
     private readonly folderAccess: FolderAccessService,
-    // #1499: the purchase-index gate's second layer (the controller is the first).
+    // The per-index read gate's second layer (the controller is the first).
     private readonly permissions: PermissionResolverService,
     // #1539: reads the live `updatedAt` of the article hits that survive the folder post-filter.
     private readonly prisma: PrismaService,
@@ -194,6 +228,7 @@ export class SearchService {
    */
   upsert(index: SearchIndex, doc: SearchDocument): void {
     if (!this.client) return;
+    this.journal(index, doc.id, doc);
     this.client
       .index(index)
       .addDocuments([doc], { primaryKey: 'id' })
@@ -214,6 +249,7 @@ export class SearchService {
    */
   upsertMany(index: SearchIndex, docs: SearchDocument[]): void {
     if (!this.client || docs.length === 0) return;
+    for (const doc of docs) this.journal(index, doc.id, doc);
     this.client
       .index(index)
       .addDocuments(docs, { primaryKey: 'id' })
@@ -231,6 +267,7 @@ export class SearchService {
    */
   remove(index: SearchIndex, id: string): void {
     if (!this.client) return;
+    this.journal(index, id, null);
     this.client
       .index(index)
       .deleteDocument(id)
@@ -263,9 +300,9 @@ export class SearchService {
   }: SearchArgs): Promise<SearchResults> {
     const asked: SearchIndex[] =
       entities && entities.length > 0 ? entities : [...SEARCH_INDEXES];
-    // #1499 defense in depth: never query the purchase indexes for a principal without
-    // `purchaseOrder:read` (an absent principal fails closed), whatever the caller asked for.
-    const requested = await this.withoutUnreadablePurchases(asked, principal);
+    // Defense in depth (#1499, AUD-015): never query an index whose read permission the principal lacks
+    // (an absent principal fails closed), whatever the caller asked for.
+    const requested = await readableIndexes(this.permissions, asked, principal);
     if (requested.length === 0) {
       return {};
     }
@@ -381,16 +418,59 @@ export class SearchService {
   }
 
   /**
-   * Authoritatively (re)build one index from its full live `docs` set (issue #370 self-heal), reusing
-   * the zero-downtime temp-index-swap of {@link reindexIndex}. No-op in disabled mode. The Meili client
-   * structurally satisfies the small `ReindexClient` surface the rebuild needs (no cast required).
+   * Authoritatively (re)build one index from its full live set (issue #370 self-heal), reusing the
+   * zero-downtime temp-index-swap of {@link reindexIndex}. Returns the number of documents indexed; a
+   * no-op returning 0 in disabled mode. The Meili client structurally satisfies the small
+   * `ReindexClient` surface the rebuild needs (no cast required).
+   *
+   * **Writes during the rebuild (AUD-050).** The swap replaces the live index with a snapshot, so an
+   * `upsert`/`remove` this process makes while the rebuild runs would be lost with the old index. Each
+   * one is journaled (latest per id) from the moment the rebuild starts and replayed onto the live
+   * index after a successful swap. Pass `source` as a loader so the database read happens after the
+   * journal opens; an array snapshot read earlier leaves the window between that read and this call.
+   * Writes from another process (`reindex:all`, a second API replica) are not journaled; the hourly
+   * reconcile repairs them.
    */
   async rebuildIndex(
     index: SearchIndex,
-    docs: SearchDocument[],
-  ): Promise<void> {
-    if (!this.client) return;
-    await reindexIndex(this.client, index, docs);
+    source: SearchDocument[] | (() => Promise<SearchDocument[]>),
+  ): Promise<number> {
+    if (!this.client) return 0;
+    const journal: RebuildJournal = new Map();
+    const active = this.journals.get(index) ?? new Set<RebuildJournal>();
+    this.journals.set(index, active);
+    active.add(journal);
+    let docs: SearchDocument[];
+    try {
+      docs = typeof source === 'function' ? await source() : source;
+      await reindexIndex(this.client, index, docs);
+    } finally {
+      active.delete(journal);
+      if (active.size === 0) this.journals.delete(index);
+    }
+    this.replay(index, journal);
+    return docs.length;
+  }
+
+  /** Record a live write in every journal of an in-flight rebuild of `index` (AUD-050). */
+  private journal(
+    index: SearchIndex,
+    id: string,
+    doc: SearchDocument | null,
+  ): void {
+    for (const journal of this.journals.get(index) ?? []) {
+      journal.set(id, doc);
+    }
+  }
+
+  /** Re-send the journaled writes onto the freshly swapped live index (fire-and-forget, like the sync). */
+  private replay(index: SearchIndex, journal: RebuildJournal): void {
+    const upserts: SearchDocument[] = [];
+    for (const [id, doc] of journal) {
+      if (doc === null) this.remove(index, id);
+      else upserts.push(doc);
+    }
+    this.upsertMany(index, upserts);
   }
 
   /**
@@ -485,20 +565,6 @@ export class SearchService {
           : undefined;
       return updatedAt === undefined ? hit : { ...record, updatedAt };
     });
-  }
-
-  /** `indexes` minus the purchase indexes when `principal` lacks `purchaseOrder:read` (#1499). */
-  private async withoutUnreadablePurchases(
-    indexes: SearchIndex[],
-    principal: Principal | undefined,
-  ): Promise<SearchIndex[]> {
-    if (!indexes.some((index) => PURCHASE_INDEXES.includes(index))) {
-      return indexes;
-    }
-    if (await this.permissions.principalHas(principal, 'purchaseOrder:read')) {
-      return indexes;
-    }
-    return indexes.filter((index) => !PURCHASE_INDEXES.includes(index));
   }
 
   /** A `{ hits: [], total: 0 }` block for each requested index (disabled mode / seed for search). */

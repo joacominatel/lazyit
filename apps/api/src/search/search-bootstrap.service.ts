@@ -169,19 +169,22 @@ export class SearchBootstrapService implements OnApplicationBootstrap {
   }
 
   /**
-   * Load the live set for one index and rebuild it (zero-downtime). `label` only tags the log line
-   * (`self-heal` vs `reconcile`) so the two callers read distinctly in the logs. Errors are logged,
-   * not thrown — a single index's failure never aborts the surrounding pass.
+   * Load the live set for one index and rebuild it (zero-downtime). The load is handed to
+   * `rebuildIndex` as a loader so it runs after the live-write journal opens (AUD-050). `label` only
+   * tags the log line (`self-heal` vs `reconcile`) so the two callers read distinctly in the logs.
+   * Errors — including a Meili task that ended failed (AUD-006) — are logged, not thrown: a single
+   * index's failure never aborts the surrounding pass.
    */
   private async rebuild(
     index: SearchIndex,
     label: 'self-heal' | 'reconcile',
   ): Promise<void> {
     try {
-      const docs = await this.loadDocs(index);
-      await this.search.rebuildIndex(index, docs);
+      const count = await this.search.rebuildIndex(index, () =>
+        this.loadDocs(index),
+      );
       this.logger.log(
-        `Search ${label}: rebuilt '${index}' with ${docs.length} document(s).`,
+        `Search ${label}: rebuilt '${index}' with ${count} document(s).`,
       );
     } catch (err) {
       this.logger.error(

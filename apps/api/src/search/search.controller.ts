@@ -8,7 +8,7 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import { SearchResultsSchema } from '@lazyit/shared';
 import {
-  PURCHASE_INDEXES,
+  readableIndexes,
   SEARCH_INDEXES,
   SearchService,
   type SearchIndex,
@@ -37,18 +37,16 @@ export class SearchController {
     private readonly permissions: PermissionResolverService,
   ) {}
 
-  // `search:read` is held by all three roles, so gating the endpoint is behavior-preserving. The
-  // ADDITIONAL tightening (ADR-0046 P3) is at the RESULT level: a caller that lacks `user:read` (a
-  // VIEWER) must not be able to enumerate the user directory — emails, names — via the `users` index.
-  // So we drop `users` from the requested indexes for such a caller (whether they asked for it
-  // explicitly or implicitly via "search all"). This keeps /search a useful cross-entity search for
-  // VIEWER while closing the email-enumeration backdoor that gating the dedicated user reads would
-  // otherwise leave open.
+  // `search:read` gates the endpoint. The ADDITIONAL tightening (ADR-0046 P3, AUD-015) is at the RESULT
+  // level: each index is searched only for a caller holding that entity's `<domain>:read`, the same
+  // permission its dedicated GET routes require — so a VIEWER cannot enumerate the user directory, and a
+  // role edited to lose `asset:read` gets no asset hits — whether the index was asked for explicitly or
+  // implicitly via "search all".
   @Get()
   @RequirePermission('search:read')
   @ApiOperation({
     summary:
-      'Cross-entity search (Meilisearch). Returns one { hits, total } block per requested entity, or per entity when omitted. The `users` facet is omitted for callers without user:read (VIEWER), and the `purchases` and `suppliers` facets for callers without purchaseOrder:read (VIEWER by default).',
+      'Cross-entity search (Meilisearch). Returns one { hits, total } block per requested entity, or per entity when omitted. An entity is omitted for a caller without its read permission (asset:read, article:read, user:read, location:read, application:read, infra:read, consumable:read; purchaseOrder:read for purchases and suppliers) — by default a VIEWER gets no users, purchases or suppliers.',
   })
   @ApiQuery({
     name: 'q',
@@ -77,7 +75,7 @@ export class SearchController {
   ): Promise<SearchResults> {
     const requested = parseEntities(entities);
     const allowed = await this.allowedEntities(requested, user, principal);
-    // An empty `allowed` (a VIEWER who asked ONLY for `users` or purchases) must return an empty envelope — NOT be
+    // An empty `allowed` (a caller who asked ONLY for indexes it cannot read) must return an empty envelope — NOT be
     // re-expanded to "all" by the service (which treats `[]` as all). Short-circuit it here.
     if (allowed !== undefined && allowed.length === 0) {
       return {};
@@ -93,14 +91,13 @@ export class SearchController {
   }
 
   /**
-   * Drop the `users` index unless the caller holds `user:read` (ADR-0046 P3 — VIEWER cannot enumerate
-   * the directory via search), and the `purchases` / `suppliers` indexes unless the principal holds
-   * `purchaseOrder:read` (#1499, INV-PO-1 — resolved per principal, so a service account needs the direct
-   * grant). `requested === undefined` means "search all": we materialize the full
-   * index list so we can subtract `users` for a caller without the permission. An authorized caller's
-   * request is returned unchanged (still `undefined` = all when they asked for everything).
+   * Drop every index whose read permission the principal lacks ({@link readableIndexes} — resolved per
+   * principal, so a service account needs the direct grant). `users` additionally needs a human caller
+   * whose role holds `user:read` (ADR-0046 P3 as built). `requested === undefined` means "search all":
+   * we materialize the full index list so we can subtract from it. A caller who may read every requested
+   * index gets the request back unchanged (still `undefined` = all when they asked for everything).
    *
-   * Returns `[]` (not `undefined`) when a deprivileged caller asked ONLY for `users`, so the caller can
+   * Returns `[]` (not `undefined`) when nothing the caller asked for is readable, so the caller can
    * tell "nothing left to search" from "search everything" — the `find` handler short-circuits it.
    */
   private async allowedEntities(
@@ -108,22 +105,14 @@ export class SearchController {
     user?: User,
     principal?: Principal,
   ): Promise<SearchIndex[] | undefined> {
+    const base = requested ?? [...SEARCH_INDEXES];
     const canReadUsers =
       user !== undefined &&
       (await this.permissions.hasAll(user.role, ['user:read']));
-    const canReadPurchases = await this.permissions.principalHas(
-      principal,
-      'purchaseOrder:read',
-    );
-    if (canReadUsers && canReadPurchases) {
-      return requested;
-    }
-    const base = requested ?? [...SEARCH_INDEXES];
-    return base.filter(
-      (index) =>
-        (canReadUsers || index !== 'users') &&
-        (canReadPurchases || !PURCHASE_INDEXES.includes(index)),
-    );
+    const allowed = (
+      await readableIndexes(this.permissions, base, principal)
+    ).filter((index) => canReadUsers || index !== 'users');
+    return allowed.length === base.length ? requested : allowed;
   }
 }
 

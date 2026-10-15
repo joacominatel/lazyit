@@ -101,11 +101,14 @@ const SA = {
   granted: 'ckgrantedsa00000000000001',
   bare: 'ckbaresa0000000000000002',
   ai: 'ckaisa000000000000000003',
+  aiAssets: 'ckaiassetsa0000000000004',
 };
 const SA_GRANTS: Record<string, Permission[]> = {
   [SA.granted]: ['asset:read', 'asset:write', 'search:read'],
   [SA.bare]: [],
   [SA.ai]: ['ai:use', 'search:read'],
+  // Search returns an index only with its domain read (AUD-015), so this one can search assets.
+  [SA.aiAssets]: ['ai:use', 'search:read', 'asset:read'],
 };
 const SA_TOKENS = Object.fromEntries(
   Object.keys(SA_GRANTS).map((id) => [id, mintToken(id)]),
@@ -691,7 +694,7 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         'lazyit_search',
         { query: 'laptop', entities: ['users', 'assets'] },
         {
-          identity: { kind: 'service', serviceAccountId: SA.ai },
+          identity: { kind: 'service', serviceAccountId: SA.aiAssets },
           channel: 'HEADLESS',
         },
       );
@@ -718,7 +721,7 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         'lazyit_search',
         { query: 'oc-4512', entities: ['purchases', 'suppliers', 'assets'] },
         {
-          identity: { kind: 'service', serviceAccountId: SA.ai },
+          identity: { kind: 'service', serviceAccountId: SA.aiAssets },
           channel: 'HEADLESS',
         },
       );

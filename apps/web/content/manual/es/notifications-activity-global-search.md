@@ -74,6 +74,11 @@ Los resultados de la búsqueda respetan el control de acceso:
 - Las **compras** y los **proveedores** aparecen solo para quien puede ver compras (un Administrador o un
   Miembro por defecto; ver [Compras y proveedores](/help/purchases-recording-purchases)). Cualquier otra
   persona no obtiene resultados de compras, ni conteos, ni las fichas de filtro Compras y Proveedores.
+- **Todos los demás tipos de registro** siguen la misma regla: aparecen solo para quien tiene un rol que
+  puede ver ese tipo de registro. Los roles por defecto pueden verlos todos, así que esto solo importa
+  cuando un Administrador le quita un permiso a un rol — por ejemplo, un rol que ya no puede ver activos
+  no obtiene resultados ni conteo de activos. Una cuenta de servicio busca solo en lo que cubren sus
+  propios permisos.
 
 Por eso dos personas pueden obtener resultados distintos para la misma consulta — por diseño.
 
