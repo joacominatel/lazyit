@@ -824,7 +824,10 @@ describe('SearchService', () => {
     });
 
     it('drops the purchase indexes itself for a principal without purchaseOrder:read — defense in depth behind the controller (#1499)', async () => {
-      permissionsMock.principalHas.mockResolvedValue(false);
+      permissionsMock.principalHas.mockImplementation(
+        (_principal: unknown, permission: string) =>
+          Promise.resolve(permission !== 'purchaseOrder:read'),
+      );
       client.multiSearch.mockResolvedValue({ results: [] });
       const viewer = { kind: 'human', user: { role: 'VIEWER' } } as never;
 
@@ -854,22 +857,48 @@ describe('SearchService', () => {
       expect(client.multiSearch).not.toHaveBeenCalled();
     });
 
-    it('fails closed for a call with no principal at all', async () => {
+    it('fails closed for a call with no principal at all — no index is readable', async () => {
       permissionsMock.principalHas.mockImplementation((principal: unknown) =>
         Promise.resolve(principal !== undefined),
       );
-      client.multiSearch.mockResolvedValue({ results: [] });
 
-      await service.search({
+      const result = await service.search({
         q: 'x',
         entities: ['purchases', 'assets'],
         limit: 5,
       });
 
+      expect(result).toEqual({});
+      expect(client.multiSearch).not.toHaveBeenCalled();
+    });
+
+    it('drops every index whose read permission the principal lacks, not only purchases (AUD-015)', async () => {
+      permissionsMock.principalHas.mockImplementation(
+        (_principal: unknown, permission: string) =>
+          Promise.resolve(!['asset:read', 'infra:read'].includes(permission)),
+      );
+      client.multiSearch.mockResolvedValue({ results: [] });
+      const sa = { kind: 'service', permissions: new Set() } as never;
+
+      const result = await service.search({
+        q: '10.0.',
+        entities: ['assets', 'infra', 'locations'],
+        limit: 5,
+        principal: sa,
+      });
+
       const [params] = client.multiSearch.mock.calls[0] as [
         { queries: Array<{ indexUid: string }> },
       ];
-      expect(params.queries.map((query) => query.indexUid)).toEqual(['assets']);
+      expect(params.queries.map((query) => query.indexUid)).toEqual([
+        'locations',
+      ]);
+      expect(result).not.toHaveProperty('assets');
+      expect(result).not.toHaveProperty('infra');
+      expect(permissionsMock.principalHas).toHaveBeenCalledWith(
+        sa,
+        'infra:read',
+      );
     });
 
     it('upsertMany writes every document in one engine task, and skips an empty batch', () => {

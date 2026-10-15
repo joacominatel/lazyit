@@ -34,6 +34,9 @@ describe('SearchController', () => {
   const search = jest.fn();
   let canReadUsers = true;
   let canReadPurchases = true;
+  // Read permissions the caller's principal lacks (AUD-015: every index follows its `<domain>:read`).
+  let deniedReads = new Set<string>();
+  let principalOverride: unknown;
 
   // The mock resolver: `hasAll` honours the per-test `canReadUsers` flag for `user:read`. Returns a
   // resolved Promise<boolean> to match the real signature (the controller awaits it).
@@ -43,9 +46,11 @@ describe('SearchController', () => {
     ),
   );
 
-  // `principalHas` (the per-principal check the purchase indexes use, #1499) honours `canReadPurchases`.
+  // `principalHas` (the per-principal, per-index check) honours `canReadPurchases` and `deniedReads`.
   const principalHas = jest.fn((_principal: unknown, perm: string) =>
-    Promise.resolve(perm === 'purchaseOrder:read' ? canReadPurchases : true),
+    Promise.resolve(
+      perm === 'purchaseOrder:read' ? canReadPurchases : !deniedReads.has(perm),
+    ),
   );
 
   beforeAll(async () => {
@@ -64,10 +69,11 @@ describe('SearchController', () => {
     app.use((req: Request, _res: Response, next: NextFunction) => {
       const user = { role: 'VIEWER' };
       (req as Request & { user?: unknown }).user = user;
-      (req as Request & { principal?: unknown }).principal = {
-        kind: 'human',
-        user,
-      };
+      (req as Request & { principal?: unknown }).principal =
+        principalOverride ?? { kind: 'human', user };
+      if (principalOverride !== undefined) {
+        (req as Request & { user?: unknown }).user = undefined;
+      }
       next();
     });
     await app.init();
@@ -84,6 +90,8 @@ describe('SearchController', () => {
     principalHas.mockClear();
     canReadUsers = true;
     canReadPurchases = true;
+    deniedReads = new Set();
+    principalOverride = undefined;
   });
 
   const lastArg = (): SearchArg =>
@@ -230,5 +238,58 @@ describe('SearchController', () => {
       '/search?entities=purchases,suppliers',
     );
     expect(lastArg().entities).toEqual(['purchases', 'suppliers']);
+  });
+
+  // ── every other index follows its own read permission (AUD-015, ADR-0046 P3) ────────────────────────
+
+  it('drops assets and infra for a caller whose role lost asset:read and infra:read', async () => {
+    deniedReads = new Set(['asset:read', 'infra:read']);
+    await request(app.getHttpServer()).get(
+      '/search?q=10.0.&entities=infra,assets,locations',
+    );
+    expect(lastArg().entities).toEqual(['locations']);
+    expect(principalHas).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'human' }),
+      'infra:read',
+    );
+  });
+
+  it('drops every index the caller cannot read from "search all"', async () => {
+    deniedReads = new Set([
+      'article:read',
+      'location:read',
+      'application:read',
+      'consumable:read',
+    ]);
+    await request(app.getHttpServer()).get('/search');
+    expect(lastArg().entities).toEqual([
+      'assets',
+      'users',
+      'infra',
+      'purchases',
+      'suppliers',
+    ]);
+  });
+
+  it('returns an empty envelope when the caller can read none of the requested indexes', async () => {
+    deniedReads = new Set(['asset:read', 'infra:read']);
+    const res = await request(app.getHttpServer()).get(
+      '/search?entities=assets,infra',
+    );
+    expect(res.body).toEqual({});
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('a service account gets only the indexes its direct grants cover, and never users', async () => {
+    principalOverride = { kind: 'service', permissions: new Set() };
+    deniedReads = new Set(['article:read', 'location:read']);
+    canReadPurchases = false;
+    await request(app.getHttpServer()).get('/search');
+    expect(lastArg().entities).toEqual([
+      'assets',
+      'applications',
+      'infra',
+      'consumables',
+    ]);
   });
 });
