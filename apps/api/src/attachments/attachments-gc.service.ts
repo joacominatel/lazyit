@@ -16,6 +16,8 @@ import {
 } from './attachments.constants';
 import { attachmentsTmpDir, blobPathFor } from './attachment-storage';
 
+const ORPHAN_SCAN_PAGE = 1000;
+
 export interface GcSweepResult {
   /** Never-referenced ARTICLE images soft-deleted past the 24 h grace (pin 4, first pass). */
   orphanedRows: number;
@@ -105,21 +107,38 @@ export class AttachmentsGcService implements OnModuleInit {
    * exempt — they have no body reference; their live row IS the reference.
    */
   private async orphanArticleImages(cutoff: Date, now: Date): Promise<number> {
-    const candidates = await this.prisma.attachment.findMany({
-      where: { entityType: 'ARTICLE', createdAt: { lt: cutoff } },
-      select: { id: true },
-      take: 1000,
-    });
     let orphaned = 0;
-    for (const candidate of candidates) {
-      if (await this.isPinned(candidate.id)) continue;
-      await this.prisma.attachment.update({
-        where: { id: candidate.id },
-        data: { deletedAt: now },
+    let after: { createdAt: Date; id: string } | undefined;
+    // Keyset pages over every candidate: a fixed window let pinned images starve the orphans (AUD-049).
+    for (;;) {
+      const page = await this.prisma.attachment.findMany({
+        where: {
+          entityType: 'ARTICLE',
+          createdAt: { lt: cutoff },
+          ...(after
+            ? {
+                OR: [
+                  { createdAt: { gt: after.createdAt } },
+                  { createdAt: after.createdAt, id: { gt: after.id } },
+                ],
+              }
+            : {}),
+        },
+        select: { id: true, createdAt: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: ORPHAN_SCAN_PAGE,
       });
-      orphaned += 1;
+      for (const candidate of page) {
+        if (await this.isPinned(candidate.id)) continue;
+        await this.prisma.attachment.update({
+          where: { id: candidate.id },
+          data: { deletedAt: now },
+        });
+        orphaned += 1;
+      }
+      if (page.length < ORPHAN_SCAN_PAGE) return orphaned;
+      after = page[page.length - 1];
     }
-    return orphaned;
   }
 
   /**

@@ -67,7 +67,13 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
               createdAt?: { lt: Date };
               deletedAt?: { not: null };
               sha256?: { in: string[] };
+              OR?: [
+                { createdAt: { gt: Date } },
+                { createdAt: Date; id: { gt: string } },
+              ];
             };
+            orderBy?: unknown;
+            take?: number;
           }) => {
             const w = args.where;
             if (w.sha256?.in) {
@@ -76,12 +82,30 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
             if (w.deletedAt) {
               return rows.filter((r) => r.deletedAt !== null);
             }
-            return rows.filter(
+            let page = rows.filter(
               (r) =>
                 r.deletedAt === null &&
                 r.entityType === w.entityType &&
                 r.createdAt < w.createdAt!.lt,
             );
+            // Postgres returns an unordered window in heap order unless asked for one.
+            if (args.orderBy) {
+              page = [...page].sort(
+                (a, b) =>
+                  a.createdAt.getTime() - b.createdAt.getTime() ||
+                  a.id.localeCompare(b.id),
+              );
+            }
+            if (w.OR) {
+              const [after, tie] = w.OR;
+              page = page.filter(
+                (r) =>
+                  r.createdAt > after.createdAt.gt ||
+                  (r.createdAt.getTime() === tie.createdAt.getTime() &&
+                    r.id > tie.id.gt),
+              );
+            }
+            return args.take ? page.slice(0, args.take) : page;
           },
         ),
         // Live-row count per sha (pin 3) — the extension would inject deletedAt: null.
@@ -294,5 +318,34 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
     expect(existsSync(staleTmp)).toBe(false);
     expect(existsSync(freshTmp)).toBe(true); // in-flight upload untouched
     expect(existsSync(rowless)).toBe(false);
+  });
+
+  it('AUD-049 pass 1: orphans past more than one page of pinned images are still reached', async () => {
+    const pinnedCount = 1001;
+    const refs: string[] = [];
+    // The orphan is the newest candidate and last in heap order: only a second page reaches it.
+    for (let i = 0; i < pinnedCount; i++) {
+      const id = `clpin${String(i).padStart(19, '0')}`;
+      rows.push({
+        id,
+        sha256: PINNED_SHA,
+        entityType: 'ARTICLE',
+        createdAt: new Date(OLD.getTime() + 1000 + i),
+        deletedAt: null,
+      });
+      refs.push(`![p](attachment:${id})`);
+    }
+    articleBodies.push(refs.join('\n'));
+    rows.push({
+      id: ORPHAN_ID,
+      sha256: ORPHAN_SHA,
+      entityType: 'ARTICLE',
+      createdAt: new Date(OLD.getTime() + 1000 + pinnedCount),
+      deletedAt: null,
+    });
+
+    const result = await service.sweep(NOW);
+    expect(result.orphanedRows).toBe(1);
+    expect(rows.find((r) => r.id === ORPHAN_ID)?.deletedAt).toEqual(NOW);
   });
 });
