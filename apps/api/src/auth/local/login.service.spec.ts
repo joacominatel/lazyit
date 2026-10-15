@@ -64,11 +64,11 @@ function makeUser(overrides: Partial<UserRow> = {}): UserRow {
 describe('LoginService', () => {
   let credentials: LocalCredentialService;
   let findFirst: jest.Mock;
-  let update: jest.Mock;
+  let rehashWrite: jest.Mock;
   let sessionCreate: jest.Mock;
   let sessionDeleteMany: jest.Mock;
   let prisma: {
-    user: { findFirst: jest.Mock; update: jest.Mock };
+    user: { findFirst: jest.Mock; updateMany: jest.Mock };
     userSession: {
       create: jest.Mock;
       deleteMany: jest.Mock;
@@ -86,13 +86,13 @@ describe('LoginService', () => {
   beforeEach(() => {
     credentials = new LocalCredentialService();
     findFirst = jest.fn();
-    update = jest.fn().mockResolvedValue({});
+    rehashWrite = jest.fn().mockResolvedValue({});
     sessionCreate = jest.fn(({ data }: { data: { id: string } }) =>
       Promise.resolve({ id: data.id }),
     );
     sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     prisma = {
-      user: { findFirst, update },
+      user: { findFirst, updateMany: rehashWrite },
       userSession: {
         create: sessionCreate,
         deleteMany: sessionDeleteMany,
@@ -372,26 +372,56 @@ describe('LoginService', () => {
     findFirst.mockResolvedValue(makeUser({ passwordHash: weak }));
 
     await service.login('alice@example.com', 'pw');
-    expect(update).toHaveBeenCalledTimes(1);
-    const [arg] = update.mock.calls[0] as [
+    expect(rehashWrite).toHaveBeenCalledTimes(1);
+    const [arg] = rehashWrite.mock.calls[0] as [
       { where: { id: string }; data: { passwordHash: string } },
     ];
-    expect(arg.where).toEqual({ id: VALID_ID });
+    // Conditional on the hash it verified against (AUD-037).
+    expect(arg.where).toEqual({ id: VALID_ID, passwordHash: weak });
     expect(arg.data.passwordHash.startsWith('$argon2id$')).toBe(true);
     expect(arg.data.passwordHash).toContain('m=19456,t=2,p=1');
+  });
+
+  it('a rehash never brings back the old password over a reset that landed during the verify (AUD-037)', async () => {
+    const weak = await weakHash('old-pw');
+    const row = { passwordHash: weak };
+    findFirst.mockResolvedValue(makeUser({ passwordHash: weak }));
+    const overwrite = (args: { data: { passwordHash: string } }) => {
+      row.passwordHash = args.data.passwordHash;
+      return Promise.resolve({});
+    };
+    (prisma.user as Record<string, jest.Mock>).update = jest.fn(overwrite);
+    rehashWrite.mockImplementation(
+      (args: {
+        where: { passwordHash?: string };
+        data: { passwordHash: string };
+      }) =>
+        args.where.passwordHash === row.passwordHash
+          ? overwrite(args)
+          : Promise.resolve({ count: 0 }),
+    );
+    const hash = credentials.hash.bind(credentials);
+    jest.spyOn(credentials, 'hash').mockImplementation(async (pw: string) => {
+      // The owner's reset commits while this login is still rehashing.
+      row.passwordHash = 'reset-by-owner';
+      return hash(pw);
+    });
+
+    await service.login('alice@example.com', 'old-pw');
+    expect(row.passwordHash).toBe('reset-by-owner');
   });
 
   it('does NOT rehash when the stored hash already meets the target', async () => {
     const hash = await credentials.hash('pw');
     findFirst.mockResolvedValue(makeUser({ passwordHash: hash }));
     await service.login('alice@example.com', 'pw');
-    expect(update).not.toHaveBeenCalled();
+    expect(rehashWrite).not.toHaveBeenCalled();
   });
 
   it('a failed rehash never blocks a valid login (best-effort)', async () => {
     const weak = await weakHash('pw');
     findFirst.mockResolvedValue(makeUser({ passwordHash: weak }));
-    update.mockRejectedValue(new Error('db down'));
+    rehashWrite.mockRejectedValue(new Error('db down'));
     const res = await service.login('alice@example.com', 'pw');
     expect(typeof res.token).toBe('string');
   });
