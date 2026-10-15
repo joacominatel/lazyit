@@ -8752,8 +8752,7 @@ describe('InfraService', () => {
           .includes("'macs'"),
       );
       const arg = call?.[0] as
-        | { strings?: string[]; values?: unknown[] }
-        | undefined;
+        { strings?: string[]; values?: unknown[] } | undefined;
       return {
         sql: (arg?.strings ?? []).join(' '),
         values: arg?.values ?? [],
