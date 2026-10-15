@@ -104,7 +104,7 @@ export class WorkflowRunsController {
   @RequirePermission('workflow:run')
   @ApiOperation({
     summary:
-      'Retry a terminal FAILED run from the step that failed onward (issue #308). Resume-from-failed-step, NOT a full re-run — already-SUCCEEDED steps are not re-executed (no double-provision). An OPTIONAL `overrides` body (ADR-0057 Option 2) patches the failed step mapping for the next attempt only (request-scoped, never persisted — INV-6). 409 if the run is not FAILED or another run of the same grant event is in flight or SUCCEEDED; 422 if it has no resolvable failed step.',
+      'Retry a terminal FAILED run from the step that failed onward (issue #308). Resume-from-failed-step, NOT a full re-run — already-SUCCEEDED steps are not re-executed (no double-provision). An OPTIONAL `overrides` body (ADR-0057 Option 2) patches the failed step mapping for the next attempt only (request-scoped, never persisted — INV-6). 409 if the run is not FAILED, another run of the same grant event is in flight or SUCCEEDED, or the grant was revoked; 422 if it has no resolvable failed step.',
   })
   @ApiOkResponse({
     description:
@@ -119,7 +119,7 @@ export class WorkflowRunsController {
   @RequirePermission('workflow:run')
   @ApiOperation({
     summary:
-      'Clone-to-new-run from the LATEST workflow version (ADR-0057 Option 3). Leaves the source FAILED run immutable and creates a FRESH run on the current version for the same grant, starting at the entry node. 409 if the source run is not FAILED or another run of the same grant event is in flight or SUCCEEDED; 422 (FAIL-CLOSED guard) if it already SUCCEEDED a non-idempotent create on/before the failed step (re-grant instead).',
+      'Clone-to-new-run from the LATEST workflow version (ADR-0057 Option 3). Leaves the source FAILED run immutable and creates a FRESH run on the current version for the same grant, starting at the entry node. 409 if the source run is not FAILED, another run of the same grant event is in flight or SUCCEEDED, or the grant was revoked; 422 (FAIL-CLOSED guard) if it already SUCCEEDED a non-idempotent create on/before the failed step (re-grant instead).',
   })
   @ApiOkResponse({
     description:

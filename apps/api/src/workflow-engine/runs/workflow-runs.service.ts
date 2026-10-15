@@ -92,7 +92,8 @@ export class WorkflowRunsService {
    *   - 409 if it is not terminal `FAILED` (a `SUCCEEDED`/`COMPENSATED`/in-flight run is not retryable —
    *     ONLY `FAILED` is, the §4.9 / issue-308 policy; a COMPENSATED run rolled its effects back and must
    *     be re-granted, not retried), OR if it lost the CAS race (a concurrent retry already claimed it),
-   *     OR another run of this grant event is in flight or SUCCEEDED (AUD-007);
+   *     OR another run of this grant event is in flight or SUCCEEDED (AUD-007), OR the grant behind an
+   *     ACCESS_GRANTED run was revoked or its user offboarded (AUD-069);
    *   - 422 if the FAILED run carries no resolvable failed step to resume from.
    * On success returns the resumed cursor + the new attempt number so the FE can refetch the detail.
    *
@@ -104,7 +105,7 @@ export class WorkflowRunsService {
   async retry(id: string, overrides?: RetryRunOverrides) {
     const run = await this.prisma.workflowRun.findFirst({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, trigger: true, accessGrantId: true },
     });
     if (!run) {
       throw new NotFoundException(`WorkflowRun ${id} not found`);
@@ -114,6 +115,7 @@ export class WorkflowRunsService {
         `Only a terminal FAILED run can be retried (this run is ${run.status})`,
       );
     }
+    await this.assertGrantStillActive(run);
     let result: Awaited<ReturnType<WorkflowRunOrchestrator['retryRun']>>;
     try {
       result = await this.orchestrator.retryRun(id, overrides);
@@ -161,8 +163,9 @@ export class WorkflowRunsService {
    *      new PENDING run via {@link WorkflowTriggerService.buildReplayRunData} (the parent's id as
    *      `supersedesRunId`), CREATE it, and enqueue via the normal {@link WorkflowTriggerService.enqueue}.
    *
-   * A P2002 on the unique `idempotencyKey` can no longer come from a concurrent replay (the lock serializes
-   * them); if one still surfaces it is a clean 409, never a 500.
+   * An ACCESS_GRANTED source whose grant was revoked or whose grantee was offboarded is refused (409,
+   * AUD-069). A P2002 on the unique `idempotencyKey` can no longer come from a concurrent replay (the lock
+   * serializes them); if one still surfaces it is a clean 409, never a 500.
    */
   async replayLatest(runId: string, principal?: Principal) {
     const source = await this.prisma.workflowRun.findFirst({
@@ -183,6 +186,7 @@ export class WorkflowRunsService {
       );
     }
     const accessGrantId = source.accessGrantId;
+    await this.assertGrantStillActive(source);
 
     // Resolve the LATEST version for this (application, trigger) — the SAME selection a real grant uses —
     // BEFORE the guard, because the clone re-fires THAT version (not the source's pinned one).
@@ -283,6 +287,25 @@ export class WorkflowRunsService {
         );
       }
       throw err;
+    }
+  }
+
+  // AUD-069: re-driving a provision after the grant was revoked would create an account nobody removes.
+  private async assertGrantStillActive(run: {
+    trigger: string;
+    accessGrantId: string | null;
+  }): Promise<void> {
+    if (run.trigger !== 'ACCESS_GRANTED' || !run.accessGrantId) {
+      return;
+    }
+    const grant = await this.prisma.accessGrant.findUnique({
+      where: { id: run.accessGrantId },
+      select: { revokedAt: true, user: { select: { deletedAt: true } } },
+    });
+    if (!grant || grant.revokedAt !== null || grant.user.deletedAt !== null) {
+      throw new ConflictException(
+        'The access grant behind this run was revoked or its user offboarded; re-grant to provision again',
+      );
     }
   }
 

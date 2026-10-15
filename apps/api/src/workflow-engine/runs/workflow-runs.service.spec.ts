@@ -191,11 +191,16 @@ function buildForRetry(
     | { retried: true; resumeStepKey: string; attempt: number }
     | { retried: false }
     | Error,
+  grant: { revokedAt: Date | null; user: { deletedAt: Date | null } } = {
+    revokedAt: null,
+    user: { deletedAt: null },
+  },
 ) {
   const findFirst = jest.fn().mockResolvedValue(runRow);
   const prisma = {
     workflowRun: { findFirst },
     workflowStepRun: { findMany: jest.fn() },
+    accessGrant: { findUnique: jest.fn().mockResolvedValue(grant) },
   } as unknown as PrismaService;
   const retryRun = jest.fn(() =>
     retryResult instanceof Error
@@ -291,6 +296,42 @@ describe('WorkflowRunsService.retry — manual FAILED-run retry (issue #308)', (
     );
     await expect(service.retry('r1')).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('AUD-069: 409s a provisioning run whose grant was revoked or whose grantee was offboarded (never re-driven)', async () => {
+    const revoked = { revokedAt: new Date(), user: { deletedAt: null } };
+    const offboarded = { revokedAt: null, user: { deletedAt: new Date() } };
+    for (const grant of [revoked, offboarded]) {
+      const { service, retryRun } = buildForRetry(
+        {
+          id: 'r1',
+          status: 'FAILED',
+          trigger: 'ACCESS_GRANTED',
+          accessGrantId: 'g1',
+        },
+        { retried: true, resumeStepKey: 'provision', attempt: 2 },
+        grant,
+      );
+      await expect(service.retry('r1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(retryRun).not.toHaveBeenCalled();
+    }
+  });
+
+  it('AUD-069: a deprovisioning run is still retried although its grant is revoked by definition', async () => {
+    const { service, retryRun } = buildForRetry(
+      {
+        id: 'r1',
+        status: 'FAILED',
+        trigger: 'ACCESS_REVOKED',
+        accessGrantId: 'g1',
+      },
+      { retried: true, resumeStepKey: 'deprovision', attempt: 2 },
+      { revokedAt: new Date(), user: { deletedAt: new Date() } },
+    );
+    await expect(service.retry('r1')).resolves.toMatchObject({ ok: true });
+    expect(retryRun).toHaveBeenCalledWith('r1', undefined);
+  });
 });
 
 /**
@@ -327,6 +368,8 @@ interface ReplayHarnessOpts {
   collisionsBeforeSuccess?: number;
   /** What the AUD-007 lineage query finds: a live run of the same grant event, or none. */
   liveRun?: { id: string; status: string } | null;
+  /** The grant behind the source run (AUD-069). Defaults to active. */
+  grant?: { revokedAt: Date | null; user: { deletedAt: Date | null } } | null;
 }
 
 function buildForReplay(opts: ReplayHarnessOpts = {}) {
@@ -397,6 +440,15 @@ function buildForReplay(opts: ReplayHarnessOpts = {}) {
     workflowRun: { findFirst, create },
     workflowVersion: { findUnique: findUniqueVersion },
     workflowStepRun: { findMany: findManyStepRuns },
+    accessGrant: {
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(
+          opts.grant === undefined
+            ? { revokedAt: null, user: { deletedAt: null } }
+            : opts.grant,
+        ),
+    },
     $executeRaw: executeRaw,
   };
   // The interactive transaction runs its callback against the same mock client.
@@ -681,6 +733,19 @@ describe('WorkflowRunsService.replayLatest — clone-to-new-run (ADR-0057 Option
     expect(findFirst.mock.invocationCallOrder[lineageCall]).toBeLessThan(
       create.mock.invocationCallOrder[0],
     );
+  });
+
+  it('AUD-069: refuses (409) to replay a provisioning run whose grant was revoked or whose grantee was offboarded', async () => {
+    for (const grant of [
+      { revokedAt: new Date(), user: { deletedAt: null } },
+      { revokedAt: null, user: { deletedAt: new Date() } },
+    ]) {
+      const { service, create } = buildForReplay({ maxReplaySeq: 0, grant });
+      await expect(service.replayLatest('src')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(create).not.toHaveBeenCalled();
+    }
   });
 
   it('422s when no enabled workflow version exists to replay against (planForTrigger returns null)', async () => {

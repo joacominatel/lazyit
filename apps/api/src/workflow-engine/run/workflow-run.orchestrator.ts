@@ -22,7 +22,7 @@ import type {
   StepResult,
   WorkflowMappingContext,
 } from '../handlers/step-handler';
-import { RunContextBuilder } from './run-context';
+import { GrantInactiveError, RunContextBuilder } from './run-context';
 import { lockLineageAndAssertIdle } from './run-lineage';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
@@ -365,7 +365,16 @@ export class WorkflowRunOrchestrator {
     const steps = WorkflowStepsSchema.parse(run.workflowVersion.steps);
 
     let cursor: string = startCursor ?? steps[0].key;
-    const ctx = await this.contextBuilder.build(runId);
+    let ctx: Readonly<WorkflowMappingContext>;
+    try {
+      ctx = await this.contextBuilder.build(runId);
+    } catch (err) {
+      if (err instanceof GrantInactiveError) {
+        await this.finalizeFailed(runId, cursor, 'grant-inactive');
+        return;
+      }
+      throw err;
+    }
     // The attempt number for the step at `cursor`. Carried (incremented) across a degraded in-process
     // retry of the SAME step; reset to 1 whenever the cursor advances to a different step.
     let attempt = startAttempt;

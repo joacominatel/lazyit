@@ -16,6 +16,7 @@ import {
 } from './workflow-run.orchestrator';
 import type { WorkflowStep } from '@lazyit/shared';
 import type { StepResult } from '../handlers/step-handler';
+import { GrantInactiveError } from './run-context';
 import { RunLineageBusyError } from './run-lineage';
 
 /** A throwaway but VALID cuid for a step's connectionId (the shared step schema enforces z.cuid()). */
@@ -234,7 +235,15 @@ function harness(
     trigger as never,
     notifications as never,
   );
-  return { orchestrator, prisma, state, sleeper, trigger, notifications };
+  return {
+    orchestrator,
+    prisma,
+    state,
+    sleeper,
+    trigger,
+    notifications,
+    contextBuilder,
+  };
 }
 
 const restStep = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -927,6 +936,26 @@ describe('WorkflowRunOrchestrator.retryRun — manual FAILED-run retry (issue #3
       id: { not: 'run1' },
     });
     expect(state.runStatus).toBe('RUNNING');
+  });
+});
+
+describe('WorkflowRunOrchestrator — a revoked grant never provisions (AUD-069)', () => {
+  it('finalizes the run FAILED with grant-inactive and executes no step', async () => {
+    const rest = scripted('REST', [ok()]);
+    const { orchestrator, state, contextBuilder } = harness([restStep('s1')], {
+      REST: rest,
+    });
+    contextBuilder.build.mockRejectedValueOnce(new GrantInactiveError('run1'));
+
+    await orchestrator.start('run1');
+
+    expect(rest.execute).not.toHaveBeenCalled();
+    expect(state.stepRuns).toHaveLength(0);
+    expect(state.runStatus).toBe('FAILED');
+    expect(state.runError).toEqual({
+      stepKey: 's1',
+      errorClass: 'grant-inactive',
+    });
   });
 });
 

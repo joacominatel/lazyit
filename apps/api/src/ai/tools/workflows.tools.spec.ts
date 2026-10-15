@@ -598,7 +598,12 @@ const prisma = {
       Promise.resolve(stepRuns.filter((s) => matches(s, where))),
     ),
   },
-  // The runs service takes a lineage advisory lock before a re-drive (AUD-007).
+  // The runs service refuses a re-drive of a revoked grant and takes a lineage advisory lock (AUD-007/069).
+  accessGrant: {
+    findUnique: jest
+      .fn()
+      .mockResolvedValue({ revokedAt: null, user: { deletedAt: null } }),
+  },
   $executeRaw: jest.fn().mockResolvedValue(0),
   workflowVersion: {
     findUnique: jest.fn(({ where }: { where: { id: number } }) =>
