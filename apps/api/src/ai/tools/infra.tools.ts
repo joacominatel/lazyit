@@ -73,10 +73,13 @@ function leanNode(row: Row): Row {
   return { ...pick(row, ['id', 'kind', 'status']), label: nodeLabel(row) };
 }
 
+/** The linked asset's owners; their names are self-editable profile text, wrapped (INV-AI-4). */
 function owners(value: unknown): Row[] {
-  return asRows(value).map((o) =>
-    pick(o, ['userId', 'firstName', 'lastName', 'email', 'deletedAt']),
-  );
+  return asRows(value).map((o) => ({
+    ...pick(o, ['userId', 'email', 'deletedAt']),
+    firstName: untrusted(str(o.firstName)),
+    lastName: untrusted(str(o.lastName)),
+  }));
 }
 
 /** The node summary both tools share. */

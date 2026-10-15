@@ -356,7 +356,7 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
               {
                 assignmentId: ASSIGN.laptopAna,
                 userId: ID.ana,
-                name: 'Ana Ops',
+                name: '<untrusted_content>Ana Ops</untrusted_content>',
                 email: 'ana@example.com',
               },
             ],
@@ -444,7 +444,10 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         notes: WRAPPED,
       });
       expect(d.owners).toEqual([
-        expect.objectContaining({ userId: ID.ana, name: 'Ana Ops' }),
+        expect.objectContaining({
+          userId: ID.ana,
+          name: '<untrusted_content>Ana Ops</untrusted_content>',
+        }),
       ]);
       expect(d).not.toHaveProperty('history');
       expect(d.asset).not.toHaveProperty('specs');
@@ -1626,8 +1629,12 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
           },
           {
             field: 'owners',
-            before: ['Ana Ops <ana@example.com>'],
-            after: ['Ana Ops <ana@example.com>'],
+            before: [
+              '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
+            ],
+            after: [
+              '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
+            ],
           },
         ],
         precondition: { updatedAt: T0.toISOString() },
@@ -1736,11 +1743,18 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
             after: {
               type: 'user',
               id: ID.ana,
-              label: 'Ana Ops <ana@example.com>',
+              label:
+                '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
             },
             valueKind: 'entity',
           },
-          { field: 'owners', before: [], after: ['Ana Ops <ana@example.com>'] },
+          {
+            field: 'owners',
+            before: [],
+            after: [
+              '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
+            ],
+          },
           { field: 'notes', after: 'On-call kit' },
         ],
       });
@@ -1853,7 +1867,8 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
         type: 'assetAssignment',
         id: ASSIGN.sharedJuan,
         op: 'updated',
-        label: 'TAB-0001 → Juan Perez <juan1@example.com>',
+        label:
+          'TAB-0001 → <untrusted_content>Juan Perez</untrusted_content> <juan1@example.com>',
         parent: { type: 'asset', id: A.shared },
       };
       expect(action.preview).toMatchObject({
@@ -1865,7 +1880,8 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
             before: {
               type: 'user',
               id: ID.juan1,
-              label: 'Juan Perez <juan1@example.com>',
+              label:
+                '<untrusted_content>Juan Perez</untrusted_content> <juan1@example.com>',
             },
             after: null,
             valueKind: 'entity',
@@ -1873,10 +1889,12 @@ describe('assets toolset (W2-5) — asset_* tools', () => {
           {
             field: 'owners',
             before: [
-              'Ana Ops <ana@example.com>',
-              'Juan Perez <juan1@example.com>',
+              '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
+              '<untrusted_content>Juan Perez</untrusted_content> <juan1@example.com>',
             ],
-            after: ['Ana Ops <ana@example.com>'],
+            after: [
+              '<untrusted_content>Ana Ops</untrusted_content> <ana@example.com>',
+            ],
           },
           { field: 'notes', before: null, after: 'Returned' },
         ],

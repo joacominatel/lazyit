@@ -1706,7 +1706,7 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         'https://api.jira.example',
       ]);
       expect(change(preview, 'dryRunSample')!.after).toBe(
-        `Ana Ops <ana@example.com> — access level admin (grant ${GRANT_ANA})`,
+        `<untrusted_content>Ana Ops</untrusted_content> <ana@example.com> — access level <untrusted_content>admin</untrusted_content> (grant ${GRANT_ANA})`,
       );
       expect(change(preview, 'dryRun')!.after).toEqual([
         '1. create-user: POST https://api.jira.example/rest/users?apikey=… — body {"email":"ana@example.com","display":"Hello"} — headers Accept, X-Api-Token, authorization',

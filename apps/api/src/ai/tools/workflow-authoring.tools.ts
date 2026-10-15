@@ -1240,10 +1240,12 @@ function sampleLabel(dry: Row): string {
   const context = asRow(dry.context);
   const grantee = asRow(context.grantee);
   const grant = asRow(context.grant);
-  const name = [str(grantee.firstName), str(grantee.lastName)]
-    .filter(Boolean)
-    .join(' ');
-  return `${name} <${str(grantee.email) ?? '?'}> — access level ${str(grant.accessLevel) ?? 'none'} (grant ${String(dry.sampleAccessGrantId)})`;
+  // The name is self-editable and the level requester-authored: both untrusted (INV-AI-4, AUD-003/095).
+  const name = untrusted(
+    [str(grantee.firstName), str(grantee.lastName)].filter(Boolean).join(' '),
+  );
+  const level = untrusted(str(grant.accessLevel));
+  return `${name ?? ''} <${str(grantee.email) ?? '?'}> — access level ${level ?? 'none'} (grant ${String(dry.sampleAccessGrantId)})`.trim();
 }
 
 const workflowSetEnabled = defineTool({

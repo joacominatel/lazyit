@@ -38,6 +38,9 @@ function pick(row: unknown, fields: readonly string[]): Row {
   return out;
 }
 
+const text = (value: unknown): string | null =>
+  typeof value === 'string' ? value : null;
+
 const sessionContext = defineTool({
   name: 'session_context',
   title: 'Session context',
@@ -69,7 +72,12 @@ const sessionContext = defineTool({
     });
     return {
       data: {
-        user: pick(me, ['id', 'firstName', 'lastName', 'email', 'role']),
+        user: {
+          ...pick(me, ['id', 'email', 'role']),
+          // A name is self-editable profile text: wrapped like every other name (INV-AI-4).
+          firstName: untrusted(text((me as Row).firstName)),
+          lastName: untrusted(text((me as Row).lastName)),
+        },
         permissions: permissions.permissions,
         version: version.current,
         assignedAssets: {
@@ -97,7 +105,7 @@ const sessionContext = defineTool({
 const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   assets: ['id', 'name', 'assetTag', 'serial', 'status'],
   articles: ['id', 'slug', 'title', 'status'],
-  users: ['id', 'firstName', 'lastName', 'email'],
+  users: ['id', 'email'],
   locations: ['id', 'name', 'type'],
   applications: ['id', 'name', 'vendor'],
   infra: ['id', 'label', 'kind', 'status', 'ipAddress', 'assetName'],
@@ -112,11 +120,13 @@ const HIT_FIELDS: Record<SearchEntity, readonly string[]> = {
   ],
   suppliers: ['id', 'name', 'taxId'],
 };
-const HIT_UNTRUSTED_TEXT: Partial<Record<SearchEntity, string>> = {
-  assets: 'notes',
-  articles: 'excerpt',
-  applications: 'description',
-  consumables: 'description',
+const HIT_UNTRUSTED_TEXT: Partial<Record<SearchEntity, readonly string[]>> = {
+  assets: ['notes'],
+  articles: ['excerpt'],
+  // Anyone may rename themselves (`PATCH /users/me`).
+  users: ['firstName', 'lastName'],
+  applications: ['description'],
+  consumables: ['description'],
 };
 
 const lazyitSearch = defineTool({
@@ -168,16 +178,13 @@ const lazyitSearch = defineTool({
         entity
       ] as { hits?: unknown[]; total?: number } | undefined;
       if (!block) continue;
-      const textField = HIT_UNTRUSTED_TEXT[entity];
+      const textFields = HIT_UNTRUSTED_TEXT[entity] ?? [];
       data[entity] = {
         total: block.total ?? 0,
         hits: (block.hits ?? []).map((hit) => {
           const projected = pick(hit, HIT_FIELDS[entity]);
-          if (textField) {
-            const text = (hit as Row)[textField];
-            projected[textField] = untrusted(
-              typeof text === 'string' ? text : null,
-            );
+          for (const field of textFields) {
+            projected[field] = untrusted(text((hit as Row)[field]));
           }
           return projected;
         }),

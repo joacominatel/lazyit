@@ -131,15 +131,21 @@ function assetCore(asset: Row, extra: readonly string[] = []): Row {
   return out;
 }
 
-function personName(user: Row): string {
+/** The raw full name, for matching a reference only; what reaches the model is {@link personName}. */
+function fullName(user: Row): string {
   return `${str(user.firstName) ?? ''} ${str(user.lastName) ?? ''}`.trim();
 }
 
-/** `Ana Ops <ana@example.com>`. */
+/** A person's full name, wrapped: anyone may rename themselves (`PATCH /users/me`, INV-AI-4). */
+function personName(user: Row): string | null {
+  return untrusted(fullName(user));
+}
+
+/** `Ana Ops <ana@example.com>`, the name wrapped as untrusted (the email stays plain). */
 function userLabel(user: Row): string {
   const name = personName(user);
   const email = str(user.email);
-  if (!email) return name || String(user.id);
+  if (!email) return name ?? String(user.id);
   return name ? `${name} <${email}>` : email;
 }
 
@@ -322,7 +328,7 @@ function resolveUser(
         (u) =>
           u.id === ref ||
           sameText(u.email, ref) ||
-          sameText(personName(u), ref) ||
+          sameText(fullName(u), ref) ||
           sameText(u.username, ref) ||
           sameText(u.legajo, ref),
         ref,
@@ -2669,7 +2675,7 @@ function ownerMatches(
   return (
     sameText(assignment.userId, ref) ||
     sameText(user.email, ref) ||
-    sameText(personName(user), ref) ||
+    sameText(fullName(user), ref) ||
     sameText(user.username, ref) ||
     sameText(user.legajo, ref)
   );
