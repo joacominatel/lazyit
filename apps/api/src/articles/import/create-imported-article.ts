@@ -8,7 +8,15 @@ import {
 } from '@lazyit/shared';
 import { parseImportFile, titleFromFilename } from '../article-import';
 import { extractZipEntries, type ZipExtractOptions } from './zip-extract';
-import { IMPORT_SLUG_TAKEN_MESSAGE } from './import-job.constants';
+import {
+  IMPORT_FOLDER_GONE_MESSAGE,
+  IMPORT_SLUG_TAKEN_MESSAGE,
+} from './import-job.constants';
+import { FOLDER_TREE_LOCK } from '../../article-categories/folder-tree';
+import {
+  claimableWikiLinksWhere,
+  type ClaimableWikiLinkWhere,
+} from '../wiki-link-claim';
 import type { AttachmentIngestPrisma } from '../../attachments/attachment-ingest';
 import type { ArticleRow } from '../../search/search.documents';
 import type {
@@ -81,6 +89,26 @@ interface ArticleWikiLinkCreateManyArgs {
 
 /** The transaction-scoped slice of Prisma the create path uses. */
 export interface ImportTx {
+  $queryRaw(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<unknown>;
+  $executeRaw(
+    query: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<number>;
+  articleCategory: {
+    findFirst(args: {
+      where:
+        | { id: string; deletedAt: null }
+        | { name: string; parentId: string; deletedAt: null };
+      select: { id: true };
+    }): Promise<{ id: string } | null>;
+    create(args: {
+      data: { name: string; parentId: string };
+      select: { id: true };
+    }): Promise<{ id: string }>;
+  };
   article: {
     create(args: ArticleCreateArgs): Promise<ImportedArticleRow>;
     // Used ONLY by the image round-trip (ADR-0082 §5): after the row exists we know the article id,
@@ -98,7 +126,7 @@ export interface ImportTx {
   articleWikiLink: {
     createMany(args: ArticleWikiLinkCreateManyArgs): Promise<unknown>;
     updateMany(args: {
-      where: { targetSlug: string; resolvedTargetId: null };
+      where: ClaimableWikiLinkWhere;
       data: { resolvedTargetId: string };
     }): Promise<{ count: number }>;
   };
@@ -128,30 +156,13 @@ export interface ImportPrismaClient {
 // into two transactions (which would need a pre-generated id or a mutable v1 snapshot).
 const IMPORT_TX_TIMEOUT_MS = 120_000;
 
-/** A live (non-soft-deleted) Folder row, as the zip folder-mirror pass reads/creates it. */
-interface FolderRow {
-  id: string;
-  name: string;
-  parentId: string | null;
-}
-
 /**
- * The minimal Prisma client the ZIP worker needs (ADR-0059 §5) — a superset of {@link ImportTx}
- * exposed at the TOP level (not just inside `$transaction`), because folder find-or-create and the
- * link-rewire pass span entries. Satisfied structurally by a real PrismaClient.
+ * The minimal Prisma client the ZIP worker needs (ADR-0059 §5): the per-entry and per-folder
+ * transactions, plus the TOP-level root check, slug probe and link-rewire pass that span entries.
+ * Satisfied structurally by a real PrismaClient.
  */
 export interface ZipImportPrismaClient extends ImportPrismaClient {
   articleCategory: {
-    /** Find a live child folder by (parentId, name) — null = a root-level folder. */
-    findFirst(args: {
-      where: { name: string; parentId: string | null; deletedAt: null };
-      select: { id: true; name: true; parentId: true };
-    }): Promise<FolderRow | null>;
-    /** Create a folder under `parentId` (null = root). */
-    create(args: {
-      data: { name: string; parentId: string | null };
-      select: { id: true; name: true; parentId: true };
-    }): Promise<FolderRow>;
     /** Confirm the ROOT home folder is live (the worker fails the job cleanly otherwise). */
     findUnique(args: {
       where: { id: string };
@@ -167,7 +178,7 @@ export interface ZipImportPrismaClient extends ImportPrismaClient {
   articleWikiLink: {
     /** Re-resolve a previously-unresolved edge to a freshly-created batch article (the §5 rewire). */
     updateMany(args: {
-      where: { targetSlug: string; resolvedTargetId: null };
+      where: ClaimableWikiLinkWhere;
       data: { resolvedTargetId: string };
     }): Promise<{ count: number }>;
   };
@@ -253,6 +264,18 @@ function entryFailureReason(err: unknown): ZipEntryFailureReason {
     : 'failed';
 }
 
+// A folder delete holds FOR UPDATE on its rows, so this waits it out and the re-read then sees it gone (AUD-023).
+async function lockLiveFolder(tx: ImportTx, folderId: string): Promise<void> {
+  await tx.$queryRaw`SELECT "id" FROM "article_categories" WHERE "id" = ${folderId} FOR SHARE`;
+  const live = await tx.articleCategory.findFirst({
+    where: { id: folderId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!live) {
+    throw new Error(IMPORT_FOLDER_GONE_MESSAGE);
+  }
+}
+
 /**
  * Create one Article + its version-1 snapshot + its outgoing `[[slug]]` wiki-link edges inside ONE
  * transaction (ADR-0042/0059 §3). Shared by the single-file and zip paths. Each parsed `[[slug]]`
@@ -271,6 +294,7 @@ async function createArticleWithVersion(
   },
   resolveContent?: ResolveImportedContent,
 ): Promise<ImportedArticleRow> {
+  await lockLiveFolder(tx, params.categoryId);
   const created = await tx.article.create({
     data: {
       slug: params.slug,
@@ -317,7 +341,7 @@ async function createArticleWithVersion(
   const slugs = parseWikiLinks(content);
   if (slugs.length > 0) {
     const matches = await tx.article.findMany({
-      where: { slug: { in: slugs } },
+      where: { slug: { in: slugs }, deletedAt: null },
       select: { id: true, slug: true },
     });
     const idBySlug = new Map(matches.map((m) => [m.slug, m.id]));
@@ -400,9 +424,9 @@ export async function runImportJob(
           },
           resolveContent,
         );
-        // Earlier forward references to this slug resolve now (ADR-0059 §3).
+        // Earlier references to this slug resolve now (ADR-0059 §3).
         await tx.articleWikiLink.updateMany({
-          where: { targetSlug: created.slug, resolvedTargetId: null },
+          where: claimableWikiLinksWhere(created.slug),
           data: { resolvedTargetId: created.id },
         });
         return created;
@@ -447,23 +471,31 @@ async function resolveFolder(
       parentId = cached;
       continue;
     }
-    const existing = await prisma.articleCategory.findFirst({
-      where: { name, parentId, deletedAt: null },
-      select: { id: true, name: true, parentId: true },
-    });
-    let folderId: string;
-    if (existing) {
-      folderId = existing.id;
-    } else {
-      const created = await prisma.articleCategory.create({
-        data: { name, parentId },
-        select: { id: true, name: true, parentId: true },
+    const parent = parentId;
+    // Under the folder-tree lock like the folder service's nested create, so no folder lands under a deleted one.
+    const folder = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${FOLDER_TREE_LOCK}))`;
+      const parentLive = await tx.articleCategory.findFirst({
+        where: { id: parent, deletedAt: null },
+        select: { id: true },
       });
-      folderId = created.id;
-      createdCounter.count += 1;
-    }
-    cache.set(keyPrefix, folderId);
-    parentId = folderId;
+      if (!parentLive) {
+        throw new Error(IMPORT_FOLDER_GONE_MESSAGE);
+      }
+      const existing = await tx.articleCategory.findFirst({
+        where: { name, parentId: parent, deletedAt: null },
+        select: { id: true },
+      });
+      if (existing) return { id: existing.id, created: false };
+      const created = await tx.articleCategory.create({
+        data: { name, parentId: parent },
+        select: { id: true },
+      });
+      return { id: created.id, created: true };
+    });
+    if (folder.created) createdCounter.count += 1;
+    cache.set(keyPrefix, folder.id);
+    parentId = folder.id;
   }
   return parentId;
 }
@@ -499,9 +531,7 @@ export async function runZipImportJob(
     select: { id: true, deletedAt: true },
   });
   if (!root || root.deletedAt) {
-    throw new Error(
-      'The import target folder does not reference a live folder',
-    );
+    throw new Error(IMPORT_FOLDER_GONE_MESSAGE);
   }
 
   const items: ZipItemResult[] = [];
@@ -603,7 +633,7 @@ export async function runZipImportJob(
   for (const [slug, id] of batchSlugToId) {
     try {
       const res = await prisma.articleWikiLink.updateMany({
-        where: { targetSlug: slug, resolvedTargetId: null },
+        where: claimableWikiLinksWhere(slug),
         data: { resolvedTargetId: id },
       });
       linksResolved += res.count;

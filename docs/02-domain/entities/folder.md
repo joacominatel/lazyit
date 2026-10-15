@@ -61,8 +61,10 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   folder tree. Two opposing moves therefore cannot both pass the cycle check, and a sub-folder cannot be
   created under a folder that is being deleted. A delete also locks its folder rows `FOR UPDATE`, which
   waits out an article insert already in flight into them (the FK's key-share lock) so the emptiness
-  check or the cascade sees it. Article creation does not lock its folder yet, so an article whose
-  folder check ran before the delete began can still land after it (the open half of AUD-023).
+  check or the cascade sees it. The article side holds too: an article create, an article move and
+  each import write lock the target folder `FOR SHARE` inside their write transaction and re-check it
+  is live, so an article whose folder check ran before a delete began cannot land after it. Both
+  halves of AUD-023 are closed.
 - **Restore needs a live parent** (AUD-022) — restoring a sub-folder whose parent is still soft-deleted
   is a **409**: restore the parent first. Restores do not cascade ([[0041-soft-delete-reuse-and-restore]]),
   so without this a folder could come back live under a deleted one, unreachable for every non-admin.
@@ -90,7 +92,10 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
   folder — walking segment by segment, find-or-create by `(parentId, name)` among live rows (honouring
   the per-parent partial-unique), so the same name under two parents (`Servers/Linux` vs
   `Workstations/Linux`) yields two distinct folders. A folder created mid-import is reused for sibling
-  entries (a path cache), so the tree is built once per job inside the sandboxed worker child.
+  entries (a path cache), so the tree is built once per job inside the sandboxed worker child. Each
+  find-or-create runs under the folder-tree lock after checking its parent is still live, like a
+  nested create from the API; a folder deleted while the job runs makes the entries below it
+  **skipped** (`failed`) instead of landing in a deleted subtree (AUD-023).
 - **Access attaches to the folder, not to article rows** — a deliberate, bounded carve-out from the
   per-record-ACL rejection of [[0040-rbac-roles]]/[[0046-roles-permissions-v2]]. The restriction is
   stored on the folder as a **`accessRules` jsonb** column: `null`/empty = **PUBLIC** (default — any

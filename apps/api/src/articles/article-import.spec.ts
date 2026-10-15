@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { BadRequestException } from '@nestjs/common';
+import multer from 'multer';
 import {
   extensionOf,
+  importUploadOptions,
   maxImportBytes,
   maxImportMb,
   parseImportFile,
@@ -11,6 +14,45 @@ import {
 
 const fixture = (name: string): Buffer =>
   readFileSync(join(__dirname, '../../test/fixtures', name));
+
+/** Push one multipart part through multer exactly as a browser sends it: the filename as raw UTF-8 bytes. */
+async function parseUpload(filename: string): Promise<Express.Multer.File> {
+  const boundary = 'lazyitboundary';
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\n`),
+    Buffer.from(
+      `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`,
+      'utf8',
+    ),
+    Buffer.from('Content-Type: text/markdown\r\n\r\n# Body\n'),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const req = Object.assign(new PassThrough(), {
+    headers: {
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+      'content-length': String(body.length),
+    },
+  });
+  const middleware = multer(importUploadOptions()).single('file');
+  const done = new Promise<Express.Multer.File>((resolve, reject) =>
+    middleware(req as never, {} as never, (err?: unknown) =>
+      err
+        ? reject(err instanceof Error ? err : new Error('multer failed'))
+        : resolve((req as unknown as { file: Express.Multer.File }).file),
+    ),
+  );
+  req.end(body);
+  return done;
+}
+
+describe('importUploadOptions (AUD-048)', () => {
+  it('decodes a non-ASCII filename as UTF-8, so the imported title is not mojibake', async () => {
+    const file = await parseUpload('garantía.md');
+    expect(file.originalname).toBe('garantía.md');
+    expect(titleFromFilename(file.originalname)).toBe('garantía');
+    expect(file.buffer.toString()).toBe('# Body\n');
+  });
+});
 
 describe('article-import helpers', () => {
   describe('extensionOf', () => {

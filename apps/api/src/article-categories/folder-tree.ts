@@ -1,3 +1,6 @@
+// Every tree-shape write checks and writes under this lock, or two opposing moves both pass and close a cycle.
+export const FOLDER_TREE_LOCK = 'lazyit.folder_tree';
+
 /** The two columns a folder-tree walk needs: the folder's id and its parent (null for a root). */
 export interface FolderTreeEdge {
   id: string;
