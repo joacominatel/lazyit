@@ -435,7 +435,8 @@ true`, `service_documentation` → the Manual page. **PRM** advertises `resource
 6. `POST /oauth/token` (`authorization_code`): atomic single use (`updateMany where usedAt null`), PKCE verify,
    redirect/client/resource match → creates the **grant** and returns `lzit_oat_` (1 h) + `lzit_ort_` (30 days)
    with `Cache-Control: no-store`.
-7. `POST /oauth/token` (`refresh_token`): atomic rotation; a rotated token presented again **outside** a 30 s grace
+7. `POST /oauth/token` (`refresh_token`): atomic rotation (the old token is burned in the same transaction
+   that issues the new pair, so a failed issue leaves it usable); a rotated token presented again **outside** a 30 s grace
    window = reuse → the whole grant is revoked (audited); inside the grace window → `invalid_grant` without
    revocation (benign concurrent-refresh race). Dead tokens always answer `invalid_grant`.
 8. Resource-server check on every `/mcp` request: token hash → grant (live, not expired) → **user reloaded**
@@ -1229,7 +1230,10 @@ once per connection across replicas and restarts; a per-process memo spares the 
 once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
 follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
 always lands). A grant older
-than the bell's 90-day retention is not announced (its notice, if any, was sent). Service Accounts
+than the bell's 90-day retention that was already used is not announced again (its notice was sent and
+may have been pruned); one never used before — `lastUsedAt` null when the request verified it, as for a
+personal token minted and kept idle — is announced whatever its age. An OAuth grant counts as used from
+its code exchange, so an old one is never re-announced. Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
 token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).
@@ -1276,8 +1280,9 @@ lifecycle, expiry bounds, hashing, never logged, the REST guard refusing `lzit_p
   `Host`, which a rebinding attacker controls. Accepted: `/mcp` authenticates only by a bearer token the
   page cannot read (no cookie, no ambient credential), so a rebound page gains nothing.
 - **F6 — per-connection rate limits and their prune cost.** The limits are per grant or SA, not per user
-  (one user with several connections gets several budgets), and each counter prunes its map on every hit
-  (linear in the live keys). Accepted at the 5–20 person scale.
+  (one user with several connections gets several budgets). The counters are the OAuth endpoints'
+  `FixedWindowRateLimiter`: constant work per hit (expired windows are dropped from the front of the
+  map) and at most 10,000 keys, past which the oldest window is evicted (AUD-005 / AUD-039).
 - **F9** — accepted as recorded in the review.
 - **Admin revoke of a personal token (F8)** — `DELETE /oauth/grants/:id` already records
   `PERSONAL_TOKEN_REVOKED` (reason `admin`); now pinned by a test.

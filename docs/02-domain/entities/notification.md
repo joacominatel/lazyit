@@ -131,7 +131,9 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
   grant or a personal MCP token is used for the first time — local mode has no MFA, so a phished consent
   must not go unnoticed. Emailed (on the allowlist). No `entityType`: the bell deep-links by type to
   `/account/ai`. Dedupe `mcp.client_connected:<grantId>` (one per connection); a grant older than the
-  90-day retention is never announced. Metadata = grant id, kind (`oauth` | `personal`), client name or
+  90-day retention that was already used is not announced again (its notice may have been pruned), while
+  one never used before (`lastUsedAt` null — a personal token minted and kept idle) is announced on its
+  first use whatever its age. Metadata = grant id, kind (`oauth` | `personal`), client name or
   token label, scopes — never a token. Fire-and-forget: it never delays or fails the MCP request.
 
 ## API (poll) — read-path authZ (the auth contract)

@@ -34,6 +34,9 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
   connected-apps lists). **A normal web logout does not**: it bumps only `sessionEpoch`, so the grant
   survives it ([[0097-ai-assistant-mcp-and-headless-api]] decision 8, amended 2026-09-24). Deactivation,
   `directoryOnly` and `mustChangePassword` also refuse it.
+- **Listed while it holds a live token**: the connected-apps lists show a grant only while one of its
+  tokens is unexpired. An OAuth grant whose refresh token idled out (30 days unused) and was swept can
+  never act again, so it leaves the lists; the row itself stays, unrevoked, for the record.
 - **Authority** = the user's current permissions ∩ the scope class (`lazyit.read` → `read` tools,
   `lazyit.write` → `write`, `lazyit.admin` → `elevated`), re-checked on every call with `ai:connect` and
   the MCP switch.
