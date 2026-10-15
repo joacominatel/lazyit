@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method -- pre-existing jest doubles and matchers. */
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
@@ -46,7 +47,10 @@ function makeController() {
   };
   const commits = {
     enqueueCommit: jest.fn(async () => ({ sessionId: 's1' })),
-    getCommitResult: jest.fn(async () => ({ sessionId: 's1', status: 'COMMITTED' })),
+    getCommitResult: jest.fn(async () => ({
+      sessionId: 's1',
+      status: 'COMMITTED',
+    })),
   };
   const controller = new ImportController(
     sessions as never,
@@ -118,9 +122,17 @@ describe('ImportController — owner-scoping + human-only', () => {
     );
   });
 
+  it('upload 400s (not a 500 ZodError) on an unknown entity form field', () => {
+    const { controller, sessions } = makeController();
+    expect(() => controller.upload(FILE, 'user', HUMAN)).toThrow(
+      BadRequestException,
+    );
+    expect(sessions.createAndParse).not.toHaveBeenCalled();
+  });
+
   it('upload 400s on an unsupported file type (.xlsx → export-to-CSV message)', () => {
     const { controller } = makeController();
-    const xlsx = { ...FILE, originalname: 'sheet.xlsx' } as Express.Multer.File;
+    const xlsx = { ...FILE, originalname: 'sheet.xlsx' };
     expect(() => controller.upload(xlsx, undefined, HUMAN)).toThrow(/CSV/i);
   });
 
@@ -131,13 +143,21 @@ describe('ImportController — owner-scoping + human-only', () => {
     expect(sessions.getForOwner).toHaveBeenCalledWith('s1', 'human-1');
 
     await controller.setMapping('s1', { columns: [] } as never, HUMAN);
-    expect(sessions.setMapping).toHaveBeenCalledWith('s1', 'human-1', expect.any(Object));
+    expect(sessions.setMapping).toHaveBeenCalledWith(
+      's1',
+      'human-1',
+      expect.any(Object),
+    );
 
     await controller.runDryRun('s1', HUMAN);
     expect(dryRun.dryRun).toHaveBeenCalledWith('s1', 'human-1');
 
-    await controller.savePlan('s1', { conflicts: [] } as never, HUMAN);
-    expect(dryRun.saveResolutionPlan).toHaveBeenCalledWith('s1', 'human-1', expect.any(Object));
+    await controller.savePlan('s1', { conflicts: [] }, HUMAN);
+    expect(dryRun.saveResolutionPlan).toHaveBeenCalledWith(
+      's1',
+      'human-1',
+      expect.any(Object),
+    );
 
     await controller.commit('s1', HUMAN);
     expect(commits.enqueueCommit).toHaveBeenCalledWith('s1', 'human-1');
@@ -154,7 +174,9 @@ describe('ImportController — owner-scoping + human-only', () => {
 
   it('a missing principal is rejected (never a null owner that could widen a query)', () => {
     const { controller, sessions } = makeController();
-    expect(() => controller.status('s1', undefined)).toThrow(BadRequestException);
+    expect(() => controller.status('s1', undefined)).toThrow(
+      BadRequestException,
+    );
     expect(sessions.getForOwner).not.toHaveBeenCalled();
   });
 });
