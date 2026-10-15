@@ -4556,6 +4556,45 @@ describe('InfraService', () => {
       });
     });
 
+    it('refuses (409) to restore a node whose Asset another live node now links', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: 'asset-1',
+        deletedAt: new Date(),
+      });
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(service.restoreNode('node-old')).rejects.toThrow(
+        INFRA_NODE_ASSET_SHARED_ERROR,
+      );
+
+      expect(prisma.infraNode.count).toHaveBeenCalledWith({
+        where: { assetId: 'asset-1', id: { not: 'node-old' } },
+      });
+      expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('restores a node with its Asset link when no other live node links that Asset', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: 'asset-1',
+        deletedAt: new Date(),
+      });
+      prisma.infraNode.count.mockResolvedValue(0);
+      prisma.infraNode.update.mockResolvedValue({
+        id: 'node-old',
+        assetId: 'asset-1',
+        deletedAt: null,
+      });
+
+      await service.restoreNode('node-old');
+
+      expect(prisma.infraNode.update).toHaveBeenCalledWith({
+        where: { id: 'node-old' },
+        data: { deletedAt: null },
+      });
+    });
+
     it('removes the node from the infra index on soft-delete', async () => {
       prisma.infraNode.findFirst.mockResolvedValue({ id: 'node-1' });
       prisma.infraNode.update.mockResolvedValue({ id: 'node-1' });
@@ -4922,6 +4961,39 @@ describe('InfraService', () => {
       expect(prisma.infraNode.update).toHaveBeenCalledTimes(1);
       expect(prisma.infraNode.create).not.toHaveBeenCalled();
       expect(notifications.emit).not.toHaveBeenCalled();
+    });
+
+    it('a clone whose serial carries a child-key separator still gets a HOST key, not a guest key (AUD-102)', async () => {
+      prisma.infraNode.findFirst
+        .mockResolvedValueOnce(ORIGINAL)
+        .mockResolvedValueOnce(null);
+      prisma.$queryRaw.mockResolvedValue(
+        storedHost('web-01', [
+          { kind: 'serial', value: 'SN-ALPHA' },
+          { kind: 'mac', value: 'aa:bb:cc:dd:ee:01' },
+        ]),
+      );
+      prisma.infraNode.create.mockResolvedValue({
+        id: 'node-2',
+        state: 'PENDING',
+      });
+
+      await service.ingestReport(
+        reportFrom('web-02', 'SN/guest/BETA', 'aa:bb:cc:dd:ee:02'),
+        AGENT_SA,
+      );
+
+      const createArg = firstArg<{ data: { externalId: string } }>(
+        prisma.infraNode.create,
+      );
+      expect(createArg.data.externalId).toBe('machine-id-baked#SN_guest_BETA');
+      // The second lookup (the clone's own node) uses the same derived key, so it lands there every time.
+      const ownLookup = prisma.infraNode.findFirst.mock.calls[1] as [
+        { where: { externalId?: string } },
+      ];
+      expect(ownLookup[0].where.externalId).toBe(
+        'machine-id-baked#SN_guest_BETA',
+      );
     });
 
     it('a SECOND host on the same machine-id gets its OWN pending node, and the original is untouched', async () => {

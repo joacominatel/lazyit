@@ -544,7 +544,9 @@ are not serialized (the detach guard is what keeps that race from destroying any
 `confirmNode` now **claims** `PENDING → CONFIRMED` with a conditional write before it adopts or mints,
 so two concurrent confirms of one node mint one Asset, not two; a failed adopt or mint returns the node
 to `PENDING`. The serial-collision retry stays, as the backstop for two *different* nodes confirming at
-once and for the skipped-adoption case above.
+once and for the skipped-adoption case above. *(2026-10-14, audit follow-up:)* restoring an archived node
+whose Asset another live node now links is a `409` too — a restore re-establishes the link, so it is an
+attach; detach the Asset from the live node, or merge the two, first.
 
 **Amendment (2026-07-31, #1136) — correction: ingestion is inline, there is no report queue.** The
 struck bullet above describes a design that was never built, and the one that was built is the right
@@ -808,6 +810,9 @@ clone keeps reporting the same baked machine-id forever — so its node is keyed
 they are two). The row also carries `specs.identityConflict` naming the value actually reported and the
 peer node it collided with. **This is an identity choice, and it is effectively permanent** — the same
 weight as §2's canonicalisation rules — so it is stated here rather than left in code.
+*(2026-10-14, audit follow-up to AUD-102:)* the serial is agent free text, so when the derived key would
+carry `/container/` or `/guest/` the discriminator's slashes become `_`; every other derived key is
+unchanged, so no existing clone node moves.
 
 **A colliding host's CONTAINERS are not tracked, and that gap is deliberate (#1158, 2026-08-01).** A
 container child's key is `<hostExternalId>/container/<name>`, derived from the **reported**
