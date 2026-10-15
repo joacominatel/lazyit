@@ -39,6 +39,21 @@ type ClientMock = {
 
 const MeilisearchMock = Meilisearch as unknown as jest.Mock;
 
+type Settled = { uid: number; status: string; error?: unknown };
+
+/** The real client's EnqueuedTaskPromise: the enqueue promise plus a `waitTask` that settles the task. */
+const enqueued = (settled: Settled = { uid: 1, status: 'succeeded' }) =>
+  Object.assign(Promise.resolve({ taskUid: settled.uid }), {
+    waitTask: jest.fn(() => Promise.resolve(settled)),
+  });
+
+/** An enqueue that never reached the engine: both the promise and its `waitTask` reject. */
+const enqueueFailed = (err: Error) => {
+  const base = Promise.reject(err);
+  base.catch(() => undefined);
+  return Object.assign(base, { waitTask: jest.fn(() => Promise.reject(err)) });
+};
+
 // A logger double; the service only calls info/error/setContext on it.
 const loggerMock = (): { info: jest.Mock; error: jest.Mock } => ({
   info: jest.fn(),
@@ -161,8 +176,10 @@ describe('SearchService', () => {
       process.env.MEILI_HOST = 'http://localhost:7700';
       process.env.MEILI_MASTER_KEY = 'masterKey';
       index = {
-        addDocuments: jest.fn().mockResolvedValue({ taskUid: 1 }),
-        deleteDocument: jest.fn().mockResolvedValue({ taskUid: 2 }),
+        addDocuments: jest.fn(() => enqueued()),
+        deleteDocument: jest.fn(() =>
+          enqueued({ uid: 2, status: 'succeeded' }),
+        ),
       };
       client = {
         index: jest.fn().mockReturnValue(index),
@@ -200,7 +217,7 @@ describe('SearchService', () => {
 
     it('upsert swallows a rejected addDocuments and logs it (fire-and-forget)', async () => {
       const boom = new Error('meili down');
-      index.addDocuments.mockRejectedValueOnce(boom);
+      index.addDocuments.mockReturnValueOnce(enqueueFailed(boom));
 
       // The call itself must not throw...
       expect(() =>
@@ -219,12 +236,56 @@ describe('SearchService', () => {
     });
 
     it('remove swallows a rejected deleteDocument and logs it (fire-and-forget)', async () => {
-      index.deleteDocument.mockRejectedValueOnce(new Error('meili down'));
+      index.deleteDocument.mockReturnValueOnce(
+        enqueueFailed(new Error('meili down')),
+      );
 
       expect(() => service.remove('users', 'u1')).not.toThrow();
       await Promise.resolve();
       await Promise.resolve();
       expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('upsert logs a task the engine accepted and then FAILED, without blocking the call', async () => {
+      index.addDocuments.mockReturnValueOnce(
+        enqueued({
+          uid: 41,
+          status: 'failed',
+          error: { code: 'invalid_document_id' },
+        }),
+      );
+
+      expect(() =>
+        service.upsert('assets', { id: 'a1', name: 'x' }),
+      ).not.toThrow();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const [meta] = logger.error.mock.calls[0] as [
+        { index: string; id: string; taskUid: number; status: string },
+      ];
+      expect(meta).toMatchObject({
+        index: 'assets',
+        id: 'a1',
+        taskUid: 41,
+        status: 'failed',
+      });
+    });
+
+    it('remove logs a canceled task, and a succeeded one logs nothing', async () => {
+      index.deleteDocument
+        .mockReturnValueOnce(enqueued({ uid: 7, status: 'succeeded' }))
+        .mockReturnValueOnce(enqueued({ uid: 8, status: 'canceled' }));
+
+      service.remove('users', 'u1');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(logger.error).not.toHaveBeenCalled();
+
+      service.remove('users', 'u2');
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const [meta] = logger.error.mock.calls[0] as [{ status: string }];
+      expect(meta.status).toBe('canceled');
     });
 
     it('has NO process-wide write suppression — every write reaches the client (ADR-0069 §10)', () => {
@@ -912,7 +973,9 @@ describe('SearchService', () => {
     });
 
     it('upsertMany swallows a rejected addDocuments and logs every id (fire-and-forget)', async () => {
-      index.addDocuments.mockRejectedValueOnce(new Error('meili down'));
+      index.addDocuments.mockReturnValueOnce(
+        enqueueFailed(new Error('meili down')),
+      );
 
       expect(() =>
         service.upsertMany('purchases', [{ id: 'po1' }, { id: 'po2' }]),

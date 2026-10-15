@@ -24,6 +24,7 @@ import {
   identityDiscriminator,
   inferNodeKind,
   isClonedMachineId,
+  isContainerChildExternalId,
   isGuestChildExternalId,
   isNewerVersion,
   isPlausibleEdge,
@@ -646,6 +647,18 @@ const IDENTITY_CONFLICT_REMEDY: Partial<
   },
   windows: { command: 'sysprep /generalize', identity: 'MachineGuid' },
 };
+
+// A serial is agent free text: swap its slashes only when they would make the key read as a child key (AUD-102).
+export function childSafeDisambiguatedId(
+  externalId: string,
+  discriminator: string,
+): string {
+  const key = disambiguateExternalId(externalId, discriminator);
+  if (!isContainerChildExternalId(key) && !isGuestChildExternalId(key)) {
+    return key;
+  }
+  return disambiguateExternalId(externalId, discriminator.replaceAll('/', '_'));
+}
 
 /**
  * How the nudge opens, and what it calls the colliding fact, for the reporting host's OS family.
@@ -1922,7 +1935,10 @@ export class InfraService {
         report.agentVersion,
       );
     }
-    const externalId = disambiguateExternalId(report.externalId, discriminator);
+    const externalId = childSafeDisambiguatedId(
+      report.externalId,
+      discriminator,
+    );
     // Everything the marker says except WHEN — identical whether it is being stamped or re-stamped.
     const conflictFacts = {
       reportedExternalId: report.externalId,
@@ -4503,7 +4519,7 @@ export class InfraService {
     return removed;
   }
 
-  /** Restore a soft-deleted node. 404 if it never existed; idempotent if already live. */
+  /** Restore a soft-deleted node. 404 if it never existed; idempotent if live; 409 if another live node now links its Asset. */
   async restoreNode(id: string) {
     const node = await this.prisma.infraNode.findFirst({
       where: { id },
@@ -4513,6 +4529,9 @@ export class InfraService {
       throw new NotFoundException(`Infra node ${id} not found`);
     }
     if (node.deletedAt === null) return node; // already live — no-op.
+    if (node.assetId) {
+      await this.assertAssetNotLinkedElsewhere(node.assetId, id);
+    }
     const restored = await this.prisma.infraNode.update({
       where: { id },
       data: { deletedAt: null },

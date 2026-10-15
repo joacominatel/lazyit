@@ -39,6 +39,12 @@ merely lets a user *enter* the Secret Manager ([[0061-secret-manager-zero-knowle
   and an item write take a `FOR SHARE` lock on the `secret_vaults` row and re-check liveness inside their
   transaction; `deleteVault` takes `FOR UPDATE` on the same row before dropping memberships. Whichever
   commits second sees the other's result, so no membership survives under a deleted vault.
+- **Grants are fenced against a concurrent offboarding too (audit 2026-10-10 follow-up).** A human grant
+  takes `FOR SHARE` on the target `users` row before judging it; offboarding takes `FOR UPDATE` on the same
+  row (right after the last-admin advisory lock) before dropping memberships. A grant that lands first is
+  dropped by the offboarding; one that waits re-reads the user as deleted and gets the 404, so no
+  membership survives for a departed user. Offboarding takes `lazyit.admin_set` then the user row and
+  never the vault row; a grant takes the vault row then the user row, so the two cannot deadlock.
 - **Soft-revoke v1 = DROP the row.** Revoking membership **deletes** the row so the member's wrapped DEK
   copy no longer exists; there is no soft-delete tombstone for v1 (a current-state join).
 - **Offboarding hard-drops ALL of a user's memberships (#869).** Offboarding a [[user]]

@@ -1542,7 +1542,8 @@ describe('UsersService', () => {
             let release: () => void = () => undefined;
             const client: TxMock = {
               ...tx,
-              $executeRaw: jest.fn(async () => {
+              $executeRaw: jest.fn(async (sql: TemplateStringsArray) => {
+                if (!sql.join('?').includes('pg_advisory_xact_lock')) return 1;
                 const previous = held;
                 held = new Promise<void>((resolve) => (release = resolve));
                 await previous;
@@ -1600,6 +1601,37 @@ describe('UsersService', () => {
         service.update('u-1', { role: 'VIEWER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('offboarding locks the user row after the admin-set lock and before dropping vault memberships', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'u-1',
+        role: 'MEMBER',
+        isActive: true,
+        deletedAt: null,
+      });
+      tx.user.update.mockResolvedValue({ id: 'u-1', deletedAt: new Date() });
+
+      await service.remove('u-1', { userId: 'actor-99' });
+
+      // Call 1 is the admin-set advisory lock, call 2 the user row lock.
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+      const calls = tx.$executeRaw.mock.calls as Array<
+        [TemplateStringsArray, ...unknown[]]
+      >;
+      expect(calls[0][0].join('?')).toContain('pg_advisory_xact_lock');
+      expect(calls[0][1]).toBe('lazyit.admin_set');
+      expect(calls[1][0].join('?')).toBe(
+        'SELECT 1 FROM "users" WHERE "id" = ? FOR UPDATE',
+      );
+      expect(calls[1][1]).toBe('u-1');
+      const rowLock = tx.$executeRaw.mock.invocationCallOrder[1];
+      expect(rowLock).toBeLessThan(
+        tx.vaultMembership.findMany.mock.invocationCallOrder[0],
+      );
+      expect(rowLock).toBeLessThan(
+        tx.vaultMembership.deleteMany.mock.invocationCallOrder[0],
+      );
     });
 
     it('takes the admin-set lock before counting, inside the write transaction (AUD-041)', async () => {

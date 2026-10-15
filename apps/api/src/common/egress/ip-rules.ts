@@ -268,6 +268,28 @@ function classifyIpv6Bytes(b: Uint8Array): AddressCategory {
   if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) {
     return 'reserved'; // 2001:db8::/32 (documentation)
   }
+  if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0 && b[3] === 0) {
+    return 'reserved'; // 2001::/32 (Teredo — tunnels to an embedded IPv4)
+  }
+  if (b[0] === 0x20 && b[1] === 0x02) {
+    return 'reserved'; // 2002::/16 (6to4 — embeds an IPv4, which may be internal)
+  }
+  if (
+    b[0] === 0x00 &&
+    b[1] === 0x64 &&
+    b[2] === 0xff &&
+    b[3] === 0x9b &&
+    b[4] === 0x00 &&
+    b[5] === 0x01
+  ) {
+    return 'reserved'; // 64:ff9b:1::/48 (local-use NAT64)
+  }
+  if (b[0] === 0xfe && (b[1] & 0xc0) === 0xc0) {
+    return 'reserved'; // fec0::/10 (deprecated site-local)
+  }
+  if (b[0] === 0x3f && b[1] === 0xff && (b[2] & 0xf0) === 0) {
+    return 'reserved'; // 3fff::/20 (documentation)
+  }
   if (
     b[0] === 0x01 &&
     b[1] === 0x00 &&

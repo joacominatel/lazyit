@@ -130,6 +130,29 @@ describe('classifyIp — IPv6 reserved-range edges', () => {
     ['::ffff:255.255.255.255', 'broadcast'],
     ['::ffff:192.0.2.1', 'reserved'],
     ['::ffff:0.0.0.0', 'unspecified'],
+    // 2002::/16 6to4 — the embedded IPv4 may be internal, so the whole prefix is denied
+    ['2002::1', 'reserved'],
+    ['2002:7f00:1::1', 'reserved'],
+    ['2002:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'reserved'],
+    ['2003::1', 'global'],
+    // 2001::/32 Teredo
+    ['2001::1', 'reserved'],
+    ['2001:0:4136:e378:8000:63bf:3fff:fdd2', 'reserved'],
+    ['2001:0:ffff:ffff:ffff:ffff:ffff:ffff', 'reserved'],
+    ['2001:1::1', 'global'],
+    // 64:ff9b:1::/48 local-use NAT64
+    ['64:ff9b:1::1', 'reserved'],
+    ['64:ff9b:1:ffff:ffff:ffff:ffff:ffff', 'reserved'],
+    ['64:ff9b:2::1', 'global'],
+    ['64:ff9b:0:1::1', 'global'],
+    // fec0::/10 deprecated site-local
+    ['fec0::1', 'reserved'],
+    ['feff:ffff::1', 'reserved'],
+    // 3fff::/20 documentation
+    ['3fff::1', 'reserved'],
+    ['3fff:fff:ffff::1', 'reserved'],
+    ['3fff:1000::1', 'global'],
+    ['3ffe:ffff::1', 'global'],
   ];
 
   it.each(cases)('classifies %s as %s', (addr, expected) => {

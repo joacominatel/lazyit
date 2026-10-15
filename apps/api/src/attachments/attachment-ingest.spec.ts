@@ -29,9 +29,21 @@ interface StoredRow {
 /** A minimal in-memory stand-in for the child's raw PrismaClient (only `attachment` is used). */
 function makePrisma() {
   const rows: StoredRow[] = [];
+  const lockedShas: string[] = [];
   let seq = 0;
   return {
     rows,
+    lockedShas,
+    // The blob lock (AUD-021): the second hashed key is the sha256.
+    // eslint-disable-next-line @typescript-eslint/require-await
+    $executeRaw: async (
+      _sql: TemplateStringsArray,
+      _ns: unknown,
+      sha: unknown,
+    ) => {
+      lockedShas.push(String(sha));
+      return 1;
+    },
     attachment: {
       // Distinct-by-sha256 max byteSize — matches the real budget accounting.
       // eslint-disable-next-line @typescript-eslint/require-await
@@ -94,6 +106,7 @@ describe('ingestArticleImage', () => {
     expect(result.ok).toBe(true);
     expect(prisma.rows).toHaveLength(1);
     const row = prisma.rows[0];
+    expect(prisma.lockedShas).toEqual([row.sha256]);
     expect(row.entityId).toBe(ARTICLE_ID);
     expect(row.mimeType).toBe('image/png');
     // The blob exists on disk, keyed by the sha256 of the RE-ENCODED bytes.

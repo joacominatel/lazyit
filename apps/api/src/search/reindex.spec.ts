@@ -2,6 +2,7 @@ import {
   MeiliTaskFailedError,
   reindexIndex,
   REINDEX_BATCH_SIZE,
+  REINDEX_TASK_TIMEOUT_MS,
   type ReindexClient,
 } from './reindex';
 import type { SearchDocument } from './search.documents';
@@ -36,8 +37,10 @@ type Settled = { status: string; error?: { code: string; message: string } };
 function fakeClient(opts: FakeOptions = {}): {
   client: ReindexClient;
   ops: Op[];
+  waits: Array<{ timeout?: number } | undefined>;
 } {
   const ops: Op[] = [];
+  const waits: Array<{ timeout?: number } | undefined> = [];
   const calls = new Map<Op['kind'], number>();
   // A step listed in `failedTask` resolves `failed` with an engine error, as the real client does.
   const outcome = (kind: Op['kind']): Settled => {
@@ -53,9 +56,12 @@ function fakeClient(opts: FakeOptions = {}): {
   };
   const task = (
     run: () => Settled | void,
-  ): { waitTask: () => Promise<Settled> } => ({
+  ): { waitTask: (o?: { timeout?: number }) => Promise<Settled> } => ({
     // `run` may throw (a transport error) or return a non-succeeded task (an engine-side failure).
-    waitTask: () => Promise.resolve(run() ?? { status: 'succeeded' }),
+    waitTask: (o) => {
+      waits.push(o);
+      return Promise.resolve(run() ?? { status: 'succeeded' });
+    },
   });
 
   const client: ReindexClient = {
@@ -114,7 +120,7 @@ function fakeClient(opts: FakeOptions = {}): {
       return Promise.resolve(true);
     },
   };
-  return { client, ops };
+  return { client, ops, waits };
 }
 
 const docs = (...ids: string[]): SearchDocument[] => ids.map((id) => ({ id }));
@@ -123,6 +129,18 @@ describe('reindexIndex (authoritative rebuild)', () => {
   // An injected, fixed run token makes the per-run temp uid (#464) deterministic and assertable.
   const RUN = 'run-fixed';
   const TEMP = `users__reindex_tmp_${RUN}`;
+
+  it('waits on every task with the explicit rebuild timeout, not the client 5 s default', async () => {
+    const { client, waits } = fakeClient();
+
+    await reindexIndex(client, 'articles', docs('a1'), RUN);
+
+    expect(waits.length).toBeGreaterThan(0);
+    expect(waits).toEqual(
+      waits.map(() => ({ timeout: REINDEX_TASK_TIMEOUT_MS })),
+    );
+    expect(REINDEX_TASK_TIMEOUT_MS).toBeGreaterThan(5_000);
+  });
 
   it('builds a fresh temp index, swaps it into place, then drops the temp index', async () => {
     const { client, ops } = fakeClient();
