@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-10-09
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -570,6 +570,21 @@ marker ("updated via re-import") so a re-import always leaves an audit row; `sup
 per-row Meili upsert (the bulk commit reconciles once). Existing `update()` callers (the PATCH controller)
 pass no options → behaviour unchanged. This is the recommended path over the provenance-only fallback
 (which would leave a no-delta re-import with no `AssetHistory` row).
+
+## Amendment — audit hardening (2026-10-14, backend audit 2026-10-10)
+
+- **Plan step is status-gated** like the map step: `POST /imports/:id/plan` accepts only a `MAPPED` or
+  `DRY_RUN` session with a confirmed mapping, else `409`, so a committing, committed or failed session
+  can no longer be rewound to `DRY_RUN`.
+- **Commit retries resume.** The worker marks the session `FAILED` only on the final BullMQ attempt
+  (`attempts: 3`, exponential backoff from 5s); earlier attempts leave it `COMMITTING`, which `commit()`
+  resumes (§8's resume path, previously unreachable).
+- **A dead parse surfaces.** The parse job is enqueued with `jobId = sessionId`; when BullMQ has already
+  failed it (an OOM-killed child, a DB error), `GET /imports/:id` flips a `PENDING`/`PARSING` session to
+  `FAILED` instead of leaving it polling until the 24h GC. A source column named `__proto__` is a graceful
+  parse failure.
+- **§11 per-target check covers categories created through a model:** when the plan creates an
+  `AssetModel` and `modelConfig` carries a category, the commit also requires `category:write`.
 
 **Related:** [[0069-migrator-import.REDESIGN]] · [[0038-jit-user-provisioning]] · [[user]] ·
 [[INVARIANTS]] · [[SEC-072]] · [[0007-flexible-asset-specs-jsonb]] · [[0006-soft-delete-and-auditing]] ·

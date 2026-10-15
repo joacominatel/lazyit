@@ -3,7 +3,7 @@ title: ImportSession
 tags: [domain, entity, migrator, import, transient]
 status: accepted
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-10-14
 ---
 
 # ImportSession
@@ -49,9 +49,12 @@ did lives in [[import-run]].
   `SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS` ([[0069-migrator-import]] §11).
 - **Status-gated transitions.** `status` walks the `ImportSessionStatus` enum
   (`PENDING → PARSING → PARSED → MAPPED → DRY_RUN → COMMITTING → COMMITTED`, plus `FAILED` / `EXPIRED`).
-  Commit is rejected for a non-`DRY_RUN` (and non-resuming-`COMMITTING`) session; the enqueue uses a
-  deterministic `jobId = sessionId` so a double-enqueue can't mint a second [[import-run]] or duplicate
-  assets ([[0069-migrator-import]] wave-4a notes).
+  The mapping step accepts only `PARSED`/`MAPPED`, and the plan step only `MAPPED`/`DRY_RUN` with a
+  mapping (`409` otherwise). Commit is rejected for a non-`DRY_RUN` (and non-resuming-`COMMITTING`)
+  session; the enqueue uses a deterministic `jobId = sessionId` so a double-enqueue can't mint a second
+  [[import-run]] or duplicate assets ([[0069-migrator-import]] wave-4a notes). A commit job flips the
+  session `FAILED` only after its last retry; a parse job BullMQ already failed flips a
+  `PENDING`/`PARSING` session `FAILED` on the next read ([[0069-migrator-import]] audit amendment).
 - **Raw file discarded.** Only the coerced [[import-row]]s persist (under TTL); the file bytes are
   parsed once in a sandboxed forked child and thrown away. `fileHash` retains the SHA-256 (never the
   contents) for audit/idempotency correlation.
