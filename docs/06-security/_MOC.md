@@ -3,7 +3,7 @@ title: Security
 tags: [moc, security]
 status: draft
 created: 2026-05-25
-updated: 2026-09-26
+updated: 2026-10-14
 ---
 
 # 06 — Security
@@ -27,6 +27,7 @@ dependency auditing are later phases.
 | `issues/` | One file per **open** finding, `SEC-NNN-slug.md`. |
 | `closed/` | Findings that were fixed (and re-verified) or dismissed; moved here from `issues/`. |
 | [[deferred]] | Risks that are **already accepted, documented debt** in an ADR — not new findings. |
+| `sweep-YYYY-MM-DD-*.md` | Dated sweep reports: method, verdicts and the findings each one filed. The latest is [[sweep-2026-10-10-backend-audit]], the verified full-backend audit and its remediation backlog. |
 | [[content-security-policy]] | The web app's CSP (#1440): the policy, how it is delivered, the report-only status and what enforcing needs. |
 | [[ISSUE_TEMPLATE]] | The report template. Copy it for each new finding. |
 
