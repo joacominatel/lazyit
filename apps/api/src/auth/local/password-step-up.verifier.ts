@@ -25,8 +25,8 @@ const MAX_TRACKED = 10_000;
 /**
  * The ONE password STEP-UP primitive (SEC-082): the chat's elevated approvals (ADR-0097 decision 4;
  * security.md §6.2; tools §9 "Boundary": the runtime verifies it before calling core's
- * `approve(…, { stepUpVerified: true })`) and the OAuth consent's `lazyit.admin` grant (security.md §6.3)
- * both call it. Provided once by the global `AuthModule`, so a single per-account backoff covers every
+ * `approve(…, { stepUpVerified: true })`), the OAuth consent's `lazyit.admin` grant (security.md §6.3) and
+ * `POST /auth/change-password`'s current-password check (AUD-013) all call it. Provided once by the global `AuthModule`, so a single per-account backoff covers every
  * step-up surface: failures at the consent lock the chat approvals too, and the other way round.
  *
  * The password is checked by the local-auth verifier itself — `LocalCredentialService.verify` (argon2id,

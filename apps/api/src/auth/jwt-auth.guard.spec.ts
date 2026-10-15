@@ -1425,6 +1425,58 @@ describe('JwtAuthGuard', () => {
         warnSpy.mockRestore();
       });
 
+      it('gives up on a userinfo endpoint that never answers and provisions from the token claims (AUD-036)', async () => {
+        delete process.env.OIDC_JWKS_URI;
+        (jose.jwtVerify as jest.Mock).mockResolvedValue({
+          payload: { sub: 'oidc-sub-hung' },
+        });
+        prismaUser.findFirst.mockResolvedValue(null);
+        prismaUser.upsert.mockImplementation(echoUpsertedUser);
+        const warnSpy = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined);
+        const timeout = AbortSignal.timeout.bind(AbortSignal);
+        const timeoutSpy = jest
+          .spyOn(AbortSignal, 'timeout')
+          .mockImplementation(() => timeout(10));
+
+        fetchMock.mockImplementation(
+          (
+            input: unknown,
+            init?: { signal?: AbortSignal },
+          ): Promise<FakeResponse> => {
+            if (String(input).includes('/.well-known/openid-configuration')) {
+              return Promise.resolve(
+                jsonResponse({
+                  userinfo_endpoint:
+                    'https://auth.example.com/oidc/v1/userinfo',
+                }),
+              );
+            }
+            // Accepts the connection and never answers; only the caller's signal ends it.
+            return new Promise<FakeResponse>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () =>
+                reject(new Error('aborted')),
+              );
+            });
+          },
+        );
+
+        const result = await guard.canActivate(
+          makeCtx({ headers: { authorization: 'Bearer access.token' } }),
+        );
+
+        expect(result).toBe(true);
+        expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+        expect(prismaUser.upsert).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { externalId: 'oidc-sub-hung' },
+          }),
+        );
+        timeoutSpy.mockRestore();
+        warnSpy.mockRestore();
+      });
+
       it('does not call discovery or userinfo for a known externalId (no JIT)', async () => {
         delete process.env.OIDC_JWKS_URI;
         (jose.jwtVerify as jest.Mock).mockResolvedValue({
