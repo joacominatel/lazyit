@@ -3,7 +3,7 @@ title: "ADR-0057: Retry-after-fix vs pinned-version replay — how «fix the flo
 tags: [adr, workflow-engine, run, retry, replay, versioning, idempotency]
 status: accepted
 created: 2026-06-11
-updated: 2026-06-11
+updated: 2026-10-14
 deciders: [Joaquín Minatel]
 ---
 
@@ -20,6 +20,12 @@ report #4). It builds on the **already-shipped** run orchestrator
 ledger (ADR-0054 §4 / §8) and the redaction invariant **INV-6** ([[0031-logging-strategy]]). The
 ratified scope ships **both** Option 3 and Option 2 (below) and carries a **localized ADR-0054 §3
 idempotency-key change** (a sequence suffix).
+
+**Amended** — 2026-10-14 (backend audit 2026-10-10, AUD-007 / AUD-069): Decision 3's double-provision
+guard also covers **sibling runs**. Retry and replay-latest are both refused (409) while another run of the
+same `(trigger, accessGrantId)` is in flight or `SUCCEEDED`, serialized by a transaction-scoped advisory
+lock on that pair; and neither re-drives an `ACCESS_GRANTED` run whose grant was revoked or whose grantee
+was offboarded. The `supersedesRunId` lineage and the sequence-suffixed key stand unchanged.
 
 > **Scope of this ADR.** ONE question: when an operator **edits a workflow to fix a broken mapping**
 > (e.g. adds a missing `lastName` field) and then hits **Retry** on a `FAILED` run, the edit is silently

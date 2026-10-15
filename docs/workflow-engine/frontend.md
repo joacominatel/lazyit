@@ -621,7 +621,8 @@ replays the failed run's *frozen* mapping, so an edited definition is silently i
   the same grant (the source `FAILED` run stays immutable), then on success it navigates to the new
   `runId`. Errors are surfaced honestly: **422** = the fail-closed double-provision guard refused (the run
   already provisioned a non-idempotent step → the operator must **re-grant**, not replay); **409** = the
-  source run is no longer `FAILED`.
+  source run is no longer `FAILED`, another run of the same grant is in flight or already `SUCCEEDED`, or
+  the grant was revoked (the toast shows the server's message).
 
 (Per-step single-step `Retry` and a full `Re-run` remain future affordances.)
 
