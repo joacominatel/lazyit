@@ -228,20 +228,6 @@ export class AgentRunOrchestrator {
         'A run is already active in this conversation',
       );
     }
-    // Repair: a run that ended while its step could not be answered leaves it open; answer it before
-    // the new user message so the history stays valid for the provider. (Only with no active run: an
-    // active run's open step is the one its approvals are waiting on.)
-    await this.lifecycle.answerOpenStep(conversation.id, null).catch((err) => {
-      this.logger.error(
-        `AI conversation ${conversation.id}: the open step could not be answered: ${describeError(err)}`,
-      );
-      throw refusal(
-        HttpStatus.CONFLICT,
-        'RUN_IN_PROGRESS',
-        'The previous turn is still being finalized; try again',
-      );
-    });
-
     const turn = this.prompts.turnContext({
       now: new Date(),
       route: input.channel === 'CHAT' ? input.context?.route : null,
@@ -282,6 +268,21 @@ export class AgentRunOrchestrator {
             'A run is already active in this conversation',
           );
         }
+        // Repair: a run that ended while its step could not be answered leaves it open; answer it before
+        // the new user message so the history stays valid for the provider. (Only with no active run: an
+        // active run's open step is the one its approvals are waiting on.)
+        await this.lifecycle
+          .answerOpenStep(conversation.id, null, undefined, tx)
+          .catch((err) => {
+            this.logger.error(
+              `AI conversation ${conversation.id}: the open step could not be answered: ${describeError(err)}`,
+            );
+            throw refusal(
+              HttpStatus.CONFLICT,
+              'RUN_IN_PROGRESS',
+              'The previous turn is still being finalized; try again',
+            );
+          });
         // The pin as it is under the lock (#1373): a model change that committed between the read above
         // and this lock is what the run will use, so the run row records exactly that.
         const pinned = await tx.aiConversation.findUniqueOrThrow({

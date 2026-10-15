@@ -37,11 +37,26 @@ export const AI_CONNECTION_TEST_CODES = {
   providerLayerUnavailable: 'PROVIDER_LAYER_UNAVAILABLE',
 } as const;
 
+const FAILED = 'The connection test failed.';
+
 /**
- * Fixed, user-safe messages. The tester never echoes an upstream body, an SDK message or a credential:
- * a failure cannot become a reflected read (security.md §6.4) or a key leak (§6.5).
+ * Fixed, user-safe messages, one for every code a failure can carry (the run vocabulary and the tester's
+ * own). The tester never echoes an upstream body, an SDK message or a credential: a failure cannot become
+ * a reflected read (security.md §6.4) or a key leak (§6.5).
  */
 const MESSAGES: Record<string, string> = {
+  AI_DISABLED:
+    'The provider is not fully configured — check the provider and its base URL.',
+  FORBIDDEN: FAILED,
+  BUDGET_EXCEEDED: FAILED,
+  CONTEXT_LIMIT: 'The model refused the test prompt as too long.',
+  MAX_STEPS: FAILED,
+  ENGINE_RESTART: FAILED,
+  RUN_IN_PROGRESS: FAILED,
+  CONVERSATION_READ_ONLY:
+    'The provider configuration changed while the test ran; test again.',
+  STEP_UP_REQUIRED: FAILED,
+  WEB_SEARCH_DISABLED: FAILED,
   PROVIDER_AUTH: 'The provider rejected the credentials.',
   PROVIDER_BAD_REQUEST:
     'The provider refused the request — check the model id and the options.',
@@ -56,7 +71,11 @@ const MESSAGES: Record<string, string> = {
     'The model answered but did not call a tool — it cannot drive the assistant.',
   [AI_CONNECTION_TEST_CODES.providerLayerUnavailable]:
     'The provider layer is not available in this build.',
-};
+} satisfies Record<
+  | AiRunErrorCode
+  | (typeof AI_CONNECTION_TEST_CODES)[keyof typeof AI_CONNECTION_TEST_CODES],
+  string
+>;
 
 /** The provider-layer error classes (provider-and-runtime.md §6.3 `AiErrorClass`) mapped to run codes. */
 const CLASS_TO_CODE: Record<string, AiRunErrorCode> = {
@@ -119,7 +138,10 @@ function failure(
     ok: false,
     checks,
     latencyMs,
-    error: { code, message: MESSAGES[code] ?? MESSAGES.PROVIDER_UNAVAILABLE },
+    error: {
+      code,
+      message: Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : FAILED,
+    },
   };
 }
 
