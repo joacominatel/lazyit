@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-10-09
+updated: 2026-10-14
 ---
 
 # Releasing lazyit
@@ -83,7 +83,9 @@ the target is a real release (an annotated `vX.Y.Z` tag on `origin/master`, fetc
 a signature, when present, must not be bad — see *Tag trust* in [[0083-versioning-and-releases]]), fails loud on a missing env var (**never writes
 `.env.prod`**), builds before swapping, health-gates, and — on failure — auto-rolls-back only when
 no migration ran, otherwise stops with a confirm-gated, human-run restore. In-app, an ADMIN only **enqueues an `UpdateRun` and sees the command to run**; the API
-never executes the update.
+never executes the update. Running `update.sh` for a different version than the one enqueued marks that pending
+request `failed` ("Superseded by an operator-run update to vX.Y.Z", never deleted) in the same transaction that
+records the script's own run. Like every `update.sh` fix, this applies from the release after the one that ships it.
 
 > [!warning] Updating **from v2.0.0 or earlier** — the update to v2.1.0 is done by hand (#1458)
 > Up to v2.0.0, `update.sh` required a tag signature that the automated release tags never carry, so it

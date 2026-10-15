@@ -54,7 +54,8 @@ set -eu
 #    NOTE: the copy is of the script in the CURRENT checkout — an update always runs the updater of the
 #    version you are LEAVING, never the target's. A fix to update.sh helps only from the release after it.
 #    Test seam (NEVER set in a real deploy): LAZYIT_UPDATE_LIB_ONLY=1 skips the re-exec and main, so a test
-#    can source this file and call its functions directly (infra/test/update-tag-trust.sh, update-mode-aware.sh).
+#    can source this file and call its functions directly (infra/test/update-tag-trust.sh, update-mode-aware.sh,
+#    update-run-row.sh).
 # =============================================================================
 if [ "${LAZYIT_UPDATE_REEXEC:-}" != "1" ] && [ "${LAZYIT_UPDATE_LIB_ONLY:-}" != "1" ]; then
   _orig_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -186,6 +187,26 @@ terminal_suffix() {
   esac
 }
 
+# Claim the most-recent `requested` row for this target (enqueued by the in-app button); if none, create
+# one so update.sh works standalone (the manual path is the recovery floor). Best-effort.
+claim_update_run() {
+  RUN_ID=$(printf "SELECT id FROM update_runs WHERE status='requested' AND \"toVersion\"='%s' ORDER BY id DESC LIMIT 1;\n" "$TARGET_TAG" | db_psql_scalar | head -n1 | tr -d '[:space:]')
+  if [ -n "$RUN_ID" ]; then
+    info "claiming enqueued UpdateRun #$RUN_ID"
+    stamp "backing_up"
+    printf "UPDATE update_runs SET \"startedAt\"=now() WHERE id=%s AND \"startedAt\" IS NULL;\n" "$RUN_ID" | db_psql_scalar >/dev/null 2>&1 || true
+    return 0
+  fi
+  # Retire a pending request for another target first (one-active-run index); one transaction, so a failed insert keeps it.
+  RUN_ID=$(printf "BEGIN;\nUPDATE update_runs SET status='failed', error='Superseded by an operator-run update to %s.', \"finishedAt\"=now(), \"updatedAt\"=now() WHERE status='requested';\nINSERT INTO update_runs (\"fromVersion\",\"toVersion\",status,\"startedAt\",\"createdAt\",\"updatedAt\") VALUES ('%s','%s','backing_up',now(),now(),now()) RETURNING id;\nCOMMIT;\n" \
+    "$TARGET_TAG" "$FROM_VERSION" "$TARGET_TAG" | db_psql_scalar | head -n1 | tr -d '[:space:]')
+  if [ -n "$RUN_ID" ]; then
+    info "created UpdateRun #$RUN_ID"
+  else
+    warn "could not record an UpdateRun row (non-fatal — the update continues; the UI just won't show live status)."
+  fi
+}
+
 # =============================================================================
 # main
 # =============================================================================
@@ -284,21 +305,7 @@ EOF
   fi
 
   # ---------- claim / create the UpdateRun row ----------
-  # Claim the most-recent `requested` row for this target (enqueued by the in-app button); if none, create
-  # one so update.sh works standalone (the manual path is the recovery floor). Best-effort.
-  RUN_ID=$(printf "SELECT id FROM update_runs WHERE status='requested' AND \"toVersion\"='%s' ORDER BY id DESC LIMIT 1;\n" "$TARGET_TAG" | db_psql_scalar | head -n1 | tr -d '[:space:]')
-  if [ -n "$RUN_ID" ]; then
-    info "claiming enqueued UpdateRun #$RUN_ID"
-    stamp "backing_up"
-    printf "UPDATE update_runs SET \"startedAt\"=now() WHERE id=%s AND \"startedAt\" IS NULL;\n" "$RUN_ID" | db_psql_scalar >/dev/null 2>&1 || true
-  else
-    RUN_ID=$(printf "INSERT INTO update_runs (\"fromVersion\",\"toVersion\",status,\"startedAt\",\"createdAt\",\"updatedAt\") VALUES ('%s','%s','backing_up',now(),now(),now()) RETURNING id;\n" "$FROM_VERSION" "$TARGET_TAG" | db_psql_scalar | head -n1 | tr -d '[:space:]')
-    if [ -n "$RUN_ID" ]; then
-      info "created UpdateRun #$RUN_ID"
-    else
-      warn "could not record an UpdateRun row (non-fatal — the update continues; the UI just won't show live status)."
-    fi
-  fi
+  claim_update_run
 
   # ---------- 3. MANDATORY VERIFIED BACKUP ----------
   step "Backing up the database (mandatory, verified)"
