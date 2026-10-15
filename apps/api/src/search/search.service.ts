@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import type { Permission } from '@lazyit/shared';
 import { Meilisearch } from 'meilisearch';
-import type { MultiSearchParams } from 'meilisearch';
+import type { EnqueuedTaskPromise, MultiSearchParams } from 'meilisearch';
 import type { SearchDocument } from './search.documents';
 import { reindexIndex } from './reindex';
 import {
@@ -110,6 +110,9 @@ const RETRIEVE: Record<SearchIndex, string[]> = {
 
 /** The article-hit home-folder field: the post-filter's key, shipped only on a surviving hit (#1539). */
 const ARTICLE_FOLDER_FIELD = 'categoryId';
+
+// A live task can queue behind a rebuild batch, so the outcome check gets a minute and polls gently.
+const LIVE_SYNC_WAIT = { timeout: 60_000, interval: 250 };
 
 /**
  * Build the Meili-side article folder filter (#598, ADR-0060 §5). Pins the article query to the caller's
@@ -229,17 +232,12 @@ export class SearchService {
   upsert(index: SearchIndex, doc: SearchDocument): void {
     if (!this.client) return;
     this.journal(index, doc.id, doc);
-    this.client
-      .index(index)
-      .addDocuments([doc], { primaryKey: 'id' })
-      .catch((err: unknown) => {
-        // A dropped sync leaves this row stale/unsearchable until its next write or a `reindex:all`
-        // (issue #370). Log it loudly with index + id so the gap is diagnosable from the logs.
-        this.logger.error(
-          { err, index, id: doc.id, op: 'upsert' },
-          'Dropped Meilisearch sync: failed to index document (row stale until next write or reindex)',
-        );
-      });
+    // A dropped sync leaves this row stale/unsearchable until its next write or a reindex (issue #370).
+    this.watchSync(
+      this.client.index(index).addDocuments([doc], { primaryKey: 'id' }),
+      { index, id: doc.id, op: 'upsert' },
+      'Dropped Meilisearch sync: failed to index document (row stale until next write or reindex)',
+    );
   }
 
   /**
@@ -250,15 +248,11 @@ export class SearchService {
   upsertMany(index: SearchIndex, docs: SearchDocument[]): void {
     if (!this.client || docs.length === 0) return;
     for (const doc of docs) this.journal(index, doc.id, doc);
-    this.client
-      .index(index)
-      .addDocuments(docs, { primaryKey: 'id' })
-      .catch((err: unknown) => {
-        this.logger.error(
-          { err, index, ids: docs.map((doc) => doc.id), op: 'upsert' },
-          'Dropped Meilisearch sync: failed to index documents (rows stale until next write or reindex)',
-        );
-      });
+    this.watchSync(
+      this.client.index(index).addDocuments(docs, { primaryKey: 'id' }),
+      { index, ids: docs.map((doc) => doc.id), op: 'upsert' },
+      'Dropped Meilisearch sync: failed to index documents (rows stale until next write or reindex)',
+    );
   }
 
   /**
@@ -268,16 +262,36 @@ export class SearchService {
   remove(index: SearchIndex, id: string): void {
     if (!this.client) return;
     this.journal(index, id, null);
-    this.client
-      .index(index)
-      .deleteDocument(id)
-      .catch((err: unknown) => {
-        // A dropped removal leaves a GHOST document searchable until a `reindex:all` evicts it
-        // (issue #370 / ghost-doc note in reindex.ts). Log it loudly with index + id.
+    // A dropped removal leaves a GHOST document searchable until a reindex evicts it (issue #370).
+    this.watchSync(
+      this.client.index(index).deleteDocument(id),
+      { index, id, op: 'remove' },
+      'Dropped Meilisearch sync: failed to remove document (ghost remains until reindex)',
+    );
+  }
+
+  // Not awaited, so the request is never held; waitTask resolves (not rejects) a task that ended failed.
+  private watchSync(
+    task: EnqueuedTaskPromise,
+    context: Record<string, unknown>,
+    message: string,
+  ): void {
+    task
+      .waitTask(LIVE_SYNC_WAIT)
+      .then((done) => {
+        if (done.status === 'succeeded') return;
         this.logger.error(
-          { err, index, id, op: 'remove' },
-          'Dropped Meilisearch sync: failed to remove document (ghost remains until reindex)',
+          {
+            ...context,
+            taskUid: done.uid,
+            status: done.status,
+            taskError: done.error,
+          },
+          message,
         );
+      })
+      .catch((err: unknown) => {
+        this.logger.error({ err, ...context }, message);
       });
   }
 

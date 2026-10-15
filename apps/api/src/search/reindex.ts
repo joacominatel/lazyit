@@ -24,6 +24,9 @@ import type { SearchIndex } from './search.service';
 /** Documents are added in chunks of this size so a single payload never blows Meili's limit. */
 export const REINDEX_BATCH_SIZE = 1000;
 
+// Per task: the client's 5 s default timed out a 1000-document batch on a busy engine and failed the rebuild.
+export const REINDEX_TASK_TIMEOUT_MS = 120_000;
+
 /** The finished task `waitTask()` resolves to (a structural subset of the client's `Task`). */
 interface SettledTask {
   status: string;
@@ -32,7 +35,7 @@ interface SettledTask {
 
 /** An enqueued Meili task whose completion can be awaited (the `EnqueuedTaskPromise` shape). */
 interface AwaitableTask {
-  waitTask(): Promise<SettledTask>;
+  waitTask(options?: { timeout?: number }): Promise<SettledTask>;
 }
 
 /**
@@ -55,7 +58,7 @@ export class MeiliTaskFailedError extends Error {
 
 /** Await a task and throw unless it succeeded. */
 async function settle(task: AwaitableTask, step: string): Promise<void> {
-  const done = await task.waitTask();
+  const done = await task.waitTask({ timeout: REINDEX_TASK_TIMEOUT_MS });
   if (done.status !== 'succeeded') {
     throw new MeiliTaskFailedError(step, done);
   }

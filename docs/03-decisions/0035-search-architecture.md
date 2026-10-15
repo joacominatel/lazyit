@@ -273,6 +273,14 @@ audit.
   index from the request, and `SearchService.search` drops it again (an absent principal reads nothing).
   The `users` facet keeps its stricter rule as built: a human caller whose role holds `user:read`. The
   web palette hides each filter chip without its index's read permission.
+- **Live sync sees an engine-side failure; rebuild waits get an explicit timeout (audit follow-up,
+  2026-10-14).** The live `upsert`/`upsertMany`/`remove` `.catch` only saw an enqueue error, so a task the
+  engine accepted and then ended `failed` or `canceled` was silent. Each live write now also awaits its task
+  in the background (`waitTask`, 60 s timeout, 250 ms polling) and logs the same "Dropped Meilisearch
+  sync" error with the task uid, status and engine error. The request is still never held (§3), and the
+  hourly reconcile stays the repair. A rebuild now waits up to **120 s per task**
+  (`REINDEX_TASK_TIMEOUT_MS` in `reindex.ts`) instead of the client's 5 s default, which timed out a
+  1000-document batch on a slow or busy engine and failed the whole rebuild.
 
 ## Deferred (explicit)
 
