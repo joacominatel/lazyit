@@ -26,6 +26,10 @@ The `start.sh` choice is two-way (built-in accounts or your own IdP), and the
 `auth.` block and the `zitadel_db` backup leave §Infra consequences. `AUTH_MODE` (`shim | local | oidc`),
 its immutability and the persisted mode marker are unchanged. The `IdentityProvider` seam is retired, so
 `LocalIdentityProvider` no longer exists; local-mode checks read `AUTH_MODE` directly.
+**Amended** — 2026-10-14 (backend audit 2026-10-10): §3 change-password's current-password check goes
+through the step-up verifier and shares its per-account backoff (`429 STEP_UP_RATE_LIMITED`); rehash-on-login
+writes only over the hash it verified; §5 the recovery CLI also marks every outstanding reset token used; §1
+first setup creates the admin and the mode marker in one transaction.
 **Supersedes** the "no first-party auth" posture of [[0016-auth-strategy-deferred]].
 **Amends** [[0037-idp-choice-zitadel-byoi]], [[0038-jit-user-provisioning]],
 [[0039-authjs-v5-frontend-oidc]], [[0043-zitadel-source-of-truth]],
