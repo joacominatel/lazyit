@@ -105,8 +105,10 @@ Print buttons, and the server-side filter bar. A new **Audit log** nav item sits
 - INV-10 is preserved and pinned by a unit test (the secret read/export returns metadata only and never
   selects the ciphertext columns).
 - **Ceilings / follow-ups (deliberate v1 shortcuts):**
-  - Offset paging (like Reports v1). The export is streamed so bulk is fine; a keyset cursor is a clean
-    future upgrade (these are real tables with a stable autoincrement `id`, unlike the UNION view).
+  - Offset paging for the on-screen page read (like Reports v1). The streamed CSV export pages by a
+    keyset cursor on the autoincrement `id` instead (`id < last id`, newest first), so rows appended
+    while an export runs are neither skipped nor duplicated (AUD-033, 2026-10-14). These are real tables
+    with a stable `id`, unlike the UNION view.
   - The frontend action-chip label is a locale-neutral title-case of the enum token (no per-locale
     label map). Add `audit.action.*` i18n keys if a translated label is ever wanted.
   - The `vaultId`/`itemId`/`serviceAccountId` filters are URL/deep-link driven (surfaced as active-filter
