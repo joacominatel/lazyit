@@ -1,5 +1,9 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { LocationsService } from './locations.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -338,12 +342,28 @@ describe('LocationsService', () => {
     name?: string;
     type?: string;
     parentId: string | null;
+    /** Archived: hidden from reads unless the call carries the includeSoftDeleted escape hatch. */
+    deleted?: boolean;
   };
   const seedTree = (nodes: Node[]) => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
     location.findFirst.mockImplementation(
-      ({ where }: { where: { id: string } }) =>
-        Promise.resolve(byId.get(where.id) ?? null),
+      ({
+        where,
+        includeSoftDeleted,
+      }: {
+        where: { id: string };
+        includeSoftDeleted?: boolean;
+      }) => {
+        const node = byId.get(where.id);
+        if (!node || (node.deleted && !includeSoftDeleted)) {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve({
+          ...node,
+          deletedAt: node.deleted ? new Date() : null,
+        });
+      },
     );
   };
 
@@ -411,6 +431,79 @@ describe('LocationsService', () => {
       service.update('child', { parentId: 'ghost' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(location.update).not.toHaveBeenCalled();
+  });
+
+  // AUD-080: a live node under an archived ancestor is a valid parent; only the parent must be live.
+  it('update accepts a live parent whose ancestor is archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq' },
+      { id: 'rack', parentId: null },
+    ]);
+    location.update.mockResolvedValue({ id: 'rack', parentId: 'room5' });
+
+    await service.update('rack', { parentId: 'room5' });
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'rack' },
+      data: { parentId: 'room5' },
+    });
+  });
+
+  it('create accepts a live parent whose ancestor is archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq' },
+    ]);
+    location.create.mockResolvedValue({ id: 'rack', parentId: 'room5' });
+
+    await service.create({ name: 'Rack', type: 'RACK', parentId: 'room5' });
+
+    expect(location.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('update still refuses a cycle that runs through an archived ancestor (400)', async () => {
+    // building → floor (archived) → room. Moving building under room would close a loop once the floor
+    // is restored, so the walk must see through the archived floor.
+    seedTree([
+      { id: 'building', parentId: null },
+      { id: 'floor', parentId: 'building', deleted: true },
+      { id: 'room', parentId: 'floor' },
+    ]);
+
+    await expect(
+      service.update('building', { parentId: 'room' }),
+    ).rejects.toThrow(
+      'A location cannot be moved under one of its own descendants.',
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('restore refuses (409) a location whose parent is still archived', async () => {
+    seedTree([
+      { id: 'hq', parentId: null, deleted: true },
+      { id: 'room5', parentId: 'hq', deleted: true },
+    ]);
+
+    await expect(service.restore('room5')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(location.update).not.toHaveBeenCalled();
+  });
+
+  it('restore brings back a location whose parent is live', async () => {
+    seedTree([
+      { id: 'hq', parentId: null },
+      { id: 'room5', parentId: 'hq', deleted: true },
+    ]);
+    location.update.mockResolvedValue({ id: 'room5', parentId: 'hq' });
+
+    await service.restore('room5');
+
+    expect(location.update).toHaveBeenCalledWith({
+      where: { id: 'room5' },
+      data: { deletedAt: null },
+    });
   });
 
   it('findOneWithAncestors resolves the path ordered root→self inclusive', async () => {

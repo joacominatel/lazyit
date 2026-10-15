@@ -3,7 +3,7 @@ title: Location
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-09-24
+updated: 2026-10-14
 ---
 
 # Location
@@ -35,12 +35,24 @@ employee". Answers half of the core audit question "what do we have and **where 
   any node, or be a root). `parentId = null` is a root. The **one** structural rule is **no
   cycles**: a location can be neither its own parent nor moved under one of its own descendants —
   enforced in `LocationsService` (the DB can't express it), rejected `400`. A missing or
-  soft-deleted `parentId` is likewise rejected `400`. On a (hypothetical) hard delete of a parent
+  soft-deleted `parentId` is likewise rejected `400`. Only the parent itself must be live: a live
+  location that sits under an archived ancestor is a valid parent, and the cycle walk passes through
+  archived ancestors, so an archived link cannot hide a loop that restoring it would close (audit
+  2026-10-10, AUD-080). On a (hypothetical) hard delete of a parent
   the FK is `onDelete: SetNull`, so children become roots — mirrors `Asset.locationId`; normal
   deletes are soft.
 - Every location is **classified** by a required `type` — hardcoded enum for now, with
   user-managed custom types deferred (see the Known-debt note below and [[0017-location-type-enum]]).
   The same `type` enum doubles as the hierarchy node **kind** (no separate kind field).
+- **Soft delete leaves children and assets in place (open — SEC-041).** Deleting a location only
+  stamps `deletedAt`: child locations, assets, consumable deliveries and purchase orders keep pointing
+  at it, and the `SetNull` FK never fires. Whether a delete should be refused while it is in use or
+  detach its children is an open product decision. Until then, children of an archived location stay
+  live and read as roots from that break.
+- **Restore needs a live parent (AUD-080).** Restoring a location whose parent is still soft-deleted
+  is a `409`: restore the parent first. Restores do not cascade
+  ([[0041-soft-delete-reuse-and-restore]]). Locations already left under an archived parent keep
+  loading as before.
 
 ## Conventions
 
@@ -87,7 +99,8 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
   (the last element is the location itself). The web breadcrumb renders `path` directly. A
   soft-deleted ancestor ends the walk (the location is treated as a root from that break).
 - **Create / update** accept an optional `parentId` (nullable). `null`/omitted = root; a
-  cycle-forming or missing/soft-deleted parent → `400`.
+  cycle-forming or missing/soft-deleted parent → `400`. An archived ancestor further up does not
+  block the write.
 - Ancestry is a **bounded parent-walk** (cap 32 levels, cycle-free by construction; the cap only
   guards against corrupt data and is logged if hit).
 
@@ -96,8 +109,8 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 `apps/api/src/locations/` (`LocationsModule`): `GET /locations` (excludes soft-deleted, returns
 `parentId`), `GET /locations/:id` (returns the entity **+ ancestry `path`**), `POST /locations`,
 `PATCH /locations/:id` (both accept optional `parentId`), `DELETE /locations/:id` (soft delete),
-`POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`,
-[[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
+`POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`, `409` while the parent is still
+deleted, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
 via Swagger ([[0018-api-documentation-swagger]]).
 
 **Web:** `locations/[id]` is the location detail page — the place's facts plus the "assets here"
