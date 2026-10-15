@@ -3164,25 +3164,17 @@ export class InfraService {
           data: { endedAt: now },
         });
         if (!canonicalEdge) {
-          try {
-            await tx.infraEdge.create({
-              data: {
+          // Not a caught P2002: a failed statement aborts the Postgres tx and COMMIT rolls back (AUD-060).
+          await tx.infraEdge.createMany({
+            data: [
+              {
                 sourceId: canonicalNodeId,
                 targetId: childEdge.targetId,
                 kind: 'RUNS_ON',
               },
-            });
-          } catch (err) {
-            // A concurrent report opened it first — the invariant held; not a failure.
-            if (
-              !(
-                err instanceof Prisma.PrismaClientKnownRequestError &&
-                err.code === 'P2002'
-              )
-            ) {
-              throw err;
-            }
-          }
+            ],
+            skipDuplicates: true,
+          });
         }
       }
     });

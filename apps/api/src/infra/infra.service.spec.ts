@@ -206,12 +206,13 @@ describe('InfraService', () => {
   let permissions: { hasAll: Mock };
   // The tx client the $transaction callback receives (RUNS_ON migration + the #1141 merge write
   // through it — the merge needs both writes in one transaction or the dedup index refuses them).
-  let txEdge: { create: Mock; updateMany: Mock };
+  let txEdge: { create: Mock; createMany: Mock; updateMany: Mock };
   let txNode: { update: Mock };
 
   beforeEach(async () => {
     txEdge = {
       create: jest.fn(),
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     };
     txNode = { update: jest.fn().mockResolvedValue({ id: 'node-keep' }) };
@@ -8400,10 +8401,13 @@ describe('InfraService', () => {
         where: { id: 'edge-child' },
         data: { endedAt: expect.any(Date) as Date },
       });
-      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host.
-      expect(txEdge.create).toHaveBeenCalledWith({
-        data: { sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' },
+      // …and the RUNS_ON lands on the canonical node, pointing at the same hypervisor host — as an
+      // ON CONFLICT DO NOTHING insert, never a caught P2002, which would abort the transaction (AUD-060).
+      expect(txEdge.createMany).toHaveBeenCalledWith({
+        data: [{ sourceId: 'node-vm', targetId: 'node-hv', kind: 'RUNS_ON' }],
+        skipDuplicates: true,
       });
+      expect(txEdge.create).not.toHaveBeenCalled();
       // The duplicate is off the map and off the index; no suspicion nudge for a resolved join.
       expect(search.remove).toHaveBeenCalledWith('infra', 'node-guest');
       expect(notifications.emit).not.toHaveBeenCalled();
