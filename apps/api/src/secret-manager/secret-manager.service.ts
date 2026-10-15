@@ -1301,6 +1301,8 @@ export class SecretManagerService {
     tx: PrismaTypes.TransactionClient,
     userId: string,
   ): Promise<void> {
+    // Offboarding holds this row FOR UPDATE while it drops memberships, so a grant waits it out and re-reads.
+    await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR SHARE`;
     const user = await tx.user.findFirst({
       where: { id: userId, isActive: true, directoryOnly: false },
       select: { id: true },

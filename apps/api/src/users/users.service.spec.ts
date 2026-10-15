@@ -57,6 +57,8 @@ type TxMock = {
   };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
+  // The offboarding row lock (FOR UPDATE on the user) that vault grants wait on.
+  $queryRaw: jest.Mock;
   accessGrant: { updateMany: jest.Mock; create: jest.Mock };
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
@@ -144,6 +146,7 @@ describe('UsersService', () => {
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
@@ -1600,6 +1603,36 @@ describe('UsersService', () => {
         service.update('u-1', { role: 'VIEWER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('offboarding locks the user row after the admin-set lock and before dropping vault memberships', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'u-1',
+        role: 'MEMBER',
+        isActive: true,
+        deletedAt: null,
+      });
+      tx.user.update.mockResolvedValue({ id: 'u-1', deletedAt: new Date() });
+
+      await service.remove('u-1', { userId: 'actor-99' });
+
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      const [sql, userId] = tx.$queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        string,
+      ];
+      expect(sql.join('?')).toBe(
+        'SELECT "id" FROM "users" WHERE "id" = ? FOR UPDATE',
+      );
+      expect(userId).toBe('u-1');
+      const rowLock = tx.$queryRaw.mock.invocationCallOrder[0];
+      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(rowLock);
+      expect(rowLock).toBeLessThan(
+        tx.vaultMembership.findMany.mock.invocationCallOrder[0],
+      );
+      expect(rowLock).toBeLessThan(
+        tx.vaultMembership.deleteMany.mock.invocationCallOrder[0],
+      );
     });
 
     it('takes the admin-set lock before counting, inside the write transaction (AUD-041)', async () => {

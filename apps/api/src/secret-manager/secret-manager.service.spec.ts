@@ -899,6 +899,7 @@ describe('SecretManagerService', () => {
       await svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP });
       expect(db.locks).toEqual([
         'SELECT "id" FROM "secret_vaults" WHERE "id" = ? FOR SHARE',
+        'SELECT "id" FROM "users" WHERE "id" = ? FOR SHARE',
       ]);
 
       db.locks = [];
@@ -910,6 +911,37 @@ describe('SecretManagerService', () => {
   });
 
   describe('grant target eligibility (AUD-042)', () => {
+    it('share-locks the target user row before judging it, so a grant waits out an offboarding', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      db.locks = [];
+
+      await svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP });
+
+      expect(db.locks).toContain(
+        'SELECT "id" FROM "users" WHERE "id" = ? FOR SHARE',
+      );
+    });
+
+    it('refuses (404) a target an offboarding soft-deleted while the grant waited on the user row lock', async () => {
+      const { svc, db } = build();
+      const alice = human('alice');
+      const vaultId = await makeVault(svc, alice);
+      const realQueryRaw = db.$queryRaw;
+      db.$queryRaw = (strings: TemplateStringsArray) => {
+        if (strings.join('?').includes('"users"')) {
+          db.userState.carol = { deletedAt: new Date() };
+        }
+        return realQueryRaw(strings);
+      };
+
+      await expect(
+        svc.grantMembership(alice, vaultId, { userId: 'carol', ...WRAP }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(db.memberships.some((m) => m.userId === 'carol')).toBe(false);
+    });
+
     it.each([
       ['a missing user', null],
       ['a soft-deleted user', { deletedAt: new Date() }],
