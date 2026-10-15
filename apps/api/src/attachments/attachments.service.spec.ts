@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -61,6 +61,7 @@ type PrismaMock = {
   tx: {
     attachment: PrismaMock['attachment'];
     purchaseOrderEvent: PrismaMock['purchaseOrderEvent'];
+    $executeRaw: jest.Mock;
   };
 };
 
@@ -71,6 +72,8 @@ describe('AttachmentsService (ADR-0082)', () => {
   let root: string;
   let prisma: PrismaMock;
   let budgetRows: BudgetRow[];
+  /** sha256 values whose advisory blob lock an open transaction holds (released when it ends). */
+  let heldBlobLocks: Set<string>;
   let articles: { findOne: jest.Mock; assertAttachmentWritable: jest.Mock };
   let queue: { add: jest.Mock };
   let service: AttachmentsService;
@@ -89,6 +92,7 @@ describe('AttachmentsService (ADR-0082)', () => {
     process.env.ATTACHMENTS_DIR = root;
     delete process.env.ATTACHMENTS_MAX_TOTAL_MB;
     budgetRows = [];
+    heldBlobLocks = new Set();
     prisma = {
       attachment: {
         create: jest.fn((args: { data: object }) => ({
@@ -131,9 +135,25 @@ describe('AttachmentsService (ADR-0082)', () => {
     };
     // A distinct transaction client sharing the delegates: a write made through `tx` is in the transaction.
     const purchaseOrderEvent = { create: jest.fn().mockResolvedValue({}) };
-    prisma.tx = { attachment: prisma.attachment, purchaseOrderEvent };
-    prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) =>
-      cb(prisma.tx),
+    prisma.tx = {
+      attachment: prisma.attachment,
+      purchaseOrderEvent,
+      $executeRaw: jest.fn((_sql: unknown, _ns: string, sha: string) => {
+        heldBlobLocks.add(sha);
+        return 1;
+      }),
+    };
+    prisma.$transaction.mockImplementation(
+      async (cb: (tx: unknown) => unknown) => {
+        const before = new Set(heldBlobLocks);
+        try {
+          return await cb(prisma.tx);
+        } finally {
+          for (const sha of heldBlobLocks) {
+            if (!before.has(sha)) heldBlobLocks.delete(sha);
+          }
+        }
+      },
     );
     articles = {
       findOne: jest.fn().mockResolvedValue({ id: ARTICLE_ID }),
@@ -291,6 +311,28 @@ describe('AttachmentsService (ADR-0082)', () => {
       const shard = await readdir(join(root, sha.slice(0, 2)));
       expect(shard).toEqual([sha]); // exactly one blob
       expect(await readdir(join(root, 'tmp'))).toEqual([]); // both tmp copies gone
+    });
+
+    it('AUD-021: a dedup hit keeps its blob when a reclaimer runs before the row commits', async () => {
+      const sha = sha256Of(PDF_BYTES);
+      // The blob exists with no live row yet (e.g. its only row was deleted long ago).
+      await mkdir(join(root, sha.slice(0, 2)), { recursive: true });
+      await writeFile(blobPathFor(sha, root), PDF_BYTES);
+      // A concurrent GC unlinks the blob unless the upload holds its lock while inserting the row.
+      prisma.attachment.create.mockImplementationOnce(
+        async (args: { data: { sha256: string } }) => {
+          if (!heldBlobLocks.has(args.data.sha256)) {
+            await rm(blobPathFor(args.data.sha256, root), { force: true });
+          }
+          return { id: 'clatt0000000000000000000', ...args.data };
+        },
+      );
+
+      const file = await stageUpload(PDF_BYTES, 'again.pdf');
+      await service.upload('ASSET', ASSET_ID, file, HUMAN);
+
+      expect(existsSync(blobPathFor(sha, root))).toBe(true);
+      expect(heldBlobLocks.size).toBe(0);
     });
 
     it('rejects a service-account uploader (403 — an uploader is a human)', async () => {

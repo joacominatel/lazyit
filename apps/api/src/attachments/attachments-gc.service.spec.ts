@@ -34,10 +34,14 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
   /** Article/version bodies the mock "contains" queries scan — the pin-2 reference set. */
   let articleBodies: string[];
   let versionBodies: string[];
+  /** sha256 values whose advisory blob lock another transaction (an in-flight upload) holds. */
+  let lockedByUpload: Set<string>;
   let prisma: {
     attachment: { findMany: jest.Mock; count: jest.Mock; update: jest.Mock };
     article: { count: jest.Mock };
     articleVersion: { count: jest.Mock };
+    $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
   let service: AttachmentsGcService;
 
@@ -55,6 +59,7 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
     rows = [];
     articleBodies = [];
     versionBodies = [];
+    lockedByUpload = new Set();
     prisma = {
       attachment: {
         // Dispatch on the where-shape: pass 1 (live ARTICLE candidates), pass 2 (soft-deleted rows),
@@ -108,11 +113,13 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
             return args.take ? page.slice(0, args.take) : page;
           },
         ),
-        // Live-row count per sha (pin 3) — the extension would inject deletedAt: null.
+        // Row count per sha: live only (the extension injects deletedAt: null) unless includeSoftDeleted.
         count: jest.fn(
-          (args: { where: { sha256: string } }) =>
+          (args: { where: { sha256: string }; includeSoftDeleted?: boolean }) =>
             rows.filter(
-              (r) => r.sha256 === args.where.sha256 && r.deletedAt === null,
+              (r) =>
+                r.sha256 === args.where.sha256 &&
+                (args.includeSoftDeleted || r.deletedAt === null),
             ).length,
         ),
         update: jest.fn(
@@ -137,6 +144,11 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
               .length,
         ),
       },
+      $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(prisma)),
+      // pg_try_advisory_xact_lock: refused while an in-flight upload holds the sha.
+      $queryRaw: jest.fn((_sql: unknown, _ns: string, sha: string) => [
+        { locked: !lockedByUpload.has(sha) },
+      ]),
     };
     service = new AttachmentsGcService(
       prisma as never,
@@ -318,6 +330,58 @@ describe('AttachmentsGcService — the four-pin contract (ADR-0082 §6)', () => 
     expect(existsSync(staleTmp)).toBe(false);
     expect(existsSync(freshTmp)).toBe(true); // in-flight upload untouched
     expect(existsSync(rowless)).toBe(false);
+  });
+
+  it('AUD-021 pass 2: a blob an upload is deduping onto (lock held, row not yet committed) is not unlinked', async () => {
+    rows.push({
+      id: 'cldead000000000000000000',
+      sha256: SHARED_SHA,
+      entityType: 'ASSET',
+      createdAt: OLD,
+      deletedAt: OLD,
+    });
+    await writeBlob(SHARED_SHA);
+    lockedByUpload.add(SHARED_SHA);
+
+    const result = await service.sweep(NOW);
+    expect(result.blobsUnlinked).toBe(0);
+    expect(existsSync(blobPathFor(SHARED_SHA, root))).toBe(true);
+
+    // Once the upload is gone and still no live row exists, the next sweep reclaims it.
+    lockedByUpload.clear();
+    expect((await service.sweep(NOW)).blobsUnlinked).toBe(1);
+  });
+
+  it('AUD-021 pass 3: a row-less blob an upload is deduping onto is not removed as a crash leftover', async () => {
+    const sha = 'dd' + '4'.repeat(62);
+    const blob = await writeBlob(sha);
+    lockedByUpload.add(sha);
+
+    const result = await service.sweep(NOW);
+    expect(result.staleFilesRemoved).toBe(0);
+    expect(existsSync(blob)).toBe(true);
+  });
+
+  it('AUD-021 pass 3: a blob whose row committed after the directory scan is kept (re-checked under the lock)', async () => {
+    const sha = 'dd' + '4'.repeat(62);
+    const blob = await writeBlob(sha);
+    // The directory scan's existence probe ran before the upload's row committed.
+    prisma.attachment.findMany.mockImplementationOnce(() => []);
+    prisma.attachment.findMany.mockImplementationOnce(() => []);
+    prisma.attachment.findMany.mockImplementationOnce(() => {
+      rows.push({
+        id: 'clnew0000000000000000000',
+        sha256: sha,
+        entityType: 'ASSET',
+        createdAt: NOW,
+        deletedAt: null,
+      });
+      return [];
+    });
+
+    const result = await service.sweep(NOW);
+    expect(result.staleFilesRemoved).toBe(0);
+    expect(existsSync(blob)).toBe(true);
   });
 
   it('AUD-049 pass 1: orphans past more than one page of pinned images are still reached', async () => {
