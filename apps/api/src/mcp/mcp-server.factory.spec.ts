@@ -52,6 +52,7 @@ const CALLER: McpCaller = {
     clientId: 'lzc_1',
     clientName: 'Claude Code',
     scopes: ['lazyit.read', 'lazyit.write'],
+    lastUsedAt: new Date(),
   },
   ceiling: ['read', 'write'],
   rateKey: 'grant:g1',

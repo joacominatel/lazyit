@@ -21,6 +21,7 @@ const caller = (over: Partial<McpCaller> = {}): McpCaller => ({
     clientId: 'lzc_1',
     clientName: 'Claude Code',
     scopes: ['lazyit.read', 'lazyit.write'],
+    lastUsedAt: new Date(),
   },
   ceiling: ['read', 'write'],
   rateKey: 'grant:ckgrant1',
@@ -110,6 +111,7 @@ describe('McpConnectionNoticeService — the first-use security notice (security
           clientId: null,
           clientName: 'laptop',
           scopes: ['lazyit.read'],
+          lastUsedAt: null,
         },
       }),
     );
@@ -125,13 +127,14 @@ describe('McpConnectionNoticeService — the first-use security notice (security
           clientId: 'lzc_2',
           clientName: null,
           scopes: ['lazyit.read', 'lazyit.write', 'lazyit.admin'],
+          lastUsedAt: new Date(),
         },
       }),
     );
     expect(emit.mock.calls[1][0].summary).toMatch(/including admin actions/);
   });
 
-  it('never announces a Service Account, and never a grant older than the bell’s retention', async () => {
+  it('never announces a Service Account, and never re-announces a used grant older than the bell’s retention', async () => {
     expect(
       await notices.announce(
         caller({
@@ -144,6 +147,29 @@ describe('McpConnectionNoticeService — the first-use security notice (security
     grantCreatedAt = new Date(Date.now() - NOTIFICATION_RETENTION_MS - 1000);
     expect(await notices.announce(caller())).toBe(false);
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('announces the first use of a grant never used before, however old it is (AUD-014)', async () => {
+    grantCreatedAt = new Date(Date.now() - NOTIFICATION_RETENTION_MS - 1000);
+    expect(
+      await notices.announce(
+        caller({
+          kind: 'personal',
+          grant: {
+            id: 'ckgrant4',
+            clientId: null,
+            clientName: 'idle token',
+            scopes: ['lazyit.read'],
+            lastUsedAt: null,
+          },
+        }),
+      ),
+    ).toBe(true);
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeKey: 'mcp.client_connected:ckgrant4',
+      }),
+    );
   });
 
   it('is fire-and-forget: a failure never reaches the request', async () => {

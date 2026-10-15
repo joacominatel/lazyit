@@ -246,6 +246,7 @@ function grantFor(userId: string, scopes: OAuthScope[]) {
       clientId: 'lzc_claude',
       clientName: 'Claude Code',
       scopes,
+      lastUsedAt: new Date(),
     },
     resource: `${ISSUER}/mcp`,
     expiresAt: new Date(Date.now() + 3_600_000),
