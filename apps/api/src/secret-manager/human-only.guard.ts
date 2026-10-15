@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { type Principal, isServicePrincipal } from '../auth/principal';
+import { SERVICE_ACCOUNT_FORBIDDEN_MESSAGE } from '../auth/service-principal-forbidden.guard';
 
 /**
  * Refuses a SERVICE PRINCIPAL outright on every Secret Manager route (403), regardless of its grants.
+ * Infra and instance-update routes reuse it too, hence the feature-neutral message.
  *
  * The Secret Manager is HUMAN-ONLY by construction (ADR-0061): a vault is a zero-knowledge crypto
  * boundary whose DEK is wrapped to a per-user X25519 keypair, and a service account has no keypair and
@@ -34,9 +36,7 @@ export class HumanOnlyGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { principal?: Principal }>();
     if (isServicePrincipal(request.principal)) {
-      throw new ForbiddenException(
-        'Service accounts cannot access the Secret Manager (vaults are human-only).',
-      );
+      throw new ForbiddenException(SERVICE_ACCOUNT_FORBIDDEN_MESSAGE);
     }
     return true;
   }
