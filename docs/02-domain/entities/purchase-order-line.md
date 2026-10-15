@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-14
 ---
 
 # PurchaseOrderLine
@@ -73,7 +73,9 @@ line, the units that came out of it.
   PATCH carries only one of the two). `POST /purchase-orders/:id/lines/:lineId/cancel-remaining { quantity?,
   reason? }` (#1473) cancels every pending unit by default, never more than are pending (`400`), is a `409`
   when nothing is pending, locks the line row, and logs `UNITS_CANCELLED`; a plain line update still
-  records the change before and after.
+  records the change before and after. Every line update locks in the same order — the purchase (`FOR KEY
+  SHARE`, `FOR UPDATE` for a kind change), then the line `FOR UPDATE` — and checks the quantities it reads
+  under that lock, so it serializes with a cancel and never leaves more cancelled than ordered.
 - **quantity × unitPrice must fit `MONEY_MAX`** on write (`400`), so every derived total stays exact.
 - The **kind** of a line that received units — live linked assets, stock moved in, or seats applied —
   cannot change (`409`): its received units would silently stop counting.
@@ -101,7 +103,7 @@ by the API and available to the web):
 | `purchaseCost` | `purchaseCost` **and** `purchaseCurrency` | the line's unit price with the purchase's currency label — cost and currency move together |
 | `warrantyEnd` | `warrantyEnd` | that purchase date + `warrantyMonths` (calendar months, UTC, clamped to the month's last day) |
 | `company` | `company` | the purchase's company |
-| `modelId` | `modelId` | the line's asset model (writes a `MODEL_CHANGED` history event too) |
+| `modelId` | `modelId` | the line's asset model while live (writes a `MODEL_CHANGED` history event too). An archived one reads `UNAVAILABLE` in the preview, and a link that would apply it is a `400` with nothing written |
 
 A field the purchase has no value for is never applied (never a clear). The diff action per asset and field
 is `FILL` (asset empty), `REPLACE` (different value; cost compares amount **and** label, trimmed and

@@ -37,6 +37,14 @@ const TRAILING_LABEL = /[^\d)\-−]*$/;
 /** The "whole amount" mark of Spanish-language documents: `$ 1.500.-` is 1500, not a negative. */
 const WHOLE_AMOUNT_MARK = /[.,]-$/;
 
+/** A separator right before the digits is the number's own (`$ .75`), unless it ends an abbreviation (`Imp.1.500`). */
+function stripLeadingLabel(text: string): string {
+  const label = (LEADING_LABEL.exec(text) as RegExpExecArray)[0];
+  const ownSeparator =
+    /(?:^|[^\p{L}])[.,]$/u.test(label) && /\d/.test(text.charAt(label.length));
+  return text.slice(ownSeparator ? label.length - 1 : label.length);
+}
+
 /**
  * The integer groups of an amount grouped by spaces or apostrophes (`1 234 567,89`) are checked like
  * separator grouping: a first group of 1–3 digits, then groups of exactly 3, the decimals only after the
@@ -57,7 +65,7 @@ function validSpaceGrouping(text: string): boolean {
 function numberPart(
   text: string,
 ): { negative: boolean; digits: string; whole: boolean } | null {
-  let core = text.trim().replace(LEADING_LABEL, '').replace(TRAILING_LABEL, '');
+  let core = stripLeadingLabel(text.trim()).replace(TRAILING_LABEL, '');
   const whole = WHOLE_AMOUNT_MARK.test(core);
   if (whole) core = core.slice(0, -2);
   const negative = /^[-−(]/.test(core) || /[-−)]$/.test(core);

@@ -128,6 +128,7 @@ function makeDb() {
       groupBy: jest.fn().mockResolvedValue([]),
     },
     location: { findFirst: jest.fn() },
+    assetModel: { findFirst: jest.fn().mockResolvedValue({ id: MODEL }) },
     attachment: { findMany: jest.fn().mockResolvedValue([]) },
     consumable: { findFirst: jest.fn() },
     consumableMovement: {
@@ -291,6 +292,24 @@ describe('link preview — current vs purchase value per field (ux-proposal §3.
       BadRequestException,
     );
   });
+
+  it('an archived line model is not offered: the model reads UNAVAILABLE (AUD-029)', async () => {
+    const { service, reads } = setup();
+    reads.assetModel.findFirst.mockResolvedValue(null);
+    reads.asset.findMany.mockResolvedValue([
+      assetRow(A1, { modelId: OLD_MODEL }),
+    ]);
+    const preview = await service.linkPreview(PO, LINE, [A1]);
+    expect(reads.assetModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: MODEL, deletedAt: null } }),
+    );
+    expect(preview.values.modelId).toBeNull();
+    expect(preview.assets[0].fields.modelId).toEqual({
+      current: OLD_MODEL,
+      purchase: null,
+      action: 'UNAVAILABLE',
+    });
+  });
 });
 
 describe('link assets', () => {
@@ -354,6 +373,53 @@ describe('link assets', () => {
       warrantyEnd: '2029-03-10T00:00:00.000Z',
       purchaseOrderLineId: LINE,
     });
+  });
+
+  it('refuses to apply an archived line model (400), writing nothing (AUD-029)', async () => {
+    const { service, tx, reads } = setup();
+    reads.assetModel.findFirst.mockResolvedValue(null);
+    reads.asset.findMany.mockResolvedValue([
+      assetRow(A1, { modelId: OLD_MODEL }),
+    ]);
+
+    await expect(
+      service.linkAssets(
+        PO,
+        LINE,
+        { assetIds: [A1], apply: ['modelId', 'company'] },
+        member,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(tx.asset.update).not.toHaveBeenCalled();
+    expect(tx.assetHistory.create).not.toHaveBeenCalled();
+    expect(tx.purchaseOrderEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('an archived line model still links, as long as the model is not applied (AUD-029)', async () => {
+    const { service, tx, reads } = setup();
+    reads.assetModel.findFirst.mockResolvedValue(null);
+    reads.asset.findMany.mockResolvedValue([
+      assetRow(A1, { modelId: OLD_MODEL }),
+      // Already on the archived model: SAME, nothing to write.
+      assetRow(A2),
+    ]);
+
+    const result = await service.linkAssets(
+      PO,
+      LINE,
+      {
+        assetIds: [A1, A2],
+        apply: ['company'],
+        applyByAsset: { [A2]: ['modelId'] },
+      },
+      member,
+    );
+
+    expect(result.linked.map((a) => a.id)).toEqual([A1, A2]);
+    expect(written(tx.asset.update)).toEqual([
+      { company: 'Acme S.A.', purchaseOrderLineId: LINE },
+      { purchaseOrderLineId: LINE },
+    ]);
   });
 
   it('no apply list: the link alone, nothing copied', async () => {
