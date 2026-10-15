@@ -5,6 +5,8 @@ import type {
 } from '../../common/egress';
 import { WebhookOutStepHandler } from './webhook-out.handler';
 import {
+  CREDENTIAL_UNAVAILABLE_REASON,
+  CredentialUnavailableError,
   freezeMappingContext,
   type StepContext,
   type WorkflowMappingContext,
@@ -220,5 +222,68 @@ describe('WebhookOutStepHandler.execute', () => {
     expect(result.status).toBe('FAILED');
     expect(result.retryable).toBe(false);
     expect(result.metadata?.errorClass).toBe('http-4xx');
+  });
+});
+
+describe('WebhookOutStepHandler — robustness (AUD-071, AUD-072)', () => {
+  const signed: WebhookOutConnectionConfig = {
+    kind: 'WEBHOOK_OUT',
+    url: 'https://hooks.example.com/abc',
+    signatureHeader: 'X-Signature',
+  };
+
+  it('fails with a config error when the signing secret is unavailable', async () => {
+    const handler = new WebhookOutStepHandler();
+    const { transport, captured } = makeTransport({ status: 200 });
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.execute(
+      ctxFor(signed, makeStep(), () =>
+        Promise.reject(new CredentialUnavailableError()),
+      ),
+    );
+
+    expect(captured).toHaveLength(0);
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') {
+      expect(result.retryable).toBe(false);
+      expect(result.metadata?.errorClass).toBe('config');
+      expect(result.metadata?.reason).toBe(CREDENTIAL_UNAVAILABLE_REASON);
+    }
+  });
+
+  it('cancels the body of a non-2xx response', async () => {
+    let cancelled = false;
+    const transport: EgressTransport = () =>
+      Promise.resolve({
+        status: 502,
+        statusText: '',
+        headers: new Headers(),
+        toResponse: () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                controller.enqueue(new Uint8Array(8));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+            { status: 502 },
+          ),
+        discard: () => {},
+      });
+    const handler = new WebhookOutStepHandler();
+    handler.egressOptions = { transport, lookup: publicLookup };
+
+    const result = await handler.execute(
+      ctxFor(
+        { kind: 'WEBHOOK_OUT', url: 'https://hooks.example.com/abc' },
+        makeStep(),
+      ),
+    );
+
+    expect(result.status).toBe('FAILED');
+    expect(cancelled).toBe(true);
   });
 });

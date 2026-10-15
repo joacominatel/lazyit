@@ -14,6 +14,7 @@ import {
   type SecretEnvelope,
 } from './secret.service';
 import type { PrismaService } from '../../prisma/prisma.service';
+import { CredentialUnavailableError } from '../handlers/step-handler';
 
 // A deterministic 32-byte key (64 hex chars) for the round-trip tests.
 const TEST_KEY_HEX =
@@ -276,7 +277,22 @@ describe('SecretService — write-only CRUD (redaction)', () => {
     expect(await service.revealById(created.id)).toBe('val');
     await service.softDelete(created.id);
     expect(prisma.store.get(created.id)!.deletedAt).toBeInstanceOf(Date);
-    await expect(service.revealById(created.id)).rejects.toThrow(/not found/);
+    await expect(service.revealById(created.id)).rejects.toBeInstanceOf(
+      CredentialUnavailableError,
+    );
+  });
+
+  it('revealById maps an undecryptable secret to CredentialUnavailableError (AUD-071)', async () => {
+    const created = await service.create({
+      applicationId: 'app_1',
+      label: 'token',
+      value: 'val',
+    });
+    const row = prisma.store.get(created.id)!;
+    row.ciphertext = flipFirstBase64Byte(row.ciphertext);
+    await expect(service.revealById(created.id)).rejects.toBeInstanceOf(
+      CredentialUnavailableError,
+    );
   });
 
   it('rotate / softDelete throw for a missing or already-deleted secret', async () => {

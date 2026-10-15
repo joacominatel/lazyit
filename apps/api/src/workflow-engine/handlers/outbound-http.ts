@@ -1,4 +1,5 @@
 import { EgressError } from '../../common/egress';
+import { CredentialUnavailableError, type RevealSecret } from './step-handler';
 
 /**
  * Shared outbound-HTTP support for the REST + WEBHOOK_OUT handlers: URL assembly, correlation-id
@@ -33,11 +34,7 @@ async function readCappedBodyText(
   if (declared !== null) {
     const length = Number(declared);
     if (Number.isFinite(length) && length > maxBytes) {
-      try {
-        await res.body?.cancel();
-      } catch {
-        /* best-effort socket release */
-      }
+      await discardBody(res);
       return null;
     }
   }
@@ -102,7 +99,8 @@ const CORRELATION_KEYS = [
  * Join a connection `baseUrl` with a (already-rendered, relative) step `path`. The HOST is fixed by
  * the config's baseUrl and is never templatable (anti-SSRF, ADR-0054 §6.4); only the path is appended,
  * with slashes normalized. Rendered placeholders in `path` are already percent-encoded by the mapper,
- * so a ctx value can never inject a new path segment / change the origin.
+ * so a ctx value can never inject a `/` or change the origin. A `.`/`..` value is still a whole
+ * segment, which the REST handler refuses via {@link hasDotSegment}.
  */
 export function joinUrl(baseUrl: string, path: string): string {
   const base = baseUrl.replace(/\/+$/, '');
@@ -114,6 +112,37 @@ export function joinUrl(baseUrl: string, path: string): string {
     return `${base}${path}`;
   }
   return `${base}/${path.replace(/^\/+/, '')}`;
+}
+
+/** A `.`/`..` segment (any spelling the URL parser collapses) would climb out of the base path (AUD-016). */
+export function hasDotSegment(path: string): boolean {
+  const pathOnly = path.split(/[?#]/, 1)[0];
+  return pathOnly
+    .split(/[/\\]/)
+    .some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment));
+}
+
+/** Release an unread response body so its socket is not held until the egress deadline (AUD-072). */
+export async function discardBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    /* best-effort socket release */
+  }
+}
+
+/** A revoked or undecryptable credential becomes `{ ok: false }` so the handler fails the step (AUD-071). */
+export async function tryRevealSecret(
+  revealSecret: RevealSecret,
+): Promise<{ ok: true; secret: string | null } | { ok: false }> {
+  try {
+    return { ok: true, secret: await revealSecret() };
+  } catch (err) {
+    if (err instanceof CredentialUnavailableError) {
+      return { ok: false };
+    }
+    throw err;
+  }
 }
 
 /** The hostname of a URL (never the full URL with query, which can carry secrets). Best-effort. */
@@ -136,10 +165,12 @@ export async function extractCorrelationId(
 ): Promise<string | null> {
   const location = res.headers.get('location');
   if (location) {
+    await discardBody(res);
     return location;
   }
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('json')) {
+    await discardBody(res);
     return null;
   }
   const text = await readCappedBodyText(res, MAX_CORRELATION_BODY_BYTES);
