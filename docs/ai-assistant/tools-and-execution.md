@@ -1382,7 +1382,11 @@ person could catch a wrong target. A category is taken by id (`categoryId`, from
   `currentStock: 0`. Ref: `consumable created`.
 - `consumable_update` (write·D) — `consumable` plus any of name, sku, categoryId, description, minStock,
   unit, notes (at least one; never the stock) — the fields are taken from the route's own
-  `UpdateConsumableSchema`, so they cannot drift. Preview: target + `before → after` per sent field,
+  `UpdateConsumableSchema`, so they cannot drift. `null` clears sku, categoryId, description, minStock
+  (the low-stock alert goes off) and notes (#1584), and each of those fields says so in its input
+  description. Adding that text changed the tool's input-schema hash; #1584's nullable fields already
+  changed it in the same release, so `consumable_update` approvals left pending on v2.1.0 do not survive
+  the upgrade either way. Preview: target + `before → after` per sent field,
   precondition `{ consumable, updatedAt }`. Ref: `consumable updated`.
 - `consumable_record_movement` (write, not idempotent) — `consumable`, `type` (`IN` | `OUT` |
   `ADJUSTMENT`), `quantity` (positive int4), `reason`, `notes`. The preview shows `currentStock`
