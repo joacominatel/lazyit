@@ -2069,7 +2069,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         await tools.invoke('kb_folder_create', blind, mcp(member)),
       ).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
       expect(prisma.articleCategory.create).not.toHaveBeenCalled();
-      // The route itself accepts it — the refusal is the tool's.
+      // The route refuses it too, with its missing-parent 400 (ADR-0060 §10).
       expect(
         await viaNetwork(member, {
           method: 'create',
@@ -2077,7 +2077,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
           url: '/article-categories',
           shape: { body: { name: 'Hidden', parentId: F.admins } },
         }),
-      ).toBe('ok');
+      ).toBe(400);
     });
 
     it("a missing parent is the route's own 400 before any card", async () => {
