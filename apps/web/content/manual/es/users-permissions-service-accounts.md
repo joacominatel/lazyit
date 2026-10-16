@@ -48,7 +48,11 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
   vencimiento, rotar su token, restaurarla o ampliar su **acceso a IA** cuando la cuenta tendría un
   permiso que te falta. Renombrarla, quitarle permisos, desactivarla, acortar su vencimiento y
   revocarla siempre funcionan. Los administradores tienen todos los permisos, así que esto nunca los
-  limita.
+  limita. Una excepción: **Reportar inventario de servidores (agente)** siempre se puede otorgar,
+  porque solo reporta inventario e instalar agentes ya requiere **Cambiar la configuración de la
+  instancia**, así que puedes seguir
+  [instalando agentes de reporte](/help/assets-topology-reporting-agent). Todos los demás permisos,
+  incluido **Obtener secretos de forma programática (cuenta de servicio)**, siguen limitados.
 
 ## El token (se muestra una sola vez)
 

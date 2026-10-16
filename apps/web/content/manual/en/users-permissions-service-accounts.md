@@ -42,7 +42,10 @@ use. It **never** inherits a role and is never admin-equivalent.
   adding a permission, turning an account back on, extending its expiry, rotating its token, restoring
   it or raising its **AI access** is refused when the account would hold a permission you lack. Renaming it, removing permissions,
   turning it off, shortening its expiry and revoking it always work. Admins hold every permission, so
-  this never limits them.
+  this never limits them. One exception: **Report server inventory (agent)** can always be granted,
+  because it only reports inventory and installing agents already needs **Change instance settings**,
+  so you can still [install reporting agents](/help/assets-topology-reporting-agent). Every other
+  permission, **Fetch secrets programmatically (service account)** included, stays capped.
 
 ## The token (shown once)
 
