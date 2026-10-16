@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Application
@@ -19,8 +19,8 @@ the access-management pillar of lazyit ([[problem-space]]). See [[0023-access-ma
 ## Relationships
 
 - **grouped by** an optional [[application-category]] (`categoryId`, optional FK,
-  `onDelete: SetNull` — deleting a category detaches its applications, like
-  [[asset-model]] → [[asset-category]]).
+  `onDelete: SetNull`; deleting a category with live applications needs one resolution for all of
+  them — detach or move to another category, AUD-085).
 - **granted via** N [[access-grant]]s (to [[user]]s).
 - **licensed by** N `LICENSE` [[purchase-order-line]]s (`PurchaseOrderLine.applicationId`, `SetNull` on that
   side, #1477).

@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-06-28
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -79,9 +79,8 @@ directly by the IT team.
 
 ## Decision
 
-- **Application**: a user-managed `ApplicationCategory` (FK optional, `onDelete: SetNull` — deleting
-  a category detaches its apps, like [[asset-model]] → [[asset-category]]; **no 409 guard**, unlike
-  [[article-category]] whose FK is `Restrict`). Fields: `name`, `description?`, `url?`, `vendor?`,
+- **Application**: a user-managed `ApplicationCategory` (FK optional, `onDelete: SetNull`; deleting a
+  category in use needs one resolution for its applications — see the 2026-10-15 amendment). Fields: `name`, `description?`, `url?`, `vendor?`,
   `categoryId?`, `isCritical` (default `false`), `metadata?` (jsonb), `notes?`; soft delete +
   timestamps. `url` stays a lenient free string (scheme-less internal hosts like `vpn.corp.local`
   are intentionally allowed), **but rejects non-http(s) schemes** — `javascript:` / `data:` /
@@ -182,6 +181,28 @@ the next sweep is the only time a grant is "expired but still active". `updateEx
 - A possible future refinement: an explicit `revokedReason`/`revokedVia` enum to distinguish
   manual vs automatic vs workflow revokes in the UI, instead of inferring "automatic" from a null
   actor. Not built — the null-actor sentinel is sufficient today.
+
+## Amendment — delete with one resolution (audit 2026-10-10, AUD-024 / AUD-085, 2026-10-15)
+
+The original decision said deleting a category "detaches its apps" with no `409` guard. It never did:
+the delete is a soft delete, an `UPDATE`, so the `SetNull` FK never fired and applications kept a
+dangling `categoryId` that a restore silently re-linked. The CEO decided the user chooses, once, what
+happens to everything affected — never row by row.
+
+- **Contract** (`@lazyit/shared`): `DeleteResolutionSchema` — `{ strategy: 'detach' }` or
+  `{ strategy: 'move', targetId }` — sent on the DELETE's query string, like the custom-status delete
+  ([[0101-custom-asset-statuses]]). `GET /:id/delete-impact` previews the counts and the first 50 rows
+  of each kind the caller may read.
+- **In use and no strategy → `409`** with `code: DELETE_RESOLUTION_REQUIRED` and `dependents` counts:
+  the safe default for older clients, scripts and the AI tools, which now ask for the strategy too.
+- **Applied in the delete's transaction**, to live rows only; history rows the domain already writes
+  for that change are written (none for application or consumable categories; `LOCATION_CHANGED` and
+  the purchase `UPDATED` event for locations). A restore re-links nothing.
+- **"Create another one"** is not an API mode: the client creates the target, then deletes with `move`.
+- **Scope:** application categories, consumable categories ([[0034-consumables-design]]) and locations
+  ([[location]]). Asset categories and asset models are unchanged (SEC-041 stays open for them).
+
+Rows archived before this change keep their dangling reference; nothing is backfilled.
 
 Related: [[application]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

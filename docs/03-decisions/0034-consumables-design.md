@@ -3,7 +3,7 @@ title: "ADR-0034: Consumables design (cached stock + append-only movements)"
 tags: [adr]
 status: accepted
 created: 2026-05-26
-updated: 2026-10-02
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -42,7 +42,8 @@ below 0 raises **409** and the whole transaction rolls back (no movement, no cac
 ## Decision
 
 - **`ConsumableCategory`** — user-managed grouping (`name` unique, `description?`, `icon?`, `order?`,
-  soft delete). Like [[application-category]]: FK `onDelete: SetNull`, **no 409 guard** on delete.
+  soft delete). Like [[application-category]]: FK `onDelete: SetNull`; a delete with live consumables
+  needs one resolution for all of them (detach or move), amended by [[0023-access-management-design]].
 - **`Consumable`** — `name`, `sku?` (unique), `categoryId?` (`SetNull`), `description?`,
   `currentStock` (Int, cached, default 0, **never edited directly**), `minStock?` (reorder
   threshold), `unit` (free string, default `"units"`), `notes?`, soft delete + timestamps.
