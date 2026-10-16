@@ -218,3 +218,71 @@ Still open: AUD-002 is a **pending CEO decision** (the subset rule for `user:man
 `users.service.ts` (history in the same transaction, the last-admin guard under the `lazyit.admin_set`
 lock, AUD-019/041) but not who may assign or act on which role. The escalation paths described above are
 unchanged.
+
+## Triage note (2026-10-16, after the audit decision round)
+
+Still open at **Medium**. Most of the escalation paths above are closed, by CEO decisions of 2026-10-15
+and 2026-10-16. Two `settings:manage` paths remain, and each needs a CEO decision.
+
+**Fixed** (re-checked on `dev` at `cab67672f`):
+- **Role ceiling on `user:manage`** (recommendation 1, PR #1601 `18a04017b`).
+  - Every Users write refuses with 403 `ROLE_CEILING_EXCEEDED` when the role it grants, or the role of the
+    user it acts on, ranks above the caller's (`ADMIN > MEMBER > VIEWER`). This covers create, clone, a
+    role change, any update, reset, provisioning, offboard and restore.
+  - The rule is `assertCeiling` (`apps/api/src/users/users.service.ts:184-194`), built on `canManageRole`
+    from `@lazyit/shared`.
+  - The target's role is re-read `FOR UPDATE` inside the write transaction, so a concurrent promotion
+    cannot slip between the check and the write.
+  - A service-account actor is capped below ADMIN, and a call with no actor fails closed at VIEWER.
+  - The AI and MCP tools inherit the rule.
+  - AUD-040 landed in the same PR: the last-admin guard counts only admins who can sign in.
+- **The permission matrix and the directory connection are ADMIN-only** (recommendation 2, as the stopgap
+  it describes; PR #1606 `9bc75c4f5`).
+  - `PUT /config/permissions`, `PUT /directory/connection` and `POST /directory/sync` carry
+    `AdminOnlyGuard` next to `settings:manage`. The guard returns 403 `ADMIN_REQUIRED` to anyone who is not
+    a human ADMIN.
+  - Locations: `apps/api/src/config/config.controller.ts:156-158` and
+    `apps/api/src/directory/directory.controller.ts:66-68`, `:93-95`.
+  - The reads stay on `settings:manage`. The ADMIN-only rule lasts until custom roles (#1560) bring a
+    `role:manage`.
+- **Clone copies only what the caller could grant by hand** (recommendation 3, PR #1606).
+  - Assignments need `asset:write` and access grants need `accessGrant:grant`.
+  - A row the caller cannot copy is reported in `skipped` with reason `permission_required`
+    (`users.service.ts:1646` onward).
+- **A promotion revokes one-time credentials** (PR #1606).
+  - When `PATCH /users/:id` raises the role, judged against the locked row (`users.service.ts:937-944`),
+    the same transaction does three things: it clears a temporary password not yet replaced
+    (`mustChangePassword` with a hash), bumps the session and MCP epochs, and marks every live
+    `PasswordResetToken` used (`revokeOneTimeCredentials`, `:1310-1329`). `ROLE_CHANGED` records
+    `credentialsRevoked: true`.
+  - The admin reset-link mint re-runs the locked ceiling check inside its own transaction, so a mint
+    cannot race a promotion.
+- **UI copy** (recommendation 4, PR #1609 `cab67672f`).
+  - The `settingsManage` consequence now says that the matrix and the directory connection stay
+    admin-only (`apps/web/messages/en/settings.json:629`, and `es`).
+  - The `userManage` copy no longer claims the holder can grant ADMIN.
+  - The matrix and the directory form render read-only for non-admins.
+
+**Remaining, pending a CEO decision:**
+1. **`PUT /smtp` is `settings:manage`-only** (`apps/api/src/smtp/smtp.controller.ts:59-61`).
+   - A delegate can repoint outbound mail at a server they control.
+   - They then trigger the public `POST /auth/forgot-password` for an ADMIN
+     (`apps/api/src/auth/local/password-lifecycle.controller.ts:118`).
+   - The reset link travels through their server, and they take over the ADMIN account. This applies in
+     local mode.
+   - Fix direction: the same `AdminOnlyGuard` on the SMTP write.
+2. **Service-account token minting exceeds the delegate's own role.**
+   - Every service-accounts route is `settings:manage`-only
+     (`apps/api/src/service-accounts/service-accounts.controller.ts:80-158`).
+   - The service does not compare the SA's verbs with the caller's role, so a MEMBER delegate can mint
+     a token holding SA-grantable verbs MEMBER lacks.
+   - These tokens stay below ADMIN (SEC-011, INV-SA-3) and outlive the delegation.
+   - Fix direction: cap the SA verbs at the caller's own set, or make the route ADMIN-only.
+
+**Known limit (accepted with the promotion fix).** A promotion cannot revoke a temporary password that the
+user has already replaced. Once replaced, it is the user's own password, and lazyit does not record who
+issued the original. A delegate who reset a user and then watched them sign in does not learn the new
+password, so this does not reopen the path.
+
+No data change on update. An instance that delegated these verbs keeps its rows. The holders lose only
+what is listed under Fixed.

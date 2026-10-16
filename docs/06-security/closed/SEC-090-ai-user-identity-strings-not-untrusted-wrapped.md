@@ -140,3 +140,15 @@ Re-run on `dev` at `03d715e66` on 2026-10-15: `node node_modules/.bin/jest` over
   article titles in `asset_get`, taxonomy refusal messages) is outside this finding's scope.
 - Wrapping changes the AI tool descriptions, so the toolset hash changes and conversations started
   before the update become read-only (`VERSION_CHANGED`, by design). No stored data changes.
+
+## Correction (2026-10-16, audit decision round)
+
+The first residual-risk point above no longer holds. The CEO decided to wrap the caller's own name as well
+(consistent with the assigned assets), and PR #1599 (`bfd522a3f`, commit `5d4b5eafa`
+`fix(api): wrap the caller's own name in session_context`) does so: `apps/api/src/ai/tools/context.tools.ts:75-79`
+wraps `firstName` and `lastName` with `untrusted()`, so `session_context` has no exception left. A turn that
+calls it is never auto-approved, which is the accepted cost. The system-prompt display name ("Acting as …") is
+still not wrapped; it is sanitized by its own hardening (`inline()`, [[tools-and-execution]] §12). Test:
+`apps/api/src/ai/tools/context.tools.spec.ts:156` (`wraps the caller's own name, so even a caller with no assets
+marks the turn`). The tool description did not change, so this commit alone does not change the toolset hash.
+The text above is kept as it was written on 2026-10-15.

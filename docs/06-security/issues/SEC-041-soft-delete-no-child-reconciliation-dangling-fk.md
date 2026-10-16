@@ -158,3 +158,35 @@ What the remediation did change around it:
 - AUD-023 (PRs #1569, #1573, #1582) closed the KB folder analogue (folder remove and the article
   writes check emptiness and liveness under the folder lock). KB folders are outside this finding's three
   modules.
+
+## Triage note (2026-10-16, after the audit decision round)
+
+Still open at **Low**. The location part is fixed; the asset-category and asset-model parts are not.
+
+**Done: locations** (AUD-024, CEO decision, PR #1603 `f70c3232f`; the web dialog in PR #1608 `323ec1aed`).
+- `DELETE /locations/:id` no longer strands anything. While live assets, child locations or open
+  purchases point at the location, the delete needs **one** resolution for all of them:
+  `?strategy=detach` clears `asset.locationId` and makes the children top-level, and
+  `?strategy=move&targetId=` re-points them to one live location that is neither the location itself
+  nor one of its descendants.
+- Without a strategy the API answers **409** `DELETE_RESOLUTION_REQUIRED` with the counts.
+  `GET /locations/:id/delete-impact` previews what is affected.
+- The resolution and the soft delete run in one transaction under the location-tree lock
+  (`apps/api/src/locations/locations.service.ts:246-293`). Each affected asset gets a `LOCATION_CHANGED`
+  history row.
+- Received or closed purchases and consumable deliveries keep their reference as history.
+- Restoring the location later re-links nothing.
+- Application and consumable categories got the same rule (AUD-085). They are outside this finding's
+  three modules.
+- Tests: `apps/api/src/locations/locations.service.spec.ts:734` (`refuses (409) to delete a location still
+  in use when no strategy is given, with the counts`) and `:823` (move re-points the assets and open
+  purchases and re-parents the children).
+
+**Remaining (open)**, re-checked on `dev` at `cab67672f`:
+- `asset-categories.service.ts:82-88` still soft-deletes with no in-use guard and no detach.
+  `AssetModel.categoryId` keeps pointing at the archived category.
+- `asset-models.service.ts:161-166` does the same. `Asset.modelId` keeps pointing at the archived model.
+- A model write still does not check `categoryId` against a live category (`:132`, FK only).
+- The web keeps the direct delete for asset categories, because the API has no resolution for them.
+- Closing these needs the same product call per parent (one resolution, or a refusal). The delete-resolution
+  contract in `packages/shared` (`DeleteResolutionSchema`) is the natural pattern to extend.
