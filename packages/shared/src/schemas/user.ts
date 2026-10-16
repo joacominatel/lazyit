@@ -18,6 +18,13 @@ import { PasswordPolicySchema, requireAtLeastOneKey } from "./primitives";
 export const RoleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
 export type Role = z.infer<typeof RoleSchema>;
 
+const ROLE_RANK: Record<Role, number> = { VIEWER: 0, MEMBER: 1, ADMIN: 2 };
+
+/** SEC-088 role ceiling: `user:manage` grants and acts only at or below the caller's role (ADR-0040). */
+export function canManageRole(callerRole: Role, targetRole: Role): boolean {
+  return ROLE_RANK[targetRole] <= ROLE_RANK[callerRole];
+}
+
 /**
  * Where a user's role currently lives, for the auth epic (ADR-0043). Informational only — the API's
  * RolesGuard ALWAYS authorizes from the local DB role (ADR-0043 decision #1); this never gates
@@ -198,9 +205,8 @@ export const CreateUserSchema = z.strictObject({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   // RBAC role (ADR-0040; default flipped to VIEWER by ADR-0043). Optional; omitted → server default
-  // VIEWER (least-privilege read-only). Accepting it here is SAFE only because the Users controller is
-  // ADMIN-gated by the RolesGuard: a non-admin never reaches this endpoint, so they cannot set or
-  // escalate a role. Privilege management is an ADMIN-only operation.
+  // VIEWER (least-privilege read-only). `user:manage` can be delegated to MEMBER or VIEWER (ADR-0046),
+  // so the API refuses a role above the caller's own (403 ROLE_CEILING_EXCEEDED, see canManageRole).
   role: RoleSchema.optional(),
   // Employee/file number (ADR-0058). Optional + normalized (trim). Unique among LIVE rows (the partial
   // unique index); a duplicate among live users surfaces as a 409 via the PrismaExceptionFilter.
@@ -290,8 +296,8 @@ export const UpdateUserSchema = requireAtLeastOneKey(
       firstName: z.string().trim().min(1).max(100),
       lastName: z.string().trim().min(1).max(100),
       isActive: z.boolean(),
-      // RBAC role (ADR-0040). Same ADMIN-gated safety as CreateUserSchema: only an ADMIN can reach
-      // the Users controller, so a non-admin can never escalate their own (or anyone's) role.
+      // RBAC role (ADR-0040). Same ceiling as CreateUserSchema; nobody changes their own role, and a
+      // directory-only person's role never changes (INV-DIR-1).
       role: RoleSchema,
       // ADR-0058. `null` clears the value; a string is normalized + checked unique-among-live.
       legajo: LegajoSchema.nullable(),

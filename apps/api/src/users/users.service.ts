@@ -24,7 +24,7 @@ import type {
   UpdateOwnProfile,
   UpdateUser,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import { canManageRole, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -172,6 +172,23 @@ export interface OffboardResult {
    * operator must rotate these secrets manually. Empty when the user was a member of no vault.
    */
   rotationVaults: { vaultId: string; name: string; itemCount: number }[];
+}
+
+/** The attribution of the human-only routes, which pass the caller's id (`undefined` = server caller). */
+function humanActor(actorId: string | undefined): ActorAttribution {
+  return actorId != null ? { userId: actorId } : {};
+}
+
+function assertCeiling(ceiling: Role | undefined, roles: Role[]): void {
+  if (ceiling && roles.every((role) => canManageRole(ceiling, role))) {
+    return;
+  }
+  throw new ForbiddenException({
+    statusCode: 403,
+    code: 'ROLE_CEILING_EXCEEDED',
+    message:
+      'You can only manage users whose role is at or below your own. Only an administrator can manage administrators.',
+  });
 }
 
 @Injectable()
@@ -584,9 +601,10 @@ export class UsersService {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
     // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
     // default) so the service is the authoritative default for app-created users and the behaviour is
-    // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
+    // testable without a DB. The caller may grant at most its own role (SEC-088, role ceiling below).
     // A directory-only person is ALWAYS VIEWER — never trust the payload (which can't carry role anyway).
     const role = opts?.directoryOnly ? Role.VIEWER : (data.role ?? Role.VIEWER);
+    await this.assertWithinRoleCeiling(humanActor(actorId), role);
     // Resolve the manager either/or → DB columns (ADR-0058). On create there is no subject yet, so no
     // cycle is possible; the FK-live + at-most-one checks still apply. Then build the explicit create
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
@@ -701,6 +719,7 @@ export class UsersService {
     actorId?: string,
   ): Promise<AdminPasswordResetResult> {
     const target = await this.findOne(id); // 404 if missing or soft-deleted
+    await this.assertWithinRoleCeiling(humanActor(actorId), target.role);
     // Local mode ONLY: there is no IdP here, so lazyit owns the credential. Under OIDC the IdP owns
     // onboarding instead.
     if (!this.isLocalMode()) {
@@ -805,12 +824,18 @@ export class UsersService {
       ...(payload !== undefined ? { payload } : {}),
       // A human actor → { userId }; system/unknown → {} (both FKs null). A service account never reaches
       // these human-only routes (@CurrentUser), so the human-id mapping is complete here.
-      actor: actorId != null ? { userId: actorId } : {},
+      actor: humanActor(actorId),
     });
   }
 
   async update(id: string, data: UpdateUser, actorId?: string) {
     const current = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    const ceiling = await this.assertWithinRoleCeiling(
+      humanActor(actorId),
+      current.role,
+      ...(data.role !== undefined ? [data.role] : []),
+    );
 
     // RBAC safety guards (ADR-0040) — only run when a role change is actually requested.
     if (data.role !== undefined && data.role !== current.role) {
@@ -819,6 +844,15 @@ export class UsersService {
       // their own role and there is always a second pair of hands in the loop.
       if (actorId !== undefined && actorId === id) {
         throw new ForbiddenException('You cannot change your own role');
+      }
+      // INV-DIR-1: a directory person stays VIEWER until it is onboarded (AUD-040).
+      if (current.directoryOnly) {
+        throw new UnprocessableEntityException({
+          statusCode: 422,
+          code: 'DIRECTORY_PERSON_ROLE_LOCKED',
+          message:
+            'This is a directory-only person with no login, so their role cannot change. Onboard them first.',
+        });
       }
     }
 
@@ -897,6 +931,7 @@ export class UsersService {
             (demoting || (data.isActive === false && target.isActive)),
         );
       }
+      await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
       // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
       // account, but without the epoch bump a later REACTIVATION would revive every token minted before
       // it — including a "keep me signed in" token that never expires by time. Harmless outside local mode.
@@ -1023,6 +1058,10 @@ export class UsersService {
     },
   ): Promise<AdminPasswordResetOutcome> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
+    const ceiling = await this.assertWithinRoleCeiling(
+      humanActor(actorId),
+      user.role,
+    );
 
     if (!user.isActive) {
       throw new UnprocessableEntityException(
@@ -1054,6 +1093,7 @@ export class UsersService {
       // The append-only PASSWORD_RESET_BY_ADMIN row (ADR-0086 §5 / decision G) commits with the credential
       // change; no plaintext is ever recorded (the payload carries nothing sensitive).
       await this.prisma.$transaction(async (tx) => {
+        await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
         await tx.user.update({
           where: { id },
           data: {
@@ -1202,8 +1242,42 @@ export class UsersService {
     };
   }
 
+  /** SEC-088 role ceiling; returns the caller's ceiling for the in-transaction re-check. */
+  private async assertWithinRoleCeiling(
+    actor: ActorAttribution,
+    ...roles: Role[]
+  ): Promise<Role | undefined> {
+    let ceiling: Role | undefined;
+    if (actor.userId != null) {
+      const caller = await this.prisma.user.findUnique({
+        where: { id: actor.userId },
+        select: { role: true },
+      });
+      ceiling = caller?.role;
+    } else {
+      // An SA is never ADMIN-equivalent (INV-SA-3); no actor is the directory sync, which creates VIEWERs only.
+      ceiling = actor.serviceAccountId != null ? Role.MEMBER : Role.VIEWER;
+    }
+    assertCeiling(ceiling, roles);
+    return ceiling;
+  }
+
+  /** Re-checks the target under its row lock, so a concurrent promotion cannot slip past the pre-check. */
+  private async assertLockedTargetWithinCeiling(
+    tx: Prisma.TransactionClient,
+    id: string,
+    ceiling: Role | undefined,
+  ): Promise<void> {
+    const [row] = await tx.$queryRaw<
+      { role: Role }[]
+    >`SELECT "role" FROM "users" WHERE "id" = ${id} FOR UPDATE`;
+    if (row) {
+      assertCeiling(ceiling, [row.role]);
+    }
+  }
+
   /**
-   * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
+   * The last-admin predicate (ADR-0040, SEC-021): true when at least one usable ADMIN (counted below) OTHER than
    * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
    * administrable. The single definition of "usable admin". Private so it is only ever counted under the
    * admin-set lock, through {@link wouldRemoveLastAdmin}.
@@ -1212,8 +1286,21 @@ export class UsersService {
     userId: string,
     client: Pick<Prisma.TransactionClient, 'user'>,
   ): Promise<boolean> {
+    // AUD-040: only an admin who can actually sign in keeps the instance administrable.
+    const credential: Prisma.UserWhereInput =
+      process.env.AUTH_MODE === 'shim'
+        ? {}
+        : this.isLocalMode()
+          ? { passwordHash: { not: null } }
+          : { externalId: { not: null } };
     const otherAdmins = await client.user.count({
-      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+      where: {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        ...credential,
+        id: { not: userId },
+      },
     });
     return otherAdmins > 0;
   }
@@ -1221,9 +1308,8 @@ export class UsersService {
   /**
    * Throws 409 Conflict if `userId` is the only remaining usable ADMIN and `removesAdminPowers` says the
    * change strips their administrator powers (role demotion, deactivation, offboarding, delete), so a
-   * fresh install — or any instance — is never left without an administrator. Counts LIVE and ACTIVE
-   * admins only: the read filter already excludes soft-deleted users, and `isActive: true` excludes
-   * deactivated ones, since neither can authenticate to administer anything (SEC-021).
+   * fresh install — or any instance — is never left without an administrator. Counts usable admins only
+   * (see {@link hasAnotherActiveAdmin}).
    *
    * Runs inside the caller's write transaction, after taking one transaction-scoped advisory lock on the
    * admin set (AUD-041), and judges the target as it stands under that lock. Two admins demoting or
@@ -1237,7 +1323,7 @@ export class UsersService {
   ) {
     if (await this.wouldRemoveLastAdmin(tx, userId, removesAdminPowers)) {
       throw new ConflictException(
-        'Cannot remove the last administrator. Promote another user to ADMIN first.',
+        'Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.',
       );
     }
   }
@@ -1245,8 +1331,8 @@ export class UsersService {
   /**
    * The lock-and-recount half of {@link assertNotLastAdmin}, for a caller that skips instead of failing
    * (the directory-sync offboard, ADR-0091). Takes the admin-set advisory lock for the rest of `tx`,
-   * re-reads the target, and returns true when `removesAdminPowers` holds for it and no other live,
-   * active ADMIN exists. The caller must make its write in the same `tx`, after this returns.
+   * re-reads the target, and returns true when `removesAdminPowers` holds for it and no other usable
+   * ADMIN exists. The caller must make its write in the same `tx`, after this returns.
    */
   async wouldRemoveLastAdmin(
     tx: Prisma.TransactionClient,
@@ -1295,7 +1381,8 @@ export class UsersService {
     id: string,
     actor: ActorAttribution = {},
   ): Promise<OffboardResult> {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+    const target = await this.findOne(id); // 404 if missing or already soft-deleted
+    const ceiling = await this.assertWithinRoleCeiling(actor, target.role);
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1305,7 +1392,7 @@ export class UsersService {
       await this.assertNotLastAdmin(tx, id, (t) => t.role === 'ADMIN');
 
       // Lock order: lazyit.admin_set (above), then this row; a vault grant share-locks it, so none lands mid-offboard.
-      await tx.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id} FOR UPDATE`;
+      await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
 
       // 1. Revoke all the user's active (not-yet-revoked) access grants. Attribute the offboarding
       // actor on each: human → revokedById, service account → revokedBySaId (CHECK-safe; ADR-0048).
@@ -1447,6 +1534,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
     }
+    const ceiling = await this.assertWithinRoleCeiling(actor, user.role);
     if (user.deletedAt === null) {
       return this.serializeUser(user); // already live — idempotent (no state change → no history row)
     }
@@ -1454,6 +1542,7 @@ export class UsersService {
     // becomes LIVE again, so this row IS visible in the recent_activity feed (the view keeps live
     // subjects). Attributes the full principal (human → performedById, SA → serviceAccountId).
     const restored = await this.prisma.$transaction(async (tx) => {
+      await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
       const updated = await tx.user.update({
         where: { id },
         data: { deletedAt: null },
@@ -1541,7 +1630,7 @@ export class UsersService {
 
     // 4) Write the new user's assignments + grants (+ any PENDING workflow run rows) in ONE transaction —
     //    all-or-nothing among the cloned local rows. The cloning admin is the actor on every row.
-    const actor: ActorAttribution = actorId != null ? { userId: actorId } : {};
+    const actor = humanActor(actorId);
     const runIds: string[] = [];
     // The cloned grants to nudge the bell about AFTER commit (ADR-0056 §3, issue #359). Collected from
     // the in-tx creates and fired post-commit (best-effort) — never inside the tx (a notification must

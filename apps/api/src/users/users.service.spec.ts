@@ -37,6 +37,8 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 type PrismaUserMock = {
   findMany: jest.Mock;
   findFirst: jest.Mock;
+  // The role ceiling reads the caller's role (SEC-088).
+  findUnique: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
@@ -57,6 +59,8 @@ type TxMock = {
   };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
+  // SEC-088: the target row lock that re-reads its role inside the write transaction.
+  $queryRaw: jest.Mock;
   accessGrant: { updateMany: jest.Mock; create: jest.Mock };
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
@@ -120,6 +124,8 @@ describe('UsersService', () => {
     user = {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      // Default: the caller is an ADMIN, so the role ceiling never bites unless a test says otherwise.
+      findUnique: jest.fn().mockResolvedValue({ role: 'ADMIN' }),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -144,6 +150,13 @@ describe('UsersService', () => {
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
+      // Default: the locked row carries whatever role the target read returned.
+      $queryRaw: jest.fn(async (_sql: TemplateStringsArray, id: string) => {
+        const row = (await user.findFirst({ where: { id } })) as {
+          role?: string;
+        } | null;
+        return row ? [{ role: row.role }] : [];
+      }),
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
@@ -342,7 +355,7 @@ describe('UsersService', () => {
     expect(createCalls[0][0].data.role).toBe('VIEWER');
   });
 
-  it('honours an explicit role on create (ADMIN-gated controller may pass any role)', async () => {
+  it('honours an explicit role on create (an ADMIN caller may grant any role)', async () => {
     const dto = {
       email: 'a@b.com',
       firstName: 'Ada',
@@ -351,7 +364,7 @@ describe('UsersService', () => {
     };
     user.create.mockResolvedValue({ id: 'uuid-a', ...dto });
 
-    await service.create(dto);
+    await service.create(dto, 'admin-1');
 
     // An explicitly-supplied role is preserved (not overridden by the VIEWER default).
     expect(user.create).toHaveBeenCalledWith({
@@ -655,7 +668,11 @@ describe('UsersService', () => {
   });
 
   it('offboards: soft-deletes (deletedAt) + revokes grants + releases assignments, in one tx', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.accessGrant.updateMany.mockResolvedValue({ count: 2 });
     assignments.releaseAllForUser.mockResolvedValue([
@@ -741,7 +758,11 @@ describe('UsersService', () => {
   // offboarding-control gap) and flags each vault to rotate. INV-10-safe: a pure row-delete of wrapped
   // key material; no decryption. Reuses the offboard setup above.
   it('offboards: revokes ALL the user’s vault memberships and flags each vault to rotate (#869)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
     // The user is a crypto member of two vaults; the read carries each vault's name + LIVE item count.
@@ -805,7 +826,11 @@ describe('UsersService', () => {
   });
 
   it('attributes the vault-revoke audit rows to the SERVICE ACCOUNT when a SA offboards (#869)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.vaultMembership.findMany.mockResolvedValue([
       { vaultId: 'vault-a', vault: { name: 'Prod DB', _count: { items: 1 } } },
@@ -875,6 +900,7 @@ describe('UsersService', () => {
     it('bumps sessionEpoch and mcpCredentialEpoch when an active user is deactivated', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         deletedAt: null,
       });
@@ -895,6 +921,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         deletedAt: null,
       });
@@ -903,6 +930,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -923,6 +951,7 @@ describe('UsersService', () => {
     it('clears directoryOffboardedAt when an active user is deactivated by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -943,6 +972,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -951,6 +981,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -970,6 +1001,7 @@ describe('UsersService', () => {
     it('marks directoryReenabledAt when an inactive user is re-enabled by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         directoryReenabledAt: null,
         deletedAt: null,
@@ -986,6 +1018,7 @@ describe('UsersService', () => {
     it('clears the mark when an active user is deactivated by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         directoryReenabledAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -1005,6 +1038,7 @@ describe('UsersService', () => {
       user.update.mockResolvedValue({ id: 'uuid-1' });
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -1101,7 +1135,11 @@ describe('UsersService', () => {
   });
 
   it('re-indexes the user on update (upsert with the updated row)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     user.update.mockResolvedValue({
       id: 'uuid-1',
       firstName: 'Ada',
@@ -1228,7 +1266,13 @@ describe('UsersService', () => {
         service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.count).toHaveBeenCalledWith({
-        where: { role: 'ADMIN', isActive: true, id: { not: 'admin-1' } },
+        where: {
+          role: 'ADMIN',
+          isActive: true,
+          directoryOnly: false,
+          externalId: { not: null },
+          id: { not: 'admin-1' },
+        },
       });
       expect(user.update).not.toHaveBeenCalled();
     });
@@ -1614,18 +1658,22 @@ describe('UsersService', () => {
 
       await service.remove('u-1', { userId: 'actor-99' });
 
-      // Call 1 is the admin-set advisory lock, call 2 the user row lock.
-      expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+      // The admin-set advisory lock first, then the user row lock that re-reads the role (SEC-088).
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
       const calls = tx.$executeRaw.mock.calls as Array<
         [TemplateStringsArray, ...unknown[]]
       >;
       expect(calls[0][0].join('?')).toContain('pg_advisory_xact_lock');
       expect(calls[0][1]).toBe('lazyit.admin_set');
-      expect(calls[1][0].join('?')).toBe(
-        'SELECT 1 FROM "users" WHERE "id" = ? FOR UPDATE',
+      const lockCalls = tx.$queryRaw.mock.calls as Array<
+        [TemplateStringsArray, ...unknown[]]
+      >;
+      expect(lockCalls[0][0].join('?')).toBe(
+        'SELECT "role" FROM "users" WHERE "id" = ? FOR UPDATE',
       );
-      expect(calls[1][1]).toBe('u-1');
-      const rowLock = tx.$executeRaw.mock.invocationCallOrder[1];
+      expect(lockCalls[0][1]).toBe('u-1');
+      const rowLock = tx.$queryRaw.mock.invocationCallOrder[0];
+      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(rowLock);
       expect(rowLock).toBeLessThan(
         tx.vaultMembership.findMany.mock.invocationCallOrder[0],
       );
@@ -1651,6 +1699,455 @@ describe('UsersService', () => {
       expect(tx.user.count.mock.invocationCallOrder[0]).toBeLessThan(
         tx.user.update.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  // SEC-088 / AUD-002: `user:manage` delegated to MEMBER or VIEWER never reaches ADMIN.
+  describe('role ceiling for delegated user:manage (SEC-088)', () => {
+    const callerIs = (role: string | null) =>
+      user.findUnique.mockResolvedValue(role === null ? null : { role });
+    const target = (role: string, extra: Record<string, unknown> = {}) =>
+      user.findFirst.mockResolvedValue({
+        id: 'target-1',
+        role,
+        isActive: true,
+        directoryOnly: false,
+        deletedAt: null,
+        ...extra,
+      });
+    const ceiling = {
+      response: { statusCode: 403, code: 'ROLE_CEILING_EXCEEDED' },
+    };
+    const profile = {
+      email: 'new@corp.example',
+      firstName: 'N',
+      lastName: 'U',
+    };
+
+    it('a MEMBER cannot create an ADMIN', async () => {
+      callerIs('MEMBER');
+
+      await expect(
+        service.create({ ...profile, role: 'ADMIN' }, 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'member-1' },
+        select: { role: true },
+      });
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a VIEWER cannot create a MEMBER', async () => {
+      callerIs('VIEWER');
+
+      await expect(
+        service.create({ ...profile, role: 'MEMBER' }, 'viewer-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER can create a MEMBER', async () => {
+      callerIs('MEMBER');
+      user.create.mockResolvedValue({
+        id: 'new-1',
+        ...profile,
+        role: 'MEMBER',
+      });
+
+      await service.create({ ...profile, role: 'MEMBER' }, 'member-1');
+
+      expect(user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ role: 'MEMBER' }) as unknown,
+      });
+    });
+
+    it('an ADMIN can create an ADMIN', async () => {
+      callerIs('ADMIN');
+      user.create.mockResolvedValue({ id: 'new-1', ...profile, role: 'ADMIN' });
+
+      await service.create({ ...profile, role: 'ADMIN' }, 'admin-1');
+
+      expect(user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ role: 'ADMIN' }) as unknown,
+      });
+    });
+
+    it('a MEMBER cannot clone into an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('MEMBER');
+
+      await expect(
+        service.clone(
+          'target-1',
+          {
+            profile: { ...profile, role: 'ADMIN' },
+            cloneAssetAssignments: [],
+            cloneAccessGrants: [],
+            fireWorkflowsOnClonedGrants: false,
+          },
+          'member-1',
+        ),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER cannot promote anyone to ADMIN', async () => {
+      callerIs('MEMBER');
+      target('MEMBER');
+
+      await expect(
+        service.update('target-1', { role: 'ADMIN' }, 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER cannot edit, demote or deactivate an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      for (const patch of [
+        { email: 'mine@corp.example' },
+        { role: 'VIEWER' as const },
+        { isActive: false },
+      ]) {
+        await expect(
+          service.update('target-1', patch, 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+      }
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER can promote a VIEWER to MEMBER', async () => {
+      callerIs('MEMBER');
+      target('VIEWER');
+      user.update.mockResolvedValue({ id: 'target-1', role: 'MEMBER' });
+
+      await service.update('target-1', { role: 'MEMBER' }, 'member-1');
+
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'target-1' },
+        data: expect.objectContaining({ role: 'MEMBER' }) as unknown,
+      });
+    });
+
+    it('an ADMIN can still demote another ADMIN', async () => {
+      callerIs('ADMIN');
+      target('ADMIN');
+      user.update.mockResolvedValue({ id: 'target-1', role: 'MEMBER' });
+
+      await service.update('target-1', { role: 'MEMBER' }, 'admin-1');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("a MEMBER cannot reset an ADMIN's password (local mode)", async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      await expect(
+        service.requestPasswordReset('target-1', 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("an ADMIN can reset another ADMIN's password (local mode)", async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('ADMIN');
+      target('ADMIN');
+
+      await expect(
+        service.requestPasswordReset('target-1', 'admin-1'),
+      ).resolves.toEqual(
+        expect.objectContaining({ delivery: 'temporary-password' }),
+      );
+    });
+
+    it('a MEMBER cannot offboard an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      await expect(
+        service.remove('target-1', { userId: 'member-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('an ADMIN can offboard another ADMIN', async () => {
+      callerIs('ADMIN');
+      target('ADMIN');
+      tx.user.update.mockResolvedValue({ id: 'target-1' });
+
+      await expect(
+        service.remove('target-1', { userId: 'admin-1' }),
+      ).resolves.toEqual(expect.objectContaining({ userId: 'target-1' }));
+    });
+
+    it('a MEMBER cannot restore an offboarded ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN', { deletedAt: new Date() });
+
+      await expect(
+        service.restore('target-1', { userId: 'member-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a service account is never ADMIN-equivalent: it cannot offboard or restore an ADMIN', async () => {
+      target('ADMIN');
+      await expect(
+        service.remove('target-1', { serviceAccountId: 'sa-1' }),
+      ).rejects.toMatchObject(ceiling);
+
+      target('ADMIN', { deletedAt: new Date() });
+      await expect(
+        service.restore('target-1', { serviceAccountId: 'sa-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a caller whose row is gone fails closed', async () => {
+      callerIs(null);
+      target('VIEWER');
+
+      await expect(
+        service.update('target-1', { firstName: 'X' }, 'ghost-1'),
+      ).rejects.toMatchObject(ceiling);
+    });
+
+    // A concurrent promotion lands between the pre-check and the write: the row lock re-reads ADMIN.
+    describe('the target is re-checked under its row lock', () => {
+      beforeEach(() => {
+        callerIs('MEMBER');
+        tx.$queryRaw.mockResolvedValue([{ role: 'ADMIN' }]);
+      });
+
+      it('update refuses and writes nothing', async () => {
+        target('MEMBER');
+
+        await expect(
+          service.update('target-1', { firstName: 'X' }, 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+        expect(history.record).not.toHaveBeenCalled();
+      });
+
+      it('a local password reset refuses and never stores the temporary password', async () => {
+        process.env.AUTH_MODE = 'local';
+        target('MEMBER');
+
+        await expect(
+          service.requestPasswordReset('target-1', 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+        expect(history.record).not.toHaveBeenCalled();
+      });
+
+      it('offboarding refuses before revoking or releasing anything', async () => {
+        target('MEMBER');
+
+        await expect(
+          service.remove('target-1', { userId: 'member-1' }),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
+        expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+
+      it('restore refuses and leaves the row soft-deleted', async () => {
+        target('MEMBER', { deletedAt: new Date() });
+
+        await expect(
+          service.restore('target-1', { userId: 'member-1' }),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+    });
+
+    it('a MEMBER cannot onboard a directory row that already holds ADMIN (local mode)', async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('MEMBER');
+      target('ADMIN', { directoryOnly: true });
+
+      await expect(
+        service.provisionLocalAccount('target-1', 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+    });
+
+    it('no actor fails closed at VIEWER: it can neither grant nor touch a higher role', async () => {
+      await expect(
+        service.create({ ...profile, role: 'MEMBER' }),
+      ).rejects.toMatchObject(ceiling);
+
+      target('MEMBER');
+      await expect(
+        service.update('target-1', { firstName: 'X' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).not.toHaveBeenCalled();
+      expect(user.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // AUD-040: the last-admin guard counts only admins who can actually sign in.
+  describe('last-admin guard counts only usable admins (AUD-040)', () => {
+    type Row = {
+      role: string;
+      isActive: boolean;
+      directoryOnly: boolean;
+      passwordHash: string | null;
+      externalId: string | null;
+    };
+    type Where = {
+      role: string;
+      isActive: boolean;
+      directoryOnly?: boolean;
+      passwordHash?: { not: null };
+      externalId?: { not: null };
+      id: { not: string };
+    };
+    let rows: Record<string, Row>;
+
+    beforeEach(() => {
+      rows = {
+        'admin-1': {
+          role: 'ADMIN',
+          isActive: true,
+          directoryOnly: false,
+          passwordHash: 'h',
+          externalId: 'sub-1',
+        },
+      };
+      user.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            rows[where.id] ? { id: where.id, ...rows[where.id] } : null,
+          ),
+      );
+      user.count.mockImplementation(({ where }: { where: Where }) =>
+        Promise.resolve(
+          Object.entries(rows).filter(
+            ([id, r]) =>
+              id !== where.id.not &&
+              r.role === where.role &&
+              r.isActive === where.isActive &&
+              (where.directoryOnly === undefined ||
+                r.directoryOnly === where.directoryOnly) &&
+              (where.passwordHash === undefined || r.passwordHash !== null) &&
+              (where.externalId === undefined || r.externalId !== null),
+          ).length,
+        ),
+      );
+    });
+
+    it('a directory-only ADMIN does not keep the instance administrable', async () => {
+      rows['dir-admin'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: true,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('local mode: a password-less ADMIN does not count', async () => {
+      process.env.AUTH_MODE = 'local';
+      rows['no-password'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.remove('admin-1', { userId: 'actor-99' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('OIDC: an ADMIN never linked to the IdP does not count', async () => {
+      rows['never-signed-in'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.update('admin-1', { isActive: false }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('another ADMIN who can sign in still lets the demotion through', async () => {
+      process.env.AUTH_MODE = 'local';
+      rows['admin-2'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: 'h2',
+        externalId: null,
+      };
+      user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
+
+      await service.update('admin-1', { role: 'MEMBER' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('the dev shim needs no credential: a password-less, unlinked ADMIN still counts', async () => {
+      process.env.AUTH_MODE = 'shim';
+      rows['admin-2'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
+        externalId: null,
+      };
+      user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
+
+      await service.update('admin-1', { role: 'MEMBER' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a role change on a directory-only person (INV-DIR-1)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'dir-1',
+        role: 'VIEWER',
+        isActive: true,
+        directoryOnly: true,
+        deletedAt: null,
+      });
+
+      await expect(
+        service.update('dir-1', { role: 'ADMIN' }, 'actor-99'),
+      ).rejects.toMatchObject({
+        response: { statusCode: 422, code: 'DIRECTORY_PERSON_ROLE_LOCKED' },
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('still allows a non-role edit of a directory-only person', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'dir-1',
+        role: 'VIEWER',
+        isActive: true,
+        directoryOnly: true,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'dir-1', firstName: 'New' });
+
+      await service.update('dir-1', { firstName: 'New' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -2198,7 +2695,11 @@ describe('UsersService', () => {
   // --- restore (re-onboard) (ADR-0041) -------------------------------------
   describe('restore', () => {
     it('clears deletedAt for a soft-deleted user and re-indexes them', async () => {
-      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'VIEWER',
+        deletedAt: new Date(),
+      });
       user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
 
       const restored = await service.restore('uuid-1');
@@ -2226,7 +2727,11 @@ describe('UsersService', () => {
     });
 
     it('is idempotent (no update) when the user is already live', async () => {
-      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'VIEWER',
+        deletedAt: null,
+      });
 
       await service.restore('uuid-1');
 

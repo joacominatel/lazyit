@@ -210,6 +210,9 @@ always leave exactly one administrator.
   `assertNotLastAdmin` runs before a demotion away from ADMIN, a deactivation (`isActive=false`) and an
   offboard/delete, and counts only live (`deletedAt: null`) **and active** (`isActive: true`) ADMINs —
   an inactive account cannot authenticate, so it never keeps the instance administrable (SEC-021).
+  Since 2026-10-15 (AUD-040) a usable ADMIN is also **not directory-only** and holds a **login
+  credential** for the running mode — `passwordHash` in local mode, `externalId` under OIDC (the dev
+  shim needs none) — because an account that cannot sign in administers nothing.
 - `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls
   `UsersService.wouldRemoveLastAdmin` inside its own write transaction, under the same
   `lazyit.admin_set` advisory lock as the `PATCH /users` and offboard guards, and **skips** the last
@@ -577,12 +580,15 @@ rotation; the API imports no crypto capable of exploiting it.
 2. **Never holds an administrative role.** `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
    rejects any `role` field. The import path forces VIEWER unconditionally; the regular `PATCH /users`
    path can change the role, but only AFTER the person is promoted (`directoryOnly = false`) — a
-   VIEWER directory person can never reach ADMIN status while it remains directory-only.
+   VIEWER directory person can never reach ADMIN status while it remains directory-only. Enforced since
+   2026-10-15 (AUD-040): `UsersService.update` refuses a role change on a directory-only row with 422
+   `DIRECTORY_PERSON_ROLE_LOCKED`.
 3. **Excluded from the bootstrap first-user→ADMIN count** and the **last-admin guard count.**
    - `jwt-auth.guard.ts` bootstrap count: `where: { directoryOnly: false, includeSoftDeleted: true }`.
      Importing 200 directory persons cannot hand ADMIN to the first OIDC login.
-   - `users.service.ts` last-admin guard: filters `role: ADMIN, isActive: true`. A VIEWER directory
-     person is already excluded by the role filter — no extra clause needed.
+   - `users.service.ts` last-admin guard: filters `role: ADMIN, isActive: true, directoryOnly: false`
+     plus a login credential (AUD-040), so a directory row never counts, even one that reached ADMIN
+     before the role-change refusal existed.
    - `config.service.ts` setup path: filters `role: ADMIN` — same reasoning.
 
 **Why.** The "is User" shortcut (no `Person` model) means directory persons sit in the `users` table
