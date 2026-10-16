@@ -140,6 +140,7 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
           passwordResetToken: {
             updateMany: txTokUpdateMany,
             deleteMany: txTokDeleteMany,
+            create: tokCreate,
           },
           user: { update: txUserUpdate, updateMany: txUserUpdateMany },
           userSession: {
@@ -694,6 +695,35 @@ describe('PasswordLifecycleService (ADR-0086 §F4)', () => {
 
   describe('sendAdminResetLink', () => {
     const subject = { id: VALID_ID, email: 'alice@example.com' };
+
+    it('runs the caller hook in the mint transaction before the token insert (SEC-088)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      const beforeMint = jest.fn().mockResolvedValue(undefined);
+
+      await service.sendAdminResetLink(
+        subject,
+        'https://lazyit.example.com',
+        beforeMint,
+      );
+
+      expect(beforeMint).toHaveBeenCalledTimes(1);
+      expect(beforeMint.mock.invocationCallOrder[0]).toBeLessThan(
+        tokCreate.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('mints nothing and sends nothing when the hook refuses (SEC-088)', async () => {
+      resolveConfig.mockResolvedValue(SMTP_CONFIG);
+      const refusal = new Error('ceiling');
+
+      await expect(
+        service.sendAdminResetLink(subject, 'https://lazyit.example.com', () =>
+          Promise.reject(refusal),
+        ),
+      ).rejects.toBe(refusal);
+      expect(tokCreate).not.toHaveBeenCalled();
+      expect(sendMail).not.toHaveBeenCalled();
+    });
 
     it('mints a token, emails the RAW token in the link, and stores ONLY its hash', async () => {
       resolveConfig.mockResolvedValue(SMTP_CONFIG);

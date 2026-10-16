@@ -9,7 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ChangePasswordResponse } from '@lazyit/shared';
-import type { User } from '../../../generated/prisma/client';
+import type { Prisma, User } from '../../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { SmtpService } from '../../smtp/smtp.service';
@@ -460,6 +460,8 @@ export class PasswordLifecycleService {
     /** The already-resolved, live, active, non-directory subject. Only its id + mailbox are needed. */
     user: { id: string; email: string },
     origin: string | null,
+    /** Runs in the mint transaction first; the caller's locked re-check of the subject (SEC-088). */
+    beforeMint?: (tx: Prisma.TransactionClient) => Promise<unknown>,
   ): Promise<{ sentTo: string; expiresInMinutes: number }> {
     if (!this.isLocalMode()) {
       // Defensive: the caller already branches on mode. There are no local credentials to reset here.
@@ -513,12 +515,15 @@ export class PasswordLifecycleService {
     }
 
     const { raw, tokenHash } = mintResetToken();
-    await this.prisma.passwordResetToken.create({
-      data: {
-        tokenHash,
-        userId: user.id,
-        expiresAt: new Date(Date.now() + RESET_TTL_MS),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await beforeMint?.(tx);
+      await tx.passwordResetToken.create({
+        data: {
+          tokenHash,
+          userId: user.id,
+          expiresAt: new Date(Date.now() + RESET_TTL_MS),
+        },
+      });
     });
 
     try {

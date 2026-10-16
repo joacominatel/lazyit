@@ -3068,6 +3068,7 @@ describe('UsersService', () => {
           expect(passwordLifecycle.sendAdminResetLink).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
             'https://lazyit.example.com',
+            expect.any(Function),
           );
           // Sending a link does not change the stored credential, so live sessions stay valid.
           expect(user.update).not.toHaveBeenCalled();
@@ -3081,6 +3082,55 @@ describe('UsersService', () => {
               actor: { userId: 'actor-1' },
             }),
           );
+        });
+
+        describe('the mint re-checks the ceiling under the subject lock (SEC-088)', () => {
+          // Runs the pre-mint hook the way PasswordLifecycleService does, inside the mint transaction.
+          const mintThroughHook = () =>
+            passwordLifecycle.sendAdminResetLink.mockImplementation(
+              async (
+                _user: unknown,
+                _origin: unknown,
+                beforeMint: (t: unknown) => Promise<unknown>,
+              ) => {
+                await beforeMint(tx);
+                return { sentTo: 'a@b.com', expiresInMinutes: 60 };
+              },
+            );
+
+          it('refuses when the target was promoted above the caller between the pre-check and the mint', async () => {
+            user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+            user.findFirst.mockResolvedValue(localUser({ role: 'VIEWER' }));
+            tx.$queryRaw.mockResolvedValueOnce([{ role: 'ADMIN' }]);
+            mintThroughHook();
+
+            const err: unknown = await service
+              .requestPasswordReset('user-1', 'actor-1', {
+                delivery: 'email',
+                linkOrigin: 'https://lazyit.example.com',
+              })
+              .catch((e: unknown) => e);
+
+            expect(err).toBeInstanceOf(ForbiddenException);
+            expect((err as ForbiddenException).getResponse()).toMatchObject({
+              code: 'ROLE_CEILING_EXCEEDED',
+            });
+            expect(history.record).not.toHaveBeenCalled();
+          });
+
+          it('mints when the locked role is still within the ceiling', async () => {
+            user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+            user.findFirst.mockResolvedValue(localUser({ role: 'VIEWER' }));
+            mintThroughHook();
+
+            await expect(
+              service.requestPasswordReset('user-1', 'actor-1', {
+                delivery: 'email',
+                linkOrigin: 'https://lazyit.example.com',
+              }),
+            ).resolves.toMatchObject({ delivery: 'email' });
+            expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+          });
         });
 
         it('bumps sessionEpoch and reports it when revokeSessions is true', async () => {

@@ -1092,7 +1092,7 @@ export class UsersService {
         );
       }
       if (options?.delivery === 'email') {
-        return this.sendResetLink(user, actorId, options);
+        return this.sendResetLink(user, actorId, options, ceiling);
       }
       const temporaryPassword = this.provisioning.generateTempPassword();
       const credential = await this.provisioning.credentialFields(
@@ -1151,12 +1151,14 @@ export class UsersService {
     user: User,
     actorId: string | undefined,
     options: { revokeSessions?: boolean; linkOrigin?: string | null },
+    ceiling: Role | undefined,
   ): Promise<AdminPasswordResetOutcome> {
     let sent: { sentTo: string; expiresInMinutes: number };
     try {
       sent = await this.passwordLifecycle.sendAdminResetLink(
         user,
         options.linkOrigin ?? null,
+        (tx) => this.assertLockedTargetWithinCeiling(tx, user.id, ceiling),
       );
     } catch (err) {
       if (err instanceof AdminResetLinkError) {
