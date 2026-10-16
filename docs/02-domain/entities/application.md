@@ -118,6 +118,12 @@ Indexes: `@@index([categoryId])`.
 ([[0018-api-documentation-swagger]]).
 
 - `GET /applications` — list (excludes soft-deleted, ordered by name).
+- `GET /applications/export?q=&deleted=` — a CSV of every application the list would return for the same
+  filters, under the same `application:read` and the same ADMIN-only `deleted=only` (#1597,
+  [[0103-data-export-streaming-path]]). Columns: `id, name, vendor, url, description, isCritical,
+  seatsPurchased, seatsUsed, costPerSeat, renewalDate, notes, createdAt, updatedAt, deletedAt`;
+  `costPerSeat` in major units with a dot decimal, `seatsUsed` derived as on the list. The category (the
+  list carries only its id) and `metadata` are not exported. Every export is audited ([[data-export-log]]).
 - `GET /applications/:id` — one by id (`404` if missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
