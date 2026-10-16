@@ -2,7 +2,7 @@
 id: SEC-089
 title: A category:write holder can re-parent or create a KB folder around a restricted ancestor and widen who reads it
 severity: high
-status: open
+status: fixed
 cwe: CWE-285
 discovered: 2026-10-10
 module: article-categories (KB folder access)
@@ -123,3 +123,47 @@ a re-parent or a create under a restricted ancestor, with an ADR-0060 amendment)
 code around it without changing who may move a folder: a move now checks and writes under the folder-tree
 advisory lock (`article-categories.service.ts:239-241`, `:468-469`), which closed the AUD-010 cycle race.
 That locked `update` transaction is where the authorization check would go.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: commit `cf169e620` (`fix(api): require settings:manage to move a KB folder (AUD-001, SEC-089)`),
+with `76e861ccf` (the moved subtree's articles locked `FOR NO KEY UPDATE`) and `f43ec808a` (ADR-0060 §10 and
+INV-9), merged to `dev` in PR #1600 (`b2aaa95a0`); the web side ("Move to…" only with `settings:manage`, the
+403 mapped) in PR #1608 (`323ec1aed`)
+**Fixed by**: 2026-10-10 audit decision round (CEO decision on AUD-001; closure recorded by the final docs step)
+**Date**: 2026-10-16
+
+### Evidence (on `dev` at `cab67672f`)
+- `apps/api/src/article-categories/article-categories.service.ts:237-273`: `update` with a changed
+  `parentId` runs under the folder-tree lock and refuses a caller without `settings:manage` with 403
+  (`FOLDER_MOVE_FORBIDDEN`, `:62-63`), after the folder's 404 and before the parent and cycle 400s. A body
+  that repeats the current `parentId` is not a move and is not gated.
+- `:276-320` (`recordFolderMove`): a move writes one `ArticleVersion` per live article in the moved
+  subtree, attributed to the mover (`editedById`, or `serviceAccountId`), after locking those articles
+  `FOR NO KEY UPDATE` (`:286`).
+- `:217-233`: `create` under a parent resolves `FolderAccessService.visibleFolderIds` and refuses a parent
+  the caller cannot read with the same 400 as a missing one.
+- `apps/api/src/article-categories/article-categories.controller.ts:92-119`: create and update pass the
+  principal. [[0060-kb-folder-access-control]] §10 and [[INVARIANTS]] INV-9 record the rule.
+
+### Tests
+- `apps/api/src/article-categories/article-categories.service.spec.ts`, block `a folder move is a
+  settings:manage write (ADR-0060 §10, SEC-089)`: a `category:write` holder is refused (403) on a move to
+  the root and under another folder, and so is a caller with no principal; a `settings:manage` holder moves
+  the folder and a version lands on every live article in the subtree; a service-account mover is recorded
+  in `serviceAccountId`; an empty subtree writes no version; a repeated `parentId` and a rename are not
+  gated; a create under an unreadable parent is the missing-parent 400.
+
+### Verification
+Re-run on `dev` at `cab67672f` on 2026-10-16: `node node_modules/.bin/jest` over `src/article-categories`
+with the users, config, directory, locations, category, OAuth, MCP and AI context suites — 39 suites, 906
+tests passed.
+
+### Residual risk
+- A folder-level `from → to` move record would need its own table (ADR-0060 §10); the per-article
+  versions are the audit trail for now.
+- The ZIP import still creates sub-folders under a root that is checked for liveness only, the same open
+  product call as an article `POST` into an unreadable folder (ADR-0060 §9). Outside this finding.
+- No data change: existing folders keep their position and audience. A MEMBER client that moved folders
+  now gets a 403.
