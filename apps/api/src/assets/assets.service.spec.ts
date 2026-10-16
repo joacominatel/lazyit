@@ -23,7 +23,7 @@ jest.mock('../../generated/prisma/client', () => ({
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
-        public meta?: { target?: string | string[] },
+        public meta?: Record<string, unknown>,
       ) {
         super(`prisma-${code}`);
       }
@@ -35,19 +35,24 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import { Prisma } from '../../generated/prisma/client';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 // The P2002 factory the collision-retry tests throw — a genuine instance of the mocked known-error
-// class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry). `meta.target`
-// carries the offending index so the TARGET-AWARE guard is exercised for real: only an assetTag
-// collision advances-and-retries; a serial collision must propagate without burning counter values.
+// class, so `isUniqueTagCollision`'s instanceof check matches it (ADR-0063 collision-retry). Its meta
+// names the offending index the way adapter-pg does, so the TARGET-AWARE guard is exercised for real:
+// only an assetTag collision advances-and-retries; a serial collision must propagate without burning
+// counter values.
 const FakePrismaKnownError =
   Prisma.PrismaClientKnownRequestError as unknown as new (
     code: string,
-    meta?: { target?: string | string[] },
-  ) => Error & { code: string; meta?: { target?: string | string[] } };
-// The raw partial-unique index names (migration 20260601130000). adapter-pg surfaces these by NAME on
-// a P2002 (the indexes are raw SQL, unknown to Prisma's schema), so that is the real meta.target shape.
-const ASSET_TAG_INDEX = 'assets_assetTag_active_key';
-const SERIAL_INDEX = 'assets_serial_active_key';
+    meta?: Record<string, unknown>,
+  ) => Error & { code: string; meta?: Record<string, unknown> };
+// The raw partial-unique index names (migration 20260601130000).
+const ASSET_TAG_VIOLATION = adapterPgUniqueViolationMeta({
+  index: 'assets_assetTag_active_key',
+});
+const SERIAL_VIOLATION = adapterPgUniqueViolationMeta({
+  index: 'assets_serial_active_key',
+});
 
 type PrismaAssetMock = {
   findMany: jest.Mock;
@@ -540,7 +545,7 @@ describe('AssetsService', () => {
       .mockResolvedValueOnce('LAZY-00043');
     tx.create
       .mockRejectedValueOnce(
-        new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+        new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
       )
       .mockResolvedValueOnce({ id: 'a1', assetTag: 'LAZY-00043', ...dto });
 
@@ -562,7 +567,7 @@ describe('AssetsService', () => {
     };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042');
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: SERIAL_INDEX }),
+      new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -582,7 +587,7 @@ describe('AssetsService', () => {
     // An explicit tag took a value already in use → P2002 on the assetTag index, but it must still
     // propagate (the retry-only-on-auto-tag guard in create() short-circuits before the predicate).
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -596,7 +601,7 @@ describe('AssetsService', () => {
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042'); // always renders a colliding tag
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', { target: ASSET_TAG_INDEX }),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     ); // always collides on the assetTag index
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
@@ -692,7 +697,7 @@ describe('AssetsService', () => {
         call++;
         if (call === 2) {
           return Promise.reject(
-            new FakePrismaKnownError('P2002', { target: SERIAL_INDEX }),
+            new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
           );
         }
         return Promise.resolve({ id: `a${call}`, ...data });

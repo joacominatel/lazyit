@@ -13,6 +13,7 @@ import type {
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isHumanPrincipal, type Principal } from '../auth/principal';
@@ -277,9 +278,9 @@ export class AccessRequestsService {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      const target = err.meta?.target;
-      const name = Array.isArray(target) ? target.join(',') : String(target);
-      return name.includes('pending');
+      return uniqueViolationTargets(err).includes(
+        'access_requests_requester_application_pending_key',
+      );
     }
     return false;
   }
