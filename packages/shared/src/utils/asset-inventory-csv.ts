@@ -42,15 +42,3 @@ export function assetInventoryCsvHeader(options: AssetInventoryCsvOptions = {}):
     ? [...ASSET_INVENTORY_CSV_COLUMNS, ...ASSET_INVENTORY_CSV_PURCHASE_COLUMNS].join(",")
     : ASSET_INVENTORY_CSV_HEADER;
 }
-
-/**
- * A money amount (integer minor units, ADR-0100) as a spreadsheet-friendly CSV cell: major units with a dot
- * decimal separator and no grouping — `150000` → `1500`, `150050` → `1500.50`. A whole amount is not padded
- * (ADR-0100 §5); a fraction keeps the stored two decimals. `null` / absent → empty.
- */
-export function moneyToCsvAmount(minor: number | null | undefined): string {
-  if (minor === null || minor === undefined) return "";
-  const major = Math.trunc(minor / 100);
-  const cents = minor % 100;
-  return cents === 0 ? String(major) : `${major}.${String(cents).padStart(2, "0")}`;
-}
