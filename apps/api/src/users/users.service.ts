@@ -833,6 +833,15 @@ export class UsersService {
       if (actorId !== undefined && actorId === id) {
         throw new ForbiddenException('You cannot change your own role');
       }
+      // INV-DIR-1: a directory person stays VIEWER until it is onboarded (AUD-040).
+      if (current.directoryOnly) {
+        throw new UnprocessableEntityException({
+          statusCode: 422,
+          code: 'DIRECTORY_PERSON_ROLE_LOCKED',
+          message:
+            'This is a directory-only person with no login, so their role cannot change. Onboard them first.',
+        });
+      }
     }
 
     // Never strip the LAST usable ADMIN of its administrator powers — that would leave the instance with
@@ -1254,8 +1263,21 @@ export class UsersService {
     userId: string,
     client: Pick<Prisma.TransactionClient, 'user'>,
   ): Promise<boolean> {
+    // AUD-040: only an admin who can actually sign in keeps the instance administrable.
+    const credential: Prisma.UserWhereInput =
+      process.env.AUTH_MODE === 'shim'
+        ? {}
+        : this.isLocalMode()
+          ? { passwordHash: { not: null } }
+          : { externalId: { not: null } };
     const otherAdmins = await client.user.count({
-      where: { role: 'ADMIN', isActive: true, id: { not: userId } },
+      where: {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        ...credential,
+        id: { not: userId },
+      },
     });
     return otherAdmins > 0;
   }

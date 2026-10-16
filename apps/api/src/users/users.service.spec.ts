@@ -1244,7 +1244,13 @@ describe('UsersService', () => {
         service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(user.count).toHaveBeenCalledWith({
-        where: { role: 'ADMIN', isActive: true, id: { not: 'admin-1' } },
+        where: {
+          role: 'ADMIN',
+          isActive: true,
+          directoryOnly: false,
+          externalId: { not: null },
+          id: { not: 'admin-1' },
+        },
       });
       expect(user.update).not.toHaveBeenCalled();
     });
@@ -1883,6 +1889,150 @@ describe('UsersService', () => {
       await expect(
         service.update('target-1', { firstName: 'X' }, 'ghost-1'),
       ).rejects.toMatchObject(ceiling);
+    });
+  });
+
+  // AUD-040: the last-admin guard counts only admins who can actually sign in.
+  describe('last-admin guard counts only usable admins (AUD-040)', () => {
+    type Row = {
+      role: string;
+      isActive: boolean;
+      directoryOnly: boolean;
+      passwordHash: string | null;
+      externalId: string | null;
+    };
+    type Where = {
+      role: string;
+      isActive: boolean;
+      directoryOnly?: boolean;
+      passwordHash?: { not: null };
+      externalId?: { not: null };
+      id: { not: string };
+    };
+    let rows: Record<string, Row>;
+
+    beforeEach(() => {
+      rows = {
+        'admin-1': {
+          role: 'ADMIN',
+          isActive: true,
+          directoryOnly: false,
+          passwordHash: 'h',
+          externalId: 'sub-1',
+        },
+      };
+      user.findFirst.mockImplementation(
+        ({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            rows[where.id] ? { id: where.id, ...rows[where.id] } : null,
+          ),
+      );
+      user.count.mockImplementation(({ where }: { where: Where }) =>
+        Promise.resolve(
+          Object.entries(rows).filter(
+            ([id, r]) =>
+              id !== where.id.not &&
+              r.role === where.role &&
+              r.isActive === where.isActive &&
+              (where.directoryOnly === undefined ||
+                r.directoryOnly === where.directoryOnly) &&
+              (where.passwordHash === undefined || r.passwordHash !== null) &&
+              (where.externalId === undefined || r.externalId !== null),
+          ).length,
+        ),
+      );
+    });
+
+    it('a directory-only ADMIN does not keep the instance administrable', async () => {
+      rows['dir-admin'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: true,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('local mode: a password-less ADMIN does not count', async () => {
+      process.env.AUTH_MODE = 'local';
+      rows['no-password'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.remove('admin-1', { userId: 'actor-99' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('OIDC: an ADMIN never linked to the IdP does not count', async () => {
+      rows['never-signed-in'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
+        externalId: null,
+      };
+
+      await expect(
+        service.update('admin-1', { isActive: false }, 'actor-99'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('another ADMIN who can sign in still lets the demotion through', async () => {
+      process.env.AUTH_MODE = 'local';
+      rows['admin-2'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: 'h2',
+        externalId: null,
+      };
+      user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
+
+      await service.update('admin-1', { role: 'MEMBER' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a role change on a directory-only person (INV-DIR-1)', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'dir-1',
+        role: 'VIEWER',
+        isActive: true,
+        directoryOnly: true,
+        deletedAt: null,
+      });
+
+      await expect(
+        service.update('dir-1', { role: 'ADMIN' }, 'actor-99'),
+      ).rejects.toMatchObject({
+        response: { statusCode: 422, code: 'DIRECTORY_PERSON_ROLE_LOCKED' },
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('still allows a non-role edit of a directory-only person', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'dir-1',
+        role: 'VIEWER',
+        isActive: true,
+        directoryOnly: true,
+        deletedAt: null,
+      });
+      user.update.mockResolvedValue({ id: 'dir-1', firstName: 'New' });
+
+      await service.update('dir-1', { firstName: 'New' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
   });
 
