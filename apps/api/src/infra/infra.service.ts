@@ -775,22 +775,24 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const node = await this.prisma.infraNode.create({
-      data: {
-        ...rest,
-        // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
-        // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
-        assetId: assetId ?? null,
-        // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
-        ...(data.ipAddress !== undefined
-          ? { ipAddressSource: 'MANUAL' as const }
-          : {}),
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-        ...(shortcuts !== undefined ? { shortcuts } : {}),
-      },
-    });
+    const node = await this.prisma.infraNode
+      .create({
+        data: {
+          ...rest,
+          // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
+          // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
+          assetId: assetId ?? null,
+          // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+          ...(shortcuts !== undefined ? { shortcuts } : {}),
+        },
+      })
+      .catch((err: unknown) => this.rethrowSharedAssetLink(err, assetId));
     // Fire-and-forget search sync after the write (ADR-0035): un-awaited, never throws, no-op when
     // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
     void this.syncNodeToSearch(node.id);
@@ -3492,15 +3494,24 @@ export class InfraService {
       }
     }
 
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        state: 'CONFIRMED',
-        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
-        ...(dto.label !== undefined ? { label: dto.label } : {}),
-        ...(assetId !== undefined ? { assetId } : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          state: 'CONFIRMED',
+          ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+          ...(dto.label !== undefined ? { label: dto.label } : {}),
+          ...(assetId !== undefined ? { assetId } : {}),
+        },
+      })
+      .catch(async (err: unknown) => {
+        // Another node linked the adopted asset first: hand this one back to the tray, as above.
+        await this.prisma.infraNode.updateMany({
+          where: { id, state: 'CONFIRMED', assetId: null },
+          data: { state: 'PENDING' },
+        });
+        return this.rethrowSharedAssetLink(err, assetId, id);
+      });
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
@@ -4374,34 +4385,38 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        ...rest,
-        // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
-        // curated value — derived server-side (never client-settable) so `source` stays a trusted
-        // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
-        ...(data.ipAddress !== undefined
-          ? { ipAddressSource: 'MANUAL' as const }
-          : {}),
-        ...(specs !== undefined
-          ? {
-              specs:
-                specs === null
-                  ? Prisma.DbNull
-                  : (specs as Prisma.InputJsonValue),
-            }
-          : {}),
-        ...(shortcuts !== undefined
-          ? {
-              shortcuts:
-                shortcuts === null
-                  ? Prisma.DbNull
-                  : (shortcuts as Prisma.InputJsonValue),
-            }
-          : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          ...rest,
+          // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
+          // curated value — derived server-side (never client-settable) so `source` stays a trusted
+          // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? {
+                specs:
+                  specs === null
+                    ? Prisma.DbNull
+                    : (specs as Prisma.InputJsonValue),
+              }
+            : {}),
+          ...(shortcuts !== undefined
+            ? {
+                shortcuts:
+                  shortcuts === null
+                    ? Prisma.DbNull
+                    : (shortcuts as Prisma.InputJsonValue),
+              }
+            : {}),
+        },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, data.assetId, id),
+      );
     // Fire-and-forget search re-sync: label/kind/status/ipAddress (and the asset link, on detach) may
     // have changed (ADR-0035). Un-awaited, never throws, no-op when Meili is disabled.
     void this.syncNodeToSearch(updated.id);
@@ -4500,6 +4515,27 @@ export class InfraService {
     }
   }
 
+  /**
+   * The race the check above loses: a concurrent link lands first and `infra_nodes_assetId_active_key`
+   * refuses this write. Re-asked of the database rather than read off `meta`, whose shape the driver
+   * adapter decides. Anything else is rethrown untouched.
+   */
+  private async rethrowSharedAssetLink(
+    err: unknown,
+    assetId: string | null | undefined,
+    nodeId?: string,
+  ): Promise<never> {
+    if (
+      assetId &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      (await this.assetLinkedElsewhere(assetId, nodeId))
+    ) {
+      throw new ConflictException(INFRA_NODE_ASSET_SHARED_ERROR);
+    }
+    throw err;
+  }
+
   /** PATCH a node's canvas position (x/y). Cheap + debounce-friendly (ADR-0070 MVP). 404 if missing. */
   async updatePosition(id: string, x: number, y: number) {
     await this.getNode(id);
@@ -4532,10 +4568,14 @@ export class InfraService {
     if (node.assetId) {
       await this.assertAssetNotLinkedElsewhere(node.assetId, id);
     }
-    const restored = await this.prisma.infraNode.update({
-      where: { id },
-      data: { deletedAt: null },
-    });
+    const restored = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, node.assetId, id),
+      );
     // Back on the map → re-index it. Fire-and-forget, never throws, no-op when disabled (ADR-0035).
     void this.syncNodeToSearch(restored.id);
     return restored;

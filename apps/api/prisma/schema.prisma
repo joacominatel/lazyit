@@ -2974,6 +2974,8 @@ model InfraNode {
   factChanges InfraNodeFactChange[]
 
   @@index([assetId])
+  // Raw-SQL partial UNIQUE `infra_nodes_assetId_active_key` on (assetId) WHERE deletedAt IS NULL AND
+  // assetId IS NOT NULL — one live node per asset (migration 20261015130000; prisma-migrations.md §3).
   @@index([kind])
   @@index([state]) // the PENDING review-tray query
   // v2: partial UNIQUE (reportingSource, externalId) WHERE both NOT NULL — added with the agent
