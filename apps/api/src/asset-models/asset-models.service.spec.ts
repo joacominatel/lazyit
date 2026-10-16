@@ -557,6 +557,61 @@ describe('AssetModelsService', () => {
     });
   });
 
+  // --- restore needs a live category (SEC-041) -------------------------------
+
+  const archivedModel = (categoryId: string | null) => ({
+    id: 'm1',
+    categoryId,
+    deletedAt: new Date('2026-09-01T00:00:00.000Z'),
+  });
+  const categoryLockReturns = (live: boolean) =>
+    queryRaw.mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(
+        strings.join('?').includes('FROM "asset_categories"') && live
+          ? [{ id: 'cat-1' }]
+          : [],
+      ),
+    );
+
+  it('refuses (409) to restore a model while its category is archived, and writes nothing', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel('cat-1'));
+    categoryLockReturns(false);
+
+    const err = await service.restore('m1').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).message).toContain(
+      'Restore the category first',
+    );
+    expect(assetModel.update).not.toHaveBeenCalled();
+  });
+
+  it('restores a model whose category is live, locking the category FOR SHARE', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel('cat-1'));
+    categoryLockReturns(true);
+    assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: null });
+
+    await service.restore('m1');
+
+    const [sql, categoryId] = (queryRaw.mock.calls as RawCall[])[0];
+    expect(sql.join('?')).toContain('FOR SHARE');
+    expect(categoryId).toBe('cat-1');
+    expect(assetModel.update).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { deletedAt: null },
+    });
+  });
+
+  it('restores an uncategorized model without reading any category', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel(null));
+    assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: null });
+
+    await service.restore('m1');
+
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(assetModel.update).toHaveBeenCalledTimes(1);
+  });
+
   it('the delete-impact preview 404s for an archived model', async () => {
     assetModel.findFirst.mockResolvedValue(null);
 
