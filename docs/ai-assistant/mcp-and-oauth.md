@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -385,7 +385,7 @@ DCR creates a new client per connection anyway; always-prompt defeats silent re-
 | Token | `{origin}/oauth/token` (form-urlencoded) | api | public client (`client_id`) |
 | Registration (DCR) | `{origin}/oauth/register` (JSON) | api | none, rate-limited |
 | Revocation (RFC 7009) | `{origin}/oauth/revoke` | api | `client_id` |
-| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session + `ai:connect` |
+| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session; listing grants and minting a personal token need `ai:connect`, listing your personal tokens and revoking your own need none |
 | All users' connections (admin) | `{origin}/api/oauth/grants?userId=` (list/revoke) | api | session + `settings:manage` |
 | Plugin marketplace + archive (public) | `{origin}/api/ai/claude-code/marketplace.json`, `…/lazyit-plugin.zip` | api | none — only when MCP is enabled on an HTTPS instance (R8) |
 | Plugin download (authenticated) | `{origin}/api/ai/claude-code/plugin.zip` | api | session + `ai:connect`; always available while MCP is enabled |
@@ -1248,7 +1248,7 @@ ledger, never retried. Not started under `NODE_ENV=test`.
 | Route | Answers |
 | --- | --- |
 | `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused** — by the schema and again by the service, G3 F7). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user — counted and created in one transaction under a per-user `pg_advisory_xact_lock` (G3 F4). |
-| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant` |
+| `GET /oauth/personal-tokens` | No permission, human only: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant`. A user who lost `ai:connect` still sees, and can revoke, the tokens they hold (AUD-083) |
 | `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
 
 A personal token is a grant (`kind: "personal"`, `label`, `scopes`, `expiresAt`, the user's
