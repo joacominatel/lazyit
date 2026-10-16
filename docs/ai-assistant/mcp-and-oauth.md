@@ -559,9 +559,10 @@ lazyit-plugin.zip
 
 - **Settings → AI (admin)**: an "External agents (MCP)" switch, independent of provider configuration (decided — CEO, round 2),
   plus the list of all users' active connections with revoke, for incident response and offboarding (R9).
-- **Account → AI connections (`/account/ai`, every user holding `ai:connect`)**: install instructions (Claude
-  Code plugin commands, generic snippet), the user's connected apps (client, verified/unverified, access level,
-  created, last used, revoke), and — in `lan` — personal tokens (R9).
+- **Account → AI connections (`/account/ai`, every user)**: install instructions (Claude Code plugin commands,
+  generic snippet) for holders of `ai:connect`, the user's connected apps (client, verified/unverified, access
+  level, created, last used, revoke) for everyone, so a user who lost `ai:connect` can still revoke them
+  (AUD-083), and — in `lan` — personal tokens (R9).
 - Manual (en + es): "Connect an AI agent (MCP)" — per [[0062-in-app-help-manual-surface]].
 
 ### 5.7 OIDC mode — transitional footnote

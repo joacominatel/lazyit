@@ -130,7 +130,7 @@ notes.
 | **R6** | **Audit.** `AiActionLog` is the **single** permanent, append-only AI mutation ledger. The provider note's write-class `AiToolCall` rows collapse into it; the per-call approval row is `AiToolInvocation` (retention-bound). MCP writes use the same writer with channel `MCP`. Additive nullable `aiInvocationId` on `asset_history` and `user_history`. | The provider note's `AiToolCall` as the approval unit **and** the ledger. |
 | **R7** | **OAuth.** Scopes `lazyit.read`, `lazyit.write`, and `lazyit.admin` (only `elevated`-class tools; never preselected at consent; password step-up). Consent offers read-only. Opaque, hashed, audience-bound tokens; refresh rotation with reuse detection; DCR **and** CIMD; consent always shown; a password change or "sign out everywhere" revokes grants (a normal web logout does not — ADR-0097 decision 8, amended 2026-09-24). | The security note's colon-named scopes, its "do not ship DCR", its remembered consent; the MCP note's two-scope set. |
 | **R8** | **Skill.** An authenticated zip download is always available; the public plugin-marketplace URL is served only when MCP is enabled on an HTTPS instance (Claude Code's `archive` source is HTTPS-only). | The frontend note's "marketplace later" and the MCP note's "anonymous marketplace everywhere". |
-| **R9** | **Per-user surface.** `/account/ai` (install + connected apps + personal tokens) for holders of `ai:connect`; Settings → AI for admins (provider wizard, MCP switch, retention, budgets, every user's grants). | The frontend note's `ai:use`-gated install panel. |
+| **R9** | **Per-user surface.** `/account/ai`: install and new personal tokens for holders of `ai:connect`, connected apps (list + revoke) for every user (AUD-083); Settings → AI for admins (provider wizard, MCP switch, retention, budgets, every user's grants). | The frontend note's `ai:use`-gated install panel. |
 | **R10** | **SA tokens on `/mcp`** are accepted only if the SA holds `ai:connect`, fail-closed. Adopted by default (§8). | The security note's "`/mcp` rejects SA tokens". |
 
 ---
@@ -351,8 +351,8 @@ authenticated download — [[ai-assistant/mcp-and-oauth|MCP]] §13 records what 
   egress disclosure → enable → hard reload), the editor, the MCP switch, retention and budgets, every
   user's connected apps, and the list of SAs holding `ai:use`. The per-SA AI access control lives on
   each Service Account's page.
-- **`/account/ai`** (`ai:connect`): install instructions, the user's connected apps, and personal
-  tokens on `lan`. Linked from the user menu.
+- **`/account/ai`** (every user; installing and minting need `ai:connect`): install instructions, the
+  user's connected apps, and personal tokens on `lan`. Linked from the user menu.
 - **Consent page** `/oauth/authorize` in the `(auth)` group: client name with a verified-domain or
   self-declared badge, the redirect host (with a loopback warning), "acting as you", Read only / Read &
   write (preselected) / Admin actions (never preselected, password).
