@@ -10,6 +10,7 @@ import request from 'supertest';
 import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import { AccessGrantsController } from './access-grants.controller';
 import { AccessGrantsService } from './access-grants.service';
+import { AccessGrantsExportService } from './access-grants-export.service';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -93,6 +94,7 @@ describe('GET /access-grants/mine — self-scope carve-out authZ (#947)', () => 
       providers: [
         Reflector,
         { provide: AccessGrantsService, useValue: { findPage, findOne } },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         PermissionResolverService,
         { provide: APP_GUARD, useClass: FakeAuthGuard },

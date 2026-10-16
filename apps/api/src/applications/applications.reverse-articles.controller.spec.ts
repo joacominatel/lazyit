@@ -12,6 +12,7 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 import { ApplicationsController } from './applications.controller';
 import type { ApplicationsService } from './applications.service';
 import type { AccessGrantsService } from '../access-grants/access-grants.service';
+import type { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import type { ArticlesService } from '../articles/articles.service';
 
 /**
@@ -34,6 +35,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
     { findOne } as unknown as ApplicationsService,
     {} as unknown as AccessGrantsService,
     { findArticlesForApplication } as unknown as ArticlesService,
+    {} as unknown as AccessGrantsExportService,
   );
 
   beforeEach(() => {
@@ -80,10 +82,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
       'app1',
       expect.objectContaining({
         status: ['DRAFT', 'PUBLISHED'],
-        categoryId: [
-          'clh1abc0000xyz0000000abcd',
-          'clh2abc0000xyz0000000abcd',
-        ],
+        categoryId: ['clh1abc0000xyz0000000abcd', 'clh2abc0000xyz0000000abcd'],
       }),
       expect.anything(),
       // No principal passed in this call → forwarded as undefined (folder pin resolves to the
@@ -113,13 +112,7 @@ describe('ApplicationsController GET /applications/:id/articles (paginated + fil
 
   it('rejects an over-max limit with 400 (rejected, not clamped — ADR-0030)', async () => {
     await expect(
-      controller.findArticles(
-        'app1',
-        undefined,
-        undefined,
-        undefined,
-        '201',
-      ),
+      controller.findArticles('app1', undefined, undefined, undefined, '201'),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(findArticlesForApplication).not.toHaveBeenCalled();
   });

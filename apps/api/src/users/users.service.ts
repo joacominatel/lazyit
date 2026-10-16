@@ -15,6 +15,7 @@ import type {
   CloneUser,
   CloneUserResult,
   CreateUser,
+  DeletedFilter,
   ManagerDescriptor,
   ManagerInput,
   PageQuery,
@@ -36,6 +37,11 @@ import { projectUser } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { multiTokenWhere } from '../common/multi-token-where';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import type { ActorAttribution } from '../common/actor.service';
@@ -272,6 +278,32 @@ export class UsersService {
     // each over the page's user ids (two queries total, regardless of page size). LIST-only fields.
     const withCounts = await this.attachActivityCounts(serialized);
     return pageOf(withCounts, total, page);
+  }
+
+  /** The list's own `where`, slice and row shape for `GET /users/export`, walked by keyset (ADR-0103). */
+  exportSource(filters: UserFilters, deleted: DeletedFilter) {
+    const where: Prisma.UserWhereInput = {
+      ...this.buildWhere(filters),
+      ...deletedWhere(deleted),
+    };
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.user.count({ where, ...escapeHatch }),
+      fetchBatch: async (
+        after: KeysetCursor | null,
+        take: number,
+      ): Promise<SerializedUserListItem[]> => {
+        const rows = await this.prisma.user.findMany({
+          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          orderBy: keysetOrderBy(),
+          take,
+          ...escapeHatch,
+        });
+        return this.attachActivityCounts(await this.serializeUsers(rows));
+      },
+    };
   }
 
   /**

@@ -3,7 +3,7 @@ title: AccessGrant
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # AccessGrant
@@ -160,6 +160,19 @@ Plus the natural sub-resource endpoints on the related entities:
 - `GET /users/:id/access-grants?activeOnly=&includeExpired=` — grants of one [[user]] (`404` if the
   user is missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — grants on one [[application]].
+
+**Export** — the access-review artefact ([[0103-data-export-streaming-path]]).
+`GET /access-grants/export?userId=&applicationId=&activeOnly=&includeExpired=` and
+`GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` stream as CSV every grant the
+matching list returns: same `accessGrant:read` (a VIEWER gets 403 by default), same filters and
+defaults, and the per-application route `404`s on a missing or archived application like its list.
+Columns: application, user, user email, access level, status (`active`, `expired` = past `expiresAt`
+and not yet swept, `revoked`), granted at, granted by, expires at, revoked at, revoked by, notes,
+grant ID. A service-account actor reads `<name> (service account)`. The names are joined, so each one
+follows the read the screen would need to resolve it: user names and the email column need
+`user:read`, the application name `application:read`, a service-account name `settings:manage`.
+Without it the cell holds the id the list already returns, and the email column is left out. Every
+export writes a [[data-export-log]] row.
 
 ## Not yet implemented (deferred)
 

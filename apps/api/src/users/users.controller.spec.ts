@@ -12,6 +12,7 @@ import { UsersController } from './users.controller';
 import { PasswordResetUnsupportedError, UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { ExportService } from '../common/export';
 import { ActorService } from '../common/actor.service';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
@@ -59,6 +60,7 @@ describe('UsersController :id uuid validation (SEC-004)', () => {
         },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: {
@@ -112,6 +114,7 @@ describe('UsersController GET /users?ids= (batch resolver, #961)', () => {
         { provide: UsersService, useValue: { findPage } },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: {
@@ -221,6 +224,7 @@ describe('UsersController GET /users/me (ADR-0040)', () => {
         },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: {
@@ -317,6 +321,7 @@ describe('UsersController POST /users/:id/reset-password (issue #149)', () => {
         },
         { provide: AssetAssignmentsService, useValue: { findAll: jest.fn() } },
         { provide: AccessGrantsService, useValue: { findAll: jest.fn() } },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: {
