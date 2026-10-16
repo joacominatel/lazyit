@@ -37,6 +37,12 @@ use. It **never** inherits a role and is never admin-equivalent.
 - **Two capabilities are never grantable.** A service account can never hold **Change instance
   settings** or **Manage users**. Either would make it admin-equivalent (able to mint more accounts or
   create a human admin), so lazyit rejects them — even if you try to set them.
+- **You can only grant what your own role holds.** If an admin gave your role **Change instance
+  settings**, you can manage service accounts, but only with permissions your role has itself. Creating,
+  adding a permission, turning an account back on, extending its expiry, rotating its token or restoring
+  it is refused when the account would hold a permission you lack. Renaming it, removing permissions,
+  turning it off, shortening its expiry and revoking it always work. Admins hold every permission, so
+  this never limits them.
 
 ## The token (shown once)
 

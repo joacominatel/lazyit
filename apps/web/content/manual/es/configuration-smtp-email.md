@@ -13,6 +13,11 @@ app. Debes apuntar lazyit a tu servidor de correo (SMTP) existente en **Configur
 administradores; en el menú lateral de Configuración está bajo **Integraciones**). Está **desactivado
 hasta que lo actives**, y el encabezado de la página muestra **Activado** o **Desactivado**.
 
+Solo un administrador puede **guardar** esta configuración, incluso si un Miembro o Lector recibió
+**Cambiar la configuración de la instancia**: quien controla el servidor de correo podría leer cada
+correo de restablecimiento de contraseña que pasa por él, incluido el de un administrador. Un Miembro o
+Lector con esa capacidad todavía puede abrir la página y enviar un correo de prueba.
+
 ## Configurar la conexión
 
 La sección **Servidor SMTP** tiene estos campos. Cada uno guarda su explicación larga tras el **?** junto

@@ -73,9 +73,11 @@ Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada s
   usuario por encima de tu rol el rol aparece como una etiqueta fija y no se ofrecen **Editar**, el
   restablecimiento de contraseña ni **Dar de baja** (clonarlo sí). Cualquier otra cosa se rechaza con
   un mensaje claro.
-- **Solo un administrador edita los permisos y la conexión del directorio.** Dar a Miembro o a Lector
-  **Cambiar la configuración de la instancia** les permite ver la matriz de permisos y la conexión del
-  directorio, no cambiarlas ni ejecutar una sincronización del directorio.
+- **Solo un administrador edita los permisos, la conexión del directorio y la configuración de correo.**
+  Dar a Miembro o a Lector **Cambiar la configuración de la instancia** les permite ver la matriz de
+  permisos, la conexión del directorio y la configuración de correo (SMTP), no cambiarlas ni ejecutar una
+  sincronización del directorio. Las cuentas de servicio que gestionan solo pueden tener permisos que su
+  propio rol tiene.
 - **Promover a alguien cancela sus credenciales de acceso pendientes.** Cuando el rol de una persona
   sube, se cancelan la contraseña temporal que todavía no reemplazó y cualquier enlace de
   restablecimiento pendiente, así que una entregada con el rol inferior deja de funcionar. La
