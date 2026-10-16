@@ -160,8 +160,6 @@ describe("UserSchema role (ADR-0040)", () => {
   });
 });
 
-// ADR-0043 — `roleSource` is an OPTIONAL, additive field on the User response (informational only; the
-// API still authorizes from the DB role). It must not break existing responses that omit it.
 describe("canManageRole (SEC-088)", () => {
   test("a caller may grant and act on its own role and below", () => {
     expect(canManageRole("ADMIN", "ADMIN")).toBe(true);
@@ -178,6 +176,8 @@ describe("canManageRole (SEC-088)", () => {
   });
 });
 
+// ADR-0043 — `roleSource` is an OPTIONAL, additive field on the User response (informational only; the
+// API still authorizes from the DB role). It must not break existing responses that omit it.
 describe("UserSchema roleSource (ADR-0043)", () => {
   const base = READ_BASE;
 
