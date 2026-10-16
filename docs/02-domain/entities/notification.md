@@ -93,8 +93,9 @@ or blocks the domain write — the AccessGrant-outbox decoupling). Idempotent vi
 - **Login** (`GET /users/me`, the app-load self-read) → **`secret.vault_setup`**, a **targeted** nudge
   (`recipientUserId = caller`) when the caller holds `secret:read` but has **no** [[user-keypair]] (they
   have never set a vault passphrase, so they can decrypt nothing — [[0061-secret-manager-zero-knowledge]]
-  §7). Dedupe **`secret.vault_setup:<userId>`** (a STABLE key, no time bucket) → **one nudge per user,
-  ever**; none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
+  §7). Dedupe **`secret.vault_setup:<userId>`** (a STABLE key, no time bucket) → **at most one nudge per
+  user per retention window**: the 90-day prune frees the key, so a user still without a keypair is nudged
+  again on a later login (AUD-089); none re-fires once a keypair exists. Wired **fail-soft** in `VaultSetupNudgeService` (a
   notification problem never blocks login or `/me`). **INV-10-safe** — carries no key material, only "set
   up your vault passphrase" + a link to `/secrets`.
 - **`PUT /config/permissions`** (`PermissionsConfigService.updateMatrix`) → **`permission_widened`**, a

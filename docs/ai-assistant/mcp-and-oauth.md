@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -385,7 +385,7 @@ DCR creates a new client per connection anyway; always-prompt defeats silent re-
 | Token | `{origin}/oauth/token` (form-urlencoded) | api | public client (`client_id`) |
 | Registration (DCR) | `{origin}/oauth/register` (JSON) | api | none, rate-limited |
 | Revocation (RFC 7009) | `{origin}/oauth/revoke` | api | `client_id` |
-| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session; listing grants and minting a personal token need `ai:connect`, listing your personal tokens and revoking your own need none |
+| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session; minting a personal token needs `ai:connect`, listing and revoking your own connections and personal tokens need none (AUD-083) |
 | All users' connections (admin) | `{origin}/api/oauth/grants?userId=` (list/revoke) | api | session + `settings:manage` |
 | Plugin marketplace + archive (public) | `{origin}/api/ai/claude-code/marketplace.json`, `…/lazyit-plugin.zip` | api | none — only when MCP is enabled on an HTTPS instance (R8) |
 | Plugin download (authenticated) | `{origin}/api/ai/claude-code/plugin.zip` | api | session + `ai:connect`; always available while MCP is enabled |
@@ -899,7 +899,7 @@ server must not depend on the provider configuration.
 | `POST /oauth/revoke` | 200, empty, whether or not the token was known; revoking either token revokes the grant |
 | `POST /oauth/authorize/validate` | 200 `OAuthAuthorizeValidation`; **400 `{ error, redirectTo }`** for a request error that belongs to the client (the page sends the browser to `redirectTo`, which carries `error`, `state`, `iss`) |
 | `POST /oauth/authorize/decision` | 200 `OAuthAuthorizeRedirect`; 403 `{ refusal }`; 403 `{ code: "STEP_UP_REQUIRED" \| "STEP_UP_FAILED" \| "STEP_UP_UNAVAILABLE" }` and 429 `{ code: "STEP_UP_RATE_LIMITED", retryAfterSec }` for `lazyit.admin` (the password goes through `PasswordStepUpVerifier`, the chat approvals' per-account backoff — one counter for both; each refusal audited `CONSENT_STEP_UP_FAILED`, SEC-082); 400 for scopes outside the request; the same 400 `{ error, redirectTo }`; 429 past 10/min per user |
-| `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `ai:connect` / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
+| `GET /oauth/grants/mine` · `GET /oauth/grants?userId=` · `DELETE /oauth/grants/:id` | `mine`: no permission, so a user who lost `ai:connect` still sees what they hold (AUD-083) / `settings:manage` (the admin items add `userId` to the shared `OAuthGrant`); DELETE: the owner always, otherwise `settings:manage`, otherwise 404; service accounts refused |
 
 `validate` refuses (never redirects) in this order: no human session or no `ai:connect` → `FORBIDDEN`; MCP
 off → `AI_DISABLED`; unknown client or a client the allowlist no longer admits → `INVALID_CLIENT`; a

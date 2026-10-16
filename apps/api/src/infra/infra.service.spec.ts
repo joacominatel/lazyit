@@ -41,6 +41,7 @@ import { InfraNodeEnrollmentLimiter } from './infra-node-enrollment.limiter';
 import { NotificationsService } from '../notifications/notifications.service';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` for types (erased) AND at runtime for `Prisma.PrismaClientKnownRequestError` (the P2002
@@ -64,7 +65,7 @@ jest.mock('../../generated/prisma/client', () => ({
     PrismaClientKnownRequestError: class extends Error {
       constructor(
         public code: string,
-        public meta?: { target?: string | string[] },
+        public meta?: Record<string, unknown>,
       ) {
         super(`prisma-${code}`);
       }
@@ -80,13 +81,20 @@ import { Prisma } from '../../generated/prisma/client';
 
 const KnownError = Prisma.PrismaClientKnownRequestError as unknown as new (
   code: string,
-  meta?: { target?: string | string[] },
-) => Error & { code: string; meta?: { target?: string | string[] } };
+  meta?: Record<string, unknown>,
+) => Error & { code: string; meta?: Record<string, unknown> };
 
 // The two raw partial-unique index names from migration 20260623193046_infra_topology (adapter-pg
 // surfaces these by NAME on a P2002, since Prisma doesn't know the raw indexes from the schema).
 const RUNS_ON_INDEX = 'infra_edges_source_active_runs_on_key';
 const CONNECTS_TO_INDEX = 'infra_edges_connects_to_pair_active_key';
+const edgeUniqueViolation = (index: string) =>
+  new KnownError('P2002', adapterPgUniqueViolationMeta({ index }, 'InfraEdge'));
+const serialUniqueViolation = () =>
+  new KnownError(
+    'P2002',
+    adapterPgUniqueViolationMeta({ index: 'assets_serial_active_key' }),
+  );
 
 type Mock = jest.Mock;
 
@@ -382,6 +390,32 @@ describe('InfraService', () => {
         where: { assetId: 'asset-taken' },
       });
       expect(prisma.infraNode.create).not.toHaveBeenCalled();
+    });
+
+    it('maps a link that loses the race to the one-live-node index to the same 409', async () => {
+      // The pre-check passes, then a concurrent link lands first and the partial unique index refuses.
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-raced' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
+    });
+
+    it('rethrows a P2002 that is not about the asset link untouched', async () => {
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-free' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toMatchObject({ code: 'P2002' });
     });
 
     it('stamps a typed IP MANUAL, so a later merge or report never overwrites it (AUD-088)', async () => {
@@ -2861,9 +2895,7 @@ describe('InfraService', () => {
       mockDetailReadAfterConfirm(PENDING);
       // First mint (with serial) collides on assets_serial_active_key; the retry (no serial) succeeds.
       assets.create
-        .mockRejectedValueOnce(
-          new KnownError('P2002', { target: 'assets_serial_active_key' }),
-        )
+        .mockRejectedValueOnce(serialUniqueViolation())
         .mockResolvedValueOnce({ id: 'asset-new' });
       prisma.infraNode.update.mockResolvedValue({
         id: 'node-1',
@@ -2886,6 +2918,28 @@ describe('InfraService', () => {
         prisma.infraNode.update,
       );
       expect(arg.data.state).toBe('CONFIRMED');
+    });
+
+    it('a P2002 on another Asset unique (the live tag) is not mistaken for a serial collision', async () => {
+      mockDetailReadAfterConfirm({
+        id: 'node-1',
+        label: 'web-01',
+        state: 'PENDING',
+        assetId: null,
+        specs: {
+          host: { hostname: 'web-01', hardware: { serial: 'DUP-SERIAL' } },
+        },
+      });
+      const tagCollision = new KnownError(
+        'P2002',
+        adapterPgUniqueViolationMeta({ index: 'assets_assetTag_active_key' }),
+      );
+      assets.create.mockRejectedValueOnce(tagCollision);
+
+      await expect(service.confirmNode('node-1', {}, HUMAN)).rejects.toBe(
+        tagCollision,
+      );
+      expect(assets.create).toHaveBeenCalledTimes(1);
     });
 
     it('is an idempotent no-op on an already-CONFIRMED node (no Asset minted, no re-flip write)', async () => {
@@ -3061,6 +3115,19 @@ describe('InfraService', () => {
         where: { assetId: 'asset-of-a', id: { not: 'node-b' } },
       });
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('maps a first-attach that loses the race to the one-live-node index to the same 409', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-b',
+        assetId: null,
+      });
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.updateNode('node-b', { assetId: 'asset-of-a' }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
     });
 
     it('only UN-LINKS an auto-created Asset another LIVE node still links — never archives it (AUD-030)', async () => {
@@ -3310,9 +3377,7 @@ describe('InfraService', () => {
     });
 
     it('maps a racing active-unique P2002 to a friendly 409', async () => {
-      txEdge.create.mockRejectedValue(
-        new KnownError('P2002', { target: RUNS_ON_INDEX }),
-      );
+      txEdge.create.mockRejectedValue(edgeUniqueViolation(RUNS_ON_INDEX));
 
       await expect(
         service.createEdge({
@@ -3320,7 +3385,30 @@ describe('InfraService', () => {
           targetId: 'host-1',
           kind: 'RUNS_ON',
         }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toThrow(
+        new ConflictException(
+          'This source already has an active host (RUNS_ON). Close the existing one first, or the migration retry raced — try again.',
+        ),
+      );
+    });
+
+    it('lets a P2002 on any other index, or one naming only fields, propagate unchanged', async () => {
+      const otherIndex = edgeUniqueViolation('infra_edges_pkey');
+      const fieldsOnly = new KnownError(
+        'P2002',
+        adapterPgUniqueViolationMeta({ fields: ['sourceId'] }, 'InfraEdge'),
+      );
+
+      for (const err of [otherIndex, fieldsOnly]) {
+        txEdge.create.mockRejectedValueOnce(err);
+        await expect(
+          service.createEdge({
+            sourceId: 'vm-1',
+            targetId: 'host-1',
+            kind: 'RUNS_ON',
+          }),
+        ).rejects.toBe(err);
+      }
     });
   });
 
@@ -3365,7 +3453,7 @@ describe('InfraService', () => {
 
     it('maps the canonical-pair unique P2002 to a friendly 409', async () => {
       prisma.infraEdge.create.mockRejectedValue(
-        new KnownError('P2002', { target: CONNECTS_TO_INDEX }),
+        edgeUniqueViolation(CONNECTS_TO_INDEX),
       );
 
       await expect(
@@ -3374,7 +3462,11 @@ describe('InfraService', () => {
           targetId: 'zzz',
           kind: 'CONNECTS_TO',
         }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toThrow(
+        new ConflictException(
+          'These two nodes are already connected (CONNECTS_TO is symmetric — the pair already has an active connection).',
+        ),
+      );
     });
   });
 
@@ -4572,6 +4664,20 @@ describe('InfraService', () => {
         where: { assetId: 'asset-1', id: { not: 'node-old' } },
       });
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('maps a restore that loses the race to the one-live-node index to the same 409', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: 'asset-1',
+        deletedAt: new Date(),
+      });
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(service.restoreNode('node-old')).rejects.toThrow(
+        INFRA_NODE_ASSET_SHARED_ERROR,
+      );
     });
 
     it('restores a node with its Asset link when no other live node links that Asset', async () => {
@@ -7461,6 +7567,24 @@ describe('InfraService', () => {
       });
     });
 
+    it('an adoption that loses the race to the one-live-node index is a 409 and the node goes back to the tray', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({ id: 'asset-curated' });
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(service.confirmNode('node-1', {}, HUMAN)).rejects.toThrow(
+        INFRA_NODE_ASSET_SHARED_ERROR,
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'node-1', state: 'CONFIRMED', assetId: null },
+        data: { state: 'PENDING' },
+      });
+      // The link never landed, so no AGENT_LINKED row may claim it did.
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
     it('never adopts an Asset another LIVE node already links — that one mints instead (AUD-030)', async () => {
       // A re-imaged host's new proposal must not share its predecessor's Asset: detaching either node
       // would then archive or un-link the row the other still uses. The relation filter is not scoped
@@ -7531,6 +7655,10 @@ describe('InfraService', () => {
       await service.confirmNode('node-1', {}, HUMAN);
 
       expect(assetHistory.record).toHaveBeenCalledTimes(1);
+      // Recorded only after the node update wrote the link.
+      expect(assetHistory.record.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.infraNode.update.mock.invocationCallOrder[0],
+      );
       const event = (assetHistory.record.mock.calls as unknown[][])[0][1] as {
         assetId: string;
         eventType: string;
@@ -7650,9 +7778,7 @@ describe('InfraService', () => {
       confirmReads(pendingCorroborated());
       prisma.asset.findFirst.mockResolvedValue(null); // nothing to adopt at probe time…
       assets.create
-        .mockRejectedValueOnce(
-          new KnownError('P2002', { target: 'assets_serial_active_key' }),
-        )
+        .mockRejectedValueOnce(serialUniqueViolation())
         .mockResolvedValueOnce({ id: 'asset-new' }); // …but a racing confirm minted it in between
 
       await service.confirmNode('node-1', {}, HUMAN);

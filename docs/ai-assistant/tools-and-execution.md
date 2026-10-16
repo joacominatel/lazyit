@@ -707,9 +707,10 @@ path unit (W2-0, #1315):
   is wrapped with `untrusted()` in a users hit (AUD-003), and so are an asset hit's name and serial, an
   article hit's title, and an infrastructure hit's label and asset name — a hit does not say whether a
   reporting agent wrote them. `session_context` wraps the name and serial of the caller's assigned assets
-  for the same reason (the lean `mine` rows carry no specs), so a caller who holds assets starts a turn
-  that read it as untrusted; its own user — the caller's own name — is intentionally plain, pending a CEO
-  decision (wrapping it would mark most turns untrusted and so turn auto-approve off in practice);
+  for the same reason (the lean `mine` rows carry no specs), and the caller's own first and last name too
+  (anyone may rename themselves), so every turn that calls it is untrusted and never auto-approved:
+  `session_context` no longer has an exception. The display name in the system prompt ("Acting as …") is
+  not wrapped; it is covered by its own hardening (§12, "Hardening of the dynamic values");
   `input-request.tools.ts` (#1388) holds the `interaction` toolset: `request_input`, the chat-only form
   the assistant builds to ask for missing data (`awaitsInput: true` on a `navigate` tool — the runtime,
   not the tool, pauses the run; [[ai-assistant/provider-and-runtime|provider]] §8.2), and lists
@@ -1284,9 +1285,9 @@ a separate remediation, not a supported path here.
     pins the user row, not its holdings).
   - Every toolset wraps person names (AUD-003): the users, KB and access tools, and since the B20 batch
     the assets (an owner, a card's person), infrastructure (a node's owners), context (a users search
-    hit) and workflow-authoring (the enable card's sample grantee) tools. The caller's own name in
-    `session_context` is intentionally plain, pending a CEO decision: wrapping it would mark nearly every
-    turn untrusted and so turn auto-approve off in practice.
+    hit) and workflow-authoring (the enable card's sample grantee) tools. `session_context` no longer has
+    an exception: the caller's own name is wrapped too, so a turn that calls it is never auto-approved.
+    The system-prompt display name is covered by its own hardening (§12).
 
 **Access tools as built (W2-6).** Rows 17–26 of §7, in `tools/access.tools.ts`. Every call goes through
 `rt.call`, so an application write passes the route's own `CreateApplicationSchema` /
