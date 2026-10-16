@@ -3,7 +3,7 @@ title: PurchaseOrder
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # PurchaseOrder
@@ -83,6 +83,15 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   and live line descriptions (`q`), and filters by `status` (multi-value), `supplierId` and `receipt` — a
   derived state, or `PENDING`: at least one unit pending on a purchase that is not `CANCELLED`. The receipt
   filter is computed with the same functions as the detail, so the list and the shown state agree.
+- **Export** (`GET /purchase-orders/export`, #1597, [[0103-data-export-streaming-path]]): a CSV of every
+  purchase the list would return for the same filters (`q`, `status`, `supplierId`, `receipt`, `deleted`),
+  under the same `purchaseOrder:read` (VIEWER denied by default) and the same ADMIN-only `deleted=only`. One
+  row per purchase, never per line: `reference, supplier, status, receipt, orderDate, expectedDate,
+  invoiceNumbers, invoiceDate, company, lineCount, unitsOrdered, unitsReceived, unitsPending, total,
+  currency, unpricedLines, createdAt`. `total` is the list's total in major units with a dot decimal (empty
+  when unknown), in that row's `currency` label; the units are the derived receipt's, empty on a purchase
+  with no countable line. Notes and line detail are not exported. Every export is audited
+  ([[data-export-log]]).
 - **Global search** (#1499, [[0035-search-architecture]]): the `purchases` index carries the reference,
   supplier name, invoice numbers, stored status, order and creation dates, and the live lines' descriptions
   (searchable, never returned). Never money or notes. Searched only by a principal holding
