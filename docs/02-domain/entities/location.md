@@ -140,6 +140,12 @@ above), `POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`, `409` 
 deleted, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
 via Swagger ([[0018-api-documentation-swagger]]).
 
+**Export.** `GET /locations/export?q=&type=&deleted=` streams every location the list would return for the
+same filters as CSV, under the same `location:read` and the same ADMIN-only `deleted=only` (#1597,
+[[0103-data-export-streaming-path]]). Columns: `id, name, type, parentId, address, floor, description,
+notes, createdAt, updatedAt, deletedAt`. The list carries `parentId`, not the ancestry `path`, so the file
+does too: the hierarchy is rebuilt from `id` / `parentId`. Every export is audited ([[data-export-log]]).
+
 **Web:** `locations/[id]` is the location detail page — the place's facts plus the "assets here"
 view (the inventory physically located there), via the existing `GET /assets?locationId=` filter
 (no dedicated endpoint). See [[0020-frontend-data-layer]].

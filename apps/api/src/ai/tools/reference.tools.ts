@@ -742,5 +742,10 @@ export const referenceToolset: AiToolset = {
       ['setAccessRules'],
       'Folder access rules: elevated authorization configuration, after v1 (tools-and-execution.md §3).',
     ),
+    unexposed(
+      LocationsController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
   ],
 };

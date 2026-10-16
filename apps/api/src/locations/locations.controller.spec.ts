@@ -9,6 +9,7 @@ import { APP_GUARD } from '@nestjs/core';
 import request from 'supertest';
 import { LocationsController } from './locations.controller';
 import { LocationsService } from './locations.service';
+import { ExportService } from '../common/export';
 
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -47,6 +48,7 @@ describe('LocationsController — deleted=only ADMIN gate (ADR-0041)', () => {
       controllers: [LocationsController],
       providers: [
         { provide: LocationsService, useValue: { findPage } },
+        { provide: ExportService, useValue: {} },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
       ],
     }).compile();
@@ -131,6 +133,7 @@ describe('LocationsController — DELETE resolution query (AUD-024)', () => {
       controllers: [LocationsController],
       providers: [
         { provide: LocationsService, useValue: { remove } },
+        { provide: ExportService, useValue: {} },
         { provide: APP_GUARD, useClass: FakeAuthGuard },
       ],
     }).compile();
