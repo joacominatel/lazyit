@@ -51,15 +51,16 @@ adivinar.)
 **Qué hace eliminar una categoría.** Eliminar una categoría de activos, aplicaciones o consumibles es
 un **borrado lógico**: la categoría se oculta, nunca se borra, y se puede restaurar.
 
-- Una **categoría de aplicaciones o de consumibles** que todavía tiene ítems te pide **una sola
-  decisión para todos** — nunca ítem por ítem — después de mostrarte cuáles son: **dejarlos sin
-  categoría**, **moverlos a otra categoría** del mismo tipo o **crear una categoría nueva** — escribes
-  su nombre y lazyit la crea y luego mueve los ítems ahí (solo si también puedes crear categorías). El
-  movimiento y la eliminación ocurren juntos, y restaurar la categoría después no devuelve los ítems.
-- Una **categoría de activos** en uso se puede eliminar directamente: sus registros conservan todos sus
-  datos, pero se muestran **sin categoría** hasta que se restaure o los clasifiques en otra. La
-  confirmación dice cuántos registros son (*La usan 42 activos — conservan sus registros, pero se
-  muestran sin categoría hasta que se restaure*).
+- Una categoría que todavía tiene ítems — **modelos** en una categoría de activos, **aplicaciones** o
+  **consumibles** en las demás — te pide **una sola decisión para todos**, nunca ítem por ítem,
+  después de mostrarte cuáles son: **dejarlos sin categoría**, **moverlos a otra categoría** del mismo
+  tipo o **crear una categoría nueva** — escribes su nombre y lazyit la crea y luego mueve los ítems ahí
+  (solo si también puedes crear categorías). En una categoría de activos el diálogo también cuenta los
+  activos de esos modelos, porque la categoría de un activo viene de su modelo. El movimiento y la
+  eliminación ocurren juntos, y restaurar la categoría después no devuelve los ítems.
+- Un **modelo** en uso pregunta lo mismo sobre sus activos y las líneas de compras abiertas asociadas a
+  él. Consulta
+  [Quitar un modelo o una categoría](/help/assets-models-categories#quitar-un-modelo-o-una-categoría).
 
 Todavía no hay una lista de categorías eliminadas en
 Configuración; un administrador puede restaurar una a través de la API
@@ -67,10 +68,8 @@ Configuración; un administrador puede restaurar una a través de la API
 `consumable-categories`).
 
 **Eliminar varias categorías a la vez.** Elige **Seleccionar** sobre la lista para mostrar una casilla
-en cada fila, marca las que quieras quitar y usa **Eliminar** en la barra de selección. En las
-categorías de activos, la confirmación nombra las seleccionadas que están en uso y cuántos registros se
-mostrarán sin categoría en total. Una categoría de aplicaciones o de consumibles que todavía tiene
-ítems **no** se elimina en bloque, porque necesita su propia decisión sobre adónde van sus ítems: queda
+en cada fila, marca las que quieras quitar y usa **Eliminar** en la barra de selección. Una categoría
+que todavía tiene ítems **no** se elimina en bloque, porque necesita su propia decisión sobre adónde van sus ítems: queda
 seleccionada y el resumen te indica que la elimines por separado. lazyit elimina el resto una por una
 e informa el resultado; si una petición falla (por ejemplo, se corta la conexión), esa fila queda
 seleccionada y el resumen dice cuántas no se pudieron eliminar, para que vuelvas a intentarlo. **Listo** sale de la selección. (El borrado masivo requiere el permiso de eliminación de
@@ -139,9 +138,8 @@ ninguno. Por eso importa mantener la lista curada: renombra una categoría una v
 que la referencian lo reflejan.
 
 Quitar una entrada de taxonomía sigue las mismas reglas de **borrado lógico y auditoría** que el resto
-del dominio: la entrada se oculta, no se borra, y los registros que la referencian se conservan. Las
-categorías de aplicaciones y de consumibles preguntan adónde van sus ítems cuando eliminas una en uso;
-un registro cuya categoría de activos se eliminó simplemente se muestra sin ella. Revisa el recuento
+del dominio: la entrada se oculta, no se borra, y los registros que la referencian se conservan.
+Eliminar una categoría o un modelo en uso pregunta adónde van sus registros. Revisa el recuento
 **En uso** antes de eliminar.
 
 ## Dónde gestionar la configuración relacionada

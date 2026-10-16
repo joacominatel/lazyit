@@ -89,9 +89,34 @@ filling them in is what makes filtering, grouping and reporting useful.
 
 ## Removing a model or category
 
-Models and categories are **soft-deleted**, never destroyed. Removing one does **not** delete or
-break the assets that reference it — those assets simply keep their snapshot and become unclassified
-for that link. This keeps your history intact: lazyit favors auditability over strict tidiness.
+Models and categories are **soft-deleted**, never destroyed, and removing one never deletes anything
+that points to it. When it is still in use, lazyit first shows you what will be affected and asks for
+**one decision for all of it** — you cannot choose item by item.
+
+**Removing a model** that still has **assets**, or **open purchase lines** mapped to it, offers:
+
+- **Leave them without a model** — the assets keep their details but no longer have a model, and the
+  purchase lines lose their model mapping.
+- **Move them to another model** — everything goes to the model you pick. It can belong to another
+  category: an asset's category comes from its model, so the assets then show that category.
+- **Create a new model** — type a name: lazyit creates it with the same manufacturer and category as
+  the one you are removing, then moves everything there. This choice appears only if you can also
+  create models.
+
+**Removing a category** that still has **models** offers the same three choices for those models:
+leave them without a category, move them to another category, or create a new category and move them
+into it. Their assets follow their model, so the dialog also counts the assets whose category changes.
+
+The dialog names up to 50 of each kind and counts all of them. If you are not allowed to view a kind
+(purchases, say), you see only how many there are — the decision still applies to them.
+
+The move and the removal happen together, and every asset moved off a model gets a model change in its
+history. Records that are already history keep pointing at the removed model or category: archived
+assets and models, purchase lines already received, and the lines of cancelled purchases. A model or
+category nothing points to is removed straight away.
+
+An admin can bring a removed model back from the archived view. Restoring a model or category does not
+bring back what was moved off it.
 
 ## What's next
 

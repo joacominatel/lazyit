@@ -47,27 +47,25 @@ before the server reports counts, the column stays empty rather than guessing.)
 **What deleting a category does.** Deleting an asset, application or consumable category is a
 **soft delete**: the category is hidden, never erased, and it can be restored.
 
-- An **application or consumable category** that still has items asks for **one decision for all of
-  them** — never item by item — after showing you which ones: **leave them without a category**, or
-  **move them to another category** of the same kind, or **create a new category** — type its name
-  and lazyit creates it, then moves the items there (offered only if you can also create categories).
+- A category that still has items — **models** for an asset category, **applications** or
+  **consumables** for the others — asks for **one decision for all of them**, never item by item,
+  after showing you which ones: **leave them without a category**, or **move them to another
+  category** of the same kind, or **create a new category** — type its name and lazyit creates it,
+  then moves the items there (offered only if you can also create categories). For an asset category
+  the dialog also counts the assets of those models, since an asset's category comes from its model.
   The move and the delete happen together, and restoring the category later does not bring the items
   back.
-- An **asset category** in use can still be deleted directly: its records keep all their data but show
-  **no category** until the category is restored or you file them under another one. The confirmation
-  says how many records that is (*Used by 42 assets — they keep their records but show no category
-  until it is restored*).
+- A **model** in use asks the same way about its assets and the open purchase lines mapped to it. See
+  [Removing a model or category](/help/assets-models-categories#removing-a-model-or-category).
 
 There is no list of deleted categories in Settings yet; an
 administrator can restore one through the API (`POST /api/asset-categories/{id}/restore`, and the same
 under `application-categories` and `consumable-categories`).
 
 **Removing several categories at once.** Choose **Select** above the list to show a checkbox on each
-row, tick the ones you want to remove and use **Delete** in the selection bar. For asset categories,
-the confirmation names the selected categories that are in use and how many records will show no
-category in all. An application or consumable category that still has items is **not** deleted in
-bulk, since it needs its own decision about where its items go: it stays selected, and the summary
-tells you to delete it on its own. lazyit deletes the rest one by one and reports the result; if a
+row, tick the ones you want to remove and use **Delete** in the selection bar. A category that still
+has items is **not** deleted in bulk, since it needs its own decision about where its items go: it
+stays selected, and the summary tells you to delete it on its own. lazyit deletes the rest one by one and reports the result; if a
 request fails (a lost connection, say), that row stays selected and the summary says how many could
 not be deleted, so you can try again. **Done** leaves selection.
 (Bulk delete requires the category-delete permission; **Select** only appears when you hold it.)
@@ -130,9 +128,8 @@ A category or model is a **reference** that records point at — it is not the r
 keeping the list curated matters: rename a category once and every record that references it follows.
 
 Removing a taxonomy entry follows the same **soft-delete and audit** rules as the rest of the domain:
-the entry is hidden, not erased, and the records that reference it are kept. Application and
-consumable categories ask where their items go when you delete one in use; a record whose asset
-category was deleted simply shows none. Check the **In use** count before you delete.
+the entry is hidden, not erased, and the records that reference it are kept. Deleting a category or
+model in use asks where its records go. Check the **In use** count before you delete.
 
 ## Where to manage related setup
 

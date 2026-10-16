@@ -92,10 +92,35 @@ pero completarlos es lo que hace útiles el filtrado, el agrupamiento y los info
 
 ## Quitar un modelo o una categoría
 
-Los modelos y las categorías se **borran de forma lógica**, nunca se destruyen. Quitar uno **no** borra
-ni rompe los activos que lo referencian — esos activos simplemente conservan su instantánea y quedan
-sin clasificar en ese vínculo. Así tu historial se mantiene intacto: lazyit prioriza la auditabilidad
-por sobre la prolijidad estricta.
+Los modelos y las categorías se **borran de forma lógica**, nunca se destruyen, y quitar uno nunca borra
+lo que lo referencia. Cuando todavía está en uso, lazyit primero te muestra qué se verá afectado y te
+pide **una sola decisión para todo** — no se puede elegir ítem por ítem.
+
+**Quitar un modelo** que todavía tiene **activos**, o **líneas de compras abiertas** asociadas a él,
+ofrece:
+
+- **Dejarlos sin modelo** — los activos conservan sus datos pero quedan sin modelo, y las líneas de
+  compra pierden su modelo asociado.
+- **Moverlos a otro modelo** — todo pasa al modelo que elijas. Puede ser de otra categoría: la
+  categoría de un activo viene de su modelo, así que los activos pasan a mostrar esa categoría.
+- **Crear un modelo nuevo** — escribe un nombre: lazyit lo crea con el mismo fabricante y la misma
+  categoría que el que quitas, y luego mueve todo ahí. Esta opción solo aparece si también puedes crear
+  modelos.
+
+**Quitar una categoría** que todavía tiene **modelos** ofrece las mismas tres opciones para esos
+modelos: dejarlos sin categoría, moverlos a otra categoría o crear una categoría nueva y moverlos ahí.
+Sus activos siguen a su modelo, así que el diálogo también cuenta los activos cuya categoría cambia.
+
+El diálogo nombra hasta 50 de cada tipo y los cuenta a todos. Si no tienes permiso para ver un tipo
+(las compras, por ejemplo), solo ves cuántos hay — la decisión también se aplica a ellos.
+
+El movimiento y la baja ocurren juntos, y cada activo que sale de un modelo registra el cambio de modelo
+en su historial. Lo que ya es historial sigue apuntando al modelo o la categoría quitados: los activos y
+modelos archivados, las líneas de compra ya recibidas y las líneas de compras canceladas. Un modelo o
+una categoría a los que nada apunta se quitan directamente.
+
+Un administrador puede recuperar un modelo quitado desde la vista de archivados. Restaurar un modelo o
+una categoría no devuelve lo que se movió.
 
 ## Qué sigue
 
