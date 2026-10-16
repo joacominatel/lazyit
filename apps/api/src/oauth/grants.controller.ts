@@ -20,7 +20,8 @@ import { type AdminOAuthGrant, GrantsService } from './grants.service';
 /**
  * Connected apps (synthesis §4.7, R9). Human sessions only — a service account never manages OAuth
  * delegations. Browser path: `/api/oauth/grants…` (Caddy strips `/api`).
- *   - `GET /oauth/grants/mine` — the caller's live connections (`ai:connect`).
+ *   - `GET /oauth/grants/mine` — the caller's live connections. No permission: a user who lost
+ *     `ai:connect` still sees, and can revoke, the connections they hold.
  *   - `GET /oauth/grants?userId=` — everyone's, or one user's (`settings:manage`). Each item adds
  *     `userId` to the shared `OAuthGrant` shape.
  *   - `DELETE /oauth/grants/:id` — the owner always; anyone else needs `settings:manage`; 404 otherwise.
@@ -31,7 +32,6 @@ export class GrantsController {
   constructor(private readonly grants: GrantsService) {}
 
   @Get('mine')
-  @RequirePermission('ai:connect')
   listMine(@CurrentUser() user: User): Promise<OAuthGrant[]> {
     return this.grants.listMine(user);
   }
