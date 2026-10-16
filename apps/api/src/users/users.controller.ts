@@ -486,7 +486,9 @@ export class UsersController {
       'normal CreateUser payload (the new identity); the clone NEVER copies the source email/legajo/' +
       'username or externalId (SEC-006). `cloneAssetAssignments` / `cloneAccessGrants` opt INTO mirroring ' +
       'the source’s ACTIVE assignments/grants as NEW append-only rows for the new user (actor = the ' +
-      'cloning admin); a soft-deleted asset / a not-active id is skipped and reported. ' +
+      'cloning admin); a soft-deleted asset / a not-active id is skipped and reported, and so is every ' +
+      'assignment without the caller holding asset:write and every grant without accessGrant:grant ' +
+      '(reason `permission_required`, SEC-088). ' +
       '`fireWorkflowsOnClonedGrants` (default FALSE) is the engine toggle: false = grants recorded ' +
       'bookkeeping-only (the ACCESS_GRANTED workflow is SUPPRESSED); true = each cloned grant fires the ' +
       'standard after-commit workflow run (provisioning externally). The choice is audited in the ' +

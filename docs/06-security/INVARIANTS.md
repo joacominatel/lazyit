@@ -271,7 +271,9 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   guard that each such controller contributes at least one gated route.
 - `apps/api/src/config/permissions-config.service.ts` + `apps/api/src/config/config.controller.ts` —
   **the configurable surface (P5):** `GET`/`PUT /config/permissions` (`@RequirePermission('settings:manage')`,
-  ADMIN-only) read/replace the MEMBER + VIEWER sets. The **ADMIN-immutable** half of this invariant is
+  ADMIN-only) read/replace the MEMBER + VIEWER sets. Since 2026-10-16 (SEC-088) the PUT also carries
+  `AdminOnlyGuard`, so a role that was delegated `settings:manage` still cannot widen itself; the
+  directory connection writes (`PUT /directory/connection`, `POST /directory/sync`) carry it too. The **ADMIN-immutable** half of this invariant is
   ACTIVELY enforced here: the strict PUT body (`UpdateRolePermissionsSchema` in
   `packages/shared/src/schemas/permission.ts`) accepts ONLY `MEMBER`/`VIEWER` keys, so an `ADMIN`/extra
   key → 400; the service never writes ADMIN rows, and the resolver's ADMIN short-circuit means a row edit
@@ -282,7 +284,8 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   caller's effective set via the same resolver (no `User`-shape pollution). Covered by
   `apps/api/src/config/permissions-config.service.spec.ts` (round-trip, audit, cache-coherence,
   ADMIN-never-written) and `apps/api/src/config/config.controller.spec.ts` (the `settings:manage` gate:
-  MEMBER/VIEWER → 403 on GET/PUT; `my-permissions` open to any authenticated user).
+  MEMBER/VIEWER → 403 on GET/PUT; `my-permissions` open to any authenticated user; a MEMBER holding
+  `settings:manage` reads but gets 403 `ADMIN_REQUIRED` on the PUT).
 - **As-built (P2+P3+P4+P5, ADR-0046 §Phased delivery):** the `@RequirePermission` guard + the GET
   annotations + ALL the migrated write gates + the editable matrix are now LIVE — the invariant is
   enforced by the runtime guard + resolver, not the schema/seed alone. The only behavior delta is VIEWER

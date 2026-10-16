@@ -11,7 +11,9 @@ An admin can tune what **Member** and **Viewer** are allowed to do, choosing fro
 catalog. **Admin is not configurable** — it always holds the complete catalog and the screen shows it
 locked. This page walks through the editor.
 
-You need the **Change instance settings** capability (admin by default) to open it.
+You need the **Change instance settings** capability (admin by default) to open it. Only an admin can
+**save** changes: a Member or Viewer you gave that capability can open the page, but saving is refused,
+so nobody but an admin can widen what a role is allowed to do, including their own.
 
 ## Open the matrix
 

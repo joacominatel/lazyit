@@ -22,6 +22,7 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
 import { PasswordLifecycleService } from '../auth/local/password-lifecycle.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { ActorService } from '../common/actor.service';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
@@ -138,6 +139,7 @@ describe('User wire shape never carries credential columns (SEC-085)', () => {
         { provide: AccessGrantsService, useValue: {} },
         { provide: LocalProvisioningService, useValue: {} },
         { provide: PasswordLifecycleService, useValue: {} },
+        { provide: PermissionResolverService, useValue: {} },
         { provide: getLoggerToken(UsersService.name), useValue: {} },
         {
           provide: ActorService,

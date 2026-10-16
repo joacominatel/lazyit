@@ -12,7 +12,9 @@ fijo de permisos. **El Administrador no es configurable** — siempre tiene el c
 pantalla lo muestra bloqueado. Esta página recorre el editor.
 
 Necesitas la capacidad **Cambiar la configuración de la instancia** (administrador por defecto) para
-abrirlo.
+abrirlo. Solo un administrador puede **guardar** cambios: un Miembro o Lector al que le diste esa
+capacidad puede abrir la página, pero el guardado se rechaza, así que nadie más que un administrador
+puede ampliar lo que un rol puede hacer, incluido el suyo.
 
 ## Abrir la matriz
 

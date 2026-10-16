@@ -70,6 +70,10 @@ the selected apps. After cloning, lazyit tells you what carried over and lists a
 skipped (and why). A selected asset or application that has since been **deleted** is skipped rather
 than copied, so the clone never revives a retired asset or a decommissioned application.
 
+A clone only carries over what you could hand out yourself: assets need **Add & edit inventory**, and
+application access needs **Grant & revoke access**. If your role lacks one, those items are listed as
+skipped for that reason and the new user is created without them.
+
 ## Reset a password
 
 On a user's detail page, **Reset password** starts a password reset for that person. It exists only
@@ -94,6 +98,9 @@ You choose how the reset reaches the person:
 > [!IMPORTANT]
 > A temporary password is shown **once**. Copy it before closing the dialog — it is never displayed
 > again and cannot be looked up later. If you lose it, simply run the reset again.
+
+Promoting the person to a higher role cancels a temporary password they have not replaced yet and any
+reset link still pending. Run the reset again after the promotion if they still need one.
 
 The action is unavailable for an inactive user (reactivate them first) and for a directory person who
 has no login account yet — onboard them with a temporary password instead, which gives them their

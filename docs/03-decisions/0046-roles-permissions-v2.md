@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-15
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -23,6 +23,8 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 
 **Amended** — 2026-10-15 (SEC-088, AUD-002): a delegated `user:manage` is bounded by a role ceiling. See
 *Amendment — the role ceiling on a delegated `user:manage`* below.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): `PUT /config/permissions` is ADMIN-only; a delegated
+`settings:manage` no longer edits the matrix. See *Amendment — the matrix is edited by an ADMIN only* below.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -346,6 +348,22 @@ What stays as P5/P7 described: `user:manage` and the other coarse verbs remain g
 VIEWER, and the matrix UI still warns rather than blocks. What is **not** bounded yet: a delegated
 `settings:manage` can still edit the matrix for its own role, and so grant itself `user:manage` (the
 second half of SEC-088, still open). Under the ceiling that reaches at most the holder's own role.
+*Closed 2026-10-16 by the next amendment.*
+
+### Amendment — the matrix is edited by an ADMIN only (SEC-088, 2026-10-16)
+
+CEO decision: editing the permission matrix and the directory connection is ADMIN-only until custom roles
+(#1560) give them their own verb; a delegated `settings:manage` no longer covers them. `PUT
+/config/permissions` keeps `@RequirePermission('settings:manage')` and adds `AdminOnlyGuard`, which refuses
+any caller that is not a human whose DB role is ADMIN with **403** `ADMIN_REQUIRED`, whatever the matrix
+grants its role. `GET /config/permissions` is unchanged: a `settings:manage` holder still reads the matrix.
+A service account was already refused on both routes (INV-SA-3) and still is.
+
+This narrows P5/P7 for one verb on one route. `settings:manage` stays delegable and still gates the rest
+of instance configuration. The matrix UI keeps offering `settings:manage` to MEMBER and VIEWER; a holder
+sees the matrix but cannot save it. The directory connection write follows the same rule
+([[0091-on-prem-ad-ldap-directory-source]]). No data change: an instance that delegated `settings:manage`
+keeps the rows, and the holders lose only the matrix and directory writes.
 
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 

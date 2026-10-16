@@ -19,6 +19,7 @@ import type {
   ManagerInput,
   PageQuery,
   PasswordResetCapabilities,
+  Permission,
   ThemePreference,
   UiLocale,
   UpdateOwnProfile,
@@ -44,6 +45,7 @@ import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import { resolveIntegrationMode } from '../config/integration-mode';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import {
   AdminResetLinkError,
   PasswordLifecycleService,
@@ -221,6 +223,7 @@ export class UsersService {
     // reset-mail path for the admin `email` delivery rather than growing a second copy of it. Injected
     // via LocalAuthModule (imported by UsersModule); it self-gates on local mode.
     private readonly passwordLifecycle: PasswordLifecycleService,
+    private readonly permissions: PermissionResolverService,
     @InjectPinoLogger(UsersService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -931,7 +934,17 @@ export class UsersService {
             (demoting || (data.isActive === false && target.isActive)),
         );
       }
-      await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
+      const lockedRole = await this.assertLockedTargetWithinCeiling(
+        tx,
+        id,
+        ceiling,
+      );
+      const promoting =
+        data.role !== undefined &&
+        !canManageRole(lockedRole ?? current.role, data.role);
+      const credentialsRevoked = promoting
+        ? await this.revokeOneTimeCredentials(tx, id)
+        : false;
       // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
       // account, but without the epoch bump a later REACTIVATION would revive every token minted before
       // it — including a "keep me signed in" token that never expires by time. Harmless outside local mode.
@@ -966,6 +979,7 @@ export class UsersService {
         await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
           from: current.role,
           to: data.role!,
+          ...(credentialsRevoked ? { credentialsRevoked: true } : {}),
         });
       }
       if (managerChanged) {
@@ -1078,7 +1092,7 @@ export class UsersService {
         );
       }
       if (options?.delivery === 'email') {
-        return this.sendResetLink(user, actorId, options);
+        return this.sendResetLink(user, actorId, options, ceiling);
       }
       const temporaryPassword = this.provisioning.generateTempPassword();
       const credential = await this.provisioning.credentialFields(
@@ -1137,12 +1151,14 @@ export class UsersService {
     user: User,
     actorId: string | undefined,
     options: { revokeSessions?: boolean; linkOrigin?: string | null },
+    ceiling: Role | undefined,
   ): Promise<AdminPasswordResetOutcome> {
     let sent: { sentTo: string; expiresInMinutes: number };
     try {
       sent = await this.passwordLifecycle.sendAdminResetLink(
         user,
         options.linkOrigin ?? null,
+        (tx) => this.assertLockedTargetWithinCeiling(tx, user.id, ceiling),
       );
     } catch (err) {
       if (err instanceof AdminResetLinkError) {
@@ -1242,6 +1258,20 @@ export class UsersService {
     };
   }
 
+  /** The human caller's permissions, resolved DB-first; no caller holds none. */
+  private async callerPermissions(
+    actorId: string | undefined,
+  ): Promise<ReadonlySet<Permission>> {
+    const caller =
+      actorId != null
+        ? await this.prisma.user.findUnique({
+            where: { id: actorId },
+            select: { role: true },
+          })
+        : null;
+    return caller ? this.permissions.resolve(caller.role) : new Set();
+  }
+
   /** SEC-088 role ceiling; returns the caller's ceiling for the in-transaction re-check. */
   private async assertWithinRoleCeiling(
     actor: ActorAttribution,
@@ -1267,13 +1297,35 @@ export class UsersService {
     tx: Prisma.TransactionClient,
     id: string,
     ceiling: Role | undefined,
-  ): Promise<void> {
+  ): Promise<Role | undefined> {
     const [row] = await tx.$queryRaw<
       { role: Role }[]
     >`SELECT "role" FROM "users" WHERE "id" = ${id} FOR UPDATE`;
     if (row) {
       assertCeiling(ceiling, [row.role]);
     }
+    return row?.role;
+  }
+
+  /** SEC-088: a temp password or reset link a lower-ranked caller may hold must not outlive a promotion. */
+  private async revokeOneTimeCredentials(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<boolean> {
+    const now = new Date();
+    const temporary = await tx.user.updateMany({
+      where: { id, mustChangePassword: true, passwordHash: { not: null } },
+      data: {
+        passwordHash: null,
+        sessionEpoch: { increment: 1 },
+        mcpCredentialEpoch: { increment: 1 },
+      },
+    });
+    const links = await tx.passwordResetToken.updateMany({
+      where: { userId: id, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+    return temporary.count > 0 || links.count > 0;
   }
 
   /**
@@ -1582,6 +1634,8 @@ export class UsersService {
    *    grant writes a PENDING workflow run (ACCESS_GRANTED) atomically and is enqueued AFTER commit
    *    (the normal grant path fires); when FALSE the grant is bookkeeping-only (the trigger is
    *    SUPPRESSED). Either way the grant row is identical and auditable.
+   *  - The caller copies only what it could grant by hand (SEC-088): assignments need `asset:write`, grants
+   *    `accessGrant:grant`. Without the verb each selected row is SKIPPED as "permission_required".
    *  - The new user's assignments + grants + the workflow run rows commit in ONE transaction; the engine
    *    enqueue happens AFTER commit (the decoupling invariant — a failing provisioning never rolls back
    *    the clone). Returns the per-item batch shape: `{ created, skipped: [{ id, reason }] }`.
@@ -1607,6 +1661,7 @@ export class UsersService {
     });
 
     const skipped: CloneUserResult['skipped'] = [];
+    const callerPermissions = await this.callerPermissions(actorId);
 
     // 2) Resolve the SELECTED source assignments — must be the source's ACTIVE rows (releasedAt null).
     //    Anything not found / not the source's / already released is skipped+reported. We then read each
@@ -1616,6 +1671,7 @@ export class UsersService {
       data.cloneAssetAssignments,
       created.id,
       skipped,
+      callerPermissions.has('asset:write'),
     );
 
     // 3) Resolve the SELECTED source grants — the source's ACTIVE grants (revokedAt null). For each, if
@@ -1626,6 +1682,7 @@ export class UsersService {
       data.cloneAccessGrants,
       data.fireWorkflowsOnClonedGrants,
       skipped,
+      callerPermissions.has('accessGrant:grant'),
     );
 
     // 4) Write the new user's assignments + grants (+ any PENDING workflow run rows) in ONE transaction —
@@ -1733,6 +1790,7 @@ export class UsersService {
     ids: string[],
     newUserId: string,
     skipped: CloneUserResult['skipped'],
+    permitted: boolean,
   ): Promise<{ assetId: string }[]> {
     if (ids.length === 0) {
       return [];
@@ -1771,6 +1829,14 @@ export class UsersService {
         continue;
       }
       seenAssets.add(row.assetId);
+      if (!permitted) {
+        skipped.push({
+          id,
+          entityId: row.assetId,
+          reason: 'permission_required',
+        });
+        continue;
+      }
       plans.push({ assetId: row.assetId });
     }
     return plans;
@@ -1791,6 +1857,7 @@ export class UsersService {
     ids: string[],
     fireWorkflows: boolean,
     skipped: CloneUserResult['skipped'],
+    permitted: boolean,
   ): Promise<
     Array<{
       applicationId: string;
@@ -1828,7 +1895,7 @@ export class UsersService {
       string,
       Awaited<ReturnType<WorkflowTriggerService['planForTrigger']>>
     >();
-    if (fireWorkflows) {
+    if (fireWorkflows && permitted) {
       const appIds = [...new Set(rows.map((r) => r.applicationId))];
       for (const appId of appIds) {
         const plan = await this.workflowTrigger
@@ -1859,6 +1926,14 @@ export class UsersService {
           id,
           entityId: row.applicationId,
           reason: 'application_deleted',
+        });
+        continue;
+      }
+      if (!permitted) {
+        skipped.push({
+          id,
+          entityId: row.applicationId,
+          reason: 'permission_required',
         });
         continue;
       }
