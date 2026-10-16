@@ -710,7 +710,11 @@ describe('LocationsService', () => {
       }
       if (sql.includes('FROM "purchase_orders"')) {
         return Promise.resolve(
-          (opts.purchases ?? []).map((id) => ({ id, reference: `PO-${id}` })),
+          (opts.purchases ?? []).map((id, i) => ({
+            id,
+            reference: `PO-${id}`,
+            createdAt: new Date(Date.UTC(2026, 0, 1 + i)),
+          })),
         );
       }
       return Promise.resolve([]);
@@ -999,5 +1003,44 @@ describe('LocationsService', () => {
     expect(lockOf(purchaseQueries[0].slice(1))).toBe(true);
     expect(lockOf(purchaseQueries[1].slice(1))).toBe(false);
     expect(purchaseQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
+  });
+
+  it('locks the open purchases in id order, as the model delete and supplier merge do, and still lists them oldest first', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({});
+    queryRaw.mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(
+        strings.join('?').includes('FROM "purchase_orders"')
+          ? [
+              {
+                id: 'po-a',
+                reference: 'PO-A',
+                createdAt: new Date('2026-10-02'),
+              },
+              {
+                id: 'po-b',
+                reference: 'PO-B',
+                createdAt: new Date('2026-10-01'),
+              },
+            ]
+          : [],
+      ),
+    );
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+    const impact = await service.deleteImpact('hq', ADMIN);
+
+    const [lock] = (
+      queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]
+    )
+      .map(([strings]) => strings.join('?'))
+      .filter((sql) => sql.includes('FROM "purchase_orders"'));
+    expect(lock).toMatch(/ORDER BY po\."id" ASC/);
+    expect(lock).not.toMatch(/ORDER BY po\."createdAt"/);
+    expect(impact.purchaseOrders.items).toEqual([
+      { id: 'po-b', reference: 'PO-B' },
+      { id: 'po-a', reference: 'PO-A' },
+    ]);
   });
 });
