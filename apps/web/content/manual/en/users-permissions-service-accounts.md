@@ -37,6 +37,15 @@ use. It **never** inherits a role and is never admin-equivalent.
 - **Two capabilities are never grantable.** A service account can never hold **Change instance
   settings** or **Manage users**. Either would make it admin-equivalent (able to mint more accounts or
   create a human admin), so lazyit rejects them — even if you try to set them.
+- **You can only grant what your own role holds.** If an admin gave your role **Change instance
+  settings**, you can manage service accounts, but only with permissions your role has itself. Creating,
+  adding a permission, turning an account back on, extending its expiry, rotating its token, restoring
+  it or raising its **AI access** is refused when the account would hold a permission you lack. Renaming it, removing permissions,
+  turning it off, shortening its expiry and revoking it always work. Admins hold every permission, so
+  this never limits them. One exception: **Report server inventory (agent)** can always be granted,
+  because it only reports inventory and installing agents already needs **Change instance settings**,
+  so you can still [install reporting agents](/help/assets-topology-reporting-agent). Every other
+  permission, **Fetch secrets programmatically (service account)** included, stays capped.
 
 ## The token (shown once)
 

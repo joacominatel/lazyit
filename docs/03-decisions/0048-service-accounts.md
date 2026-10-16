@@ -3,7 +3,7 @@ title: "ADR-0048: Service Accounts — a non-human principal with a lazyit-nativ
 tags: [adr, auth, authz, service-accounts, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-09
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -22,6 +22,9 @@ fast-follow** (the `/settings/service-accounts` screen, gated on `settings:manag
 
 **Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the deferred Zitadel machine-user
 mirror will not be built, and the `IdentityProvider` seam it would have used is retired.
+
+**Amended** — 2026-10-16 (SEC-088, CEO decision): a service account's verbs are capped at the caller's
+own permissions. See *Amendment — a service account holds only what its manager holds* below.
 
 ## Context
 
@@ -195,6 +198,42 @@ posture, the actor columns — but the SA gains a bounded AI surface:
 
 → [[ai-assistant/_synthesis|synthesis]] §1, §2 decision 13, §3 R10; [[authorization]] §9;
 [[INVARIANTS]] INV-AI-1, INV-AI-11, INV-AI-17.
+
+## Amendment — a service account holds only what its manager holds (SEC-088, 2026-10-16)
+
+`settings:manage` gates this API and an ADMIN can delegate it to MEMBER or VIEWER
+([[0046-roles-permissions-v2]] P5). A delegate could therefore mint a token carrying verbs its own role
+lacks, and the token outlives the delegation. That breaks the rule the CEO already applied to the user
+clone ([[0058-user-manager-and-clone-actions]]): a caller hands out only what it could grant by hand.
+
+By CEO decision, every write that issues or re-arms a credential is capped at the caller's own verbs,
+resolved DB-first from the caller's role (`PermissionResolverService`):
+- create — the requested set;
+- update — the verbs it adds; and the whole resulting set when it re-enables the account
+  (`isActive: true` on an inactive one) or extends its expiry (clears it, or moves it later);
+- rotate and restore — the account's current set, because each hands back a working credential;
+- widening the account's AI access (`PUT /config/ai/service-accounts/:id`: a higher access level, or a
+  higher or cleared write cap) — its current set, because it puts those verbs back to work.
+
+Update, rotate and restore lock the account row (`SELECT … FOR UPDATE`) at the start of their
+transaction and judge the ceiling against the grants, `isActive` and `expiresAt` read under that lock,
+so a stale read cannot re-grant a verb a concurrent write just removed.
+
+A violation is **403** `PERMISSION_CEILING_EXCEEDED`, with the offending verbs in `permissions`, and
+nothing is written. Writes that only narrow are never refused by the cap: rename, description, removing
+verbs, disabling, shortening the expiry and revoke. A delegate can always shut an account down. ADMIN
+resolves to the full catalog and is unaffected. The SA-ungrantable verbs and INV-SA-3 are unchanged.
+
+**One exemption, `infra:report`** (CEO decision, 2026-10-16). No human role holds it, because it is
+machine-only, so without the exemption a delegate could no longer add a server or rotate an agent token.
+The verb only lets an agent report inventory, and installing agents was already `settings:manage`'s job,
+so a delegate keeps doing it as before. It is the single member of `CEILING_EXEMPT_PERMISSIONS`
+(`apps/api/src/service-accounts/permission-ceiling.ts`). `secret:fetch` stays capped, because it reaches
+secrets, and so does every other verb.
+
+No data change: existing accounts and their tokens keep working with their current verbs. The cap
+applies the next time a non-ADMIN rotates, restores, re-enables or extends one that holds more than
+their role.
 
 ## Consequences
 

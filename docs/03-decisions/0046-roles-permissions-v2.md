@@ -25,6 +25,8 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 *Amendment — the role ceiling on a delegated `user:manage`* below.
 **Amended** — 2026-10-16 (SEC-088, CEO decision): `PUT /config/permissions` is ADMIN-only; a delegated
 `settings:manage` no longer edits the matrix. See *Amendment — the matrix is edited by an ADMIN only* below.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): a delegated `settings:manage` no longer saves SMTP, and
+mints service-account verbs only within its own role. See *Amendment — SMTP and service accounts* below.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -364,6 +366,20 @@ of instance configuration. The matrix UI keeps offering `settings:manage` to MEM
 sees the matrix but cannot save it. The directory connection write follows the same rule
 ([[0091-on-prem-ad-ldap-directory-source]]). No data change: an instance that delegated `settings:manage`
 keeps the rows, and the holders lose only the matrix and directory writes.
+
+### Amendment — SMTP and service accounts (SEC-088, 2026-10-16)
+
+CEO decision, closing SEC-088. Two more `settings:manage` surfaces reached past the holder's own role:
+- **SMTP.** Repointing outbound mail at a relay the holder controls, then requesting an ADMIN's password
+  reset, hands them the reset link. `PUT /config/smtp` now carries `AdminOnlyGuard` (**403**
+  `ADMIN_REQUIRED`); the read and the test send stay on `settings:manage`
+  ([[0079-instance-smtp-outbound-email]]).
+- **Service accounts.** A holder could mint a token with verbs its own role lacks. Every write that
+  issues or re-arms a token is now capped at the caller's own verbs (**403**
+  `PERMISSION_CEILING_EXCEEDED`, [[0048-service-accounts]]), the same "only what you could grant by
+  hand" rule as the user clone ([[0058-user-manager-and-clone-actions]]).
+
+`settings:manage` stays delegable for the rest of instance configuration. No data change.
 
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 

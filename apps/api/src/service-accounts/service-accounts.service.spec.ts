@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { PERMISSIONS } from '@lazyit/shared';
 import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
 
 // The service imports PrismaService, which loads the generated Prisma client (ESM `.js` re-exports jest
@@ -16,6 +18,7 @@ jest.mock('@prisma/adapter-pg', () => ({ PrismaPg: class {} }));
 import { ServiceAccountsService } from './service-accounts.service';
 import { hashSecret, parseToken } from './service-account-token';
 import type { PrismaService } from '../prisma/prisma.service';
+import type { PermissionResolverService } from '../auth/permission-resolver.service';
 
 interface SaRow {
   id: string;
@@ -50,6 +53,7 @@ interface AuditRow {
  * The read filter (`deletedAt: null`) is honored manually (the soft-delete extension is bypassed here).
  */
 class FakePrisma {
+  users = new Map<string, string>();
   accounts: SaRow[] = [];
   perms: PermRow[] = [];
   audit: AuditRow[] = [];
@@ -72,6 +76,12 @@ class FakePrisma {
   }
 
   private readonly client = {
+    user: {
+      findUnique: ({ where }: { where: { id: string } }) => {
+        const role = this.users.get(where.id);
+        return Promise.resolve(role ? { role } : null);
+      },
+    },
     serviceAccount: {
       create: ({
         data,
@@ -96,8 +106,7 @@ class FakePrisma {
         };
         this.accounts.push(row);
         const nested = data.permissions as
-          | { create: { permission: string }[] }
-          | undefined;
+          { create: { permission: string }[] } | undefined;
         if (nested) {
           for (const p of nested.create) {
             this.perms.push({
@@ -188,6 +197,9 @@ class FakePrisma {
     },
   };
 
+  get user() {
+    return this.client.user;
+  }
   get serviceAccount() {
     return this.client.serviceAccount;
   }
@@ -196,6 +208,17 @@ class FakePrisma {
   }
   get serviceAccountAuditLog() {
     return this.client.serviceAccountAuditLog;
+  }
+
+  locks: string[] = [];
+
+  // The row lock (`SELECT … FOR UPDATE`): the id is the only interpolated value.
+  $queryRaw(_sql: TemplateStringsArray, id: string) {
+    this.locks.push(id);
+    const row = this.accounts.find((a) => a.id === id);
+    return Promise.resolve(
+      row ? [{ isActive: row.isActive, expiresAt: row.expiresAt }] : [],
+    );
   }
 
   $transaction<T>(fn: (tx: FakePrisma) => Promise<T>): Promise<T> {
@@ -207,10 +230,22 @@ describe('ServiceAccountsService (ADR-0048)', () => {
   let prisma: FakePrisma;
   let service: ServiceAccountsService;
   const ADMIN = '11111111-1111-4111-8111-111111111111';
+  const MEMBER = '22222222-2222-4222-8222-222222222222';
+  // A MEMBER role an ADMIN delegated settings:manage to, holding asset:read but not asset:write.
+  const memberSet = new Set(['settings:manage', 'asset:read']);
+  const resolver = {
+    resolve: (role: string) =>
+      Promise.resolve(role === 'ADMIN' ? new Set(PERMISSIONS) : memberSet),
+  };
 
   beforeEach(() => {
     prisma = new FakePrisma();
-    service = new ServiceAccountsService(prisma as unknown as PrismaService);
+    prisma.users.set(ADMIN, 'ADMIN');
+    prisma.users.set(MEMBER, 'MEMBER');
+    service = new ServiceAccountsService(
+      prisma as unknown as PrismaService,
+      resolver as unknown as PermissionResolverService,
+    );
   });
 
   describe('create', () => {
@@ -570,6 +605,223 @@ describe('ServiceAccountsService (ADR-0048)', () => {
           detail: { added: [], removed: ['user:manage'] },
         }),
       );
+    });
+  });
+
+  describe('permission ceiling — a delegate cannot exceed its own verbs (SEC-088)', () => {
+    const ceiling = {
+      response: {
+        statusCode: 403,
+        code: 'PERMISSION_CEILING_EXCEEDED',
+        permissions: ['asset:write'],
+      },
+    };
+
+    async function adminCreated(
+      overrides: { expiresAt?: string } = {},
+    ): Promise<string> {
+      const created = await service.create(
+        {
+          name: 'admin-bot',
+          permissions: ['asset:read', 'asset:write'],
+          ...overrides,
+        },
+        ADMIN,
+      );
+      return created.id;
+    }
+
+    it('create: refuses a verb the caller lacks, listing it, and persists nothing', async () => {
+      const err = await service
+        .create(
+          { name: 'bot', permissions: ['asset:read', 'asset:write'] },
+          MEMBER,
+        )
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err).toMatchObject(ceiling);
+      expect(prisma.accounts).toHaveLength(0);
+      expect(prisma.audit).toHaveLength(0);
+    });
+
+    it('create: allows a set within the caller own verbs', async () => {
+      const res = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      expect(res.permissions).toEqual(['asset:read']);
+    });
+
+    it('create: an unattributed caller holds nothing and fails closed', async () => {
+      await expect(
+        service.create({ name: 'bot', permissions: ['asset:read'] }, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('update: refuses adding a verb the caller lacks; nothing changes', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      await expect(
+        service.update(
+          own.id,
+          { permissions: ['asset:read', 'asset:write'] },
+          MEMBER,
+        ),
+      ).rejects.toMatchObject(ceiling);
+      expect(prisma.perms.map((p) => p.permission)).toEqual(['asset:read']);
+    });
+
+    it('update: narrowing or renaming an over-ceiling account is still allowed', async () => {
+      const id = await adminCreated();
+      await service.update(id, { name: 'renamed' }, MEMBER);
+      await service.update(id, { isActive: false }, MEMBER);
+      const narrowed = await service.update(
+        id,
+        { permissions: ['asset:write'] },
+        MEMBER,
+      );
+      expect(narrowed.permissions).toEqual(['asset:write']);
+    });
+
+    it('update: re-enabling or extending an over-ceiling account is refused', async () => {
+      const soon = new Date(Date.now() + 60_000).toISOString();
+      const id = await adminCreated({ expiresAt: soon });
+      await service.update(id, { isActive: false }, ADMIN);
+
+      await expect(
+        service.update(id, { isActive: true }, MEMBER),
+      ).rejects.toMatchObject(ceiling);
+      await expect(
+        service.update(id, { expiresAt: null }, MEMBER),
+      ).rejects.toMatchObject(ceiling);
+      const later = new Date(Date.now() + 3_600_000).toISOString();
+      await expect(
+        service.update(id, { expiresAt: later }, MEMBER),
+      ).rejects.toMatchObject(ceiling);
+      const row = prisma.accounts.find((a) => a.id === id)!;
+      expect(row.isActive).toBe(false);
+      expect(row.expiresAt?.toISOString()).toBe(soon);
+    });
+
+    it('rotate: refuses re-minting the token of an over-ceiling account; the old hash stays', async () => {
+      const id = await adminCreated();
+      const before = prisma.accounts.find((a) => a.id === id)!.tokenHash;
+      await expect(service.rotate(id, MEMBER)).rejects.toMatchObject(ceiling);
+      expect(prisma.accounts.find((a) => a.id === id)!.tokenHash).toBe(before);
+      expect(prisma.audit.map((a) => a.action)).not.toContain('ROTATE');
+    });
+
+    it('rotate: allowed when the account is within the caller own verbs', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      const rotated = await service.rotate(own.id, MEMBER);
+      expect(rotated.token).not.toBe(own.token);
+    });
+
+    it('restore: refuses bringing back an over-ceiling account; revoke stays allowed', async () => {
+      const id = await adminCreated();
+      await service.revoke(id, MEMBER);
+      await expect(service.restore(id, MEMBER)).rejects.toMatchObject(ceiling);
+      expect(
+        prisma.accounts.find((a) => a.id === id)!.deletedAt,
+      ).not.toBeNull();
+    });
+
+    it('update: judges the grants read under the row lock, not the stale pre-read', async () => {
+      const id = await adminCreated();
+      // A concurrent narrowing commits between the pre-read and the transaction.
+      jest
+        .spyOn(prisma.serviceAccountPermission, 'findMany')
+        .mockResolvedValueOnce([{ permission: 'asset:read' }]);
+      await expect(
+        service.update(
+          id,
+          { permissions: ['asset:read', 'asset:write'] },
+          MEMBER,
+        ),
+      ).rejects.toMatchObject(ceiling);
+      expect(prisma.locks).toContain(id);
+      expect(prisma.audit.map((a) => a.action)).toEqual(['MINT']);
+    });
+
+    it('rotate: judges the grants read under the row lock', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      const before = prisma.accounts.find((a) => a.id === own.id)!.tokenHash;
+      // A concurrent widening commits after the pre-read.
+      jest
+        .spyOn(prisma.serviceAccountPermission, 'findMany')
+        .mockResolvedValueOnce([
+          { permission: 'asset:read' },
+          { permission: 'asset:write' },
+        ]);
+      await expect(service.rotate(own.id, MEMBER)).rejects.toMatchObject(
+        ceiling,
+      );
+      expect(prisma.locks).toContain(own.id);
+      expect(prisma.accounts.find((a) => a.id === own.id)!.tokenHash).toBe(
+        before,
+      );
+    });
+
+    it('rotate: an inert legacy grant (SEC-073) does not count against the ceiling', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      prisma.perms.push({
+        serviceAccountId: own.id,
+        permission: 'user:manage',
+      });
+      const rotated = await service.rotate(own.id, MEMBER);
+      expect(rotated.token).not.toBe(own.token);
+    });
+
+    it('update: shortening the expiry of an over-ceiling account is allowed', async () => {
+      const later = new Date(Date.now() + 3_600_000).toISOString();
+      const id = await adminCreated({ expiresAt: later });
+      const sooner = new Date(Date.now() + 60_000).toISOString();
+      const updated = await service.update(id, { expiresAt: sooner }, MEMBER);
+      expect(updated.expiresAt).toBe(sooner);
+    });
+
+    it('infra:report is exempt: a delegate creates and rotates an agent account', async () => {
+      const agent = await service.create(
+        { name: 'agent', permissions: ['infra:report'] },
+        MEMBER,
+      );
+      expect(agent.permissions).toEqual(['infra:report']);
+      const rotated = await service.rotate(agent.id, MEMBER);
+      expect(rotated.token).not.toBe(agent.token);
+    });
+
+    it('only infra:report is exempt: secret:fetch beside it is still refused, alone in the list', async () => {
+      await expect(
+        service.create(
+          { name: 'agent', permissions: ['infra:report', 'secret:fetch'] },
+          MEMBER,
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'PERMISSION_CEILING_EXCEEDED',
+          permissions: ['secret:fetch'],
+        },
+      });
+      expect(prisma.accounts).toHaveLength(0);
+    });
+
+    it('ADMIN is unaffected: every verb on create, rotate and restore', async () => {
+      const id = await adminCreated();
+      await service.rotate(id, ADMIN);
+      await service.revoke(id, ADMIN);
+      const restored = await service.restore(id, ADMIN);
+      expect(restored.permissions).toEqual(['asset:read', 'asset:write']);
     });
   });
 

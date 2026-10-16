@@ -2,7 +2,7 @@
 id: SEC-088
 title: A non-ADMIN role delegated user:manage or settings:manage can make itself ADMIN (no subset rule, matrix self-edit)
 severity: medium
-status: open
+status: fixed
 cwe: CWE-269
 discovered: 2026-10-09
 module: users / config (RBAC delegation)
@@ -286,3 +286,85 @@ password, so this does not reopen the path.
 
 No data change on update. An instance that delegated these verbs keeps its rows. The holders lose only
 what is listed under Fixed.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: the role ceiling on `user:manage` in PR #1601 (`18a04017b`); the matrix and directory writes
+ADMIN-only, clone limited to what the caller could grant, and promotion revoking one-time credentials in PR
+#1606 (`9bc75c4f5`); the UI copy in PR #1609 (`cab67672f`); the two remaining `settings:manage` paths in
+PR #1611: `5310b682a` (`fix(api): saving the SMTP settings is ADMIN-only (SEC-088)`) and `584bd45f0`
+(`fix(api): cap service-account verbs at the caller's own permissions (SEC-088)`), hardened after review by
+`f8f579bd6` (the ceiling judged under a row lock), `2ba5d3773` (widening AI access capped) and
+`aa3256904` (the `infra:report` exemption, CEO decision), with
+`846acf864` (ADR-0079, ADR-0048 and ADR-0046 amendments, INV-SA-3)
+**Fixed by**: 2026-10-10 audit decision round (CEO decisions of 2026-10-15 and 2026-10-16; the last two
+paths by CEO decision of 2026-10-16)
+**Date**: 2026-10-16
+
+### Evidence (on `fix/sec-088-smtp-and-sa-ceiling`, PR #1611)
+- `apps/api/src/smtp/smtp.controller.ts:63`: `PUT /config/smtp` carries `AdminOnlyGuard` next to
+  `settings:manage`, so a delegate gets 403 `ADMIN_REQUIRED` and cannot repoint outbound mail to read an
+  ADMIN's reset link. `GET` and `POST /config/smtp/test` stay on `settings:manage`: the read returns no
+  secret, and the test send persists nothing and uses the relay an ADMIN saved.
+- `apps/api/src/service-accounts/permission-ceiling.ts` (`assertWithinPermissionCeiling`): a verb outside
+  the caller's set is refused with 403 `PERMISSION_CEILING_EXCEEDED`, listing the verbs.
+  `CEILING_EXEMPT_PERMISSIONS` holds only `infra:report`, by CEO decision. The verb is machine-only, so
+  no human role holds it, and the cap would have stopped a delegate adding a server or rotating an agent
+  token. It only reports inventory, and installing agents was already `settings:manage`'s job.
+  `secret:fetch` stays capped because it reaches secrets.
+- `apps/api/src/service-accounts/service-accounts.service.ts`: the caller's verbs resolve DB-first from
+  their role, once per request. Call sites:
+  - create (`:88`);
+  - update (`:191-213`): the verbs it adds, or the whole set when it re-enables the account or extends its
+    expiry;
+  - rotate (`:277`);
+  - restore (`:341`).
+  Update, rotate and restore lock the account row (`lockAccount`, `:371`, `SELECT … FOR UPDATE`) and
+  judge the grants, `isActive` and `expiresAt` read under the lock, before any write.
+  Narrowing writes are not checked, so a delegate can always disable or revoke an account. ADMIN holds the
+  full catalog.
+- `apps/api/src/ai/headless/ai-service-account-access.service.ts:77`: widening an account's AI access (a
+  higher level, or a higher or cleared write cap) applies the same check to its effective verbs. Narrowing
+  is free.
+- The paths fixed earlier are listed in the 2026-10-16 triage note above.
+
+### Tests
+- `apps/api/src/smtp/smtp.controller.spec.ts`: a delegated MEMBER is refused `PUT` with `ADMIN_REQUIRED`
+  and nothing is saved, a service account is refused, an ADMIN saves, and the read and test send stay
+  available to the delegate.
+- `apps/api/src/service-accounts/service-accounts.service.spec.ts`, block `permission ceiling — a delegate
+  cannot exceed its own verbs (SEC-088)`: create, an added verb, re-enable, clearing or extending the
+  expiry, rotate and restore are refused past the ceiling with nothing written. An unattributed caller
+  fails closed. Narrowing writes pass, including shortening the expiry, and ADMIN is unaffected.
+  - A grant set read under the lock that differs from the pre-read is the one judged, on update and on
+    rotate.
+  - An inert legacy grant (SEC-073) does not block a rotate.
+  - A delegate creates and rotates an account holding only `infra:report`. With `infra:report` plus
+    `secret:fetch`, the create is refused and lists only `secret:fetch`.
+- `apps/api/src/ai/headless/ai-service-account-access.service.spec.ts`, block `widening stays within the
+  caller (SEC-088)`: a higher level, a higher cap and a cleared cap are refused on an over-ceiling
+  account, with nothing written. Narrowing passes, and so do widening within the caller and any ADMIN
+  change.
+- The earlier paths' tests are listed in PRs #1601 and #1606.
+
+### Verification
+Re-run on the PR branch on 2026-10-16, after the review fixes and the `infra:report` exemption:
+`node node_modules/.bin/jest` over all of `apps/api`. 314 suites and 7337 tests passed.
+
+Without the fixes, the new denial tests fail:
+- 1 in the SMTP suite;
+- 6 in the service-account suite, plus 2 for the stale-read cases against the first ceiling commit;
+- 3 in the AI access suite;
+- 3 for the `infra:report` exemption.
+
+### Residual risk
+- `settings:manage` stays delegable for the rest of instance configuration. The surfaces that decide who
+  can do what are ADMIN-only until custom roles (#1560) bring a `role:manage`: the matrix, the directory
+  connection and the SMTP save.
+- A service account minted before this change, with verbs above its creator's role, keeps working. The
+  cap applies on the next write that would issue or re-arm its token. An ADMIN who wants it gone revokes
+  or narrows it.
+- The accepted limit from the promotion fix stands: a temporary password the user already replaced
+  cannot be revoked by a promotion.
+- No data change.

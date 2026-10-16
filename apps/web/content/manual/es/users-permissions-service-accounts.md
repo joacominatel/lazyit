@@ -42,6 +42,17 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
   configuración de la instancia** ni **Gestionar usuarios**. Cualquiera de las dos la haría equivalente
   a un administrador (capaz de crear más cuentas o de crear un administrador humano), así que lazyit las
   rechaza — aunque intentes asignarlas.
+- **Solo puedes otorgar lo que tiene tu propio rol.** Si un administrador le dio a tu rol **Cambiar la
+  configuración de la instancia**, puedes gestionar cuentas de servicio, pero solo con permisos que tu
+  rol tiene. Se rechaza crear una cuenta, agregarle un permiso, volver a activarla, extender su
+  vencimiento, rotar su token, restaurarla o ampliar su **acceso a IA** cuando la cuenta tendría un
+  permiso que te falta. Renombrarla, quitarle permisos, desactivarla, acortar su vencimiento y
+  revocarla siempre funcionan. Los administradores tienen todos los permisos, así que esto nunca los
+  limita. Una excepción: **Reportar inventario de servidores (agente)** siempre se puede otorgar,
+  porque solo reporta inventario e instalar agentes ya requiere **Cambiar la configuración de la
+  instancia**, así que puedes seguir
+  [instalando agentes de reporte](/help/assets-topology-reporting-agent). Todos los demás permisos,
+  incluido **Obtener secretos de forma programática (cuenta de servicio)**, siguen limitados.
 
 ## El token (se muestra una sola vez)
 

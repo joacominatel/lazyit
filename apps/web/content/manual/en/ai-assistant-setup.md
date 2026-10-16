@@ -241,7 +241,9 @@ choose **AI access**:
 AI access only narrows what the account's permissions allow; it never grants one. The account also needs
 **Use the AI assistant** for headless runs and **Connect external AI agents (MCP)** for MCP. An account
 holding **Report server inventory (agent)** — the agents' reporting credential — is refused AI use
-whatever you choose; create a separate account for AI. See also
+whatever you choose; create a separate account for AI. If an admin gave your role **Change instance
+settings**, you can always narrow an account's AI access, but you can widen it (a higher level, or a
+higher or no write limit) only when the account holds no permission your own role lacks. See also
 [Service accounts](/help/users-permissions-service-accounts).
 
 ## Turning it off

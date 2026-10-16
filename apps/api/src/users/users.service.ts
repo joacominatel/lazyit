@@ -1406,9 +1406,13 @@ export class UsersService {
     removesAdminPowers: (target: { role: Role; isActive: boolean }) => boolean,
   ) {
     if (await this.wouldRemoveLastAdmin(tx, userId, removesAdminPowers)) {
-      throw new ConflictException(
-        'Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.',
-      );
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'LAST_ADMIN_REQUIRED',
+        message:
+          'Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.',
+      });
     }
   }
 

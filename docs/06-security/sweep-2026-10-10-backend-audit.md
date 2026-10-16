@@ -68,7 +68,8 @@ Updated 2026-10-16 from the decision round (#1598–#1609), verified against the
 - **Closed findings.** SEC-052, SEC-070, SEC-071, SEC-090, SEC-091, SEC-092 and SEC-089, plus SEC-012
   as an accepted risk.
 - **Still open.** SEC-088, on two `settings:manage` paths outside AUD-002: `PUT /smtp` and
-  service-account token verbs. SEC-041, on its asset-category and asset-model parts, which are outside
+  service-account token verbs (*closed later on 2026-10-16 by #1611: the SMTP save is ADMIN-only and
+  service-account verbs are capped at the caller's own*). SEC-041, on its asset-category and asset-model parts, which are outside
   AUD-024.
 - **Not an entry.** The round also fixed unique-violation handling under `@prisma/adapter-pg` (#1602,
   #1607).
@@ -78,7 +79,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | Entry | Status | PR | Note |
 | --- | --- | --- | --- |
 | AUD-001 | Fixed | #1600 | Moving a KB folder needs `settings:manage`, and a create under an unreadable parent is refused ([[0060-kb-folder-access-control]] §10). [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] closed. Web: #1608. |
-| AUD-002 | Fixed | #1601, #1606 | Role ceiling on every `user:manage` write (403 `ROLE_CEILING_EXCEEDED`). A clone copies only what the caller could grant, and a promotion revokes pending temporary passwords and reset links. Web: #1608, #1609. [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] stays open on two `settings:manage` paths (`PUT /smtp`, service-account token verbs), pending a CEO decision. |
+| AUD-002 | Fixed | #1601, #1606 | Role ceiling on every `user:manage` write (403 `ROLE_CEILING_EXCEEDED`). A clone copies only what the caller could grant, and a promotion revokes pending temporary passwords and reset links. Web: #1608, #1609. [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] closed: its two `settings:manage` paths outside AUD-002 (`PUT /smtp`, service-account token verbs) were fixed in #1611. |
 | AUD-003 | Fixed | #1567, #1592, #1599 | [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] closed. The caller's own name in `session_context` is wrapped too since #1599 (CEO decision). |
 | AUD-004 | Fixed | #1573 | [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] closed. |
 | AUD-005 | Fixed | #1566 | [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] closed. |

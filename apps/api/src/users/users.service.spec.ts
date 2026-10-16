@@ -1284,9 +1284,18 @@ describe('UsersService', () => {
       // No OTHER admin exists → this is the final administrator.
       user.count.mockResolvedValue(0);
 
-      await expect(
-        service.update('admin-1', { role: 'MEMBER' }, 'actor-99'),
-      ).rejects.toBeInstanceOf(ConflictException);
+      const err = await service
+        .update('admin-1', { role: 'MEMBER' }, 'actor-99')
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      // The web still matches the wording, so the message must not change alongside the new code.
+      expect((err as ConflictException).getResponse()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'LAST_ADMIN_REQUIRED',
+        message:
+          'Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.',
+      });
       expect(user.count).toHaveBeenCalledWith({
         where: {
           role: 'ADMIN',
