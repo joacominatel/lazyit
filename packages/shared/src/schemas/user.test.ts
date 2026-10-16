@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canManageRole,
   CreateDirectoryPersonSchema,
   CreateUserSchema,
   ManagerInputSchema,
@@ -54,7 +55,7 @@ describe("CreateUserSchema (SEC-006)", () => {
   });
 
   // ADR-0040 — role is OPTIONAL on create (omitted → server default MEMBER) but must be one of the
-  // three enum values when present. The Users controller is ADMIN-gated, so accepting it is safe.
+  // three enum values when present. The API bounds it by the caller's own role (SEC-088).
   test("accepts an optional role on create", () => {
     expect(CreateUserSchema.safeParse({ ...valid, role: "ADMIN" }).success).toBe(
       true,
@@ -161,6 +162,22 @@ describe("UserSchema role (ADR-0040)", () => {
 
 // ADR-0043 — `roleSource` is an OPTIONAL, additive field on the User response (informational only; the
 // API still authorizes from the DB role). It must not break existing responses that omit it.
+describe("canManageRole (SEC-088)", () => {
+  test("a caller may grant and act on its own role and below", () => {
+    expect(canManageRole("ADMIN", "ADMIN")).toBe(true);
+    expect(canManageRole("ADMIN", "VIEWER")).toBe(true);
+    expect(canManageRole("MEMBER", "MEMBER")).toBe(true);
+    expect(canManageRole("MEMBER", "VIEWER")).toBe(true);
+    expect(canManageRole("VIEWER", "VIEWER")).toBe(true);
+  });
+
+  test("a caller can never reach a role above its own", () => {
+    expect(canManageRole("MEMBER", "ADMIN")).toBe(false);
+    expect(canManageRole("VIEWER", "MEMBER")).toBe(false);
+    expect(canManageRole("VIEWER", "ADMIN")).toBe(false);
+  });
+});
+
 describe("UserSchema roleSource (ADR-0043)", () => {
   const base = READ_BASE;
 
