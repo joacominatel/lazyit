@@ -3,7 +3,7 @@ import type {
   AuditLogPage,
   AuditLogSource,
 } from "@lazyit/shared";
-import { apiFetch, apiFetchBlob } from "../client";
+import { apiFetch } from "../client";
 
 /**
  * Data-access for the security audit-log READ surface (issue #871, ADR-0081) — the reader for the
@@ -50,11 +50,15 @@ export interface AuditLogParams extends AuditLogClientFilters {
   offset?: number;
 }
 
-/** Append every present filter to the search params (shared by the read + export serializers). */
-function appendFilters(
-  params: URLSearchParams,
-  filters: AuditLogClientFilters,
-): void {
+/** The audit export route; it takes {@link auditLogFilterParams}, the list's own filters. */
+export const AUDIT_EXPORT_PATH = `${BASE}/logs/export`;
+
+/** One source's filters, never the page window; the CSV export sends exactly these. */
+export function auditLogFilterParams(
+  source: AuditLogSource,
+  filters: AuditLogClientFilters = {},
+): URLSearchParams {
+  const params = new URLSearchParams({ source });
   if (filters.action) params.set("action", filters.action);
   if (filters.actorId) params.set("actorId", filters.actorId);
   if (filters.serviceAccountId)
@@ -63,6 +67,7 @@ function appendFilters(
   if (filters.itemId) params.set("itemId", filters.itemId);
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
+  return params;
 }
 
 /**
@@ -74,10 +79,9 @@ export function getAuditLogs(
   { source, limit, offset, ...filters }: AuditLogParams,
   token?: string,
 ): Promise<AuditLogPage> {
-  const params = new URLSearchParams({ source });
+  const params = auditLogFilterParams(source, filters);
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
-  appendFilters(params, filters);
   return apiFetch<AuditLogPage>(`${BASE}/logs?${params.toString()}`, { token });
 }
 
@@ -91,18 +95,4 @@ export function getAuditLogFilters(
   return apiFetch<AuditLogFilterOptions>(
     `${BASE}/logs/filters?source=${source}`,
   );
-}
-
-/**
- * Download the WHOLE filtered range of one audit source as a CSV blob (`GET /audit/logs/export`).
- * Serializes the SAME filters as {@link getAuditLogs} (no paging — the export streams every matching
- * row server-side). The RFC-4180 escaping + formula-injection guard are applied server-side.
- */
-export function downloadAuditLogExport(
-  source: AuditLogSource,
-  filters: AuditLogClientFilters = {},
-): Promise<Blob> {
-  const params = new URLSearchParams({ source });
-  appendFilters(params, filters);
-  return apiFetchBlob(`${BASE}/logs/export?${params.toString()}`);
 }

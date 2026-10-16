@@ -64,6 +64,23 @@ export interface UserListParams {
    * (`MAX_RESOLVE_USER_IDS`) and each validated as a UUID server-side. Pair with `limit` ≥ the id count.
    */
   ids?: string[];
+  /** Export only: the list filters active/inactive over the page on the client. */
+  isActive?: boolean;
+}
+
+/** The user export route; it takes {@link userFilterParams}, the list's own filters. */
+export const USER_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging, sort or the `ids` resolver; the CSV export sends exactly these. */
+export function userFilterParams(params: UserListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  if (params.directoryOnly !== undefined)
+    qs.set("directoryOnly", String(params.directoryOnly));
+  if (params.role) qs.set("role", params.role);
+  if (params.isActive !== undefined) qs.set("isActive", String(params.isActive));
+  return qs;
 }
 
 /**
@@ -80,18 +97,13 @@ export function getUsers(
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<UserListPage> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = userFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
-  if (params.directoryOnly !== undefined)
-    qs.set("directoryOnly", String(params.directoryOnly));
-  if (params.role) qs.set("role", params.role);
   // Batch id→name resolver (#961): comma-encoded ids so a whole set rides one param.
   if (params.ids && params.ids.length > 0) qs.set("ids", params.ids.join(","));
   const search = qs.toString();

@@ -32,12 +32,6 @@
     "noSubject": "—"
   },
   "export": {
-    "exportAll": "Exportar todo (filtrado)",
-    "exportAllTitle": "Descargar todos los eventos que coinciden con los filtros actuales (todo el rango, no solo esta página)",
-    "exportAllBusy": "Exportando…",
-    "exportAllError": "No se pudo exportar el registro de auditoría",
-    "exportVisible": "Exportar eventos visibles",
-    "exportTitle": "Exportar los eventos visibles actualmente (la página filtrada)",
     "print": "Imprimir",
     "printTitle": "Imprimir el registro de auditoría"
   },

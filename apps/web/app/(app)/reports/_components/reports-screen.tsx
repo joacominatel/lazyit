@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowDownTrayIcon,
   ClockIcon,
   PrinterIcon,
   UserIcon,
@@ -20,6 +19,7 @@ import { ActorAvatar, ENTITY_META } from "@/components/activity-row";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { ErrorState, Pagination } from "@/components/resource-table";
@@ -36,15 +36,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { actionLabel, actionTone } from "@/lib/activity-tones";
-import type { DashboardActivityFilters } from "@/lib/api/endpoints/dashboard";
-import { notifyError } from "@/lib/api/notify-error";
+import {
+  ACTIVITY_EXPORT_PATH,
+  activityFilterParams,
+  type DashboardActivityFilters,
+} from "@/lib/api/endpoints/dashboard";
 import {
   useReportsActivityFilters,
   useReportsActivityPage,
 } from "@/lib/api/hooks/use-dashboard";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
-import { downloadActivityExport, downloadCsv } from "./reports-csv";
 
 /** Stable empty breadcrumb for the reports PageHeader (no items — just the home crumb). */
 const BREADCRUMB = <Breadcrumb />;
@@ -61,8 +63,8 @@ const BREADCRUMB = <Breadcrumb />;
  *
  * The feed is rendered as a LEDGER TAPE (ADR-0077): one hairline-ruled, baseline-aligned record per
  * row (mono+tabular timestamp · actor · ACTION stamp · → target · `// <entity>`), with true
- * server-side prev/next paging; the earlier Timeline and dense-Table views were dropped (#696). CSV +
- * Print export exactly the rows currently visible.
+ * server-side prev/next paging; the earlier Timeline and dense-Table views were dropped (#696). The CSV
+ * export streams every event matching the filters (ADR-0103); Print prints the visible page.
  */
 
 /**
@@ -171,8 +173,6 @@ export function ReportsScreen() {
   const tAction = useTranslations("shared.activity.action");
   // Snapshot "now" once so the relative-range presets stay pure across renders.
   const [now] = useState(() => Date.now());
-  // Bulk "export all (filtered)" is async (it streams the whole range from the API); disable while busy.
-  const [isExportingAll, setIsExportingAll] = useState(false);
   const {
     q,
     offset,
@@ -245,19 +245,6 @@ export function ReportsScreen() {
 
   const items = pageData?.items ?? [];
   const total = pageData?.total ?? 0;
-
-  // Stream the WHOLE filtered range from the API (issue #840), not just the visible page. Uses the same
-  // server filters the feed is showing, so "export all" matches what's on screen minus the paging.
-  async function handleExportAll() {
-    setIsExportingAll(true);
-    try {
-      await downloadActivityExport(serverFilters);
-    } catch (error) {
-      notifyError(error, t("export.exportAllError"));
-    } finally {
-      setIsExportingAll(false);
-    }
-  }
 
   const chips = [
     ...(q
@@ -334,28 +321,14 @@ export function ReportsScreen() {
       subtitle={t("page.subtitle")}
       actions={
         <div className="flex items-center gap-2" data-print-hide>
-          <Button
-            variant="outline"
+          <ExportButton
+            path={ACTIVITY_EXPORT_PATH}
+            params={activityFilterParams(serverFilters)}
+            total={pageData?.total}
+            filename="activity"
+            permission="logs:read"
             size="sm"
-            onClick={handleExportAll}
-            disabled={isExportingAll || total === 0}
-            title={t("export.exportAllTitle")}
-          >
-            <ArrowDownTrayIcon />
-            {isExportingAll
-              ? t("export.exportAllBusy")
-              : t("export.exportAll")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => downloadCsv(items)}
-            disabled={items.length === 0}
-            title={t("export.exportTitle")}
-          >
-            <ArrowDownTrayIcon />
-            {t("export.exportVisible")}
-          </Button>
+          />
           <Button
             variant="outline"
             size="sm"

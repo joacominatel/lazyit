@@ -6,7 +6,7 @@ import type {
   RecentActivityFilterOptions,
   RecentActivityPage,
 } from "@lazyit/shared";
-import { apiFetch, apiFetchBlob } from "../client";
+import { apiFetch } from "../client";
 
 /**
  * Data-access for the read-only dashboard aggregation. `GET /dashboard/summary` (ADR-0030 sibling,
@@ -95,22 +95,33 @@ export interface DashboardActivityParams extends DashboardActivityFilters {
  * store, unchanged.
  */
 export function getDashboardActivity(
-  {
-    limit,
-    offset,
-    entityType,
-    entityId,
-    actorId,
-    action,
-    from,
-    to,
-    q,
-  }: DashboardActivityParams = {},
+  { limit, offset, ...filters }: DashboardActivityParams = {},
   token?: string,
 ): Promise<RecentActivityPage> {
-  const params = new URLSearchParams();
+  const params = activityFilterParams(filters);
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
+  const qs = params.toString();
+  return apiFetch<RecentActivityPage>(
+    qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
+    { token },
+  );
+}
+
+/** The activity export route; it takes {@link activityFilterParams}, the feed's own filters. */
+export const ACTIVITY_EXPORT_PATH = `${BASE}/activity/export`;
+
+/** The feed's filters, never the page window; the CSV export sends exactly these. */
+export function activityFilterParams({
+  entityType,
+  entityId,
+  actorId,
+  action,
+  from,
+  to,
+  q,
+}: DashboardActivityFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
   if (entityType) params.set("entityType", entityType);
   if (entityId) params.set("entityId", entityId);
   if (actorId) params.set("actorId", actorId);
@@ -118,11 +129,7 @@ export function getDashboardActivity(
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   if (q) params.set("q", q);
-  const qs = params.toString();
-  return apiFetch<RecentActivityPage>(
-    qs ? `${BASE}/activity?${qs}` : `${BASE}/activity`,
-    { token },
-  );
+  return params;
 }
 
 /**
@@ -133,36 +140,4 @@ export function getDashboardActivity(
  */
 export function getDashboardActivityFilters(): Promise<RecentActivityFilterOptions> {
   return apiFetch<RecentActivityFilterOptions>(`${BASE}/activity/filters`);
-}
-
-/**
- * Download the WHOLE filtered activity range as a CSV blob (`GET /dashboard/activity/export`, issue
- * #840). Serializes the SAME filters as {@link getDashboardActivity} (no `limit`/`offset` — the export
- * is unpaginated and streams every matching row server-side). Authenticated via the Bearer the client
- * already holds, so it can't be a plain `<a href>`; the caller turns the returned Blob into a browser
- * download. The RFC-4180 escaping + formula-injection guard are applied server-side.
- */
-export function downloadDashboardActivityExport(
-  {
-    entityType,
-    entityId,
-    actorId,
-    action,
-    from,
-    to,
-    q,
-  }: DashboardActivityFilters = {},
-): Promise<Blob> {
-  const params = new URLSearchParams();
-  if (entityType) params.set("entityType", entityType);
-  if (entityId) params.set("entityId", entityId);
-  if (actorId) params.set("actorId", actorId);
-  if (action) params.set("action", action);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (q) params.set("q", q);
-  const qs = params.toString();
-  return apiFetchBlob(
-    qs ? `${BASE}/activity/export?${qs}` : `${BASE}/activity/export`,
-  );
 }

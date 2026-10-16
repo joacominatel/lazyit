@@ -11,7 +11,7 @@ import type {
   CreateAsset,
   UpdateAsset,
 } from "@lazyit/shared";
-import { apiFetch, apiFetchBlob } from "../client";
+import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
 
 /**
@@ -72,9 +72,9 @@ export interface AssetFilters {
   offset?: number;
   deleted?: "only";
   /**
-   * Purchase provenance filters (#1476), list read only — the CSV export does not take them. The API
-   * refuses them (403) without `purchaseOrder:read`, and they reveal provenance (ADR-0099 D-A), so callers
-   * build them through `purchaseAssetFilter`, which drops them for a viewer without the permission.
+   * Purchase provenance filters (#1476), on the list and the CSV export alike. The API refuses them (403)
+   * without `purchaseOrder:read`, and they reveal provenance (ADR-0099 D-A), so callers build them through
+   * `purchaseAssetFilter`, which drops them for a viewer without the permission.
    */
   purchase?: PurchaseAssetFilter;
 }
@@ -89,23 +89,12 @@ export interface PurchaseAssetFilter {
   purchaseLinked?: boolean;
 }
 
-/**
- * List assets (lean), optionally filtered, sorted and paged. `GET /assets`
- * returns a paginated `Page<AssetListItem>` envelope (ADR-0030); we return the
- * whole envelope (`items` + `total`/`limit`/`offset`) so the list can render
- * pagination controls. `limit`/`offset` are echoed by the server. By default only active rows are
- * returned; pass `deleted: "only"` (ADMIN) for the archived view of soft-deleted rows.
- */
-/**
- * Append the additive FILTER params (not paging/sort) shared by the list read and the CSV export —
- * `q`, `categoryId`, `modelId`, `locationId`, `status`, `statusLabelId`, `company`, `assignedToUserId`, `ownership`,
- * `warranty`, `deleted`. The export reuses this so it serializes every filter IDENTICALLY to the
- * list and can never drift from it.
- */
-function appendAssetFilterParams(
-  params: URLSearchParams,
-  filters: AssetFilters,
-): void {
+/** The asset export route; it takes {@link assetFilterParams}, the list's own filters. */
+export const ASSET_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function assetFilterParams(filters: AssetFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
   if (filters.q) params.set("q", filters.q);
   if (filters.categoryId) params.set("categoryId", filters.categoryId);
   if (filters.modelId) params.set("modelId", filters.modelId);
@@ -118,19 +107,16 @@ function appendAssetFilterParams(
   if (filters.ownership) params.set("ownership", filters.ownership);
   if (filters.warranty) params.set("warranty", filters.warranty);
   if (filters.deleted) params.set("deleted", filters.deleted);
-}
-
-/**
- * The query string of the list read: the shared filters, the purchase filters (list only), sort and the
- * page window. Pure; exported for the test that pins which purchase params are ever sent.
- */
-export function assetListSearchParams(filters: AssetFilters = {}): URLSearchParams {
-  const params = new URLSearchParams();
-  appendAssetFilterParams(params, filters);
   const purchase = filters.purchase;
   if (purchase?.purchaseOrderLineId) params.set("purchaseOrderLineId", purchase.purchaseOrderLineId);
   if (purchase?.purchaseOrderId) params.set("purchaseOrderId", purchase.purchaseOrderId);
   if (purchase?.purchaseLinked !== undefined) params.set("purchaseLinked", String(purchase.purchaseLinked));
+  return params;
+}
+
+/** The query string of the list read: {@link assetFilterParams}, then sort and the page window. */
+export function assetListSearchParams(filters: AssetFilters = {}): URLSearchParams {
+  const params = assetFilterParams(filters);
   if (filters.sort) {
     params.set("sort", filters.sort);
     if (filters.dir) params.set("dir", filters.dir);
@@ -141,6 +127,12 @@ export function assetListSearchParams(filters: AssetFilters = {}): URLSearchPara
   return params;
 }
 
+/**
+ * List assets (lean), optionally filtered, sorted and paged. `GET /assets` returns a paginated
+ * `Page<AssetListItem>` envelope (ADR-0030); we return the whole envelope so the list can render
+ * pagination controls. By default only active rows are returned; pass `deleted: "only"` (ADMIN) for the
+ * archived view of soft-deleted rows.
+ */
 export function getAssets(
   filters: AssetFilters = {},
   signal?: AbortSignal,
@@ -151,21 +143,6 @@ export function getAssets(
 ): Promise<AssetListPage> {
   const qs = assetListSearchParams(filters).toString();
   return apiFetch<AssetListPage>(qs ? `${BASE}?${qs}` : BASE, { signal, token });
-}
-
-/**
- * Download the WHOLE filtered asset inventory as a CSV blob (`GET /assets/export`, issue #872).
- * Serializes the SAME filters as {@link getAssets} MINUS paging/sort — the export streams every matching
- * asset server-side, not just the visible page. `deleted=only` (archived) stays ADMIN-only server-side.
- * RFC-4180 escaping + the formula-injection guard are applied server-side (shared with the list).
- */
-export function downloadAssetInventoryExport(
-  filters: AssetFilters = {},
-): Promise<Blob> {
-  const params = new URLSearchParams();
-  appendAssetFilterParams(params, filters);
-  const qs = params.toString();
-  return apiFetchBlob(qs ? `${BASE}/export?${qs}` : `${BASE}/export`);
 }
 
 /**

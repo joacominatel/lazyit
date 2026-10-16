@@ -4,12 +4,6 @@
     "subtitle": "Everything your team tracks and owns.",
     "newAsset": "New asset",
     "scan": "Scan",
-    "export": {
-      "button": "Export (filtered)",
-      "exporting": "Exporting…",
-      "exportTitle": "Download every asset matching the current filters as a CSV",
-      "error": "Couldn't export the inventory"
-    },
     "import": {
       "button": "Import",
       "title": "Register many assets at once from a CSV"

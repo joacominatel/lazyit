@@ -32,12 +32,6 @@
     "noSubject": "—"
   },
   "export": {
-    "exportAll": "Export all (filtered)",
-    "exportAllTitle": "Download every event matching the current filters (the whole range, not just this page)",
-    "exportAllBusy": "Exporting…",
-    "exportAllError": "Couldn't export the audit log",
-    "exportVisible": "Export visible events",
-    "exportTitle": "Export the events currently visible (the filtered page)",
     "print": "Print",
     "printTitle": "Print the audit log"
   },
