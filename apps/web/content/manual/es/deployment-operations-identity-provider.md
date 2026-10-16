@@ -86,9 +86,9 @@ variables de entorno.
    OIDC. Define también `OIDC_CLIENT_ID`: es la audiencia contra la que la API valida cada token. Sin
    ella la API arranca igual, pero registra una advertencia de que la validación de audiencia está
    desactivada, y acepta cualquier token que firme tu proveedor — incluso uno emitido para otra app del
-   mismo proveedor. Si tu proveedor corre en el mismo host y su dirección pública no se resuelve desde dentro de
-   los contenedores, define también `AUTH_INTERNAL_ISSUER` con una dirección a la que la app web pueda
-   llegar.
+   mismo proveedor. Si tu proveedor corre en el mismo host y su dirección pública no se resuelve desde
+   dentro de los contenedores, define también `AUTH_INTERNAL_ISSUER` con una dirección a la que la app
+   web pueda llegar.
 4. **Recrea la app web y la API**, y abre `/setup`. El asistente muestra las mismas variables para que
    las revises antes de crear el primer administrador.
 

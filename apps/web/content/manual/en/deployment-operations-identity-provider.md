@@ -79,8 +79,9 @@ environment variables.
    `OIDC_ISSUER` and `OIDC_JWKS_URI` are **required** — the API refuses to start in OIDC mode without
    them. Set `OIDC_CLIENT_ID` too: it is the audience the API checks every token against. Without it the
    API still starts, but logs a warning that audience validation is off, and accepts any token your
-   provider signs — including one issued to another app on the same provider. If your provider runs on the same host and its public address doesn't resolve from inside the
-   containers, also set `AUTH_INTERNAL_ISSUER` to an address the web app can reach.
+   provider signs — including one issued to another app on the same provider. If your provider runs on
+   the same host and its public address doesn't resolve from inside the containers, also set
+   `AUTH_INTERNAL_ISSUER` to an address the web app can reach.
 4. **Recreate the web app and the API**, then open `/setup`. The wizard shows the same variables so you
    can check them before you create the first administrator.
 
