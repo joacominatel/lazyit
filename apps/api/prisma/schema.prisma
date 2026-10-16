@@ -1920,7 +1920,8 @@ enum ConsumableMovementType {
 // adjustment, and — DEBT-2 / issue #185 — UserHistory user lifecycle) into one normalized, newest-
 // first stream for the dashboard's recent-activity feed.
 // Columns: { occurredAt timestamptz, actorId uuid?, entityType text, entityId text, action text,
-// summary text }. Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL — created in
+// summary text, subjectName text?, targetUserId uuid?, targetUserName text?, sourceKey text } — sourceKey
+// ('<table>:<id>[:<action>]', unique per event) is the export's keyset tiebreak (ADR-0103). Prisma cannot express a UNION view in PSL, so it lives ONLY as raw SQL — created in
 // prisma/migrations/20260601163936_recent_activity_view/migration.sql and REPLACED (CREATE OR REPLACE)
 // to add the UserHistory branch in prisma/migrations/<ts>_recent_activity_view_user/migration.sql (the
 // same "SQL Prisma can't represent" pattern as the partial unique indexes — see

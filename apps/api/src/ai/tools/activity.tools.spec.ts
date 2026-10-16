@@ -40,6 +40,7 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { DashboardController } from '../../dashboard/dashboard.controller';
+import { ExportService } from '../../common/export';
 import { DashboardService } from '../../dashboard/dashboard.service';
 import { AiToolService } from '../core/ai-tool.service';
 import { mapToolError } from '../core/error-mapper';
@@ -279,6 +280,7 @@ describe('activity toolset (W2-9) — dashboard_summary, activity_list', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [DashboardController],
       providers: [
+        { provide: ExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         {
           provide: LocalCredentialService,
