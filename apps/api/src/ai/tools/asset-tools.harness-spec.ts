@@ -36,7 +36,6 @@ import { UsersController } from '../../users/users.controller';
 import { UsersService } from '../../users/users.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
-import { ExportService } from '../../common/export';
 import { ActorService } from '../../common/actor.service';
 import { VaultSetupNudgeService } from '../../notifications/vault-setup-nudge.service';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
@@ -1073,7 +1072,6 @@ export async function bootHarness(): Promise<Harness> {
       ArticleCategoriesController,
     ],
     providers: [
-      { provide: ExportService, useValue: {} },
       { provide: PrismaService, useValue: prisma },
       {
         provide: LocalCredentialService,

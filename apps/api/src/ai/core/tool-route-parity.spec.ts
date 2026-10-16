@@ -61,7 +61,6 @@ import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
 import { ExportService } from '../../common/export';
 import { AssetsController } from '../../assets/assets.controller';
-import { ExportService } from '../../common/export';
 import { AssetsService } from '../../assets/assets.service';
 import { ArticlesService } from '../../articles/articles.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
@@ -445,7 +444,6 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         AccessGrantsController,
       ],
       providers: [
-        { provide: ExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         {
           provide: LocalCredentialService,
