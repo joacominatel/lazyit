@@ -2656,6 +2656,11 @@ export const purchasesToolset: AiToolset = {
     ),
     unexposed(
       SuppliersController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      SuppliersController,
       ['merge', 'mergePreview'],
       'Merging suppliers is an ADMIN-only clean-up that archives the duplicate and re-points every purchase ' +
         '(#1496): done from the supplier page after reviewing its preview, not part of the chat purchase flow.',

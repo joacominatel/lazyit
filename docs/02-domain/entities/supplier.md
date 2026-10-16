@@ -63,6 +63,12 @@ fields stay as they are.
   `deleted=only` (ADMIN) lists archived suppliers. Soft-deleting a supplier leaves its purchases pointing at
   it — they show it, flagged as archived. The FK from a purchase is `Restrict`, so a supplier with purchases
   can never be hard-deleted.
+- **Export** (`GET /suppliers/export?q=&deleted=`, #1597, [[0103-data-export-streaming-path]]): a CSV of every
+  supplier the list would return for the same filters, under the same `purchaseOrder:read` (VIEWER denied by
+  default) and the same ADMIN-only `deleted=only`. Columns: `id, name, taxId, website, salesContactName,
+  salesContactEmail, salesContactPhone, supportContactName, supportContactEmail, supportContactPhone, notes,
+  createdAt, updatedAt, deletedAt` — the list row, field for field. Every export is audited
+  ([[data-export-log]]).
 - Supplier names feed smart entry: `GET /suggestions/supplierName` (ADR-0099 §7).
 - **Global search** (#1499, [[0035-search-architecture]]): the `suppliers` index carries the name, tax ID and
   the two contact names (the names searchable, not returned) — never emails, phones, website or notes. Searched
