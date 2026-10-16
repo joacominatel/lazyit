@@ -400,6 +400,7 @@
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
+    "adminOnly": "Only an administrator can change the email settings. You can view them here and send a test.",
     "fields": {
       "enabled": {
         "label": "Enable outbound email",
@@ -626,7 +627,7 @@
         "removedRead": "{who} will no longer be able to {action}.",
         "accessGrantGrant": "{who} will be able to grant and revoke application access for anyone — including to sensitive applications. This is normally an admin-only action.",
         "userManage": "{who} will be able to administer users at or below their own role: create accounts, change roles up to their own and offboard people. Only an admin manages admins. This is normally an admin-only action.",
-        "settingsManage": "{who} will be able to configure the instance and manage taxonomies. Editing this permission matrix and the directory connection stays admin-only. This is normally an admin-only action.",
+        "settingsManage": "{who} will be able to configure the instance and manage taxonomies. Editing this permission matrix, the directory connection and the email (SMTP) settings stays admin-only, and the service accounts they manage can hold only permissions their own role has, except reporting inventory. This is normally an admin-only action.",
         "deleteDefault": "{who} will be able to {action} — a destructive action normally reserved for admins.",
         "who": {
           "MEMBER": "Members",
@@ -717,6 +718,9 @@
       "aiAccess": "AI access"
     },
     "revokeExplanation": "Its token stops authenticating immediately. You can restore it from the “Show revoked” view (rotate to mint a fresh token). Revoking suspends the token but does not remove vault access — use the vault's Members list to revoke per vault and remove key material.",
+    "errors": {
+      "ceilingExceeded": "Your role does not hold {permissions}. A service account can only hold permissions your own role has."
+    },
     "toast": {
       "restored": "Service account restored",
       "restoreError": "Couldn't restore service account",
@@ -845,7 +849,9 @@
       "sectionAria": "{label} permissions",
       "selectAllAria": "Select all {label} permissions",
       "all": "All",
-      "adminLevel": "Admin-level"
+      "adminLevel": "Admin-level",
+      "outsideRole": "Not in your role",
+      "outsideRoleHint": "Your role does not hold this permission. You can remove it from this account, but once it is saved without it you cannot grant it back."
     },
     "lastUsed": "Used {when}",
     "neverUsed": "Never used",

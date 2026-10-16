@@ -400,6 +400,7 @@
     "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
+    "adminOnly": "Solo un administrador puede cambiar la configuración de correo. Aquí puedes verla y enviar una prueba.",
     "fields": {
       "enabled": {
         "label": "Activar correo saliente",
@@ -626,7 +627,7 @@
         "removedRead": "{who} ya no podrán {action}.",
         "accessGrantGrant": "{who} podrán otorgar y revocar el acceso a aplicaciones para cualquiera — incluso a aplicaciones sensibles. Normalmente esta es una acción exclusiva de administradores.",
         "userManage": "{who} podrán administrar usuarios con un rol igual o inferior al suyo: crear cuentas, cambiar roles hasta el suyo y dar de baja a personas. Solo un administrador gestiona administradores. Normalmente esta es una acción exclusiva de administradores.",
-        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos y la conexión del directorio sigue siendo exclusivo de administradores. Normalmente esta es una acción exclusiva de administradores.",
+        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos, la conexión del directorio y la configuración de correo (SMTP) sigue siendo exclusivo de administradores, y las cuentas de servicio que gestionen solo pueden tener permisos que su propio rol tiene, salvo reportar inventario. Normalmente esta es una acción exclusiva de administradores.",
         "deleteDefault": "{who} podrán {action} — una acción destructiva normalmente reservada a administradores.",
         "who": {
           "MEMBER": "Los Miembros",
@@ -717,6 +718,9 @@
       "aiAccess": "Acceso a IA"
     },
     "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo). Revocar suspende el token pero no elimina el acceso a las bóvedas — usa la lista de Miembros de la bóveda para revocar por bóveda y eliminar el material de clave.",
+    "errors": {
+      "ceilingExceeded": "Tu rol no tiene {permissions}. Una cuenta de servicio solo puede tener permisos que tu propio rol tiene."
+    },
     "toast": {
       "restored": "Cuenta de servicio restaurada",
       "restoreError": "No se pudo restaurar la cuenta de servicio",
@@ -845,7 +849,9 @@
       "sectionAria": "Permisos de {label}",
       "selectAllAria": "Seleccionar todos los permisos de {label}",
       "all": "Todos",
-      "adminLevel": "Nivel administrador"
+      "adminLevel": "Nivel administrador",
+      "outsideRole": "Fuera de tu rol",
+      "outsideRoleHint": "Tu rol no tiene este permiso. Puedes quitárselo a esta cuenta, pero una vez guardada sin él no puedes volver a otorgarlo."
     },
     "lastUsed": "Usada {when}",
     "neverUsed": "Nunca usada",

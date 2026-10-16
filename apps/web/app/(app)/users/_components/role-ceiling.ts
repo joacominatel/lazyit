@@ -24,8 +24,7 @@ export function userMutationErrorKind(error: unknown): UserMutationErrorKind | n
   const code = (error.body as { code?: unknown } | undefined)?.code;
   if (error.status === 403 && code === "ROLE_CEILING_EXCEEDED") return "roleCeiling";
   if (error.status === 422 && code === "DIRECTORY_PERSON_ROLE_LOCKED") return "directoryRoleLocked";
-  // The last-admin 409 carries no code, so it is matched by its wording (AUD-040).
-  if (error.status === 409 && /last administrator/i.test(error.message)) return "lastAdmin";
+  if (error.status === 409 && code === "LAST_ADMIN_REQUIRED") return "lastAdmin";
   return null;
 }
 

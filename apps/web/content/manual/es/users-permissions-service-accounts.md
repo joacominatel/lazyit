@@ -52,7 +52,10 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
   porque solo reporta inventario e instalar agentes ya requiere **Cambiar la configuración de la
   instancia**, así que puedes seguir
   [instalando agentes de reporte](/help/assets-topology-reporting-agent). Todos los demás permisos,
-  incluido **Obtener secretos de forma programática (cuenta de servicio)**, siguen limitados.
+  incluido **Obtener secretos de forma programática (cuenta de servicio)**, siguen limitados. El
+  selector muestra solo lo que puedes otorgar; un permiso que la cuenta ya tiene fuera de tu rol sigue
+  en la lista, marcado **Fuera de tu rol**, para que puedas quitarlo. Un rechazo nombra los permisos
+  que le faltan a tu rol.
 
 ## El token (se muestra una sola vez)
 

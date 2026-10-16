@@ -19,6 +19,7 @@ import {
   pillarDescription,
   pillarLabel,
 } from "../../_lib/permission-labels";
+import { offeredPermissions, withinCeiling } from "./permission-ceiling";
 
 /** Permissions a service account may never be granted (human-only per ADR-0069 / SEC-011). */
 const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
@@ -48,8 +49,12 @@ interface PermissionPickerProps {
   value: ReadonlySet<Permission>;
   /** Toggle one permission on/off. */
   onToggle: (permission: Permission, on: boolean) => void;
-  /** Toggle every permission in a pillar on (true) / off (false). */
-  onTogglePillar: (pillar: PermissionPillar, on: boolean) => void;
+  /** Toggle every listed permission of one pillar on (true) / off (false). */
+  onTogglePillar: (permissions: Permission[], on: boolean) => void;
+  /** Whether the caller's own role holds a permission — the SEC-088 ceiling on what is offered. */
+  can: (permission: Permission) => boolean;
+  /** What the account already holds: listed even beyond the caller's role, so it can be removed. */
+  held: ReadonlySet<Permission>;
   /** Disable every control (e.g. while the form is submitting). */
   disabled?: boolean;
   /** Stable prefix for the checkbox ids so two pickers on one screen don't collide. */
@@ -60,8 +65,9 @@ interface PermissionPickerProps {
  * A checklist permission picker for a service account's direct grants (ADR-0048), grouped by the four
  * product pillars. Each permission shows its plain-language `PERMISSION_META` label; the delete + coarse
  * verbs carry the ⚠ "Admin-level" marker (mirroring the role config screen's `isAboveDefaultTier`) —
- * granting them is allowed but warned, never client-blocked (the backend doesn't block either). A
- * per-pillar "select all / none" header lets an operator grant a whole pillar in one click.
+ * granting them is allowed but warned. Only verbs the caller's own role holds are offered (SEC-088);
+ * one the account already holds beyond that stays listed, marked, so it can be removed. A per-pillar
+ * "select all / none" header toggles the listed verbs of a pillar in one click.
  *
  * Stateless: it renders from `value` and reports edits up via `onToggle` / `onTogglePillar`. The owning
  * form holds the staged set; the shared `ServiceAccountPermissionsSchema` (min 1) is the real guard.
@@ -70,16 +76,24 @@ export function PermissionPicker({
   value,
   onToggle,
   onTogglePillar,
+  can,
+  held,
   disabled = false,
   idPrefix = "sa-perm",
 }: PermissionPickerProps) {
   const t = useTranslations("settings");
-  const pillars = useMemo(() => PERMISSION_PILLARS, []);
+  const pillars = useMemo(
+    () =>
+      PERMISSION_PILLARS.map((pillar) => ({
+        pillar,
+        perms: offeredPermissions(PERMISSIONS_BY_PILLAR[pillar], can, held),
+      })).filter(({ perms }) => perms.length > 0),
+    [can, held],
+  );
 
   return (
     <div className="space-y-4">
-      {pillars.map((pillar) => {
-        const perms = PERMISSIONS_BY_PILLAR[pillar];
+      {pillars.map(({ pillar, perms }) => {
         const pLabel = pillarLabel(t, pillar);
         const selectedCount = perms.filter((p) => value.has(p)).length;
         const allOn = selectedCount === perms.length;
@@ -103,7 +117,7 @@ export function PermissionPicker({
               <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
                 <Checkbox
                   checked={allOn ? true : someOn ? "indeterminate" : false}
-                  onCheckedChange={(v) => onTogglePillar(pillar, v === true)}
+                  onCheckedChange={(v) => onTogglePillar(perms, v === true)}
                   disabled={disabled}
                   aria-label={t(
                     "serviceAccounts.permissionPicker.selectAllAria",
@@ -118,6 +132,7 @@ export function PermissionPicker({
               {perms.map((permission) => {
                 const checkboxId = `${idPrefix}-${permission}`;
                 const aboveTier = isAboveDefaultTier(permission);
+                const outsideRole = !withinCeiling(permission, can);
                 return (
                   <li key={permission} className="flex items-center gap-2">
                     <Checkbox
@@ -141,6 +156,15 @@ export function PermissionPicker({
                         >
                           <ExclamationTriangleIcon aria-hidden />
                           {t("serviceAccounts.permissionPicker.adminLevel")}
+                        </StatusBadge>
+                      ) : null}
+                      {outsideRole ? (
+                        <StatusBadge
+                          tone="neutral"
+                          className="px-1.5"
+                          title={t("serviceAccounts.permissionPicker.outsideRoleHint")}
+                        >
+                          {t("serviceAccounts.permissionPicker.outsideRole")}
                         </StatusBadge>
                       ) : null}
                     </label>
