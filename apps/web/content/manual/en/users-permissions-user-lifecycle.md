@@ -191,8 +191,8 @@ accurate at any team size, and the choice lives in the page address — a filter
 bookmarkable. The [Roles](/help/users-permissions-roles) screen's **View N members** links land here
 pre-filtered, so the Users list is the one place you browse and manage role membership.
 
-**Export CSV** at the top of the list downloads every user matching the current search and filters,
-status included — see [Exporting data](/help/notifications-activity-data-export).
+**Export CSV** at the top of the list downloads every user matching the current search and filters —
+see [Exporting data](/help/notifications-activity-data-export).
 
 ## Directory people
 

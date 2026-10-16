@@ -33,10 +33,9 @@ const users = createCrudEndpoints<User, CreateUser, UpdateUser>(BASE);
 
 /**
  * Server-side params for the user list (#104). `q` matches firstName/lastName/email;
- * `sort` is allowlisted to `firstName|lastName|email|role|createdAt` (unknown → 400). The
- * active/inactive status filter is NOT a server param — the screen applies it client-side over the
- * page. `limit`/`offset` thread the pagination window (ADR-0030). `deleted: "only"` is the
- * ADMIN-only archived view (soft-deleted / offboarded users).
+ * `sort` is allowlisted to `firstName|lastName|email|role|createdAt` (unknown → 400).
+ * `limit`/`offset` thread the pagination window (ADR-0030). `deleted: "only"` is the ADMIN-only
+ * archived view (soft-deleted / offboarded users).
  */
 export interface UserListParams {
   q?: string;
@@ -64,7 +63,7 @@ export interface UserListParams {
    * (`MAX_RESOLVE_USER_IDS`) and each validated as a UUID server-side. Pair with `limit` ≥ the id count.
    */
   ids?: string[];
-  /** Export only: the list filters active/inactive over the page on the client. */
+  /** `true` → active accounts only, `false` → inactive only, omitted → both. */
   isActive?: boolean;
 }
 

@@ -208,7 +208,7 @@ miembros** de la pantalla de [Roles](/help/users-permissions-roles) llegan aquí
 lista de Usuarios es el único lugar donde navegas y gestionas la membresía de roles.
 
 **Exportar CSV**, arriba de la lista, descarga todos los usuarios que coinciden con la búsqueda y los
-filtros actuales, estado incluido — mira [Exportar datos](/help/notifications-activity-data-export).
+filtros actuales — mira [Exportar datos](/help/notifications-activity-data-export).
 
 ## Personas de directorio
 

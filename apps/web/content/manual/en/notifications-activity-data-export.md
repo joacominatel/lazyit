@@ -33,8 +33,7 @@ and the archived view. It is never just the page in front of you, and it ignores
 columns you chose to show and the order you sorted by. Each list always writes the same columns, newest
 rows first, so a script reading the file keeps working.
 
-To export a slice, filter the list first, then export. On **Users**, the *Active / Inactive* status filter
-applies to the file too.
+To export a slice, filter the list first, then export.
 
 ## Limits
 

@@ -18,6 +18,7 @@ const { assetFilterParams, getAssets } = await import("./assets");
 const { activityFilterParams, getDashboardActivity } = await import("./dashboard");
 const { auditLogFilterParams, getAuditLogs } = await import("./audit");
 const { getUsers, userFilterParams } = await import("./users");
+const { deriveUserParams } = await import("@/app/(app)/users/_components/users-list-query");
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
 const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
 const { consumableFilterParams, getConsumables } = await import("./consumables");
@@ -101,14 +102,29 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
     expect(auditLogFilterParams("export", filters).get("source")).toBe("export");
   });
 
-  test("users", async () => {
-    const filters = { q: "ana", role: "MEMBER" as const, directoryOnly: false, deleted: "only" as const };
+  test("users, the Active / Inactive status included", async () => {
+    const filters = {
+      q: "ana",
+      role: "MEMBER" as const,
+      directoryOnly: false,
+      deleted: "only" as const,
+      isActive: false,
+    };
     await expectSameFilters(() => getUsers({ ...filters, ...window }), userFilterParams(filters));
   });
 
-  test("users: the export can also take the status the list filters client-side", () => {
-    expect(userFilterParams({ isActive: false }).get("isActive")).toBe("false");
-    expect(userFilterParams({}).has("isActive")).toBe(false);
+  test("users: the status filter reaches the list request as isActive", async () => {
+    const state = { q: "", sort: "createdAt", dir: "desc" as const, offset: 0, limit: 50 };
+    const derive = (status: string) =>
+      deriveUserParams(
+        { ...state, filters: { status, archived: "ALL", directory: "ALL", role: "ALL" } },
+        { isAdmin: false },
+      );
+    const inactive = derive("INACTIVE");
+    expect(await listFilters(() => getUsers(inactive))).toEqual([["isActive", "false"]]);
+    expect(entries(userFilterParams(inactive))).toEqual([["isActive", "false"]]);
+    expect(derive("ACTIVE").isActive).toBe(true);
+    expect(derive("ALL").isActive).toBeUndefined();
   });
 
   test("access grants, global and per user", async () => {

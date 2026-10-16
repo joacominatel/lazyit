@@ -233,15 +233,10 @@ export function UsersListView() {
   const roleFilter = filters.role as RoleFilter;
 
   // `deriveUserParams` is the SAME URL→query mapping the server prefetch uses — `directory`→
-  // `directoryOnly`, `role`→`?role=`, archived→`deleted` (#693) — so this hook's key and the
-  // SSR-prefetched key are byte-identical (ADR-0067 / #733). `status` stays a client-side post-filter.
+  // `directoryOnly`, `role`→`?role=`, `status`→`?isActive=`, archived→`deleted` (#693) — so this
+  // hook's key and the SSR-prefetched key are byte-identical (ADR-0067 / #733).
   const listParams = deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
   const { data: page, isLoading, isFetching, isError, error, refetch } = useUserList(listParams);
-  // The export filters status on the server, so the file holds every match, not one page's.
-  const exportParams = userFilterParams({
-    ...listParams,
-    isActive: statusFilter === "ALL" ? undefined : statusFilter === "ACTIVE",
-  });
   const restoreUserMutation = useRestoreUser();
 
   // The server-orchestrated clone wizard (ADR-0058) is `cloning` — distinct from the create/edit form.
@@ -254,13 +249,7 @@ export function UsersListView() {
   const { formOpen, editing, cloning, deleting } = dialogs;
   const [bulkRestoring, setBulkRestoring] = useState(false);
 
-  const rows = useMemo(() => {
-    const items = page?.items ?? [];
-    if (statusFilter === "ALL") return items;
-    return items.filter((user) =>
-      statusFilter === "ACTIVE" ? user.isActive : !user.isActive,
-    );
-  }, [page?.items, statusFilter]);
+  const rows = useMemo(() => page?.items ?? [], [page?.items]);
 
   // Selection only matters in the archived view (its sole bulk action: Restore).
   const visibleIds = useMemo(() => rows.map((user) => user.id), [rows]);
@@ -506,7 +495,7 @@ export function UsersListView() {
             ) : null}
             <ExportButton
               path={USER_EXPORT_PATH}
-              params={exportParams}
+              params={userFilterParams(listParams)}
               total={page?.total}
               filename="users"
               permission="user:read"

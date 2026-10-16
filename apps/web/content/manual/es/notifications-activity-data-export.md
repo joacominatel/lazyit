@@ -34,8 +34,7 @@ tamaño de página, las columnas que elegiste mostrar y el orden en que ordenast
 las mismas columnas, con las filas más recientes primero, así un script que lee el archivo sigue
 funcionando.
 
-Para exportar una porción, filtra la lista primero y después exporta. En **Usuarios**, el filtro de estado
-*Activo / Inactivo* también se aplica al archivo.
+Para exportar una porción, filtra la lista primero y después exporta.
 
 ## Límites
 
