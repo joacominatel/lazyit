@@ -16,9 +16,9 @@ const baseUser = { id: USER_ID, role: 'ADMIN' } as unknown as User;
 
 /**
  * VaultSetupNudgeService (ADR-0056 amendment, #453) — the login-time vault-setup nudge. Proves:
- *   - emits a ONE-TIME TARGETED notification only when the caller holds `secret:read` AND has no keypair;
+ *   - emits a TARGETED notification only when the caller holds `secret:read` AND has no keypair;
  *   - does NOT emit when they lack `secret:read`, or when a keypair already exists;
- *   - the dedupeKey is the STABLE `secret.vault_setup:<userId>` (idempotent — one nudge per user, ever);
+ *   - the dedupeKey is the STABLE `secret.vault_setup:<userId>` (one nudge per retention window);
  *   - is FAIL-SOFT: any error (permission resolve, keypair lookup, emit) is swallowed, never thrown.
  */
 describe('VaultSetupNudgeService', () => {
@@ -58,15 +58,17 @@ describe('VaultSetupNudgeService', () => {
       select: { id: true },
     });
     expect(emit).toHaveBeenCalledTimes(1);
-    const arg = emit.mock.calls[0]![0];
+    const arg = (emit.mock.calls as [{ title?: string }][])[0][0];
     expect(arg).toMatchObject({
       type: 'secret.vault_setup',
-      // The STABLE dedupeKey (no time bucket) — one nudge per user, ever (idempotent via @unique).
+      // The STABLE dedupeKey (no time bucket) — one nudge per retention window (idempotent via @unique).
       dedupeKey: `secret.vault_setup:${USER_ID}`,
       recipientUserId: USER_ID, // TARGETED to the user's own bell
     });
     // INV-10: carries no secret value / no key material — only copy + (type-driven) link.
-    expect(JSON.stringify(arg)).not.toMatch(/privateKey|passphrase[A-Z]|recovery|ciphertext|dek/i);
+    expect(JSON.stringify(arg)).not.toMatch(
+      /privateKey|passphrase[A-Z]|recovery|ciphertext|dek/i,
+    );
     expect(arg.title).toBeTruthy();
   });
 
@@ -93,9 +95,8 @@ describe('VaultSetupNudgeService', () => {
     await service.notifyIfVaultSetupNeeded(baseUser);
     await service.notifyIfVaultSetupNeeded(baseUser);
     expect(emit).toHaveBeenCalledTimes(2);
-    expect(emit.mock.calls[0]![0].dedupeKey).toBe(
-      emit.mock.calls[1]![0].dedupeKey,
-    );
+    const calls = emit.mock.calls as [{ dedupeKey: string }][];
+    expect(calls[0][0].dedupeKey).toBe(calls[1][0].dedupeKey);
   });
 
   it('is FAIL-SOFT: a permission-resolve error is swallowed, never thrown (login is never blocked)', async () => {

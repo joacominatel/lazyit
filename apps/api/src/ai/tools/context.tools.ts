@@ -72,8 +72,12 @@ const sessionContext = defineTool({
     });
     return {
       data: {
-        // The caller's own name stays plain (pending a CEO decision): wrapping it would mark most turns untrusted.
-        user: pick(me, ['id', 'firstName', 'lastName', 'email', 'role']),
+        // Anyone may rename themselves (`PATCH /users/me`), so even the caller's own name is wrapped.
+        user: {
+          ...pick(me, ['id', 'email', 'role']),
+          firstName: untrusted(text((me as Row).firstName)),
+          lastName: untrusted(text((me as Row).lastName)),
+        },
         permissions: permissions.permissions,
         version: version.current,
         assignedAssets: {

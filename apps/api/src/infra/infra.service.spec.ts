@@ -384,6 +384,32 @@ describe('InfraService', () => {
       expect(prisma.infraNode.create).not.toHaveBeenCalled();
     });
 
+    it('maps a link that loses the race to the one-live-node index to the same 409', async () => {
+      // The pre-check passes, then a concurrent link lands first and the partial unique index refuses.
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-raced' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
+    });
+
+    it('rethrows a P2002 that is not about the asset link untouched', async () => {
+      prisma.infraNode.create.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.createNode(
+          { kind: 'VM', label: 'web-02', assetId: 'asset-free' },
+          true,
+          HUMAN,
+        ),
+      ).rejects.toMatchObject({ code: 'P2002' });
+    });
+
     it('stamps a typed IP MANUAL, so a later merge or report never overwrites it (AUD-088)', async () => {
       assets.create.mockResolvedValue({ id: 'asset-new' });
       prisma.infraNode.create.mockResolvedValue({ id: 'node-1' });
@@ -3063,6 +3089,19 @@ describe('InfraService', () => {
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
     });
 
+    it('maps a first-attach that loses the race to the one-live-node index to the same 409', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-b',
+        assetId: null,
+      });
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(
+        service.updateNode('node-b', { assetId: 'asset-of-a' }, HUMAN),
+      ).rejects.toThrow(INFRA_NODE_ASSET_SHARED_ERROR);
+    });
+
     it('only UN-LINKS an auto-created Asset another LIVE node still links — never archives it (AUD-030)', async () => {
       // Two nodes already sharing one asset (data from before the attach guard): detaching one of them
       // must not archive the row the other still uses.
@@ -4572,6 +4611,20 @@ describe('InfraService', () => {
         where: { assetId: 'asset-1', id: { not: 'node-old' } },
       });
       expect(prisma.infraNode.update).not.toHaveBeenCalled();
+    });
+
+    it('maps a restore that loses the race to the one-live-node index to the same 409', async () => {
+      prisma.infraNode.findFirst.mockResolvedValue({
+        id: 'node-old',
+        assetId: 'asset-1',
+        deletedAt: new Date(),
+      });
+      prisma.infraNode.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+
+      await expect(service.restoreNode('node-old')).rejects.toThrow(
+        INFRA_NODE_ASSET_SHARED_ERROR,
+      );
     });
 
     it('restores a node with its Asset link when no other live node links that Asset', async () => {
@@ -7461,6 +7514,24 @@ describe('InfraService', () => {
       });
     });
 
+    it('an adoption that loses the race to the one-live-node index is a 409 and the node goes back to the tray', async () => {
+      confirmReads(pendingCorroborated());
+      prisma.asset.findFirst.mockResolvedValue({ id: 'asset-curated' });
+      prisma.infraNode.update.mockRejectedValue(new KnownError('P2002'));
+      prisma.infraNode.count.mockResolvedValue(1);
+
+      await expect(service.confirmNode('node-1', {}, HUMAN)).rejects.toThrow(
+        INFRA_NODE_ASSET_SHARED_ERROR,
+      );
+
+      expect(prisma.infraNode.updateMany).toHaveBeenLastCalledWith({
+        where: { id: 'node-1', state: 'CONFIRMED', assetId: null },
+        data: { state: 'PENDING' },
+      });
+      // The link never landed, so no AGENT_LINKED row may claim it did.
+      expect(assetHistory.record).not.toHaveBeenCalled();
+    });
+
     it('never adopts an Asset another LIVE node already links — that one mints instead (AUD-030)', async () => {
       // A re-imaged host's new proposal must not share its predecessor's Asset: detaching either node
       // would then archive or un-link the row the other still uses. The relation filter is not scoped
@@ -7531,6 +7602,10 @@ describe('InfraService', () => {
       await service.confirmNode('node-1', {}, HUMAN);
 
       expect(assetHistory.record).toHaveBeenCalledTimes(1);
+      // Recorded only after the node update wrote the link.
+      expect(assetHistory.record.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.infraNode.update.mock.invocationCallOrder[0],
+      );
       const event = (assetHistory.record.mock.calls as unknown[][])[0][1] as {
         assetId: string;
         eventType: string;

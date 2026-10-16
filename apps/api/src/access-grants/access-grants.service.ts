@@ -59,7 +59,7 @@ export class AccessGrantsService {
   /**
    * Grants, newest first. Filters: user, application, `activeOnly` (only `revokedAt = null`,
    * default true) and `includeExpired` (default true; when false, hides grants already past their
-   * `expiresAt`). `expiresAt` never changes activeness — it's informative (ADR-0023).
+   * `expiresAt`, which the expiry sweeper has not yet revoked). ADR-0023, amended.
    *
    * Unpaginated — still used by the inherently-scoped nested lists (`/users/:id/access-grants`,
    * `/applications/:id/access-grants`). The top-level `GET /access-grants` uses {@link findPage}.
@@ -386,8 +386,8 @@ export class AccessGrantsService {
 
   /**
    * Change the expiry — extend, shorten or clear it (`null` => permanent). A metadata edit, no actor.
-   * `expiresAt` is informative: changing it never revokes or reactivates the grant (ADR-0023). 404
-   * if missing; 400 if earlier than the stored `grantedAt`, the create schema's rule (AUD-097).
+   * The write itself revokes nothing, but a past `expiresAt` is revoked by the next expiry sweep (ADR-0023,
+   * amended). 404 if missing; 400 if earlier than the stored `grantedAt`, the create schema's rule (AUD-097).
    */
   async updateExpiry(id: string, data: UpdateAccessGrantExpiry) {
     const grant = await this.findOne(id);

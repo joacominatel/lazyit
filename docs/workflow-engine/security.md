@@ -157,8 +157,9 @@ external system protects.
    `SecretService.revealById` throws a typed `CredentialUnavailableError` when the connection's secret
    is revoked (soft-deleted) or no longer decrypts. The REST and webhook handlers turn it into a
    non-retryable `config` failure whose reason says the credential is unavailable and to attach a new
-   one; **Test connection** reports a failed probe instead of a 500. The connection keeps its
-   `secretId`; whether revoking a secret should clear or flag that reference is a pending decision.
+   one; **Test connection** reports a failed probe instead of a 500. Revoking a secret **keeps** the
+   connection's `secretId` (CEO decision, 2026-10-15): nothing clears or flags the reference, and the
+   connection reports "credential unavailable" until a new credential is attached.
 
 ### 2.2 Key management
 

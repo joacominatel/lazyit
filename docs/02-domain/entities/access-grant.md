@@ -40,7 +40,8 @@ granting and (critically for offboarding) **revoking** access is auditable ([[pr
   verbatim and never interprets it; each [[application]] owns its vocabulary.
 - **`expiresAt` drives auto-revoke** — a periodic sweeper (`AccessGrantExpirySweeper`) revokes a grant
   once it passes `expiresAt`, through the normal `revoke()` path so the deprovision workflow + system
-  attribution fire ([[0023-access-management-design]] amended). A proactive **`access_grant_expiring`**
+  attribution fire ([[0023-access-management-design]] amended). It is not informative: a past expiry,
+  typed on create or set by an edit, is revoked on the next sweep. A proactive **`access_grant_expiring`**
   notification (bell + email, admin broadcast) warns ~14 days before, so the team can re-grant before a
   contractor/temp silently loses access (#1070). It is skipped when the grant's application or user is
   soft-deleted. On **create**, when both are supplied, `expiresAt` must
@@ -115,7 +116,7 @@ Prisma model `AccessGrant` → table `access_grants`. Validation schemas (`Acces
 | `accessLevel` | `string?` | free-form, app-defined (e.g. "admin"); lazyit never interprets it. |
 | `grantedAt` | `datetime` | `@default(now())`; part of identity. Optional on create (backdate imports). |
 | `revokedAt` | `datetime?` | `null` while active; set to end the grant. Not a soft delete. |
-| `expiresAt` | `datetime?` | informative; no auto-revoke. `null` = no expiry. |
+| `expiresAt` | `datetime?` | the expiry sweeper revokes the grant once it passes (see Business rules). `null` = no expiry. |
 | `grantedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** grantor; null = system. |
 | `revokedById` | `uuid?` | FK → [[user]], `@db.Uuid`, `onDelete: SetNull`. The **human** revoker; null = system. |
 | `grantedBySaId` | `cuid?` | FK → [[service-account]], `onDelete: SetNull`. The **non-human** grantor. At-most-one-actor CHECK with `grantedById`. |
@@ -133,9 +134,10 @@ create/revoke (see the note above). Documented via Swagger ([[0018-api-documenta
 
 - `POST /access-grants` — open a grant. `userId`/`applicationId` must be live → else `400` (FK
   errors also map to `400`). The principal is recorded in `grantedById` or `grantedBySaId`.
-- `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=` — list, newest first.
-  `activeOnly` **defaults to true** (`revokedAt = null`); `includeExpired` **defaults to true**
-  (pass `false` to hide active grants already past `expiresAt`).
+- `GET /access-grants?userId=&applicationId=&activeOnly=&includeExpired=&limit=&offset=&page=` —
+  list, newest first, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to true**
+  (`revokedAt = null`); `includeExpired` **defaults to true** (pass `false` to hide active grants
+  already past `expiresAt` that the sweeper has not revoked yet).
 - `GET /access-grants/mine?activeOnly=&includeExpired=&limit=&offset=&page=` — the caller's **own**
   grants, paginated ([[0030-list-pagination-contract]]). `activeOnly` **defaults to false** (revoked
   history included). A self-read: any authenticated human, no `accessGrant:read` needed; the user id
@@ -148,7 +150,9 @@ create/revoke (see the note above). Documented via Swagger ([[0018-api-documenta
   concurrently) revoked ones as `already_in_state` — never a rollback of the rest.
 - `PATCH /access-grants/:id/notes` — body `{ notes }` (`null` clears). Metadata edit, no actor.
 - `PATCH /access-grants/:id/expiry` — body `{ expiresAt }` (`null` = permanent). Metadata edit,
-  no actor; never revokes/reactivates. An `expiresAt` earlier than the grant's `grantedAt` → `400`.
+  no actor. The edit itself revokes nothing, but an `expiresAt` already in the past is revoked by the
+  next expiry sweep, with the deprovision workflow; a revoked grant is never reactivated. An
+  `expiresAt` earlier than the grant's `grantedAt` → `400`.
 - **No `DELETE`** — by design (append-only).
 
 Plus the natural sub-resource endpoints on the related entities:

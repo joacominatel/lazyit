@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-08-09
+updated: 2026-10-15
 ---
 
 # InfraNode
@@ -58,9 +58,16 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   `POST /infra/nodes` with an `assetId`, or a first-attach patch — is a `409`. A detach archives an
   auto-created asset only when no other live node still links it; otherwise it only un-links. A
   confirm never **adopts** an asset another live node links: it mints, as it does for any adoption it
-  declines (a re-imaged host's new proposal belongs in a merge, not beside its predecessor). The rule is
-  an application check, not a DB constraint: nodes that already share an asset keep loading and
-  working, and only their next attach or detach is guarded.
+  declines (a re-imaged host's new proposal belongs in a merge, not beside its predecessor). Since
+  2026-10-15 the database enforces it too — the partial unique index `infra_nodes_assetId_active_key`
+  over live linked nodes — so two links racing on one asset end in one link and a `409`. Its migration
+  resolved links already shared: the live node that reported most recently (`lastReportedAt`, with a
+  never-reported node last) kept the asset, falling back to the oldest (`createdAt`, then `id`) on a tie;
+  the others had their `assetId` cleared and `specs._infraAssetUnlinked` (`{ assetId, keptByNodeId, at }`)
+  stamped (a node whose `specs` is not a JSON object is un-linked but not stamped), and nothing was
+  deleted. After a re-image that puts the marker on the dead predecessor, which
+  no longer reports. The marker never reaches an Asset; an agent report that rewrites the node's blob
+  replaces it.
 - **Confirm is claimed, not checked** (AUD-059). `confirmNode` flips `PENDING → CONFIRMED` with a
   conditional write before it adopts or mints, so of two concurrent confirms of one node (a double
   click, the tray racing an auto-confirm rule) only one creates an Asset; the other is the idempotent
@@ -208,6 +215,8 @@ Enums: `InfraNodeKind` = `PHYSICAL_HOST` · `VM` · `CONTAINER` · `CLUSTER` · 
 `InfraNodeSource` = `MANUAL` · `AGENT`. `InfraNodeState` = `CONFIRMED` · `PENDING`.
 
 Indexes: `@@index([assetId])`, `@@index([kind])`, `@@index([state])` (the PENDING review-tray query).
+Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the agent dedup key) and
+`infra_nodes_assetId_active_key` (`assetId` over live nodes — one live node per asset).
 
 > **No reporter column, deliberately (#1134).** The `POST /infra/report` throttles bound agent row
 > creation by RATE, in memory, keyed on the server-resolved principal — so nothing on the row records

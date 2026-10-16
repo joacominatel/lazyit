@@ -96,13 +96,13 @@ describe('lazyit_search wraps agent- and author-written hit text (INV-AI-4)', ()
   });
 });
 
-describe('session_context wraps the assigned assets, not the caller (INV-AI-4)', () => {
-  const sessionRuntime = (assets: unknown[]) =>
+describe('session_context wraps the caller and the assigned assets (INV-AI-4)', () => {
+  const sessionRuntime = (assets: unknown[], firstName = 'Ana') =>
     runtime((controller, method) => {
       if (method === 'me') {
         return {
           id: 'u1',
-          firstName: 'Ana',
+          firstName,
           lastName: 'Ops',
           email: 'ana@example.com',
           role: 'MEMBER',
@@ -116,7 +116,7 @@ describe('session_context wraps the assigned assets, not the caller (INV-AI-4)',
       return { total: 0, items: [] };
     });
 
-  it("wraps an assigned asset's name and serial and marks the turn; the caller's own name stays plain", async () => {
+  it("wraps an assigned asset's name and serial and marks the turn", async () => {
     const result = await read(
       'session_context',
       {},
@@ -133,7 +133,7 @@ describe('session_context wraps the assigned assets, not the caller (INV-AI-4)',
     expect(result).toMatchObject({
       ok: true,
       data: {
-        user: { firstName: 'Ana', lastName: 'Ops' },
+        user: { firstName: wrapped('Ana'), lastName: wrapped('Ops') },
         assignedAssets: {
           total: 1,
           items: [
@@ -153,8 +153,27 @@ describe('session_context wraps the assigned assets, not the caller (INV-AI-4)',
     ]);
   });
 
-  it('a caller with no assigned assets keeps the turn unmarked', async () => {
-    const result = await read('session_context', {}, sessionRuntime([]));
-    expect(untrustedRefsOf(result, 'session_context')).toEqual([]);
+  it("wraps the caller's own name, so even a caller with no assets marks the turn", async () => {
+    const result = await read(
+      'session_context',
+      {},
+      sessionRuntime([], INJECTION),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        user: {
+          id: 'u1',
+          firstName: wrapped(INJECTION),
+          lastName: wrapped('Ops'),
+          email: 'ana@example.com',
+          role: 'MEMBER',
+        },
+        assignedAssets: { total: 0, items: [] },
+      },
+    });
+    expect(untrustedRefsOf(result, 'session_context')).toEqual([
+      aiToolResultSourceRef('session_context'),
+    ]);
   });
 });

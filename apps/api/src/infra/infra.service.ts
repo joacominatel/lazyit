@@ -775,22 +775,24 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const node = await this.prisma.infraNode.create({
-      data: {
-        ...rest,
-        // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
-        // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
-        assetId: assetId ?? null,
-        // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
-        ...(data.ipAddress !== undefined
-          ? { ipAddressSource: 'MANUAL' as const }
-          : {}),
-        ...(specs !== undefined
-          ? { specs: specs as Prisma.InputJsonValue }
-          : {}),
-        ...(shortcuts !== undefined ? { shortcuts } : {}),
-      },
-    });
+    const node = await this.prisma.infraNode
+      .create({
+        data: {
+          ...rest,
+          // `rest` carries the input `assetId` (possibly undefined); override with the resolved one
+          // (the freshly-created asset id, or the same linked id). undefined => graph-only (no link).
+          assetId: assetId ?? null,
+          // A typed IP is a human's, exactly as on a PATCH (#1081): no later merge or report clobbers it.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? { specs: specs as Prisma.InputJsonValue }
+            : {}),
+          ...(shortcuts !== undefined ? { shortcuts } : {}),
+        },
+      })
+      .catch((err: unknown) => this.rethrowSharedAssetLink(err, assetId));
     // Fire-and-forget search sync after the write (ADR-0035): un-awaited, never throws, no-op when
     // Meili is disabled. The helper re-reads with the linked Asset name for the projection.
     void this.syncNodeToSearch(node.id);
@@ -3479,9 +3481,14 @@ export class InfraService {
     // Mint the backing Asset only when tracking AND the node isn't already linked. Reuse the exact
     // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
     let assetId = node.assetId ?? undefined;
+    let adopted = false;
     if (trackAsAsset && !node.assetId) {
       try {
-        assetId = await this.resolveBackingAsset(node, label, principal);
+        ({ id: assetId, adopted } = await this.resolveBackingAsset(
+          node,
+          label,
+          principal,
+        ));
       } catch (err) {
         // Hand the node back to the tray so a retry can mint; the claim alone linked nothing.
         await this.prisma.infraNode.updateMany({
@@ -3492,21 +3499,34 @@ export class InfraService {
       }
     }
 
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        state: 'CONFIRMED',
-        ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
-        ...(dto.label !== undefined ? { label: dto.label } : {}),
-        ...(assetId !== undefined ? { assetId } : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          state: 'CONFIRMED',
+          ...(dto.kind !== undefined ? { kind: dto.kind } : {}),
+          ...(dto.label !== undefined ? { label: dto.label } : {}),
+          ...(assetId !== undefined ? { assetId } : {}),
+        },
+      })
+      .catch(async (err: unknown) => {
+        // Whatever failed, hand the node back to the tray so a retry can confirm it.
+        await this.prisma.infraNode.updateMany({
+          where: { id, state: 'CONFIRMED', assetId: null },
+          data: { state: 'PENDING' },
+        });
+        return this.rethrowSharedAssetLink(err, assetId, id);
+      });
+    // Only once the link is written: a confirm that lost the race must not leave a false AGENT_LINKED row.
+    if (adopted && assetId !== undefined) {
+      await this.recordAgentLink(assetId, node, principal);
+    }
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
   }
 
-  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link. */
+  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link and which it was. */
   private async resolveBackingAsset(
     node: {
       id: string;
@@ -3516,7 +3536,7 @@ export class InfraService {
     },
     label: string,
     principal?: Principal,
-  ): Promise<string> {
+  ): Promise<{ id: string; adopted: boolean }> {
     const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
     // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
     // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
@@ -3538,10 +3558,12 @@ export class InfraService {
       // stamping it here would mean a later detach silently deleted the operator's curated
       // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
       // is left intact and merely un-linked"). See {@link detachAsset}.
-      await this.recordAgentLink(adopted.id, node, principal);
-      return adopted.id;
+      return { id: adopted.id, adopted: true };
     }
-    return this.mintBackingAsset(hostSpecs, serial, label, principal);
+    return {
+      id: await this.mintBackingAsset(hostSpecs, serial, label, principal),
+      adopted: false,
+    };
   }
 
   /**
@@ -3641,7 +3663,7 @@ export class InfraService {
    * report at a five-minute cadence would drown every human edit this row ever received. What MOVED is
    * audited on the NODE instead ([[infra-node-fact-change]], #1143), one join away.
    *
-   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been decided
+   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been written
    * by the time this runs; losing the audit row would be a real loss, but failing the confirm over it
    * would be a worse one — and on the auto-confirm path (#1145) it would fail a REPORT.
    */
@@ -4374,34 +4396,38 @@ export class InfraService {
     }
 
     const { specs, shortcuts, ...rest } = data;
-    const updated = await this.prisma.infraNode.update({
-      where: { id },
-      data: {
-        ...rest,
-        // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
-        // curated value — derived server-side (never client-settable) so `source` stays a trusted
-        // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
-        ...(data.ipAddress !== undefined
-          ? { ipAddressSource: 'MANUAL' as const }
-          : {}),
-        ...(specs !== undefined
-          ? {
-              specs:
-                specs === null
-                  ? Prisma.DbNull
-                  : (specs as Prisma.InputJsonValue),
-            }
-          : {}),
-        ...(shortcuts !== undefined
-          ? {
-              shortcuts:
-                shortcuts === null
-                  ? Prisma.DbNull
-                  : (shortcuts as Prisma.InputJsonValue),
-            }
-          : {}),
-      },
-    });
+    const updated = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: {
+          ...rest,
+          // A human edit to the IP marks it MANUAL (#1081) so the next agent report never clobbers the
+          // curated value — derived server-side (never client-settable) so `source` stays a trusted
+          // provenance marker. Clearing the IP is a human choice too, so it also stamps MANUAL.
+          ...(data.ipAddress !== undefined
+            ? { ipAddressSource: 'MANUAL' as const }
+            : {}),
+          ...(specs !== undefined
+            ? {
+                specs:
+                  specs === null
+                    ? Prisma.DbNull
+                    : (specs as Prisma.InputJsonValue),
+              }
+            : {}),
+          ...(shortcuts !== undefined
+            ? {
+                shortcuts:
+                  shortcuts === null
+                    ? Prisma.DbNull
+                    : (shortcuts as Prisma.InputJsonValue),
+              }
+            : {}),
+        },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, data.assetId, id),
+      );
     // Fire-and-forget search re-sync: label/kind/status/ipAddress (and the asset link, on detach) may
     // have changed (ADR-0035). Un-awaited, never throws, no-op when Meili is disabled.
     void this.syncNodeToSearch(updated.id);
@@ -4500,6 +4526,27 @@ export class InfraService {
     }
   }
 
+  /**
+   * The race the check above loses: a concurrent link lands first and `infra_nodes_assetId_active_key`
+   * refuses this write. Re-asked of the database rather than read off `meta`, whose shape the driver
+   * adapter decides. Anything else is rethrown untouched.
+   */
+  private async rethrowSharedAssetLink(
+    err: unknown,
+    assetId: string | null | undefined,
+    nodeId?: string,
+  ): Promise<never> {
+    if (
+      assetId &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      (await this.assetLinkedElsewhere(assetId, nodeId))
+    ) {
+      throw new ConflictException(INFRA_NODE_ASSET_SHARED_ERROR);
+    }
+    throw err;
+  }
+
   /** PATCH a node's canvas position (x/y). Cheap + debounce-friendly (ADR-0070 MVP). 404 if missing. */
   async updatePosition(id: string, x: number, y: number) {
     await this.getNode(id);
@@ -4532,10 +4579,14 @@ export class InfraService {
     if (node.assetId) {
       await this.assertAssetNotLinkedElsewhere(node.assetId, id);
     }
-    const restored = await this.prisma.infraNode.update({
-      where: { id },
-      data: { deletedAt: null },
-    });
+    const restored = await this.prisma.infraNode
+      .update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+      .catch((err: unknown) =>
+        this.rethrowSharedAssetLink(err, node.assetId, id),
+      );
     // Back on the map → re-index it. Fire-and-forget, never throws, no-op when disabled (ADR-0035).
     void this.syncNodeToSearch(restored.id);
     return restored;
@@ -5202,6 +5253,8 @@ const REPORT_DIAGNOSTIC_KEYS = [
 const NODE_ONLY_SPECS_KEYS = [
   ...REPORT_DIAGNOSTIC_KEYS,
   'softwareHash',
+  // Stamped by migration 20261015130000 on a node that lost a shared asset link: node provenance.
+  '_infraAssetUnlinked',
 ] as const;
 
 /**

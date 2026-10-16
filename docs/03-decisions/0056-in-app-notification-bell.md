@@ -3,7 +3,7 @@ title: "ADR-0056: In-app notification bell — append-only Notification + per-ad
 tags: [adr, notifications, frontend, rbac, workflow-engine, data-model]
 status: accepted
 created: 2026-06-09
-updated: 2026-09-23
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -283,12 +283,15 @@ The first targeted notification:
 
 - **Condition:** at login, a user who **holds `secret:read`** ([[0061-secret-manager-zero-knowledge]] §7
   / [[0046-roles-permissions-v2]]) **but has no `UserKeypair`** (they have never set a vault passphrase,
-  so they cannot decrypt any vault) gets a **one-time targeted** notification — `recipientUserId = that
-  user` — copy *"set up your vault passphrase"*, deep-linking to `/secrets`.
+  so they cannot decrypt any vault) gets a targeted notification **at most once per retention window**
+  — `recipientUserId = that user` — copy *"set up your vault passphrase"*, deep-linking to `/secrets`.
 - **Idempotent** via the existing dedupe mechanism (§4): **`dedupeKey = secret.vault_setup:<userId>`**.
-  Because `dedupeKey` is `@unique` on `Notification` (live schema), the emit **never re-fires** — a user
-  who logs in ten times before setting up their vault gets **exactly one** vault-setup notification, and
-  none after they create their `UserKeypair`. This is the same "the emitter is best-effort, so it must be
+  Because `dedupeKey` is `@unique` on `Notification` (live schema), the emit collapses onto the existing
+  row while that row exists — a user who logs in ten times before setting up their vault gets **one**
+  vault-setup notification, and none after they create their `UserKeypair`. *(Reworded 2026-10-15,
+  AUD-089:)* the 90-day retention prune deletes that row like any other, so a user who still has no
+  keypair is nudged again on their next login after it — **at most once per retention window**, not once
+  ever. Accepted as the intended reminder. This is the same "the emitter is best-effort, so it must be
   safe to fire twice" posture as §4. A new closed `NotificationType` literal (e.g. `secret.vault_setup`)
   is added to the shared enum (§5) — the standard additive catalog-as-code change, with the golden-test
   update + **web exhaustive-map re-typecheck** the §6 discipline already requires.

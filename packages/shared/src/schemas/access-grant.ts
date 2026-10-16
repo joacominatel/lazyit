@@ -9,9 +9,9 @@ import { optionalText } from "./primitives";
  * Single source of truth for `api` (DTOs) and `web` (forms).
  * See docs/02-domain/entities/access-grant.md.
  *
- * Actor note: `grantedById` (create) and `revokedById` (revoke) come from the `X-User-Id` shim
- * (the caller header → a JWT later), never the request body ([[0022]], [[0023]]). They are absent
- * from the Create/Revoke payloads below on purpose.
+ * Actor note: the API records the actor from the authenticated principal, **never** from the
+ * request body — a human in `grantedById` / `revokedById`, a service account in `grantedBySaId` /
+ * `revokedBySaId` (ADR-0048). They are absent from the Create/Revoke payloads below on purpose.
  *
  * ID note: `userId` / `grantedById` / `revokedById` reference User (`uuid`, @db.Uuid) while
  * `applicationId` references Application (`cuid`). See docs/03-decisions/0005-id-strategy.md.
@@ -27,11 +27,15 @@ export const AccessGrantSchema = z.object({
   grantedAt: z.iso.datetime(),
   // null while active; set when revoked. Lifecycle field, not a soft delete (ADR-0006).
   revokedAt: z.iso.datetime().nullable(),
-  // Informative only — no scheduler auto-revokes at expiry (ADR-0023). null => no expiry.
+  // A periodic sweeper revokes the grant once this passes, through the normal revoke path (ADR-0023,
+  // amended). null => no expiry.
   expiresAt: z.iso.datetime().nullable(),
   // Optional audit FKs — who granted / revoked. null when the system acted or it's unknown.
   grantedById: z.uuid().nullable(),
   revokedById: z.uuid().nullable(),
+  // The service-account actor, set instead of the human one (ADR-0048). `.nullish()`: added later.
+  grantedBySaId: z.cuid().nullish(),
+  revokedBySaId: z.cuid().nullish(),
   notes: z.string().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -40,8 +44,9 @@ export const AccessGrantSchema = z.object({
 /**
  * Payload to open a grant. `userId` + `applicationId` are required; both must reference live
  * (non-soft-deleted) rows (the service enforces this → 400). `grantedAt` is optional and defaults
- * to `now()` in the DB — pass it only to backdate an imported/historical record. `grantedById` is
- * NOT here: it comes from the `X-User-Id` header ([[0023]]).
+ * to `now()` in the DB — pass it only to backdate an imported/historical record. The actor is NOT
+ * here: it comes from the authenticated principal ([[0023]]). An `expiresAt` already in the past is
+ * revoked by the next expiry sweep.
  */
 export const CreateAccessGrantSchema = z
   .strictObject({
@@ -68,7 +73,7 @@ export const CreateAccessGrantSchema = z
 
 /**
  * Payload to revoke an active grant (`PATCH /access-grants/:id/revoke`). Sets `revokedAt = now()`.
- * Only `notes` is accepted; the actor (`revokedById`) comes from the `X-User-Id` header ([[0023]]).
+ * Only `notes` is accepted; the actor comes from the authenticated principal ([[0023]]).
  */
 export const RevokeAccessGrantSchema = z.strictObject({
   notes: optionalText(2000),
@@ -84,8 +89,9 @@ export const UpdateAccessGrantNotesSchema = z.strictObject({
 
 /**
  * Payload to change the expiry (`PATCH /access-grants/:id/expiry`) — extend, shorten, or clear it.
- * `null` removes the expiry (makes the grant permanent). Metadata edit, no actor. Note: `expiresAt`
- * is informative; changing it never revokes or reactivates the grant (ADR-0023).
+ * `null` removes the expiry (makes the grant permanent). Metadata edit, no actor. The edit itself
+ * revokes nothing, but an `expiresAt` in the past is revoked by the next expiry sweep (ADR-0023,
+ * amended); a revoked grant is never reactivated.
  */
 export const UpdateAccessGrantExpirySchema = z.strictObject({
   expiresAt: z.iso.datetime().nullable(),
