@@ -13,15 +13,8 @@ const MEMO_LIMIT = 10_000;
  * FIRST time a connection (an OAuth grant, or a personal token) is used at `/mcp`. Local mode has no MFA,
  * so a phished consent or a token minted from a stolen session must not go unnoticed.
  *
- * Exactly once per connection: the notification's `dedupeKey` is `mcp.client_connected:<grantId>`
- * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo — set only once the
- * notice exists, so a failed send is retried — spares the lookups on every later request. The email copy
- * follows the owner's per-type email opt-out like every emailable type (the allowlist has no mandatory
- * types); the bell copy always lands. Whether a connection was announced is stored on the grant
- * (`announcedAt`), never inferred from its age, so the 90-day bell prune cannot make an old, never-announced
- * grant look announced (AUD-014). A grant announced before the column existed is recognized by its notice
- * row and the column is filled in. Two concurrent first uses claim `announcedAt` with a conditional update,
- * so only one of them sends. Service Accounts have no bell and are never announced.
+ * Once per connection: the unique `dedupeKey` makes a racing second emit a no-op, and `announcedAt` and
+ * the memo are set only once the notice row exists, so a failed send is retried (AUD-014).
  *
  * Best-effort and fire-and-forget: a notification problem never fails or delays the MCP request.
  */
@@ -61,32 +54,17 @@ export class McpConnectionNoticeService {
       this.remember(grant.id);
       return false;
     }
-    // Announced before `announcedAt` existed (or by an older replica): record it and stop.
-    const sentAt = await this.sentAt(dedupeKey);
-    if (sentAt) {
-      await this.prisma.oAuthGrant.updateMany({
-        where: { id: grant.id, announcedAt: null },
-        data: { announcedAt: sentAt },
-      });
-      this.remember(grant.id);
-      return false;
-    }
-    const { count } = await this.prisma.oAuthGrant.updateMany({
-      where: { id: grant.id, announcedAt: null },
-      data: { announcedAt: now },
-    });
-    // A concurrent first use claimed it; not remembered, so a failed send over there is retried here.
-    if (count === 0) return false;
-
-    const personal = caller.kind === 'personal';
-    const name =
-      grant.clientName?.trim() ||
-      (personal ? 'A personal token' : 'An unnamed client');
-    const access = grant.scopes.includes('lazyit.write')
-      ? 'read and write'
-      : 'read-only';
-    let sent = false;
-    try {
+    // A notice row without the stamp: sent before the column existed, or by an older replica.
+    const already = await this.sentAt(dedupeKey);
+    if (!already) {
+      const personal = caller.kind === 'personal';
+      const name =
+        grant.clientName?.trim() ||
+        (personal ? 'A personal token' : 'An unnamed client');
+      const access = grant.scopes.includes('lazyit.write')
+        ? 'read and write'
+        : 'read-only';
+      // A concurrent emit loses on the unique dedupeKey (no row, no email) and finds the winner's row here.
       const id = await this.notifications.emit({
         type: 'mcp.client_connected',
         dedupeKey,
@@ -107,20 +85,14 @@ export class McpConnectionNoticeService {
           scopes: formatOAuthScopes(grant.scopes),
         },
       });
-      // `emit` swallows its failures and answers null; a null because the dedupe key already exists is a send.
-      sent = id !== null || (await this.sentAt(dedupeKey)) !== null;
-    } finally {
-      if (sent) {
-        this.remember(grant.id);
-      } else {
-        // Release the claim so the connection's next request retries the send (G3 review F5).
-        await this.prisma.oAuthGrant.updateMany({
-          where: { id: grant.id, announcedAt: now },
-          data: { announcedAt: null },
-        });
-      }
+      if (id === null && (await this.sentAt(dedupeKey)) === null) return true;
     }
-    return true;
+    await this.prisma.oAuthGrant.updateMany({
+      where: { id: grant.id, announcedAt: null },
+      data: { announcedAt: already ?? now },
+    });
+    this.remember(grant.id);
+    return !already;
   }
 
   private async sentAt(dedupeKey: string): Promise<Date | null> {

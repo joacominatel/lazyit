@@ -29,6 +29,8 @@ const caller = (over: Partial<McpCaller> = {}): McpCaller => ({
 describe('McpConnectionNoticeService — the first-use security notice (security §6.3, G3)', () => {
   /** Each grant row's `announcedAt`, shared by every service instance (one database, many replicas). */
   let stamps: Map<string, Date | null>;
+  /** The notification rows by dedupeKey (UNIQUE), with their createdAt. */
+  let rows: Map<string, Date>;
   const announcedAt = (id = 'ckgrant1') => stamps.get(id) ?? null;
   let findFirst: jest.Mock;
   let updateMany: jest.Mock;
@@ -47,6 +49,7 @@ describe('McpConnectionNoticeService — the first-use security notice (security
 
   beforeEach(() => {
     stamps = new Map();
+    rows = new Map();
     findFirst = jest.fn(({ where }: { where: { id: string } }) =>
       Promise.resolve({ userId: USER, announcedAt: announcedAt(where.id) }),
     );
@@ -68,8 +71,16 @@ describe('McpConnectionNoticeService — the first-use security notice (security
         return Promise.resolve({ count: match ? 1 : 0 });
       },
     );
-    sent = jest.fn().mockResolvedValue(null);
-    emit = jest.fn().mockResolvedValue('ckn1');
+    sent = jest.fn(({ where }: { where: { dedupeKey: string } }) => {
+      const createdAt = rows.get(where.dedupeKey);
+      return Promise.resolve(createdAt ? { createdAt } : null);
+    });
+    // Honours the unique dedupeKey like NotificationsService.emit: a duplicate answers null, no row.
+    emit = jest.fn(({ dedupeKey }: { dedupeKey: string }) => {
+      if (rows.has(dedupeKey)) return Promise.resolve(null);
+      rows.set(dedupeKey, new Date());
+      return Promise.resolve('ckn1');
+    });
     notices = replica();
   });
 
@@ -102,10 +113,9 @@ describe('McpConnectionNoticeService — the first-use security notice (security
   });
 
   it('remembers a grant only once its notice exists: a failed send is retried (G3 review F5)', async () => {
-    // emit swallows a failure and answers null; no row exists → not remembered.
+    // emit swallows a failure and answers null; no row exists → not stamped, not remembered.
     emit.mockResolvedValueOnce(null);
     expect(await notices.announce(caller())).toBe(true);
-    // The claim was released, so the grant still reads as never announced.
     expect(announcedAt()).toBeNull();
     expect(await notices.announce(caller())).toBe(true);
     expect(announcedAt()).not.toBeNull();
@@ -117,7 +127,7 @@ describe('McpConnectionNoticeService — the first-use security notice (security
 
   it('treats a grant announced before announcedAt existed as announced, and records it', async () => {
     const noticeAt = new Date('2026-09-30T10:00:00.000Z');
-    sent.mockResolvedValue({ createdAt: noticeAt });
+    rows.set('mcp.client_connected:ckgrant1', noticeAt);
     expect(await notices.announce(caller())).toBe(false);
     expect(sent).toHaveBeenCalledWith({
       where: { dedupeKey: 'mcp.client_connected:ckgrant1' },
@@ -138,13 +148,36 @@ describe('McpConnectionNoticeService — the first-use security notice (security
     expect(emit).toHaveBeenCalledTimes(1);
   });
 
-  it('sends one notice when two replicas see the same first use at once', async () => {
-    const results = await Promise.all([
+  it('leaves one notice row and a stamp when two replicas see the same first use at once', async () => {
+    await Promise.all([
       replica().announce(caller()),
       replica().announce(caller()),
     ]);
-    expect(results.sort()).toEqual([false, true]);
-    expect(emit).toHaveBeenCalledTimes(1);
+    expect(rows.size).toBe(1);
+    expect(announcedAt()).not.toBeNull();
+  });
+
+  it('still sends on a later request when a concurrent first use observed a send that then failed', async () => {
+    let failFirst!: () => void;
+    emit.mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          failFirst = () => resolve(null);
+        }),
+    );
+    emit.mockResolvedValueOnce(null);
+    const first = notices.announce(caller());
+    await new Promise((resolve) => setImmediate(resolve));
+    // A second request on the same process while the first send is in flight: it fails too.
+    expect(await notices.announce(caller())).toBe(true);
+    failFirst();
+    expect(await first).toBe(true);
+    expect(announcedAt()).toBeNull();
+    // Neither failure was memoized: the next request sends and stamps.
+    expect(await notices.announce(caller())).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(announcedAt()).not.toBeNull();
+    expect(emit).toHaveBeenCalledTimes(3);
   });
 
   it('names a personal token and says read-only / admin accurately', async () => {
