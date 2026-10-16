@@ -12,7 +12,7 @@ to type your team into lazyit by hand. You point lazyit at your directory under 
 (AD/LDAP)** (administrators only; in the Settings side menu it sits under **Integrations**). It is **off
 until you turn it on**, and the page header shows **On** or **Off** for the scheduled sync. A Member or
 Viewer you gave **Change instance settings** can view the connection, but only an admin can save it or
-run **Sync now**.
+run **Sync now**: for anyone else the form and **Sync now** are locked, with a note saying why.
 
 ## What it does — and what it deliberately does not
 

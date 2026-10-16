@@ -462,6 +462,7 @@
     }
   },
   "directory": {
+    "adminOnly": "Only an administrator can change the directory connection or run a sync. You can view it here.",
     "title": "AD / LDAP directory sync",
     "subtitle": "Import people read-only from Active Directory or LDAP.",
     "connection": {

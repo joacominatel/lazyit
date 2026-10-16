@@ -462,6 +462,7 @@
     }
   },
   "directory": {
+    "adminOnly": "Solo un administrador puede cambiar la conexión del directorio o ejecutar una sincronización. Aquí puedes verla.",
     "title": "Sincronización de directorio AD / LDAP",
     "subtitle": "Importa personas de solo lectura desde Active Directory o LDAP.",
     "connection": {
