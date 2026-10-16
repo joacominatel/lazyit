@@ -47,6 +47,7 @@ import { ServiceAccountAuthenticator } from '../../auth/service-account-authenti
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
 import { ApplicationCategoriesController } from '../../application-categories/application-categories.controller';
@@ -1111,6 +1112,7 @@ describe('taxonomy toolset (#1390)', () => {
         { provide: AssetsService, useValue: assetsService },
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: ConsumablesService, useValue: consumablesService },
+        { provide: ExportService, useValue: {} },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },

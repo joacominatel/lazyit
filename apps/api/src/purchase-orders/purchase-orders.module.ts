@@ -6,6 +6,7 @@ import { ApplicationsModule } from '../applications/applications.module';
 import { AiProvidersModule } from '../ai/providers/ai-providers.module';
 import { AiSettingsModule } from '../ai/settings/ai-settings.module';
 import { AiRunLimits } from '../ai/runtime/limits';
+import { ExportModule } from '../common/export';
 import { PurchaseExtractionService } from './extraction/purchase-extraction.service';
 import { PurchaseFromAssetsService } from './purchase-from-assets.service';
 import { PurchaseLicenseService } from './purchase-license.service';
@@ -35,6 +36,7 @@ import { SuppliersService } from './suppliers.service';
     ApplicationsModule,
     AiSettingsModule,
     AiProvidersModule,
+    ExportModule,
   ],
   controllers: [
     PurchaseOrdersController,

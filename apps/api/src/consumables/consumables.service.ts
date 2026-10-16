@@ -11,6 +11,7 @@ import type {
   ConsumableDeliveryTargetKey,
   CreateConsumable,
   CreateConsumableMovement,
+  DeletedFilter,
   PageQuery,
   Permission,
   UpdateConsumable,
@@ -25,6 +26,11 @@ import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SearchService } from '../search/search.service';
 import { projectConsumable } from '../search/search.documents';
@@ -45,6 +51,16 @@ export interface ConsumableFilters {
   /** Restrict to consumables in this category (ConsumableCategory id, a cuid). */
   categoryId?: string;
 }
+
+// A to-one include is not auto-scoped (#1067): the export blanks an archived category, as the list does.
+const CONSUMABLE_EXPORT_INCLUDE = {
+  category: { select: { name: true, deletedAt: true } },
+} as const satisfies Prisma.ConsumableInclude;
+
+/** One row of the consumables CSV export. */
+export type ConsumableExportRow = Prisma.ConsumableGetPayload<{
+  include: typeof CONSUMABLE_EXPORT_INCLUDE;
+}>;
 
 /**
  * Server-side sort allowlist for `GET /consumables` (ADR-0030 amendment). Maps each PUBLIC `?sort=`
@@ -165,10 +181,7 @@ export class ConsumablesService {
    * over the same `where` in one `$transaction`.
    */
   async findPage(filters: ConsumableFilters, page: PageQuery) {
-    const where = {
-      ...this.buildWhere(filters),
-      ...deletedWhere(page.deleted),
-    };
+    const where = this.listWhere(filters, page.deleted);
     const includeSoftDeleted = includeSoftDeletedFor(page.deleted);
     const { take, skip } = offsetOf(page);
     const orderBy =
@@ -194,6 +207,33 @@ export class ConsumablesService {
       this.prisma.consumable.count({ where, ...escapeHatch }),
     ]);
     return pageOf(items, total, page);
+  }
+
+  /** The list's `where` for a filter set and soft-delete slice: the page, its count and the export read it. */
+  listWhere(
+    filters: ConsumableFilters,
+    deleted: DeletedFilter,
+  ): Prisma.ConsumableWhereInput {
+    return { ...this.buildWhere(filters), ...deletedWhere(deleted) };
+  }
+
+  /** The CSV export's reads (ADR-0103): the list's own `where`, walked newest first by keyset. */
+  exportSource(filters: ConsumableFilters, deleted: DeletedFilter) {
+    const where = this.listWhere(filters, deleted);
+    const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
+      ? { includeSoftDeleted: true }
+      : {};
+    return {
+      count: () => this.prisma.consumable.count({ where, ...escapeHatch }),
+      fetchBatch: (after: KeysetCursor | null, take: number) =>
+        this.prisma.consumable.findMany({
+          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          orderBy: keysetOrderBy(),
+          take,
+          include: CONSUMABLE_EXPORT_INCLUDE,
+          ...escapeHatch,
+        }),
+    };
   }
 
   /** The shared `where` for the consumable list — used identically by findPage and its count. */

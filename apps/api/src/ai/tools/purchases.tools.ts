@@ -2633,6 +2633,11 @@ export const purchasesToolset: AiToolset = {
     ),
     unexposed(
       PurchaseOrdersController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      PurchaseOrdersController,
       ['unlinkAssets'],
       'Unlinking is the correction of a link, done from the asset or the purchase page; not part of the Phase 3 ' +
         'chat flow (#1478). A later unit may expose it.',

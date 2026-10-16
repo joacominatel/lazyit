@@ -48,6 +48,7 @@ import { LocalCredentialService } from '../../auth/local/local-credential.servic
 import type { Principal } from '../../auth/principal';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { PurchaseOrdersController } from '../../purchase-orders/purchase-orders.controller';
 import { PurchaseOrdersService } from '../../purchase-orders/purchase-orders.service';
@@ -1038,6 +1039,7 @@ describe('purchases toolset (#1478)', () => {
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: PurchaseOrdersService, useValue: purchases },
+        { provide: ExportService, useValue: {} },
         { provide: PurchaseReceivingService, useValue: receiving },
         { provide: PurchaseLicenseService, useValue: licenses },
         { provide: PurchaseFromAssetsService, useValue: fromAssets },
