@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -202,6 +202,7 @@ Legend:
 | consumables | list / get / movements | consumable:read | R | v1 `consumable_search` / `consumable_get` (built, W2-7) |
 | consumables | create / update / movement | consumable:write | W | v1 `consumable_create` / `consumable_update` / `consumable_record_movement` (built, W2-7) |
 | consumables | delete / restore | consumable:delete | D | v1.1 |
+| consumables | export CSV | consumable:read | R | EXCL (bulk file; use search) |
 | articles | list / by-slug / get | article:read | R | v1 |
 | articles | versions / links / backlinks / aliases | article:read | R | v1.1 |
 | articles | create / update / publish / unpublish | article:write | W | v1 (SA create → 403, [R25]) |
@@ -1479,7 +1480,8 @@ payloads, document names and labels, the document draft — is wrapped as untrus
   auto-approved" rule is the chat's; there is no chat card to skip elsewhere.
 - **Unexposed**: archive / restore of purchases and suppliers (ADMIN lifecycle actions, done from the pages),
   `unlinkAssets` (a correction, done from the pages), `extractionStatus` (the web's probe; the tool answers the
-  same refusals), document upload / download (no file tools) and label edit / delete (human-only routes).
+  same refusals), document upload / download (no file tools), label edit / delete (human-only routes) and the
+  CSV export (a bulk file, [[0103-data-export-streaming-path]]).
 - **Labels**: the sentences are `purchase_*.action` / `.summary` and `supplier_*.action` / `.summary` in
   `AI_SENTENCES`; the web renders the preview fields (`supplier`, `lines`, `total`, `unpricedLines`, `line`,
   `lineTotal`, `apply`, `assets`, `received`, `replacedValues`, `notFound`, `overReceived`, `quantity`, `model`,
