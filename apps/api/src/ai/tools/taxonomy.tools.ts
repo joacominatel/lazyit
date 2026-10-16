@@ -17,13 +17,11 @@ import {
   type AiEntityType,
 } from '@lazyit/shared';
 import { ApplicationCategoriesController } from '../../application-categories/application-categories.controller';
-import { ApplicationsController } from '../../applications/applications.controller';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
-import { ConsumablesController } from '../../consumables/consumables.controller';
 import { LocationsController } from '../../locations/locations.controller';
 import { AiReferenceError } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
@@ -331,28 +329,6 @@ function impactOf(
 /** Scans at most this many rows of an unfiltered list to count the ones pointing at a row. */
 const SCAN_PAGES = 5;
 
-/**
- * Count the rows of a paged list that point at `id` through `field`, scanning up to five pages of 200.
- * Past that the count is unknown (`null`): a partial scan never reports a number it did not see.
- */
-async function scanCount(
-  read: (offset: number) => Promise<{ items: unknown; total?: unknown }>,
-  matches: (row: Row) => boolean,
-): Promise<{ total: number; items: Row[] } | null> {
-  const hits: Row[] = [];
-  for (let pageNo = 0; pageNo < SCAN_PAGES; pageNo++) {
-    const offset = pageNo * Number(RESOLVE_PAGE);
-    const page = await read(offset);
-    const rows = asRows(page.items);
-    hits.push(...rows.filter(matches));
-    const total = typeof page.total === 'number' ? page.total : 0;
-    if (offset + rows.length >= total || rows.length === 0) {
-      return { total: hits.length, items: hits };
-    }
-  }
-  return null;
-}
-
 interface Impact {
   impacted: Impacted[];
   /** The kinds of dependents the caller could not count (their list is not readable, or too long). */
@@ -412,49 +388,12 @@ async function categoryImpact(
       );
       break;
     }
-    case 'applicationCategory': {
-      // The applications list has no category filter: count by scanning it (bounded).
-      collect(
-        impact,
-        'applications',
-        await counted(async () => {
-          const scan = await scanCount(
-            (offset) =>
-              rt.call(ApplicationsController, 'findAll', {
-                query: { limit: RESOLVE_PAGE, offset: String(offset) },
-              }),
-            (app) => app.categoryId === id,
-          );
-          if (scan === null) throw new ScanTooLong();
-          return impactOf('application', scan);
-        }).catch(unknownOnLongScan),
-      );
+    case 'applicationCategory':
+    case 'consumableCategory':
       break;
-    }
-    case 'consumableCategory': {
-      collect(
-        impact,
-        'consumables',
-        await counted(async () =>
-          impactOf(
-            'consumable',
-            await rt.call(ConsumablesController, 'findAll', {
-              query: { category: id, limit: '5' },
-            }),
-          ),
-        ),
-      );
-      break;
-    }
   }
   return impact;
 }
-
-class ScanTooLong extends Error {}
-const unknownOnLongScan = (err: unknown): undefined => {
-  if (err instanceof ScanTooLong) return undefined;
-  throw err;
-};
 
 /** The card rows an archive carries: archived false → true, plus what could not be counted. */
 function archiveChanges(impact: Impact): Change[] {
@@ -731,6 +670,26 @@ function dependentsOf(impact: Row): Record<string, number> {
   return out;
 }
 
+/** The card's impact from a delete-impact read: exact counts, a sample only of what the caller may read. */
+function impactFromDelete(
+  response: Row,
+  kinds: [string, AiEntityType, ((row: Row) => string | undefined)?][],
+): Impact {
+  const impacted = kinds
+    .map(([key, type, label]) =>
+      impactOf(
+        type,
+        (response[key] ?? { items: null }) as {
+          items: unknown;
+          total?: unknown;
+        },
+        label,
+      ),
+    )
+    .filter((row): row is Impacted => row !== null);
+  return { impacted, unknown: [] };
+}
+
 /** Never a card for a delete the route would refuse with 409: the model is told what still depends on it. */
 function assertResolved(
   label: string,
@@ -758,23 +717,28 @@ async function categoryDeleteImpact(
   rt: AiToolRuntime,
   kind: CategoryKind,
   id: string,
-): Promise<Record<string, number>> {
+): Promise<Impact & { dependents: Record<string, number> }> {
   const shape = { params: { id } };
+  let response: Row;
   switch (kind) {
     case 'applicationCategory':
-      return dependentsOf(
-        asRow(
-          await rt.call(ApplicationCategoriesController, 'deleteImpact', shape),
-        ),
+      response = asRow(
+        await rt.call(ApplicationCategoriesController, 'deleteImpact', shape),
       );
+      return {
+        ...impactFromDelete(response, [['applications', 'application']]),
+        dependents: dependentsOf(response),
+      };
     case 'consumableCategory':
-      return dependentsOf(
-        asRow(
-          await rt.call(ConsumableCategoriesController, 'deleteImpact', shape),
-        ),
+      response = asRow(
+        await rt.call(ConsumableCategoriesController, 'deleteImpact', shape),
       );
+      return {
+        ...impactFromDelete(response, [['consumables', 'consumable']]),
+        dependents: dependentsOf(response),
+      };
     case 'assetCategory':
-      return {};
+      return { ...(await categoryImpact(rt, kind, id)), dependents: {} };
   }
 }
 
@@ -817,8 +781,6 @@ const categoryArchive = defineTool({
     bind(ConsumableCategoriesController, 'deleteImpact'),
     bind(AssetModelsController, 'findAll'),
     bind(AssetsController, 'findAll'),
-    bind(ApplicationsController, 'findAll'),
-    bind(ConsumablesController, 'findAll'),
   ],
   async run(input, rt) {
     assertStrategyKind(input.kind, input.strategy);
@@ -847,13 +809,13 @@ const categoryArchive = defineTool({
     const { row } = await resolveCategory(rt, input.kind, input.category, true);
     const current = row!;
     const id = String(current.id);
-    const dependents = await categoryDeleteImpact(rt, input.kind, id);
+    const impact = await categoryDeleteImpact(rt, input.kind, id);
+    const dependents = impact.dependents;
     assertResolved(
       `The ${KIND_LABEL[input.kind]} "${String(untrusted(str(current.name)))}"`,
       dependents,
       input.strategy,
     );
-    const impact = await categoryImpact(rt, input.kind, id);
     const changes = archiveChanges(impact);
     if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
       const to = await resolveCategory(rt, input.kind, input.moveTo, true);
@@ -1465,7 +1427,6 @@ const locationArchive = defineTool({
     bind(LocationsController, 'deleteImpact'),
     bind(LocationsController, 'findOne'),
     bind(LocationsController, 'findAll'),
-    bind(AssetsController, 'findAll'),
   ],
   async run(input, rt) {
     const { id } = await resolveLocation(rt, input.location, false);
@@ -1495,47 +1456,24 @@ const locationArchive = defineTool({
       }),
     );
     const id = String(current.id);
-    const dependents = dependentsOf(
-      asRow(
-        await rt.call(LocationsController, 'deleteImpact', { params: { id } }),
-      ),
+    const response = asRow(
+      await rt.call(LocationsController, 'deleteImpact', { params: { id } }),
     );
+    const dependents = dependentsOf(response);
     assertResolved(
       `The location "${String(untrusted(str(current.name)))}"`,
       dependents,
       input.strategy,
     );
-    const impact: Impact = { impacted: [], unknown: [] };
-    collect(
-      impact,
-      'assets',
-      await counted(async () =>
-        impactOf(
-          'asset',
-          await rt.call(AssetsController, 'findAll', {
-            query: { locationId: id, limit: '5' },
-          }),
-          (a) => str(a.assetTag) ?? undefined,
-        ),
-      ),
-    );
-    // The locations list has no parent filter: count the children by scanning it (bounded).
-    const children = await scanCount(
-      (offset) =>
-        rt.call(LocationsController, 'findAll', {
-          query: { limit: RESOLVE_PAGE, offset: String(offset) },
-        }),
-      (l) => l.parentId === id,
-    );
-    collect(
-      impact,
-      'child locations',
-      children === null ? undefined : impactOf('location', children),
-    );
+    const impact = impactFromDelete(response, [
+      ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
+      ['childLocations', 'location'],
+      ['purchaseOrders', 'purchaseOrder', (p) => str(p.reference) ?? undefined],
+    ]);
     const changes = archiveChanges(impact);
     if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
       const to = await resolveLocation(rt, input.moveTo, true);
-      // Never a card for a move the route refuses: onto itself or into one of its own descendants.
+      // Catches a move onto itself or below it along the live path; the route also refuses one through an archived link.
       const toRow = asRow(
         await rt.call(LocationsController, 'findOne', {
           params: { id: to.id },

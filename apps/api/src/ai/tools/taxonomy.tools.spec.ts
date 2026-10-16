@@ -639,7 +639,7 @@ const locationsService = {
     return Promise.resolve({
       assets: { total: deps.assets.length, items: deps.assets },
       childLocations: { total: deps.children.length, items: deps.children },
-      purchaseOrders: { total: 0, items: [] },
+      purchaseOrders: { total: 0, items: [] as Row[] | null },
     });
   }),
 };
@@ -1987,29 +1987,22 @@ describe('taxonomy toolset (#1390)', () => {
       expect(writes()).toBe(0);
     });
 
-    it('a child count past the bounded scan is reported unknown', async () => {
-      for (let i = 0; i < 1001; i++) {
-        locations.push(
-          base(cid(`tlocbulk${i}`), {
-            name: `Box ${i}`,
-            type: 'OTHER',
-            parentId: L.storage,
-          }),
-        );
-      }
+    it('counts open purchases from the delete-impact read, without a sample the caller may not read', async () => {
+      locationsService.deleteImpact.mockResolvedValueOnce({
+        assets: { total: 0, items: [] },
+        childLocations: { total: 0, items: [] },
+        purchaseOrders: { total: 2, items: null },
+      });
       const action = await propose('location_archive', {
         location: L.storage,
         strategy: 'detach',
       });
+      expect(action.preview!.impacted).toEqual([
+        { type: 'purchaseOrder', count: 2, sample: [] },
+      ]);
       expect(action.preview!.changes).toContainEqual({
-        field: 'usedBy',
-        after: 'Unknown to you: child locations',
-        afterSentences: [
-          {
-            code: 'taxonomy.usedByUnknown',
-            params: { kinds: 'child locations' },
-          },
-        ],
+        field: 'destination',
+        after: 'None (detached)',
         valueKind: 'text',
       });
     });
