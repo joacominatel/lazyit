@@ -30,7 +30,8 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
   the dashed **New folder** card on the Knowledge Base home page.
 - **Create a sub-folder** from the **⋯** menu on the folder you want it inside → **New sub-folder
   here**, or with **Subfolder** on that folder's page. There is no depth limit — nest as deeply as
-  your documentation needs. The new folder opens as soon as it is created.
+  your documentation needs. The new folder opens as soon as it is created. You can only create a
+  sub-folder inside a folder you can read; the new folder is restricted exactly like its parent.
 - **The ⋯ menu** appears when you point at a folder row, when you move to it with the keyboard, and
   always on the selected folder; on a touch screen it is always visible. It holds **New sub-folder
   here**, **Edit**, **Move to…**, **Access…** (administrators) and **Delete folder**, each shown only
@@ -42,7 +43,9 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
   the field, the dialog says so and the current value is kept.
 - **Move a folder** with **Move to…** in the same menu. Pick any other folder as the new parent, or
   **Top level (no parent)** to pull it back out to the root; the folder's sub-folders and its
-  articles move with it.
+  articles move with it. Because a move changes who can read everything inside the folder, it needs
+  the *manage settings* permission (administrators have it); anyone else gets a permission error and
+  nothing moves. Each move is recorded in the version history of every article it carries.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both
   exist; two folders named `Linux` under the *same* parent cannot. If a name is already taken where
   you are creating or moving to, the app says so and nothing is changed.

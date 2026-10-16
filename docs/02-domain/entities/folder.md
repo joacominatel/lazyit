@@ -3,7 +3,7 @@ title: Folder
 tags: [domain, entity]
 status: accepted
 created: 2026-06-11
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Folder
@@ -118,6 +118,13 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 - **Setting/clearing a folder's rules is `settings:manage`-gated** (ADMIN-only, `PUT
   /article-categories/:id/access-rules`) — re-scoping WHO may read a folder is an authorization-
   management action, distinct from `category:write` (authoring the folder itself).
+- **Moving a folder is `settings:manage`-gated too** ([[0060-kb-folder-access-control]] §10, SEC-089).
+  A folder's position is half of its effective rule (inherit-and-narrow), so any **change** of
+  `parentId`, the root included, is a **403** without `settings:manage`; a body repeating the current
+  parent is not a move. A move writes one `ArticleVersion` per live article in the moved subtree, in the
+  same transaction, attributed to the mover. **Creating** under a parent requires that the caller can
+  read it — an unreadable parent is the same **400** as a missing one; the new folder inherits the
+  parent's rule, so a create widens nothing.
 - **The rule CONTENT is gated; the rule's EXISTENCE is not** (#1299, [[0060-kb-folder-access-control]]
   §3 amendment). `accessRules` itself is returned **only** to a `settings:manage` reader (#554);
   beside it, every folder read carries a **derived `hasAccessRules` boolean** readable by **any**
@@ -140,8 +147,9 @@ IT team can mirror its docs structure (Networking → Firewalls → …) and sco
 ## Endpoints
 
 The endpoints stay `/article-categories` (`ArticleCategoriesModule`) — see [[article-category]] — with
-`parentId` now accepted on create (optional; absent = root) and update (nullable; `null` = move to
-root, a cuid = reparent). A reparent that would create a cycle is **400**; a delete of a folder with
+`parentId` now accepted on create (optional; absent = root; the parent must be readable by the caller)
+and update (nullable; `null` = move to root, a cuid = reparent; a change needs `settings:manage`, else
+**403**). A reparent that would create a cycle is **400**; a delete of a folder with
 live sub-folders is **409** (non-cascade), and so is restoring a sub-folder whose parent is still
 deleted. **`DELETE /article-categories/:id?cascade=true`** (`category:delete`,
 ADMIN-only) performs the cascade delete described above and returns `{ deletedFolders, deletedArticles }`.

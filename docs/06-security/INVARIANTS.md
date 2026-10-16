@@ -448,6 +448,10 @@ catalog — the `article:read` capability still gates whether you may act at all
 **which** articles you see. The folder ACL **composes most-restrictive-wins** with draft visibility and
 `article:read`. **No-escalation:** you can **never alias or share** an article you cannot yourself access
 (an [[article-alias]] never widens access; INV-8 ADMIN omnipotence over visibility is consistent and intact).
+**A write that changes an article's or a folder's effective audience is an authorization write, gated and
+audited:** moving an article checks the destination (§9); moving a folder — any change of its `parentId`,
+the root included — needs `settings:manage` (403 otherwise) and is recorded on the version timeline of every
+live article in the subtree; creating a folder needs read access to its parent (§10).
 
 **Why.** KB documents are inherently access-tiered in a way assets/consumables are not, so the KB needs a
 data-scoping axis the flat per-domain catalog cannot express — but scoping to a **folder** (not a row) keeps
@@ -489,7 +493,11 @@ laundering access to a folder they cannot see.
   ADMIN full; service account → direct grants); anonymous / no principal fails closed (SEC-#554).
   Every folder write (`create`, `update`, `remove`, `restore`, `setAccessRules`) returns the same public
   select and never the rules, so `category:write` / `category:delete` cannot read them by writing
-  (SEC-087, #1301).
+  (SEC-087, #1301). `update` treats a **changed** `parentId` as a folder move: it resolves
+  `settings:manage` DB-first (the same resolver as the rule read), refuses with **403** without it, and
+  writes one `ArticleVersion` per live article in the moved subtree in the same transaction, under the
+  folder-tree lock; `create` with a `parentId` refuses an unreadable parent with the same 400 as a
+  missing one ([[0060-kb-folder-access-control]] §10, SEC-089).
 - DB / storage — the rule set is a zod-validated jsonb `accessRules` column on `ArticleCategory`
   (`FolderAccessRulesSchema` in `@lazyit/shared`, a CLOSED `users`/`role`/`appGrant`/`assetAssignment`
   vocabulary), set via `PUT /article-categories/:id/access-rules` (`settings:manage`, ADMIN-only). The
@@ -500,7 +508,8 @@ laundering access to a folder they cannot see.
   (folder-hidden → 404, no-escalation alias AND link, reverse-lookup folder pin), `search.service.spec.ts`
   (restricted hit excluded for a non-matching caller — the leak is closed), `article-categories.service.spec.ts`
   (accessRules omitted for non-admins, returned for `settings:manage`, and absent from every write
-  response), `folder.test.ts` (the closed
+  response; a folder move refused without `settings:manage`, to the root and to another folder, and
+  recorded on the subtree's articles with it; a create under an unreadable parent refused), `folder.test.ts` (the closed
   rule vocabulary).
 - Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
 
