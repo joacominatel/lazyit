@@ -1043,7 +1043,7 @@
       },
       "settings:manage": {
         "label": "Configure the instance",
-        "description": "Change instance settings and manage taxonomies — the full admin configuration surface."
+        "description": "Change instance settings and manage taxonomies. Editing permissions and the directory connection stays admin-only."
       },
       "workflow:view": {
         "label": "View workflows & runs",

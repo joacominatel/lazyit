@@ -1043,7 +1043,7 @@
       },
       "settings:manage": {
         "label": "Configurar la instancia",
-        "description": "Cambiar la configuración de la instancia y gestionar taxonomías — toda la superficie de configuración del administrador."
+        "description": "Cambiar la configuración de la instancia y gestionar taxonomías. Editar los permisos y la conexión del directorio sigue siendo exclusivo de administradores."
       },
       "workflow:view": {
         "label": "Ver flujos de trabajo y ejecuciones",
