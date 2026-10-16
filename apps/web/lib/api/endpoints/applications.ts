@@ -83,16 +83,28 @@ export interface ApplicationGrantsOptions {
   includeExpired?: boolean;
 }
 
-/** One application's access grants (raw — `userId` only; resolve the user client-side). */
-export function getApplicationGrants(
-  applicationId: string,
-  { activeOnly, includeExpired }: ApplicationGrantsOptions = {},
-): Promise<AccessGrant[]> {
+export function applicationGrantsExportPath(applicationId: string): string {
+  return `${BASE}/${applicationId}/access-grants/export`;
+}
+
+/** The per-application grant list's filters; the CSV export sends exactly these. */
+export function applicationGrantFilterParams({
+  activeOnly,
+  includeExpired,
+}: ApplicationGrantsOptions = {}): URLSearchParams {
   const params = new URLSearchParams();
   if (activeOnly !== undefined) params.set("activeOnly", String(activeOnly));
   if (includeExpired !== undefined)
     params.set("includeExpired", String(includeExpired));
-  const qs = params.toString();
+  return params;
+}
+
+/** One application's access grants (raw — `userId` only; resolve the user client-side). */
+export function getApplicationGrants(
+  applicationId: string,
+  options: ApplicationGrantsOptions = {},
+): Promise<AccessGrant[]> {
+  const qs = applicationGrantFilterParams(options).toString();
   return apiFetch<AccessGrant[]>(
     qs
       ? `${BASE}/${applicationId}/access-grants?${qs}`

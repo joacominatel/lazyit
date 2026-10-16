@@ -134,6 +134,7 @@ export const MANUAL_NAV: readonly ManualNavCategory[] = [
       "notification-bell",
       "email-preferences",
       "activity-reports",
+      "data-export",
       "global-search",
       "quick-view",
     ],

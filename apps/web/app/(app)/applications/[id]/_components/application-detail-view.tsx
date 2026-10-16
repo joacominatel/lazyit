@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useState } from "react";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
+import { ExportButton } from "@/components/export-button";
 import { DetailField, DetailPanel, DetailSkeleton } from "@/components/detail-panel";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -25,6 +26,10 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ErrorState } from "@/components/resource-table";
 import { useCan } from "@/lib/hooks/use-permissions";
+import {
+  applicationGrantFilterParams,
+  applicationGrantsExportPath,
+} from "@/lib/api/endpoints/applications";
 import { useApplicationCategories } from "@/lib/api/hooks/use-application-categories";
 import { useDeleteApplication } from "@/lib/api/hooks/use-application-mutations";
 import {
@@ -95,7 +100,8 @@ export function ApplicationDetailView({ id }: { id: string }) {
   const { data: application, isLoading, isError, error, refetch } =
     useApplication(id);
   // All grants (active + revoked), each raw (userId only) — resolved to users below.
-  const { data: grants } = useApplicationGrants(id, { activeOnly: false });
+  const grantsOptions = { activeOnly: false };
+  const { data: grants } = useApplicationGrants(id, grantsOptions);
   const { data: categories } = useApplicationCategories();
   const revokeGrant = useRevokeGrant();
   const deleteApplication = useDeleteApplication();
@@ -357,31 +363,41 @@ export function ApplicationDetailView({ id }: { id: string }) {
       <DetailPanel
         title={t("detail.activeAccessTitle")}
         actions={
-          canGrant ? (
-            <Button
+          <div className="flex items-center gap-2">
+            <ExportButton
+              path={applicationGrantsExportPath(application.id)}
+              params={applicationGrantFilterParams(grantsOptions)}
+              total={grants?.length}
+              filename="access-grants"
+              permission="accessGrant:read"
               size="sm"
-              variant="outline"
-              onClick={() => dispatchDialog({ type: "setGrantOpen", open: true })}
-            >
-              <UserPlusIcon />
-              {t("detail.grantAccess")}
-            </Button>
-          ) : hasOwnActiveGrant ? undefined : hasPendingRequest ? (
-            <StatusBadge tone="warning">
-              {t("detail.accessRequested")}
-            </StatusBadge>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                dispatchDialog({ type: "setRequestOpen", open: true })
-              }
-            >
-              <HandRaisedIcon />
-              {t("detail.requestAccess")}
-            </Button>
-          )
+            />
+            {canGrant ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => dispatchDialog({ type: "setGrantOpen", open: true })}
+              >
+                <UserPlusIcon />
+                {t("detail.grantAccess")}
+              </Button>
+            ) : hasOwnActiveGrant ? undefined : hasPendingRequest ? (
+              <StatusBadge tone="warning">
+                {t("detail.accessRequested")}
+              </StatusBadge>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  dispatchDialog({ type: "setRequestOpen", open: true })
+                }
+              >
+                <HandRaisedIcon />
+                {t("detail.requestAccess")}
+              </Button>
+            )}
+          </div>
         }
       >
         <GroupedAccessList

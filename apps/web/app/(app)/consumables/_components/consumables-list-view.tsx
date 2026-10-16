@@ -11,6 +11,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
@@ -45,7 +46,11 @@ import {
   useDeleteConsumable,
   useRestoreConsumable,
 } from "@/lib/api/hooks/use-consumable-mutations";
-import { restoreConsumable } from "@/lib/api/endpoints/consumables";
+import {
+  CONSUMABLE_EXPORT_PATH,
+  consumableFilterParams,
+  restoreConsumable,
+} from "@/lib/api/endpoints/consumables";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
@@ -99,10 +104,9 @@ export function ConsumablesListView() {
   // `deriveConsumableParams` is the SAME URL→query mapping the server prefetch uses (`category`/
   // `lowStock`/archived all resolved server-side, #824), so this hook's key and the SSR-prefetched key
   // are byte-identical (ADR-0067 / #733).
+  const listParams = deriveConsumableParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
   const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useConsumables(
-      deriveConsumableParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
-    );
+    useConsumables(listParams);
   const { data: categories } = useConsumableCategories();
   const deleteConsumable = useDeleteConsumable();
   const restoreConsumableMutation = useRestoreConsumable();
@@ -297,6 +301,13 @@ export function ConsumablesListView() {
                 }}
               />
             ) : null}
+            <ExportButton
+              path={CONSUMABLE_EXPORT_PATH}
+              params={consumableFilterParams(listParams)}
+              total={page?.total}
+              filename="consumables"
+              permission="consumable:read"
+            />
             {canWrite ? (
               <Button asChild>
                 <Link href="/consumables/new">

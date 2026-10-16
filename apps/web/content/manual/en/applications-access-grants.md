@@ -66,6 +66,9 @@ expiry** to make a grant permanent — leaving an expiry in place now means the 
   panel shows revoked ones.
 - A grantee who has since been deactivated is flagged on their grants, so you can quickly find
   access that should be cleaned up.
+- For an access review, **Export CSV** on the **Active access** panel downloads every grant of the
+  application, revoked ones included; a person's **Access** tab has the same button for their grants.
+  See [Exporting data](/help/notifications-activity-data-export).
 
 ## Finding a grant
 

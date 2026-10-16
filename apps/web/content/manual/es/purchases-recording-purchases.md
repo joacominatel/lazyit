@@ -46,6 +46,10 @@ editar consumibles. Aplicar una línea de licencia cambia su aplicación, así q
 editar compras** *y* el permiso para editar aplicaciones. [Leer un documento con IA](#leer-un-documento-con-ia)
 necesita **Registrar y editar compras** *y* el permiso para usar el asistente de IA.
 
+Quien puede ver las compras puede descargar la lista con **Exportar CSV**: una fila por compra que coincide
+con la búsqueda y los filtros actuales, con sus totales y su estado de recepción, para pasársela a finanzas —
+mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Registrar una compra
 
 Elige **Nueva compra**. El formulario está pensado para ser rápido: solo hace falta lo que identifica la

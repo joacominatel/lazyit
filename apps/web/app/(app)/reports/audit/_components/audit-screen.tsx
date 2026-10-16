@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  ArrowDownTrayIcon,
-  ShieldCheckIcon,
-  PrinterIcon,
-} from "@heroicons/react/24/outline";
+import { ShieldCheckIcon, PrinterIcon } from "@heroicons/react/24/outline";
 import {
   AUDIT_ACTIONS_BY_SOURCE,
   AUDIT_LOG_SOURCES,
@@ -12,11 +8,12 @@ import {
   type AuditLogSource,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ActorAvatar } from "@/components/activity-row";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { RowsPerPageSelect } from "@/components/rows-per-page-select";
 import { ErrorState, Pagination } from "@/components/resource-table";
@@ -31,12 +28,15 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { AuditLogClientFilters } from "@/lib/api/endpoints/audit";
+import {
+  AUDIT_EXPORT_PATH,
+  type AuditLogClientFilters,
+  auditLogFilterParams,
+} from "@/lib/api/endpoints/audit";
 import { useAuditLogFilters, useAuditLogsPage } from "@/lib/api/hooks/use-audit";
-import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
-import { downloadAuditExport, downloadVisibleAuditCsv } from "./audit-csv";
+import { exportAuditDetailLine, type ExportDetailTranslate } from "./export-audit-detail";
 
 /** Stable empty breadcrumb for the audit PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -101,7 +101,6 @@ function auditActionTone(action: string): StatusTone {
 
 export function AuditScreen() {
   const t = useTranslations("audit");
-  const [isExportingAll, setIsExportingAll] = useState(false);
   const { limit, offset, filters, setFilter, setFilters, setLimit, setOffset, clearFilters, filtersActive } =
     useListParams({ filters: FILTER_DEFAULTS, defaultLimit: 25 });
 
@@ -165,17 +164,6 @@ export function AuditScreen() {
 
   const items = pageData?.items ?? [];
   const total = pageData?.total ?? 0;
-
-  async function handleExportAll() {
-    setIsExportingAll(true);
-    try {
-      await downloadAuditExport(source, serverFilters);
-    } catch (err) {
-      notifyError(err, t("export.exportAllError"));
-    } finally {
-      setIsExportingAll(false);
-    }
-  }
 
   const chips = [
     ...(actionFilter !== "ALL"
@@ -250,26 +238,14 @@ export function AuditScreen() {
       subtitle={t("page.subtitle")}
       actions={
         <div className="flex items-center gap-2" data-print-hide>
-          <Button
-            variant="outline"
+          <ExportButton
+            path={AUDIT_EXPORT_PATH}
+            params={auditLogFilterParams(source, serverFilters)}
+            total={pageData?.total}
+            filename={`audit-${source}`}
+            permission="logs:read"
             size="sm"
-            onClick={handleExportAll}
-            disabled={isExportingAll || total === 0}
-            title={t("export.exportAllTitle")}
-          >
-            <ArrowDownTrayIcon />
-            {isExportingAll ? t("export.exportAllBusy") : t("export.exportAll")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => downloadVisibleAuditCsv(source, items)}
-            disabled={items.length === 0}
-            title={t("export.exportTitle")}
-          >
-            <ArrowDownTrayIcon />
-            {t("export.exportVisible")}
-          </Button>
+          />
           <Button
             variant="outline"
             size="sm"
@@ -429,6 +405,8 @@ function AuditTape({
   onOffsetChange: (offset: number) => void;
 }) {
   const t = useTranslations("audit");
+  const tExportDetail = useTranslations("audit.exportDetail");
+  const exportDetail: ExportDetailTranslate = (key, values) => tExportDetail(key, values);
   const { dateTime, relative } = useFormatters();
 
   return (
@@ -465,7 +443,7 @@ function AuditTape({
                 <span aria-hidden className="font-mono text-muted-foreground/60">
                   →
                 </span>
-                <span className="min-w-0 truncate">{detailLine(item, t)}</span>
+                <span className="min-w-0 truncate">{detailLine(item, t, exportDetail)}</span>
               </span>
             </li>
           );
@@ -484,7 +462,11 @@ function AuditTape({
 }
 
 /** A source-specific one-line detail for a row (metadata only — never a value). */
-function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): string {
+function detailLine(
+  item: AuditLogItem,
+  t: ReturnType<typeof useTranslations>,
+  exportDetail: ExportDetailTranslate,
+): string {
   switch (item.source) {
     case "secret": {
       const parts = [item.vaultName, item.itemLabel].filter(Boolean);
@@ -495,7 +477,7 @@ function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): 
     case "permission":
       return [item.role, item.permission].filter(Boolean).join(" · ") || t("table.noSubject");
     case "export":
-      return item.detail ?? t("table.noSubject");
+      return exportAuditDetailLine(item.detail, exportDetail) ?? item.detail ?? t("table.noSubject");
     case "serviceAccount":
       return (
         [item.serviceAccountName, item.detail].filter(Boolean).join(" · ") ||

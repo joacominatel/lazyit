@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Audit log",
-    "subtitle": "Security audit trail — secret, permission and service-account events.",
+    "subtitle": "Security audit trail — secret, permission, service-account and data-export events.",
     "accessDeniedTitle": "The audit log is admin-only",
     "accessDeniedDescription": "The security audit trail needs the Reports permission. Ask an admin if you need access to this view.",
     "accessDeniedAction": "Back to reports"
@@ -31,13 +31,11 @@
     "system": "System",
     "noSubject": "—"
   },
+  "exportDetail": {
+    "rows": "{count, plural, one {# row} other {# rows}}",
+    "noFilters": "no filters"
+  },
   "export": {
-    "exportAll": "Export all (filtered)",
-    "exportAllTitle": "Download every event matching the current filters (the whole range, not just this page)",
-    "exportAllBusy": "Exporting…",
-    "exportAllError": "Couldn't export the audit log",
-    "exportVisible": "Export visible events",
-    "exportTitle": "Export the events currently visible (the filtered page)",
     "print": "Print",
     "printTitle": "Print the audit log"
   },

@@ -149,9 +149,9 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
   LF or the full-width `＝ ＋ － ＠`, then RFC-4180 quoting. `number`, `date` and `money` cells skip the
   guard only when the value is a strict number (`-?digits[.digits]`) or an ISO-8601 date or timestamp,
   so `-5` stays `-5`; anything else in such a column is guarded like text. The helpers are `csvCell()` /
-  `guardCsvFormula()` in `@lazyit/shared`. No server export uses the legacy `escapeCsvCell()` any more
-  (phase 1b); it keeps its narrower guard only for the browser "export visible page" paths until 1d
-  retires them.
+  `guardCsvFormula()` in `@lazyit/shared`. The legacy `escapeCsvCell()` and the browser row
+  serializers it guarded were removed with the "export visible page" buttons (phase 1d); `@lazyit/shared`
+  keeps only the asset, activity and audit header constants the API pins.
 - **The `# lazyit` provenance stamp** ([[0083-versioning-and-releases]]) only on a file an importer reads
   back, today the asset inventory. Activity and audit exports drop it: no importer consumes it there and
   it pushes the header to row 2.
@@ -166,7 +166,7 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
 | 0 + 1a | This ADR and its amendments; the engine; `DataExportLog` and the `export` audit source; the typed guard. |
 | 1b | Assets, activity (view `sourceKey`) and audit move onto the engine; all three gain the cap, the audit row and the BOM. The asset column contract and stamp stay. |
 | 1c | Users, access grants (global and per application), consumables, purchases. |
-| 1d | The web `<ExportButton>` on those seven screens, the "Exports" audit source on screen, the Manual. |
+| 1d | The web `<ExportButton>` on those seven screens (the user and application records export their grants), the "Exports" audit source on screen, the Manual. |
 | 2 | Applications, locations, suppliers, pending units, access requests, servers, consumable movements and deliveries, the KB article index (metadata only, folder ACL tests mandatory). |
 
 ## Consequences

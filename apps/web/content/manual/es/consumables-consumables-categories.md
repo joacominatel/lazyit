@@ -47,6 +47,9 @@ cuándo se actualizó cada ítem por última vez. La cifra de stock está codifi
 Puedes buscar por nombre o SKU, y filtrar por **Categoría** o por **Solo stock bajo**. Cada fila
 incluye además los botones rápidos `−1` / `+1` para ajustar el conteo en el sitio.
 
+**Exportar CSV** descarga todos los ítems que coinciden con la búsqueda y los filtros actuales, con su stock
+y su umbral de reposición, para un recuento — mira [Exportar datos](/help/notifications-activity-data-export).
+
 ## Categorías
 
 Las categorías (Cables, Adaptadores, Periféricos, Material de oficina, Otros, …) son una agrupación

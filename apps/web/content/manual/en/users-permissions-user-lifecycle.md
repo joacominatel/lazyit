@@ -47,7 +47,8 @@ Opening a user shows their record, laid out like an asset's page.
   next 30 days, access that has expired and is about to be revoked, and assets the person hasn't
   acknowledged receiving yet.
 - **Tabs**: **Assets** (each with its asset tag, model, category, status and whether receipt was
-  acknowledged), **Access** (expired and soon-to-expire access listed first), **Articles**,
+  acknowledged), **Access** (expired and soon-to-expire access listed first; **Export CSV** downloads
+  the person's grants, revoked ones included), **Articles**,
   **Consumables**, and **History**, one list of the assets they returned and the access they lost,
   most recent first. Each tab only appears to people allowed to see what it lists. The open tab is
   kept in the page address, so a shared link opens on the same tab.
@@ -189,6 +190,9 @@ The Users list has a **role filter** alongside the status and directory filters:
 accurate at any team size, and the choice lives in the page address — a filtered list is shareable and
 bookmarkable. The [Roles](/help/users-permissions-roles) screen's **View N members** links land here
 pre-filtered, so the Users list is the one place you browse and manage role membership.
+
+**Export CSV** at the top of the list downloads every user matching the current search and filters —
+see [Exporting data](/help/notifications-activity-data-export).
 
 ## Directory people
 

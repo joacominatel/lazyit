@@ -172,5 +172,15 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >     one after the promotion if needed.
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
+> - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an
+>   **Export CSV** button next to assets, activity and audit. Update any script that reads these files.
+>   - Every export file now starts with a UTF-8 BOM and ends its lines in CRLF.
+>   - Activity and audit files no longer start with the `# lazyit` stamp line, so the header is the
+>     first line. The asset file keeps it, because the importer reads it.
+>   - The "Export visible" buttons on Reports and the audit log are gone. An export always holds every
+>     row matching the filters, never just the visible page.
+>   - An export over 100,000 rows is refused (422, "narrow your filters"). A second export while one
+>     runs, or a sixth in a minute, gets a 429.
+>   - Every export is audited, under Reports → Audit log → Exports.
 
 See also: [[deploy-self-hosted]], [[backups]].

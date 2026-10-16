@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { CSV_BOM, CSV_EOL, csvCell, guardCsvFormula } from "./csv";
-import { escapeCsvCell } from "./recent-activity-csv";
 
 describe("guardCsvFormula", () => {
   test.each([
@@ -58,11 +57,5 @@ describe("conventions", () => {
   test("BOM and CRLF", () => {
     expect(CSV_BOM).toBe("\uFEFF");
     expect(CSV_EOL).toBe("\r\n");
-  });
-
-  test("the legacy escaper is unchanged (the existing exports keep their output)", () => {
-    expect(escapeCsvCell("\nline")).toBe(`"\nline"`);
-    expect(escapeCsvCell("\uFF1D1")).toBe("\uFF1D1");
-    expect(escapeCsvCell("-5")).toBe("'-5");
   });
 });

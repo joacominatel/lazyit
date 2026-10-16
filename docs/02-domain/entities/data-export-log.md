@@ -69,5 +69,8 @@ feed's actor, service-account, resource and date filters over its newest-first `
 `GET /audit/logs?source=export` (and `/logs/export`, `/logs/filters`), `logs:read`. On the unified
 audit row, `action` is the resource, `detail` is `{"rowCount":…,"filters":{…}}`.
 
+Reports › Audit log › **Exports** shows the resource as the action and the detail as its row count and
+filters (`1,204 rows · q: dell`), leaving out the default `deleted: active` slice.
+
 Related: [[0103-data-export-streaming-path]] · [[0081-audit-log-read-surface]] · [[secret-audit-log]] ·
 [[permission-audit-log]] · [[service-account-audit-log]] · [[INVARIANTS]] INV-EXP-1

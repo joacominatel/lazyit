@@ -56,6 +56,18 @@ export interface ConsumableListParams {
   deleted?: "only";
 }
 
+export const CONSUMABLE_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function consumableFilterParams(params: ConsumableListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.lowStock) qs.set("lowStock", "true");
+  if (params.category) qs.set("category", params.category);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 /**
  * List consumables, paged. `GET /consumables` returns a `Page<Consumable>` envelope; we
  * return the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
@@ -68,17 +80,13 @@ export function getConsumables(
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<ConsumableListPage> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = consumableFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
-  if (params.lowStock) qs.set("lowStock", "true");
-  if (params.category) qs.set("category", params.category);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<ConsumableListPage>(
     search ? `${BASE}?${search}` : BASE,

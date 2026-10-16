@@ -10,8 +10,8 @@ import type { DerivedListState } from "@/lib/hooks/list-params-url";
  */
 
 /**
- * URL filter defaults. `status` (active/inactive) is filtered CLIENT-side over the page, so it never
- * enters the server query key. `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view;
+ * URL filter defaults. `status` ("ALL" | "ACTIVE" | "INACTIVE") drives the server `?isActive=` slice.
+ * `archived` ("ALL" | "only") drives the ADMIN-only `deleted=only` view;
  * `directory` ("ALL" | "directory" | "accounts") drives the server `directoryOnly` slice; `role`
  * ("ALL" | ADMIN | MEMBER | VIEWER) drives the server `?role=` slice (#693).
  */
@@ -32,8 +32,7 @@ export const USER_LIST_OPTIONS = {
 /**
  * Map the URL-derived list state to the server `UserListParams`. `isAdmin` gates the archived
  * (`deleted=only`) slice exactly as the client does (API keeps it ADMIN-only). `directory` maps to the
- * three-way `directoryOnly` (`true`/`false`/omitted); `role` collapses "ALL" → `undefined`; `status`
- * is a client-side post-filter and stays out of the key.
+ * three-way `directoryOnly` (`true`/`false`/omitted); `role` and `status` collapse "ALL" → `undefined`.
  */
 export function deriveUserParams(
   state: Pick<DerivedListState, "q" | "sort" | "dir" | "offset" | "limit" | "filters">,
@@ -55,5 +54,7 @@ export function deriveUserParams(
     deleted: opts.isAdmin && filters.archived === "only" ? "only" : undefined,
     directoryOnly,
     role: filters.role !== "ALL" ? (filters.role as Role) : undefined,
+    isActive:
+      filters.status === "ACTIVE" ? true : filters.status === "INACTIVE" ? false : undefined,
   };
 }
