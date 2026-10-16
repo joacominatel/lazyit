@@ -59,6 +59,7 @@ const SOURCE_INDICATOR: Record<AuditLogSource, string> = {
   secret: "data-[state=active]:border-pillar-manage",
   permission: "data-[state=active]:border-primary",
   serviceAccount: "data-[state=active]:border-pillar-access",
+  export: "data-[state=active]:border-primary",
 };
 
 /** Start-of-day local ISO for a `YYYY-MM-DD`, or undefined when empty/invalid. */
@@ -494,6 +495,7 @@ function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): 
     case "permission":
       return [item.role, item.permission].filter(Boolean).join(" · ") || t("table.noSubject");
     case "serviceAccount":
+    case "export":
       return (
         [item.serviceAccountName, item.detail].filter(Boolean).join(" · ") ||
         t("table.noSubject")

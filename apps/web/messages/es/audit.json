@@ -9,7 +9,8 @@
   "sources": {
     "secret": "Secretos",
     "permission": "Permisos",
-    "serviceAccount": "Cuentas de servicio"
+    "serviceAccount": "Cuentas de servicio",
+    "export": "Exportaciones"
   },
   "filters": {
     "anyActor": "Cualquier actor",
