@@ -23,6 +23,7 @@ import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ExportService } from '../common/export';
 import { PurchaseOrdersController } from './purchase-orders.controller';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { SuppliersController } from './suppliers.controller';
@@ -131,6 +132,7 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
         PermissionResolverService,
         { provide: PrismaService, useValue: prisma },
         { provide: PurchaseOrdersService, useValue: purchases },
+        { provide: ExportService, useValue: {} },
         { provide: SuppliersService, useValue: suppliers },
         { provide: PurchaseReceivingService, useValue: receiving },
         { provide: AttachmentsService, useValue: attachments },
@@ -156,6 +158,7 @@ describe('Purchases authorization (ADR-0099 §8)', () => {
   describe('VIEWER — denied by default', () => {
     it.each([
       '/purchase-orders',
+      '/purchase-orders/export',
       `/purchase-orders/${PO}`,
       `/purchase-orders/${PO}/events`,
       '/suppliers',
