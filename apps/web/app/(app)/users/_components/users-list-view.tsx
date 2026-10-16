@@ -844,10 +844,10 @@ export function UsersListView() {
                           onEdit={canManageUser(myRole, user) ? () => openEdit(user) : undefined}
                           onClone={() => openClone(user)}
                           onDelete={
-                        canManageUser(myRole, user)
-                          ? () => dispatchDialogs({ type: "openDelete", user })
-                          : undefined
-                      }
+                            canManageUser(myRole, user)
+                              ? () => dispatchDialogs({ type: "openDelete", user })
+                              : undefined
+                          }
                           deleteLabel={t("list.offboardAction")}
                         />
                       </div>
