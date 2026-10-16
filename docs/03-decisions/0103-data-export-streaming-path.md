@@ -91,8 +91,8 @@ the audit row with that count, then return a `StreamableFile` over the keyset st
 
 An export never orders by a mutable column or by the on-screen sort. It walks `(createdAt, id)`
 newest first. `createdAt` is server-set and never updated, unlike `grantedAt` / `assignedAt`, which a
-client can backdate. A row inserted while the export runs sorts ahead of the cursor and is not sent;
-nothing is sent twice. Prisma's `cursor` option is not used: it resolves the cursor row by id, and a
+client can backdate. Once the first batch is read, a newly inserted row sorts ahead of the cursor and
+is not sent; nothing is sent twice. Prisma's `cursor` option is not used: it resolves the cursor row by id, and a
 cursor row soft-deleted mid-export would break the walk. The activity view has no stable row id, so it
 gains a `sourceKey` (§ amendment to [[0044-recent-activity-view]]); the audit logs keep keying on their
 autoincrement `id`.
@@ -101,8 +101,14 @@ autoincrement `id`.
 
 `DATA_EXPORT_ROW_CAP = 100_000`, in `@lazyit/shared` so the web can warn before calling. The count runs
 before the first byte; above it the export is refused with **422** "narrow your filters" and nothing is
-streamed, audited or truncated. A count of exactly the cap is accepted. Rows deleted after the count
-make the file shorter than the recorded count; rows inserted after it are not in the file.
+streamed, audited or truncated. A count of exactly the cap is accepted. The count and the file can
+differ by the rows written between them: the first batch reads with no cursor, so a row inserted (or a
+row whose filtered fields change) between the count and that read can appear, and a row deleted
+mid-export is missing. Rows inserted after the first batch is read are never in the file. There is no
+hard limit on that difference.
+
+A batch that fails mid-stream aborts the response: the error is logged and the connection destroyed,
+so the client sees a failed download, never a short file that looks complete. The audit row stays.
 
 ### 5. Synchronous streaming only
 
@@ -138,8 +144,9 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
   round trip is safe.
 - **CRLF** line endings (RFC-4180).
 - **Typed formula guard.** `text` cells get a leading `'` when they start with `=` `+` `-` `@` tab, CR,
-  LF or the full-width `＝ ＋ － ＠`, then RFC-4180 quoting. `number`, `date` and `money` cells are values
-  the server formatted itself and are emitted raw, so `-5` stays `-5`. The helpers are `csvCell()` /
+  LF or the full-width `＝ ＋ － ＠`, then RFC-4180 quoting. `number`, `date` and `money` cells skip the
+  guard only when the value is a strict number (`-?digits[.digits]`) or an ISO-8601 date or timestamp,
+  so `-5` stays `-5`; anything else in such a column is guarded like text. The helpers are `csvCell()` /
   `guardCsvFormula()` in `@lazyit/shared`; the legacy `escapeCsvCell()` keeps its narrower guard until
   the existing exports move onto the engine.
 - **The `# lazyit` provenance stamp** ([[0083-versioning-and-releases]]) only on a file an importer reads

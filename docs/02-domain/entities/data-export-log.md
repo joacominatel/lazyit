@@ -29,9 +29,11 @@ and it is the fourth source of Reports › Audit ([[0081-audit-log-read-surface]
   `ExportService.recordExport()` and never updated or deleted; there is no service method that does.
 - **One row per export, written before the first byte.** The export engine counts the matching rows,
   refuses above the cap, then writes this row with that count and only then streams. An export the
-  client abandons is still recorded. A refused export (over the cap, or rate-limited) writes nothing.
-- **`rowCount` is the count at start**, not the number of rows sent: rows deleted during the stream
-  make the file shorter, rows inserted during it are not in the file.
+  client abandons, or one whose stream fails mid-way (the download then fails), is still recorded. A
+  refused export (over the cap, or rate-limited) writes nothing.
+- **`rowCount` is the count at start**, not the number of rows sent. The two can differ by the rows
+  written between the count and the first batch read, and by rows deleted mid-export; rows inserted
+  after the first batch is read are never in the file.
 - **`filters` is sanitized**: flat JSON of scalars and scalar arrays, strings cut at 200 characters,
   arrays at 50 items, nested objects and empty values dropped. It holds list filter values, never a
   secret.

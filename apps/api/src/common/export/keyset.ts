@@ -39,7 +39,7 @@ export function keysetWhere<W extends object, I extends string | number>(
   };
 }
 
-/** Newest first, `batchSize` rows at a time; a row inserted mid-export sorts ahead of the cursor. */
+/** Newest first, `batchSize` rows at a time; a row inserted after the first batch sorts ahead of the cursor. */
 export async function* keysetBatches<T extends KeysetCursor>(
   fetchBatch: (after: KeysetCursor | null, take: number) => Promise<T[]>,
   batchSize: number = EXPORT_BATCH_SIZE,
