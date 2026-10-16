@@ -353,8 +353,10 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > **A promotion revokes one-time credentials (SEC-088, 2026-10-16).** When a role change ranks the user
 > up (judged against the role under the row lock), the same transaction clears a temporary password the
 > user has not changed yet (`mustChangePassword` with a `passwordHash` → hash cleared, `sessionEpoch` and
-> `mcpCredentialEpoch` bumped) and marks every live `PasswordResetToken` used, so a credential a
-> lower-ranked caller minted cannot sign in at the new role. `ROLE_CHANGED` then carries
+> `mcpCredentialEpoch` bumped) and marks every live `PasswordResetToken` used, so a temporary password
+> or link a lower-ranked caller minted stops working at the new role. The limit: once the temporary
+> password has been replaced (`mustChangePassword` cleared), nothing is revoked, so a caller who signed
+> in with it and set the password before the promotion keeps that account. `ROLE_CHANGED` then carries
 > `credentialsRevoked: true`. An admin issues a fresh temporary password after promoting
 > ([[0040-rbac-roles]] → Amendment — clone and promotion).
 >

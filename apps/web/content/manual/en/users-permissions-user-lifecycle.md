@@ -99,8 +99,8 @@ You choose how the reset reaches the person:
 > A temporary password is shown **once**. Copy it before closing the dialog — it is never displayed
 > again and cannot be looked up later. If you lose it, simply run the reset again.
 
-Promoting the person to a higher role cancels a temporary password they have not used yet and any reset
-link still pending. Run the reset again after the promotion if they still need one.
+Promoting the person to a higher role cancels a temporary password they have not replaced yet and any
+reset link still pending. Run the reset again after the promotion if they still need one.
 
 The action is unavailable for an inactive user (reactivate them first) and for a directory person who
 has no login account yet — onboard them with a temporary password instead, which gives them their

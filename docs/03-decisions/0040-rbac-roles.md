@@ -304,7 +304,9 @@ hash is cleared and the session and MCP epochs bump) and every live password-res
 The promotion is judged against the target's role under the row lock. The `ROLE_CHANGED` row carries
 `credentialsRevoked: true` when anything was revoked. lazyit does not record who minted a credential, so
 the rule applies to every promotion, an ADMIN's own temporary password included: issue a new one after
-promoting. A demotion or a same-role edit revokes nothing. Under OIDC no such credential exists.
+promoting. A demotion or a same-role edit revokes nothing. Under OIDC no such credential exists. The limit: a
+temporary password already replaced is the user's own password and is not revoked, so a caller who signed
+in with it and set the password before the promotion keeps that access.
 
 No migration and no data change: rows written before this amendment stay; the rule applies on the next
 clone or promotion.

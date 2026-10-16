@@ -109,8 +109,8 @@ Eliges cómo le llega el restablecimiento a la persona:
 > Una contraseña temporal se muestra **una sola vez**. Cópiala antes de cerrar el diálogo — no se vuelve
 > a mostrar ni se puede consultar más tarde. Si la pierdes, basta con repetir el restablecimiento.
 
-Promover a la persona a un rol superior cancela la contraseña temporal que todavía no usó y cualquier
-enlace de restablecimiento pendiente. Repite el restablecimiento después de la promoción si todavía lo
+Promover a la persona a un rol superior cancela la contraseña temporal que todavía no reemplazó y
+cualquier enlace de restablecimiento pendiente. Repite el restablecimiento después de la promoción si todavía lo
 necesita.
 
 La acción no está disponible para un usuario inactivo (reactívalo primero) ni para una persona de
