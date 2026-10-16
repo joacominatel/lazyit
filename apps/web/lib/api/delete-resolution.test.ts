@@ -7,6 +7,8 @@ import {
   isChoiceReady,
   isDeleteResolutionRequired,
   locationSubtreeIds,
+  resolutionChoiceKinds,
+  retryAfterCreatedTarget,
   runDeleteResolution,
 } from "./delete-resolution";
 
@@ -83,6 +85,43 @@ describe("runDeleteResolution — one choice becomes one request", () => {
       "Name taken",
     );
     expect(r.removed).toEqual([]);
+  });
+});
+
+describe("after a create succeeded and its delete failed", () => {
+  test("the retry is a move to the created target and 'create' is no longer offered", () => {
+    const retry = retryAfterCreatedTarget({ id: TARGET, name: "Warehouse B" });
+    expect(retry).toEqual({
+      kind: "move",
+      targetId: TARGET,
+      created: { id: TARGET, name: "Warehouse B" },
+    });
+    expect(resolutionChoiceKinds({ canCreate: true, created: retry.created })).toEqual([
+      "detach",
+      "move",
+    ]);
+  });
+
+  test("so the retry never creates a second target", async () => {
+    const retry = retryAfterCreatedTarget({ id: TARGET, name: "Warehouse B" });
+    const r = recorder();
+    await runDeleteResolution({ kind: retry.kind, targetId: retry.targetId }, r.ops);
+    expect(r.created).toEqual([]);
+    expect(r.removed).toEqual([{ strategy: "move", targetId: TARGET }]);
+  });
+});
+
+describe("resolutionChoiceKinds", () => {
+  test("all three choices before anything was created", () => {
+    expect(resolutionChoiceKinds({ canCreate: true, created: null })).toEqual([
+      "detach",
+      "move",
+      "create",
+    ]);
+  });
+
+  test("no 'create' without the write permission", () => {
+    expect(resolutionChoiceKinds({ canCreate: false, created: null })).toEqual(["detach", "move"]);
   });
 });
 

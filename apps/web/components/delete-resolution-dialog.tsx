@@ -24,6 +24,9 @@ import {
   isChoiceReady,
   isDeleteResolutionRequired,
   type ResolutionChoice,
+  type ResolutionChoiceKind,
+  resolutionChoiceKinds,
+  retryAfterCreatedTarget,
   runDeleteResolution,
 } from "@/lib/api/delete-resolution";
 import { notifyError } from "@/lib/api/notify-error";
@@ -43,8 +46,6 @@ export interface ImpactGroupView {
   items: { id: string; label: string | null }[] | null;
 }
 
-type ChoiceKind = ResolutionChoice["kind"];
-const CHOICE_KINDS: ChoiceKind[] = ["detach", "move", "create"];
 
 export interface DeleteResolutionDialogProps {
   open: boolean;
@@ -79,7 +80,7 @@ export function DeleteResolutionDialog({
 }: DeleteResolutionDialogProps) {
   const t = useTranslations("shared");
   const id = useId();
-  const [kind, setKind] = useState<ChoiceKind | null>(null);
+  const [kind, setKind] = useState<ResolutionChoiceKind | null>(null);
   const [targetId, setTargetId] = useState("");
   const [newName, setNewName] = useState("");
   // A target this dialog created; a retry moves to it rather than creating another.
@@ -118,9 +119,10 @@ export function DeleteResolutionDialog({
       finish();
     } catch (error) {
       if (error instanceof CreatedTargetDeleteError) {
-        setCreated(error.target);
-        setKind("move");
-        setTargetId(error.target.id);
+        const retry = retryAfterCreatedTarget(error.target);
+        setCreated(retry.created);
+        setKind(retry.kind);
+        setTargetId(retry.targetId);
         setFailure(
           t("deleteResolution.createdButNotDeleted", {
             target: error.target.name,
@@ -184,11 +186,11 @@ export function DeleteResolutionDialog({
               </legend>
               <RadioGroup
                 value={kind ?? ""}
-                onValueChange={(value) => setKind(value as ChoiceKind)}
+                onValueChange={(value) => setKind(value as ResolutionChoiceKind)}
                 aria-label={t("deleteResolution.choiceLabel")}
                 className="gap-2"
               >
-                {CHOICE_KINDS.filter((option) => option !== "create" || created === null).map(
+                {resolutionChoiceKinds({ canCreate: true, created }).map(
                   (option) => (
                     <label
                       key={option}

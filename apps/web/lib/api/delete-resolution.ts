@@ -10,6 +10,26 @@ export type ResolutionChoice =
   | { kind: "move"; targetId: string }
   | { kind: "create"; name: string };
 
+export type ResolutionChoiceKind = ResolutionChoice["kind"];
+
+// "Create" is gone once a target was created, so a retry can only move to it.
+export function resolutionChoiceKinds(options: {
+  canCreate: boolean;
+  created: { id: string } | null;
+}): ResolutionChoiceKind[] {
+  return options.canCreate && options.created === null
+    ? ["detach", "move", "create"]
+    : ["detach", "move"];
+}
+
+export function retryAfterCreatedTarget(target: { id: string; name: string }): {
+  kind: "move";
+  targetId: string;
+  created: { id: string; name: string };
+} {
+  return { kind: "move", targetId: target.id, created: target };
+}
+
 export function deleteResolutionQuery(resolution?: DeleteResolution): string {
   if (!resolution) return "";
   const qs = new URLSearchParams({ strategy: resolution.strategy });
