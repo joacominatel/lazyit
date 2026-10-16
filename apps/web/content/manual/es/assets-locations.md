@@ -87,7 +87,13 @@ todo** — no se puede elegir ítem por ítem:
   nivel superior y las compras abiertas quedan sin ubicación de entrega.
 - **Moverlos a otra ubicación** — todo pasa a la ubicación que elijas. Debe ser una ubicación activa
   que no esté dentro de la que quitas.
-- **Crear una ubicación nueva** — créala primero y luego mueve todo ahí.
+- **Crear una ubicación nueva** — escribe un nombre: lazyit la crea con el mismo tipo y la misma
+  ubicación padre que la que quitas, y luego mueve todo ahí. Si la ubicación nueva se crea pero la
+  baja falla, el diálogo lo dice y en el siguiente intento ofrece mover todo a ella, así nunca quedan
+  dos.
+
+El diálogo nombra hasta 50 de cada tipo y los cuenta a todos. Si no tienes permiso para ver un tipo
+(las compras, por ejemplo), solo ves cuántos hay — la decisión también se aplica a ellos.
 
 El movimiento y la baja ocurren juntos, y cada activo movido registra el cambio de ubicación en su
 historial. Lo que ya es historial sigue apuntando a la ubicación quitada: los consumibles entregados

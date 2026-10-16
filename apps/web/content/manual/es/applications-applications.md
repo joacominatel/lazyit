@@ -53,9 +53,9 @@ pero las categorías son totalmente tuyas: renómbralas, agrega las tuyas o quit
 La categoría es opcional; una aplicación sin categoría es perfectamente válida.
 
 Eliminar una categoría nunca elimina las aplicaciones que contiene. Si todavía tiene aplicaciones,
-lazyit te muestra cuáles y te pide **una sola decisión para todas**: dejarlas sin categoría o moverlas
-a otra categoría (crea una nueva primero si quieres una distinta). No se pierde nada, y restaurar la
-categoría después no las devuelve.
+lazyit te muestra cuáles y te pide **una sola decisión para todas**: dejarlas sin categoría, moverlas
+a otra categoría o escribir un nombre para crear una categoría nueva ahí mismo y moverlas a ella. No se
+pierde nada, y restaurar la categoría después no las devuelve.
 
 ## Encontrar aplicaciones
 

@@ -1,12 +1,15 @@
 import type {
   CreateLocation,
+  DeleteResolution,
   Location,
+  LocationDeleteImpact,
   LocationType,
   Page,
   UpdateLocation,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
 import { createCrudEndpoints } from "../crud-endpoints";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Pure data-access functions for the Location resource — the ONLY place that
@@ -71,7 +74,16 @@ export function getLocations(
 export const getLocation = locations.get;
 export const createLocation = locations.create;
 export const updateLocation = locations.update;
-export const deleteLocation = locations.remove;
+
+export function getLocationDeleteImpact(id: string): Promise<LocationDeleteImpact> {
+  return apiFetch<LocationDeleteImpact>(`${BASE}/${id}/delete-impact`);
+}
+
+export function deleteLocation(id: string, resolution?: DeleteResolution): Promise<Location> {
+  return apiFetch<Location>(`${BASE}/${id}${deleteResolutionQuery(resolution)}`, {
+    method: "DELETE",
+  });
+}
 
 /**
  * Restore one soft-deleted location (`POST /locations/:id/restore`, ADMIN). Clears `deletedAt` and

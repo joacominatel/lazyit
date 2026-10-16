@@ -40,9 +40,11 @@ import {
   useCreateConsumableCategory,
   useDeleteConsumableCategory,
 } from "@/lib/api/hooks/use-consumable-categories";
+import { isDeleteResolutionRequired } from "@/lib/api/delete-resolution";
 import { notifyError } from "@/lib/api/notify-error";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { CategoryDeleteDialog } from "./category-delete-dialog";
 import { CategoryFormDialog } from "./category-form-dialog";
 import {
   InlineCreateRow,
@@ -95,8 +97,9 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
     consumable: useCreateConsumableCategory(),
   };
   const { data, isLoading, isError, error, refetch } = queries[kind];
-  const remove = deletes[kind];
   const create = creates[kind];
+  // Application and consumable categories in use need one resolution for their items (AUD-085); asset categories do not yet.
+  const resolvable = kind !== "asset";
   const label = t(`taxonomies.kindLabel.${kind}`);
   const canWrite = useCan("category:write");
   const canDelete = useCan("category:delete");
@@ -146,23 +149,27 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
     }
   }
 
-  /**
-   * Loop the per-kind delete over the selection (no batch endpoint). A category delete is a plain,
-   * restorable soft delete with no in-use guard: records filed under it keep their data and show no
-   * category until it is restored or they are re-filed. A row whose request fails stays selected so
-   * the operator can see it; a toast reports the split.
-   */
+  function deleteOne(id: string): Promise<unknown> {
+    return kind === "asset"
+      ? deletes.asset.mutateAsync(id)
+      : deletes[kind].mutateAsync({ id });
+  }
+
+  // No batch endpoint: a row that fails stays selected; in-use resolvable ones are reported apart, never resolved in bulk.
   async function handleBulkDelete() {
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
     setIsBulkDeleting(true);
-    const results = await Promise.allSettled(ids.map((id) => remove.mutateAsync(id)));
+    const results = await Promise.allSettled(ids.map((id) => deleteOne(id)));
     let deleted = 0;
     let skipped = 0;
+    let needsResolution = 0;
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         deleted += 1;
         selection.setSelected(ids[index], false);
+      } else if (isDeleteResolutionRequired(result.reason)) {
+        needsResolution += 1;
       } else {
         skipped += 1;
       }
@@ -171,6 +178,10 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
     setBulkConfirmOpen(false);
     const tb = (key: string, values?: Record<string, number>) =>
       t(`taxonomies.categories.bulkDelete.${key}`, values);
+    if (needsResolution > 0) {
+      toast.warning(tb("resultNeedsResolution", { count: needsResolution }));
+    }
+    if (deleted === 0 && skipped === 0) return;
     if (skipped === 0) toast.success(tb("resultAllDeleted", { deleted }));
     else if (deleted === 0) toast.error(tb("resultAllSkipped", { skipped }));
     else toast.success(tb("resultPartial", { deleted, skipped }));
@@ -288,7 +299,16 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
         category={editing}
         cloneSource={cloning}
       />
-      {deleting ? (
+      {deleting && kind !== "asset" ? (
+        <CategoryDeleteDialog
+          kind={kind}
+          category={deleting}
+          open
+          onOpenChange={(open) => {
+            if (!open) setDeleting(undefined);
+          }}
+        />
+      ) : deleting ? (
         <DeleteConfirmDialog
           open
           onOpenChange={(open) => {
@@ -296,7 +316,7 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
           }}
           entityKey="category"
           name={deleting.name}
-          onConfirm={() => remove.mutateAsync(deleting.id)}
+          onConfirm={() => deleteOne(deleting.id)}
         >
           <DeleteImpact
             noun={USAGE_NOUN[kind]}
@@ -317,9 +337,14 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
               {t("taxonomies.categories.bulkDelete.confirmTitle", { count: selection.count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("taxonomies.categories.bulkDelete.confirmDescription")}
+              {t(
+                resolvable
+                  ? "taxonomies.categories.bulkDelete.confirmDescriptionResolvable"
+                  : "taxonomies.categories.bulkDelete.confirmDescription",
+              )}
             </AlertDialogDescription>
             <BulkDeleteImpact
+              resolvable={resolvable}
               noun={USAGE_NOUN[kind]}
               rows={categories
                 .filter((c) => selection.selectedIds.includes(c.id))
@@ -360,14 +385,23 @@ function DeleteImpact({ noun, count }: { noun: UsageNoun; count: number | null |
 
 /** The bulk version: which selected categories are in use, and how many records lose their category. */
 function BulkDeleteImpact({
+  resolvable,
   noun,
   rows,
 }: {
+  resolvable: boolean;
   noun: UsageNoun;
   rows: { name: string; count: number | null | undefined }[];
 }) {
   const t = useTranslations("settings.taxonomies");
   const { inUse, total, known } = bulkUsage(rows);
+  if (inUse.length > 0 && resolvable) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t("categories.deleteImpact.bulkNeedsResolution", { names: inUse.join(", ") })}
+      </p>
+    );
+  }
   if (inUse.length > 0) {
     return (
       <p className="text-sm text-muted-foreground">

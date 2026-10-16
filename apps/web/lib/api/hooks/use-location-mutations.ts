@@ -1,12 +1,19 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { CreateLocation, UpdateLocation } from "@lazyit/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  CreateLocation,
+  DeleteResolution,
+  UpdateLocation,
+} from "@lazyit/shared";
 import {
   createLocation,
   deleteLocation,
+  getLocationDeleteImpact,
   restoreLocation,
   updateLocation,
 } from "../endpoints/locations";
+import { assetKeys } from "./use-assets";
 import { locationKeys } from "./use-locations";
+import { purchaseOrderKeys } from "./use-purchase-orders";
 
 /**
  * Write hooks for the Location resource. Each invalidates the locations list on
@@ -35,12 +42,28 @@ export function useUpdateLocation() {
   });
 }
 
+export function useLocationDeleteImpact(id: string | undefined) {
+  return useQuery({
+    queryKey: [...locationKeys.detail(id ?? ""), "delete-impact"],
+    queryFn: () => getLocationDeleteImpact(id as string),
+    enabled: Boolean(id),
+    staleTime: 0,
+  });
+}
+
 export function useDeleteLocation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteLocation(id),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: locationKeys.all }),
+    mutationFn: ({ id, resolution }: { id: string; resolution?: DeleteResolution }) =>
+      deleteLocation(id, resolution),
+    onSuccess: (_location, { resolution }) => {
+      queryClient.invalidateQueries({ queryKey: locationKeys.all });
+      // A resolution re-pointed assets and open purchases too.
+      if (resolution) {
+        queryClient.invalidateQueries({ queryKey: assetKeys.all });
+        queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+      }
+    },
   });
 }
 
