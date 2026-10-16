@@ -3,7 +3,7 @@ title: "ADR-0040: Minimal RBAC — ADMIN / MEMBER / VIEWER role on User"
 tags: [adr, auth, authz, rbac, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-14
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -19,6 +19,9 @@ deliberately did not add: ADR-0038 sets `request.user`, ADR-0040 decides **what 
 **Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the `IdentityProvider` scaffold, the
 `IDENTITY_PROVIDER_TYPE` variable and the IdP role mirror described under Consequences are gone; the mode is
 read from `AUTH_MODE` and roles are never written to an IdP. DB-first authorization is unchanged.
+
+**Amended** — 2026-10-15 (SEC-088, AUD-002, AUD-040; CEO decision): a role ceiling on user administration
+and a stricter definition of a usable admin. See *Amendment — role ceiling and usable admins* below.
 
 ## Context
 
@@ -94,6 +97,8 @@ Concretely:
    `CreateUser`/`UpdateUser`. Accepting `role` on those payloads is safe **only because the Users
    controller is ADMIN-gated** — a non-admin never reaches it, so a non-admin can never set or
    escalate a role (no self-promotion path exists).
+   *Amended 2026-10-15 (SEC-088):* that premise stopped holding once [[0046-roles-permissions-v2]] made
+   `user:manage` delegable to MEMBER and VIEWER. The service-level role ceiling (below) now carries it.
 
 ### Role → capability matrix
 
@@ -177,6 +182,7 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   zero. The guard now runs inside the same transaction as the write: it takes a transaction-scoped
   advisory lock on the admin set, re-reads the target and re-counts, so the second request waits, sees
   the first one's result and gets the 409. Who counts as an admin is unchanged.
+  *Amended 2026-10-15 (AUD-040):* who counts is now a **usable** admin — see the amendment below.
 - **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
   Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
   another, so a single admin can never quietly elevate/strip their own role. The controller passes
@@ -228,6 +234,48 @@ newly-provisioned identity can read but mutate nothing until an ADMIN promotes i
 
 The MEMBER role itself is unchanged (still the normal writeable tier); only the *default* moved. The
 [role → capability matrix](#role--capability-matrix) above still holds.
+
+## Amendment — role ceiling and usable admins (2026-10-15, SEC-088 / AUD-002 / AUD-040)
+
+CEO decision on the 2026-10-10 backend audit: *"the granted role cannot exceed the caller's; only an
+ADMIN can act on an ADMIN"* and *"the last-admin guard counts only non-directory accounts with a login
+credential"*.
+
+**Role ceiling.** The roles are ordered `ADMIN > MEMBER > VIEWER` (`canManageRole` in `@lazyit/shared`).
+Every `user:manage` write in `UsersService` reads the caller's DB role (INV-1) and refuses with **403**
+`ROLE_CEILING_EXCEEDED` when:
+
+- the role it grants — on create, clone or a role change — ranks above the caller's; or
+- the user it acts on — update (any field), reset password, provision a local account, offboard/delete or
+  restore — ranks above the caller's.
+
+So only an ADMIN can create, promote to, demote, edit, reset, offboard or restore an ADMIN. A peer is
+reachable: a MEMBER holding `user:manage` manages MEMBERs and VIEWERs. The self-role-change refusal is
+unchanged. The order is fixed by role, not by what the matrix grants each role: a VIEWER configured with
+more permissions than MEMBER still ranks below it. The rule lives in the service, so the web UI, the API
+and the AI/MCP tools (which call the same routes) all get it.
+
+A **service account** has no role and is never ADMIN-equivalent (INV-SA-3), so its ceiling is the highest
+non-ADMIN role. It cannot hold `user:manage` in the first place (SEC-011, stripped at principal load by
+SEC-073); the ceiling is the second layer on the two routes that accept an SA actor (offboard, restore).
+A call with no actor at all is a trusted server caller — the bulk import and the directory sync — which
+only create VIEWER directory persons.
+
+**Usable admin.** The last-admin guard counts an ADMIN only when it is live, active, **not directory-only**
+and holds a **login credential** for the running mode: a password hash in local mode, an `externalId` (an
+IdP link from a first sign-in) under OIDC. The development shim signs anyone in, so it needs no
+credential. A directory person's role can no longer be changed (**422**
+`DIRECTORY_PERSON_ROLE_LOCKED`, INV-DIR-1): it stays VIEWER until it is onboarded.
+
+**Consequences.**
+
+- Delegating `user:manage` no longer hands out ADMIN. The `settings:manage` path of SEC-088 (a delegate
+  editing the matrix for its own role) is **not** closed by this amendment.
+- The last-admin guard may now refuse an action it used to allow: on an OIDC instance whose other ADMINs
+  never signed in, the only signed-in ADMIN can no longer be demoted, deactivated or offboarded. This is
+  the intent, since those other ADMINs cannot administer anything until they sign in.
+- No migration and no data change. Existing roles stay as they are, including any directory person or
+  ADMIN created above a caller's rank before this change; the rule applies on the next write.
 
 Related: [[0038-jit-user-provisioning]] · [[0016-auth-strategy-deferred]] ·
 [[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] ·

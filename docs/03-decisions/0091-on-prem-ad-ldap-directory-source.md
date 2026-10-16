@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-10-14
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -100,6 +100,8 @@ uniques.
   `UsersService.wouldRemoveLastAdmin`, under the same admin-set advisory lock as the `PATCH /users` and
   offboard guards, and judges the person as they stand under that lock. A sync offboard racing an admin
   demotion of the other remaining ADMIN therefore serialises with it, and one ADMIN always remains.
+  *Amended 2026-10-15 (AUD-040):* "another active ADMIN" now means a usable one — not directory-only and
+  holding a login credential for the auth mode ([[0040-rbac-roles]] → *role ceiling and usable admins*).
   *Amended 2026-10-05 (#1311):* "only when *we* set it" is enforced by never stamping what we did not
   deactivate. The sweep **skips a person who is already inactive** — nothing written, counted as
   `skipped` — so a manual deactivation never carries `directoryOffboardedAt` and a reappearance leaves it
