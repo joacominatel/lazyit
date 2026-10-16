@@ -90,6 +90,11 @@ Delegating **Manage users** has a ceiling: a Member or Viewer who holds it can o
 role or a lower one, and can only act on users at or below their role. Only an admin manages admins.
 See [Roles](/help/users-permissions-roles#built-in-safety-rules).
 
+Delegating **Change instance settings** does not cover two things: editing this permission matrix and
+saving or syncing the [AD / LDAP directory](/help/configuration-directory-sync) connection. Both stay
+with admins, because either one decides who can do what. A Member or Viewer holding the capability can
+still view them.
+
 > Permissions are about **areas**, not individual records. lazyit does not have per-record access
 > control as a general feature — if a role can read assets, it can read all assets. (The Knowledge
 > Base folders and the Secret Manager vaults are the two deliberate exceptions, where access is

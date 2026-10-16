@@ -11,7 +11,9 @@ lazyit puede **importar personas desde tu Active Directory local (o cualquier di
 tengas que cargar tu equipo en lazyit a mano. Apuntas lazyit a tu directorio en **Configuración →
 Directorio AD/LDAP** (solo administradores; en el menú lateral de Configuración está bajo
 **Integraciones**). Está **desactivada hasta que la actives**, y el encabezado de la página muestra
-**Activado** o **Desactivado** para la sincronización programada.
+**Activado** o **Desactivado** para la sincronización programada. Un Miembro o Lector al que le diste
+**Cambiar la configuración de la instancia** puede ver la conexión, pero solo un administrador puede
+guardarla o ejecutar **Sincronizar ahora**.
 
 ## Qué hace — y qué deliberadamente no hace
 

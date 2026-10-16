@@ -92,6 +92,11 @@ propio rol o uno inferior, y solo puede actuar sobre usuarios con un rol igual o
 un administrador gestiona administradores. Consulta
 [Roles](/help/users-permissions-roles#reglas-de-seguridad-incorporadas).
 
+Delegar **Cambiar la configuración de la instancia** no cubre dos cosas: editar esta matriz de permisos y
+guardar o sincronizar la conexión del [directorio AD / LDAP](/help/configuration-directory-sync). Ambas
+quedan en manos de los administradores, porque cualquiera de las dos decide quién puede hacer qué. Un
+Miembro o Lector con esa capacidad todavía puede verlas.
+
 > Los permisos son por **área**, no por registro individual. lazyit no tiene control de acceso por
 > registro como función general — si un rol puede leer activos, puede leer todos los activos. (Las
 > carpetas de la Base de Conocimiento y las bóvedas del Gestor de Secretos son las dos excepciones

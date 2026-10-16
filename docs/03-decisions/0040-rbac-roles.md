@@ -3,7 +3,7 @@ title: "ADR-0040: Minimal RBAC — ADMIN / MEMBER / VIEWER role on User"
 tags: [adr, auth, authz, rbac, security]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-15
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -22,6 +22,9 @@ read from `AUTH_MODE` and roles are never written to an IdP. DB-first authorizat
 
 **Amended** — 2026-10-15 (SEC-088, AUD-002, AUD-040; CEO decision): a role ceiling on user administration
 and a stricter definition of a usable admin. See *Amendment — role ceiling and usable admins* below.
+**Amended** — 2026-10-16 (SEC-088; CEO decision): a clone copies only what the caller could grant by
+hand, and a promotion revokes the user's outstanding one-time credentials. See *Amendment — clone and
+promotion* below.
 
 ## Context
 
@@ -275,12 +278,38 @@ administrator must sign in, or be promoted, first." A directory person's role ca
 **Consequences.**
 
 - Delegating `user:manage` no longer hands out ADMIN. The `settings:manage` path of SEC-088 (a delegate
-  editing the matrix for its own role) is **not** closed by this amendment.
+  editing the matrix for its own role) is **not** closed by this amendment. *(Closed 2026-10-16:
+  [[0046-roles-permissions-v2]] → Amendment — the matrix is edited by an ADMIN only.)*
 - The last-admin guard may now refuse an action it used to allow: on an OIDC instance whose other ADMINs
   never signed in, the only signed-in ADMIN can no longer be demoted, deactivated or offboarded. This is
   the intent, since those other ADMINs cannot administer anything until they sign in.
 - No migration and no data change. Existing roles stay as they are, including any directory person or
   ADMIN created above a caller's rank before this change; the rule applies on the next write.
+
+## Amendment — clone and promotion (2026-10-16, SEC-088)
+
+CEO decision closing the remaining `user:manage` paths of SEC-088.
+
+**A clone copies only what the caller could grant by hand.** `POST /users/:id/clone` mirrors the source's
+asset assignments only when the caller holds `asset:write`, and its access grants only when it holds
+`accessGrant:grant` — the verbs of `POST /asset-assignments` and `POST /access-grants`. The caller's
+permissions are resolved DB-first from its role (INV-1). A selected row the caller cannot copy is
+reported in the result's `skipped` list with reason `permission_required`, never dropped silently; the new
+user is still created. See [[0058-user-manager-and-clone-actions]].
+
+**A promotion revokes one-time credentials.** When `PATCH /users/:id` raises a user's role up the
+`ADMIN > MEMBER > VIEWER` order, the same transaction revokes what a lower-ranked `user:manage` holder may
+have minted for that user: a temporary password not yet changed (`mustChangePassword` with a hash — the
+hash is cleared and the session and MCP epochs bump) and every live password-reset link (marked used).
+The promotion is judged against the target's role under the row lock. The `ROLE_CHANGED` row carries
+`credentialsRevoked: true` when anything was revoked. lazyit does not record who minted a credential, so
+the rule applies to every promotion, an ADMIN's own temporary password included: issue a new one after
+promoting. A demotion or a same-role edit revokes nothing. Under OIDC no such credential exists. The limit: a
+temporary password already replaced is the user's own password and is not revoked, so a caller who signed
+in with it and set the password before the promotion keeps that access.
+
+No migration and no data change: rows written before this amendment stay; the rule applies on the next
+clone or promotion.
 
 Related: [[0038-jit-user-provisioning]] · [[0016-auth-strategy-deferred]] ·
 [[0022-draft-visibility-auth-shim]] · [[0023-access-management-design]] ·

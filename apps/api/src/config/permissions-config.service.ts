@@ -164,7 +164,7 @@ export class PermissionsConfigService {
     // Sensitive-audit alert (ADR-0056 amendment / #852): if this edit raised MEMBER/VIEWER to any
     // high-risk verb, broadcast ONE nudge to the admin feed, POST-COMMIT + best-effort (emit never
     // throws — a failed nudge must never roll back the matrix edit). ponytail: no "self-escalation"
-    // axis to distinguish here — only an ADMIN (settings:manage) can edit the matrix, ADMIN is
+    // axis to distinguish here — only an ADMIN can edit the matrix (AdminOnlyGuard, SEC-088), ADMIN is
     // immutable/full (INV-8), and edits target the MEMBER/VIEWER ROLE sets, never the actor's own
     // account, so an admin can never widen *themselves*. Ceiling: revisit only if per-user grants land.
     if (widened.length > 0) {

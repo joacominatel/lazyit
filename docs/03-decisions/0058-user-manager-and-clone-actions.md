@@ -3,7 +3,7 @@ title: "ADR-0058: User identity graph (legajo / username / manager) + clone-with
 tags: [adr, users, identity, access, workflow-engine, data-model]
 status: accepted
 created: 2026-06-11
-updated: 2026-07-01
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -407,6 +407,15 @@ that leaves crypto access is strictly worse; separation-of-duties is acceptable 
 membership drops back too — no split-brain. **Deferred (unchanged):** no auto-rotation, no DEK rotation,
 no hard-revoke of a cached DEK (ADR-0061 §5 Phase-2); the pre-confirm preview of memberships and the
 printable Return Act secrets section are separable later UX.
+
+## Amendment (2026-10-16, SEC-088) — a clone copies only what the caller could grant
+
+The clone mirrored assignments and grants under `user:manage` alone, so a delegated holder could hand out
+access it could not grant directly. By CEO decision a clone now copies assignments only when the caller
+holds `asset:write` and grants only when it holds `accessGrant:grant`. Every selected row it cannot copy
+is reported in `skipped` with reason `permission_required` and its `entityId`, alongside the existing
+reasons; the new user is still created and the rest of the clone proceeds. The `CloneUserResultSchema`
+shape is unchanged (`reason` is a string). Rules: [[0040-rbac-roles]] → Amendment — clone and promotion.
 
 ## References
 

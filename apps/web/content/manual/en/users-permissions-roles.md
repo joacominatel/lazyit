@@ -65,6 +65,13 @@ These guardrails protect the instance from being locked out or quietly escalated
   offboard or restore users whose role is at or below theirs. Only an admin can create an admin,
   promote someone to admin, or act on an existing admin. Anything else is refused with a clear
   message.
+- **Only an admin edits permissions and the directory connection.** Giving Member or Viewer **Change
+  instance settings** lets them view the permission matrix and the directory connection, not change
+  them or run a directory sync.
+- **Promoting someone cancels their pending sign-in credentials.** When a person's role goes up, a
+  temporary password they have not replaced yet and any password-reset link still waiting are cancelled,
+  so one handed out at the lower role stops working. If they need one, issue a new temporary password or
+  reset link after the promotion.
 - **You cannot change your own role.** An admin cannot promote or demote themselves; a role change
   must be made by one admin on another. This prevents a single person quietly elevating their own
   access. (You can still edit your own name, email and other details.)

@@ -885,6 +885,7 @@ describe('DirectoryReconcileService.reconcile (ADR-0091 hard invariants)', () =>
         undefined as never,
         undefined as never,
         undefined as never,
+        undefined as never,
       );
       const config = {
         resolveConfig: jest.fn().mockResolvedValue({}),

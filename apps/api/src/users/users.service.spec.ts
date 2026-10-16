@@ -21,6 +21,7 @@ import {
   AdminResetLinkError,
   PasswordLifecycleService,
 } from '../auth/local/password-lifecycle.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -56,7 +57,10 @@ type TxMock = {
     create: jest.Mock;
     count: jest.Mock;
     findFirst: jest.Mock;
+    // SEC-088: a promotion clears an outstanding temporary password.
+    updateMany: jest.Mock;
   };
+  passwordResetToken: { updateMany: jest.Mock };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
   // SEC-088: the target row lock that re-reads its role inside the write transaction.
@@ -108,6 +112,8 @@ describe('UsersService', () => {
   // ADR-0058 §4 / ADR-0056 §3 (issue #359): the bell emitter the clone reuses post-commit for every
   // cloned grant. Mocked so the clone tests assert WHICH grants nudged the bell, without a DB.
   let accessGrants: { emitGrantNotifications: jest.Mock };
+  // The caller's permissions for the clone rule (SEC-088): ADMIN holds both verbs, any other role only user:manage.
+  let resolver: { resolve: jest.Mock };
   // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads,
   // and the #386 list-count tests can prime / inspect the per-page `groupBy` aggregations).
   let prismaMock: {
@@ -148,6 +154,10 @@ describe('UsersService', () => {
         create: jest.fn((args: unknown) => user.create(args) as unknown),
         count: jest.fn((args: unknown) => user.count(args) as unknown),
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      passwordResetToken: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
       // Default: the locked row carries whatever role the target read returned.
@@ -271,6 +281,17 @@ describe('UsersService', () => {
     accessGrants = {
       emitGrantNotifications: jest.fn().mockResolvedValue(undefined),
     };
+    resolver = {
+      resolve: jest.fn((role: string) =>
+        Promise.resolve(
+          new Set(
+            role === 'ADMIN'
+              ? ['user:manage', 'asset:write', 'accessGrant:grant']
+              : ['user:manage'],
+          ),
+        ),
+      ),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -284,6 +305,7 @@ describe('UsersService', () => {
         { provide: AccessGrantsService, useValue: accessGrants },
         { provide: LocalProvisioningService, useValue: provisioning },
         { provide: PasswordLifecycleService, useValue: passwordLifecycle },
+        { provide: PermissionResolverService, useValue: resolver },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
@@ -1507,6 +1529,97 @@ describe('UsersService', () => {
           service.remove('admin-1', { userId: 'actor-99' }),
         ).rejects.toBeInstanceOf(ConflictException);
         expect(tx.user.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('a promotion revokes one-time credentials (SEC-088)', () => {
+      const target = (role: string) =>
+        user.findFirst.mockResolvedValue({
+          id: 'member-1',
+          role,
+          deletedAt: null,
+        });
+
+      it('promoting MEMBER → ADMIN clears a temp password and kills live reset links in the role-change tx', async () => {
+        target('MEMBER');
+        user.update.mockResolvedValue({ id: 'member-1', role: 'ADMIN' });
+        tx.user.updateMany.mockResolvedValue({ count: 1 });
+        tx.passwordResetToken.updateMany.mockResolvedValue({ count: 2 });
+
+        await service.update('member-1', { role: 'ADMIN' }, 'actor-99');
+
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+        expect(tx.user.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: 'member-1',
+            mustChangePassword: true,
+            passwordHash: { not: null },
+          },
+          data: {
+            passwordHash: null,
+            sessionEpoch: { increment: 1 },
+            mcpCredentialEpoch: { increment: 1 },
+          },
+        });
+        expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith({
+          where: {
+            userId: 'member-1',
+            usedAt: null,
+            expiresAt: { gt: expect.any(Date) as Date },
+          },
+          data: { usedAt: expect.any(Date) as Date },
+        });
+        // Revoked before the role write commits, and recorded on the ROLE_CHANGED row.
+        expect(
+          tx.passwordResetToken.updateMany.mock.invocationCallOrder[0],
+        ).toBeLessThan(tx.user.update.mock.invocationCallOrder[0]);
+        expect(history.record).toHaveBeenCalledWith(tx, {
+          userId: 'member-1',
+          eventType: 'ROLE_CHANGED',
+          payload: { from: 'MEMBER', to: 'ADMIN', credentialsRevoked: true },
+          actor: { userId: 'actor-99' },
+        });
+      });
+
+      it('promoting VIEWER → MEMBER revokes too', async () => {
+        target('VIEWER');
+        user.update.mockResolvedValue({ id: 'member-1', role: 'MEMBER' });
+
+        await service.update('member-1', { role: 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
+        expect(tx.passwordResetToken.updateMany).toHaveBeenCalledTimes(1);
+        // Nothing was outstanding, so the history row says nothing about credentials.
+        expect(history.record).toHaveBeenCalledWith(
+          tx,
+          expect.objectContaining({
+            payload: { from: 'VIEWER', to: 'MEMBER' },
+          }),
+        );
+      });
+
+      it.each([
+        ['a demotion', 'ADMIN', 'MEMBER'],
+        ['a same-role PATCH', 'MEMBER', 'MEMBER'],
+      ])('%s leaves credentials alone', async (_label, from, to) => {
+        target(from);
+        user.count.mockResolvedValue(2);
+        user.update.mockResolvedValue({ id: 'member-1', role: to });
+
+        await service.update('member-1', { role: to as 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).not.toHaveBeenCalled();
+        expect(tx.passwordResetToken.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('judges the promotion against the locked row, not the pre-read', async () => {
+        target('MEMBER');
+        tx.$queryRaw.mockResolvedValueOnce([{ role: 'VIEWER' }]);
+        user.update.mockResolvedValue({ id: 'member-1', role: 'MEMBER' });
+
+        await service.update('member-1', { role: 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
       });
     });
 
@@ -2955,6 +3068,7 @@ describe('UsersService', () => {
           expect(passwordLifecycle.sendAdminResetLink).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'user-1', email: 'a@b.com' }),
             'https://lazyit.example.com',
+            expect.any(Function),
           );
           // Sending a link does not change the stored credential, so live sessions stay valid.
           expect(user.update).not.toHaveBeenCalled();
@@ -2968,6 +3082,55 @@ describe('UsersService', () => {
               actor: { userId: 'actor-1' },
             }),
           );
+        });
+
+        describe('the mint re-checks the ceiling under the subject lock (SEC-088)', () => {
+          // Runs the pre-mint hook the way PasswordLifecycleService does, inside the mint transaction.
+          const mintThroughHook = () =>
+            passwordLifecycle.sendAdminResetLink.mockImplementation(
+              async (
+                _user: unknown,
+                _origin: unknown,
+                beforeMint: (t: unknown) => Promise<unknown>,
+              ) => {
+                await beforeMint(tx);
+                return { sentTo: 'a@b.com', expiresInMinutes: 60 };
+              },
+            );
+
+          it('refuses when the target was promoted above the caller between the pre-check and the mint', async () => {
+            user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+            user.findFirst.mockResolvedValue(localUser({ role: 'VIEWER' }));
+            tx.$queryRaw.mockResolvedValueOnce([{ role: 'ADMIN' }]);
+            mintThroughHook();
+
+            const err: unknown = await service
+              .requestPasswordReset('user-1', 'actor-1', {
+                delivery: 'email',
+                linkOrigin: 'https://lazyit.example.com',
+              })
+              .catch((e: unknown) => e);
+
+            expect(err).toBeInstanceOf(ForbiddenException);
+            expect((err as ForbiddenException).getResponse()).toMatchObject({
+              code: 'ROLE_CEILING_EXCEEDED',
+            });
+            expect(history.record).not.toHaveBeenCalled();
+          });
+
+          it('mints when the locked role is still within the ceiling', async () => {
+            user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+            user.findFirst.mockResolvedValue(localUser({ role: 'VIEWER' }));
+            mintThroughHook();
+
+            await expect(
+              service.requestPasswordReset('user-1', 'actor-1', {
+                delivery: 'email',
+                linkOrigin: 'https://lazyit.example.com',
+              }),
+            ).resolves.toMatchObject({ delivery: 'email' });
+            expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+          });
         });
 
         it('bumps sessionEpoch and reports it when revokeSessions is true', async () => {
@@ -3357,6 +3520,80 @@ describe('UsersService', () => {
           payload: { clonedFrom: SOURCE, fireWorkflows: false },
         }),
       );
+    });
+
+    describe('copies only what the caller could grant by hand (SEC-088)', () => {
+      const A1 = 'clxassign1aaaaaaaaaaaaaaa';
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+
+      function primeSource() {
+        prismaRef().assetAssignment.findMany.mockResolvedValue([
+          { id: A1, assetId: 'asset-live' },
+        ]);
+        prismaRef().asset.findMany.mockResolvedValue([{ id: 'asset-live' }]);
+        prismaRef().accessGrant.findMany.mockResolvedValue([
+          {
+            id: G1,
+            applicationId: 'app-1',
+            accessLevel: null,
+            expiresAt: null,
+          },
+        ]);
+        prismaRef().application.findMany.mockResolvedValue([{ id: 'app-1' }]);
+      }
+
+      const body = {
+        profile: profile(),
+        cloneAssetAssignments: [A1],
+        cloneAccessGrants: [G1],
+        fireWorkflowsOnClonedGrants: true,
+      };
+
+      it('a delegated MEMBER without asset:write or accessGrant:grant copies neither, and says so', async () => {
+        primeCreate();
+        primeSource();
+        user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(result.created.id).toBe(NEW_ID);
+        expect(tx.assetAssignment.create).not.toHaveBeenCalled();
+        expect(tx.accessGrant.create).not.toHaveBeenCalled();
+        expect(workflowTrigger.planForTrigger).not.toHaveBeenCalled();
+        expect(accessGrants.emitGrantNotifications).not.toHaveBeenCalled();
+        expect(result.skipped).toEqual([
+          { id: A1, entityId: 'asset-live', reason: 'permission_required' },
+          { id: G1, entityId: 'app-1', reason: 'permission_required' },
+        ]);
+      });
+
+      it('a MEMBER holding asset:write but not accessGrant:grant copies the assets only', async () => {
+        primeCreate();
+        primeSource();
+        user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+        resolver.resolve.mockResolvedValue(
+          new Set(['user:manage', 'asset:write']),
+        );
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+        expect(tx.accessGrant.create).not.toHaveBeenCalled();
+        expect(result.skipped).toEqual([
+          { id: G1, entityId: 'app-1', reason: 'permission_required' },
+        ]);
+      });
+
+      it('an ADMIN copies both', async () => {
+        primeCreate();
+        primeSource();
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+        expect(tx.accessGrant.create).toHaveBeenCalledTimes(1);
+        expect(result.skipped).toEqual([]);
+      });
     });
 
     it('opens NEW assignment rows for the new user, skipping a SOFT-DELETED asset (reported)', async () => {
