@@ -100,22 +100,26 @@ that points to it. When it is still in use, lazyit first shows you what will be 
 - **Move them to another model** — everything goes to the model you pick. It can belong to another
   category: an asset's category comes from its model, so the assets then show that category.
 - **Create a new model** — type a name: lazyit creates it with the same manufacturer and category as
-  the one you are removing, then moves everything there. This choice appears only if you can also
-  create models.
+  the one you are removing, then moves everything there. If that category has itself been removed, the
+  new model is created without a category, and the dialog says so. This choice appears only if you can
+  also create models.
 
 **Removing a category** that still has **models** offers the same three choices for those models:
 leave them without a category, move them to another category, or create a new category and move them
-into it. Their assets follow their model, so the dialog also counts the assets whose category changes.
+into it. Only the models are moved; their assets follow their model, so the dialog also lists the
+assets whose category changes.
 
-The dialog names up to 50 of each kind and counts all of them. If you are not allowed to view a kind
-(purchases, say), you see only how many there are — the decision still applies to them.
+The dialog names up to 50 of each kind and counts all of them; each purchase line links to its
+purchase. If you are not allowed to view a kind (purchases, say), you see only how many there are — the
+decision still applies to them.
 
 The move and the removal happen together, and every asset moved off a model gets a model change in its
 history. Records that are already history keep pointing at the removed model or category: archived
 assets and models, purchase lines already received, and the lines of cancelled purchases. A model or
 category nothing points to is removed straight away.
 
-An admin can bring a removed model back from the archived view. Restoring a model or category does not
+There is no list of removed models in Settings yet: an administrator can restore one through the API
+(`POST /api/asset-models/{id}/restore`) or ask the assistant to. Restoring a model or category does not
 bring back what was moved off it. Restoring a model whose category is still removed is refused — restore
 the category first.
 

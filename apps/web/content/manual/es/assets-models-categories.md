@@ -104,22 +104,26 @@ ofrece:
 - **Moverlos a otro modelo** — todo pasa al modelo que elijas. Puede ser de otra categoría: la
   categoría de un activo viene de su modelo, así que los activos pasan a mostrar esa categoría.
 - **Crear un modelo nuevo** — escribe un nombre: lazyit lo crea con el mismo fabricante y la misma
-  categoría que el que quitas, y luego mueve todo ahí. Esta opción solo aparece si también puedes crear
+  categoría que el que quitas, y luego mueve todo ahí. Si esa categoría también se quitó, el modelo
+  nuevo se crea sin categoría, y el diálogo lo indica. Esta opción solo aparece si también puedes crear
   modelos.
 
 **Quitar una categoría** que todavía tiene **modelos** ofrece las mismas tres opciones para esos
 modelos: dejarlos sin categoría, moverlos a otra categoría o crear una categoría nueva y moverlos ahí.
-Sus activos siguen a su modelo, así que el diálogo también cuenta los activos cuya categoría cambia.
+Solo se mueven los modelos; sus activos siguen a su modelo, así que el diálogo también lista los
+activos cuya categoría cambia.
 
-El diálogo nombra hasta 50 de cada tipo y los cuenta a todos. Si no tienes permiso para ver un tipo
-(las compras, por ejemplo), solo ves cuántos hay — la decisión también se aplica a ellos.
+El diálogo nombra hasta 50 de cada tipo y los cuenta a todos; cada línea de compra enlaza a su compra.
+Si no tienes permiso para ver un tipo (las compras, por ejemplo), solo ves cuántos hay — la decisión
+también se aplica a ellos.
 
 El movimiento y la baja ocurren juntos, y cada activo que sale de un modelo registra el cambio de modelo
 en su historial. Lo que ya es historial sigue apuntando al modelo o la categoría quitados: los activos y
 modelos archivados, las líneas de compra ya recibidas y las líneas de compras canceladas. Un modelo o
 una categoría a los que nada apunta se quitan directamente.
 
-Un administrador puede recuperar un modelo quitado desde la vista de archivados. Restaurar un modelo o
+Todavía no hay una lista de modelos quitados en Configuración: un administrador puede restaurar uno a
+través de la API (`POST /api/asset-models/{id}/restore`) o pedírselo al asistente. Restaurar un modelo o
 una categoría no devuelve lo que se movió. Restaurar un modelo cuya categoría sigue quitada se rechaza:
 restaura primero la categoría.
 
