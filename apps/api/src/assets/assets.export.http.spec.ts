@@ -115,7 +115,11 @@ describe('GET /assets/export (ADR-0103)', () => {
   let table: Row[] = [];
   let onBatch: (call: number) => void = () => {};
   const findMany = jest.fn(
-    (args: { where: Record<string, unknown>; take?: number }) => {
+    (args: {
+      where: Record<string, unknown>;
+      take?: number;
+      select?: object;
+    }) => {
       onBatch(findMany.mock.calls.length);
       const rows = afterCursor(table, args.where).sort(newestFirst);
       return Promise.resolve(rows.slice(0, args.take ?? rows.length));
