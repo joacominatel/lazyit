@@ -8,15 +8,16 @@ import { NotificationsService } from './notifications.service';
  * VaultSetupNudgeService — the login-time vault-setup nudge (ADR-0056 amendment 2026-06-14, issue #453).
  *
  * Condition (ADR-0061 §7 / INV-10): a user who HOLDS `secret:read` but has NO `UserKeypair` (they have
- * never set a vault passphrase, so they cannot decrypt any vault) gets a ONE-TIME TARGETED notification
+ * never set a vault passphrase, so they cannot decrypt any vault) gets a TARGETED notification
  * — `recipientUserId = that user`, type `secret.vault_setup`, copy "set up your vault passphrase",
  * deep-linking to `/secrets`.
  *
- * IDEMPOTENT — fires EXACTLY ONCE per user, ever. The dedupe key is the STABLE `secret.vault_setup:<id>`
- * (no time bucket): because `Notification.dedupeKey` is `@unique`, the emit collapses to the existing
- * row on every subsequent login, so a user who logs in ten times before setting up their vault gets
- * exactly one nudge — and none after they create their `UserKeypair` (the condition no longer holds, so
- * the emit is never even attempted again).
+ * IDEMPOTENT — fires AT MOST ONCE PER RETENTION WINDOW per user. The dedupe key is the STABLE
+ * `secret.vault_setup:<id>` (no time bucket): because `Notification.dedupeKey` is `@unique`, the emit
+ * collapses to the existing row on every subsequent login, so a user who logs in ten times before setting
+ * up their vault gets one nudge — and none after they create their `UserKeypair` (the condition no longer
+ * holds, so the emit is never even attempted again). The 90-day retention prune deletes that row, so a
+ * user still without a keypair is nudged again after it (ADR-0056 amendment B, AUD-089).
  *
  * FAIL-SOFT — {@link notifyIfVaultSetupNeeded} NEVER throws to its caller. It is wired at the post-login
  * seam (`GET /users/me`, the app-load self-read), and a notification problem must NEVER block login or
@@ -37,13 +38,13 @@ export class VaultSetupNudgeService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  /** The stable, one-time dedupe key — one vault-setup nudge per user, ever. */
+  /** The stable dedupe key — one vault-setup nudge per user while its row survives the retention prune. */
   private dedupeKey(userId: string): string {
     return `secret.vault_setup:${userId}`;
   }
 
   /**
-   * Emit the one-time vault-setup nudge IF the user holds `secret:read` but has no `UserKeypair`. Called
+   * Emit the vault-setup nudge IF the user holds `secret:read` but has no `UserKeypair`. Called
    * fail-soft at the post-login seam. Returns silently on any path that should NOT nudge (no
    * `secret:read`, keypair already exists) and swallows every error (never blocks login).
    */
