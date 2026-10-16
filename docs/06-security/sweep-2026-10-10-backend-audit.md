@@ -3,7 +3,7 @@ title: Sweep 2026-10-10 — Full backend audit (verified, after epic #1543)
 tags: [security, sweep, audit, backend]
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Sweep 2026-10-10 — Full backend audit
@@ -59,17 +59,27 @@ AUD-099 were re-checked against `dev` for this record.
 
 ## Remediation status
 
-Recorded 2026-10-15 from the merged PRs on `dev` (#1565–#1592) and verified against their bodies and the
-code at `03d715e66`. Of 105 entries: 90 fixed, 4 fixed with a follow-up, 1 partly fixed,
-1 already resolved, and 9 pending a CEO decision. Closed findings: SEC-052, SEC-070, SEC-071,
-SEC-090, SEC-091 and SEC-092; SEC-089, SEC-088, SEC-041 and SEC-012 stay open on the pending entries.
+Recorded 2026-10-15 from the merged PRs on `dev` (#1565–#1592), verified against their bodies and the
+code at `03d715e66`. At that point 9 entries were pending a CEO decision.
+
+Updated 2026-10-16 from the decision round (#1598–#1609), verified against the code at `cab67672f`:
+- **Entries.** Of 105: 102 fixed, 1 fixed with a follow-up (AUD-091), 1 accepted (AUD-012) and 1 already
+  resolved (AUD-099). None is pending.
+- **Closed findings.** SEC-052, SEC-070, SEC-071, SEC-090, SEC-091, SEC-092 and SEC-089, plus SEC-012
+  as an accepted risk.
+- **Still open.** SEC-088, on two `settings:manage` paths outside AUD-002: `PUT /smtp` and
+  service-account token verbs. SEC-041, on its asset-category and asset-model parts, which are outside
+  AUD-024.
+- **Not an entry.** The round also fixed unique-violation handling under `@prisma/adapter-pg` (#1602,
+  #1607).
+
 Follow-ups that are not one entry's remainder are tracked outside this note.
 
 | Entry | Status | PR | Note |
 | --- | --- | --- | --- |
-| AUD-001 | Pending CEO decision | — | KB folder re-parent authorization ([[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]]). #1569 put the move under the folder-tree lock, where the check would go. |
-| AUD-002 | Pending CEO decision | — | Subset rule for `user:manage` ([[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]]). |
-| AUD-003 | Fixed | #1567, #1592 | [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] closed. The caller's own name in `session_context` stays plain, pending a CEO decision. |
+| AUD-001 | Fixed | #1600 | Moving a KB folder needs `settings:manage`, and a create under an unreadable parent is refused ([[0060-kb-folder-access-control]] §10). [[SEC-089-kb-folder-reparent-widens-read-access\|SEC-089]] closed. Web: #1608. |
+| AUD-002 | Fixed | #1601, #1606 | Role ceiling on every `user:manage` write (403 `ROLE_CEILING_EXCEEDED`). A clone copies only what the caller could grant, and a promotion revokes pending temporary passwords and reset links. Web: #1608, #1609. [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] stays open on two `settings:manage` paths (`PUT /smtp`, service-account token verbs), pending a CEO decision. |
+| AUD-003 | Fixed | #1567, #1592, #1599 | [[SEC-090-ai-user-identity-strings-not-untrusted-wrapped\|SEC-090]] closed. The caller's own name in `session_context` is wrapped too since #1599 (CEO decision). |
 | AUD-004 | Fixed | #1573 | [[SEC-091-article-import-job-status-no-ownership-check\|SEC-091]] closed. |
 | AUD-005 | Fixed | #1566 | [[SEC-092-oauth-rate-limiter-full-scan-per-hit\|SEC-092]] closed. |
 | AUD-006 | Fixed | #1570 |  |
@@ -78,9 +88,9 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-009 | Fixed | #1568 |  |
 | AUD-010 | Fixed | #1569 |  |
 | AUD-011 | Fixed | #1573 |  |
-| AUD-012 | Pending CEO decision | — | Make `OIDC_CLIENT_ID` required ([[SEC-012-oidc-audience-not-validated\|SEC-012]]). |
+| AUD-012 | Accepted | #1598 | `OIDC_CLIENT_ID` stays optional, and boot logs a warning when it is unset in OIDC mode (CEO decision). [[SEC-012-oidc-audience-not-validated\|SEC-012]] closed as an accepted risk. |
 | AUD-013 | Fixed | #1577 | The web localizes the 429 (#1583). |
-| AUD-014 | Fixed, follow-up | #1566 | Never-used grants are announced at any age. An OAuth grant kept alive by refreshes alone past 90 days is still not announced; closing that needs an additive `OAuthGrant.announcedAt` (pending CEO decision). |
+| AUD-014 | Fixed | #1566, #1598 | Additive `OAuthGrant.announcedAt`: a grant is announced when it was never announced, at any age. The column is backfilled from existing notice rows. |
 | AUD-015 | Fixed | #1570 | The web hides chips per domain read (#1583). |
 | AUD-016 | Fixed | #1579 |  |
 | AUD-017 | Fixed | #1579 |  |
@@ -90,7 +100,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-021 | Fixed | #1578 |  |
 | AUD-022 | Fixed | #1569 |  |
 | AUD-023 | Fixed | #1569, #1573, #1582 |  |
-| AUD-024 | Pending CEO decision | — | Location soft-delete with live children or assets: refuse or detach ([[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]]). |
+| AUD-024 | Fixed | #1603 | A location delete with live dependents takes one resolution for all of them (`detach` or `move`), otherwise 409 `DELETE_RESOLUTION_REQUIRED`; `GET /locations/:id/delete-impact` previews it. Web: #1608. Closes the location part of [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]]; the asset-category and asset-model parts stay open. |
 | AUD-025 | Fixed | #1584 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] closed. |
 | AUD-026 | Fixed | #1581 |  |
 | AUD-027 | Fixed | #1581 |  |
@@ -106,7 +116,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-037 | Fixed | #1577 |  |
 | AUD-038 | Fixed | #1566 |  |
 | AUD-039 | Fixed | #1566 |  |
-| AUD-040 | Pending CEO decision | — | Which admins count for the last-admin guard. |
+| AUD-040 | Fixed | #1601 | The last-admin guard counts only live, active, non-directory admins who hold a login credential for the auth mode. |
 | AUD-041 | Fixed | #1571, #1575 | Finishes [[SEC-021-last-admin-lockout-via-isactive\|SEC-021]] under concurrency, the sync path included. |
 | AUD-042 | Fixed | #1588 |  |
 | AUD-043 | Fixed | #1585 |  |
@@ -114,7 +124,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-045 | Fixed | #1581 |  |
 | AUD-046 | Fixed | #1573, #1574 |  |
 | AUD-047 | Fixed | #1573 |  |
-| AUD-048 | Fixed, follow-up | #1578, #1582 | New uploads and KB imports store UTF-8 names. Repairing names already stored as mojibake is a pending CEO decision. |
+| AUD-048 | Fixed | #1578, #1582 | New uploads and KB imports store UTF-8 names. Names already stored as mojibake are left as is (accepted, CEO decision). |
 | AUD-049 | Fixed | #1578 |  |
 | AUD-050 | Fixed | #1570 | In-process writes during a rebuild are replayed; writes from another process are left to the reconcile. |
 | AUD-051 | Fixed | #1576 |  |
@@ -137,7 +147,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-068 | Fixed | #1579 |  |
 | AUD-069 | Fixed | #1572 |  |
 | AUD-070 | Fixed | #1572 |  |
-| AUD-071 | Fixed, follow-up | #1579 | Typed "credential unavailable" failure. Whether revoking a secret clears or flags `connection.secretId` is a pending CEO decision. |
+| AUD-071 | Fixed | #1579, #1599 | Typed "credential unavailable" failure. Revoking a secret keeps `connection.secretId` (CEO decision, documented in #1599). |
 | AUD-072 | Fixed | #1579 |  |
 | AUD-073 | Fixed | #1590 |  |
 | AUD-074 | Fixed | #1590 |  |
@@ -149,13 +159,13 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-080 | Fixed | #1581 |  |
 | AUD-081 | Fixed | #1577 |  |
 | AUD-082 | Fixed | #1566 |  |
-| AUD-083 | Pending CEO decision | — | Personal-token list and DELETE permission semantics. |
+| AUD-083 | Fixed | #1598, #1605 | Listing your own AI connections no longer needs `ai:connect`: `GET /oauth/personal-tokens` (#1598) and the grants list `GET /oauth/grants/mine` (#1605). Revoking your own stays owner-scoped and needs no permission. Minting and consent still need `ai:connect`. Web: #1609. |
 | AUD-084 | Fixed | #1584 |  |
-| AUD-085 | Pending CEO decision | — | Whether soft-deleting a category detaches its items. |
-| AUD-086 | Pending CEO decision | — | Managers attaching to foreign drafts they cannot read. |
+| AUD-085 | Fixed | #1603 | Deleting an application or consumable category with live items takes one resolution (`detach` or `move`), otherwise 409 `DELETE_RESOLUTION_REQUIRED`. Web: #1608. |
+| AUD-086 | Fixed | #1600 | An ADMIN or `article:manage` holder reads a foreign draft by id or slug (CEO decision). The folder ACL still binds a non-admin. |
 | AUD-087 | Fixed | #1576 |  |
 | AUD-088 | Fixed | #1580 |  |
-| AUD-089 | Pending CEO decision | — | Vault nudge "exactly once" versus the 90-day prune. |
+| AUD-089 | Fixed | #1599 | Docs say "at most once per retention window" (CEO decision). |
 | AUD-090 | Fixed | #1568 |  |
 | AUD-091 | Fixed, follow-up | #1579 | Header names are lower-cased. Rejecting reserved header names in the shared schema is a follow-up. |
 | AUD-092 | Fixed | #1590 |  |
@@ -163,7 +173,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-094 | Fixed | #1592 |  |
 | AUD-095 | Fixed | #1567, #1592 |  |
 | AUD-096 | Fixed | #1588 |  |
-| AUD-097 | Partly fixed | #1585 | The expiry edit checks `grantedAt`. The expiry semantics (auto-revoke versus "informative") are a pending CEO decision. |
+| AUD-097 | Fixed | #1585, #1599 | The expiry edit checks `grantedAt` (#1585). Auto-revoke on expiry is the intended behaviour; every "informative" text is corrected (#1599, web copy in #1608). |
 | AUD-098 | Fixed | #1581 |  |
 | AUD-099 | Already resolved | #1565 | [[SEC-030-asset-unguarded-soft-deleted-model-location-fk\|SEC-030]] closed; no code change. |
 | AUD-100 | Fixed | #1581 |  |
