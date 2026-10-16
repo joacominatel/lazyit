@@ -3,7 +3,7 @@ title: ArticleCategory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # ArticleCategory
@@ -95,8 +95,10 @@ Prisma model `ArticleCategory` → table `article_categories`. Validation schema
 
 `apps/api/src/article-categories/` (`ArticleCategoriesModule`): `GET /article-categories` (excludes
 soft-deleted, ordered by `order` then `name`), `GET /article-categories/:id`, `POST` (optional
-`parentId` → nest; absent = root; `400` if the parent isn't live), `PATCH /:id` (`parentId` nullable —
-`null` moves to root, a cuid reparents; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
+`parentId` → nest; absent = root; `400` if the parent isn't live or the caller cannot read it — the
+same 400 for both, [[0060-kb-folder-access-control]] §10), `PATCH /:id` (`parentId` nullable — `null`
+moves to root, a cuid reparents; a **change** of `parentId` needs `settings:manage`, else `403`, and is
+recorded on the subtree's articles' version history; `400` on a cycle), `DELETE /:id` (soft delete; `409` if the
 folder still has live articles **or** live child folders; add `?cascade=true` for the full subtree
 cascade returning `{ deletedFolders, deletedArticles }` — `category:delete` ADMIN-only, #415),
 `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]; `409` if

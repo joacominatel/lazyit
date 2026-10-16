@@ -431,8 +431,10 @@ matrix, ADMIN always full; a service account → its direct grants).
 **Auditability.** A folder move writes the §9 record for every **live** article whose home folder is
 in the moved subtree: one `ArticleVersion` per article, in the same transaction, with a body identical
 to its latest state and attributed to the mover (`editedById`, or `serviceAccountId` for a service
-account). The article rows are locked before their version numbers are read, so a concurrent article
-edit cannot collide on `(articleId, version)`. This reuses the one KB audit trail that exists, and
+account; the shared `ArticleVersion` wire schema carries it as an optional `serviceAccountId`). The
+article rows are locked `FOR NO KEY UPDATE` before their version numbers are read, so a concurrent
+article edit cannot collide on `(articleId, version)`, while the `KEY SHARE` locks that FK inserts
+(links, aliases, wiki-links, attachments) take on the article row do not conflict with it. This reuses the one KB audit trail that exists, and
 inherits its limits: it records **that**, **when** and **by whom**, not the source and destination
 folder, and a move of a subtree with no live article leaves no row. A folder-level audit log with
 `from → to` needs its own table, an additive migration that was not authorized here.

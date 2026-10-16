@@ -719,9 +719,10 @@ export class ArticlesService {
 
   /**
    * A page of an article's version history, newest version first (ADR-0030/0042). Visibility
-   * mirrors the article reads: a DRAFT's history is only visible to its author (404 otherwise), so
-   * snapshots never leak a private draft's content. Runs the page `findMany(take/skip)` and the
-   * `count` over the same `where` inside one `$transaction` so `total` can't drift from the page.
+   * mirrors the article reads: a DRAFT's history is only visible to its author, an ADMIN or an
+   * `article:manage` holder (AUD-086; 404 otherwise), so snapshots never leak a private draft's
+   * content. Runs the page `findMany(take/skip)` and the `count` over the same `where` inside one
+   * `$transaction` so `total` can't drift from the page.
    */
   async listVersions(
     articleId: string,
