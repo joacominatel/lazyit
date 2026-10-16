@@ -31,6 +31,15 @@ export interface AssetHistoryWriter {
   };
 }
 
+/** A client able to append many `asset_history` rows in one statement (a `$transaction` client). */
+export interface AssetHistoryBatchWriter {
+  assetHistory: {
+    createMany: (args: {
+      data: Prisma.AssetHistoryCreateManyInput[];
+    }) => Promise<unknown>;
+  };
+}
+
 /**
  * AssetHistory writer/reader (ADR-0033). Events are appended by **explicit** service calls — the
  * Asset and AssetAssignment services pass their transaction client so the log row commits atomically
@@ -45,25 +54,20 @@ export class AssetHistoryService {
     client: AssetHistoryWriter,
     event: RecordAssetEvent,
   ): Promise<unknown> {
-    // Spread the actor attribution: a human → performedById, a service account → serviceAccountId,
-    // system/unknown → neither (both FKs stay null). resolveActor guarantees at most one is set, so the
-    // at-most-one-actor CHECK on asset_history is always satisfied (ADR-0048).
-    const actor = event.actor ?? {};
-    // AI provenance (ADR-0097, R6): a row written while an AI tool call executes is stamped with that
-    // call's invocation id, read from the AsyncLocalStorage context the AI executor runs every dispatch in.
-    // Outside an AI call the column stays null. The actor above is unchanged — the AI acts AS the principal.
-    const aiInvocationId = currentAiInvocationId();
     return client.assetHistory.create({
-      data: {
-        assetId: event.assetId,
-        eventType: event.eventType,
-        ...(event.payload !== undefined ? { payload: event.payload } : {}),
-        ...(actor.userId != null ? { performedById: actor.userId } : {}),
-        ...(actor.serviceAccountId != null
-          ? { serviceAccountId: actor.serviceAccountId }
-          : {}),
-        ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
-      },
+      data: historyRow(event, currentAiInvocationId()),
+    });
+  }
+
+  /** Append many rows in one insert, for a change that moves many assets at once (a location delete). */
+  async recordMany(
+    client: AssetHistoryBatchWriter,
+    events: readonly RecordAssetEvent[],
+  ): Promise<void> {
+    if (events.length === 0) return;
+    const aiInvocationId = currentAiInvocationId();
+    await client.assetHistory.createMany({
+      data: events.map((event) => historyRow(event, aiInvocationId)),
     });
   }
 
@@ -78,4 +82,22 @@ export class AssetHistoryService {
       take: opts.limit,
     });
   }
+}
+
+// The actor spreads to at most one column (ADR-0048 CHECK); an AI tool call stamps its invocation id (ADR-0097).
+function historyRow(
+  event: RecordAssetEvent,
+  aiInvocationId: string | undefined,
+): Prisma.AssetHistoryUncheckedCreateInput {
+  const actor = event.actor ?? {};
+  return {
+    assetId: event.assetId,
+    eventType: event.eventType,
+    ...(event.payload !== undefined ? { payload: event.payload } : {}),
+    ...(actor.userId != null ? { performedById: actor.userId } : {}),
+    ...(actor.serviceAccountId != null
+      ? { serviceAccountId: actor.serviceAccountId }
+      : {}),
+    ...(aiInvocationId !== undefined ? { aiInvocationId } : {}),
+  };
 }

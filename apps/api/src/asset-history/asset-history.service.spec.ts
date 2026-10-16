@@ -140,4 +140,37 @@ describe('AssetHistoryService', () => {
       take: 25,
     });
   });
+
+  // --- recordMany (one insert for a bulk move) ------------------------------
+  it('recordMany appends N rows in ONE createMany, each attributed like record', async () => {
+    const client = {
+      assetHistory: { createMany: jest.fn().mockResolvedValue({ count: 3 }) },
+    };
+
+    await service.recordMany(
+      client,
+      ['a1', 'a2', 'a3'].map((assetId) => ({
+        assetId,
+        eventType: 'LOCATION_CHANGED' as const,
+        payload: { from: 'hq', to: null },
+        actor: { serviceAccountId: SA_ID },
+      })),
+    );
+
+    expect(client.assetHistory.createMany).toHaveBeenCalledTimes(1);
+    expect(client.assetHistory.createMany).toHaveBeenCalledWith({
+      data: ['a1', 'a2', 'a3'].map((assetId) => ({
+        assetId,
+        eventType: 'LOCATION_CHANGED',
+        payload: { from: 'hq', to: null },
+        serviceAccountId: SA_ID,
+      })),
+    });
+  });
+
+  it('recordMany with no events writes nothing', async () => {
+    const client = { assetHistory: { createMany: jest.fn() } };
+    await service.recordMany(client, []);
+    expect(client.assetHistory.createMany).not.toHaveBeenCalled();
+  });
 });
