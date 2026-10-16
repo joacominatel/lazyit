@@ -51,7 +51,8 @@ Al abrir un usuario ves su ficha, organizada como la página de un activo.
   próximos 30 días, accesos que ya vencieron y están por revocarse, y activos cuya recepción la persona
   todavía no confirmó.
 - **Pestañas**: **Activos** (cada uno con su etiqueta, modelo, categoría, estado y si se confirmó la
-  recepción), **Accesos** (primero los vencidos y los que vencen pronto), **Artículos**,
+  recepción), **Accesos** (primero los vencidos y los que vencen pronto; **Exportar CSV** descarga los
+  accesos de la persona, revocados incluidos), **Artículos**,
   **Consumibles** e **Historial**, una sola lista de los activos que devolvió y los accesos que perdió,
   del más reciente al más antiguo. Cada pestaña aparece solo para quienes pueden ver lo que contiene.
   La pestaña abierta queda en la dirección de la página, así un enlace compartido abre en la misma
@@ -205,6 +206,9 @@ servidor, así que se mantiene exacto con cualquier tamaño de equipo, y la elec
 de la página — una lista filtrada se puede compartir y guardar en marcadores. Los enlaces **Ver N
 miembros** de la pantalla de [Roles](/help/users-permissions-roles) llegan aquí ya filtrados, así que la
 lista de Usuarios es el único lugar donde navegas y gestionas la membresía de roles.
+
+**Exportar CSV**, arriba de la lista, descarga todos los usuarios que coinciden con la búsqueda y los
+filtros actuales, estado incluido — mira [Exportar datos](/help/notifications-activity-data-export).
 
 ## Personas de directorio
 

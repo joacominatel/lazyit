@@ -60,25 +60,18 @@ fila por evento. La paginación es real de anterior/siguiente sobre el resultado
 filas por página), así que cada página es una porción real del recuento del servidor, nunca una ventana
 parcial.
 
-- **Exportar todo (filtrado)** — descarga un CSV con **todos** los eventos que coinciden con los filtros
-  actuales — el rango completo, no solo la página que estás viendo. El archivo se transmite desde el
-  servidor, así que funciona incluso con historiales grandes; el tamaño de página y la página en la que
-  estás se ignoran.
-- **Exportar eventos visibles** — descarga solo las filas mostradas actualmente (los filtros **y** la
-  página actual) como CSV.
+- **Exportar CSV** — descarga un CSV con **todos** los eventos que coinciden con los filtros actuales — el
+  rango completo, no solo la página que estás viendo. El tamaño de página y la página en la que estás se
+  ignoran. Las columnas son cuándo, acción, entidad, id de entidad, responsable y resumen. Una exportación
+  admite hasta 100.000 eventos: con un historial largo, elige antes un rango de fechas. Mira
+  [Exportar datos](/help/notifications-activity-data-export).
 - **Imprimir** — imprime la vista actual.
-
-Ambas exportaciones a CSV producen las mismas columnas (cuándo, acción, entidad, id de entidad,
-responsable, resumen) y son seguras de abrir en una hoja de cálculo. La diferencia es el alcance:
-**Exportar todo** es todo el historial filtrado, mientras que **Exportar eventos visibles** e **Imprimir**
-operan solo sobre la página que tienes delante. Acota el feed con los filtros primero para exportar solo la
-porción que necesitas.
 
 ## El registro de auditoría de seguridad
 
 Informes cubre el parque operativo (activos, accesos, stock, personas). El **registro de auditoría de
 seguridad** — una vista aparte dentro de Informes, en **Informes → Registro de auditoría** — es la
-superficie de lectura y exportación de los tres rastros de seguridad que no forman parte del feed de
+superficie de lectura y exportación de los cuatro rastros de seguridad que no forman parte del feed de
 actividad:
 
 - **Secretos** — cada acción del Gestor de Secretos: bóvedas e ítems creados / actualizados / eliminados,
@@ -87,15 +80,18 @@ actividad:
 - **Permisos** — cada permiso otorgado o revocado a un rol.
 - **Cuentas de servicio** — el ciclo de vida de cada cuenta de servicio: creada, rotada, revocada,
   restaurada y cambios de permisos.
+- **Exportaciones** — cada exportación de datos de cualquier lista: quién exportó, qué lista (la acción) y
+  una línea de detalle con el número de filas y los filtros con los que se hizo, por ejemplo
+  *1.204 filas · q: dell*. Mira [Exportar datos](/help/notifications-activity-data-export).
 
 Está protegido por el **mismo permiso que Informes** — no hace falta ningún rol extra. Elige una pestaña
-de **fuente** (Secretos, Permisos, Cuentas de servicio) y luego acota con los filtros de **responsable**,
+de **fuente** (Secretos, Permisos, Cuentas de servicio, Exportaciones) y luego acota con los filtros de **responsable**,
 **acción** y **rango de fechas**. El registro de secretos también puede fijarse a una única **bóveda** o
 **ítem** — esa es la cronología por bóveda / por ítem (habitualmente se llega mediante un enlace directo,
 mostrada como una ficha de filtro activo que puedes quitar).
 
-La lista, las acciones **Exportar todo (filtrado)** / **Exportar eventos visibles** / **Imprimir** y la
-paginación se comportan igual que el feed de actividad de arriba. Las columnas del CSV son los campos de
+La lista, las acciones **Exportar CSV** e **Imprimir** y la paginación se comportan igual que el feed de
+actividad de arriba; la exportación cubre la pestaña de fuente que tengas abierta. Las columnas del CSV son los campos de
 auditoría (cuándo, fuente, acción, responsable, cuenta de servicio, bóveda, ítem, destino, rol, permiso,
 detalle).
 

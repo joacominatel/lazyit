@@ -56,22 +56,16 @@ The feed is a single dense **table** — when, action, entity, actor and a one-l
 event. Paging is real previous/next over the filtered result (pick how many rows per page), so each page
 is one true slice of the server's count, never a partial window.
 
-- **Export all (filtered)** — download a CSV of **every** event matching the current filters — the whole
-  range, not just the page you are looking at. The file is streamed from the server, so it works even for
-  large histories; the current page size and which page you are on are ignored.
-- **Export visible** — download just the rows currently shown (the active filters **and** the current
-  page) as a CSV.
+- **Export CSV** — download a CSV of **every** event matching the current filters — the whole range,
+  not just the page you are looking at. The page size and which page you are on are ignored. The columns
+  are when, action, entity, entity id, actor and summary. An export is capped at 100,000 events: on a long
+  history, pick a date range first. See [Exporting data](/help/notifications-activity-data-export).
 - **Print** — print the current view.
-
-Both CSV exports produce the same columns (when, action, entity, entity id, actor, summary) and are safe
-to open in a spreadsheet. The difference is scope: **Export all** is the whole filtered history, while
-**Export visible** and **Print** act only on the page in front of you. Narrow the feed with the filters
-first to export just the slice you need.
 
 ## The security audit log
 
 Reports covers the operational estate (assets, access, stock, people). The **security audit log** — a
-separate view under Reports, at **Reports → Audit log** — is the read + export surface for the three
+separate view under Reports, at **Reports → Audit log** — is the read + export surface for the four
 security trails that are not part of the activity feed:
 
 - **Secrets** — every Secret Manager action: vaults and items created / updated / deleted, memberships
@@ -80,14 +74,17 @@ security trails that are not part of the activity feed:
 - **Permissions** — every permission granted to or revoked from a role.
 - **Service accounts** — the lifecycle of each service account: minted, rotated, revoked, restored, and
   permission changes.
+- **Exports** — every data export from any list: who exported, which list (the action), and a detail
+  line with the number of rows and the filters it ran with, for example *1,204 rows · q: dell*. See
+  [Exporting data](/help/notifications-activity-data-export).
 
 It is gated by the **same permission as Reports** — no extra role is needed. Pick a **source** tab
-(Secrets, Permissions, Service accounts), then narrow with the **actor**, **action** and **date-range**
+(Secrets, Permissions, Service accounts, Exports), then narrow with the **actor**, **action** and **date-range**
 filters. The secret log can also be pinned to a single **vault** or **item** — that is the per-vault /
 per-item timeline (usually reached by a deep link, shown as an active-filter chip you can clear).
 
-The list, the **Export all (filtered)** / **Export visible** / **Print** actions, and the paging behave
-exactly like the activity feed above. The CSV columns are the audit fields (when, source, action,
+The list, the **Export CSV** and **Print** actions, and the paging behave exactly like the activity
+feed above; the export covers the source tab you have open. The CSV columns are the audit fields (when, source, action,
 actor, service account, vault, item, target, role, permission, detail).
 
 **Secrets stay secret.** The secret audit log records only *metadata* — which vault, which item, who,
