@@ -58,6 +58,8 @@ export interface DeleteResolutionDialogProps {
   onRetryImpact: () => void;
   /** Live move targets, already without the row itself (and, for a location, its subtree). */
   targets: ComboboxItem[];
+  /** The create permission for this kind; without it "create a new one" is not offered. */
+  canCreate: boolean;
   createHint: string;
   remove: (resolution?: DeleteResolution) => Promise<unknown>;
   create: (name: string) => Promise<{ id: string; name: string }>;
@@ -73,6 +75,7 @@ export function DeleteResolutionDialog({
   impactError,
   onRetryImpact,
   targets,
+  canCreate,
   createHint,
   remove,
   create,
@@ -190,7 +193,7 @@ export function DeleteResolutionDialog({
                 aria-label={t("deleteResolution.choiceLabel")}
                 className="gap-2"
               >
-                {resolutionChoiceKinds({ canCreate: true, created }).map(
+                {resolutionChoiceKinds({ canCreate, created }).map(
                   (option) => (
                     <label
                       key={option}

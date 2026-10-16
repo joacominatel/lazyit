@@ -59,8 +59,8 @@ Conviene saber algunas cosas:
 - Un consumible puede tener **una** categoría, o ninguna.
 - **Eliminar una categoría no elimina sus consumibles.** Si todavía tiene consumibles, lazyit te
   muestra cuáles y te pide **una sola decisión para todos**: dejarlos sin categoría, moverlos a otra
-  categoría o escribir un nombre para crear una categoría nueva ahí mismo y moverlos a ella. No se
-  pierde nada, y restaurar la categoría después no los devuelve.
+  categoría o, si puedes crear categorías, escribir un nombre para crear una ahí mismo y moverlos a
+  ella. No se pierde nada, y restaurar la categoría después no los devuelve.
 - Las categorías se **eliminan de forma reversible** y un nombre eliminado queda libre para
   reutilizarse, así que puedes recrear o restaurar una más adelante sin conflicto.
 

@@ -54,8 +54,8 @@ un **borrado lógico**: la categoría se oculta, nunca se borra, y se puede rest
 - Una **categoría de aplicaciones o de consumibles** que todavía tiene ítems te pide **una sola
   decisión para todos** — nunca ítem por ítem — después de mostrarte cuáles son: **dejarlos sin
   categoría**, **moverlos a otra categoría** del mismo tipo o **crear una categoría nueva** — escribes
-  su nombre y lazyit la crea y luego mueve los ítems ahí. El movimiento y la eliminación ocurren
-  juntos, y restaurar la categoría después no devuelve los ítems.
+  su nombre y lazyit la crea y luego mueve los ítems ahí (solo si también puedes crear categorías). El
+  movimiento y la eliminación ocurren juntos, y restaurar la categoría después no devuelve los ítems.
 - Una **categoría de activos** en uso se puede eliminar directamente: sus registros conservan todos sus
   datos, pero se muestran **sin categoría** hasta que se restaure o los clasifiques en otra. La
   confirmación dice cuántos registros son (*La usan 42 activos — conservan sus registros, pero se

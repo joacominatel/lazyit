@@ -50,8 +50,8 @@ an application with no category is perfectly valid.
 
 Deleting a category never deletes the applications in it. When it still has applications, lazyit
 shows you which ones and asks for **one decision for all of them**: leave them uncategorized, move
-them to another category, or type a name to create a new category right there and move them into it.
-Nothing is lost, and restoring the category later does not bring them back.
+them to another category, or, if you can create categories, type a name to create one right there
+and move them into it. Nothing is lost, and restoring the category later does not bring them back.
 
 ## Finding applications
 

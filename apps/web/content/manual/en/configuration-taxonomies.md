@@ -50,8 +50,9 @@ before the server reports counts, the column stays empty rather than guessing.)
 - An **application or consumable category** that still has items asks for **one decision for all of
   them** — never item by item — after showing you which ones: **leave them without a category**, or
   **move them to another category** of the same kind, or **create a new category** — type its name
-  and lazyit creates it, then moves the items there. The move and the delete happen together, and
-  restoring the category later does not bring the items back.
+  and lazyit creates it, then moves the items there (offered only if you can also create categories).
+  The move and the delete happen together, and restoring the category later does not bring the items
+  back.
 - An **asset category** in use can still be deleted directly: its records keep all their data but show
   **no category** until the category is restored or you file them under another one. The confirmation
   says how many records that is (*Used by 42 assets — they keep their records but show no category

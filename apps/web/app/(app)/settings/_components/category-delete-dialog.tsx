@@ -18,6 +18,7 @@ import {
   useCreateConsumableCategory,
   useDeleteConsumableCategory,
 } from "@/lib/api/hooks/use-consumable-categories";
+import { useCan } from "@/lib/hooks/use-permissions";
 
 /** The category kinds whose delete takes one resolution for their items (AUD-085). */
 export type ResolvableCategoryKind = "application" | "consumable";
@@ -50,6 +51,7 @@ export function CategoryDeleteDialog({
     application: useCreateApplicationCategory(),
     consumable: useCreateConsumableCategory(),
   };
+  const canCreate = useCan("category:write");
   const impact = kind === "application" ? appImpact : consumableImpact;
   const list = kind === "application" ? appCategories.data : consumableCategories.data;
 
@@ -101,6 +103,7 @@ export function CategoryDeleteDialog({
       impactError={impact.error}
       onRetryImpact={() => void impact.refetch()}
       targets={targets}
+      canCreate={canCreate}
       createHint={t("createHintCategory")}
       remove={(resolution) => removes[kind].mutateAsync({ id: category.id, resolution })}
       create={(name) => creates[kind].mutateAsync({ name })}

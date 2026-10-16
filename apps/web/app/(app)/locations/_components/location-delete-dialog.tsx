@@ -14,6 +14,7 @@ import {
   useLocationDeleteImpact,
 } from "@/lib/api/hooks/use-location-mutations";
 import { useLocations } from "@/lib/api/hooks/use-locations";
+import { useCan } from "@/lib/hooks/use-permissions";
 
 export function locationImpactGroups(impact: LocationDeleteImpact): ImpactGroupView[] {
   return [
@@ -59,6 +60,7 @@ export function LocationDeleteDialog({
   const { data: locations } = useLocations();
   const remove = useDeleteLocation();
   const create = useCreateLocation();
+  const canCreate = useCan("location:write");
 
   const groups = useMemo(
     () => (impact.data ? locationImpactGroups(impact.data) : undefined),
@@ -82,6 +84,7 @@ export function LocationDeleteDialog({
       impactError={impact.error}
       onRetryImpact={() => void impact.refetch()}
       targets={targets}
+      canCreate={canCreate}
       createHint={t("createHintLocation", { name: location.name })}
       remove={(resolution) => remove.mutateAsync({ id: location.id, resolution })}
       create={(name) =>
