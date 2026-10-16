@@ -340,7 +340,8 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > **Role ceiling (SEC-088).** `user:manage` can be delegated to MEMBER or VIEWER, so every Users write
 > checks the caller's own DB role: the role it grants (create, clone, role change) and the role of the
 > user it acts on (edit, deactivate, reset password, onboard, offboard, restore) must be **at or below**
-> the caller's. Otherwise **403** with `code: "ROLE_CEILING_EXCEEDED"`. Only an `ADMIN` can therefore
+> the caller's, re-checked under the target's row lock inside the write. Otherwise **403** with
+> `code: "ROLE_CEILING_EXCEEDED"`. A call with no actor (the directory sync) is held to VIEWER. Only an `ADMIN` can therefore
 > create, promote to, demote, reset or offboard an `ADMIN`. A service account is never ADMIN-equivalent
 > (INV-SA-3) and is capped below ADMIN; it cannot hold `user:manage` anyway (SEC-011). The order is
 > `ADMIN > MEMBER > VIEWER` (`canManageRole` in `@lazyit/shared`), whatever the matrix grants each role.

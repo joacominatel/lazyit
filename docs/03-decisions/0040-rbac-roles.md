@@ -249,6 +249,10 @@ Every `user:manage` write in `UsersService` reads the caller's DB role (INV-1) a
 - the user it acts on — update (any field), reset password, provision a local account, offboard/delete or
   restore — ranks above the caller's.
 
+The target's role is read twice: once before the work starts, and again under a row lock
+(`SELECT "role" … FOR UPDATE`) inside the write transaction, so a concurrent promotion of the target cannot
+slip between the check and the write (update, password reset, offboard, restore).
+
 So only an ADMIN can create, promote to, demote, edit, reset, offboard or restore an ADMIN. A peer is
 reachable: a MEMBER holding `user:manage` manages MEMBERs and VIEWERs. The self-role-change refusal is
 unchanged. The order is fixed by role, not by what the matrix grants each role: a VIEWER configured with
@@ -258,13 +262,14 @@ and the AI/MCP tools (which call the same routes) all get it.
 A **service account** has no role and is never ADMIN-equivalent (INV-SA-3), so its ceiling is the highest
 non-ADMIN role. It cannot hold `user:manage` in the first place (SEC-011, stripped at principal load by
 SEC-073); the ceiling is the second layer on the two routes that accept an SA actor (offboard, restore).
-A call with no actor at all is a trusted server caller — the bulk import and the directory sync — which
-only create VIEWER directory persons.
+A call with no actor at all fails closed at VIEWER. The only such caller is the directory sync, which only
+creates VIEWER directory persons; the bulk import always passes the importing human.
 
 **Usable admin.** The last-admin guard counts an ADMIN only when it is live, active, **not directory-only**
 and holds a **login credential** for the running mode: a password hash in local mode, an `externalId` (an
 IdP link from a first sign-in) under OIDC. The development shim signs anyone in, so it needs no
-credential. A directory person's role can no longer be changed (**422**
+credential. The refusal now reads "Cannot remove the last administrator who can sign in. Another
+administrator must sign in, or be promoted, first." A directory person's role can no longer be changed (**422**
 `DIRECTORY_PERSON_ROLE_LOCKED`, INV-DIR-1): it stays VIEWER until it is onboarded.
 
 **Consequences.**
