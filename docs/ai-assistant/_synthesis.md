@@ -3,7 +3,7 @@ title: "AI Assistant, MCP Server and Headless API — Architecture Synthesis"
 tags: [ai-assistant, architecture, synthesis, mcp, oauth, llm, security, adr-candidate]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-16
 authors: [cto]
 reconciles:
   - "[[ai-assistant/mcp-and-oauth]]"
@@ -275,7 +275,7 @@ prefix). The rows marked **public path** are routed by Caddy to the API without 
 | OAuth metadata | `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server` — **public path** | none; 404 when MCP is off or on `lan` |
 | OAuth protocol | `/oauth/token`, `/oauth/register`, `/oauth/revoke` — **public path** | public client; rate-limited; 404 when MCP is off or on `lan` |
 | Consent | web page `/oauth/authorize` ((auth) group) → API `POST /oauth/authorize/validate`, `POST /oauth/authorize/decision` | web session (Bearer) + `ai:connect` |
-| Connected apps | `GET /oauth/grants/mine`, `DELETE /oauth/grants/:id`; admin `GET /oauth/grants?userId=`; `POST`/`GET /oauth/personal-tokens`, `DELETE /oauth/personal-tokens/:id` (mint on `lan` only) | `ai:connect` (own) / `settings:manage` (all) |
+| Connected apps | `GET /oauth/grants/mine`, `DELETE /oauth/grants/:id`; admin `GET /oauth/grants?userId=`; `POST`/`GET /oauth/personal-tokens`, `DELETE /oauth/personal-tokens/:id` (mint on `lan` only) | own: none to list or revoke, `ai:connect` to mint (AUD-083) / `settings:manage` (all) |
 | Skill / plugin | `GET /ai/claude-code/plugin.zip` (authenticated); `GET /ai/claude-code/marketplace.json` + `…/lazyit-plugin.zip` (public, HTTPS + MCP on only) | `ai:connect` / none |
 
 > **As built (W3-1, #1315)** — the conversations, runs, event stream, decision and per-SA rows above:

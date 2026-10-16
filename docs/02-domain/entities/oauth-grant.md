@@ -3,7 +3,7 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # OAuthGrant
@@ -37,6 +37,8 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
 - **Listed while it holds a live token**: the connected-apps lists show a grant only while one of its
   tokens is unexpired. An OAuth grant whose refresh token idled out (30 days unused) and was swept can
   never act again, so it leaves the lists; the row itself stays, unrevoked, for the record.
+- **Its owner always sees and can revoke it**: listing and revoking your own grants need no permission,
+  so a user who lost `ai:connect` can still review and cut what they hold (AUD-083). Creating one needs it.
 - **Authority** = the user's current permissions ∩ the scope class (`lazyit.read` → `read` tools,
   `lazyit.write` → `write`, `lazyit.admin` → `elevated`), re-checked on every call with `ai:connect` and
   the MCP switch.
