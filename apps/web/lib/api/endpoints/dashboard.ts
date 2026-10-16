@@ -108,7 +108,6 @@ export function getDashboardActivity(
   );
 }
 
-/** The activity export route; it takes {@link activityFilterParams}, the feed's own filters. */
 export const ACTIVITY_EXPORT_PATH = `${BASE}/activity/export`;
 
 /** The feed's filters, never the page window; the CSV export sends exactly these. */

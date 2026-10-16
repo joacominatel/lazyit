@@ -83,7 +83,6 @@ export interface ApplicationGrantsOptions {
   includeExpired?: boolean;
 }
 
-/** One application's grant export route; it takes {@link applicationGrantFilterParams}. */
 export function applicationGrantsExportPath(applicationId: string): string {
   return `${BASE}/${applicationId}/access-grants/export`;
 }

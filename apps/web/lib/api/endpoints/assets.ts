@@ -89,7 +89,6 @@ export interface PurchaseAssetFilter {
   purchaseLinked?: boolean;
 }
 
-/** The asset export route; it takes {@link assetFilterParams}, the list's own filters. */
 export const ASSET_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never paging or sort; the CSV export sends exactly these. */

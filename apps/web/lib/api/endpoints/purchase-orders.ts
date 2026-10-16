@@ -58,7 +58,6 @@ export interface PurchaseOrderListParams {
   deleted?: "only";
 }
 
-/** The purchase export route; it takes {@link purchaseOrderFilterParams}, the list's own filters. */
 export const PURCHASE_ORDER_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never paging or sort; the CSV export sends exactly these. */

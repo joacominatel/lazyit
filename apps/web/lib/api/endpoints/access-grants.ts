@@ -38,7 +38,6 @@ export interface AccessGrantFilters {
   offset?: number;
 }
 
-/** The grant export route; it takes {@link accessGrantFilterParams}, the list's own filters. */
 export const ACCESS_GRANT_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never the page window; the CSV export sends exactly these. */

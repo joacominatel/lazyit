@@ -56,7 +56,6 @@ export interface ConsumableListParams {
   deleted?: "only";
 }
 
-/** The consumable export route; it takes {@link consumableFilterParams}, the list's own filters. */
 export const CONSUMABLE_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never paging or sort; the CSV export sends exactly these. */

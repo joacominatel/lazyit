@@ -50,7 +50,6 @@ export interface AuditLogParams extends AuditLogClientFilters {
   offset?: number;
 }
 
-/** The audit export route; it takes {@link auditLogFilterParams}, the list's own filters. */
 export const AUDIT_EXPORT_PATH = `${BASE}/logs/export`;
 
 /** One source's filters, never the page window; the CSV export sends exactly these. */

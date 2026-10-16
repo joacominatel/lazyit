@@ -67,7 +67,6 @@ export interface UserListParams {
   isActive?: boolean;
 }
 
-/** The user export route; it takes {@link userFilterParams}, the list's own filters. */
 export const USER_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never paging, sort or the `ids` resolver; the CSV export sends exactly these. */

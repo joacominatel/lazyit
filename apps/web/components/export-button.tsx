@@ -15,11 +15,9 @@ import {
 } from "@/lib/export/export-file";
 
 export interface ExportButtonProps {
-  /** The resource's export route, e.g. `/assets/export`. */
   path: string;
   /** The list's own filter params, from the endpoint module's `…FilterParams`. */
   params: URLSearchParams;
-  /** The list's `total` for the same filters. */
   total: number | undefined;
   /** File name stem: `lazyit-<stem>-YYYY-MM-DD.csv`. */
   filename: string;
