@@ -219,7 +219,7 @@ function isNotFound(err: unknown): boolean {
 
 /**
  * Read ONE article by id or slug through the bound read handlers, as the caller. A folder-hidden article
- * or another person's draft (by id, a manager's excepted) is a 404 there, so it is simply "not found" here — never a hint that it
+ * or another person's draft (a manager's excepted) is a 404 there, so it is simply "not found" here — never a hint that it
  * exists. Any other refusal (a 403 for a caller without `article:read`) propagates as the route's own.
  */
 async function readArticle(

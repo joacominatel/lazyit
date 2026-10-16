@@ -712,8 +712,8 @@ const VISIBLE: Record<string, string[]> = {
   'SA holding ai:use + article:read/write': [A.pub],
 };
 const ALL_ARTICLES = [A.pub, A.secret, A.team, A.draftOther, A.draftMine];
-// Foreign drafts a manager reads by id though no list shows them (AUD-086); by slug they stay hidden.
-const READ_BY_ID_ONLY: Record<string, string[]> = {
+// Foreign drafts a manager reads directly (id or slug) though no list shows them (AUD-086).
+const READ_DIRECTLY_ONLY: Record<string, string[]> = {
   ADMIN: [A.draftOther, A.draftMine],
 };
 const TITLES: Record<string, string> = {
@@ -915,20 +915,26 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
             { article: A.missing },
             ctx(a),
           );
-          if (READ_BY_ID_ONLY[label]?.includes(id)) {
+          const slug = articles.get(id)!.slug;
+          if (READ_DIRECTLY_ONLY[label]?.includes(id)) {
             expect((data(byId).article as { id: string }).id).toBe(id);
-          } else {
-            expect(byId).toMatchObject({
-              ok: false,
-              error: { code: 'NOT_FOUND', status: 404 },
-            });
-            expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
+            const bySlug = await tools.invoke(
+              'kb_get_article',
+              { article: slug },
+              ctx(a),
+            );
+            expect((data(bySlug).article as { id: string }).id).toBe(id);
+            continue;
           }
+          expect(byId).toMatchObject({
+            ok: false,
+            error: { code: 'NOT_FOUND', status: 404 },
+          });
+          expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
           expect(missing).toMatchObject({
             ok: false,
             error: { code: 'NOT_FOUND', status: 404 },
           });
-          const slug = articles.get(id)!.slug;
           expect(
             await tools.invoke('kb_get_article', { article: slug }, ctx(a)),
           ).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
@@ -1760,7 +1766,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
       expect(articles.get(A.pub)!.title).toBe('VPN setup');
     });
 
-    it("a raw id reaches the write handler (an admin may edit another author's draft); a slug is resolved through the reads", async () => {
+    it("an admin may edit another author's draft by raw id or by slug (resolved through the reads, AUD-086)", async () => {
       const admin = actor('ADMIN');
       const byId = await tools.invoke(
         'kb_update_article',
@@ -1774,8 +1780,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         { article: 'reorg-plan', title: 'Again' },
         mcp(admin),
       );
-      expect(bySlug).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
-      expect(articles.get(A.draftOther)!.title).toBe('Reviewed plan');
+      expect(bySlug).toMatchObject({ ok: true });
+      expect(articles.get(A.draftOther)!.title).toBe('Again');
     });
 
     it('shows the whole new body on the card, never an excerpt (visibility laundering, security.md §6.1)', async () => {

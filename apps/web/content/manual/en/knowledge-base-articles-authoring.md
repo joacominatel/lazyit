@@ -227,8 +227,8 @@ Authoring is gated by Knowledge Base permissions, and the API additionally enfor
   lost:** the original author stays recorded, and each edit is stamped with who actually made it in
   the article's version history.
 - Administrators can always see every article, including drafts, regardless of folder restrictions.
-  A holder of **"Edit any article"** can open another author's draft by its ID (through the API or the
-  assistant) in a folder they can read, so they can fix what they are allowed to edit. Other people's
-  drafts still never appear in their lists or in search.
+  A holder of **"Edit any article"** can open another author's draft by its link (its address or ID) in
+  a folder they can read, so they can fix what they are allowed to edit. Other people's drafts still
+  never appear in their lists or in search.
 
 See [Roles and permissions](/help/permissions) for the full capability set.

@@ -54,7 +54,7 @@ deferred.
   single create still returns `409` on collision today** (wiring the suffix into that path is a small
   follow-up).
 - **Status** is `DRAFT` or `PUBLISHED`. A `DRAFT` is **private to its author** (an ADMIN or
-  `article:manage` holder may edit it and read it by id — #877, AUD-086); `PUBLISHED` is
+  `article:manage` holder may edit it and read it by link, id or slug — #877, AUD-086); `PUBLISHED` is
   visible to everyone. Transitions go through `publish`/`unpublish` endpoints — **`PATCH` never
   changes status**.
 - **`publishedAt`** is set on the **first** publish and **never cleared** (unpublishing keeps it,
@@ -201,10 +201,11 @@ listings), `@@index([status, publishedAt])` (latest published).
   `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
   metric). The owner is already exposed as `authorId`.
 - `GET /articles/by-slug/:slug` · `GET /articles/:id` — a draft requested by a non-author returns
-  `404` (never `403`, so existence isn't leaked). **By id only**, an ADMIN or `article:manage` holder —
-  the callers who may already edit a foreign draft (#877) — reads it (AUD-086); the folder ACL still
-  applies to a non-admin. That opens the by-id sub-reads (versions, links, aliases, backlinks target,
-  attachments) with it; lists, search and the by-slug read still show a draft to its author only.
+  `404` (never `403`, so existence isn't leaked). **By link (id or slug)**, an ADMIN or
+  `article:manage` holder — the callers who may already edit a foreign draft (#877) — reads it
+  (AUD-086); the folder ACL still applies to a non-admin. That opens the by-id sub-reads (versions,
+  links, aliases, backlinks target, attachments) with it; lists and search still show a draft to its
+  author only.
 - `POST /articles` — create (author = `X-User-Id`).
 - `POST /articles/import` — multipart `.md`/`.txt`/`.docx` (one article) or `.zip` (bulk, #398;
   selective extraction + folder mirroring + slug auto-suffix + best-effort link rewire,

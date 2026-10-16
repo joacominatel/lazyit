@@ -960,7 +960,7 @@ describe('ArticlesService', () => {
       ).resolves.toMatchObject({ id: 'a' });
     });
 
-    // --- AUD-086: the read gate honours the #877 manager exemption, by id only ---
+    // --- AUD-086: the direct reads (id and slug) honour the #877 manager exemption ---
 
     const FOREIGN_DRAFT = {
       id: 'a',
@@ -989,6 +989,36 @@ describe('ArticlesService', () => {
       await expect(
         service.findOne('a', { id: ADMIN_ID } as never, ADMIN_PRINCIPAL),
       ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it("lets an article:manage holder read another author's DRAFT by slug", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it("still hides another author's DRAFT by slug from a non-manager (404)", async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("still hides a manager's foreign DRAFT by slug in a folder they cannot read (404)", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findBySlug('a-draft', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it("still hides another author's DRAFT from a non-manager (404)", async () => {

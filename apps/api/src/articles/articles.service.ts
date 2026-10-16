@@ -410,13 +410,7 @@ export class ArticlesService {
       where: { id },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (
-      !article ||
-      (article.status === 'DRAFT' &&
-        article.authorId !== cu &&
-        // The #877 edit gate already lets a manager write this draft; reading it by id must match (AUD-086).
-        !(await this.canManageAny(principal)))
-    ) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article ${id} not found`);
     }
     await this.assertFolderVisible(
@@ -430,6 +424,19 @@ export class ArticlesService {
     return article;
   }
 
+  // The #877 edit gate already lets a manager write a foreign draft; reading it directly must match (AUD-086).
+  private async isHiddenDraft(
+    article: Pick<Article, 'status' | 'authorId'>,
+    currentUserId: string | undefined,
+    principal?: Principal,
+  ): Promise<boolean> {
+    return (
+      article.status === 'DRAFT' &&
+      article.authorId !== currentUserId &&
+      !(await this.canManageAny(principal))
+    );
+  }
+
   /** Same visibility rules as findOne (draft + folder access — ADR-0022/0060), looked up by slug. */
   async findBySlug(slug: string, currentUser?: User, principal?: Principal) {
     const cu = this.resolveCurrentUser(currentUser);
@@ -437,7 +444,7 @@ export class ArticlesService {
       where: { slug },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
     }
     await this.assertFolderVisible(article.categoryId, principal, () => {
