@@ -3,6 +3,9 @@ import { BadRequestException } from '@nestjs/common';
 import { AUDIT_LOG_CSV_HEADER } from '@lazyit/shared';
 import { AuditService } from './audit.service';
 import { AuditController } from './audit.controller';
+import type { ExportService } from '../common/export';
+import { EXPORT_BATCH_SIZE, keysetBatches } from '../common/export/keyset';
+import { streamCsv } from '../common/export/stream-csv';
 import { PERMISSION_KEY } from '../auth/require-permission.decorator';
 import type { PrismaService } from '../prisma/prisma.service';
 
@@ -65,6 +68,22 @@ function makePrisma(): FakePrisma {
 }
 
 const svc = (p: FakePrisma) => new AuditService(p as unknown as PrismaService);
+
+/** The file the engine streams for these filters, minus the limiter and the audit row. */
+async function exportCsv(
+  service: AuditService,
+  filters: Parameters<AuditService['logsExport']>[0],
+): Promise<string> {
+  const { columns, fetchBatch } = service.logsExport(filters);
+  let out = '';
+  for await (const chunk of streamCsv({
+    columns,
+    batches: keysetBatches(fetchBatch),
+  })) {
+    out += chunk;
+  }
+  return out;
+}
 const ACTOR = '11111111-1111-4111-8111-111111111111';
 const TARGET = '22222222-2222-4222-8222-222222222222';
 
@@ -317,7 +336,7 @@ describe('AuditService — export source (DataExportLog, ADR-0103)', () => {
     });
   });
 
-  it('streams export rows through the existing audit CSV with the keyset cursor', async () => {
+  it('streams export rows through the audit CSV columns with the keyset cursor', async () => {
     const prisma = makePrisma();
     prisma.dataExportLog.findMany.mockResolvedValueOnce([
       {
@@ -331,12 +350,7 @@ describe('AuditService — export source (DataExportLog, ADR-0103)', () => {
       },
     ]);
 
-    let csv = '';
-    for await (const chunk of svc(prisma).streamLogsCsvRows({
-      source: 'export',
-    } as never)) {
-      csv += chunk;
-    }
+    const csv = await exportCsv(svc(prisma), { source: 'export' });
 
     expect(csv).toContain('2026-10-16T09:00:00.000Z,export,ASSETS,');
   });
@@ -345,7 +359,10 @@ describe('AuditService — export source (DataExportLog, ADR-0103)', () => {
 describe('AuditController — export source', () => {
   function controller() {
     const getLogs = jest.fn().mockResolvedValue({ items: [], total: 0 });
-    const ctrl = new AuditController({ getLogs } as unknown as AuditService);
+    const ctrl = new AuditController(
+      { getLogs } as unknown as AuditService,
+      {} as unknown as ExportService,
+    );
     return { ctrl, getLogs };
   }
 
@@ -378,13 +395,7 @@ describe('AuditController — export source', () => {
   });
 });
 
-describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-injection guard)', () => {
-  async function collect(gen: AsyncGenerator<string>): Promise<string> {
-    let out = '';
-    for await (const chunk of gen) out += chunk;
-    return out;
-  }
-
+describe('AuditService.logsExport — export boundary (INV-10 + formula-injection guard)', () => {
   it('streams a header then metadata rows, defusing a formula-injection in a resolved vault name', async () => {
     const prisma = makePrisma();
     // A full batch then an empty one → proves the batching loop terminates.
@@ -401,7 +412,7 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
     };
     prisma.secretAuditLog.findMany
       .mockResolvedValueOnce(
-        Array.from({ length: AuditService.EXPORT_BATCH_SIZE }, () => row),
+        Array.from({ length: EXPORT_BATCH_SIZE }, () => row),
       )
       .mockResolvedValueOnce([]);
     // The vault is literally named with a spreadsheet formula → must be neutralized in the CSV.
@@ -409,29 +420,27 @@ describe('AuditService.streamLogsCsvRows — export boundary (INV-10 + formula-i
       { id: 'v1', name: '=cmd|/c calc' },
     ]);
 
-    const csv = await collect(
-      svc(prisma).streamLogsCsvRows({ source: 'secret' } as never),
-    );
+    const csv = await exportCsv(svc(prisma), { source: 'secret' });
 
     expect(prisma.secretAuditLog.findMany).toHaveBeenCalledTimes(2);
-    // Provenance stamp (#909) then the header.
-    expect(csv.startsWith('# lazyit ')).toBe(true);
-    expect(csv).toContain(`\n${AUDIT_LOG_CSV_HEADER}\n`);
+    // BOM then the header: no provenance stamp, nothing imports this file (ADR-0103 §8).
+    expect(csv.startsWith(`\uFEFF${AUDIT_LOG_CSV_HEADER}\r\n`)).toBe(true);
+    expect(AUDIT_LOG_CSV_HEADER).toBe(
+      'occurredAt,source,action,actorName,serviceAccountName,vaultName,itemLabel,targetUserName,targetServiceAccountName,role,permission,detail',
+    );
     // Formula-injection defused with a leading single quote.
     expect(csv).toContain("'=cmd|/c calc");
     // Every row of the full batch was serialized.
-    expect(csv.split("'=cmd|/c calc").length - 1).toBe(
-      AuditService.EXPORT_BATCH_SIZE,
-    );
+    expect(csv.split("'=cmd|/c calc").length - 1).toBe(EXPORT_BATCH_SIZE);
     // No value/ciphertext column exists in the export.
     expect(csv).not.toContain('ciphertext');
   });
 });
 
-describe('AuditService.streamLogsCsvRows — live table (AUD-033)', () => {
+describe('AuditService.logsExport — live table (AUD-033)', () => {
   it('emits every row exactly once while newer rows are appended mid-export', async () => {
     const prisma = makePrisma();
-    const total = AuditService.EXPORT_BATCH_SIZE * 2 + 5;
+    const total = EXPORT_BATCH_SIZE * 2 + 5;
     let table = Array.from({ length: total }, (_, i) => ({
       id: i + 1,
       action: 'ITEM_REVEALED',
@@ -467,12 +476,7 @@ describe('AuditService.streamLogsCsvRows — live table (AUD-033)', () => {
       },
     );
 
-    let csv = '';
-    for await (const chunk of svc(prisma).streamLogsCsvRows({
-      source: 'secret',
-    } as never)) {
-      csv += chunk;
-    }
+    const csv = await exportCsv(svc(prisma), { source: 'secret' });
 
     const exported = csv.match(/item-\d+/g) ?? [];
     expect(new Set(exported).size).toBe(exported.length);

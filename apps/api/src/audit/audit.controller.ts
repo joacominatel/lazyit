@@ -1,9 +1,9 @@
-import { Readable } from 'node:stream';
 import {
   BadRequestException,
   Controller,
   Get,
   Query,
+  Res,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -25,8 +25,12 @@ import {
   AuditLogQuerySchema,
   AuditLogSourceSchema,
 } from '@lazyit/shared';
+import type { Response } from 'express';
 import { AuditService } from './audit.service';
 import { AuditLogFilterOptionsDto, AuditLogPageDto } from './audit.dto';
+import { ExportService } from '../common/export';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 
 /** Flattened `source → allowed actions` doc string for the Swagger `action` param. */
@@ -46,7 +50,10 @@ const ACTIONS_DOC = (Object.keys(AUDIT_ACTIONS_BY_SOURCE) as AuditLogSource[])
 @ApiTags('audit')
 @Controller('audit')
 export class AuditController {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get('logs/filters')
   @RequirePermission('logs:read')
@@ -157,7 +164,7 @@ export class AuditController {
   @ApiProduces('text/csv')
   @ApiOperation({
     summary:
-      'Bulk CSV export of the WHOLE filtered range of one security audit log (issue #871), gated on logs:read. Takes the SAME filters as GET /audit/logs (minus paging) and streams EVERY matching row newest-first — not just the visible page. Cells are RFC-4180 escaped with a spreadsheet formula-injection guard. Secret rows carry metadata display names ONLY (INV-10) — there is no value column.',
+      'CSV export of the WHOLE filtered range of one audit log source (issue #871, ADR-0103), gated on logs:read. Takes the SAME filters as GET /audit/logs (minus paging) and streams every matching row newest-first by id: UTF-8 BOM, CRLF rows, formula-guarded text cells. Secret rows carry metadata display names ONLY (INV-10) — there is no value column. Above 100,000 matching rows → 422; a second export running or a sixth in a minute → 429. Every export, this one included, is recorded under source `export`.',
   })
   @ApiQuery({ name: 'source', required: true, enum: AUDIT_LOG_SOURCES })
   @ApiQuery({ name: 'action', required: false, type: String })
@@ -169,6 +176,8 @@ export class AuditController {
   @ApiQuery({ name: 'to', required: false, type: String })
   @ApiOkResponse({ description: 'The filtered audit log as CSV (text/csv).' })
   export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
     @Query('source') source?: string,
     @Query('action') action?: string,
     @Query('actorId') actorId?: string,
@@ -177,7 +186,7 @@ export class AuditController {
     @Query('itemId') itemId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
-  ): StreamableFile {
+  ): Promise<StreamableFile> {
     const filters = this.parseFilters({
       source,
       action,
@@ -188,17 +197,14 @@ export class AuditController {
       from,
       to,
     });
-    const filename = `lazyit-audit-${filters.source}-${new Date().toISOString().slice(0, 10)}.csv`;
-    // Readable.from drains the async generator one chunk at a time → never the whole result in memory.
-    return new StreamableFile(
-      Readable.from(this.audit.streamLogsCsvRows(filters), {
-        objectMode: false,
-      }),
-      {
-        type: 'text/csv; charset=utf-8',
-        disposition: `attachment; filename="${filename}"`,
-      },
-    );
+    return this.exports.exportCsv({
+      resource: 'AUDIT',
+      principal,
+      response,
+      filters,
+      filename: `audit-${filters.source}`,
+      ...this.audit.logsExport(filters),
+    });
   }
 
   // ── parse / validate ───────────────────────────────────────────────────────────
