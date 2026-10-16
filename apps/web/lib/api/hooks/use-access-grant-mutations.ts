@@ -80,7 +80,7 @@ export function useUpdateGrantNotes() {
   });
 }
 
-/** Edit a grant's expiry (`null` makes it permanent). Informative only — never auto-revokes. */
+/** Edit a grant's expiry (`null` makes it permanent); the expiry sweep revokes it once the date passes. */
 export function useUpdateGrantExpiry() {
   const invalidate = useInvalidateGrants();
   return useMutation({
