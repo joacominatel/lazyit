@@ -308,7 +308,7 @@ export class AssetModelsService {
         return model; // already live — idempotent
       }
       if (model.categoryId !== null) {
-        // SHARE waits out a category delete in flight, which then sees this model as live.
+        // SHARE serializes with a category delete: whichever commits first, the other sees it.
         const category = await tx.$queryRaw<{ id: string }[]>`
           SELECT "id" FROM "asset_categories"
            WHERE "id" = ${model.categoryId} AND "deletedAt" IS NULL
