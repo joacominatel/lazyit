@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import type {
   Prisma as PrismaTypes,
   ServiceAccount,
 } from '../../generated/prisma/client';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
 import { mintToken, randomHash } from './service-account-token';
@@ -58,7 +60,10 @@ const WITH_PERMISSIONS = {
  */
 @Injectable()
 export class ServiceAccountsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rolePermissions: PermissionResolverService,
+  ) {}
 
   /**
    * Create a service account and mint its first token (ADR-0048). The token embeds the row id
@@ -80,6 +85,7 @@ export class ServiceAccountsService {
         ? this.parseFutureExpiry(dto.expiresAt)
         : null;
     const permissions = this.cleanPermissions(dto.permissions);
+    await this.assertWithinCallerPermissions(actorId, permissions);
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 1) Create the row so Prisma allocates the cuid the token must embed. The placeholder tokenHash
@@ -165,15 +171,32 @@ export class ServiceAccountsService {
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    if (dto.expiresAt !== undefined) {
-      data.expiresAt =
-        dto.expiresAt === null ? null : this.parseFutureExpiry(dto.expiresAt);
-    }
+    const nextExpiry =
+      dto.expiresAt === undefined || dto.expiresAt === null
+        ? dto.expiresAt
+        : this.parseFutureExpiry(dto.expiresAt);
+    if (nextExpiry !== undefined) data.expiresAt = nextExpiry;
 
     const nextPermissions =
       dto.permissions !== undefined
         ? this.cleanPermissions(dto.permissions)
         : undefined;
+    const currentPermissions = this.cleanPermissions(
+      account.permissions.map((p) => p.permission),
+    );
+    const rearms =
+      (dto.isActive === true && !account.isActive) ||
+      (nextExpiry !== undefined &&
+        account.expiresAt !== null &&
+        (nextExpiry === null || nextExpiry > account.expiresAt));
+    await this.assertWithinCallerPermissions(
+      actorId,
+      rearms
+        ? (nextPermissions ?? currentPermissions)
+        : (nextPermissions ?? []).filter(
+            (p) => !currentPermissions.includes(p),
+          ),
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (Object.keys(data).length > 0) {
@@ -240,6 +263,10 @@ export class ServiceAccountsService {
     // The engine SA's token is a throwaway it never authenticates with — rotating it is meaningless and
     // forbidden (#304).
     this.assertNotSystemManaged(account, 'rotated');
+    await this.assertWithinCallerPermissions(
+      actorId,
+      this.cleanPermissions(account.permissions.map((p) => p.permission)),
+    );
     const minted = mintToken(id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -293,16 +320,21 @@ export class ServiceAccountsService {
     id: string,
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
-    const account = await this.prisma.serviceAccount.findFirst({
+    const account = (await this.prisma.serviceAccount.findFirst({
       where: { id },
+      include: WITH_PERMISSIONS,
       includeSoftDeleted: true,
-    } as PrismaTypes.ServiceAccountFindFirstArgs);
+    } as PrismaTypes.ServiceAccountFindFirstArgs)) as ServiceAccountWithPermissions | null;
     if (!account) {
       throw new NotFoundException(`Service account ${id} not found`);
     }
     if (account.deletedAt === null) {
       return this.findOne(id); // already live — idempotent
     }
+    await this.assertWithinCallerPermissions(
+      actorId,
+      this.cleanPermissions(account.permissions.map((p) => p.permission)),
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const restored = await tx.serviceAccount.update({
@@ -319,6 +351,32 @@ export class ServiceAccountsService {
   }
 
   // ── helpers ────────────────────────────────────────────────────────────────
+
+  // SEC-088: whatever issues or re-arms a token stays within the caller's own verbs; narrowing never trips it.
+  private async assertWithinCallerPermissions(
+    actorId: string | null,
+    verbs: readonly Permission[],
+  ): Promise<void> {
+    if (verbs.length === 0) return;
+    const caller = actorId
+      ? await this.prisma.user.findUnique({
+          where: { id: actorId },
+          select: { role: true },
+        })
+      : null;
+    const held: ReadonlySet<Permission> = caller
+      ? await this.rolePermissions.resolve(caller.role)
+      : new Set();
+    const exceeded = verbs.filter((p) => !held.has(p));
+    if (exceeded.length === 0) return;
+    throw new ForbiddenException({
+      statusCode: 403,
+      code: 'PERMISSION_CEILING_EXCEEDED',
+      message:
+        'A service account can only hold permissions your own role holds.',
+      permissions: exceeded,
+    });
+  }
 
   /** Fetch a LIVE service account (with grants) or 404. The read filter already excludes revoked rows. */
   private async getLiveOr404(
