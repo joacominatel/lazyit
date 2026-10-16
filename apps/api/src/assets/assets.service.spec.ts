@@ -47,10 +47,10 @@ const FakePrismaKnownError =
     meta?: Record<string, unknown>,
   ) => Error & { code: string; meta?: Record<string, unknown> };
 // The raw partial-unique index names (migration 20260601130000).
-const ASSET_TAG_INDEX = adapterPgUniqueViolationMeta({
+const ASSET_TAG_VIOLATION = adapterPgUniqueViolationMeta({
   index: 'assets_assetTag_active_key',
 });
-const SERIAL_INDEX = adapterPgUniqueViolationMeta({
+const SERIAL_VIOLATION = adapterPgUniqueViolationMeta({
   index: 'assets_serial_active_key',
 });
 
@@ -545,7 +545,7 @@ describe('AssetsService', () => {
       .mockResolvedValueOnce('LAZY-00043');
     tx.create
       .mockRejectedValueOnce(
-        new FakePrismaKnownError('P2002', ASSET_TAG_INDEX),
+        new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
       )
       .mockResolvedValueOnce({ id: 'a1', assetTag: 'LAZY-00043', ...dto });
 
@@ -567,7 +567,7 @@ describe('AssetsService', () => {
     };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042');
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', SERIAL_INDEX),
+      new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -587,7 +587,7 @@ describe('AssetsService', () => {
     // An explicit tag took a value already in use → P2002 on the assetTag index, but it must still
     // propagate (the retry-only-on-auto-tag guard in create() short-circuits before the predicate).
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', ASSET_TAG_INDEX),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     );
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(
@@ -601,7 +601,7 @@ describe('AssetsService', () => {
     const dto = { name: 'SRV-01', status: 'OPERATIONAL' as const };
     tagScheme.allocateTag.mockResolvedValue('LAZY-00042'); // always renders a colliding tag
     tx.create.mockRejectedValue(
-      new FakePrismaKnownError('P2002', ASSET_TAG_INDEX),
+      new FakePrismaKnownError('P2002', ASSET_TAG_VIOLATION),
     ); // always collides on the assetTag index
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
@@ -697,7 +697,7 @@ describe('AssetsService', () => {
         call++;
         if (call === 2) {
           return Promise.reject(
-            new FakePrismaKnownError('P2002', SERIAL_INDEX),
+            new FakePrismaKnownError('P2002', SERIAL_VIOLATION),
           );
         }
         return Promise.resolve({ id: `a${call}`, ...data });

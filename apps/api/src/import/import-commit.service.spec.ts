@@ -691,8 +691,8 @@ describe('ImportCommitService.commit', () => {
       code: 'P2002',
       clientVersion: 'test',
       meta: adapterPgUniqueViolationMeta({
-          index: 'assets_serial_active_key',
-        }),
+        index: 'assets_serial_active_key',
+      }),
     });
     const assets = makeAssets({
       failOn: (d) => (d.name === 'COLLIDE' ? p2002 : undefined),
