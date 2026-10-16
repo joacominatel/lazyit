@@ -9,6 +9,15 @@ export const DATA_EXPORT_RESOURCES = [
   "ACCESS_GRANTS",
   "CONSUMABLES",
   "PURCHASE_ORDERS",
+  "APPLICATIONS",
+  "LOCATIONS",
+  "SUPPLIERS",
+  "PENDING_UNITS",
+  "ACCESS_REQUESTS",
+  "INFRA_NODES",
+  "CONSUMABLE_MOVEMENTS",
+  "CONSUMABLE_DELIVERIES",
+  "ARTICLES",
 ] as const;
 export const DataExportResourceSchema = z.enum(DATA_EXPORT_RESOURCES);
 export type DataExportResource = z.infer<typeof DataExportResourceSchema>;
