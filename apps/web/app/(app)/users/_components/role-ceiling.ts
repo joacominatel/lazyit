@@ -1,13 +1,11 @@
-import { canManageRole, type Role } from "@lazyit/shared";
+import { canManageRole, type Role, RoleSchema } from "@lazyit/shared";
 import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
-
-export const ROLE_VALUES: Role[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 // Mirrors the API's SEC-088 ceiling; nothing is offered while the caller's role is unknown.
 export function assignableRoles(callerRole: Role | undefined): Role[] {
   if (!callerRole) return [];
-  return ROLE_VALUES.filter((role) => canManageRole(callerRole, role));
+  return RoleSchema.options.filter((role) => canManageRole(callerRole, role));
 }
 
 export function canManageUser(callerRole: Role | undefined, target: { role: Role }): boolean {

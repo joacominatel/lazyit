@@ -31,7 +31,7 @@ import {
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 
-export type ImpactGroupKey =
+type ImpactGroupKey =
   | "assets"
   | "childLocations"
   | "purchaseOrders"
@@ -46,7 +46,7 @@ export interface ImpactGroupView {
 }
 
 
-export interface TargetPickerProps {
+interface TargetPickerProps {
   id: string;
   value: string;
   onValueChange: (value: string) => void;
@@ -58,7 +58,7 @@ export interface TargetPickerProps {
   created: { id: string; name: string } | null;
 }
 
-export interface DeleteResolutionDialogProps {
+interface DeleteResolutionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   entityKey: "location" | "category";

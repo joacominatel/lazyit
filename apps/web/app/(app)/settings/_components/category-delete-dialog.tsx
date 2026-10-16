@@ -26,7 +26,7 @@ import {
 import { useCan } from "@/lib/hooks/use-permissions";
 
 /** The category kinds whose delete takes one resolution for their items (AUD-085). */
-export type ResolvableCategoryKind = "application" | "consumable";
+type ResolvableCategoryKind = "application" | "consumable";
 
 export function CategoryDeleteDialog({
   kind,

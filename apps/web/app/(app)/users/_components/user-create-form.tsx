@@ -59,8 +59,6 @@ import { wireShapeResolver } from "./user-form-payload";
 
 const FORM_ID = "user-create-form";
 
-/** Role values shown in the create Select (the shared enum's order; labels resolved via i18n). */
-
 /** A blank manager picker (no manager recorded). */
 const EMPTY_MANAGER: ManagerFormValue = { kind: "none" };
 
