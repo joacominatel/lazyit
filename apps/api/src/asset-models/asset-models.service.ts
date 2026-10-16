@@ -249,6 +249,12 @@ export class AssetModelsService {
         SELECT "id" FROM "assets"
          WHERE "modelId" = ${id} AND "deletedAt" IS NULL
          ORDER BY "id" FOR UPDATE`;
+        // Purchase before line, as every purchase write locks; SHARE also waits out a status change or archive in flight.
+        await tx.$queryRaw`
+        SELECT "id" FROM "purchase_orders"
+         WHERE "id" IN (SELECT "purchaseOrderId" FROM "purchase_order_lines"
+                         WHERE "assetModelId" = ${id} AND "deletedAt" IS NULL)
+         ORDER BY "id" FOR SHARE`;
         const lines = await this.openLines(tx, id, true);
         if (assets.length + lines.length > 0) {
           if (!resolution) {
