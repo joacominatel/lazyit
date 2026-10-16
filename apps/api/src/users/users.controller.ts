@@ -467,7 +467,8 @@ export class UsersController {
   @Post()
   @RequirePermission('user:manage')
   @ApiOperation({
-    summary: 'Create a user — ADMIN only (can set the RBAC role)',
+    summary:
+      'Create a user — user:manage; the role can be at most the caller’s own (SEC-088)',
   })
   @ApiCreatedResponse({ type: UserDto })
   create(@Body() dto: CreateUserDto, @CurrentUser() actor?: User) {
@@ -479,7 +480,7 @@ export class UsersController {
   @RequirePermission('user:manage')
   @ApiOperation({
     summary:
-      'Clone a user with chosen actions — ADMIN only (ADR-0058). Mints a NEW user and mirrors the SOURCE’s selected active assignments + grants.',
+      'Clone a user with chosen actions — user:manage, at or below the caller’s role (SEC-088) (ADR-0058). Mints a NEW user and mirrors the SOURCE’s selected active assignments + grants.',
     description:
       'A clone is a CREATE with extras: `:id` is the SOURCE (must be live). The body’s `profile` is a ' +
       'normal CreateUser payload (the new identity); the clone NEVER copies the source email/legajo/' +
@@ -505,7 +506,7 @@ export class UsersController {
   @RequirePermission('user:manage')
   @ApiOperation({
     summary:
-      'Update a user — ADMIN only. Can change first/last name, email and the RBAC role.',
+      'Update a user — user:manage, at or below the caller’s role (SEC-088). Can change first/last name, email and the RBAC role.',
     description:
       'A plain database write; nothing is written to the identity provider (ADR-0102). externalId ' +
       'can never be set here (SEC-006).',
@@ -527,7 +528,7 @@ export class UsersController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Trigger a password reset for a user — ADMIN only (issue #149, #1268)',
+      'Trigger a password reset for a user — user:manage, at or below the caller’s role (SEC-088) (issue #149, #1268)',
     description:
       'OIDC mode: 501 ("managed by your identity provider") — the operator’s IdP owns the credential ' +
       'and its reset (ADR-0102 §5). LOCAL mode (AUTH_MODE=local, ADR-0086 §5): there ' +
@@ -615,7 +616,8 @@ export class UsersController {
   @Delete(':id')
   @RequirePermission('user:manage')
   @ApiOperation({
-    summary: 'Offboard (soft-delete) a user — ADMIN only',
+    summary:
+      'Offboard (soft-delete) a user — user:manage, at or below the caller’s role (SEC-088)',
     description:
       'Soft-deletes the user and, in one transaction, revokes all their active access grants and ' +
       'releases all their active asset assignments (with RELEASED history). Returns the offboarding ' +
@@ -645,7 +647,7 @@ export class UsersController {
   @RequirePermission('user:manage')
   @ApiOperation({
     summary:
-      'Offboard a user (explicit alias of DELETE /users/:id) — ADMIN only',
+      'Offboard a user (explicit alias of DELETE /users/:id) — user:manage, at or below the caller’s role (SEC-088)',
     description:
       'Same effect as DELETE /users/:id: soft-delete + revoke grants + release assignments, all in ' +
       'one transaction. Provided as an intention-revealing verb for the offboarding flow.',
@@ -671,7 +673,8 @@ export class UsersController {
   @Post(':id/restore')
   @RequirePermission('user:manage')
   @ApiOperation({
-    summary: 'Restore (re-onboard) a soft-deleted user — ADMIN only (ADR-0041)',
+    summary:
+      'Restore (re-onboard) a soft-deleted user — user:manage, at or below the caller’s role (SEC-088) (ADR-0041)',
     description:
       'Clears deletedAt so the account exists and can log in again. Does NOT re-grant the access or ' +
       're-assign the assets that offboarding revoked/released — those are separate, intentional acts.',
@@ -693,7 +696,7 @@ export class UsersController {
   @RequirePermission('user:manage')
   @ApiOperation({
     summary:
-      'Onboard a directory person with a one-time temporary password — ADMIN only, LOCAL mode (ADR-0086)',
+      'Onboard a directory person with a one-time temporary password — user:manage, at or below the caller’s role (SEC-088), LOCAL mode (ADR-0086)',
     description:
       'AUTH_MODE=local only: mints a one-time temporary password for a directory-only person (created by ' +
       'the bulk import, no login), hashes it, sets mustChangePassword, flips directoryOnly to false so the ' +

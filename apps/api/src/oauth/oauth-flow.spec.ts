@@ -939,7 +939,6 @@ describe('verifyAccessToken — the /mcp resource-server check', () => {
         clientId,
         clientName: 'Claude Code',
         scopes: ['lazyit.read', 'lazyit.write'],
-        lastUsedAt: expect.any(Date),
       },
       resource: RESOURCE,
       expiresAt: expect.any(Date),

@@ -86,6 +86,10 @@ records or to grant application access — lazyit marks it clearly and asks you 
 is a meaningful delegation. It does not stop you: handing a trusted Member the ability to delete is a
 legitimate choice. Administrator, by contrast, is never editable.
 
+Delegating **Manage users** has a ceiling: a Member or Viewer who holds it can only give out their own
+role or a lower one, and can only act on users at or below their role. Only an admin manages admins.
+See [Roles](/help/users-permissions-roles#built-in-safety-rules).
+
 > Permissions are about **areas**, not individual records. lazyit does not have per-record access
 > control as a general feature — if a role can read assets, it can read all assets. (The Knowledge
 > Base folders and the Secret Manager vaults are the two deliberate exceptions, where access is

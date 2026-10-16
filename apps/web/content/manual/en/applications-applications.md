@@ -48,8 +48,10 @@ set — **SaaS, Internal, Service, Third Party, Infrastructure, Other** — but 
 yours to manage: rename them, add your own, or remove ones you don't use. A category is optional;
 an application with no category is perfectly valid.
 
-Deleting a category never deletes the applications in it — it simply **detaches** them, leaving
-them uncategorized. Nothing is lost.
+Deleting a category never deletes the applications in it. When it still has applications, lazyit
+shows you which ones and asks for **one decision for all of them**: leave them uncategorized, or move
+them to another category (create a new one first if you want a fresh one). Nothing is lost, and
+restoring the category later does not bring them back.
 
 ## Finding applications
 

@@ -3,7 +3,7 @@ title: "AI assistant — MCP server, lazyit as OAuth 2.1 authorization server, a
 tags: [ai-assistant, mcp, oauth, auth, security, design]
 status: draft
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # MCP server, OAuth 2.1 authorization server, and the instance-served skill
@@ -385,7 +385,7 @@ DCR creates a new client per connection anyway; always-prompt defeats silent re-
 | Token | `{origin}/oauth/token` (form-urlencoded) | api | public client (`client_id`) |
 | Registration (DCR) | `{origin}/oauth/register` (JSON) | api | none, rate-limited |
 | Revocation (RFC 7009) | `{origin}/oauth/revoke` | api | `client_id` |
-| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session + `ai:connect` |
+| My connections | `{origin}/api/oauth/grants/mine` (list/revoke) · `{origin}/api/oauth/personal-tokens` (`lan` only) | api | session; listing grants and minting a personal token need `ai:connect`, listing your personal tokens and revoking your own need none |
 | All users' connections (admin) | `{origin}/api/oauth/grants?userId=` (list/revoke) | api | session + `settings:manage` |
 | Plugin marketplace + archive (public) | `{origin}/api/ai/claude-code/marketplace.json`, `…/lazyit-plugin.zip` | api | none — only when MCP is enabled on an HTTPS instance (R8) |
 | Plugin download (authenticated) | `{origin}/api/ai/claude-code/plugin.zip` | api | session + `ai:connect`; always available while MCP is enabled |
@@ -614,6 +614,7 @@ model OAuthGrant {
   mcpCredentialEpoch Int                    // snapshot; mismatch with User.mcpCredentialEpoch = dead (R7)
   expiresAt     DateTime?                   // personal tokens only
   lastUsedAt    DateTime?
+  announcedAt   DateTime?                   // first-use notice sent (AUD-014); null = never announced
   revokeReason  String?                     // 'user' | 'admin' | 'refresh_reuse' | 'revocation_endpoint' | 'client_deleted'
   revokedById   String?   @db.Uuid
   createdAt     DateTime  @default(now())
@@ -1229,11 +1230,15 @@ configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected
 once per connection across replicas and restarts; a per-process memo spares the lookups and is set only
 once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
 follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
-always lands). A grant older
-than the bell's 90-day retention that was already used is not announced again (its notice was sent and
-may have been pruned); one never used before — `lastUsedAt` null when the request verified it, as for a
-personal token minted and kept idle — is announced whatever its age. An OAuth grant counts as used from
-its code exchange, so an old one is never re-announced. Service Accounts
+always lands). Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
+(AUD-014), never inferred from its age or `lastUsedAt`, so the bell's 90-day prune cannot make a grant
+that was never announced look announced — a personal token minted and first used months later is still
+announced. The column is set only once the notice row exists: two concurrent first uses both emit, the
+unique `dedupeKey` makes the loser a no-op (no row, no email), and both then stamp. A failed send stamps
+nothing, so the next request retries. A grant with `announcedAt` null whose notice row exists (sent
+before the column, or by an older replica during a rolling update) counts as announced and gets the
+column filled in. A legacy grant whose notice was already pruned by the 90-day retention before it was
+stamped is announced once more on its next use — an extra notice, never a missed one. Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
 token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).
@@ -1248,7 +1253,7 @@ ledger, never retried. Not started under `NODE_ENV=test`.
 | Route | Answers |
 | --- | --- |
 | `POST /oauth/personal-tokens` | `ai:connect`, human only. Body `CreatePersonalTokenSchema`: `label`, `expiresInDays` (default 90, 1–365), `scopes` (optional, `lazyit.read` / `lazyit.write`, default both; **`lazyit.admin` is refused** — by the schema and again by the service, G3 F7). 201 `PersonalTokenCreated` — the token once, `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance; 403 `{ code: "AI_DISABLED" }` while MCP is off or in the shim; 409 past 20 live tokens per user — counted and created in one transaction under a per-user `pg_advisory_xact_lock` (G3 F4). |
-| `GET /oauth/personal-tokens` | `ai:connect`: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant` |
+| `GET /oauth/personal-tokens` | No permission, human only: the caller's live personal tokens (not revoked, unexpired, current `mcpCredentialEpoch`) as `OAuthGrant`. A user who lost `ai:connect` still sees, and can revoke, the tokens they hold (AUD-083) |
 | `DELETE /oauth/personal-tokens/:id` | 204; the caller's own personal token only, 404 otherwise (the admin path is `DELETE /oauth/grants/:id`) |
 
 A personal token is a grant (`kind: "personal"`, `label`, `scopes`, `expiresAt`, the user's

@@ -19,8 +19,6 @@ export interface McpCaller {
     clientId: string | null;
     clientName: string | null;
     scopes: OAuthScope[];
-    /** The grant's `lastUsedAt` as read before this request stamped it; null = never used. */
-    lastUsedAt: Date | null;
   };
   /** The tool-class ceiling: the scopes (R7), or the Service Account's AI access setting. */
   ceiling: readonly AiToolClass[];

@@ -1,4 +1,7 @@
-import { validateBootConfig } from './boot-config';
+import {
+  OIDC_AUDIENCE_DISABLED_WARNING,
+  validateBootConfig,
+} from './boot-config';
 
 // validateBootConfig calls process.exit(1) on a bad config; spy on it so the test process survives
 // and we can assert it was (or was not) called. The spy throws a sentinel so control flow stops at
@@ -27,6 +30,7 @@ describe('validateBootConfig (fail-loud boot config)', () => {
     DATABASE_URL: 'postgres://u:p@localhost:5432/db',
     OIDC_ISSUER: 'https://auth.example.com',
     OIDC_JWKS_URI: 'https://auth.example.com/.well-known/jwks.json',
+    OIDC_CLIENT_ID: 'lazyit-web',
     WEB_ORIGIN: 'http://localhost:3000',
   };
 
@@ -284,6 +288,41 @@ describe('validateBootConfig (fail-loud boot config)', () => {
 
     it('stays silent in local mode, which never read it', () => {
       validateBootConfig({ ...LOCAL_OK, IDENTITY_PROVIDER_TYPE: 'zitadel' });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('OIDC_CLIENT_ID unset in OIDC mode (SEC-012, AUD-012)', () => {
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it('still boots, with one warning that audience validation is off', () => {
+      expect(() =>
+        validateBootConfig({ ...OIDC_OK, OIDC_CLIENT_ID: undefined }),
+      ).not.toThrow();
+      expect(() =>
+        validateBootConfig({ ...OIDC_OK, OIDC_CLIENT_ID: '' }),
+      ).not.toThrow();
+      expect(exitSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(OIDC_AUDIENCE_DISABLED_WARNING);
+      expect(OIDC_AUDIENCE_DISABLED_WARNING).toContain('OIDC_CLIENT_ID');
+    });
+
+    it('stays silent when OIDC_CLIENT_ID is set, and in the modes that never verify an OIDC token', () => {
+      validateBootConfig({ ...OIDC_OK });
+      validateBootConfig({ ...LOCAL_OK });
+      validateBootConfig({
+        AUTH_MODE: 'shim',
+        DATABASE_URL: 'postgres://u:p@localhost:5432/db',
+      });
       expect(warnSpy).not.toHaveBeenCalled();
     });
   });

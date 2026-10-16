@@ -27,10 +27,10 @@ applies audience validation conditionally:
   ? { audience: process.env.OIDC_CLIENT_ID }
   : {}),
 ```
-(`apps/api/src/auth/jwt-auth.guard.ts:405-409`).
+(`apps/api/src/auth/jwt-auth.guard.ts:410-414`).
 
 The boot contract requires `OIDC_ISSUER` + `OIDC_JWKS_URI` in OIDC mode but leaves `OIDC_CLIENT_ID`
-optional (`apps/api/src/auth/boot-config.ts:63`, no `.refine` requires it). When it is unset, the guard
+optional (`apps/api/src/auth/boot-config.ts:66`, no `.refine` requires it). When it is unset, the guard
 accepts any token that (a) is signed by a key in the issuer's JWKS and (b) carries a `sub` — the `aud`
 claim is never checked. On an OIDC issuer that serves more than one client/relying party (a realistic
 BYOI case: one Keycloak/Authentik/Zitadel instance fronting several apps), a token issued for *another*
@@ -40,8 +40,8 @@ token's `sub` as a lazyit user.
 The comment explains the optionality: some IdPs issue access tokens whose `aud` is a resource or API
 identifier rather than the client id, so pinning `OIDC_CLIENT_ID` could reject valid tokens. That is a
 legitimate OAuth subtlety, but the result is that the safe default (validate audience) is silently
-disabled rather than replaced with a correct audience check, and nothing warns the operator that
-audience validation is off.
+disabled rather than replaced with a correct audience check. Until the 2026-10-15 decision below,
+nothing warned the operator that audience validation was off.
 
 ## Impact
 
@@ -53,7 +53,7 @@ client of the shared issuer and enables a confused-deputy: a user who only ever 
 can have their token replayed against lazyit.
 
 Mitigating context: the guided BYOI install asks for the client id and writes `OIDC_CLIENT_ID`
-(`infra/start.sh:1177`, `:525`), and the `/setup` environment snippet lists it
+(`infra/start.sh:1178`, `:525`), and the `/setup` environment snippet lists it
 (`apps/web/app/setup/_components/byoi-snippet.tsx:19`), so an instance configured either way validates
 the audience. The exposure is an instance whose `.env.prod` was written by hand without it, on an issuer
 shared with other apps — hence **Low**. Before [[0102-remove-bundled-zitadel|ADR-0102]] the bundled
@@ -71,8 +71,9 @@ Reasoned, **not executed** (no IdP/API is run during review). With `AUTH_MODE` O
 
 ## Affected
 
-- `apps/api/src/auth/jwt-auth.guard.ts:289-292` — audience validated only when `OIDC_CLIENT_ID` is set.
-- `apps/api/src/auth/boot-config.ts:32` — `OIDC_CLIENT_ID` is optional in OIDC mode (no `.refine`).
+- `apps/api/src/auth/jwt-auth.guard.ts:410-414` — audience validated only when `OIDC_CLIENT_ID` is set.
+- `apps/api/src/auth/boot-config.ts:66` — `OIDC_CLIENT_ID` is optional in OIDC mode (no `.refine`);
+  `:149-152` warns at boot when it is unset (the decision below).
 
 ## Recommendation
 
@@ -114,3 +115,21 @@ requirements on live installs; the batch recommendation is to keep it optional w
 PR #1577 touched `jwt-auth.guard.ts` only to add a timeout to the first-login discovery and userinfo
 fetches (AUD-036); the audience option is still set only when `OIDC_CLIENT_ID` is
 (`apps/api/src/auth/jwt-auth.guard.ts:410-413`).
+
+## Decision (2026-10-15): accepted — optional with a boot warning
+
+The CEO accepted the batch recommendation for AUD-012: `OIDC_CLIENT_ID` **stays optional** in OIDC mode,
+because making it required would refuse to boot any live install whose hand-written `.env.prod` lacks it,
+and because some IdPs put a resource audience, not the client id, in their access tokens. The silent
+default is gone instead: when `AUTH_MODE=oidc` and `OIDC_CLIENT_ID` is unset or empty,
+`validateBootConfig` logs one `WARNING` line at boot naming the variable and the risk (audience
+validation disabled; a token issued to another app on the same IdP is accepted) —
+`apps/api/src/auth/boot-config.ts:41-42,149-152`, tested in `boot-config.spec.ts`. The repository has
+no in-app surface for boot or configuration warnings (the legacy `IDENTITY_PROVIDER_TYPE` notice is a boot
+log line too), so the log is where it surfaces. Local and shim modes never verify an OIDC token and stay
+silent.
+
+The residual risk is accepted at **Low**: an operator who ignores the warning on an issuer shared with
+other apps keeps the exposure described above. The guided install and the `/setup` snippet still write
+the variable. A configurable audience list (`OIDC_AUDIENCE`) remains a possible future hardening, not
+planned.

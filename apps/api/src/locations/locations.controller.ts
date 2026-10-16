@@ -19,6 +19,7 @@ import {
 import { createZodDto } from 'nestjs-zod';
 import {
   CreateLocationSchema,
+  LocationDeleteImpactSchema,
   LocationDetailSchema,
   LocationListPageSchema,
   LocationSchema,
@@ -29,7 +30,10 @@ import {
 import { LocationsService, LOCATION_SORT_ALLOWLIST } from './locations.service';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { parseDeleteResolution } from '../common/delete-resolution';
 import { CurrentUser } from '../auth/current-user.decorator';
+import { CurrentPrincipal } from '../auth/current-principal.decorator';
+import type { Principal } from '../auth/principal';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import type { User } from '../../generated/prisma/client';
 
@@ -39,6 +43,9 @@ class LocationDetailDto extends createZodDto(LocationDetailSchema) {}
 class LocationListPageDto extends createZodDto(LocationListPageSchema) {}
 class CreateLocationDto extends createZodDto(CreateLocationSchema) {}
 class UpdateLocationDto extends createZodDto(UpdateLocationSchema) {}
+class LocationDeleteImpactDto extends createZodDto(
+  LocationDeleteImpactSchema,
+) {}
 
 @ApiTags('locations')
 @Controller('locations')
@@ -165,12 +172,51 @@ export class LocationsController {
     return this.locations.update(id, dto);
   }
 
+  @Get(':id/delete-impact')
+  @RequirePermission('location:delete')
+  @ApiOperation({
+    summary:
+      'What deleting this location would re-point or detach: live assets, live child locations and open purchases (counts, plus the first 50 of each kind the caller may read).',
+  })
+  @ApiOkResponse({ type: LocationDeleteImpactDto })
+  deleteImpact(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.locations.deleteImpact(id, principal);
+  }
+
   @Delete(':id')
   @RequirePermission('location:delete')
-  @ApiOperation({ summary: 'Soft-delete a location — ADMIN only' })
+  @ApiOperation({
+    summary:
+      'Soft-delete a location — ADMIN only. While live assets, child locations or open purchases still point at it, give ONE strategy for all of them (409 DELETE_RESOLUTION_REQUIRED otherwise).',
+  })
+  @ApiQuery({
+    name: 'strategy',
+    required: false,
+    enum: ['detach', 'move'],
+    description:
+      'detach: assets lose their location, child locations become top-level, open purchases lose their delivery location. move: all of them go to targetId.',
+  })
+  @ApiQuery({
+    name: 'targetId',
+    required: false,
+    description:
+      'With strategy=move: a live location that is neither this one nor inside it.',
+  })
   @ApiOkResponse({ type: LocationDto })
-  remove(@Param('id') id: string) {
-    return this.locations.remove(id);
+  remove(
+    @Param('id') id: string,
+    @Query('strategy') strategy?: string,
+    @Query('targetId') targetId?: string,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.locations.remove(
+      id,
+      parseDeleteResolution(strategy, targetId),
+      principal,
+    );
   }
 
   @Post(':id/restore')

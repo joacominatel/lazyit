@@ -49,11 +49,19 @@ adivinar.)
 - **Filtrar** — el cuadro de filtro sobre cada lista la acota por nombre o descripción.
 
 **Qué hace eliminar una categoría.** Eliminar una categoría de activos, aplicaciones o consumibles es
-un **borrado lógico**: la categoría se oculta, nunca se borra, y se puede restaurar. lazyit **no** te
-impide eliminar una categoría que está en uso. Los registros archivados en ella conservan todos sus
-datos, pero se muestran **sin categoría** hasta que se restaure la categoría o los clasifiques en otra.
-La confirmación dice cuántos registros son (*La usan 42 activos — conservan sus registros, pero se
-muestran sin categoría hasta que se restaure*). Todavía no hay una lista de categorías eliminadas en
+un **borrado lógico**: la categoría se oculta, nunca se borra, y se puede restaurar.
+
+- Una **categoría de aplicaciones o de consumibles** que todavía tiene ítems te pide **una sola
+  decisión para todos** — nunca ítem por ítem — después de mostrarte cuáles son: **dejarlos sin
+  categoría** o **moverlos a otra categoría** del mismo tipo (para clasificarlos en una nueva, créala
+  primero y luego muévelos ahí). El movimiento y la eliminación ocurren juntos, y restaurar la
+  categoría después no devuelve los ítems.
+- Una **categoría de activos** en uso se puede eliminar directamente: sus registros conservan todos sus
+  datos, pero se muestran **sin categoría** hasta que se restaure o los clasifiques en otra. La
+  confirmación dice cuántos registros son (*La usan 42 activos — conservan sus registros, pero se
+  muestran sin categoría hasta que se restaure*).
+
+Todavía no hay una lista de categorías eliminadas en
 Configuración; un administrador puede restaurar una a través de la API
 (`POST /api/asset-categories/{id}/restore`, y lo mismo en `application-categories` y
 `consumable-categories`).
@@ -129,9 +137,10 @@ ninguno. Por eso importa mantener la lista curada: renombra una categoría una v
 que la referencian lo reflejan.
 
 Quitar una entrada de taxonomía sigue las mismas reglas de **borrado lógico y auditoría** que el resto
-del dominio: la entrada se oculta, no se borra, y los registros que la referencian se conservan. Un
-registro cuya categoría se eliminó simplemente se muestra sin ella. Revisa el recuento **En uso** antes
-de eliminar, y clasifica primero los registros en otra entrada si deben conservar una.
+del dominio: la entrada se oculta, no se borra, y los registros que la referencian se conservan. Las
+categorías de aplicaciones y de consumibles preguntan adónde van sus ítems cuando eliminas una en uso;
+un registro cuya categoría de activos se eliminó simplemente se muestra sin ella. Revisa el recuento
+**En uso** antes de eliminar.
 
 ## Dónde gestionar la configuración relacionada
 

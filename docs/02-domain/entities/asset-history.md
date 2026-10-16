@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-15
 ---
 
 # AssetHistory
@@ -87,6 +87,10 @@ cleared).
 - [[asset-status-label]] service — `STATUS_CHANGED`, one row per asset moved when a custom status in use is
   archived (to another custom status or a bare built-in status), live and archived assets alike, in the
   archive's transaction ([[0101-custom-asset-statuses]]).
+- [[location]] service — `LOCATION_CHANGED` (`{ from, to }`, `to: null` on detach), one row per live asset
+  when a location in use is deleted with a resolution, written in **one** `createMany`
+  (`AssetHistoryService.recordMany`, which attributes and stamps `aiInvocationId` exactly like `record`)
+  in the delete's transaction (AUD-024).
 - [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
   (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
 - [[consumable]] service — `CONSUMABLE_DELIVERED` (an `OUT` targeting this asset) and

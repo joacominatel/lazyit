@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # RolePermission
@@ -43,7 +43,10 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   may grant MEMBER or VIEWER a `:delete` or a coarse verb (`settings:manage` / `user:manage` /
   `accessGrant:grant`); the only guardrails are *ADMIN-immutable* + *catalog-membership*. The UI marks
   these ⚠ "Admin-level" and confirms, but the server does not block — an admin-initiated delegation is
-  accepted by design.
+  accepted by design. A delegated `user:manage` is bounded by the **role ceiling** (SEC-088, 2026-10-15):
+  the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the
+  Users API ([[user]] → *RBAC safety guards*). A delegated `settings:manage` is not bounded yet: it can
+  still edit the matrix for its own role (SEC-088, open).
 - **Seeded behavior-preserving, with two pre-tightened reads.** The seed is derived 1:1 from a single
   source-of-truth constant `DEFAULT_ROLE_PERMISSIONS` ([[shared-package]]) so the documented matrix and
   the seeded rows can never drift (a wrong seed fails the golden test). The seeded matrix:

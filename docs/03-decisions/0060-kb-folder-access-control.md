@@ -3,7 +3,7 @@ title: "ADR-0060: Knowledge Base access control — folders as the permission bo
 tags: [adr, knowledge-base, kb, authorization, security]
 status: accepted
 created: 2026-06-11
-updated: 2026-09-10
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -276,6 +276,8 @@ suspenders** pattern of [[0048-service-accounts]] / [[0058-user-manager-and-clon
 > (the UI padlock+tooltip is presentation; the API returns 404-not-403 for folder-hidden articles,
 > reusing the [[0022-draft-visibility-auth-shim]] existence-hiding pattern). **No-escalation:** you can
 > never alias/share an article you cannot yourself access.
+> **Audience changes are authorization writes:** an article move checks the destination (§9), a folder
+> move needs `settings:manage` and is audited, and a folder create needs read access to its parent (§10).
 
 ### §7. Future: alias-as-share (Phase 2, reserved)
 
@@ -399,6 +401,59 @@ pass §4 on the *destination*.
 >
 > **Still open, unchanged by this amendment:** the two blind-write findings above (`POST /articles`
 > into an unreadable folder, and the unchecked alias destination) remain separate product calls.
+
+### §10. Moving or creating a folder — a re-parent is a `settings:manage` write
+
+> [!note] Amendment — 2026-10-15, decided by the CEO, closes [[SEC-089-kb-folder-reparent-widens-read-access|SEC-089]] (AUD-001)
+> §1 makes a folder's effective audience the intersection of every restricted folder on its ancestor
+> path, so a folder's **position** is half of its rule. `PATCH /article-categories/:id` accepted a new
+> `parentId` under `category:write` alone (MEMBER holds it by default), checked only liveness and the
+> cycle guard, and wrote no record. Moving "HR / Salaries" to the root made every article in it
+> readable to every `article:read` holder. §9 had closed the article-sized version of this; the
+> folder-sized one stayed open.
+
+**The move rule.** Any change of a folder's `parentId` — to another folder or to the root (`null`) —
+requires **`settings:manage`**, the same gate that writes a folder's access rules (§3). Without it the
+API answers **403** and nothing changes. A move re-scopes who may read a whole subtree at once, which
+is the authorization-management surface `settings:manage` already owns; it is not authoring. The
+permission resolves DB-first through the same resolver as the rule editor (a human's role → the
+matrix, ADMIN always full; a service account → its direct grants).
+
+- A body that repeats the folder's **current** `parentId` is not a move and is not gated, so an edit
+  that echoes the parent keeps working under `category:write`. Renaming, describing and ordering a
+  folder stay `category:write`.
+- The check runs inside the folder-tree advisory lock, after the folder's liveness (404) and before
+  the parent's liveness and the cycle guard (400). A 403 here confirms nothing: the folder list is
+  already readable by every `category:read` holder.
+- No destination-visibility check is added for a mover. A `settings:manage` holder can already rewrite
+  any folder's rules, so a narrower check would protect nothing.
+
+**Auditability.** A folder move writes the §9 record for every **live** article whose home folder is
+in the moved subtree: one `ArticleVersion` per article, in the same transaction, with a body identical
+to its latest state and attributed to the mover (`editedById`, or `serviceAccountId` for a service
+account; the shared `ArticleVersion` wire schema carries it as an optional `serviceAccountId`). The
+article rows are locked `FOR NO KEY UPDATE` before their version numbers are read, so a concurrent
+article edit cannot collide on `(articleId, version)`, while the `KEY SHARE` locks that FK inserts
+(links, aliases, wiki-links, attachments) take on the article row do not conflict with it. This reuses the one KB audit trail that exists, and
+inherits its limits: it records **that**, **when** and **by whom**, not the source and destination
+folder, and a move of a subtree with no live article leaves no row. A folder-level audit log with
+`from → to` needs its own table, an additive migration that was not authorized here.
+
+**The create rule.** Creating a folder under a parent requires that the caller can **read** the parent
+(§4, through `FolderAccessService`). An unreadable parent is the **same 400** as a missing one, with the
+same message, so the request confirms nothing about the restricted folder (the §9 existence-hiding
+rule on a request-body field). A new folder has no rule of its own and inherits the parent's (§1), so
+a create can never widen anyone's access; refusing it under an unreadable parent only stops a blind
+write into a space the caller cannot see. Creating at the root stays open to `category:write`.
+
+**Write-path only.** No existing folder is re-validated or moved. Folders already sitting wherever a
+past move left them stay there with their current audience; only a new change of `parentId`, and a
+new create, are checked.
+
+> [!question] Still open, unchanged by this amendment
+> The ZIP import (§5 of [[0059-kb-folders-links-and-import]]) creates sub-folders under the import's
+> root folder, which it checks for liveness only. That is the same open product call as §9's
+> `POST /articles` into an unreadable folder, and is left with it.
 
 ## Consequences
 

@@ -57,14 +57,25 @@ editor por rol, `/settings/roles/permissions`, ahora abre esta página.)
 
 ## Reglas de seguridad incorporadas
 
-Dos salvaguardas protegen la instancia de quedar bloqueada o de una escalada silenciosa:
+Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada silenciosa:
 
 - **No se puede quitar al último administrador.** lazyit se niega a degradar, desactivar o dar de baja
   al último administrador que queda — siempre debe haber al menos uno. Verás un mensaje claro en lugar
-  de que el cambio se aplique.
+  de que el cambio se aplique. Solo cuentan los administradores que realmente pueden iniciar sesión: un
+  administrador que nunca inició sesión con tu proveedor de identidad, un administrador sin contraseña en
+  una instalación con cuentas locales o una persona del directorio no mantienen la instancia
+  administrable.
+- **Nadie gestiona usuarios por encima de su propio rol.** Si le das a Miembro o a Lector la capacidad
+  **Gestionar usuarios**, esas personas solo pueden otorgar su propio rol o uno inferior, y solo pueden
+  editar, restablecer, dar de baja o restaurar a usuarios con un rol igual o inferior al suyo. Solo un
+  administrador puede crear un administrador, promover a alguien a administrador o actuar sobre un
+  administrador existente. Cualquier otra cosa se rechaza con un mensaje claro.
 - **No puedes cambiar tu propio rol.** Un administrador no puede promoverse ni degradarse a sí mismo; un
   cambio de rol debe hacerlo un administrador sobre otro. Esto evita que una sola persona eleve su
   propio acceso en silencio. (Sí puedes editar tu propio nombre, correo y otros datos.)
+- **El rol de una persona del directorio no se puede cambiar.** Las personas que llegan por una
+  importación o por la sincronización del directorio no tienen inicio de sesión y siguen siendo
+  **Lector** hasta que se las incorpora. Incorpóralas primero y luego cambia el rol.
 
 ## Una nota sobre tu proveedor de identidad
 

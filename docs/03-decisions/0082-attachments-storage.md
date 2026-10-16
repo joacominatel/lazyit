@@ -3,7 +3,7 @@ title: "ADR-0082: File attachments — filesystem volume, API-only serving, defe
 tags: [adr, attachments, storage, kb, assets, security, backups]
 status: accepted
 created: 2026-07-01
-updated: 2026-10-14
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -153,7 +153,9 @@ todo tirado"):
 equivalent), each guarded by the **parent's** permission:
 
 - Asset document → `asset:read`. KB image → the article's visibility check, **including the folder
-  ACL** ([[0060-kb-folder-access-control]]) and draft-privacy.
+  ACL** ([[0060-kb-folder-access-control]]) and draft-privacy — the by-id article read, which lets an
+  ADMIN / `article:manage` holder read a foreign draft, matching the attachment write gate
+  ([[0022-draft-visibility-auth-shim]] AUD-086 amendment).
 - **404, not 403,** on no-access — no existence leak (the Secret-Manager member-blind pattern).
 - Stream with **`StreamableFile` + `createReadStream`** (the existing pattern) — never buffer.
 - **Response headers (all mandatory):**

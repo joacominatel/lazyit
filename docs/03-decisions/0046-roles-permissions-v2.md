@@ -3,7 +3,7 @@ title: "ADR-0046: Roles & Permissions v2 — fixed roles, configurable permissio
 tags: [adr, auth, authz, rbac, permissions, security]
 status: accepted
 created: 2026-06-02
-updated: 2026-10-14
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -20,6 +20,9 @@ that, like roles, is never read from a token claim and never synced to the IdP.
 
 **Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: the three coarse roles no longer keep a
 `grantRole` write-back — lazyit writes nothing to the IdP, so roles are lazyit-local like permissions.
+
+**Amended** — 2026-10-15 (SEC-088, AUD-002): a delegated `user:manage` is bounded by a role ceiling. See
+*Amendment — the role ceiling on a delegated `user:manage`* below.
 
 > **Delivery status (2026-06-02):** P0–P7 are **delivered**. The foundation (P0+P1: catalog +
 > `RolePermission` table + seed + golden test), the enforcement layer (P2: the `@RequirePermission`
@@ -256,7 +259,8 @@ to Zitadel. Only the three coarse roles keep their existing `grantRole` mirror
       and `VIEWER` keys, so an `ADMIN`/extra key → 400; combined with the resolver's ADMIN-is-full
       short-circuit, ADMIN can never be scoped down (INV-8). MEMBER/VIEWER are otherwise fully
       configurable within the catalog (granting MEMBER a `:delete` or a coarse verb is the intended
-      feature — the only guardrails are ADMIN-immutable + catalog-membership).
+      feature — the only guardrails are ADMIN-immutable + catalog-membership). *Amended 2026-10-15:* a
+      delegated `user:manage` is additionally bounded by the role ceiling (see the amendment below).
     - **Transactional + audited + cache-coherent**: per editable role the desired set is diffed against
       the current rows; revoked rows are deleted and granted rows created in ONE `$transaction`, and one
       immutable `PermissionAuditLog` row is appended per change (`GRANT`/`REVOKE`, attributed to the
@@ -328,6 +332,20 @@ in the deployment config.
 unaffected. The TTL only bounds how long a cached answer lives; it does not change what the DB
 resolves. A cache entry expiring during a user's active session causes at most a single extra DB
 read on the next `@RequirePermission` check — no user-visible disruption.
+
+### Amendment — the role ceiling on a delegated `user:manage` (SEC-088, AUD-002, 2026-10-15)
+
+P5 and P7 accepted delegating the coarse verbs to MEMBER or VIEWER with no ceiling. For `user:manage`
+that made every holder ADMIN-equivalent: it could create an ADMIN, promote to ADMIN, or reset an ADMIN's
+password and sign in as them (SEC-088). By CEO decision the delegation stays, bounded: a holder grants and
+acts on roles at or below its own only, so only an ADMIN can create, promote to or act on an ADMIN. The
+rule, its error (`403 ROLE_CEILING_EXCEEDED`) and its service-account reading are specified in
+[[0040-rbac-roles]] → *Amendment — role ceiling and usable admins*.
+
+What stays as P5/P7 described: `user:manage` and the other coarse verbs remain grantable to MEMBER and
+VIEWER, and the matrix UI still warns rather than blocks. What is **not** bounded yet: a delegated
+`settings:manage` can still edit the matrix for its own role, and so grant itself `user:manage` (the
+second half of SEC-088, still open). Under the ceiling that reaches at most the holder's own role.
 
 ### Amendment — the `ai` permission domain (ADR-0097, #1315, 2026-09-26)
 

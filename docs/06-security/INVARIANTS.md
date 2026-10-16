@@ -210,6 +210,9 @@ always leave exactly one administrator.
   `assertNotLastAdmin` runs before a demotion away from ADMIN, a deactivation (`isActive=false`) and an
   offboard/delete, and counts only live (`deletedAt: null`) **and active** (`isActive: true`) ADMINs —
   an inactive account cannot authenticate, so it never keeps the instance administrable (SEC-021).
+  Since 2026-10-15 (AUD-040) a usable ADMIN is also **not directory-only** and holds a **login
+  credential** for the running mode — `passwordHash` in local mode, `externalId` under OIDC (the dev
+  shim needs none) — because an account that cannot sign in administers nothing.
 - `apps/api/src/directory/directory-reconcile.service.ts` — the AD/LDAP offboard sweep calls
   `UsersService.wouldRemoveLastAdmin` inside its own write transaction, under the same
   `lazyit.admin_set` advisory lock as the `PATCH /users` and offboard guards, and **skips** the last
@@ -448,6 +451,10 @@ catalog — the `article:read` capability still gates whether you may act at all
 **which** articles you see. The folder ACL **composes most-restrictive-wins** with draft visibility and
 `article:read`. **No-escalation:** you can **never alias or share** an article you cannot yourself access
 (an [[article-alias]] never widens access; INV-8 ADMIN omnipotence over visibility is consistent and intact).
+**A write that changes an article's or a folder's effective audience is an authorization write, gated and
+audited:** moving an article checks the destination (§9); moving a folder — any change of its `parentId`,
+the root included — needs `settings:manage` (403 otherwise) and is recorded on the version timeline of every
+live article in the subtree; creating a folder needs read access to its parent (§10).
 
 **Why.** KB documents are inherently access-tiered in a way assets/consumables are not, so the KB needs a
 data-scoping axis the flat per-domain catalog cannot express — but scoping to a **folder** (not a row) keeps
@@ -489,7 +496,11 @@ laundering access to a folder they cannot see.
   ADMIN full; service account → direct grants); anonymous / no principal fails closed (SEC-#554).
   Every folder write (`create`, `update`, `remove`, `restore`, `setAccessRules`) returns the same public
   select and never the rules, so `category:write` / `category:delete` cannot read them by writing
-  (SEC-087, #1301).
+  (SEC-087, #1301). `update` treats a **changed** `parentId` as a folder move: it resolves
+  `settings:manage` DB-first (the same resolver as the rule read), refuses with **403** without it, and
+  writes one `ArticleVersion` per live article in the moved subtree in the same transaction, under the
+  folder-tree lock; `create` with a `parentId` refuses an unreadable parent with the same 400 as a
+  missing one ([[0060-kb-folder-access-control]] §10, SEC-089).
 - DB / storage — the rule set is a zod-validated jsonb `accessRules` column on `ArticleCategory`
   (`FolderAccessRulesSchema` in `@lazyit/shared`, a CLOSED `users`/`role`/`appGrant`/`assetAssignment`
   vocabulary), set via `PUT /article-categories/:id/access-rules` (`settings:manage`, ADMIN-only). The
@@ -500,7 +511,8 @@ laundering access to a folder they cannot see.
   (folder-hidden → 404, no-escalation alias AND link, reverse-lookup folder pin), `search.service.spec.ts`
   (restricted hit excluded for a non-matching caller — the leak is closed), `article-categories.service.spec.ts`
   (accessRules omitted for non-admins, returned for `settings:manage`, and absent from every write
-  response), `folder.test.ts` (the closed
+  response; a folder move refused without `settings:manage`, to the root and to another folder, and
+  recorded on the subtree's articles with it; a create under an unreadable parent refused), `folder.test.ts` (the closed
   rule vocabulary).
 - Decision + data model: [[0060-kb-folder-access-control]], [[folder]], [[article-alias]].
 
@@ -577,12 +589,15 @@ rotation; the API imports no crypto capable of exploiting it.
 2. **Never holds an administrative role.** `CreateDirectoryPersonSchema` (strict, in `@lazyit/shared`)
    rejects any `role` field. The import path forces VIEWER unconditionally; the regular `PATCH /users`
    path can change the role, but only AFTER the person is promoted (`directoryOnly = false`) — a
-   VIEWER directory person can never reach ADMIN status while it remains directory-only.
+   VIEWER directory person can never reach ADMIN status while it remains directory-only. Enforced since
+   2026-10-15 (AUD-040): `UsersService.update` refuses a role change on a directory-only row with 422
+   `DIRECTORY_PERSON_ROLE_LOCKED`.
 3. **Excluded from the bootstrap first-user→ADMIN count** and the **last-admin guard count.**
    - `jwt-auth.guard.ts` bootstrap count: `where: { directoryOnly: false, includeSoftDeleted: true }`.
      Importing 200 directory persons cannot hand ADMIN to the first OIDC login.
-   - `users.service.ts` last-admin guard: filters `role: ADMIN, isActive: true`. A VIEWER directory
-     person is already excluded by the role filter — no extra clause needed.
+   - `users.service.ts` last-admin guard: filters `role: ADMIN, isActive: true, directoryOnly: false`
+     plus a login credential (AUD-040), so a directory row never counts, even one that reached ADMIN
+     before the role-change refusal existed.
    - `config.service.ts` setup path: filters `role: ADMIN` — same reasoning.
 
 **Why.** The "is User" shortcut (no `Person` model) means directory persons sit in the `users` table

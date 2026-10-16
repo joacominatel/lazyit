@@ -66,6 +66,7 @@ export class FakeOAuthPrisma {
       label: null,
       expiresAt: null,
       lastUsedAt: null,
+      announcedAt: null,
       revokeReason: null,
       revokedById: null,
       deletedAt: null,

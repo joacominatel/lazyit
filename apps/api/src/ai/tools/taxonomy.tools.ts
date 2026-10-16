@@ -17,13 +17,11 @@ import {
   type AiEntityType,
 } from '@lazyit/shared';
 import { ApplicationCategoriesController } from '../../application-categories/application-categories.controller';
-import { ApplicationsController } from '../../applications/applications.controller';
 import { AssetCategoriesController } from '../../asset-categories/asset-categories.controller';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetsController } from '../../assets/assets.controller';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
-import { ConsumablesController } from '../../consumables/consumables.controller';
 import { LocationsController } from '../../locations/locations.controller';
 import { AiReferenceError } from '../core/reference-resolver';
 import { untrusted } from '../core/result-shaper';
@@ -173,8 +171,9 @@ async function removeCategory(
   rt: AiToolRuntime,
   kind: CategoryKind,
   id: string,
+  query: Record<string, string> = {},
 ): Promise<Row> {
-  const shape = { params: { id } };
+  const shape = { params: { id }, query };
   switch (kind) {
     case 'assetCategory':
       return asRow(await rt.call(AssetCategoriesController, 'remove', shape));
@@ -330,28 +329,6 @@ function impactOf(
 /** Scans at most this many rows of an unfiltered list to count the ones pointing at a row. */
 const SCAN_PAGES = 5;
 
-/**
- * Count the rows of a paged list that point at `id` through `field`, scanning up to five pages of 200.
- * Past that the count is unknown (`null`): a partial scan never reports a number it did not see.
- */
-async function scanCount(
-  read: (offset: number) => Promise<{ items: unknown; total?: unknown }>,
-  matches: (row: Row) => boolean,
-): Promise<{ total: number; items: Row[] } | null> {
-  const hits: Row[] = [];
-  for (let pageNo = 0; pageNo < SCAN_PAGES; pageNo++) {
-    const offset = pageNo * Number(RESOLVE_PAGE);
-    const page = await read(offset);
-    const rows = asRows(page.items);
-    hits.push(...rows.filter(matches));
-    const total = typeof page.total === 'number' ? page.total : 0;
-    if (offset + rows.length >= total || rows.length === 0) {
-      return { total: hits.length, items: hits };
-    }
-  }
-  return null;
-}
-
 interface Impact {
   impacted: Impacted[];
   /** The kinds of dependents the caller could not count (their list is not readable, or too long). */
@@ -411,49 +388,12 @@ async function categoryImpact(
       );
       break;
     }
-    case 'applicationCategory': {
-      // The applications list has no category filter: count by scanning it (bounded).
-      collect(
-        impact,
-        'applications',
-        await counted(async () => {
-          const scan = await scanCount(
-            (offset) =>
-              rt.call(ApplicationsController, 'findAll', {
-                query: { limit: RESOLVE_PAGE, offset: String(offset) },
-              }),
-            (app) => app.categoryId === id,
-          );
-          if (scan === null) throw new ScanTooLong();
-          return impactOf('application', scan);
-        }).catch(unknownOnLongScan),
-      );
+    case 'applicationCategory':
+    case 'consumableCategory':
       break;
-    }
-    case 'consumableCategory': {
-      collect(
-        impact,
-        'consumables',
-        await counted(async () =>
-          impactOf(
-            'consumable',
-            await rt.call(ConsumablesController, 'findAll', {
-              query: { category: id, limit: '5' },
-            }),
-          ),
-        ),
-      );
-      break;
-    }
   }
   return impact;
 }
-
-class ScanTooLong extends Error {}
-const unknownOnLongScan = (err: unknown): undefined => {
-  if (err instanceof ScanTooLong) return undefined;
-  throw err;
-};
 
 /** The card rows an archive carries: archived false → true, plus what could not be counted. */
 function archiveChanges(impact: Impact): Change[] {
@@ -694,23 +634,142 @@ const categoryUpdate = defineTool({
   },
 });
 
+// ─── Delete resolution (AUD-024 / AUD-085): one choice for everything still filed under the row ───────
+
+const deleteStrategy = z
+  .enum(['detach', 'move'])
+  .optional()
+  .describe(
+    'What happens to everything still filed under it, ONE choice for all of it: detach (they keep no ' +
+      'reference) or move (they all go to `moveTo`). Required when anything is still there; ask the person.',
+  );
+
+const DETACHED = 'None (detached)';
+
+const resolutionFields = {
+  strategy: deleteStrategy,
+  moveTo: referenceString(
+    'With strategy move: where everything goes (id or exact name).',
+  ).optional(),
+};
+
+const moveToGoesWithMove = (v: { strategy?: string; moveTo?: string }) =>
+  (v.strategy === 'move') === (v.moveTo !== undefined);
+const MOVE_TO_RULE = {
+  message: 'moveTo goes with strategy move, and only with it',
+  path: ['moveTo'],
+};
+
+/** The live dependents a delete-impact read counted, by kind; zero kinds dropped. */
+function dependentsOf(impact: Row): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [kind, group] of Object.entries(impact)) {
+    const total = (group as { total?: unknown } | null)?.total;
+    if (typeof total === 'number' && total > 0) out[kind] = total;
+  }
+  return out;
+}
+
+/** The card's impact from a delete-impact read: exact counts, a sample only of what the caller may read. */
+function impactFromDelete(
+  response: Row,
+  kinds: [string, AiEntityType, ((row: Row) => string | undefined)?][],
+): Impact {
+  const impacted = kinds
+    .map(([key, type, label]) =>
+      impactOf(
+        type,
+        (response[key] ?? { items: null }) as {
+          items: unknown;
+          total?: unknown;
+        },
+        label,
+      ),
+    )
+    .filter((row): row is Impacted => row !== null);
+  return { impacted, unknown: [] };
+}
+
+/** Never a card for a delete the route would refuse with 409: the model is told what still depends on it. */
+function assertResolved(
+  label: string,
+  dependents: Record<string, number>,
+  strategy: string | undefined,
+): void {
+  if (Object.keys(dependents).length === 0 || strategy !== undefined) return;
+  const counts = Object.entries(dependents)
+    .map(([kind, n]) => `${n} ${kind}`)
+    .join(', ');
+  throw new ConflictException(
+    `${label} is still in use (${counts}). Ask the person what happens to all of them, then propose ` +
+      'again with strategy detach, or strategy move and moveTo.',
+  );
+}
+
 // ─── category_archive ────────────────────────────────────────────────────────────────────────────────
+
+const RESOLVABLE_KINDS: readonly CategoryKind[] = [
+  'applicationCategory',
+  'consumableCategory',
+];
+
+async function categoryDeleteImpact(
+  rt: AiToolRuntime,
+  kind: CategoryKind,
+  id: string,
+): Promise<Impact & { dependents: Record<string, number> }> {
+  const shape = { params: { id } };
+  let response: Row;
+  switch (kind) {
+    case 'applicationCategory':
+      response = asRow(
+        await rt.call(ApplicationCategoriesController, 'deleteImpact', shape),
+      );
+      return {
+        ...impactFromDelete(response, [['applications', 'application']]),
+        dependents: dependentsOf(response),
+      };
+    case 'consumableCategory':
+      response = asRow(
+        await rt.call(ConsumableCategoriesController, 'deleteImpact', shape),
+      );
+      return {
+        ...impactFromDelete(response, [['consumables', 'consumable']]),
+        dependents: dependentsOf(response),
+      };
+    case 'assetCategory':
+      return { ...(await categoryImpact(rt, kind, id)), dependents: {} };
+  }
+}
+
+function assertStrategyKind(kind: CategoryKind, strategy?: string): void {
+  if (strategy !== undefined && !RESOLVABLE_KINDS.includes(kind)) {
+    throw new BadRequestException(
+      '`strategy` applies to application and consumable categories only.',
+    );
+  }
+}
 
 const categoryArchive = defineTool({
   name: 'category_archive',
   title: 'Archive a category',
   description:
-    'Archive (soft-delete) an asset, application or consumable category by id or exact name. What is ' +
-    'filed under it keeps existing but shows no live category; an administrator can restore it from ' +
-    'the lazyit UI. The approval card shows how many models, assets, applications or consumables still ' +
-    'use it — check with the person before archiving one in use.',
+    'Archive (soft-delete) an asset, application or consumable category by id or exact name; an ' +
+    'administrator can restore it from the lazyit UI. An application or consumable category that still ' +
+    'has live items needs ONE `strategy` for all of them: detach (they keep no category) or move (they go ' +
+    'to `moveTo`, another category of the same kind). What sits under an asset category keeps existing ' +
+    'but shows no live category. The approval card shows what still uses it — check with the person ' +
+    'before archiving one in use.',
   domain: 'reference',
   class: 'write',
   destructive: true,
-  input: z.strictObject({
-    kind: categoryKind,
-    category: referenceString('The category: its id or exact name.'),
-  }),
+  input: z
+    .strictObject({
+      kind: categoryKind,
+      category: referenceString('The category: its id or exact name.'),
+      ...resolutionFields,
+    })
+    .refine(moveToGoesWithMove, MOVE_TO_RULE),
   bindings: [
     bind(AssetCategoriesController, 'remove'),
     bind(ApplicationCategoriesController, 'remove'),
@@ -718,14 +777,22 @@ const categoryArchive = defineTool({
     bind(AssetCategoriesController, 'findAll'),
     bind(ApplicationCategoriesController, 'findAll'),
     bind(ConsumableCategoriesController, 'findAll'),
+    bind(ApplicationCategoriesController, 'deleteImpact'),
+    bind(ConsumableCategoriesController, 'deleteImpact'),
     bind(AssetModelsController, 'findAll'),
     bind(AssetsController, 'findAll'),
-    bind(ApplicationsController, 'findAll'),
-    bind(ConsumablesController, 'findAll'),
   ],
   async run(input, rt) {
+    assertStrategyKind(input.kind, input.strategy);
     const { id } = await resolveCategory(rt, input.kind, input.category, false);
-    const archived = await removeCategory(rt, input.kind, id);
+    const query: Record<string, string> = {};
+    if (input.strategy !== undefined) query.strategy = input.strategy;
+    if (input.moveTo !== undefined) {
+      query.targetId = (
+        await resolveCategory(rt, input.kind, input.moveTo, false)
+      ).id;
+    }
+    const archived = await removeCategory(rt, input.kind, id, query);
     return {
       data: categoryResult(input.kind, archived),
       ...summaryPhrase(
@@ -738,13 +805,45 @@ const categoryArchive = defineTool({
     };
   },
   async preview(input, rt) {
+    assertStrategyKind(input.kind, input.strategy);
     const { row } = await resolveCategory(rt, input.kind, input.category, true);
     const current = row!;
-    const impact = await categoryImpact(rt, input.kind, String(current.id));
+    const id = String(current.id);
+    const impact = await categoryDeleteImpact(rt, input.kind, id);
+    const dependents = impact.dependents;
+    assertResolved(
+      `The ${KIND_LABEL[input.kind]} "${String(untrusted(str(current.name)))}"`,
+      dependents,
+      input.strategy,
+    );
+    const changes = archiveChanges(impact);
+    if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
+      const to = await resolveCategory(rt, input.kind, input.moveTo, true);
+      if (to.id === id) {
+        throw new BadRequestException(
+          'moveTo must be another category, not the one being archived.',
+        );
+      }
+      changes.push({
+        field: 'destination',
+        after: entityValue({
+          type: 'category',
+          id: to.id,
+          label: String(to.row!.name),
+        }),
+        valueKind: 'entity',
+      });
+    } else if (Object.keys(dependents).length > 0) {
+      changes.push({
+        field: 'destination',
+        after: DETACHED,
+        valueKind: 'text',
+      });
+    }
     const target = categoryRef(current, 'archived');
     return previewOf({
       target,
-      changes: archiveChanges(impact),
+      changes,
       warnings: ['SOFT_DELETE'],
       impacted: impact.impacted,
       precondition: preconditionOf(target, current),
@@ -1309,25 +1408,35 @@ const locationArchive = defineTool({
   name: 'location_archive',
   title: 'Archive a location',
   description:
-    'Archive (soft-delete) a location by id or exact name. Its assets keep pointing at it and its child ' +
-    'locations show as top-level until it is restored (location_restore). The approval card shows how ' +
-    'many assets and child locations it still has — check with the person before archiving one in use.',
+    'Archive (soft-delete) a location by id or exact name; it can be restored later (location_restore). ' +
+    'While live assets, child locations or open purchases still point at it, give ONE `strategy` for all ' +
+    'of them: detach (assets lose their location, child locations become top-level, purchases lose their ' +
+    'delivery location) or move (all of them go to `moveTo`, a live location that is not inside this ' +
+    'one). The approval card shows what it still has — ask the person which before archiving one in use.',
   domain: 'reference',
   class: 'write',
   destructive: true,
-  input: z.strictObject({
-    location: referenceString('The location: its id or exact name.'),
-  }),
+  input: z
+    .strictObject({
+      location: referenceString('The location: its id or exact name.'),
+      ...resolutionFields,
+    })
+    .refine(moveToGoesWithMove, MOVE_TO_RULE),
   bindings: [
     bind(LocationsController, 'remove'),
+    bind(LocationsController, 'deleteImpact'),
     bind(LocationsController, 'findOne'),
     bind(LocationsController, 'findAll'),
-    bind(AssetsController, 'findAll'),
   ],
   async run(input, rt) {
     const { id } = await resolveLocation(rt, input.location, false);
+    const query: Record<string, string> = {};
+    if (input.strategy !== undefined) query.strategy = input.strategy;
+    if (input.moveTo !== undefined) {
+      query.targetId = (await resolveLocation(rt, input.moveTo, false)).id;
+    }
     const archived = asRow(
-      await rt.call(LocationsController, 'remove', { params: { id } }),
+      await rt.call(LocationsController, 'remove', { params: { id }, query }),
     );
     return {
       data: locationResult(archived),
@@ -1347,37 +1456,50 @@ const locationArchive = defineTool({
       }),
     );
     const id = String(current.id);
-    const impact: Impact = { impacted: [], unknown: [] };
-    collect(
-      impact,
-      'assets',
-      await counted(async () =>
-        impactOf(
-          'asset',
-          await rt.call(AssetsController, 'findAll', {
-            query: { locationId: id, limit: '5' },
-          }),
-          (a) => str(a.assetTag) ?? undefined,
-        ),
-      ),
+    const response = asRow(
+      await rt.call(LocationsController, 'deleteImpact', { params: { id } }),
     );
-    // The locations list has no parent filter: count the children by scanning it (bounded).
-    const children = await scanCount(
-      (offset) =>
-        rt.call(LocationsController, 'findAll', {
-          query: { limit: RESOLVE_PAGE, offset: String(offset) },
+    const dependents = dependentsOf(response);
+    assertResolved(
+      `The location "${String(untrusted(str(current.name)))}"`,
+      dependents,
+      input.strategy,
+    );
+    const impact = impactFromDelete(response, [
+      ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
+      ['childLocations', 'location'],
+      ['purchaseOrders', 'purchaseOrder', (p) => str(p.reference) ?? undefined],
+    ]);
+    const changes = archiveChanges(impact);
+    if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
+      const to = await resolveLocation(rt, input.moveTo, true);
+      // Catches a move onto itself or below it along the live path; the route also refuses one through an archived link.
+      const toRow = asRow(
+        await rt.call(LocationsController, 'findOne', {
+          params: { id: to.id },
         }),
-      (l) => l.parentId === id,
-    );
-    collect(
-      impact,
-      'child locations',
-      children === null ? undefined : impactOf('location', children),
-    );
+      );
+      if (asRows(toRow.path).some((p) => p.id === id)) {
+        throw new BadRequestException(
+          'moveTo must be a location outside the one being archived.',
+        );
+      }
+      changes.push({
+        field: 'destination',
+        after: entityValue(to),
+        valueKind: 'entity',
+      });
+    } else if (Object.keys(dependents).length > 0) {
+      changes.push({
+        field: 'destination',
+        after: DETACHED,
+        valueKind: 'text',
+      });
+    }
     const target = locationRef(current, 'archived');
     return previewOf({
       target,
-      changes: archiveChanges(impact),
+      changes,
       warnings: ['SOFT_DELETE'],
       impacted: impact.impacted,
       precondition: preconditionOf(target, current),

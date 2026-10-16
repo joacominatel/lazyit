@@ -3,7 +3,7 @@ title: Location
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Location
@@ -51,15 +51,32 @@ employee". Answers half of the core audit question "what do we have and **where 
 - Every location is **classified** by a required `type` — hardcoded enum for now, with
   user-managed custom types deferred (see the Known-debt note below and [[0017-location-type-enum]]).
   The same `type` enum doubles as the hierarchy node **kind** (no separate kind field).
-- **Soft delete leaves children and assets in place (open — SEC-041).** Deleting a location only
-  stamps `deletedAt`: child locations, assets, consumable deliveries and purchase orders keep pointing
-  at it, and the `SetNull` FK never fires. Whether a delete should be refused while it is in use or
-  detach its children is an open product decision. Until then, children of an archived location stay
-  live and read as roots from that break.
+- **Delete with one resolution (AUD-024, closes the location half of SEC-041).** A delete affects the
+  location's **live assets**, its **live child locations** and its **open purchases** whose delivery
+  location it is — live, `DRAFT` or `ORDERED` (a status a newer build adds counts as closed), and either
+  a countable line still has units pending or there is no countable line at all. While any of them exists, the delete needs **one**
+  resolution for all of them, never one per row:
+  - `detach` — assets lose their location, child locations become top-level, open purchases lose
+    their delivery location;
+  - `move` — all of them go to one target location: live, not the location itself, and not one of its
+    descendants (`400` otherwise). "Create another location" is the client creating it first, then
+    deleting with `move` to it.
+
+  Without a resolution the delete is a `409` with code `DELETE_RESOLUTION_REQUIRED` and the counts,
+  so an older client, a script or the AI never strands rows silently. The resolution and the soft
+  delete run in **one transaction** under the tree lock (30 s timeout; the assets and purchases are
+  locked `FOR UPDATE`). Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
+  (`{ from, to }`, `to: null` on detach), all written in one insert, and each purchase an `UPDATED`
+  activity row for `deliveryLocationId`. History keeps its reference: consumable deliveries (an
+  append-only ledger), closed purchases, and archived assets and child locations still point at the
+  archived location. Restoring the location re-links nothing.
 - **Restore needs a live parent (AUD-080).** Restoring a location whose parent is still soft-deleted
   is a `409`: restore the parent first. Restores do not cascade
   ([[0041-soft-delete-reuse-and-restore]]). Locations already left under an archived parent keep
   loading as before.
+- **Locations archived before the delete resolution** still have their assets, children and purchases
+  pointing at them, since that delete resolved nothing. Restoring one brings those links back as they
+  were; deleting it again later goes through the resolution like any other delete.
 
 ## Conventions
 
@@ -115,8 +132,11 @@ for both api and web ([[shared-package]], [[0013-zod-validation-pipe]]).
 
 `apps/api/src/locations/` (`LocationsModule`): `GET /locations` (excludes soft-deleted, returns
 `parentId`), `GET /locations/:id` (returns the entity **+ ancestry `path`**), `POST /locations`,
-`PATCH /locations/:id` (both accept optional `parentId`), `DELETE /locations/:id` (soft delete),
-`POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`, `409` while the parent is still
+`PATCH /locations/:id` (both accept optional `parentId`), `GET /locations/:id/delete-impact`
+(`location:delete` — the counts plus the first 50 assets, child locations and open purchases, each list
+only when the caller may read that kind, `LocationDeleteImpactSchema`), `DELETE /locations/:id`
+(soft delete; `?strategy=detach` or `?strategy=move&targetId=` — `DeleteResolutionSchema`, see the rule
+above), `POST /locations/:id/restore` (ADMIN-only — clears `deletedAt`, `409` while the parent is still
 deleted, [[0041-soft-delete-reuse-and-restore]]). Bodies validated against the shared schemas and documented
 via Swagger ([[0018-api-documentation-swagger]]).
 

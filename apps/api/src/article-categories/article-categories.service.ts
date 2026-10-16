@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import {
   FolderAccessService,
   folderVisible,
   type FolderTreeCache,
+  type VisibleFolders,
 } from './folder-access.service';
 import {
   expandFolderSubtrees,
@@ -56,6 +58,9 @@ const CATEGORY_PUBLIC_SELECT = {
   updatedAt: true,
   deletedAt: true,
 } satisfies Prisma.ArticleCategorySelect;
+
+const FOLDER_MOVE_FORBIDDEN =
+  'Moving a folder changes who can read its articles and requires the settings:manage permission';
 
 /**
  * Folders (ADR-0059 §1) — the hierarchical evolution of the flat ArticleCategory. The model/table
@@ -196,9 +201,9 @@ export class ArticleCategoriesService {
 
   /**
    * Whether the caller may see a folder's `accessRules` on a read — i.e. holds `settings:manage` (the
-   * SAME gate that writes it via PUT :id/access-rules, ADR-0060 §3). Resolved DB-first, never from a
-   * token (INV-1 / INV-8): a human's role → the RolePermission matrix (ADMIN always full); a service
-   * account → its direct permission grants. Anonymous / no principal → false (fail closed).
+   * SAME gate that writes it via PUT :id/access-rules, ADR-0060 §3, and that moves a folder, §10).
+   * Resolved DB-first, never from a token (INV-1 / INV-8): a human's role → the RolePermission matrix
+   * (ADMIN always full); a service account → its direct permission grants. Anonymous / no principal → false (fail closed).
    */
   private async canSeeAccessRules(principal?: Principal): Promise<boolean> {
     if (principal === undefined) return false;
@@ -208,13 +213,8 @@ export class ArticleCategoriesService {
     return this.permissions.hasAll(principal.user.role, ['settings:manage']);
   }
 
-  /**
-   * Create a folder. An optional `parentId` nests it under another folder (absent = a root folder);
-   * the parent must be a live folder (400 otherwise). A new folder has no children, so no cycle is
-   * possible. Folder-name uniqueness is per-parent among live rows (partial unique index → 409 on a
-   * duplicate, mapped by the global PrismaExceptionFilter).
-   */
-  async create(data: CreateArticleCategory) {
+  /** A new folder inherits its parent's rule, so it needs only read access to the parent (ADR-0060 §10). */
+  async create(data: CreateArticleCategory, principal?: Principal) {
     const { parentId } = data;
     if (parentId === undefined) {
       return this.prisma.articleCategory.create({
@@ -222,9 +222,10 @@ export class ArticleCategoriesService {
         select: CATEGORY_PUBLIC_SELECT,
       });
     }
+    const visible = await this.folderAccess.visibleFolderIds(principal);
     return this.prisma.$transaction(async (tx) => {
       await this.lockFolderTree(tx);
-      await this.assertParentUsable(tx, parentId);
+      await this.assertParentUsable(tx, parentId, visible);
       return tx.articleCategory.create({
         data,
         select: CATEGORY_PUBLIC_SELECT,
@@ -232,13 +233,8 @@ export class ArticleCategoriesService {
     });
   }
 
-  /**
-   * Update a folder. When `parentId` is present it MOVES the folder: `null` → the root, a cuid →
-   * reparent under a live folder (400 if it doesn't exist). A move that would make the folder its own
-   * ancestor is rejected with 400 (the cycle guard). Name uniqueness stays per-parent (409 on a
-   * duplicate within the new parent). A move checks and writes under the folder-tree lock.
-   */
-  async update(id: string, data: UpdateArticleCategory) {
+  /** A changed `parentId` re-scopes who reads the subtree: a `settings:manage` write (ADR-0060 §10). */
+  async update(id: string, data: UpdateArticleCategory, principal?: Principal) {
     const { parentId } = data;
     if (parentId === undefined) {
       await this.findOne(id); // 404 if missing or already soft-deleted
@@ -250,16 +246,76 @@ export class ArticleCategoriesService {
     }
     return this.prisma.$transaction(async (tx) => {
       await this.lockFolderTree(tx);
-      await this.assertFolderLive(tx, id);
+      const current = await this.loadLiveFolder(tx, id);
+      // Repeating the current parent is not a move; gating it would break a rename that echoes it.
+      if (current.parentId === parentId) {
+        return tx.articleCategory.update({
+          where: { id },
+          data,
+          select: CATEGORY_PUBLIC_SELECT,
+        });
+      }
+      if (!(await this.canSeeAccessRules(principal))) {
+        throw new ForbiddenException(FOLDER_MOVE_FORBIDDEN);
+      }
       if (parentId !== null) {
         await this.assertParentUsable(tx, parentId);
         await this.assertNoFolderCycle(tx, id, parentId);
       }
-      return tx.articleCategory.update({
+      const moved = await tx.articleCategory.update({
         where: { id },
         data,
         select: CATEGORY_PUBLIC_SELECT,
       });
+      await this.recordFolderMove(tx, id, principal);
+      return moved;
+    });
+  }
+
+  /** ADR-0060 §10: the §9 article-move record, written for every live article in the moved subtree. */
+  private async recordFolderMove(
+    tx: Prisma.TransactionClient,
+    folderId: string,
+    principal?: Principal,
+  ): Promise<void> {
+    const subtree = expandFolderSubtrees(
+      [folderId],
+      await this.loadFolderEdges(tx),
+    );
+    // Blocks concurrent version writers; NO KEY UPDATE, not UPDATE, so FK inserts' KEY SHARE cannot deadlock.
+    await tx.$queryRaw`SELECT "id" FROM "articles" WHERE "categoryId" = ANY(${subtree}::text[]) AND "deletedAt" IS NULL ORDER BY "id" FOR NO KEY UPDATE`;
+    const articles = await tx.article.findMany({
+      where: { categoryId: { in: subtree }, deletedAt: null },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        excerpt: true,
+        status: true,
+      },
+    });
+    if (articles.length === 0) return;
+    const latest = await tx.articleVersion.groupBy({
+      by: ['articleId'],
+      where: { articleId: { in: articles.map((a) => a.id) } },
+      _max: { version: true },
+    });
+    const lastVersion = new Map(
+      latest.map((row) => [row.articleId, row._max.version ?? 0]),
+    );
+    const actor = isServicePrincipal(principal)
+      ? { serviceAccountId: principal.serviceAccount.id }
+      : { editedById: principal?.user.id ?? null };
+    await tx.articleVersion.createMany({
+      data: articles.map((article) => ({
+        articleId: article.id,
+        version: (lastVersion.get(article.id) ?? 0) + 1,
+        title: article.title,
+        content: article.content,
+        excerpt: article.excerpt,
+        status: article.status,
+        ...actor,
+      })),
     });
   }
 
@@ -274,7 +330,7 @@ export class ArticleCategoriesService {
     return this.prisma.$transaction(async (tx) => {
       await this.lockFolderTree(tx);
       await this.lockFolderRows(tx, [id]);
-      await this.assertFolderLive(tx, id);
+      await this.loadLiveFolder(tx, id);
       const liveArticles = await tx.article.count({
         where: { categoryId: id, deletedAt: null },
       });
@@ -323,7 +379,7 @@ export class ArticleCategoriesService {
       await this.prisma.$transaction(async (tx) => {
         await this.lockFolderTree(tx);
         // 404 if the root folder doesn't exist or is already soft-deleted.
-        await this.assertFolderLive(tx, id);
+        await this.loadLiveFolder(tx, id);
 
         // Soft-deleted branches too: their aliases still need cleaning up.
         const subtreeIds = expandFolderSubtrees(
@@ -489,21 +545,30 @@ export class ArticleCategoriesService {
   }
 
   /** 404 if the folder is missing or soft-deleted. */
-  private async assertFolderLive(
+  private async loadLiveFolder(
     tx: Prisma.TransactionClient,
     id: string,
-  ): Promise<void> {
-    if (!(await this.isLiveFolder(tx, id))) {
+  ): Promise<{ id: string; parentId: string | null }> {
+    const folder = await tx.articleCategory.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, parentId: true },
+    });
+    if (!folder) {
       throw new NotFoundException(`ArticleCategory ${id} not found`);
     }
+    return folder;
   }
 
-  /** 400 if parentId doesn't reference a live (non-soft-deleted) folder. */
+  /** 400 if parentId isn't a live folder, or (given `visible`) one the caller can't read — the same 400. */
   private async assertParentUsable(
     tx: Prisma.TransactionClient,
     parentId: string,
+    visible?: VisibleFolders,
   ): Promise<void> {
-    if (!(await this.isLiveFolder(tx, parentId))) {
+    if (
+      (visible !== undefined && !folderVisible(visible, parentId)) ||
+      !(await this.isLiveFolder(tx, parentId))
+    ) {
       throw new BadRequestException(
         `parentId ${parentId} does not reference a live folder`,
       );

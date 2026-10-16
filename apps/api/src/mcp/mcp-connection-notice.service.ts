@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { formatOAuthScopes } from '@lazyit/shared';
-import { NOTIFICATION_RETENTION_MS } from '../notifications/notifications-retention.sweeper';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { McpCaller } from './mcp-caller';
@@ -14,14 +13,8 @@ const MEMO_LIMIT = 10_000;
  * FIRST time a connection (an OAuth grant, or a personal token) is used at `/mcp`. Local mode has no MFA,
  * so a phished consent or a token minted from a stolen session must not go unnoticed.
  *
- * Exactly once per connection: the notification's `dedupeKey` is `mcp.client_connected:<grantId>`
- * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo — set only once the
- * notice exists, so a failed send is retried — spares the lookups on every later request. The email copy
- * follows the owner's per-type email opt-out like every emailable type (the allowlist has no mandatory
- * types); the bell copy always lands. The bell forgets after 90 days, so a grant older than that which was
- * already used is not announced again (its notice was sent and may have been pruned); one never used
- * before — `lastUsedAt` still null, as for a personal token minted and kept idle — is announced whatever its
- * age (AUD-014). Service Accounts have no bell and are never announced.
+ * Once per connection: the unique `dedupeKey` makes a racing second emit a no-op, and `announcedAt` and
+ * the memo are set only once the notice row exists, so a failed send is retried (AUD-014).
  *
  * Best-effort and fire-and-forget: a notification problem never fails or delays the MCP request.
  */
@@ -55,64 +48,59 @@ export class McpConnectionNoticeService {
 
     const row = await this.prisma.oAuthGrant.findFirst({
       where: { id: grant.id },
-      select: { createdAt: true, userId: true },
+      select: { userId: true, announcedAt: true },
     });
-    if (
-      !row ||
-      (grant.lastUsedAt !== null &&
-        now.getTime() - row.createdAt.getTime() >= NOTIFICATION_RETENTION_MS)
-    ) {
+    if (!row || row.announcedAt !== null) {
       this.remember(grant.id);
       return false;
     }
-    // Already sent (by this or another replica, before a restart): remember it and stop.
-    if (await this.alreadySent(dedupeKey)) {
-      this.remember(grant.id);
-      return false;
+    // A notice row without the stamp: sent before the column existed, or by an older replica.
+    const already = await this.sentAt(dedupeKey);
+    if (!already) {
+      const personal = caller.kind === 'personal';
+      const name =
+        grant.clientName?.trim() ||
+        (personal ? 'A personal token' : 'An unnamed client');
+      const access = grant.scopes.includes('lazyit.write')
+        ? 'read and write'
+        : 'read-only';
+      // A concurrent emit loses on the unique dedupeKey (no row, no email) and finds the winner's row here.
+      const id = await this.notifications.emit({
+        type: 'mcp.client_connected',
+        dedupeKey,
+        severity: 'warning',
+        recipientUserId: row.userId,
+        targetUserId: row.userId,
+        title: personal
+          ? `Personal token "${name}" was used to connect an AI agent`
+          : `${name} was connected to your lazyit account`,
+        summary:
+          `An external AI agent now has ${access} access to lazyit as you` +
+          `${grant.scopes.includes('lazyit.admin') ? ', including admin actions' : ''}. ` +
+          `If this wasn't you, revoke it in Account → AI connections and change your password.`,
+        metadata: {
+          grantId: grant.id,
+          kind: personal ? 'personal' : 'oauth',
+          clientName: grant.clientName,
+          scopes: formatOAuthScopes(grant.scopes),
+        },
+      });
+      if (id === null && (await this.sentAt(dedupeKey)) === null) return true;
     }
-
-    const personal = caller.kind === 'personal';
-    const name =
-      grant.clientName?.trim() ||
-      (personal ? 'A personal token' : 'An unnamed client');
-    const access = grant.scopes.includes('lazyit.write')
-      ? 'read and write'
-      : 'read-only';
-    const id = await this.notifications.emit({
-      type: 'mcp.client_connected',
-      dedupeKey,
-      severity: 'warning',
-      recipientUserId: row.userId,
-      targetUserId: row.userId,
-      title: personal
-        ? `Personal token "${name}" was used to connect an AI agent`
-        : `${name} was connected to your lazyit account`,
-      summary:
-        `An external AI agent now has ${access} access to lazyit as you` +
-        `${grant.scopes.includes('lazyit.admin') ? ', including admin actions' : ''}. ` +
-        `If this wasn't you, revoke it in Account → AI connections and change your password.`,
-      metadata: {
-        grantId: grant.id,
-        kind: personal ? 'personal' : 'oauth',
-        clientName: grant.clientName,
-        scopes: formatOAuthScopes(grant.scopes),
-      },
+    await this.prisma.oAuthGrant.updateMany({
+      where: { id: grant.id, announcedAt: null },
+      data: { announcedAt: already ?? now },
     });
-    // Remember the grant only once the notice exists (G3 review F5): `emit` swallows its failures and
-    // answers null, so a failed send is retried on the connection's next request. A null because a
-    // concurrent request won the dedupe race is recognized by the row now existing.
-    if (id !== null || (await this.alreadySent(dedupeKey))) {
-      this.remember(grant.id);
-    }
-    return true;
+    this.remember(grant.id);
+    return !already;
   }
 
-  private async alreadySent(dedupeKey: string): Promise<boolean> {
+  private async sentAt(dedupeKey: string): Promise<Date | null> {
     const existing = await this.prisma.notification.findUnique({
       where: { dedupeKey },
-      select: { id: true },
+      select: { createdAt: true },
     });
-    return existing !== null;
+    return existing?.createdAt ?? null;
   }
 
   private remember(grantId: string): void {

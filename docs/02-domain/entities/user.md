@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # User
@@ -115,9 +115,10 @@ the reverse.
     **lazyit-local** — never sent to the IdP ([[0102-remove-bundled-zitadel]]). See
     [[role-permission]].
   - The **first** user ever provisioned (seed or first JIT login) is `ADMIN`; everyone else defaults to
-    `VIEWER` (least-privilege; flipped from `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Only an
-    ADMIN can change a role (Users administration is gated `user:manage`, ADMIN-only in the seed), and no
-    user can change their own role — so there is no self-escalation path.
+    `VIEWER` (least-privilege; flipped from `MEMBER` by [[0043-zitadel-source-of-truth]] Phase 1). Users
+    administration is gated `user:manage` (ADMIN-only in the seed, delegable to MEMBER or VIEWER). A holder
+    grants and acts on roles **at or below its own** only, so only an ADMIN can create, promote to or act
+    on an ADMIN (the role ceiling, SEC-088), and no user can change their own role.
 
 ## Conventions
 
@@ -185,8 +186,9 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > record is **soft-deleted** (hidden from normal queries). A user can be inactive yet not
 > deleted. Creation always starts active; deactivation is a `PATCH`. An inactive account cannot
 > authenticate, so deactivation strips administrator powers like a demotion does: deactivating the
-> **last active ADMIN** is refused (409), and the last-admin guard counts only live, active ADMINs
-> ([[0040-rbac-roles]], SEC-021). The check runs inside the write's transaction under one advisory lock
+> **last active ADMIN** is refused (409), and the last-admin guard counts only **usable** ADMINs: live,
+> active, not directory-only, and holding a login credential for the auth mode — a password in local
+> mode, an IdP link (`externalId`) under OIDC ([[0040-rbac-roles]], SEC-021, AUD-040). The check runs inside the write's transaction under one advisory lock
 > on the admin set, so two admins removing each other at the same moment cannot both pass (AUD-041).
 
 > [!note] Directory mode — `directoryOnly = true` ([[0069-migrator-import]] §A.3 / [[INVARIANTS]] INV-DIR)
@@ -271,7 +273,8 @@ reset note below), and `POST /users/:id/provision-local-account` (ADMIN onboardi
 local mode — see **Directory mode** note above).
 All **write** endpoints (create / update incl. name/email/role / delete / offboard / restore /
 reset-password) are gated `@RequirePermission('user:manage')` — ADMIN-only in the seed, **not**
-`user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4). The directory **reads** `GET /users` and `GET /users/:id` (and the
+`user:write` (which MEMBER holds) ([[0046-roles-permissions-v2]] P4) — and every one of them applies the
+role ceiling below. The directory **reads** `GET /users` and `GET /users/:id` (and the
 nested reads below) are gated `@RequirePermission('user:read')` — ADMIN + MEMBER (a VIEWER gets 403;
 this is the pre-tightening). `GET /users/me` stays OPEN (the self-read the web gates its UI off; the
 OIDC token doesn't carry the lazyit role), and so does `PATCH /users/me` (a self-write of the caller's
@@ -327,11 +330,24 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > user to other devices ([[0051-i18n-next-intl]] amendment). **No [[user-history]] row** — a display
 > preference is not a change to the person record (the same call as the email opt-outs, #879).
 
-> [!note] RBAC safety guards (ADR-0040, Round 3)
-> Changing a `role` is governed by two service-level guards. The API **refuses to remove the last
-> remaining `ADMIN`** — demoting away from `ADMIN`, offboarding or deleting the final administrator
-> returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**). Role
-> management is otherwise done by an `ADMIN` from the **Users** section (a per-user role Select);
+> [!note] RBAC safety guards (ADR-0040, Round 3; role ceiling 2026-10-15)
+> Changing a `role` is governed by service-level guards. The API **refuses to remove the last
+> remaining usable `ADMIN`** — demoting away from `ADMIN`, deactivating, offboarding or deleting the final
+> administrator returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**).
+> A **directory-only** person's role cannot change at all (**422** `DIRECTORY_PERSON_ROLE_LOCKED`,
+> INV-DIR-1); onboard them first.
+>
+> **Role ceiling (SEC-088).** `user:manage` can be delegated to MEMBER or VIEWER, so every Users write
+> checks the caller's own DB role: the role it grants (create, clone, role change) and the role of the
+> user it acts on (edit, deactivate, reset password, onboard, offboard, restore) must be **at or below**
+> the caller's, re-checked under the target's row lock inside the write. Otherwise **403** with
+> `code: "ROLE_CEILING_EXCEEDED"`. A call with no actor (the directory sync) is held to VIEWER. Only an `ADMIN` can therefore
+> create, promote to, demote, reset or offboard an `ADMIN`. A service account is never ADMIN-equivalent
+> (INV-SA-3) and is capped below ADMIN; it cannot hold `user:manage` anyway (SEC-011). The order is
+> `ADMIN > MEMBER > VIEWER` (`canManageRole` in `@lazyit/shared`), whatever the matrix grants each role.
+> Rows that predate the rule are untouched; it applies to the next write.
+>
+> Role management is otherwise done from the **Users** section (a per-user role Select);
 > the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).
 
 > [!note] Admin profile edits and password reset (issue #149, [[0102-remove-bundled-zitadel]])

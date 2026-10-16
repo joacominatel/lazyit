@@ -71,8 +71,6 @@ export interface VerifiedAccessToken {
     clientName: string | null;
     /** The granted scopes, in catalog order. */
     scopes: OAuthScope[];
-    /** Before this verification's stamp. */
-    lastUsedAt: Date | null;
   };
   /** The audience the token is bound to — always this instance's canonical `/mcp` URI. */
   resource: string;
@@ -519,7 +517,6 @@ export class OAuthTokenService {
         clientId: grant.client?.clientId ?? null,
         clientName: grant.client?.name ?? null,
         scopes: storedScopes(grant.scopes),
-        lastUsedAt: grant.lastUsedAt,
       },
       resource: config.resource,
       expiresAt: row.expiresAt,

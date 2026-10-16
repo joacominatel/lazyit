@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ApplicationCategory — user-managed grouping for Applications (SaaS, Internal, Service, …).
@@ -49,6 +49,10 @@ export const UpdateApplicationCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+export const ApplicationCategoryDeleteImpactSchema = z.object({
+  applications: deleteImpactGroup(z.object({ id: z.cuid(), name: z.string() })),
+});
+
 export type ApplicationCategory = z.infer<typeof ApplicationCategorySchema>;
 export type CreateApplicationCategory = z.infer<
   typeof CreateApplicationCategorySchema
@@ -56,3 +60,4 @@ export type CreateApplicationCategory = z.infer<
 export type UpdateApplicationCategory = z.infer<
   typeof UpdateApplicationCategorySchema
 >;
+export type ApplicationCategoryDeleteImpact = z.infer<typeof ApplicationCategoryDeleteImpactSchema>;

@@ -28,13 +28,14 @@ class CreatePersonalTokenDto extends createZodDto(CreatePersonalTokenSchema) {}
 
 /**
  * Personal MCP tokens (`lan` instances; ADR-0097 decision 9; mcp-and-oauth.md §5.4; synthesis §4.7).
- * Human sessions holding `ai:connect` only — a Service Account never mints a personal token.
+ * Human sessions only; minting needs `ai:connect` — a Service Account never mints a personal token.
  * Browser path: `/api/oauth/personal-tokens…` (Caddy strips `/api`).
  *   - `POST /oauth/personal-tokens` → 201 `PersonalTokenCreated` — the cleartext `token` EXACTLY ONCE,
  *     `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance (OAuth is the only
  *     path there), 403 `{ code: "AI_DISABLED" }` while MCP is switched off (or in the shim), 409 past
  *     the per-user cap.
- *   - `GET /oauth/personal-tokens` → the caller's live personal tokens (never a token or a hash).
+ *   - `GET /oauth/personal-tokens` → the caller's live personal tokens (never a token or a hash). No
+ *     permission: a user who lost `ai:connect` still sees the tokens they hold (AUD-083).
  *   - `DELETE /oauth/personal-tokens/:id` → 204; only the caller's own personal token, 404 otherwise.
  *     (`DELETE /oauth/grants/:id` revokes them too, and is the admin's path.)
  * Listing and revoking stay available whatever the mode or the MCP switch, so nothing that exists is
@@ -59,7 +60,6 @@ export class PersonalTokensController {
   }
 
   @Get()
-  @RequirePermission('ai:connect')
   list(@CurrentUser() user: User): Promise<OAuthGrant[]> {
     return this.personalTokens.listMine(user);
   }
