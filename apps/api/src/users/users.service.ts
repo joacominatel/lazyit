@@ -19,6 +19,7 @@ import type {
   ManagerInput,
   PageQuery,
   PasswordResetCapabilities,
+  Permission,
   ThemePreference,
   UiLocale,
   UpdateOwnProfile,
@@ -44,6 +45,7 @@ import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import { resolveIntegrationMode } from '../config/integration-mode';
 import { LocalProvisioningService } from '../auth/local/local-provisioning.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 import {
   AdminResetLinkError,
   PasswordLifecycleService,
@@ -221,6 +223,7 @@ export class UsersService {
     // reset-mail path for the admin `email` delivery rather than growing a second copy of it. Injected
     // via LocalAuthModule (imported by UsersModule); it self-gates on local mode.
     private readonly passwordLifecycle: PasswordLifecycleService,
+    private readonly permissions: PermissionResolverService,
     @InjectPinoLogger(UsersService.name)
     private readonly logger: PinoLogger,
   ) {}
@@ -1242,6 +1245,20 @@ export class UsersService {
     };
   }
 
+  /** The human caller's permissions, resolved DB-first; no caller holds none. */
+  private async callerPermissions(
+    actorId: string | undefined,
+  ): Promise<ReadonlySet<Permission>> {
+    const caller =
+      actorId != null
+        ? await this.prisma.user.findUnique({
+            where: { id: actorId },
+            select: { role: true },
+          })
+        : null;
+    return caller ? this.permissions.resolve(caller.role) : new Set();
+  }
+
   /** SEC-088 role ceiling; returns the caller's ceiling for the in-transaction re-check. */
   private async assertWithinRoleCeiling(
     actor: ActorAttribution,
@@ -1582,6 +1599,8 @@ export class UsersService {
    *    grant writes a PENDING workflow run (ACCESS_GRANTED) atomically and is enqueued AFTER commit
    *    (the normal grant path fires); when FALSE the grant is bookkeeping-only (the trigger is
    *    SUPPRESSED). Either way the grant row is identical and auditable.
+   *  - The caller copies only what it could grant by hand (SEC-088): assignments need `asset:write`, grants
+   *    `accessGrant:grant`. Without the verb each selected row is SKIPPED as "permission_required".
    *  - The new user's assignments + grants + the workflow run rows commit in ONE transaction; the engine
    *    enqueue happens AFTER commit (the decoupling invariant — a failing provisioning never rolls back
    *    the clone). Returns the per-item batch shape: `{ created, skipped: [{ id, reason }] }`.
@@ -1607,6 +1626,8 @@ export class UsersService {
     });
 
     const skipped: CloneUserResult['skipped'] = [];
+    // SEC-088: a clone copies only what the caller could grant by hand; the rest is reported as skipped.
+    const callerPermissions = await this.callerPermissions(actorId);
 
     // 2) Resolve the SELECTED source assignments — must be the source's ACTIVE rows (releasedAt null).
     //    Anything not found / not the source's / already released is skipped+reported. We then read each
@@ -1616,6 +1637,7 @@ export class UsersService {
       data.cloneAssetAssignments,
       created.id,
       skipped,
+      callerPermissions.has('asset:write'),
     );
 
     // 3) Resolve the SELECTED source grants — the source's ACTIVE grants (revokedAt null). For each, if
@@ -1626,6 +1648,7 @@ export class UsersService {
       data.cloneAccessGrants,
       data.fireWorkflowsOnClonedGrants,
       skipped,
+      callerPermissions.has('accessGrant:grant'),
     );
 
     // 4) Write the new user's assignments + grants (+ any PENDING workflow run rows) in ONE transaction —
@@ -1733,6 +1756,7 @@ export class UsersService {
     ids: string[],
     newUserId: string,
     skipped: CloneUserResult['skipped'],
+    permitted: boolean,
   ): Promise<{ assetId: string }[]> {
     if (ids.length === 0) {
       return [];
@@ -1771,6 +1795,14 @@ export class UsersService {
         continue;
       }
       seenAssets.add(row.assetId);
+      if (!permitted) {
+        skipped.push({
+          id,
+          entityId: row.assetId,
+          reason: 'permission_required',
+        });
+        continue;
+      }
       plans.push({ assetId: row.assetId });
     }
     return plans;
@@ -1791,6 +1823,7 @@ export class UsersService {
     ids: string[],
     fireWorkflows: boolean,
     skipped: CloneUserResult['skipped'],
+    permitted: boolean,
   ): Promise<
     Array<{
       applicationId: string;
@@ -1828,7 +1861,7 @@ export class UsersService {
       string,
       Awaited<ReturnType<WorkflowTriggerService['planForTrigger']>>
     >();
-    if (fireWorkflows) {
+    if (fireWorkflows && permitted) {
       const appIds = [...new Set(rows.map((r) => r.applicationId))];
       for (const appId of appIds) {
         const plan = await this.workflowTrigger
@@ -1859,6 +1892,14 @@ export class UsersService {
           id,
           entityId: row.applicationId,
           reason: 'application_deleted',
+        });
+        continue;
+      }
+      if (!permitted) {
+        skipped.push({
+          id,
+          entityId: row.applicationId,
+          reason: 'permission_required',
         });
         continue;
       }

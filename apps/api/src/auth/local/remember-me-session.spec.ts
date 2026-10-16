@@ -22,6 +22,7 @@ import { LocalCredentialService } from './local-credential.service';
 import { LocalProvisioningService } from './local-provisioning.service';
 import { LoginService } from './login.service';
 import { PasswordLifecycleService } from './password-lifecycle.service';
+import { PermissionResolverService } from '../permission-resolver.service';
 import { UsersService } from '../../users/users.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SearchService } from '../../search/search.service';
@@ -251,6 +252,7 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
           useValue: new LocalProvisioningService(credentials),
         },
         { provide: PasswordLifecycleService, useValue: passwords },
+        { provide: PermissionResolverService, useValue: {} },
         {
           provide: getLoggerToken(UsersService.name),
           useValue: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },

@@ -67,6 +67,8 @@ export const CloneUserSchema = z.strictObject({
  *                             for grants).
  *      • `already_in_state` — two selected assignments resolved to the SAME asset; the duplicate is a
  *                             no-op (the one-active-per-(asset,user) index would reject it anyway).
+ *      • `permission_required` — the caller lacks the verb to open that row by hand (`asset:write` for an
+ *                             assignment, `accessGrant:grant` for a grant), so it is not copied (SEC-088).
  */
 export const CloneUserResultSchema = z.object({
   created: UserSchema,

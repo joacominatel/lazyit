@@ -21,6 +21,7 @@ import {
   AdminResetLinkError,
   PasswordLifecycleService,
 } from '../auth/local/password-lifecycle.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -108,6 +109,8 @@ describe('UsersService', () => {
   // ADR-0058 §4 / ADR-0056 §3 (issue #359): the bell emitter the clone reuses post-commit for every
   // cloned grant. Mocked so the clone tests assert WHICH grants nudged the bell, without a DB.
   let accessGrants: { emitGrantNotifications: jest.Mock };
+  // The caller's permissions for the clone rule (SEC-088): ADMIN holds both verbs, any other role only user:manage.
+  let resolver: { resolve: jest.Mock };
   // The base prisma mock (lifted so the clone tests can prime assetAssignment/accessGrant/asset reads,
   // and the #386 list-count tests can prime / inspect the per-page `groupBy` aggregations).
   let prismaMock: {
@@ -271,6 +274,17 @@ describe('UsersService', () => {
     accessGrants = {
       emitGrantNotifications: jest.fn().mockResolvedValue(undefined),
     };
+    resolver = {
+      resolve: jest.fn((role: string) =>
+        Promise.resolve(
+          new Set(
+            role === 'ADMIN'
+              ? ['user:manage', 'asset:write', 'accessGrant:grant']
+              : ['user:manage'],
+          ),
+        ),
+      ),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -284,6 +298,7 @@ describe('UsersService', () => {
         { provide: AccessGrantsService, useValue: accessGrants },
         { provide: LocalProvisioningService, useValue: provisioning },
         { provide: PasswordLifecycleService, useValue: passwordLifecycle },
+        { provide: PermissionResolverService, useValue: resolver },
         { provide: getLoggerToken(UsersService.name), useValue: logger },
       ],
     }).compile();
@@ -3357,6 +3372,80 @@ describe('UsersService', () => {
           payload: { clonedFrom: SOURCE, fireWorkflows: false },
         }),
       );
+    });
+
+    describe('copies only what the caller could grant by hand (SEC-088)', () => {
+      const A1 = 'clxassign1aaaaaaaaaaaaaaa';
+      const G1 = 'clxgrant1aaaaaaaaaaaaaaaa';
+
+      function primeSource() {
+        prismaRef().assetAssignment.findMany.mockResolvedValue([
+          { id: A1, assetId: 'asset-live' },
+        ]);
+        prismaRef().asset.findMany.mockResolvedValue([{ id: 'asset-live' }]);
+        prismaRef().accessGrant.findMany.mockResolvedValue([
+          {
+            id: G1,
+            applicationId: 'app-1',
+            accessLevel: null,
+            expiresAt: null,
+          },
+        ]);
+        prismaRef().application.findMany.mockResolvedValue([{ id: 'app-1' }]);
+      }
+
+      const body = {
+        profile: profile(),
+        cloneAssetAssignments: [A1],
+        cloneAccessGrants: [G1],
+        fireWorkflowsOnClonedGrants: true,
+      };
+
+      it('a delegated MEMBER without asset:write or accessGrant:grant copies neither, and says so', async () => {
+        primeCreate();
+        primeSource();
+        user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(result.created.id).toBe(NEW_ID);
+        expect(tx.assetAssignment.create).not.toHaveBeenCalled();
+        expect(tx.accessGrant.create).not.toHaveBeenCalled();
+        expect(workflowTrigger.planForTrigger).not.toHaveBeenCalled();
+        expect(accessGrants.emitGrantNotifications).not.toHaveBeenCalled();
+        expect(result.skipped).toEqual([
+          { id: A1, entityId: 'asset-live', reason: 'permission_required' },
+          { id: G1, entityId: 'app-1', reason: 'permission_required' },
+        ]);
+      });
+
+      it('a MEMBER holding asset:write but not accessGrant:grant copies the assets only', async () => {
+        primeCreate();
+        primeSource();
+        user.findUnique.mockResolvedValue({ role: 'MEMBER' });
+        resolver.resolve.mockResolvedValue(
+          new Set(['user:manage', 'asset:write']),
+        );
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+        expect(tx.accessGrant.create).not.toHaveBeenCalled();
+        expect(result.skipped).toEqual([
+          { id: G1, entityId: 'app-1', reason: 'permission_required' },
+        ]);
+      });
+
+      it('an ADMIN copies both', async () => {
+        primeCreate();
+        primeSource();
+
+        const result = await service.clone(SOURCE, body, ADMIN);
+
+        expect(tx.assetAssignment.create).toHaveBeenCalledTimes(1);
+        expect(tx.accessGrant.create).toHaveBeenCalledTimes(1);
+        expect(result.skipped).toEqual([]);
+      });
     });
 
     it('opens NEW assignment rows for the new user, skipping a SOFT-DELETED asset (reported)', async () => {
