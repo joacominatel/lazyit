@@ -1,4 +1,4 @@
--- One live node per asset: the oldest live link wins, the others are un-linked (never deleted) and stamped _infraAssetUnlinked.
+-- One live node per asset: the latest reporter keeps the link (then the oldest), so a re-imaged host's dead predecessor is the one un-linked (never deleted) and stamped _infraAssetUnlinked.
 WITH ranked AS (
     SELECT "id",
            ROW_NUMBER() OVER w AS rn,
@@ -6,7 +6,7 @@ WITH ranked AS (
     FROM "infra_nodes"
     WHERE "deletedAt" IS NULL
       AND "assetId" IS NOT NULL
-    WINDOW w AS (PARTITION BY "assetId" ORDER BY "createdAt" ASC, "id" ASC)
+    WINDOW w AS (PARTITION BY "assetId" ORDER BY "lastReportedAt" DESC NULLS LAST, "createdAt" ASC, "id" ASC)
 )
 UPDATE "infra_nodes" AS n
 SET "assetId" = NULL,

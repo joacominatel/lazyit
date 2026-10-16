@@ -14,10 +14,10 @@ describe('infra_single_live_node_per_asset migration', () => {
     expect(dir).toBeDefined();
   });
 
-  it('keeps the oldest live link, un-links the rest, and deletes nothing', () => {
+  it('keeps the latest reporter (never-reported last, then the oldest), un-links the rest, and deletes nothing', () => {
     expect(sql).not.toMatch(/\bDELETE\b/i);
     expect(sql).toMatch(
-      /PARTITION BY "assetId"\s+ORDER BY "createdAt" ASC, "id" ASC/,
+      /PARTITION BY "assetId"\s+ORDER BY "lastReportedAt" DESC NULLS LAST, "createdAt" ASC, "id" ASC\)/,
     );
     expect(sql).toMatch(/SET "assetId" = NULL,\s+"specs" = CASE/);
     expect(sql).toMatch(/ranked\.rn > 1/);
