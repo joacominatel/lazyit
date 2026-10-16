@@ -113,3 +113,67 @@ describe('AssetModelsController — PATCH clearing categoryId, sku, description'
     expect(service.update).not.toHaveBeenCalled();
   });
 });
+
+describe('AssetModelsController — DELETE resolution query (SEC-041)', () => {
+  let app: INestApplication<App>;
+  const service = { remove: jest.fn() };
+  const TARGET = 'clh1abc0000xyz0000000tgt0';
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [AssetModelsController],
+      providers: [
+        { provide: AssetModelsService, useValue: service },
+        { provide: APP_GUARD, useClass: SignedInGuard },
+        { provide: APP_PIPE, useClass: ZodValidationPipe },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    service.remove.mockReset();
+    service.remove.mockResolvedValue({ id: MODEL_ID });
+  });
+
+  it('no query is no resolution (the service then refuses while anything is left)', async () => {
+    await request(app.getHttpServer())
+      .delete(`/asset-models/${MODEL_ID}`)
+      .expect(200);
+    expect(service.remove).toHaveBeenCalledWith(
+      MODEL_ID,
+      undefined,
+      expect.objectContaining({ kind: 'human' }),
+    );
+  });
+
+  it('forwards detach, and move with its target', async () => {
+    await request(app.getHttpServer()).delete(
+      `/asset-models/${MODEL_ID}?strategy=detach`,
+    );
+    await request(app.getHttpServer()).delete(
+      `/asset-models/${MODEL_ID}?strategy=move&targetId=${TARGET}`,
+    );
+    expect(service.remove.mock.calls.map((c: unknown[]) => c[1])).toEqual([
+      { strategy: 'detach' },
+      { strategy: 'move', targetId: TARGET },
+    ]);
+  });
+
+  it.each([
+    '?strategy=move',
+    `?strategy=detach&targetId=${TARGET}`,
+    `?targetId=${TARGET}`,
+    '?strategy=move&targetId=not-a-cuid',
+  ])('400s %s before the service', async (query) => {
+    await request(app.getHttpServer())
+      .delete(`/asset-models/${MODEL_ID}${query}`)
+      .expect(400);
+    expect(service.remove).not.toHaveBeenCalled();
+  });
+});
