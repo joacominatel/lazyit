@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  CreateApplicationCategorySchema,
+  CreateConsumableCategorySchema,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import {
@@ -104,6 +108,12 @@ export function CategoryDeleteDialog({
       onRetryImpact={() => void impact.refetch()}
       targets={targets}
       canCreate={canCreate}
+      nameMaxLength={
+        (kind === "application"
+          ? CreateApplicationCategorySchema
+          : CreateConsumableCategorySchema
+        ).shape.name.maxLength ?? undefined
+      }
       createHint={t("createHintCategory")}
       remove={(resolution) => removes[kind].mutateAsync({ id: category.id, resolution })}
       create={(name) => creates[kind].mutateAsync({ name })}

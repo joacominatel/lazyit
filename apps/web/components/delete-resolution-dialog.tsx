@@ -61,6 +61,8 @@ export interface DeleteResolutionDialogProps {
   /** The create permission for this kind; without it "create a new one" is not offered. */
   canCreate: boolean;
   createHint: string;
+  /** The create schema's name limit for this kind. */
+  nameMaxLength: number | undefined;
   remove: (resolution?: DeleteResolution) => Promise<unknown>;
   create: (name: string) => Promise<{ id: string; name: string }>;
   onDeleted?: () => void;
@@ -77,6 +79,7 @@ export function DeleteResolutionDialog({
   targets,
   canCreate,
   createHint,
+  nameMaxLength,
   remove,
   create,
   onDeleted,
@@ -255,7 +258,7 @@ export function DeleteResolutionDialog({
                 onChange={(event) => setNewName(event.target.value)}
                 placeholder={t("deleteResolution.createLabel")}
                 aria-label={t("deleteResolution.createLabel")}
-                maxLength={200}
+                maxLength={nameMaxLength}
                 disabled={isPending}
               />
             ) : null}

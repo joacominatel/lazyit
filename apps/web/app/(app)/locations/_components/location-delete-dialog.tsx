@@ -1,6 +1,10 @@
 "use client";
 
-import type { Location, LocationDeleteImpact } from "@lazyit/shared";
+import {
+  CreateLocationSchema,
+  type Location,
+  type LocationDeleteImpact,
+} from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 import {
@@ -85,6 +89,7 @@ export function LocationDeleteDialog({
       onRetryImpact={() => void impact.refetch()}
       targets={targets}
       canCreate={canCreate}
+      nameMaxLength={CreateLocationSchema.shape.name.maxLength ?? undefined}
       createHint={t("createHintLocation", { name: location.name })}
       remove={(resolution) => remove.mutateAsync({ id: location.id, resolution })}
       create={(name) =>
