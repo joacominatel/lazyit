@@ -1661,7 +1661,6 @@ export class UsersService {
     });
 
     const skipped: CloneUserResult['skipped'] = [];
-    // SEC-088: a clone copies only what the caller could grant by hand; the rest is reported as skipped.
     const callerPermissions = await this.callerPermissions(actorId);
 
     // 2) Resolve the SELECTED source assignments — must be the source's ACTIVE rows (releasedAt null).
