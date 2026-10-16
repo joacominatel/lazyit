@@ -959,6 +959,72 @@ describe('ArticlesService', () => {
         service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
       ).resolves.toMatchObject({ id: 'a' });
     });
+
+    // --- AUD-086: the read gate honours the #877 manager exemption, by id only ---
+
+    const FOREIGN_DRAFT = {
+      id: 'a',
+      status: 'DRAFT',
+      authorId: AUTHOR,
+      categoryId: 'shared-folder',
+    };
+    const MANAGER_USER = { id: MANAGER_ID } as never;
+
+    it("lets an article:manage holder read another author's DRAFT by id", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['shared-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+      expect(permissions.hasAll).toHaveBeenCalledWith('MEMBER', [
+        'article:manage',
+      ]);
+    });
+
+    it("lets an ADMIN read another author's DRAFT by id", async () => {
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', { id: ADMIN_ID } as never, ADMIN_PRINCIPAL),
+      ).resolves.toMatchObject({ id: 'a' });
+    });
+
+    it("still hides another author's DRAFT from a non-manager (404)", async () => {
+      permissions.hasAll.mockResolvedValue(false);
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', OTHER_USER as never, OTHER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("still hides a manager's foreign DRAFT in a folder they cannot read (404)", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      folderAccess.visibleFolderIds.mockResolvedValue(
+        new Set(['public-folder']),
+      );
+      article.findFirst.mockResolvedValue(FOREIGN_DRAFT);
+      await expect(
+        service.findOne('a', MANAGER_USER, MANAGER_PRINCIPAL),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it("keeps another author's DRAFT out of a manager's list", async () => {
+      permissions.hasAll.mockResolvedValue(true);
+      await service.findPage(
+        {},
+        { limit: 50, offset: 0, deleted: 'active' as const },
+        MANAGER_USER,
+        MANAGER_PRINCIPAL,
+      );
+      expect(listWhere().AND[0]).toEqual({
+        OR: [
+          { status: 'PUBLISHED' },
+          { status: 'DRAFT', authorId: MANAGER_ID },
+        ],
+      });
+    });
   });
 
   // --- author-only writes --------------------------------------------------

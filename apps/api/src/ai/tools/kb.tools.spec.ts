@@ -712,6 +712,10 @@ const VISIBLE: Record<string, string[]> = {
   'SA holding ai:use + article:read/write': [A.pub],
 };
 const ALL_ARTICLES = [A.pub, A.secret, A.team, A.draftOther, A.draftMine];
+// Foreign drafts a manager reads by id though no list shows them (AUD-086); by slug they stay hidden.
+const READ_BY_ID_ONLY: Record<string, string[]> = {
+  ADMIN: [A.draftOther, A.draftMine],
+};
 const TITLES: Record<string, string> = {
   [A.secret]: SECRET_TITLE,
   [A.team]: TEAM_TITLE,
@@ -911,15 +915,19 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
             { article: A.missing },
             ctx(a),
           );
-          expect(byId).toMatchObject({
-            ok: false,
-            error: { code: 'NOT_FOUND', status: 404 },
-          });
+          if (READ_BY_ID_ONLY[label]?.includes(id)) {
+            expect((data(byId).article as { id: string }).id).toBe(id);
+          } else {
+            expect(byId).toMatchObject({
+              ok: false,
+              error: { code: 'NOT_FOUND', status: 404 },
+            });
+            expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
+          }
           expect(missing).toMatchObject({
             ok: false,
             error: { code: 'NOT_FOUND', status: 404 },
           });
-          expect(JSON.stringify(byId)).not.toContain(TITLES[id]);
           const slug = articles.get(id)!.slug;
           expect(
             await tools.invoke('kb_get_article', { article: slug }, ctx(a)),
@@ -1252,7 +1260,8 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         { article: A.draftOther },
         ctx(actor('ADMIN')),
       );
-      expect(admin).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      // An ADMIN may read another author's draft by id (AUD-086): it is the draft, never the planted one.
+      expect((data(admin).article as { id: string }).id).toBe(A.draftOther);
       expect(JSON.stringify(admin)).not.toContain('Planted');
       const author = await tools.invoke(
         'kb_get_article',
@@ -1269,12 +1278,12 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         ['kb_update_article', { article: A.draftOther, title: 'Overwritten' }],
       ] as const) {
         const proposal = await tools.propose(name, input, chat(admin));
-        expect(proposal).toMatchObject({
-          ok: false,
-          result: { error: { code: 'NOT_FOUND' } },
+        if (!proposal.ok) throw new Error('proposal refused');
+        expect(proposal.action.preview!.target).toMatchObject({
+          id: A.draftOther,
         });
+        expect(JSON.stringify(proposal)).not.toContain('Planted');
       }
-      expect(invocations.size).toBe(0);
       expect(prisma.article.update).not.toHaveBeenCalled();
     });
 

@@ -390,7 +390,7 @@ export class ArticlesService {
   }
 
   /**
-   * A readable article by id. 404 if missing, soft-deleted, a draft the caller doesn't own (ADR-0022),
+   * A readable article by id. 404 if missing, soft-deleted, a draft the caller neither owns nor manages (ADR-0022),
    * OR in a home folder the caller can't see (ADR-0060 §4 — folder-hidden → 404, NOT 403, so the
    * server never leaks the existence of a restricted article). The three layers compose
    * most-restrictive-wins (folder access AND draft visibility, both 404 on failure). `article:read`
@@ -410,7 +410,13 @@ export class ArticlesService {
       where: { id },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (
+      !article ||
+      (article.status === 'DRAFT' &&
+        article.authorId !== cu &&
+        // The #877 edit gate already lets a manager write this draft; reading it by id must match (AUD-086).
+        !(await this.canManageAny(principal)))
+    ) {
       throw new NotFoundException(`Article ${id} not found`);
     }
     await this.assertFolderVisible(
