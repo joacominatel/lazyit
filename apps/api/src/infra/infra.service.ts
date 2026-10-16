@@ -90,6 +90,7 @@ import { projectInfraNode } from '../search/search.documents';
 import { parsePageQuery } from '../common/parse-page-query';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { appVersion } from '../common/export-provenance';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import type { Principal } from '../auth/principal';
 import { isServicePrincipal } from '../auth/principal';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
@@ -4879,8 +4880,8 @@ export class InfraService {
   }
 
   /**
-   * Map a partial-unique P2002 from the infra_edges indexes to a friendly 409 (ADR-0070 §3). The two
-   * raw indexes surface their NAME as `meta.target` (adapter-pg, raw SQL indexes Prisma can't see):
+   * Map a partial-unique P2002 from the infra_edges indexes to a friendly 409 (ADR-0070 §3). adapter-pg
+   * names the violated raw index in the P2002's driver-adapter cause, so it is matched exactly:
    *   - infra_edges_source_active_runs_on_key  → a duplicate active RUNS_ON for the source.
    *   - infra_edges_connects_to_pair_active_key → a duplicate active CONNECTS_TO for the canonical pair.
    * Anything else propagates unchanged (the global filter handles it).
@@ -4890,14 +4891,13 @@ export class InfraService {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      const target = err.meta?.target;
-      const name = Array.isArray(target) ? target.join(',') : String(target);
-      if (name.includes('runs_on')) {
+      const targets = uniqueViolationTargets(err);
+      if (targets.includes('infra_edges_source_active_runs_on_key')) {
         return new ConflictException(
           'This source already has an active host (RUNS_ON). Close the existing one first, or the migration retry raced — try again.',
         );
       }
-      if (name.includes('connects_to')) {
+      if (targets.includes('infra_edges_connects_to_pair_active_key')) {
         return new ConflictException(
           'These two nodes are already connected (CONNECTS_TO is symmetric — the pair already has an active connection).',
         );
@@ -5046,8 +5046,8 @@ export class InfraService {
 const IMPACT_MAX_DEPTH = 64;
 
 /**
- * Is this error a unique-serial collision on `Asset.serial` (#1081)? A P2002 whose target names the
- * `assets_serial_active_key` partial-unique — i.e. a discovered serial already belongs to another live
+ * Is this error a unique-serial collision on `Asset.serial` (#1081)? A P2002 whose adapter-pg cause names
+ * the `assets_serial_active_key` partial-unique — i.e. a discovered serial already belongs to another live
  * asset. `confirmNode` uses it to fall back to leaving the serial in specs instead of failing the
  * confirm. Anything else is not a serial collision.
  */
@@ -5058,9 +5058,7 @@ function isSerialUniqueCollision(err: unknown): boolean {
   ) {
     return false;
   }
-  const target = err.meta?.target;
-  const name = Array.isArray(target) ? target.join(',') : String(target);
-  return name.toLowerCase().includes('serial');
+  return uniqueViolationTargets(err).includes('assets_serial_active_key');
 }
 
 /**
