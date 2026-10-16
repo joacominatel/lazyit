@@ -45,7 +45,9 @@ use. It **never** inherits a role and is never admin-equivalent.
   this never limits them. One exception: **Report server inventory (agent)** can always be granted,
   because it only reports inventory and installing agents already needs **Change instance settings**,
   so you can still [install reporting agents](/help/assets-topology-reporting-agent). Every other
-  permission, **Fetch secrets programmatically (service account)** included, stays capped.
+  permission, **Fetch secrets programmatically (service account)** included, stays capped. The picker
+  lists only what you can grant; a permission the account already holds beyond your role stays listed,
+  marked **Not in your role**, so you can remove it. A refusal names the permissions your role lacks.
 
 ## The token (shown once)
 
