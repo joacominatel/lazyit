@@ -3,7 +3,7 @@ title: Article
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-15
 ---
 
 # Article
@@ -53,7 +53,8 @@ deferred.
   is consumed by the (later) bulk import to mint dozens of slugs frictionlessly; the **interactive
   single create still returns `409` on collision today** (wiring the suffix into that path is a small
   follow-up).
-- **Status** is `DRAFT` or `PUBLISHED`. A `DRAFT` is **private to its author**; `PUBLISHED` is
+- **Status** is `DRAFT` or `PUBLISHED`. A `DRAFT` is **private to its author** (an ADMIN or
+  `article:manage` holder may edit it and read it by id — #877, AUD-086); `PUBLISHED` is
   visible to everyone. Transitions go through `publish`/`unpublish` endpoints — **`PATCH` never
   changes status**.
 - **`publishedAt`** is set on the **first** publish and **never cleared** (unpublishing keeps it,
@@ -200,7 +201,10 @@ listings), `@@index([status, publishedAt])` (latest published).
   `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
   metric). The owner is already exposed as `authorId`.
 - `GET /articles/by-slug/:slug` · `GET /articles/:id` — a draft requested by a non-author returns
-  `404` (never `403`, so existence isn't leaked).
+  `404` (never `403`, so existence isn't leaked). **By id only**, an ADMIN or `article:manage` holder —
+  the callers who may already edit a foreign draft (#877) — reads it (AUD-086); the folder ACL still
+  applies to a non-admin. That opens the by-id sub-reads (versions, links, aliases, backlinks target,
+  attachments) with it; lists, search and the by-slug read still show a draft to its author only.
 - `POST /articles` — create (author = `X-User-Id`).
 - `POST /articles/import` — multipart `.md`/`.txt`/`.docx` (one article) or `.zip` (bulk, #398;
   selective extraction + folder mirroring + slug auto-suffix + best-effort link rewire,
@@ -221,7 +225,8 @@ listings), `@@index([status, publishedAt])` (latest published).
 Versioning + linking ([[0042-article-versioning-and-linking]]):
 
 - `GET /articles/:id/versions` — paginated version history ([[0030-list-pagination-contract]]),
-  newest first; `GET /articles/:id/versions/:version` — one version. Drafts visible only to author.
+  newest first; `GET /articles/:id/versions/:version` — one version. A draft's history follows the
+  by-id read above (author, ADMIN or `article:manage` holder).
 - `POST /articles/:id/links` — link to an asset XOR application (author only, `ADMIN`/`MEMBER`);
   `DELETE /articles/:id/links/:linkId` — unlink; `GET /articles/:id/links` — list links.
 - `GET /assets/:id/articles` — reverse: PUBLISHED articles linked to an asset (lean list shape).

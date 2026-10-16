@@ -246,6 +246,9 @@ La redacción está gobernada por los permisos de la Base de conocimiento, y la 
   se pierde:** el autor original permanece registrado y cada edición queda marcada con quién la hizo
   realmente en el historial de versiones del artículo.
 - Los administradores siempre ven todos los artículos, incluidos los borradores, sin importar las
-  restricciones de carpeta.
+  restricciones de carpeta. Quien tiene **«Editar cualquier artículo»** puede abrir el borrador de otro
+  autor por su ID (a través de la API o del asistente) en una carpeta que puede leer, para corregir lo
+  que ya tiene permitido editar. Los borradores ajenos siguen sin aparecer en sus listas ni en la
+  búsqueda.
 
 Consulta [Roles y permisos](/help/permissions) para el conjunto completo de capacidades.

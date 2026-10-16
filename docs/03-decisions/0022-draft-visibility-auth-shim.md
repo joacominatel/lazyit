@@ -3,7 +3,7 @@ title: "ADR-0022: Draft visibility & the X-User-Id auth shim"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-07-01
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -56,6 +56,16 @@ auth lands** — when [[0016-auth-strategy-deferred]] is resolved, this ADR is r
 > - `article:manage` is a **coarse verb**: ADMIN-only by seed construction (never seeded to
 >   MEMBER/VIEWER), delegatable from the role matrix (`PUT /config/permissions`). See
 >   [[0046-roles-permissions-v2]].
+
+> [!note] Amendment 2026-10-15 (AUD-086, decided by the CEO) — the read-by-id gate matches the write gate
+> The #877 exemption above let an ADMIN / `article:manage` holder **write** a foreign `DRAFT` (edit it,
+> attach files to it) while `GET /articles/:id` still answered **404**, so a manager could upload to a
+> draft they could not read. The read rule below now carries the same exemption **by id only**:
+> `GET /articles/:id` and the reads keyed on that id (versions, links, aliases, backlinks target, the
+> article's attachments) return a foreign draft to an ADMIN or `article:manage` holder. The folder ACL
+> still binds a non-admin holder (folder-hidden → 404). **Unchanged:** `GET /articles` lists, `/search`,
+> the reverse lookups and `GET /articles/by-slug/:slug` still show a `DRAFT` to its author only, and
+> every other caller still gets the 404.
 
 ## Context
 
