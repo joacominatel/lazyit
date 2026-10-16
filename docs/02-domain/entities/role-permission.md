@@ -3,7 +3,7 @@ title: RolePermission
 tags: [domain, entity, auth, authz, permissions]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # RolePermission
@@ -45,8 +45,9 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   these ⚠ "Admin-level" and confirms, but the server does not block — an admin-initiated delegation is
   accepted by design. A delegated `user:manage` is bounded by the **role ceiling** (SEC-088, 2026-10-15):
   the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the
-  Users API ([[user]] → *RBAC safety guards*). A delegated `settings:manage` is not bounded yet: it can
-  still edit the matrix for its own role (SEC-088, open).
+  Users API ([[user]] → *RBAC safety guards*). A delegated `settings:manage` reads the matrix but cannot
+  save it: `PUT /config/permissions` is ADMIN-only (SEC-088, 2026-10-16), as are the directory connection
+  writes.
 - **Seeded behavior-preserving, with two pre-tightened reads.** The seed is derived 1:1 from a single
   source-of-truth constant `DEFAULT_ROLE_PERMISSIONS` ([[shared-package]]) so the documented matrix and
   the seeded rows can never drift (a wrong seed fails the golden test). The seeded matrix:
@@ -138,7 +139,8 @@ audit row. Operators should review the permission matrix once after the update t
 ## Endpoints
 
 `apps/api/src/config/` (`ConfigModule`), both `@RequirePermission('settings:manage')` (ADMIN-only in
-the seed):
+the seed). The PUT also carries `AdminOnlyGuard`: only a human ADMIN saves the matrix, even when
+`settings:manage` is delegated (**403** `ADMIN_REQUIRED`, SEC-088, [[0046-roles-permissions-v2]]):
 
 - `GET /config/permissions` — returns the current `RolePermissionMatrix` (ADMIN reported as the COMPLETE
   catalog — what the resolver enforces, never the rows).

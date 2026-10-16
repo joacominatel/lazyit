@@ -232,7 +232,9 @@ read-authz gap (the old DEF-001 residual / "reads open to any authenticated user
 - `PUT /config/permissions` — replaces the **MEMBER + VIEWER** sets wholesale, validated against the
   frozen catalog (unknown → 400); the strict body accepts **only** MEMBER/VIEWER keys (ADMIN immutable →
   400 on an ADMIN/extra key). Transactional + **audited** ([[permission-audit-log]], one append-only row
-  per grant/revoke) + cache-coherent (the resolver cache is invalidated on commit).
+  per grant/revoke) + cache-coherent (the resolver cache is invalidated on commit). Saved by a human
+  ADMIN only (`AdminOnlyGuard`, **403** `ADMIN_REQUIRED`), even when `settings:manage` is delegated
+  (SEC-088); the directory connection writes follow the same rule.
 - `GET /config/my-permissions` — any authenticated user; the CALLER's effective set
   `{ role, permissions }` via the same resolver, so the web derives `can('domain:action')` without
   polluting the `User` wire shape.

@@ -70,6 +70,13 @@ Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada s
   editar, restablecer, dar de baja o restaurar a usuarios con un rol igual o inferior al suyo. Solo un
   administrador puede crear un administrador, promover a alguien a administrador o actuar sobre un
   administrador existente. Cualquier otra cosa se rechaza con un mensaje claro.
+- **Solo un administrador edita los permisos y la conexión del directorio.** Dar a Miembro o a Lector
+  **Cambiar la configuración de la instancia** les permite ver la matriz de permisos y la conexión del
+  directorio, no cambiarlas ni ejecutar una sincronización del directorio.
+- **Promover a alguien cancela sus credenciales de acceso pendientes.** Cuando el rol de una persona
+  sube, se cancelan la contraseña temporal que todavía no usó y cualquier enlace de restablecimiento
+  pendiente, para que una credencial entregada con el rol inferior no pueda iniciar sesión con el
+  superior. Si la necesita, emite una nueva contraseña temporal o un nuevo enlace después de la promoción.
 - **No puedes cambiar tu propio rol.** Un administrador no puede promoverse ni degradarse a sí mismo; un
   cambio de rol debe hacerlo un administrador sobre otro. Esto evita que una sola persona eleve su
   propio acceso en silencio. (Sí puedes editar tu propio nombre, correo y otros datos.)

@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # User
@@ -177,7 +177,9 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 > cloning admin). The **engine toggle** `fireWorkflowsOnClonedGrants` (default **false**, safe-by-default)
 > decides whether each cloned grant fires the [[0054-applications-workflow-engine|workflow engine]]
 > (`ACCESS_GRANTED`, after commit) or is recorded bookkeeping-only; the choice is audited in the clone's
-> CREATED history. Response is the per-item batch shape `{ created, skipped: [{ id, reason }] }`. **Out of
+> CREATED history. Response is the per-item batch shape `{ created, skipped: [{ id, reason }] }`. Since
+> 2026-10-16 (SEC-088) a clone copies assignments only when the caller holds `asset:write` and grants only
+> when it holds `accessGrant:grant`; anything else is skipped with reason `permission_required`. **Out of
 > scope (separate follow-up):** the mapper `grantee.manager`/`legajo`/`username` token group.
 
 > [!note] `isActive` vs `deletedAt` — independent concepts
@@ -241,7 +243,8 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 >
 > **AD/LDAP as a directory SOURCE** ([[0091-on-prem-ad-ldap-directory-source]], #839): besides the bulk
 > import, `directoryOnly` persons can be **reconciled read-only** from an on-prem AD/LDAP directory. A
-> singleton `DirectoryConnection` (Settings → Directory, `settings:manage`, off by default) binds
+> singleton `DirectoryConnection` (Settings → Directory, read with `settings:manage`, saved and synced by an
+> `ADMIN` only since SEC-088, off by default) binds
 > read-only, subtree-searches, and **upserts** persons keyed on `directorySourceId` (AD `objectGUID`) — via
 > a `setInterval` sweeper and an ADMIN `POST /directory/sync` ("Sync now"). NEW → the PENDING tray (a
 > `directoryOnly` VIEWER); MATCHED → refresh mapped profile fields + `directoryAttrs` (a fixed allowlist);
@@ -346,6 +349,14 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > (INV-SA-3) and is capped below ADMIN; it cannot hold `user:manage` anyway (SEC-011). The order is
 > `ADMIN > MEMBER > VIEWER` (`canManageRole` in `@lazyit/shared`), whatever the matrix grants each role.
 > Rows that predate the rule are untouched; it applies to the next write.
+>
+> **A promotion revokes one-time credentials (SEC-088, 2026-10-16).** When a role change ranks the user
+> up (judged against the role under the row lock), the same transaction clears a temporary password the
+> user has not changed yet (`mustChangePassword` with a `passwordHash` → hash cleared, `sessionEpoch` and
+> `mcpCredentialEpoch` bumped) and marks every live `PasswordResetToken` used, so a credential a
+> lower-ranked caller minted cannot sign in at the new role. `ROLE_CHANGED` then carries
+> `credentialsRevoked: true`. An admin issues a fresh temporary password after promoting
+> ([[0040-rbac-roles]] → Amendment — clone and promotion).
 >
 > Role management is otherwise done from the **Users** section (a per-user role Select);
 > the very first `ADMIN` on a pre-existing DB is set out-of-band via `bun run set-role` ([[auth-bootstrap]]).

@@ -3,7 +3,7 @@ title: "ADR-0091: On-prem AD/LDAP as a read-only directory source"
 tags: [adr, directory, ldap, active-directory, users, provisioning, security, data-model]
 status: accepted
 created: 2026-07-19
-updated: 2026-10-15
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -21,6 +21,11 @@ reconcile's one sanctioned `sessionEpoch` write (see Hard invariants and
 [[0086-local-authentication-mode]] §8).
 **Amended** — 2026-10-09 (#1543) by [[0102-remove-bundled-zitadel]]: with the IdP write-back gone, the
 `users.service.create` opt this record calls `skipIdpWriteBack` is named `directoryOnly`; the rail is unchanged.
+**Amended** — 2026-10-16 (SEC-088, CEO decision): `PUT /directory/connection` and `POST /directory/sync`
+are ADMIN-only (`AdminOnlyGuard`, **403** `ADMIN_REQUIRED`) until custom roles (#1560). A delegated
+`settings:manage` could repoint the connection and sync to offboard an AD-sourced admin. `GET
+/directory/connection` stays `settings:manage`. The scheduled sweeper is unaffected: it runs the
+configuration an ADMIN saved, with no caller to check.
 
 ## Context
 

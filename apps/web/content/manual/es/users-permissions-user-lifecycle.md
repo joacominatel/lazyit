@@ -77,6 +77,10 @@ enumera lo que se omitió (y por qué). Un activo o una aplicación seleccionado
 desde entonces se omiten en lugar de copiarse, para que la clonación nunca reviva un activo retirado ni
 una aplicación dada de baja.
 
+Una clonación solo traslada lo que tú mismo podrías otorgar: los activos requieren **Agregar y editar
+inventario** y el acceso a aplicaciones requiere **Otorgar y revocar acceso**. Si a tu rol le falta
+alguno, esos elementos aparecen como omitidos por ese motivo y el nuevo usuario se crea sin ellos.
+
 ## Restablecer una contraseña
 
 En la página de detalle de un usuario, **Restablecer contraseña** inicia el restablecimiento de la
@@ -104,6 +108,10 @@ Eliges cómo le llega el restablecimiento a la persona:
 > [!IMPORTANT]
 > Una contraseña temporal se muestra **una sola vez**. Cópiala antes de cerrar el diálogo — no se vuelve
 > a mostrar ni se puede consultar más tarde. Si la pierdes, basta con repetir el restablecimiento.
+
+Promover a la persona a un rol superior cancela la contraseña temporal que todavía no usó y cualquier
+enlace de restablecimiento pendiente. Repite el restablecimiento después de la promoción si todavía lo
+necesita.
 
 La acción no está disponible para un usuario inactivo (reactívalo primero) ni para una persona de
 directorio que todavía no tiene cuenta de inicio de sesión — en ese caso dale de alta con una contraseña
