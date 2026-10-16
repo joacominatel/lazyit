@@ -10,7 +10,7 @@ subcategory: connected-apps
 Cada app de IA que puede actuar en tu nombre aparece en **Apps conectadas**, en **IA y apps conectadas**
 (menú de usuario → **IA y apps conectadas**, en `/account/ai`). Revisala cada tanto y cortá todo lo que
 no reconozcas. La lista está para todos: aunque no puedas conectar apps de IA nuevas, igual ves y podés
-revocar las que tenés.
+revocar las que tenés, y una nota arriba de la página indica que tu rol no puede conectar apps nuevas.
 
 ## Qué muestra la lista
 

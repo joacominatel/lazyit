@@ -24,16 +24,16 @@
   "account": {
     "title": "AI & connected apps",
     "subtitle": "Connect Claude Code and other AI apps to lazyit, and review or revoke the apps that can act as you.",
-    "forbidden": {
-      "title": "Your role can't connect AI apps",
-      "body": "Connecting AI apps needs the “Connect external AI agents (MCP)” permission (ai:connect). Ask an administrator if you need it."
-    },
     "statusError": "Couldn't check how AI apps connect to this instance. Your connected apps are listed below."
   },
   "mode": {
     "unavailable": {
       "title": "Connections for AI apps are off",
-      "body": "An administrator hasn't turned on the MCP server (Settings → AI), or your role doesn't allow connecting AI apps. Connections you already have are listed below: while the MCP server is off they are paused, not revoked — revoke any you no longer want."
+      "body": "An administrator hasn't turned on the MCP server (Settings → AI). Connections you already have are listed below: while the MCP server is off they are paused, not revoked — revoke any you no longer want."
+    },
+    "unavailableRole": {
+      "title": "Your role can't connect AI apps",
+      "body": "Connecting AI apps needs the “Connect external AI agents (MCP)” permission. Apps and tokens you connected before have stopped working, but they stay listed below so you can revoke them. Ask an administrator if you need the permission."
     },
     "oauth": {
       "title": "This instance uses OAuth sign-in",

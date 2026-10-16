@@ -46,7 +46,7 @@ export function decideAuthorizeRequest(
   });
 }
 
-/** `GET /oauth/grants/mine` — the caller's live connections: OAuth apps and personal tokens (`ai:connect`). */
+/** `GET /oauth/grants/mine` — the caller's live connections: OAuth apps and personal tokens (no permission, AUD-083). */
 export function listMyGrants(): Promise<OAuthGrant[]> {
   return apiFetch<OAuthGrant[]>("/oauth/grants/mine");
 }

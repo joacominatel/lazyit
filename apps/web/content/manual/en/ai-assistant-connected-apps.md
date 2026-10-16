@@ -10,7 +10,7 @@ subcategory: connected-apps
 Every AI app that can act as you is listed under **Connected apps** on **AI & connected apps** (user menu
 → **AI & connected apps**, at `/account/ai`). Review it now and then, and cut off anything you don't
 recognize. The list is there for everyone: even if you may not connect new AI apps, you still see and can
-revoke the ones you have.
+revoke the ones you have, and a note at the top of the page says your role can't connect new ones.
 
 ## What the list shows
 
