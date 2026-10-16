@@ -15,7 +15,7 @@ import { streamCsv } from './stream-csv';
 export type ExportFilters = Record<string, unknown>;
 
 export interface ExportRecord {
-  principal: Principal | undefined;
+  principal: Principal;
   resource: DataExportResource;
   filters: ExportFilters;
   rowCount: number;
@@ -23,7 +23,7 @@ export interface ExportRecord {
 
 export interface CsvExportSpec<T extends KeysetCursor> {
   resource: DataExportResource;
-  principal: Principal | undefined;
+  principal: Principal;
   /** The route's `@Res({ passthrough: true })`: a client disconnect ends the stream and frees the slot. */
   response: Response;
   /** The parsed list filters, recorded on the audit row after {@link sanitizeExportFilters}. */

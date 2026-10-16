@@ -8,8 +8,7 @@ export const EXPORT_RATE_LIMIT = { max: 5, windowMs: 60_000 } as const;
 // Backstop only: a lease is released when its stream closes, this frees one whose close never came.
 export const EXPORT_LEASE_MS = 10 * 60_000;
 
-export function exportLimiterKey(principal: Principal | undefined): string {
-  if (!principal) return 'anonymous';
+export function exportLimiterKey(principal: Principal): string {
   return principal.kind === 'service'
     ? `sa:${principal.serviceAccount.id}`
     : `user:${principal.user.id}`;
