@@ -141,6 +141,44 @@ export interface MovementOrigin {
   ) => Promise<void>;
 }
 
+/** A ledger row with its target resolved and redacted for the caller (ADR-0098). */
+export type MovementExportRow = ConsumableMovement & {
+  target: ConsumableDeliveryTarget | null;
+};
+
+// Not filtered (ADR-0032): an archived consumable's deliveries stay listed, flagged by its `deletedAt`.
+const DELIVERY_INCLUDE = {
+  consumable: {
+    select: { id: true, name: true, sku: true, unit: true, deletedAt: true },
+  },
+} as const satisfies Prisma.ConsumableMovementInclude;
+
+/** One `GET /consumables/deliveries` item: the delivery, its target, consumable and return state. */
+export type DeliveryExportRow = MovementExportRow &
+  Prisma.ConsumableMovementGetPayload<{ include: typeof DELIVERY_INCLUDE }> & {
+    returnedQuantity: number;
+    outstandingQuantity: number;
+  };
+
+/** A consumable's ledger `where`: its list and its export read it. */
+function movementWhere(
+  consumableId: string,
+  { type, from, to }: MovementFilters,
+): Prisma.ConsumableMovementWhereInput {
+  return {
+    consumableId,
+    ...(type ? { type } : {}),
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(to) } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 /** The one target a create payload or a deliveries query names, or null (validated upstream). */
 function targetOf(data: TargetColumns): TargetRef | null {
   for (const key of Object.keys(TARGET_KIND) as ConsumableDeliveryTargetKey[]) {
@@ -797,24 +835,38 @@ export class ConsumablesService {
     principal?: Principal,
   ) {
     await this.assertExists(consumableId);
-    const { type, from, to } = filters;
     const rows = await this.prisma.consumableMovement.findMany({
-      where: {
-        consumableId,
-        ...(type ? { type } : {}),
-        ...(from || to
-          ? {
-              createdAt: {
-                ...(from ? { gte: new Date(from) } : {}),
-                ...(to ? { lte: new Date(to) } : {}),
-              },
-            }
-          : {}),
-      },
+      where: movementWhere(consumableId, filters),
       orderBy: { id: 'desc' },
     });
     const targets = await this.resolveTargets(rows, principal);
     return rows.map((row, i) => ({ ...row, target: targets[i] }));
+  }
+
+  // The list orders by id; the export walks (createdAt, id) like every export (ADR-0103 §3).
+  async movementsExportSource(
+    consumableId: string,
+    filters: MovementFilters,
+    principal: Principal,
+  ) {
+    await this.assertExists(consumableId);
+    const where = movementWhere(consumableId, filters);
+    const readable = await this.readableKinds(principal);
+    return {
+      count: () => this.prisma.consumableMovement.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<number> | null,
+        take: number,
+      ): Promise<MovementExportRow[]> => {
+        const rows = await this.prisma.consumableMovement.findMany({
+          where: keysetWhere(where, after),
+          orderBy: keysetOrderBy(),
+          take,
+        });
+        const targets = await this.resolveTargets(rows, principal, readable);
+        return rows.map((row, i) => ({ ...row, target: targets[i] }));
+      },
+    };
   }
 
   /**
@@ -837,6 +889,55 @@ export class ConsumablesService {
     page: PageQuery,
     principal?: Principal,
   ) {
+    const { where, readable } = await this.deliveriesScope(filters, principal);
+    const { take, skip } = offsetOf(page);
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.consumableMovement.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        take,
+        skip,
+        include: DELIVERY_INCLUDE,
+      }),
+      this.prisma.consumableMovement.count({ where }),
+    ]);
+    return pageOf(
+      await this.withReturnState(rows, principal, readable),
+      total,
+      page,
+    );
+  }
+
+  /** The deliveries CSV export's reads (ADR-0103): the list's gate, `where` and redaction, by keyset. */
+  async deliveriesExportSource(filters: DeliveryFilters, principal: Principal) {
+    const { where, readable } = await this.deliveriesScope(filters, principal);
+    return {
+      count: () => this.prisma.consumableMovement.count({ where }),
+      fetchBatch: async (
+        after: KeysetCursor<number> | null,
+        take: number,
+      ): Promise<DeliveryExportRow[]> =>
+        this.withReturnState(
+          await this.prisma.consumableMovement.findMany({
+            where: keysetWhere(where, after),
+            orderBy: keysetOrderBy(),
+            take,
+            include: DELIVERY_INCLUDE,
+          }),
+          principal,
+          readable,
+        ),
+    };
+  }
+
+  /** The deliveries list's per-kind gate (403) and its `where`, shared by the page and the export. */
+  private async deliveriesScope(
+    filters: DeliveryFilters,
+    principal?: Principal,
+  ): Promise<{
+    where: Prisma.ConsumableMovementWhereInput;
+    readable: ReadableKinds;
+  }> {
     const target = targetOf(filters);
     if (!target) {
       // Unreachable through the controller (the query schema requires exactly one target).
@@ -867,31 +968,17 @@ export class ConsumablesService {
           }
         : {}),
     };
-    const { take, skip } = offsetOf(page);
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.consumableMovement.findMany({
-        where,
-        orderBy: { id: 'desc' },
-        take,
-        skip,
-        // `Consumable` is not auto-filtered (ADR-0032) and a nested include is never filtered anyway: a
-        // soft-deleted consumable's deliveries stay listed, flagged by its `deletedAt`.
-        include: {
-          consumable: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              unit: true,
-              deletedAt: true,
-            },
-          },
-        },
-      }),
-      this.prisma.consumableMovement.count({ where }),
-    ]);
+    return { where, readable };
+  }
 
-    // Returned so far, per delivery on this page (one query).
+  /** Each delivery with its redacted target and return state; one returns query per batch. */
+  private async withReturnState(
+    rows: Prisma.ConsumableMovementGetPayload<{
+      include: typeof DELIVERY_INCLUDE;
+    }>[],
+    principal: Principal | undefined,
+    readable: ReadableKinds,
+  ): Promise<DeliveryExportRow[]> {
     const returnable = rows.filter((row) => row.returnable);
     const returned = new Map<number, number>();
     if (returnable.length > 0) {
@@ -908,7 +995,7 @@ export class ConsumablesService {
       }
     }
     const targets = await this.resolveTargets(rows, principal, readable);
-    const items = rows.map((row, i) => {
+    return rows.map((row, i) => {
       const returnedQuantity = row.returnable ? (returned.get(row.id) ?? 0) : 0;
       return {
         ...row,
@@ -919,7 +1006,6 @@ export class ConsumablesService {
           : 0,
       };
     });
-    return pageOf(items, total, page);
   }
 
   /**
