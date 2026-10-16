@@ -45,11 +45,19 @@ before the server reports counts, the column stays empty rather than guessing.)
 - **Filter** — the filter box above each list narrows it by name or description.
 
 **What deleting a category does.** Deleting an asset, application or consumable category is a
-**soft delete**: the category is hidden, never erased, and it can be restored. lazyit does **not** stop
-you from deleting a category that is in use. The records filed under it keep all their data, but they
-show **no category** until the category is restored or you file them under another one. The
-confirmation says how many records that is (*Used by 42 assets — they keep their records but show no
-category until it is restored*). There is no list of deleted categories in Settings yet; an
+**soft delete**: the category is hidden, never erased, and it can be restored.
+
+- An **application or consumable category** that still has items asks for **one decision for all of
+  them** — never item by item — after showing you which ones: **leave them without a category**, or
+  **move them to another category** of the same kind (to file them under a new one, create it first,
+  then move them there). The move and the delete happen together, and restoring the category later
+  does not bring the items back.
+- An **asset category** in use can still be deleted directly: its records keep all their data but show
+  **no category** until the category is restored or you file them under another one. The confirmation
+  says how many records that is (*Used by 42 assets — they keep their records but show no category
+  until it is restored*).
+
+There is no list of deleted categories in Settings yet; an
 administrator can restore one through the API (`POST /api/asset-categories/{id}/restore`, and the same
 under `application-categories` and `consumable-categories`).
 
@@ -119,9 +127,9 @@ A category or model is a **reference** that records point at — it is not the r
 keeping the list curated matters: rename a category once and every record that references it follows.
 
 Removing a taxonomy entry follows the same **soft-delete and audit** rules as the rest of the domain:
-the entry is hidden, not erased, and the records that reference it are kept. A record whose category
-was deleted simply shows none. Check the **In use** count before you delete, and file the records under
-another entry first if they should keep one.
+the entry is hidden, not erased, and the records that reference it are kept. Application and
+consumable categories ask where their items go when you delete one in use; a record whose asset
+category was deleted simply shows none. Check the **In use** count before you delete.
 
 ## Where to manage related setup
 

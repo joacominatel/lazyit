@@ -3,7 +3,7 @@ title: "AI Assistant — Tool catalog, delegated execution, confirmation, audit 
 tags: [ai-assistant, design, backend, authz, audit, data-model, mcp]
 status: draft
 created: 2026-09-23
-updated: 2026-10-09
+updated: 2026-10-15
 ---
 
 # AI Assistant — Tool catalog, delegated execution, confirmation, audit & data model
@@ -480,12 +480,12 @@ provisioning or notifications. **Refs** = the entity refs `{ type, id, op }` the
 | 16 | `location_create` ✅ built (W2-5) | LocationsController.create (+findAll / findOne for the parent) | location:write | write | location created |
 | 16a | `category_create` ✅ built (#1390; kind: assetCategory, applicationCategory, consumableCategory) | AssetCategoriesController.create (primary), the other two kinds' `create`, the three `findAll` | category:write | write | category created |
 | 16b | `category_update` ✅ built (#1390; rename, description, order, the asset-category attribute dictionary) | AssetCategoriesController.update (primary), the other two kinds' `update`, the three `findAll` | category:write | write·D | category updated |
-| 16c | `category_archive` ✅ built (#1390) | AssetCategoriesController.remove (primary), the other two kinds' `remove`, the three `findAll`; impact from AssetModelsController / AssetsController / ApplicationsController / ConsumablesController `findAll` | category:delete | write·D | category archived |
+| 16c | `category_archive` ✅ built (#1390; `strategy` + `moveTo` for an application / consumable category in use, AUD-085) | AssetCategoriesController.remove (primary), the other two kinds' `remove`, the three `findAll`; the application / consumable impact from their `deleteImpact`, the asset-category impact from AssetModelsController / AssetsController `findAll` | category:delete | write·D | category archived |
 | 16d | `asset_model_update` ✅ built (#1390) | AssetModelsController.update (+findOne / findAll, AssetCategoriesController.findAll) | assetModel:write | write·D | assetModel updated |
 | 16e | `asset_model_archive` ✅ built (#1390) | AssetModelsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | assetModel:delete | write·D | assetModel archived |
 | 16f | `asset_model_restore` ✅ built (#1390) | AssetModelsController.restore (+findAll `deleted=only`) | assetModel:delete | write (idempotent) | assetModel restored |
 | 16g | `location_update` ✅ built (#1390; also the move under another parent) | LocationsController.update (+findOne / findAll) | location:write | write·D | location updated |
-| 16h | `location_archive` ✅ built (#1390) | LocationsController.remove (+findOne / findAll; AssetsController.findAll for the impact) | location:delete | write·D | location archived |
+| 16h | `location_archive` ✅ built (#1390; `strategy` + `moveTo` when in use, AUD-024) | LocationsController.remove (+deleteImpact for the impact and the in-use check, findOne / findAll) | location:delete | write·D | location archived |
 | 16i | `location_restore` ✅ built (#1390) | LocationsController.restore (+findAll `deleted=only`) | location:delete | write (idempotent) | location restored |
 | 16l | `asset_status_label_create` ✅ built (#1524) | AssetStatusLabelsController.create (+findAll) | category:write | write | assetStatusLabel created |
 | 16m | `asset_status_label_update` ✅ built (#1524; rename, colour, description, order; kind only while unused) | AssetStatusLabelsController.update (+findAll) | category:write | write·D | assetStatusLabel updated |
@@ -1074,7 +1074,9 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   `consumableCategory`): the three controllers share `category:write` / `category:delete`, so one listing
   permission is exact. `category_create`, `category_update`·D (rename, description, `order` — application
   and consumable only — and `specsSchema`, asset only; a field of another kind is `INVALID_INPUT`) and
-  `category_archive`·D. KB folders are categories too but stay with the KB toolset (a folder carries an
+  `category_archive`·D — an application or consumable category still in use needs `strategy` (`detach`, or
+  `move` with `moveTo`, one choice for all its items); without one the preview is refused with the counts,
+  as the route would answer 409. KB folders are categories too but stay with the KB toolset (a folder carries an
   audience; its delete cascades).
 - **Models and locations:** `asset_model_update`·D (name, manufacturer, SKU, description, category by id
   or exact name, `specs` merged over the attributes read at execute — a `null` value removes a key; the
@@ -1083,7 +1085,9 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   route takes `categoryId: null` since #1315, CEO 2026-09-25; `sku: null` / `description: null` clear
   those fields the same way — a before → none row, a no-op when already empty, #1441), `asset_model_archive`·D, `asset_model_restore`; `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
-  top-level), `location_archive`·D, `location_restore`. The manufacturer is a free-text column of
+  top-level), `location_archive`·D (in use — live assets, child locations or open purchases — it needs
+  `strategy` `detach`, or `move` with `moveTo`, one choice for all of them; the card counts each kind from
+  `GET /locations/:id/delete-impact` and shows a `destination` row), `location_restore`. The manufacturer is a free-text column of
   `AssetModel`, not an entity: `asset_model_create` takes it as text, so there is no manufacturer to
   resolve or create; a missing category is created with `category_create` first (its description says so).
 - **References:** a category by id or exact name, read from its unpaged route list (no partial page); a

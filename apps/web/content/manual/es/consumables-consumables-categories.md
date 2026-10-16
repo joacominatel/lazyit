@@ -57,9 +57,10 @@ pequeño; renómbralo, amplíalo o recórtalo según tu parque.
 Conviene saber algunas cosas:
 
 - Un consumible puede tener **una** categoría, o ninguna.
-- **Eliminar una categoría no elimina sus consumibles.** Cada consumible que apuntaba a ella
-  simplemente queda sin categoría; no se pierde nada. (Esto difiere de otras partes de lazyit que
-  bloquean una eliminación mientras algo sigue referenciando el ítem.)
+- **Eliminar una categoría no elimina sus consumibles.** Si todavía tiene consumibles, lazyit te
+  muestra cuáles y te pide **una sola decisión para todos**: dejarlos sin categoría o moverlos a otra
+  categoría (crea una nueva primero si quieres una distinta). No se pierde nada, y restaurar la
+  categoría después no los devuelve.
 - Las categorías se **eliminan de forma reversible** y un nombre eliminado queda libre para
   reutilizarse, así que puedes recrear o restaurar una más adelante sin conflicto.
 

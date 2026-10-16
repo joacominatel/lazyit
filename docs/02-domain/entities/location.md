@@ -52,9 +52,9 @@ employee". Answers half of the core audit question "what do we have and **where 
   user-managed custom types deferred (see the Known-debt note below and [[0017-location-type-enum]]).
   The same `type` enum doubles as the hierarchy node **kind** (no separate kind field).
 - **Delete with one resolution (AUD-024, closes the location half of SEC-041).** A delete affects the
-  location's **live assets**, its **live child locations** and its **open purchases** — live, not
-  `CANCELLED`, and still waiting for units (no countable line yet, or a countable line with units
-  pending) — whose delivery location it is. While any of them exists, the delete needs **one**
+  location's **live assets**, its **live child locations** and its **open purchases** whose delivery
+  location it is — live, `DRAFT` or `ORDERED` (a status a newer build adds counts as closed), and either
+  a countable line still has units pending or there is no countable line at all. While any of them exists, the delete needs **one**
   resolution for all of them, never one per row:
   - `detach` — assets lose their location, child locations become top-level, open purchases lose
     their delivery location;
@@ -64,15 +64,19 @@ employee". Answers half of the core audit question "what do we have and **where 
 
   Without a resolution the delete is a `409` with code `DELETE_RESOLUTION_REQUIRED` and the counts,
   so an older client, a script or the AI never strands rows silently. The resolution and the soft
-  delete run in **one transaction** under the tree lock; each moved asset gets a `LOCATION_CHANGED`
-  [[asset-history]] row (`{ from, to }`, `to: null` on detach) and each purchase an `UPDATED`
+  delete run in **one transaction** under the tree lock (30 s timeout; the assets and purchases are
+  locked `FOR UPDATE`). Each moved asset gets a `LOCATION_CHANGED` [[asset-history]] row
+  (`{ from, to }`, `to: null` on detach), all written in one insert, and each purchase an `UPDATED`
   activity row for `deliveryLocationId`. History keeps its reference: consumable deliveries (an
-  append-only ledger), received or cancelled purchases, and archived assets and child locations still
-  point at the archived location. Restoring the location re-links nothing.
+  append-only ledger), closed purchases, and archived assets and child locations still point at the
+  archived location. Restoring the location re-links nothing.
 - **Restore needs a live parent (AUD-080).** Restoring a location whose parent is still soft-deleted
   is a `409`: restore the parent first. Restores do not cascade
   ([[0041-soft-delete-reuse-and-restore]]). Locations already left under an archived parent keep
   loading as before.
+- **Locations archived before the delete resolution** still have their assets, children and purchases
+  pointing at them, since that delete resolved nothing. Restoring one brings those links back as they
+  were; deleting it again later goes through the resolution like any other delete.
 
 ## Conventions
 

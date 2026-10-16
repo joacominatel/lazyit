@@ -3,7 +3,7 @@ title: PurchaseOrder
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-03
+updated: 2026-10-15
 ---
 
 # PurchaseOrder
@@ -43,7 +43,9 @@ working exactly as before ([[0099-purchases-scope-model-and-optionality]] §7, C
   archived purchase's documents 404 until it is restored. Each document may carry an optional free-text
   **type label** (quote, invoice, delivery note), set at upload or edited later (#1476, [[attachment]]).
 - **delivers to** an optional [[location]] (`deliveryLocationId`), used as the default location when
-  receiving units.
+  receiving units. Deleting that location moves or clears it, with an `UPDATED` event, while the purchase
+  is **open** — live, `DRAFT` or `ORDERED`, and either a countable line still has units pending or it has
+  no countable line at all; a cancelled, fully received or archived purchase keeps it as history (AUD-024).
 - **produced** N [[asset]]s, indirectly: each asset points at one line (`Asset.purchaseOrderLineId`).
 
 ## Business rules
