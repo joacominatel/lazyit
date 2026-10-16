@@ -46,7 +46,9 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
   articles move with it. Because a move changes who can read everything inside the folder, it needs
   the *manage settings* permission (administrators have it), and **Move to…** only appears for people
   who hold it. If that permission is taken away while the dialog is open, the move is refused with a
-  message saying so and nothing moves. Each move is recorded in the version history of every article it carries.
+  message saying so and nothing moves. Each move is recorded in the version history of every article
+  it carries; a move made through a service account (an automation or an AI tool) shows **A service
+  account** as the author.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both
   exist; two folders named `Linux` under the *same* parent cannot. If a name is already taken where
   you are creating or moving to, the app says so and nothing is changed.

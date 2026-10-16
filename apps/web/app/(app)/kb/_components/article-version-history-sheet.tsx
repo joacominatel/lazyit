@@ -158,7 +158,7 @@ export function ArticleVersionHistorySheet({
                   <VersionRow
                     key={v.id}
                     version={v}
-                    authorName={resolveAuthor(v.editedById, usersById)}
+                    authorName={resolveAuthor(v, usersById, t("versions.serviceAccountAuthor"))}
                     onView={() => setSelectedVersion(v)}
                     // Restore is offered for past versions only — restoring the latest (the live
                     // content) would be a no-op (the API skips an identical snapshot anyway).
@@ -179,13 +179,15 @@ export function ArticleVersionHistorySheet({
   );
 }
 
-/** Resolve a user id to a display name from the resolved id→user lookup (#961). */
+/** The version's author: a service account (a folder move, ADR-0060 §10) or a user from the id→user lookup (#961). */
 function resolveAuthor(
-  userId: string | null,
+  version: Pick<ArticleVersion, "editedById" | "serviceAccountId">,
   usersById: ReadonlyMap<string, { firstName: string; lastName: string }>,
+  serviceAccountLabel: string,
 ): string | undefined {
-  if (!userId) return undefined;
-  const user = usersById.get(userId);
+  if (version.serviceAccountId) return serviceAccountLabel;
+  if (!version.editedById) return undefined;
+  const user = usersById.get(version.editedById);
   return user ? `${user.firstName} ${user.lastName}` : undefined;
 }
 
@@ -298,7 +300,7 @@ function VersionDetailSheet({
           {snap && (
             <SheetDescription className="flex items-center gap-1.5">
               <span>
-                {resolveAuthor(snap.editedById, usersById) ??
+                {resolveAuthor(snap, usersById, t("versions.serviceAccountAuthor")) ??
                   t("detail.unknownAuthor")}
               </span>
               <span aria-hidden>·</span>

@@ -51,7 +51,8 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
   permiso de *gestionar configuración* (lo tienen los administradores), y **Mover a…** solo aparece para
   quien lo tiene. Si ese permiso se retira con el diálogo abierto, el movimiento se rechaza con un
   mensaje que lo explica y nada se mueve. Cada movimiento queda registrado en el historial de versiones
-  de cada artículo que arrastra.
+  de cada artículo que arrastra; un movimiento hecho mediante una cuenta de servicio (una automatización
+  o una herramienta de IA) muestra **Una cuenta de servicio** como autor.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
   `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no. Si el nombre ya está
   ocupado donde estás creando o moviendo, la app te lo dice y no se cambia nada.

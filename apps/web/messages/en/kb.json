@@ -345,6 +345,7 @@
     "loading": "Loading version history…",
     "empty": "No versions yet.",
     "versionLabel": "Version {n}",
+    "serviceAccountAuthor": "A service account",
     "viewVersion": "View",
     "viewVersionAriaLabel": "View version {n}",
     "restore": "Restore",
