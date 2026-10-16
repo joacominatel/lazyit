@@ -785,6 +785,8 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 3. **Q3 — MCP without an LLM provider → yes.** An independent "External agents (MCP)" switch (CEO, round 2).
 4. **Q4 — Where "Install in Claude Code" lives → `/account/ai`** for holders of `ai:connect` (install,
    connected apps, personal tokens); Settings → AI for admins (the MCP switch and every user's grants) (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 5. **Q5 — SA tokens on `/mcp` → accepted, fail-closed, only if the SA holds `ai:connect`** (R10; adopted by
    default, CEO to confirm on review).
 6. **Q6 — Password change / "sign out everywhere" / admin reset kill MCP connections → yes**, through the

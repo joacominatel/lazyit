@@ -978,8 +978,10 @@ Edits to existing pages (en + es):
 ## 11. Resolved decisions
 
 1. **MCP without an LLM provider → yes, two independent switches** (CEO, round 2).
-2. **Non-admins' install + connected apps at `/account/ai`**: the install for holders of `ai:connect`,
-   the connected apps for everyone (AUD-083); Settings → AI shows the same install panel to admins (R9).
+2. **Non-admins' install + connected apps at `/account/ai`** for holders of `ai:connect`; Settings → AI
+   shows the same install panel to admins (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 3. **Navigation → auto-navigate only for an explicit `navigate`-kind tool and only when no
    unsaved-changes guard is active**; otherwise an "Open" chip (R3).
 4. **Turning AI off → keep conversations and connected apps dormant** (retention keeps running; MCP
