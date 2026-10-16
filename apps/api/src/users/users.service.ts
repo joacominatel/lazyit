@@ -24,7 +24,7 @@ import type {
   UpdateOwnProfile,
   UpdateUser,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import { canManageRole, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma, Role } from '../../generated/prisma/client';
 import type { User } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -172,6 +172,11 @@ export interface OffboardResult {
    * operator must rotate these secrets manually. Empty when the user was a member of no vault.
    */
   rotationVaults: { vaultId: string; name: string; itemCount: number }[];
+}
+
+/** The attribution of the human-only routes, which pass the caller's id (`undefined` = server caller). */
+function humanActor(actorId: string | undefined): ActorAttribution {
+  return actorId != null ? { userId: actorId } : {};
 }
 
 @Injectable()
@@ -584,9 +589,10 @@ export class UsersService {
     // RBAC default (ADR-0040, flipped to VIEWER by ADR-0043): an omitted role lands the least-
     // privileged read-only role. We set it explicitly here (rather than leaning on the Prisma column
     // default) so the service is the authoritative default for app-created users and the behaviour is
-    // testable without a DB. The Users controller is ADMIN-gated, so an ADMIN may still pass any role.
+    // testable without a DB. The caller may grant at most its own role (SEC-088, role ceiling below).
     // A directory-only person is ALWAYS VIEWER — never trust the payload (which can't carry role anyway).
     const role = opts?.directoryOnly ? Role.VIEWER : (data.role ?? Role.VIEWER);
+    await this.assertWithinRoleCeiling(humanActor(actorId), role);
     // Resolve the manager either/or → DB columns (ADR-0058). On create there is no subject yet, so no
     // cycle is possible; the FK-live + at-most-one checks still apply. Then build the explicit create
     // data (manager/legajo/username are columns; `manager` the input union is NOT — strip + translate).
@@ -701,6 +707,7 @@ export class UsersService {
     actorId?: string,
   ): Promise<AdminPasswordResetResult> {
     const target = await this.findOne(id); // 404 if missing or soft-deleted
+    await this.assertWithinRoleCeiling(humanActor(actorId), target.role);
     // Local mode ONLY: there is no IdP here, so lazyit owns the credential. Under OIDC the IdP owns
     // onboarding instead.
     if (!this.isLocalMode()) {
@@ -811,6 +818,12 @@ export class UsersService {
 
   async update(id: string, data: UpdateUser, actorId?: string) {
     const current = await this.findOne(id); // 404 if missing or already soft-deleted
+
+    await this.assertWithinRoleCeiling(
+      humanActor(actorId),
+      current.role,
+      ...(data.role !== undefined ? [data.role] : []),
+    );
 
     // RBAC safety guards (ADR-0040) — only run when a role change is actually requested.
     if (data.role !== undefined && data.role !== current.role) {
@@ -1023,6 +1036,7 @@ export class UsersService {
     },
   ): Promise<AdminPasswordResetOutcome> {
     const user = await this.findOne(id); // 404 if missing or already soft-deleted
+    await this.assertWithinRoleCeiling(humanActor(actorId), user.role);
 
     if (!user.isActive) {
       throw new UnprocessableEntityException(
@@ -1202,6 +1216,34 @@ export class UsersService {
     };
   }
 
+  /** SEC-088. An SA is never ADMIN-equivalent (INV-SA-3); no actor means the import or directory sync. */
+  private async assertWithinRoleCeiling(
+    actor: ActorAttribution,
+    ...roles: Role[]
+  ): Promise<void> {
+    let ceiling: Role | undefined;
+    if (actor.userId != null) {
+      const caller = await this.prisma.user.findUnique({
+        where: { id: actor.userId },
+        select: { role: true },
+      });
+      ceiling = caller?.role;
+    } else if (actor.serviceAccountId != null) {
+      ceiling = Role.MEMBER;
+    } else {
+      return;
+    }
+    if (ceiling && roles.every((role) => canManageRole(ceiling, role))) {
+      return;
+    }
+    throw new ForbiddenException({
+      statusCode: 403,
+      code: 'ROLE_CEILING_EXCEEDED',
+      message:
+        'You can only manage users whose role is at or below your own. Only an administrator can manage administrators.',
+    });
+  }
+
   /**
    * The last-admin predicate (ADR-0040, SEC-021): true when at least one live, active ADMIN OTHER than
    * `userId` exists, i.e. removing `userId`'s administrator powers still leaves the instance
@@ -1295,7 +1337,8 @@ export class UsersService {
     id: string,
     actor: ActorAttribution = {},
   ): Promise<OffboardResult> {
-    await this.findOne(id); // 404 if missing or already soft-deleted
+    const target = await this.findOne(id); // 404 if missing or already soft-deleted
+    await this.assertWithinRoleCeiling(actor, target.role);
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1447,6 +1490,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
     }
+    await this.assertWithinRoleCeiling(actor, user.role);
     if (user.deletedAt === null) {
       return this.serializeUser(user); // already live — idempotent (no state change → no history row)
     }

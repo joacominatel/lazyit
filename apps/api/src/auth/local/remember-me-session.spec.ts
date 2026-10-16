@@ -187,6 +187,8 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
         },
       ),
       count: jest.fn().mockResolvedValue(1),
+      // The acting ADMIN_ID's role, read by the role ceiling (SEC-088).
+      findUnique: jest.fn().mockResolvedValue({ role: 'ADMIN' }),
       // Only the directory reconcile lists users here: it loads the live 'ad'-sourced cohort.
       findMany: jest.fn(({ where }: { where: Where }) =>
         Promise.resolve(

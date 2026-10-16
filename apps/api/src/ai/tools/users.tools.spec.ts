@@ -281,6 +281,10 @@ const prisma = {
     findFirst: jest.fn((args: FindArgs) =>
       Promise.resolve(liveRows(args)[0] ? { ...liveRows(args)[0] } : null),
     ),
+    findUnique: jest.fn(({ where }: { where: { id: string } }) => {
+      const row = users.get(where.id);
+      return Promise.resolve(row ? { ...row } : null);
+    }),
     findMany: jest.fn((args: FindArgs) => {
       const rows = sorted(liveRows(args), args.orderBy);
       const skip = args.skip ?? 0;
@@ -1634,6 +1638,36 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
           verb: 'patch',
           url: `/users/${ID.admin}`,
           shape: { body: { role: 'MEMBER' } },
+        }),
+      ).toBe(403);
+    });
+
+    it('a MEMBER delegated user:manage cannot promote to ADMIN through the tool (403), exactly like HTTP (SEC-088)', async () => {
+      roleMatrix = {
+        ...DEFAULT_ROLE_PERMISSIONS,
+        MEMBER: [...DEFAULT_ROLE_PERMISSIONS.MEMBER, 'user:manage'],
+      };
+      resolver.invalidate();
+      const proposal = await tools.propose(
+        'user_update',
+        { user: ID.viewer, role: 'ADMIN' },
+        chat(MEMBER),
+      );
+      if (!proposal.ok) throw new Error(JSON.stringify(proposal.result));
+      const approved = await tools.approve(proposal.action.id, chat(MEMBER), {
+        stepUpVerified: true,
+      });
+      expect(approved).toMatchObject({
+        status: 'FAILED',
+        result: { ok: false, error: { status: 403 } },
+      });
+      expect(users.get(ID.viewer)!.role).toBe('VIEWER');
+      expect(
+        await viaNetwork(MEMBER, {
+          method: 'update',
+          verb: 'patch',
+          url: `/users/${ID.viewer}`,
+          shape: { body: { role: 'ADMIN' } },
         }),
       ).toBe(403);
     });

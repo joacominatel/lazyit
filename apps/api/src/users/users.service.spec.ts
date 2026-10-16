@@ -37,6 +37,8 @@ jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 type PrismaUserMock = {
   findMany: jest.Mock;
   findFirst: jest.Mock;
+  // The role ceiling reads the caller's role (SEC-088).
+  findUnique: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
@@ -120,6 +122,8 @@ describe('UsersService', () => {
     user = {
       findMany: jest.fn(),
       findFirst: jest.fn(),
+      // Default: the caller is an ADMIN, so the role ceiling never bites unless a test says otherwise.
+      findUnique: jest.fn().mockResolvedValue({ role: 'ADMIN' }),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -655,7 +659,11 @@ describe('UsersService', () => {
   });
 
   it('offboards: soft-deletes (deletedAt) + revokes grants + releases assignments, in one tx', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.accessGrant.updateMany.mockResolvedValue({ count: 2 });
     assignments.releaseAllForUser.mockResolvedValue([
@@ -741,7 +749,11 @@ describe('UsersService', () => {
   // offboarding-control gap) and flags each vault to rotate. INV-10-safe: a pure row-delete of wrapped
   // key material; no decryption. Reuses the offboard setup above.
   it('offboards: revokes ALL the user’s vault memberships and flags each vault to rotate (#869)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.accessGrant.updateMany.mockResolvedValue({ count: 0 });
     // The user is a crypto member of two vaults; the read carries each vault's name + LIVE item count.
@@ -805,7 +817,11 @@ describe('UsersService', () => {
   });
 
   it('attributes the vault-revoke audit rows to the SERVICE ACCOUNT when a SA offboards (#869)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     tx.user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
     tx.vaultMembership.findMany.mockResolvedValue([
       { vaultId: 'vault-a', vault: { name: 'Prod DB', _count: { items: 1 } } },
@@ -1651,6 +1667,222 @@ describe('UsersService', () => {
       expect(tx.user.count.mock.invocationCallOrder[0]).toBeLessThan(
         tx.user.update.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  // SEC-088 / AUD-002: `user:manage` delegated to MEMBER or VIEWER never reaches ADMIN.
+  describe('role ceiling for delegated user:manage (SEC-088)', () => {
+    const callerIs = (role: string | null) =>
+      user.findUnique.mockResolvedValue(role === null ? null : { role });
+    const target = (role: string, extra: Record<string, unknown> = {}) =>
+      user.findFirst.mockResolvedValue({
+        id: 'target-1',
+        role,
+        isActive: true,
+        directoryOnly: false,
+        deletedAt: null,
+        ...extra,
+      });
+    const ceiling = {
+      response: { statusCode: 403, code: 'ROLE_CEILING_EXCEEDED' },
+    };
+    const profile = {
+      email: 'new@corp.example',
+      firstName: 'N',
+      lastName: 'U',
+    };
+
+    it('a MEMBER cannot create an ADMIN', async () => {
+      callerIs('MEMBER');
+
+      await expect(
+        service.create({ ...profile, role: 'ADMIN' }, 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'member-1' },
+        select: { role: true },
+      });
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a VIEWER cannot create a MEMBER', async () => {
+      callerIs('VIEWER');
+
+      await expect(
+        service.create({ ...profile, role: 'MEMBER' }, 'viewer-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER can create a MEMBER', async () => {
+      callerIs('MEMBER');
+      user.create.mockResolvedValue({
+        id: 'new-1',
+        ...profile,
+        role: 'MEMBER',
+      });
+
+      await service.create({ ...profile, role: 'MEMBER' }, 'member-1');
+
+      expect(user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ role: 'MEMBER' }) as unknown,
+      });
+    });
+
+    it('an ADMIN can create an ADMIN', async () => {
+      callerIs('ADMIN');
+      user.create.mockResolvedValue({ id: 'new-1', ...profile, role: 'ADMIN' });
+
+      await service.create({ ...profile, role: 'ADMIN' }, 'admin-1');
+
+      expect(user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ role: 'ADMIN' }) as unknown,
+      });
+    });
+
+    it('a MEMBER cannot clone into an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('MEMBER');
+
+      await expect(
+        service.clone(
+          'target-1',
+          {
+            profile: { ...profile, role: 'ADMIN' },
+            cloneAssetAssignments: [],
+            cloneAccessGrants: [],
+            fireWorkflowsOnClonedGrants: false,
+          },
+          'member-1',
+        ),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.create).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER cannot promote anyone to ADMIN', async () => {
+      callerIs('MEMBER');
+      target('MEMBER');
+
+      await expect(
+        service.update('target-1', { role: 'ADMIN' }, 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER cannot edit, demote or deactivate an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      for (const patch of [
+        { email: 'mine@corp.example' },
+        { role: 'VIEWER' as const },
+        { isActive: false },
+      ]) {
+        await expect(
+          service.update('target-1', patch, 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+      }
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a MEMBER can promote a VIEWER to MEMBER', async () => {
+      callerIs('MEMBER');
+      target('VIEWER');
+      user.update.mockResolvedValue({ id: 'target-1', role: 'MEMBER' });
+
+      await service.update('target-1', { role: 'MEMBER' }, 'member-1');
+
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'target-1' },
+        data: expect.objectContaining({ role: 'MEMBER' }) as unknown,
+      });
+    });
+
+    it('an ADMIN can still demote another ADMIN', async () => {
+      callerIs('ADMIN');
+      target('ADMIN');
+      user.update.mockResolvedValue({ id: 'target-1', role: 'MEMBER' });
+
+      await service.update('target-1', { role: 'MEMBER' }, 'admin-1');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it("a MEMBER cannot reset an ADMIN's password (local mode)", async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      await expect(
+        service.requestPasswordReset('target-1', 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("an ADMIN can reset another ADMIN's password (local mode)", async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('ADMIN');
+      target('ADMIN');
+
+      await expect(
+        service.requestPasswordReset('target-1', 'admin-1'),
+      ).resolves.toEqual(
+        expect.objectContaining({ delivery: 'temporary-password' }),
+      );
+    });
+
+    it('a MEMBER cannot offboard an ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN');
+
+      await expect(
+        service.remove('target-1', { userId: 'member-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('an ADMIN can offboard another ADMIN', async () => {
+      callerIs('ADMIN');
+      target('ADMIN');
+      tx.user.update.mockResolvedValue({ id: 'target-1' });
+
+      await expect(
+        service.remove('target-1', { userId: 'admin-1' }),
+      ).resolves.toEqual(expect.objectContaining({ userId: 'target-1' }));
+    });
+
+    it('a MEMBER cannot restore an offboarded ADMIN', async () => {
+      callerIs('MEMBER');
+      target('ADMIN', { deletedAt: new Date() });
+
+      await expect(
+        service.restore('target-1', { userId: 'member-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a service account is never ADMIN-equivalent: it cannot offboard or restore an ADMIN', async () => {
+      target('ADMIN');
+      await expect(
+        service.remove('target-1', { serviceAccountId: 'sa-1' }),
+      ).rejects.toMatchObject(ceiling);
+
+      target('ADMIN', { deletedAt: new Date() });
+      await expect(
+        service.restore('target-1', { serviceAccountId: 'sa-1' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('a caller whose row is gone fails closed', async () => {
+      callerIs(null);
+      target('VIEWER');
+
+      await expect(
+        service.update('target-1', { firstName: 'X' }, 'ghost-1'),
+      ).rejects.toMatchObject(ceiling);
     });
   });
 
