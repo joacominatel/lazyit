@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { formatOAuthScopes } from '@lazyit/shared';
-import { NOTIFICATION_RETENTION_MS } from '../notifications/notifications-retention.sweeper';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { McpCaller } from './mcp-caller';
@@ -18,10 +17,11 @@ const MEMO_LIMIT = 10_000;
  * (UNIQUE — a second emit, on any replica, is a quiet no-op), and a per-process memo — set only once the
  * notice exists, so a failed send is retried — spares the lookups on every later request. The email copy
  * follows the owner's per-type email opt-out like every emailable type (the allowlist has no mandatory
- * types); the bell copy always lands. The bell forgets after 90 days, so a grant older than that which was
- * already used is not announced again (its notice was sent and may have been pruned); one never used
- * before — `lastUsedAt` still null, as for a personal token minted and kept idle — is announced whatever its
- * age (AUD-014). Service Accounts have no bell and are never announced.
+ * types); the bell copy always lands. Whether a connection was announced is stored on the grant
+ * (`announcedAt`), never inferred from its age, so the 90-day bell prune cannot make an old, never-announced
+ * grant look announced (AUD-014). A grant announced before the column existed is recognized by its notice
+ * row and the column is filled in. Two concurrent first uses claim `announcedAt` with a conditional update,
+ * so only one of them sends. Service Accounts have no bell and are never announced.
  *
  * Best-effort and fire-and-forget: a notification problem never fails or delays the MCP request.
  */
@@ -55,21 +55,28 @@ export class McpConnectionNoticeService {
 
     const row = await this.prisma.oAuthGrant.findFirst({
       where: { id: grant.id },
-      select: { createdAt: true, userId: true },
+      select: { userId: true, announcedAt: true },
     });
-    if (
-      !row ||
-      (grant.lastUsedAt !== null &&
-        now.getTime() - row.createdAt.getTime() >= NOTIFICATION_RETENTION_MS)
-    ) {
+    if (!row || row.announcedAt !== null) {
       this.remember(grant.id);
       return false;
     }
-    // Already sent (by this or another replica, before a restart): remember it and stop.
-    if (await this.alreadySent(dedupeKey)) {
+    // Announced before `announcedAt` existed (or by an older replica): record it and stop.
+    const sentAt = await this.sentAt(dedupeKey);
+    if (sentAt) {
+      await this.prisma.oAuthGrant.updateMany({
+        where: { id: grant.id, announcedAt: null },
+        data: { announcedAt: sentAt },
+      });
       this.remember(grant.id);
       return false;
     }
+    const { count } = await this.prisma.oAuthGrant.updateMany({
+      where: { id: grant.id, announcedAt: null },
+      data: { announcedAt: now },
+    });
+    // A concurrent first use claimed it; not remembered, so a failed send over there is retried here.
+    if (count === 0) return false;
 
     const personal = caller.kind === 'personal';
     const name =
@@ -78,41 +85,50 @@ export class McpConnectionNoticeService {
     const access = grant.scopes.includes('lazyit.write')
       ? 'read and write'
       : 'read-only';
-    const id = await this.notifications.emit({
-      type: 'mcp.client_connected',
-      dedupeKey,
-      severity: 'warning',
-      recipientUserId: row.userId,
-      targetUserId: row.userId,
-      title: personal
-        ? `Personal token "${name}" was used to connect an AI agent`
-        : `${name} was connected to your lazyit account`,
-      summary:
-        `An external AI agent now has ${access} access to lazyit as you` +
-        `${grant.scopes.includes('lazyit.admin') ? ', including admin actions' : ''}. ` +
-        `If this wasn't you, revoke it in Account → AI connections and change your password.`,
-      metadata: {
-        grantId: grant.id,
-        kind: personal ? 'personal' : 'oauth',
-        clientName: grant.clientName,
-        scopes: formatOAuthScopes(grant.scopes),
-      },
-    });
-    // Remember the grant only once the notice exists (G3 review F5): `emit` swallows its failures and
-    // answers null, so a failed send is retried on the connection's next request. A null because a
-    // concurrent request won the dedupe race is recognized by the row now existing.
-    if (id !== null || (await this.alreadySent(dedupeKey))) {
-      this.remember(grant.id);
+    let sent = false;
+    try {
+      const id = await this.notifications.emit({
+        type: 'mcp.client_connected',
+        dedupeKey,
+        severity: 'warning',
+        recipientUserId: row.userId,
+        targetUserId: row.userId,
+        title: personal
+          ? `Personal token "${name}" was used to connect an AI agent`
+          : `${name} was connected to your lazyit account`,
+        summary:
+          `An external AI agent now has ${access} access to lazyit as you` +
+          `${grant.scopes.includes('lazyit.admin') ? ', including admin actions' : ''}. ` +
+          `If this wasn't you, revoke it in Account → AI connections and change your password.`,
+        metadata: {
+          grantId: grant.id,
+          kind: personal ? 'personal' : 'oauth',
+          clientName: grant.clientName,
+          scopes: formatOAuthScopes(grant.scopes),
+        },
+      });
+      // `emit` swallows its failures and answers null; a null because the dedupe key already exists is a send.
+      sent = id !== null || (await this.sentAt(dedupeKey)) !== null;
+    } finally {
+      if (sent) {
+        this.remember(grant.id);
+      } else {
+        // Release the claim so the connection's next request retries the send (G3 review F5).
+        await this.prisma.oAuthGrant.updateMany({
+          where: { id: grant.id, announcedAt: now },
+          data: { announcedAt: null },
+        });
+      }
     }
     return true;
   }
 
-  private async alreadySent(dedupeKey: string): Promise<boolean> {
+  private async sentAt(dedupeKey: string): Promise<Date | null> {
     const existing = await this.prisma.notification.findUnique({
       where: { dedupeKey },
-      select: { id: true },
+      select: { createdAt: true },
     });
-    return existing !== null;
+    return existing?.createdAt ?? null;
   }
 
   private remember(grantId: string): void {

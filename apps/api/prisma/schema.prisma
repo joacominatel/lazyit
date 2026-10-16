@@ -3658,6 +3658,8 @@ model OAuthGrant {
   /// Personal tokens only — mandatory there.
   expiresAt    DateTime?
   lastUsedAt   DateTime?
+  /// When the owner was sent the first-use notice (mcp.client_connected); null = never announced.
+  announcedAt  DateTime?
   /// user | admin | refresh_reuse | revocation_endpoint | client_deleted (OAuthGrantRevokeReason).
   revokeReason String?
   revokedById  String?      @db.Uuid

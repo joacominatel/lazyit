@@ -6,7 +6,6 @@ jest.mock('../../generated/prisma/client', () => ({
 jest.mock('meilisearch', () => ({ Meilisearch: jest.fn() }));
 
 import type { NotificationsService } from '../notifications/notifications.service';
-import { NOTIFICATION_RETENTION_MS } from '../notifications/notifications-retention.sweeper';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { McpCaller } from './mcp-caller';
 import { McpConnectionNoticeService } from './mcp-connection-notice.service';
@@ -21,7 +20,6 @@ const caller = (over: Partial<McpCaller> = {}): McpCaller => ({
     clientId: 'lzc_1',
     clientName: 'Claude Code',
     scopes: ['lazyit.read', 'lazyit.write'],
-    lastUsedAt: new Date(),
   },
   ceiling: ['read', 'write'],
   rateKey: 'grant:ckgrant1',
@@ -29,26 +27,50 @@ const caller = (over: Partial<McpCaller> = {}): McpCaller => ({
 });
 
 describe('McpConnectionNoticeService — the first-use security notice (security §6.3, G3)', () => {
-  let grantCreatedAt: Date;
+  /** Each grant row's `announcedAt`, shared by every service instance (one database, many replicas). */
+  let stamps: Map<string, Date | null>;
+  const announcedAt = (id = 'ckgrant1') => stamps.get(id) ?? null;
   let findFirst: jest.Mock;
+  let updateMany: jest.Mock;
   let sent: jest.Mock;
   let emit: jest.Mock;
   let notices: McpConnectionNoticeService;
 
-  beforeEach(() => {
-    grantCreatedAt = new Date();
-    findFirst = jest.fn(() =>
-      Promise.resolve({ createdAt: grantCreatedAt, userId: USER }),
-    );
-    sent = jest.fn().mockResolvedValue(null);
-    emit = jest.fn().mockResolvedValue('ckn1');
-    notices = new McpConnectionNoticeService(
+  const replica = () =>
+    new McpConnectionNoticeService(
       {
-        oAuthGrant: { findFirst },
+        oAuthGrant: { findFirst, updateMany },
         notification: { findUnique: sent },
       } as unknown as PrismaService,
       { emit } as unknown as NotificationsService,
     );
+
+  beforeEach(() => {
+    stamps = new Map();
+    findFirst = jest.fn(({ where }: { where: { id: string } }) =>
+      Promise.resolve({ userId: USER, announcedAt: announcedAt(where.id) }),
+    );
+    // Honours the conditional `announcedAt` in the where clause, as Postgres would.
+    updateMany = jest.fn(
+      ({
+        where,
+        data,
+      }: {
+        where: { id: string; announcedAt: Date | null };
+        data: { announcedAt: Date | null };
+      }) => {
+        const current = announcedAt(where.id);
+        const match =
+          where.announcedAt === null
+            ? current === null
+            : current?.getTime() === where.announcedAt.getTime();
+        if (match) stamps.set(where.id, data.announcedAt);
+        return Promise.resolve({ count: match ? 1 : 0 });
+      },
+    );
+    sent = jest.fn().mockResolvedValue(null);
+    emit = jest.fn().mockResolvedValue('ckn1');
+    notices = replica();
   });
 
   it('emits one targeted, emailable-type notice keyed on the grant', async () => {
@@ -83,23 +105,46 @@ describe('McpConnectionNoticeService — the first-use security notice (security
     // emit swallows a failure and answers null; no row exists → not remembered.
     emit.mockResolvedValueOnce(null);
     expect(await notices.announce(caller())).toBe(true);
+    // The claim was released, so the grant still reads as never announced.
+    expect(announcedAt()).toBeNull();
     expect(await notices.announce(caller())).toBe(true);
+    expect(announcedAt()).not.toBeNull();
     expect(emit).toHaveBeenCalledTimes(2);
     // The second send succeeded: from now on the grant is remembered.
     expect(await notices.announce(caller())).toBe(false);
     expect(emit).toHaveBeenCalledTimes(2);
   });
 
-  it('recognizes a notice already sent (another replica, before a restart) without emitting again', async () => {
-    sent.mockResolvedValue({ id: 'ckn0' });
+  it('treats a grant announced before announcedAt existed as announced, and records it', async () => {
+    const noticeAt = new Date('2026-09-30T10:00:00.000Z');
+    sent.mockResolvedValue({ createdAt: noticeAt });
     expect(await notices.announce(caller())).toBe(false);
     expect(sent).toHaveBeenCalledWith({
       where: { dedupeKey: 'mcp.client_connected:ckgrant1' },
-      select: { id: true },
+      select: { createdAt: true },
     });
     expect(emit).not.toHaveBeenCalled();
+    expect(announcedAt()).toEqual(noticeAt);
     expect(await notices.announce(caller())).toBe(false);
     expect(sent).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps announcedAt when it sends, and never announces a grant already stamped', async () => {
+    const now = new Date('2026-10-15T12:00:00.000Z');
+    expect(await notices.announce(caller(), now)).toBe(true);
+    expect(announcedAt()).toEqual(now);
+    // Another replica (or this one after a restart) reads the stamp, not the notice row.
+    expect(await replica().announce(caller())).toBe(false);
+    expect(emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends one notice when two replicas see the same first use at once', async () => {
+    const results = await Promise.all([
+      replica().announce(caller()),
+      replica().announce(caller()),
+    ]);
+    expect(results.sort()).toEqual([false, true]);
+    expect(emit).toHaveBeenCalledTimes(1);
   });
 
   it('names a personal token and says read-only / admin accurately', async () => {
@@ -111,7 +156,6 @@ describe('McpConnectionNoticeService — the first-use security notice (security
           clientId: null,
           clientName: 'laptop',
           scopes: ['lazyit.read'],
-          lastUsedAt: null,
         },
       }),
     );
@@ -127,14 +171,13 @@ describe('McpConnectionNoticeService — the first-use security notice (security
           clientId: 'lzc_2',
           clientName: null,
           scopes: ['lazyit.read', 'lazyit.write', 'lazyit.admin'],
-          lastUsedAt: new Date(),
         },
       }),
     );
     expect(emit.mock.calls[1][0].summary).toMatch(/including admin actions/);
   });
 
-  it('never announces a Service Account, and never re-announces a used grant older than the bell’s retention', async () => {
+  it('never announces a Service Account', async () => {
     expect(
       await notices.announce(
         caller({
@@ -144,31 +187,26 @@ describe('McpConnectionNoticeService — the first-use security notice (security
         }),
       ),
     ).toBe(false);
-    grantCreatedAt = new Date(Date.now() - NOTIFICATION_RETENTION_MS - 1000);
-    expect(await notices.announce(caller())).toBe(false);
-    expect(emit).not.toHaveBeenCalled();
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
-  it('announces the first use of a grant never used before, however old it is (AUD-014)', async () => {
-    grantCreatedAt = new Date(Date.now() - NOTIFICATION_RETENTION_MS - 1000);
-    expect(
-      await notices.announce(
-        caller({
-          kind: 'personal',
-          grant: {
-            id: 'ckgrant4',
-            clientId: null,
-            clientName: 'idle token',
-            scopes: ['lazyit.read'],
-            lastUsedAt: null,
-          },
-        }),
-      ),
-    ).toBe(true);
-    expect(emit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        dedupeKey: 'mcp.client_connected:ckgrant4',
+  it('announces a grant never announced whatever its age or past use (AUD-014)', async () => {
+    // The decision reads only announcedAt and the notice row, never createdAt or lastUsedAt.
+    findFirst.mockImplementation(() =>
+      Promise.resolve({
+        userId: USER,
+        announcedAt: announcedAt(),
+        createdAt: new Date('2025-01-01T00:00:00.000Z'),
+        lastUsedAt: new Date('2025-01-02T00:00:00.000Z'),
       }),
+    );
+    expect(await notices.announce(caller())).toBe(true);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 'ckgrant1' },
+      select: { userId: true, announcedAt: true },
+    });
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({ dedupeKey: 'mcp.client_connected:ckgrant1' }),
     );
   });
 
