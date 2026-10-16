@@ -1143,7 +1143,6 @@
       "selectRow": "Seleccionar {name}",
       "bulkDelete": {
         "confirmTitle": "¿Eliminar {count, plural, one {# categoría} other {# categorías}}?",
-        "confirmDescription": "Esto elimina (borrado lógico) las categorías seleccionadas; se pueden restaurar. Los registros archivados en ellas conservan sus datos, pero se muestran sin categoría hasta que se restaure la categoría o se vuelvan a clasificar.",
         "resultAllDeleted": "Se eliminaron {deleted, plural, one {# categoría} other {# categorías}}.",
         "resultPartial": "Se eliminaron {deleted}; {skipped} no se pudieron eliminar.",
         "resultAllSkipped": "No se {skipped, plural, one {pudo eliminar # categoría} other {pudieron eliminar # categorías}}.",
@@ -1205,7 +1204,6 @@
       "inlinePlaceholder": "Nueva categoría…",
       "empty": "Todavía no hay categorías.",
       "deleteImpact": {
-        "bulkUsed": "En uso: {names} — en total, {usage} se mostrarán sin categoría hasta restaurarlas.",
         "bulkUnused": "Ninguna está en uso.",
         "bulkNeedsResolution": "En uso: {names} — se omiten. Elimina cada una por separado para elegir adónde van sus ítems."
       }
