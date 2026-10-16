@@ -45,9 +45,10 @@ usan los usuarios. **Nunca** hereda un rol ni equivale a un administrador.
 - **Solo puedes otorgar lo que tiene tu propio rol.** Si un administrador le dio a tu rol **Cambiar la
   configuración de la instancia**, puedes gestionar cuentas de servicio, pero solo con permisos que tu
   rol tiene. Se rechaza crear una cuenta, agregarle un permiso, volver a activarla, extender su
-  vencimiento, rotar su token o restaurarla cuando la cuenta tendría un permiso que te falta. Renombrarla,
-  quitarle permisos, desactivarla, acortar su vencimiento y revocarla siempre funcionan. Los
-  administradores tienen todos los permisos, así que esto nunca los limita.
+  vencimiento, rotar su token, restaurarla o ampliar su **acceso a IA** cuando la cuenta tendría un
+  permiso que te falta. Renombrarla, quitarle permisos, desactivarla, acortar su vencimiento y
+  revocarla siempre funcionan. Los administradores tienen todos los permisos, así que esto nunca los
+  limita.
 
 ## El token (se muestra una sola vez)
 
