@@ -162,7 +162,7 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   affected: `?strategy=detach` or `?strategy=move&targetId=<id>` (#1603). The web dialog asks for it, and
 >   `GET …/:id/delete-impact` previews what is affected. Update any script or API client that deletes these
 >   rows. Asset categories and asset models are unchanged.
-> - **Delegated administration is narrower** (#1601, #1606).
+> - **Delegated administration is narrower** (#1601, #1606, #1611).
 >   - A role delegated `settings:manage` can no longer save the permission matrix, save the directory
 >     connection or start a directory sync: 403 `ADMIN_REQUIRED`.
 >   - A role delegated `user:manage` manages users only up to its own role. Only an ADMIN creates,
@@ -170,6 +170,9 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   - A clone copies only the assignments and grants the caller could create by hand.
 >   - Promoting a user cancels their pending temporary password and password-reset links. Issue a new
 >     one after the promotion if needed.
+>   - Saving the SMTP settings is ADMIN-only (403 `ADMIN_REQUIRED`), and a service account's
+>     permissions are capped at those of the person who creates or changes it (403
+>     `PERMISSION_CEILING_EXCEEDED`).
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
 
