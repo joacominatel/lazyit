@@ -5,6 +5,7 @@ import { ArticlesController } from './articles.controller';
 import { ArticlesService } from './articles.service';
 import { ArticleImportService } from './import/article-import.service';
 import { maxImportBytes } from './article-import';
+import { ExportService } from '../common/export';
 
 // Mock the generated Prisma client so importing ArticlesService (the DI token) never loads the
 // real one (no DB). The service itself is replaced by a mock below.
@@ -36,6 +37,7 @@ describe('ArticlesController POST /articles/import (upload size limit, SEC-001)'
       providers: [
         { provide: ArticlesService, useValue: {} },
         { provide: ArticleImportService, useValue: { enqueue } },
+        { provide: ExportService, useValue: {} },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -94,6 +96,7 @@ describe('ArticlesController GET /articles (multi-select filters + allowlist, #1
   const controller = new ArticlesController(
     { findPage } as unknown as ArticlesService,
     {} as unknown as ArticleImportService,
+    {} as unknown as ExportService,
   );
 
   beforeEach(() => findPage.mockClear());

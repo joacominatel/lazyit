@@ -208,6 +208,7 @@ Legend:
 | articles | create / update / publish / unpublish | article:write | W | v1 (SA create → 403, [R25]) |
 | articles | version restore, links / aliases writes | article:write | W | v1.1 |
 | articles | import (multipart) | article:write | W | EXCL (binary) |
+| articles | export CSV | article:read | R | EXCL (bulk file; use search) |
 | articles | delete / restore | article:delete | D | v1.1 |
 | users | list, get, `:id/assignments` | user:read | R | v1 `user_search`, `user_get` (built, W2-9) |
 | users | role-counts | user:read | R | not in the v1 cut (§7; `user_search` with `role` returns the count as its total) |
@@ -845,7 +846,8 @@ leak through a tool would be a leak in the test.
   the service (R25), so the write tools list for an SA holding `article:write` and answer 403.
 - Unexposed with reasons: versions, links, backlinks, aliases and their writes (v1.1), archive and
   restore (v1.1), the attachments list and removal (v1.1), the `.docx` import and binary attachment
-  transfer (no file tools); folder delete (a cascading one included) and restore (v1.1, declared in
+  transfer (no file tools), the article-index CSV export (a bulk file,
+  [[0103-data-export-streaming-path]]); folder delete (a cascading one included) and restore (v1.1, declared in
   `reference.tools.ts`), a folder move, and folder access rules (`elevated`, after v1).
 - **Follow-ups (recorded by the G2 review, not fixed here):**
   - entity-ref labels (article titles) are not wrapped as untrusted;

@@ -49,6 +49,7 @@ import { ArticleCategoriesService } from '../../article-categories/article-categ
 import { ArticlesController } from '../../articles/articles.controller';
 import { ArticlesService } from '../../articles/articles.service';
 import { ArticleImportService } from '../../articles/import/article-import.service';
+import { ExportService } from '../../common/export';
 import { AiActionLogService } from '../core/action-log.service';
 import { AiToolService } from '../core/ai-tool.service';
 import { mapToolError } from '../core/error-mapper';
@@ -763,6 +764,7 @@ describe('kb toolset (W2-8) — kb_search, kb_get_article, kb_create_article, kb
         FolderAccessService,
         { provide: SearchService, useValue: search },
         { provide: ArticleImportService, useValue: {} },
+        { provide: ExportService, useValue: {} },
         {
           provide: AI_SETTINGS_READER,
           useValue: {
