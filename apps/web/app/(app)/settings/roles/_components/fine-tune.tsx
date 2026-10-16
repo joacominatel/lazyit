@@ -22,6 +22,8 @@ interface FineTuneProps {
   staged: Record<EditableRole, ReadonlySet<Permission>>;
   /** Toggle a single raw permission on/off for one role (flips its preset to Custom upstream). */
   onToggle: (role: EditableRole, permission: Permission, on: boolean) => void;
+  /** Read-only for a non-admin (SEC-088). */
+  disabled: boolean;
 }
 
 /** The catalog grouped by domain (the noun half of `domain:action`), in catalog order. */
@@ -47,7 +49,7 @@ const PERMISSIONS_BY_DOMAIN: { domain: string; permissions: Permission[] }[] =
  * edits the same staged sets as the matrix, so a change here flips that
  * role's preset to Custom and shows as a partial cell above. Above-default-tier permissions carry ⚠.
  */
-export function FineTune({ staged, onToggle }: FineTuneProps) {
+export function FineTune({ staged, onToggle, disabled }: FineTuneProps) {
   const t = useTranslations("settings");
   const [open, setOpen] = useState(false);
 
@@ -108,6 +110,7 @@ export function FineTune({ staged, onToggle }: FineTuneProps) {
                             <Checkbox
                               checked={staged[role].has(p)}
                               onCheckedChange={(state) => onToggle(role, p, state === true)}
+                              disabled={disabled}
                               aria-label={t("roles.matrix.cellLabel", {
                                 capability: label,
                                 role: t(`roles.meta.${role}.label`),

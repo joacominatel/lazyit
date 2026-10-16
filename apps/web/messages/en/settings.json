@@ -662,6 +662,7 @@
       "members": "{count, plural, =0 {No one} one {# person} other {# people}}",
       "all": "All",
       "adminLocked": "Admin always has every permission and can't be edited.",
+      "adminOnly": "Only an administrator can change permissions. You can view them here.",
       "presetLabel": "Preset for {role}",
       "roleUnsaved": "Unsaved changes",
       "groupSummary": "{granted} of {total} granted to {role}",

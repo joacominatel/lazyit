@@ -662,6 +662,7 @@
       "members": "{count, plural, =0 {Nadie} one {# persona} other {# personas}}",
       "all": "Todo",
       "adminLocked": "El Administrador siempre tiene todos los permisos y no se puede editar.",
+      "adminOnly": "Solo un administrador puede cambiar los permisos. Aquí puedes verlos.",
       "presetLabel": "Preajuste para {role}",
       "roleUnsaved": "Cambios sin guardar",
       "groupSummary": "{granted} de {total} concedidas a {role}",

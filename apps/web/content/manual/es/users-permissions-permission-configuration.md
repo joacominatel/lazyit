@@ -13,8 +13,9 @@ pantalla lo muestra bloqueado. Esta página recorre el editor.
 
 Necesitas la capacidad **Cambiar la configuración de la instancia** (administrador por defecto) para
 abrirlo. Solo un administrador puede **guardar** cambios: un Miembro o Lector al que le diste esa
-capacidad puede abrir la página, pero el guardado se rechaza, así que nadie más que un administrador
-puede ampliar lo que un rol puede hacer, incluido el suyo.
+capacidad ve la matriz en solo lectura, con las casillas y los preajustes bloqueados y sin barra de
+guardado, así que nadie más que un administrador puede ampliar lo que un rol puede hacer, incluido el
+suyo.
 
 ## Abrir la matriz
 
