@@ -79,7 +79,10 @@ una aplicación dada de baja.
 
 Una clonación solo traslada lo que tú mismo podrías otorgar: los activos requieren **Agregar y editar
 inventario** y el acceso a aplicaciones requiere **Otorgar y revocar acceso**. Si a tu rol le falta
-alguno, esos elementos aparecen como omitidos por ese motivo y el nuevo usuario se crea sin ellos.
+alguno, el diálogo de clonación no ofrece esa lista (y, sin **Otorgar y revocar acceso**, tampoco el
+interruptor de aprovisionamiento) e indica qué permiso hace falta; el nuevo usuario se crea sin esos
+elementos. Lo que el servidor aún rechace, por ejemplo porque tus permisos cambiaron mientras tanto,
+aparece como omitido por ese motivo.
 
 ## Restablecer una contraseña
 

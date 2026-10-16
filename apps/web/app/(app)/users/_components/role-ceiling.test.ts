@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "@/lib/api/client";
-import { assignableRoles, canManageUser, userMutationErrorKind } from "./role-ceiling";
+import { assignableRoles, canManageUser, isPromotion, userMutationErrorKind } from "./role-ceiling";
 
 describe("assignableRoles — the role picker offers only roles at or below the caller's (SEC-088)", () => {
   test("an admin can grant every role", () => {
@@ -59,5 +59,19 @@ describe("userMutationErrorKind", () => {
     expect(userMutationErrorKind(new ApiError(409, "A record with this email already exists"))).toBeNull();
     expect(userMutationErrorKind(new ApiError(422, "x", { code: "OTHER" }))).toBeNull();
     expect(userMutationErrorKind(new Error("Failed to fetch"))).toBeNull();
+  });
+});
+
+describe("isPromotion — a role going up cancels pending credentials (SEC-088)", () => {
+  test("viewer to member, member to admin and viewer to admin are promotions", () => {
+    expect(isPromotion("VIEWER", "MEMBER")).toBe(true);
+    expect(isPromotion("MEMBER", "ADMIN")).toBe(true);
+    expect(isPromotion("VIEWER", "ADMIN")).toBe(true);
+  });
+
+  test("a demotion or no change is not", () => {
+    expect(isPromotion("ADMIN", "MEMBER")).toBe(false);
+    expect(isPromotion("MEMBER", "VIEWER")).toBe(false);
+    expect(isPromotion("MEMBER", "MEMBER")).toBe(false);
   });
 });

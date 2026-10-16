@@ -331,7 +331,7 @@ instance-level MCP configuration and every user's connected apps.
 | --- | --- | --- | --- |
 | *(panel, no route)* | mounted in `(app)/layout.tsx` | `aiStatus.chat.available` | none (client) |
 | `/settings/ai` | `(app)`, `AdminGate` | `settings:manage` | `aiKeys.config()` (primary read) |
-| `/account/ai` | `(app)` | `ai:connect`; install panel only if `aiStatus.mcp.available` | `aiKeys.oauthGrantsMine()` |
+| `/account/ai` | `(app)` | any signed-in user (AUD-083); install panel only if `aiStatus.mcp.available` | `aiKeys.oauthGrantsMine()` |
 | `/oauth/authorize?<OAuth params>` | `(auth)` / `AuthShell` | session required server-side (`await auth()` → `/login?callbackUrl=<path+query>`) | the `authorize/validate` read |
 
 Plus a hub card **"AI"** in `settings/page.tsx` (since #1533 the hub and the settings side nav are built
@@ -634,8 +634,8 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
 
 - **Mode detection** (`account/ai/_lib/mcp-snippets.ts` `detectMcpConnectMode`, bun-tested): from
   `GET /ai/status` `mcp` plus the page's own protocol. `unknown` (loading, error, 404, unrecognized body)
-  offers nothing; `unavailable` (switch off or no `ai:connect`) explains that existing connections are
-  paused; `oauth` adds a warning when the page itself was opened over `http:`; `personal-token` explains
+  offers nothing; `unavailable` explains that existing connections are paused (switch off) or, without
+  `ai:connect`, that the role can't connect new apps and the existing ones have stopped; `oauth` adds a warning when the page itself was opened over `http:`; `personal-token` explains
   *plain HTTP* (OAuth needs HTTPS) or, when the page is on `https:`, that the instance has no HTTPS
   `WEB_ORIGIN`. Every mode also states what cloud connectors (claude.ai, ChatGPT) need; `oauth` adds the
   internal-CA note (`NODE_EXTRA_CA_CERTS`).
@@ -653,8 +653,8 @@ Code: `apps/web/app/(app)/account/ai/**`, `apps/web/app/(auth)/oauth/authorize/*
   lives only in the dialog's state (never the query cache), the dialog is locked until "I've saved it"
   (the #813 pattern). The live cap (20) is not in `@lazyit/shared`; the web mirrors it as guidance and the
   API's 409 is the gate.
-- **User menu** — "AI & connected apps" for `ai:connect` holders whenever `GET /ai/status` succeeds (so an
-  older API hides it), even with MCP off, so paused connections stay revocable. The layout breadcrumb
+- **User menu** — "AI & connected apps" whenever `GET /ai/status` succeeds (so an older API hides it),
+  without `ai:connect` and even with MCP off, so paused or stopped connections stay revocable (AUD-083). The layout breadcrumb
   labels the `ai` segment ("AI" / "IA").
 - **Consent page** — a Server Component validates with the session token (`POST /oauth/authorize/validate`)
   and renders an explanation for every stop: refusal, 404 (no authorization server: `lan` or no HTTPS
@@ -723,7 +723,7 @@ UI copy say so.
 | Launcher + panel | `GET /ai/status → chat.available` (server-combined: enabled ∧ provider configured ∧ `ai:use`) |
 | Settings → AI, hub card | `settings:manage` (`AdminGate`) |
 | `/account/ai` install panel | `mcp.available` (MCP switch ∧ `ai:connect`) |
-| `/account/ai` connected apps | `ai:connect` (own grants) |
+| `/account/ai` connected apps | none — own grants, listed and revocable without `ai:connect` (AUD-083) |
 | Consent page | session + server checks (`ai:connect`, MCP enabled, HTTPS instance) |
 | Admin all-users connected apps | `settings:manage` (R9) |
 | Per-SA AI access | `settings:manage` |
@@ -980,6 +980,8 @@ Edits to existing pages (en + es):
 1. **MCP without an LLM provider → yes, two independent switches** (CEO, round 2).
 2. **Non-admins' install + connected apps at `/account/ai`** for holders of `ai:connect`; Settings → AI
    shows the same install panel to admins (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 3. **Navigation → auto-navigate only for an explicit `navigate`-kind tool and only when no
    unsaved-changes guard is active**; otherwise an "Open" chip (R3).
 4. **Turning AI off → keep conversations and connected apps dormant** (retention keeps running; MCP

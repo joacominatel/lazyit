@@ -49,7 +49,9 @@ import {
   useSyncDirectoryNow,
   useUpdateDirectoryConnection,
 } from "@/lib/api/hooks/use-directory-connection";
+import { isAdminRequired } from "@/lib/api/admin-required";
 import { notifyError } from "@/lib/api/notify-error";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import {
   attributeInputsFrom,
@@ -94,6 +96,12 @@ export function DirectorySettingsEditor() {
     useDirectoryConnection();
   const update = useUpdateDirectoryConnection();
   const sync = useSyncDirectoryNow();
+  // SEC-088: delegated settings:manage can view the connection; saving and syncing are ADMIN-only.
+  const readOnly = !usePermissions().isAdmin;
+  const notifyWriteError = (err: unknown, fallback: string) => {
+    if (isAdminRequired(err)) toast.error(t("adminOnly"));
+    else notifyError(err, fallback);
+  };
 
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
@@ -154,7 +162,7 @@ export function DirectorySettingsEditor() {
     update.mutate(toDirectoryPayload(values), {
       onSuccess: () => toast.success(t("toast.saved")),
       // A 409 (bind password supplied but DIRECTORY_SECRET_KEY unset) surfaces its explanatory message here.
-      onError: (err) => notifyError(err, t("toast.saveError")),
+      onError: (err) => notifyWriteError(err, t("toast.saveError")),
     });
   });
 
@@ -178,7 +186,7 @@ export function DirectorySettingsEditor() {
           });
         }
       },
-      onError: (err) => notifyError(err, t("sync.error")),
+      onError: (err) => notifyWriteError(err, t("sync.error")),
     });
   };
 
@@ -213,6 +221,7 @@ export function DirectorySettingsEditor() {
             {t(`fields.${name}.label`)}
           </SettingLabel>
           <Input
+            disabled={readOnly}
             id={id}
             name={field.name}
             ref={field.ref}
@@ -278,6 +287,7 @@ export function DirectorySettingsEditor() {
                         {t("fields.enabled.label")}
                       </SettingLabel>
                       <Switch
+                        disabled={readOnly}
                         id="dir-enabled"
                         checked={field.value}
                         onCheckedChange={field.onChange}
@@ -289,13 +299,15 @@ export function DirectorySettingsEditor() {
               footer={
                 <SettingsSaveBar
                   note={
-                    formState.isDirty
-                      ? tSettings("section.unsaved")
-                      : tSettings("section.noChanges")
+                    readOnly
+                      ? t("adminOnly")
+                      : formState.isDirty
+                        ? tSettings("section.unsaved")
+                        : tSettings("section.noChanges")
                   }
                 >
                   {/* Not gated on `formState.isDirty`, as before — a re-save is always allowed. */}
-                  <Button type="submit" size="sm" disabled={update.isPending}>
+                  <Button type="submit" size="sm" disabled={update.isPending || readOnly}>
                     {update.isPending && <ArrowPathIcon className="animate-spin" />}
                     {t("save")}
                   </Button>
@@ -314,6 +326,7 @@ export function DirectorySettingsEditor() {
                         {t("fields.port.label")}
                       </FieldLabel>
                       <Input
+                        disabled={readOnly}
                         id="dir-port"
                         type="number"
                         inputMode="numeric"
@@ -362,7 +375,7 @@ export function DirectorySettingsEditor() {
                     >
                       {t("fields.transport.label")}
                     </SettingLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
+                    <Select value={field.value} onValueChange={field.onChange} disabled={readOnly}>
                       <SelectTrigger id="dir-transport" className="w-full">
                         <SelectValue />
                       </SelectTrigger>
@@ -401,6 +414,7 @@ export function DirectorySettingsEditor() {
                         {t("fields.bindPassword.label")}
                       </SettingLabel>
                       <Input
+                        disabled={readOnly}
                         id="dir-bind-password"
                         type="password"
                         name={field.name}
@@ -449,6 +463,7 @@ export function DirectorySettingsEditor() {
                             {t(`fields.attributeMap.keys.${key}`)}
                           </FieldLabel>
                           <Input
+                            disabled={readOnly}
                             id={`dir-attr-${key}`}
                             name={field.name}
                             ref={field.ref}
@@ -489,7 +504,7 @@ export function DirectorySettingsEditor() {
                         id="dir-reject-unauthorized"
                         checked={field.value}
                         onCheckedChange={field.onChange}
-                        disabled={transport === "plaintext"}
+                        disabled={readOnly || transport === "plaintext"}
                       />
                     </SettingRow>
                   )}
@@ -507,6 +522,7 @@ export function DirectorySettingsEditor() {
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span>{t("fields.offboardGraceDays.before")}</span>
                         <Input
+                          disabled={readOnly}
                           id="dir-offboard-grace"
                           type="number"
                           inputMode="numeric"
@@ -552,7 +568,8 @@ export function DirectorySettingsEditor() {
                 variant="outline"
                 size="sm"
                 onClick={onSyncNow}
-                disabled={sync.isPending}
+                disabled={sync.isPending || readOnly}
+                title={readOnly ? t("adminOnly") : undefined}
               >
                 {sync.isPending ? (
                   <ArrowPathIcon className="animate-spin" />

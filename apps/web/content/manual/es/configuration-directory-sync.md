@@ -13,7 +13,8 @@ Directorio AD/LDAP** (solo administradores; en el menú lateral de Configuració
 **Integraciones**). Está **desactivada hasta que la actives**, y el encabezado de la página muestra
 **Activado** o **Desactivado** para la sincronización programada. Un Miembro o Lector al que le diste
 **Cambiar la configuración de la instancia** puede ver la conexión, pero solo un administrador puede
-guardarla o ejecutar **Sincronizar ahora**.
+guardarla o ejecutar **Sincronizar ahora**: para cualquier otra persona el formulario y **Sincronizar
+ahora** quedan bloqueados, con una nota que explica por qué.
 
 ## Qué hace — y qué deliberadamente no hace
 

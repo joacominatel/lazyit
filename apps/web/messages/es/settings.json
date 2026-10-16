@@ -462,6 +462,7 @@
     }
   },
   "directory": {
+    "adminOnly": "Solo un administrador puede cambiar la conexión del directorio o ejecutar una sincronización. Aquí puedes verla.",
     "title": "Sincronización de directorio AD / LDAP",
     "subtitle": "Importa personas de solo lectura desde Active Directory o LDAP.",
     "connection": {
@@ -624,8 +625,8 @@
       "consequence": {
         "removedRead": "{who} ya no podrán {action}.",
         "accessGrantGrant": "{who} podrán otorgar y revocar el acceso a aplicaciones para cualquiera — incluso a aplicaciones sensibles. Normalmente esta es una acción exclusiva de administradores.",
-        "userManage": "{who} podrán administrar usuarios: crear cuentas, cambiar roles (incluido otorgar ADMIN) y dar de baja a personas. Normalmente esta es una acción exclusiva de administradores.",
-        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías — toda la superficie de configuración del administrador. Normalmente esta es una acción exclusiva de administradores.",
+        "userManage": "{who} podrán administrar usuarios con un rol igual o inferior al suyo: crear cuentas, cambiar roles hasta el suyo y dar de baja a personas. Solo un administrador gestiona administradores. Normalmente esta es una acción exclusiva de administradores.",
+        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos y la conexión del directorio sigue siendo exclusivo de administradores. Normalmente esta es una acción exclusiva de administradores.",
         "deleteDefault": "{who} podrán {action} — una acción destructiva normalmente reservada a administradores.",
         "who": {
           "MEMBER": "Los Miembros",
@@ -662,6 +663,7 @@
       "members": "{count, plural, =0 {Nadie} one {# persona} other {# personas}}",
       "all": "Todo",
       "adminLocked": "El Administrador siempre tiene todos los permisos y no se puede editar.",
+      "adminOnly": "Solo un administrador puede cambiar los permisos. Aquí puedes verlos.",
       "presetLabel": "Preajuste para {role}",
       "roleUnsaved": "Cambios sin guardar",
       "groupSummary": "{granted} de {total} concedidas a {role}",
@@ -1041,7 +1043,7 @@
       },
       "settings:manage": {
         "label": "Configurar la instancia",
-        "description": "Cambiar la configuración de la instancia y gestionar taxonomías — toda la superficie de configuración del administrador."
+        "description": "Cambiar la configuración de la instancia y gestionar taxonomías. Editar los permisos y la conexión del directorio sigue siendo exclusivo de administradores."
       },
       "workflow:view": {
         "label": "Ver flujos de trabajo y ejecuciones",

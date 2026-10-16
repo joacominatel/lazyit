@@ -12,8 +12,9 @@ catalog. **Admin is not configurable** — it always holds the complete catalog 
 locked. This page walks through the editor.
 
 You need the **Change instance settings** capability (admin by default) to open it. Only an admin can
-**save** changes: a Member or Viewer you gave that capability can open the page, but saving is refused,
-so nobody but an admin can widen what a role is allowed to do, including their own.
+**save** changes: a Member or Viewer you gave that capability sees the matrix read-only, with the
+checkboxes and presets locked and no save bar, so nobody but an admin can widen what a role is allowed
+to do, including their own.
 
 ## Open the matrix
 

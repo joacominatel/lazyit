@@ -559,9 +559,10 @@ lazyit-plugin.zip
 
 - **Settings → AI (admin)**: an "External agents (MCP)" switch, independent of provider configuration (decided — CEO, round 2),
   plus the list of all users' active connections with revoke, for incident response and offboarding (R9).
-- **Account → AI connections (`/account/ai`, every user holding `ai:connect`)**: install instructions (Claude
-  Code plugin commands, generic snippet), the user's connected apps (client, verified/unverified, access level,
-  created, last used, revoke), and — in `lan` — personal tokens (R9).
+- **Account → AI connections (`/account/ai`, every user)**: install instructions (Claude Code plugin commands,
+  generic snippet) for holders of `ai:connect`, the user's connected apps (client, verified/unverified, access
+  level, created, last used, revoke) for everyone, so a user who lost `ai:connect` can still revoke them
+  (AUD-083), and — in `lan` — personal tokens (R9).
 - Manual (en + es): "Connect an AI agent (MCP)" — per [[0062-in-app-help-manual-surface]].
 
 ### 5.7 OIDC mode — transitional footnote
@@ -784,6 +785,8 @@ reconciliation; [[ai-assistant/_synthesis|the synthesis]] §2 quotes them.
 3. **Q3 — MCP without an LLM provider → yes.** An independent "External agents (MCP)" switch (CEO, round 2).
 4. **Q4 — Where "Install in Claude Code" lives → `/account/ai`** for holders of `ai:connect` (install,
    connected apps, personal tokens); Settings → AI for admins (the MCP switch and every user's grants) (R9).
+   *Amended 2026-10-16 (AUD-083): the connected apps are listed, and revocable, for every user; installing
+   and minting personal tokens still need `ai:connect`.*
 5. **Q5 — SA tokens on `/mcp` → accepted, fail-closed, only if the SA holds `ai:connect`** (R10; adopted by
    default, CEO to confirm on review).
 6. **Q6 — Password change / "sign out everywhere" / admin reset kill MCP connections → yes**, through the

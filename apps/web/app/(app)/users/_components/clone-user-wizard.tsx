@@ -57,6 +57,7 @@ import {
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import { useCan } from "@/lib/hooks/use-permissions";
 import { ManagerField } from "./manager-field";
 import { assignableRoles, notifyUserError } from "./role-ceiling";
 
@@ -179,6 +180,9 @@ export function CloneUserWizard({
   // Per-field validation errors keyed by the CloneUserSchema profile path (e.g. "email").
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // SEC-088: a clone copies only what the caller could open by hand; the API skips the rest as permission_required.
+  const canCarryAssets = useCan("asset:write");
+  const canCarryGrants = useCan("accessGrant:grant");
   // The source's ACTIVE footprint to offer as checklists.
   const { data: assignments, isLoading: assignmentsLoading } =
     useUserAssignments(open ? source.id : undefined, true);
@@ -421,69 +425,81 @@ export function CloneUserWizard({
               <p className="pt-2 text-sm font-medium text-foreground">
                 {t("sections.assets")}
               </p>
-              <ChecklistSection
-                loading={assignmentsLoading}
-                emptyText={t("assets.empty")}
-                loadingText={t("loading")}
-                items={activeAssignments.map((a) => ({
-                  id: a.id,
-                  label:
-                    assetNameById.get(a.assetId) ?? t("assets.assetFallback"),
-                  meta: t("assets.assignedOn", {
-                    date: date(a.assignedAt),
-                  }),
-                }))}
-                selected={options.selectedAssignments}
-                onToggle={toggleAssignment}
-                idPrefix="clone-assignment"
-              />
+              {canCarryAssets ? (
+                <ChecklistSection
+                  loading={assignmentsLoading}
+                  emptyText={t("assets.empty")}
+                  loadingText={t("loading")}
+                  items={activeAssignments.map((a) => ({
+                    id: a.id,
+                    label:
+                      assetNameById.get(a.assetId) ?? t("assets.assetFallback"),
+                    meta: t("assets.assignedOn", {
+                      date: date(a.assignedAt),
+                    }),
+                  }))}
+                  selected={options.selectedAssignments}
+                  onToggle={toggleAssignment}
+                  idPrefix="clone-assignment"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("assets.noPermission")}</p>
+              )}
 
               {/* — Access to carry over — */}
               <p className="pt-2 text-sm font-medium text-foreground">
                 {t("sections.access")}
               </p>
-              <ChecklistSection
-                loading={grantsLoading}
-                emptyText={t("access.empty")}
-                loadingText={t("loading")}
-                items={activeGrants.map((g) => ({
-                  id: g.id,
-                  label:
-                    appNameById.get(g.applicationId) ??
-                    t("access.applicationFallback"),
-                  meta: g.accessLevel ?? undefined,
-                }))}
-                selected={options.selectedGrants}
-                onToggle={toggleGrant}
-                idPrefix="clone-grant"
-              />
-
-              {/* — Engine toggle — */}
-              <Field orientation="horizontal" className="pt-2">
-                <FieldContent>
-                  <FieldLabel htmlFor="clone-fire">
-                    {t("fire.label")}
-                  </FieldLabel>
-                  <FieldDescription>{t("fire.help")}</FieldDescription>
-                </FieldContent>
-                <Switch
-                  id="clone-fire"
-                  checked={options.fireWorkflows}
-                  onCheckedChange={(value) =>
-                    dispatchOptions({ type: "fireWorkflowsChanged", value })
-                  }
+              {canCarryGrants ? (
+                <ChecklistSection
+                  loading={grantsLoading}
+                  emptyText={t("access.empty")}
+                  loadingText={t("loading")}
+                  items={activeGrants.map((g) => ({
+                    id: g.id,
+                    label:
+                      appNameById.get(g.applicationId) ??
+                      t("access.applicationFallback"),
+                    meta: g.accessLevel ?? undefined,
+                  }))}
+                  selected={options.selectedGrants}
+                  onToggle={toggleGrant}
+                  idPrefix="clone-grant"
                 />
-              </Field>
-
-              {options.fireWorkflows && grantCount > 0 && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
-                >
-                  <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" />
-                  <span>{t("fire.warning", { count: grantCount })}</span>
-                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("access.noPermission")}</p>
               )}
+
+              {/* — Engine toggle, only meaningful when grants can be carried over — */}
+              {canCarryGrants ? (
+                <>
+                  <Field orientation="horizontal" className="pt-2">
+                    <FieldContent>
+                      <FieldLabel htmlFor="clone-fire">
+                        {t("fire.label")}
+                      </FieldLabel>
+                      <FieldDescription>{t("fire.help")}</FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      id="clone-fire"
+                      checked={options.fireWorkflows}
+                      onCheckedChange={(value) =>
+                        dispatchOptions({ type: "fireWorkflowsChanged", value })
+                      }
+                    />
+                  </Field>
+
+                  {options.fireWorkflows && grantCount > 0 && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
+                    >
+                      <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0 text-warning" />
+                      <span>{t("fire.warning", { count: grantCount })}</span>
+                    </div>
+                  )}
+                </>
+              ) : null}
             </FieldGroup>
           </form>
         )}

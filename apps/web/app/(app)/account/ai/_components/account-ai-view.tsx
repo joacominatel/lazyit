@@ -1,6 +1,5 @@
 "use client";
 
-import { LockClosedIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,7 +13,7 @@ import { McpInstallPanel } from "./mcp-install-panel";
 
 /**
  * `/account/ai` — "AI & connected apps" (ADR-0097; docs/ai-assistant/frontend.md Fork F, §5.3). Per user,
- * for holders of `ai:connect`:
+ * for everyone (AUD-083: a user without `ai:connect` still lists and revokes what they hold):
  *
  * 1. how AI apps connect to this instance and why (OAuth on HTTPS, personal tokens on plain HTTP, MCP
  *    off) — always explained, from `GET /ai/status` `mcp` and the page's own protocol;
@@ -29,7 +28,6 @@ export function AccountAiView() {
   const { can, isLoading } = useMyPermissions();
   const status = useAiStatus();
   const location = usePageLocation();
-  const allowed = can("ai:connect");
 
   const header = (
     <PageHeader title={t("title")} subtitle={t("subtitle")} />
@@ -41,26 +39,6 @@ export function AccountAiView() {
         {header}
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-48 w-full" />
-      </div>
-    );
-  }
-
-  if (!allowed) {
-    return (
-      <div className="mx-auto max-w-3xl space-y-6">
-        {header}
-        <div
-          role="status"
-          className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-12 text-center"
-        >
-          <span className="flex size-12 items-center justify-center rounded-full bg-muted">
-            <LockClosedIcon className="size-6 text-muted-foreground" aria-hidden />
-          </span>
-          <p className="font-medium">{t("forbidden.title")}</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {t("forbidden.body")}
-          </p>
-        </div>
       </div>
     );
   }
@@ -77,7 +55,7 @@ export function AccountAiView() {
       ) : status.isError ? (
         <p className="text-sm text-muted-foreground">{t("statusError")}</p>
       ) : (
-        <ConnectionModeNotice mode={mode} />
+        <ConnectionModeNotice mode={mode} canConnect={can("ai:connect")} />
       )}
       {mode.kind === "oauth" || mode.kind === "personal-token" ? (
         <McpInstallPanel auth={mode.kind} />

@@ -4,14 +4,13 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAiStatus } from "@/lib/api/hooks/use-ai-status";
-import { useCan } from "@/lib/hooks/use-permissions";
 import { cn } from "@/lib/utils";
 import { accountSections, activeAccountSection } from "../_lib/account-sections";
 
 /**
  * The account area's sub-navigation (issue #1404): one link per existing per-user page — Overview
- * (`/account`), My profile (`/profile`), Notification emails, and AI & connected apps (only for holders
- * of `ai:connect` on an API that has the assistant, the same rule as the user menu). Rendered by
+ * (`/account`), My profile (`/profile`), Notification emails, and AI & connected apps (on an API that
+ * has the assistant, the same rule as the user menu; no permission needed, AUD-083). Rendered by
  * `account/layout.tsx` for every `/account/*` page and by the profile view, so all of them share it.
  *
  * Real links (middle/modifier-click behave); the current page carries `aria-current="page"`. On a
@@ -20,12 +19,8 @@ import { accountSections, activeAccountSection } from "../_lib/account-sections"
 export function AccountSubNav({ className }: { className?: string }) {
   const t = useTranslations("account.nav");
   const pathname = usePathname();
-  const canConnectAi = useCan("ai:connect");
   const aiStatus = useAiStatus();
-  const sections = accountSections({
-    canConnectAi,
-    aiStatusAvailable: aiStatus.isSuccess,
-  });
+  const sections = accountSections({ aiStatusAvailable: aiStatus.isSuccess });
   const active = activeAccountSection(pathname, sections);
 
   return (

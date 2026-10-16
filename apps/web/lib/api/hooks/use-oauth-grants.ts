@@ -38,7 +38,7 @@ export function useOAuthIssuer(options: { enabled?: boolean } = {}) {
   });
 }
 
-/** The caller's live connections (`GET /oauth/grants/mine`, `ai:connect`). */
+/** The caller's live connections (`GET /oauth/grants/mine`; no permission needed, AUD-083). */
 export function useMyOAuthGrants(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: oauthGrantKeys.mine(),

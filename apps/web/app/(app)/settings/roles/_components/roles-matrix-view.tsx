@@ -43,7 +43,9 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, StatusDot, type StatusTone } from "@/components/ui/status-badge";
+import { isAdminRequired } from "@/lib/api/admin-required";
 import { notifyError } from "@/lib/api/notify-error";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 import {
   usePermissionMatrix,
   useUpdatePermissionMatrix,
@@ -102,6 +104,8 @@ function RolesMatrix() {
   const matrixQuery = usePermissionMatrix();
   const { counts, isLoading: countsLoading } = useRoleCounts();
   const updateMutation = useUpdatePermissionMatrix();
+  // SEC-088: delegated settings:manage can view the matrix; only an admin changes it (403 ADMIN_REQUIRED).
+  const readOnly = !usePermissions().isAdmin;
 
   // Both editable roles' staged sets, null until the server matrix arrives (never a default form).
   const [staged, setStaged] = useState<StagedMatrix | null>(null);
@@ -189,7 +193,8 @@ function RolesMatrix() {
       setConfirmOpen(false);
       setPendingDiff(null);
     } catch (error) {
-      notifyError(error, t("roles.permissions.toast.saveError"));
+      if (isAdminRequired(error)) toast.error(t("roles.matrix.adminOnly"));
+      else notifyError(error, t("roles.permissions.toast.saveError"));
     }
   }, [staged, updateMutation, t]);
 
@@ -246,10 +251,12 @@ function RolesMatrix() {
         }
         actions={
           <>
-            <Button variant="ghost" size="sm" onClick={resetToDefaults}>
-              <ArrowUturnLeftIcon />
-              {t("roles.matrix.reset")}
-            </Button>
+            {readOnly ? null : (
+              <Button variant="ghost" size="sm" onClick={resetToDefaults}>
+                <ArrowUturnLeftIcon />
+                {t("roles.matrix.reset")}
+              </Button>
+            )}
             <Button asChild variant="outline" size="sm">
               <Link href="/users">
                 {t("roles.manageUsers")}
@@ -308,6 +315,7 @@ function RolesMatrix() {
                         )}
                         {editable ? (
                           <PresetSelect
+                            disabled={readOnly}
                             role={role}
                             value={detectPreset(staged[role])}
                             onApply={(id) => applyPreset(role, id)}
@@ -386,6 +394,7 @@ function RolesMatrix() {
                           staged={stagedSets}
                           server={serverSets}
                           onToggle={onToggleCapability}
+                          disabled={readOnly}
                         />
                       ))
                     : null}
@@ -395,29 +404,36 @@ function RolesMatrix() {
           </table>
         </div>
 
-        <SettingsSaveBar
-          className="sticky bottom-0 z-20 rounded-b-xl bg-card"
-          note={
-            <span aria-live="polite">
-              {dirty
-                ? t("roles.matrix.unsaved", { count: changeCount })
-                : t("roles.matrix.noChanges")}
-            </span>
-          }
-        >
-          {dirty ? (
-            <Button variant="ghost" onClick={discard} disabled={updateMutation.isPending}>
-              {t("roles.matrix.discard")}
+        {readOnly ? (
+          <p className="flex items-center gap-1.5 border-t px-4 py-3 text-sm text-muted-foreground">
+            <LockClosedIcon className="size-4 shrink-0" aria-hidden />
+            {t("roles.matrix.adminOnly")}
+          </p>
+        ) : (
+          <SettingsSaveBar
+            className="sticky bottom-0 z-20 rounded-b-xl bg-card"
+            note={
+              <span aria-live="polite">
+                {dirty
+                  ? t("roles.matrix.unsaved", { count: changeCount })
+                  : t("roles.matrix.noChanges")}
+              </span>
+            }
+          >
+            {dirty ? (
+              <Button variant="ghost" onClick={discard} disabled={updateMutation.isPending}>
+                {t("roles.matrix.discard")}
+              </Button>
+            ) : null}
+            <Button onClick={onSave} disabled={!dirty || updateMutation.isPending}>
+              {updateMutation.isPending ? <ArrowPathIcon className="animate-spin" /> : null}
+              {t("roles.matrix.save", { count: changeCount })}
             </Button>
-          ) : null}
-          <Button onClick={onSave} disabled={!dirty || updateMutation.isPending}>
-            {updateMutation.isPending ? <ArrowPathIcon className="animate-spin" /> : null}
-            {t("roles.matrix.save", { count: changeCount })}
-          </Button>
-        </SettingsSaveBar>
+          </SettingsSaveBar>
+        )}
       </section>
 
-      <FineTune staged={stagedSets} onToggle={onTogglePermission} />
+      <FineTune staged={stagedSets} onToggle={onTogglePermission} disabled={readOnly} />
 
       {pendingDiff && (
         <ConsequentialConfirmDialog
@@ -441,11 +457,13 @@ function CapabilityRow({
   staged,
   server,
   onToggle,
+  disabled,
 }: {
   capability: Capability;
   staged: Record<EditableRole, ReadonlySet<Permission>>;
   server: Record<EditableRole, ReadonlySet<Permission>>;
   onToggle: (role: EditableRole, capability: Capability, on: boolean) => void;
+  disabled: boolean;
 }) {
   const t = useTranslations("settings");
   const label = capabilityLabel(t, capability.id);
@@ -495,6 +513,7 @@ function CapabilityRow({
               <Checkbox
                 checked={state === "on" ? true : state === "partial" ? "indeterminate" : false}
                 onCheckedChange={(next) => onToggle(role, capability, next === true)}
+                disabled={disabled}
                 aria-label={t("roles.matrix.cellLabel", {
                   capability: label,
                   role: t(`roles.meta.${role}.label`),
@@ -513,10 +532,12 @@ function CapabilityRow({
 
 /** The preset selector in an editable role's column header. "Custom" is a state, not a choice. */
 function PresetSelect({
+  disabled,
   role,
   value,
   onApply,
 }: {
+  disabled: boolean;
   role: EditableRole;
   value: PresetId | "custom";
   onApply: (id: PresetId) => void;
@@ -525,6 +546,7 @@ function PresetSelect({
   return (
     <Select
       value={value}
+      disabled={disabled}
       onValueChange={(next) => {
         if (next !== "custom") onApply(next as PresetId);
       }}

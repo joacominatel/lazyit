@@ -323,11 +323,13 @@
     "assets": {
       "empty": "Esta persona no tiene activos para trasladar.",
       "assetFallback": "Activo",
+      "noPermission": "Trasladar activos requiere el permiso Agregar y editar inventario, que tu rol no tiene.",
       "assignedOn": "Asignado {date}"
     },
     "access": {
       "empty": "Esta persona no tiene acceso activo a aplicaciones para trasladar.",
-      "applicationFallback": "Aplicación"
+      "applicationFallback": "Aplicación",
+      "noPermission": "Trasladar el acceso a aplicaciones requiere el permiso Otorgar y revocar acceso, que tu rol no tiene."
     },
     "fire": {
       "label": "Aprovisionar al usuario nuevo en estas aplicaciones",
@@ -348,7 +350,8 @@
       "reasons": {
         "not_found": "Ya no es una fila activa del origen",
         "asset_deleted": "El activo fue eliminado",
-        "already_in_state": "Ya se trasladó para este activo"
+        "already_in_state": "Ya se trasladó para este activo",
+        "permission_required": "Tu rol no puede trasladar esto (requiere el permiso correspondiente)"
       }
     }
   },
@@ -369,8 +372,10 @@
     "confirmTitle": "¿Cambiar el rol?",
     "confirmBody": "<strong>{name}</strong> pasará a ser <strong>{role}</strong>.",
     "confirmAction": "Cambiar rol",
+    "promotionNote": "Cualquier contraseña temporal o enlace de restablecimiento que aún no hayan usado dejará de funcionar.",
     "toast": {
       "changed": "{name} ahora es {role}",
+      "credentialsCancelled": "Si tenía una contraseña temporal o un enlace de restablecimiento pendiente, se canceló. Emite uno nuevo si todavía lo necesita.",
       "error": "No se pudo cambiar el rol"
     }
   },

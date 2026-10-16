@@ -462,6 +462,7 @@
     }
   },
   "directory": {
+    "adminOnly": "Only an administrator can change the directory connection or run a sync. You can view it here.",
     "title": "AD / LDAP directory sync",
     "subtitle": "Import people read-only from Active Directory or LDAP.",
     "connection": {
@@ -624,8 +625,8 @@
       "consequence": {
         "removedRead": "{who} will no longer be able to {action}.",
         "accessGrantGrant": "{who} will be able to grant and revoke application access for anyone — including to sensitive applications. This is normally an admin-only action.",
-        "userManage": "{who} will be able to administer users: create accounts, change roles (including granting ADMIN) and offboard people. This is normally an admin-only action.",
-        "settingsManage": "{who} will be able to configure the instance and manage taxonomies — the full admin configuration surface. This is normally an admin-only action.",
+        "userManage": "{who} will be able to administer users at or below their own role: create accounts, change roles up to their own and offboard people. Only an admin manages admins. This is normally an admin-only action.",
+        "settingsManage": "{who} will be able to configure the instance and manage taxonomies. Editing this permission matrix and the directory connection stays admin-only. This is normally an admin-only action.",
         "deleteDefault": "{who} will be able to {action} — a destructive action normally reserved for admins.",
         "who": {
           "MEMBER": "Members",
@@ -662,6 +663,7 @@
       "members": "{count, plural, =0 {No one} one {# person} other {# people}}",
       "all": "All",
       "adminLocked": "Admin always has every permission and can't be edited.",
+      "adminOnly": "Only an administrator can change permissions. You can view them here.",
       "presetLabel": "Preset for {role}",
       "roleUnsaved": "Unsaved changes",
       "groupSummary": "{granted} of {total} granted to {role}",
@@ -1041,7 +1043,7 @@
       },
       "settings:manage": {
         "label": "Configure the instance",
-        "description": "Change instance settings and manage taxonomies — the full admin configuration surface."
+        "description": "Change instance settings and manage taxonomies. Editing permissions and the directory connection stays admin-only."
       },
       "workflow:view": {
         "label": "View workflows & runs",

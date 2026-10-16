@@ -323,11 +323,13 @@
     "assets": {
       "empty": "This person holds no assets to carry over.",
       "assetFallback": "Asset",
+      "noPermission": "Carrying assets over needs the Add & edit inventory permission, which your role does not have.",
       "assignedOn": "Assigned {date}"
     },
     "access": {
       "empty": "This person has no active application access to carry over.",
-      "applicationFallback": "Application"
+      "applicationFallback": "Application",
+      "noPermission": "Carrying application access over needs the Grant & revoke access permission, which your role does not have."
     },
     "fire": {
       "label": "Provision the new user in these applications",
@@ -348,7 +350,8 @@
       "reasons": {
         "not_found": "No longer an active row of the source",
         "asset_deleted": "The asset has been removed",
-        "already_in_state": "Already carried over for this asset"
+        "already_in_state": "Already carried over for this asset",
+        "permission_required": "Your role can't carry this over (it needs the matching permission)"
       }
     }
   },
@@ -369,8 +372,10 @@
     "confirmTitle": "Change role?",
     "confirmBody": "<strong>{name}</strong> will become <strong>{role}</strong>.",
     "confirmAction": "Change role",
+    "promotionNote": "Any temporary password or password-reset link they have not used yet will stop working.",
     "toast": {
       "changed": "{name} is now {role}",
+      "credentialsCancelled": "Their pending temporary password or reset link, if any, was cancelled. Issue a new one if they still need it.",
       "error": "Couldn't change role"
     }
   },
