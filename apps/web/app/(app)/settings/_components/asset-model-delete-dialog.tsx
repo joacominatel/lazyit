@@ -21,7 +21,7 @@ import {
 } from "@/lib/api/hooks/use-asset-models";
 import { useCan } from "@/lib/hooks/use-permissions";
 
-export function assetModelImpactGroups(impact: AssetModelDeleteImpact): ImpactGroupView[] {
+function assetModelImpactGroups(impact: AssetModelDeleteImpact): ImpactGroupView[] {
   return [
     {
       key: "assets",

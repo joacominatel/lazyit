@@ -40,15 +40,13 @@ function fold(text: string): string {
 }
 
 /**
- * From the selected rows' counts: the names of the rows in use, the sum of their counts, and whether
- * every count was known. A category in use is skipped by a bulk delete, so this only informs the
- * confirmation.
+ * From the selected rows' counts: the names of the rows in use, and whether every count was known.
+ * A category in use is skipped by a bulk delete, so this only informs the confirmation.
  */
 export function bulkUsage(
   rows: readonly { name: string; count: number | null | undefined }[],
-): { inUse: string[]; total: number; known: boolean } {
+): { inUse: string[]; known: boolean } {
   const inUse: string[] = [];
-  let total = 0;
   let known = true;
   for (const row of rows) {
     const label = usageLabel("assets", row.count);
@@ -56,10 +54,7 @@ export function bulkUsage(
       known = false;
       continue;
     }
-    if (label.count > 0) {
-      inUse.push(row.name);
-      total += label.count;
-    }
+    if (label.count > 0) inUse.push(row.name);
   }
-  return { inUse, total, known };
+  return { inUse, known };
 }
