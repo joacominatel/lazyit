@@ -8,7 +8,6 @@ import {
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
   BatchActionBar,
   ErrorState,
@@ -56,7 +55,7 @@ import {
   UsageText,
 } from "./taxonomy-list";
 import type { AnyCategory, CategoryKind } from "./taxonomy-types";
-import { bulkUsage, filterTaxonomy, type UsageNoun, usageLabel } from "./taxonomy-usage";
+import { bulkUsage, filterTaxonomy, type UsageNoun } from "./taxonomy-usage";
 
 /** The category kinds Settings → Taxonomies manages. KB folders (the `article` kind) live in the KB. */
 export type ManagedCategoryKind = Exclude<CategoryKind, "article">;
@@ -98,8 +97,6 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
   };
   const { data, isLoading, isError, error, refetch } = queries[kind];
   const create = creates[kind];
-  // Application and consumable categories in use need one resolution for their items (AUD-085); asset categories do not yet.
-  const resolvable = kind !== "asset";
   const label = t(`taxonomies.kindLabel.${kind}`);
   const canWrite = useCan("category:write");
   const canDelete = useCan("category:delete");
@@ -150,12 +147,10 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
   }
 
   function deleteOne(id: string): Promise<unknown> {
-    return kind === "asset"
-      ? deletes.asset.mutateAsync(id)
-      : deletes[kind].mutateAsync({ id });
+    return deletes[kind].mutateAsync({ id });
   }
 
-  // No batch endpoint: a row that fails stays selected; in-use resolvable ones are reported apart, never resolved in bulk.
+  // No batch endpoint: a row that fails stays selected; in-use ones are reported apart, never resolved in bulk.
   async function handleBulkDelete() {
     const ids = selection.selectedIds;
     if (ids.length === 0) return;
@@ -299,7 +294,7 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
         category={editing}
         cloneSource={cloning}
       />
-      {deleting && kind !== "asset" ? (
+      {deleting ? (
         <CategoryDeleteDialog
           kind={kind}
           category={deleting}
@@ -308,21 +303,6 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
             if (!open) setDeleting(undefined);
           }}
         />
-      ) : deleting ? (
-        <DeleteConfirmDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setDeleting(undefined);
-          }}
-          entityKey="category"
-          name={deleting.name}
-          onConfirm={() => deleteOne(deleting.id)}
-        >
-          <DeleteImpact
-            noun={USAGE_NOUN[kind]}
-            count={"usageCount" in deleting ? deleting.usageCount : undefined}
-          />
-        </DeleteConfirmDialog>
       ) : null}
 
       <AlertDialog
@@ -337,15 +317,10 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
               {t("taxonomies.categories.bulkDelete.confirmTitle", { count: selection.count })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t(
-                resolvable
-                  ? "taxonomies.categories.bulkDelete.confirmDescriptionResolvable"
-                  : "taxonomies.categories.bulkDelete.confirmDescription",
-              )}
+              {t("taxonomies.categories.bulkDelete.confirmDescriptionResolvable")}
             </AlertDialogDescription>
             <BulkDeleteImpact
-              resolvable={resolvable}
-              noun={USAGE_NOUN[kind]}
+              countsEveryItem={kind !== "asset"}
               rows={categories
                 .filter((c) => selection.selectedIds.includes(c.id))
                 .map((c) => ({
@@ -368,51 +343,26 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
 }
 
 /**
- * What deleting one category does to the records filed under it, when the list read sent a count: it
- * is a restorable soft delete, nothing is refused, and those records simply show no category.
+ * Which selected categories are in use and so will be skipped. An asset category's count is its assets,
+ * not its models, so a zero there does not prove the category is unused.
  */
-function DeleteImpact({ noun, count }: { noun: UsageNoun; count: number | null | undefined }) {
-  const t = useTranslations("settings.taxonomies");
-  const label = usageLabel(noun, count);
-  if (!label) return <>{t("categories.deleteImpact.unknown")}</>;
-  if (label.key === "unused") return <>{t("categories.deleteImpact.unused")}</>;
-  return (
-    <>
-      {t("categories.deleteImpact.used", { usage: t(`usage.${label.key}`, { count: label.count }) })}
-    </>
-  );
-}
-
-/** The bulk version: which selected categories are in use, and how many records lose their category. */
 function BulkDeleteImpact({
-  resolvable,
-  noun,
+  countsEveryItem,
   rows,
 }: {
-  resolvable: boolean;
-  noun: UsageNoun;
+  countsEveryItem: boolean;
   rows: { name: string; count: number | null | undefined }[];
 }) {
   const t = useTranslations("settings.taxonomies");
-  const { inUse, total, known } = bulkUsage(rows);
-  if (inUse.length > 0 && resolvable) {
+  const { inUse, known } = bulkUsage(rows);
+  if (inUse.length > 0) {
     return (
       <p className="text-sm text-muted-foreground">
         {t("categories.deleteImpact.bulkNeedsResolution", { names: inUse.join(", ") })}
       </p>
     );
   }
-  if (inUse.length > 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {t("categories.deleteImpact.bulkUsed", {
-          names: inUse.join(", "),
-          usage: t(`usage.${noun}`, { count: total }),
-        })}
-      </p>
-    );
-  }
-  if (known && rows.length > 0) {
+  if (countsEveryItem && known && rows.length > 0) {
     return <p className="text-sm text-muted-foreground">{t("categories.deleteImpact.bulkUnused")}</p>;
   }
   return null;

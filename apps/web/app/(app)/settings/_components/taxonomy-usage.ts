@@ -40,9 +40,9 @@ function fold(text: string): string {
 }
 
 /**
- * What a bulk delete would detach, from the selected rows' counts: the names of the rows in use, the
- * sum of their counts, and whether every count was known. A category delete is a plain soft delete —
- * nothing is refused — so this only informs the confirmation.
+ * From the selected rows' counts: the names of the rows in use, the sum of their counts, and whether
+ * every count was known. A category in use is skipped by a bulk delete, so this only informs the
+ * confirmation.
  */
 export function bulkUsage(
   rows: readonly { name: string; count: number | null | undefined }[],

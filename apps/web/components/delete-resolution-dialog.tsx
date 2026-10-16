@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { DeleteResolution } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
@@ -36,13 +37,15 @@ type ImpactGroupKey =
   | "childLocations"
   | "purchaseOrders"
   | "applications"
-  | "consumables";
+  | "consumables"
+  | "assetModels"
+  | "purchaseOrderLines";
 
 /** One kind of affected row; `items` is null when the caller may not read that kind. A null label is an untitled purchase. */
 export interface ImpactGroupView {
   key: ImpactGroupKey;
   total: number;
-  items: { id: string; label: string | null }[] | null;
+  items: { id: string; label: string | null; href?: string }[] | null;
 }
 
 
@@ -61,7 +64,7 @@ interface TargetPickerProps {
 interface DeleteResolutionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  entityKey: "location" | "category";
+  entityKey: "location" | "category" | "model";
   name: string;
   /** Undefined while the delete-impact read is loading. */
   groups: ImpactGroupView[] | undefined;
@@ -72,6 +75,8 @@ interface DeleteResolutionDialogProps {
   /** The create permission for this kind; without it "create a new one" is not offered. */
   canCreate: boolean;
   createHint: string;
+  /** Shown under the impact list, e.g. that some listed rows are informational. */
+  impactNote?: string;
   /** The create schema's name limit for this kind. */
   nameMaxLength: number | undefined;
   remove: (resolution?: DeleteResolution) => Promise<unknown>;
@@ -90,6 +95,7 @@ export function DeleteResolutionDialog({
   renderTargetPicker,
   canCreate,
   createHint,
+  impactNote,
   nameMaxLength,
   remove,
   create,
@@ -191,6 +197,7 @@ export function DeleteResolutionDialog({
         ) : needsResolution ? (
           <div className="space-y-4">
             <ImpactList groups={groups} />
+            {impactNote ? <p className="text-sm text-muted-foreground">{impactNote}</p> : null}
 
             <fieldset className="space-y-2">
               <legend className="mb-2 text-sm font-medium">
@@ -309,7 +316,13 @@ function ImpactList({ groups }: { groups: ImpactGroupView[] }) {
                 <ul className="space-y-0.5 text-sm text-muted-foreground">
                   {shown.map((item) => (
                     <li key={item.id} className="truncate">
-                      {item.label ?? t("untitledPurchase")}
+                      {item.href ? (
+                        <Link href={item.href} className="underline-offset-4 hover:underline">
+                          {item.label ?? t("untitledPurchase")}
+                        </Link>
+                      ) : (
+                        (item.label ?? t("untitledPurchase"))
+                      )}
                     </li>
                   ))}
                   {more > 0 ? <li>{t("more", { count: more })}</li> : null}

@@ -1,10 +1,13 @@
 import type {
   AssetModel,
+  AssetModelDeleteImpact,
   AssetModelListPage,
   CreateAssetModel,
+  DeleteResolution,
   UpdateAssetModel,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Data-access for Asset models. The list read backs the asset form's model select + the
@@ -74,7 +77,13 @@ export function updateAssetModel(
   });
 }
 
-/** Soft-delete an asset model (returns the now-archived record). */
-export function deleteAssetModel(id: string): Promise<AssetModel> {
-  return apiFetch<AssetModel>(`${BASE}/${id}`, { method: "DELETE" });
+export function getAssetModelDeleteImpact(id: string): Promise<AssetModelDeleteImpact> {
+  return apiFetch<AssetModelDeleteImpact>(`${BASE}/${id}/delete-impact`);
+}
+
+/** Soft-delete an asset model; while assets or open purchase lines still use it, `resolution` says where they go. */
+export function deleteAssetModel(id: string, resolution?: DeleteResolution): Promise<AssetModel> {
+  return apiFetch<AssetModel>(`${BASE}/${id}${deleteResolutionQuery(resolution)}`, {
+    method: "DELETE",
+  });
 }

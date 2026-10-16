@@ -1149,7 +1149,6 @@
       "selectRow": "Select {name}",
       "bulkDelete": {
         "confirmTitle": "Delete {count, plural, one {# category} other {# categories}}?",
-        "confirmDescription": "This soft-deletes the selected categories; they can be restored. Records filed under them keep their data but show no category until the category is restored or they are re-filed.",
         "resultAllDeleted": "Deleted {deleted, plural, one {# category} other {# categories}}.",
         "resultPartial": "Deleted {deleted}; {skipped} couldn't be deleted.",
         "resultAllSkipped": "Couldn't delete {skipped, plural, one {# category} other {# categories}}.",
@@ -1211,10 +1210,6 @@
       "inlinePlaceholder": "New category…",
       "empty": "No categories yet.",
       "deleteImpact": {
-        "used": "Used by {usage} — they keep their records but show no category until it is restored.",
-        "unused": "Nothing is filed under it.",
-        "unknown": "Anything filed under it keeps its record but shows no category until it is restored.",
-        "bulkUsed": "In use: {names} — {usage} in all will show no category until restored.",
         "bulkUnused": "None of them is in use.",
         "bulkNeedsResolution": "In use: {names} — these are skipped. Delete each one on its own to choose where its items go."
       }

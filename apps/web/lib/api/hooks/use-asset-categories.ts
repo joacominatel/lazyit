@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreateAssetCategory,
+  DeleteResolution,
   UpdateAssetCategory,
 } from "@lazyit/shared";
 import {
   createAssetCategory,
   deleteAssetCategory,
   getAssetCategories,
+  getAssetCategoryDeleteImpact,
   updateAssetCategory,
 } from "../endpoints/asset-categories";
 import { createQueryKeys } from "../query-keys";
+import { assetModelKeys } from "./use-asset-models";
+import { assetKeys } from "./use-assets";
 
 /** Query keys for Asset categories. */
 export const assetCategoryKeys = createQueryKeys("asset-categories");
@@ -47,8 +51,24 @@ export function useUpdateAssetCategory() {
 export function useDeleteAssetCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteAssetCategory(id),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: assetCategoryKeys.all }),
+    mutationFn: ({ id, resolution }: { id: string; resolution?: DeleteResolution }) =>
+      deleteAssetCategory(id, resolution),
+    onSuccess: (_category, { resolution }) => {
+      queryClient.invalidateQueries({ queryKey: assetCategoryKeys.all });
+      // A resolution re-filed the models, and their assets show the category through them.
+      if (resolution) {
+        queryClient.invalidateQueries({ queryKey: assetModelKeys.all });
+        queryClient.invalidateQueries({ queryKey: assetKeys.all });
+      }
+    },
+  });
+}
+
+export function useAssetCategoryDeleteImpact(id: string | undefined) {
+  return useQuery({
+    queryKey: [...assetCategoryKeys.all, "delete-impact", id ?? ""],
+    queryFn: () => getAssetCategoryDeleteImpact(id as string),
+    enabled: Boolean(id),
+    staleTime: 0,
   });
 }

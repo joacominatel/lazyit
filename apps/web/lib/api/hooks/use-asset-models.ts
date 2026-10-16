@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import {
   type CreateAssetModel,
+  type DeleteResolution,
   MAX_PAGE_LIMIT,
   type UpdateAssetModel,
 } from "@lazyit/shared";
@@ -14,11 +15,16 @@ import {
   createAssetModel,
   deleteAssetModel,
   getAssetModel,
+  getAssetModelDeleteImpact,
   getAssetModels,
   updateAssetModel,
 } from "../endpoints/asset-models";
 import { createQueryKeys, selectDirectoryItems } from "../query-keys";
 import { invalidateSuggestions } from "../query-keys";
+import { assetCategoryKeys } from "./use-asset-categories";
+import { assetHistoryKeys } from "./use-asset-history";
+import { assetKeys } from "./use-assets";
+import { purchaseOrderKeys } from "./use-purchase-orders";
 
 /** Query keys for Asset models. */
 const baseAssetModelKeys = createQueryKeys("asset-models");
@@ -111,8 +117,26 @@ export function useUpdateAssetModel() {
 export function useDeleteAssetModel() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteAssetModel(id),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: assetModelKeys.all }),
+    mutationFn: ({ id, resolution }: { id: string; resolution?: DeleteResolution }) =>
+      deleteAssetModel(id, resolution),
+    onSuccess: (_model, { resolution }) => {
+      queryClient.invalidateQueries({ queryKey: assetModelKeys.all });
+      // A resolution re-pointed assets (with a history row each) and open purchase lines; a move can also change their category counts.
+      if (resolution) {
+        queryClient.invalidateQueries({ queryKey: assetKeys.all });
+        queryClient.invalidateQueries({ queryKey: assetHistoryKeys.all });
+        queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all });
+        queryClient.invalidateQueries({ queryKey: assetCategoryKeys.all });
+      }
+    },
+  });
+}
+
+export function useAssetModelDeleteImpact(id: string | undefined) {
+  return useQuery({
+    queryKey: [...assetModelKeys.all, "delete-impact", id ?? ""],
+    queryFn: () => getAssetModelDeleteImpact(id as string),
+    enabled: Boolean(id),
+    staleTime: 0,
   });
 }

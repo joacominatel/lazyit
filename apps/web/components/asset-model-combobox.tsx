@@ -30,6 +30,7 @@ export function AssetModelCombobox({
   placeholder,
   searchPlaceholder,
   emptyText,
+  excludeIds,
 }: {
   id?: string;
   value?: string;
@@ -48,6 +49,8 @@ export function AssetModelCombobox({
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  /** Models never offered, e.g. the one being deleted. */
+  excludeIds?: ReadonlySet<string>;
 }) {
   const tc = useTranslations("common");
   const [query, setQuery] = useState("");
@@ -59,12 +62,14 @@ export function AssetModelCombobox({
 
   const items = useMemo(
     () =>
-      (data?.items ?? []).map((model) => ({
-        value: model.id,
-        label: `${model.manufacturer} ${model.name}`,
-        keywords: model.sku ? [model.sku] : undefined,
-      })),
-    [data],
+      (data?.items ?? [])
+        .filter((model) => !excludeIds?.has(model.id))
+        .map((model) => ({
+          value: model.id,
+          label: `${model.manufacturer} ${model.name}`,
+          keywords: model.sku ? [model.sku] : undefined,
+        })),
+    [data, excludeIds],
   );
 
   // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The model
