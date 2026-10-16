@@ -731,11 +731,9 @@ export function nextFreeNumber(occupied: Set<number>, from: number): number {
 /**
  * The name of the raw partial-unique index that enforces live-tag uniqueness (created in raw SQL in
  * migration 20260601130000, NOT a PSL `@unique` — Prisma can't express the `WHERE deletedAt IS NULL`
- * partial). adapter-pg reports it by NAME in the P2002's driver-adapter cause; the `assetTag` column
- * is also accepted in case a driver reports fields instead.
+ * partial). adapter-pg reports it by NAME in the P2002's driver-adapter cause.
  */
 const ASSET_TAG_UNIQUE_INDEX = 'assets_assetTag_active_key';
-const ASSET_TAG_COLUMN = 'assetTag';
 
 /**
  * Type guard for the live-tag unique collision: a P2002 raised by the `assets_assetTag_active_key`
@@ -753,7 +751,5 @@ export function isUniqueTagCollision(err: unknown): boolean {
   ) {
     return false;
   }
-  return uniqueViolationTargets(err).some(
-    (t) => t === ASSET_TAG_UNIQUE_INDEX || t === ASSET_TAG_COLUMN,
-  );
+  return uniqueViolationTargets(err).includes(ASSET_TAG_UNIQUE_INDEX);
 }

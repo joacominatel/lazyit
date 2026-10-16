@@ -4,14 +4,8 @@ import type { Prisma } from '../../generated/prisma/client';
 export function uniqueViolationTargets(
   err: Prisma.PrismaClientKnownRequestError,
 ): string[] {
-  const meta = err.meta;
   const names: unknown[] = [];
-
-  const target = meta?.target;
-  if (Array.isArray(target)) names.push(...(target as unknown[]));
-  else names.push(target);
-
-  const adapterError = meta?.driverAdapterError as
+  const adapterError = err.meta?.driverAdapterError as
     | { cause?: { constraint?: { index?: unknown; fields?: unknown } } }
     | undefined;
   const constraint = adapterError?.cause?.constraint;

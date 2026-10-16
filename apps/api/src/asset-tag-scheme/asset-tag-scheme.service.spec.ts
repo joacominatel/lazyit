@@ -937,29 +937,6 @@ describe('AssetTagSchemeService', () => {
         ),
       ),
     ).toBe(true);
-    expect(
-      isUniqueTagCollision(
-        new FakePrismaKnownError(
-          'P2002',
-          adapterPgUniqueViolationMeta({ fields: ['assetTag'] }),
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it('still matches the legacy meta.target shapes (index-name string, column array)', () => {
-    expect(
-      isUniqueTagCollision(
-        new FakePrismaKnownError('P2002', {
-          target: 'assets_assetTag_active_key',
-        }),
-      ),
-    ).toBe(true);
-    expect(
-      isUniqueTagCollision(
-        new FakePrismaKnownError('P2002', { target: ['assetTag'] }),
-      ),
-    ).toBe(true);
   });
 
   it('does NOT match a P2002 on the SERIAL index (a different live partial-unique) — it must propagate', () => {
@@ -969,11 +946,6 @@ describe('AssetTagSchemeService', () => {
           'P2002',
           adapterPgUniqueViolationMeta({ index: 'assets_serial_active_key' }),
         ),
-      ),
-    ).toBe(false);
-    expect(
-      isUniqueTagCollision(
-        new FakePrismaKnownError('P2002', { target: ['serial'] }),
       ),
     ).toBe(false);
   });

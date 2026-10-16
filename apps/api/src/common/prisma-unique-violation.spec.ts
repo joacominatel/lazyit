@@ -22,18 +22,14 @@ describe('uniqueViolationTargets', () => {
 
   it('reads column names when the adapter reports fields instead of an index', () => {
     const err = p2002(
-      adapterPgUniqueViolationMeta({ fields: ['requesterId', 'applicationId'] }),
+      adapterPgUniqueViolationMeta({
+        fields: ['requesterId', 'applicationId'],
+      }),
     );
 
-    expect(uniqueViolationTargets(err)).toEqual(['requesterId', 'applicationId']);
-  });
-
-  it('still reads meta.target as a string or an array', () => {
-    expect(
-      uniqueViolationTargets(p2002({ target: 'assets_serial_active_key' })),
-    ).toEqual(['assets_serial_active_key']);
-    expect(uniqueViolationTargets(p2002({ target: ['serial'] }))).toEqual([
-      'serial',
+    expect(uniqueViolationTargets(err)).toEqual([
+      'requesterId',
+      'applicationId',
     ]);
   });
 

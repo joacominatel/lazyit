@@ -278,7 +278,9 @@ export class AccessRequestsService {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      return uniqueViolationTargets(err).some((t) => t.includes('pending'));
+      return uniqueViolationTargets(err).includes(
+        'access_requests_requester_application_pending_key',
+      );
     }
     return false;
   }
