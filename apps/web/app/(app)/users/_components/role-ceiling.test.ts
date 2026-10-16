@@ -43,15 +43,12 @@ describe("userMutationErrorKind", () => {
     ).toBe("directoryRoleLocked");
   });
 
-  test("the last-admin 409 is recognised by the API's wording", () => {
+  test("the last-admin 409 is recognised by its code, not its wording", () => {
+    expect(userMutationErrorKind(new ApiError(409, "x", { code: "LAST_ADMIN_REQUIRED" }))).toBe("lastAdmin");
     expect(
-      userMutationErrorKind(
-        new ApiError(
-          409,
-          "Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first.",
-        ),
-      ),
-    ).toBe("lastAdmin");
+      userMutationErrorKind(new ApiError(409, "Cannot remove the last administrator who can sign in.")),
+    ).toBeNull();
+    expect(userMutationErrorKind(new ApiError(403, "x", { code: "LAST_ADMIN_REQUIRED" }))).toBeNull();
   });
 
   test("other failures fall through to the server's message", () => {
