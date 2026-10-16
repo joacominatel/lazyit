@@ -10,6 +10,7 @@ import request from 'supertest';
 import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import { AccessGrantsController } from './access-grants.controller';
 import { AccessGrantsService } from './access-grants.service';
+import { AccessGrantsExportService } from './access-grants-export.service';
 import { RolesGuard } from '../auth/roles.guard';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -73,6 +74,7 @@ describe('AccessGrant write authZ — accessGrant:grant, NOT :write (ADR-0046 P4
       providers: [
         Reflector,
         { provide: AccessGrantsService, useValue: { create } },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         PermissionResolverService,
         // Auth first (sets request.user), then authZ (RolesGuard) — same order as AuthModule.

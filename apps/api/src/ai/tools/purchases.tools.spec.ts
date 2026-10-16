@@ -65,6 +65,7 @@ import { AssetsController } from '../../assets/assets.controller';
 import { ApplicationsController } from '../../applications/applications.controller';
 import { ApplicationsService } from '../../applications/applications.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
 import { AssetsService } from '../../assets/assets.service';
 import { ArticlesService } from '../../articles/articles.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
@@ -1089,6 +1090,7 @@ describe('purchases toolset (#1478)', () => {
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         {
           provide: ApplicationsService,
           useValue: {

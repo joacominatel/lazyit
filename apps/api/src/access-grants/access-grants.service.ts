@@ -21,6 +21,15 @@ import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.
 import type { TriggerPlan } from '../workflow-engine/run/workflow-trigger.service';
 import type { ActorAttribution } from '../common/actor.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type KeysetCursor,
+} from '../common/export';
+import {
+  ACCESS_GRANT_EXPORT_SELECT,
+  type AccessGrantExportRow,
+} from './access-grant-export';
 
 /**
  * The free-form `accessLevel` values that denote an ADMIN-level grant — the trigger for the
@@ -92,6 +101,24 @@ export class AccessGrantsService {
     // The Prisma rows carry `Date`s; the API serializes them to the ISO-string wire shape at the
     // HTTP boundary (same as findAll/findOne) — the AccessGrantListPage DTO documents that shape.
     return pageOf(items, total, page);
+  }
+
+  /** The lists' own `where` for the grant exports, walked by keyset with names joined (ADR-0103). */
+  exportSource(filters: FindAccessGrantsFilters) {
+    const where = this.buildWhere(filters);
+    return {
+      count: () => this.prisma.accessGrant.count({ where }),
+      fetchBatch: (
+        after: KeysetCursor | null,
+        take: number,
+      ): Promise<AccessGrantExportRow[]> =>
+        this.prisma.accessGrant.findMany({
+          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          orderBy: keysetOrderBy(),
+          take,
+          select: ACCESS_GRANT_EXPORT_SELECT,
+        }),
+    };
   }
 
   /** The shared `where` for the grant lists — used identically by findAll, findPage and its count. */

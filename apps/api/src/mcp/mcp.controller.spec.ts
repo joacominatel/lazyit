@@ -43,6 +43,7 @@ import {
   type McpRpc,
 } from '../../test/mcp/mcp-rpc';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { ExportService } from '../common/export';
 import { AiActionLogService } from '../ai/core/action-log.service';
 import { AiToolService } from '../ai/core/ai-tool.service';
@@ -290,6 +291,7 @@ describe('/mcp end to end — listing, calls, errors and the critical-applicatio
         { provide: UsersService, useValue: usersService },
         { provide: AccessGrantsService, useValue: grantsService },
         { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ApplicationsService, useValue: applicationsService },
         {
           provide: AssetAssignmentsService,

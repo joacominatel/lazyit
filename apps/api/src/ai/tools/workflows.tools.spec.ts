@@ -45,6 +45,7 @@ import { ApplicationsController } from '../../applications/applications.controll
 import { ApplicationsService } from '../../applications/applications.service';
 import { AccessGrantsController } from '../../access-grants/access-grants.controller';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
 import { ExportService } from '../../common/export';
 import { ArticlesService } from '../../articles/articles.service';
 import { UsersController } from '../../users/users.controller';
@@ -1018,6 +1019,7 @@ describe('workflow operations toolset (W2-13)', () => {
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: AccessGrantsService, useValue: grantsService },
         { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: UsersService, useValue: usersService },
         { provide: AssetAssignmentsService, useValue: {} },
