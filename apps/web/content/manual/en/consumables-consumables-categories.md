@@ -56,9 +56,9 @@ A few things worth knowing:
 
 - A consumable can have **one** category, or none.
 - **Deleting a category does not delete its consumables.** When it still has consumables, lazyit
-  shows you which ones and asks for **one decision for all of them**: leave them uncategorised, or
-  move them to another category (create a new one first if you want a fresh one). Nothing is lost,
-  and restoring the category later does not bring them back.
+  shows you which ones and asks for **one decision for all of them**: leave them uncategorised, move
+  them to another category, or, if you can create categories, type a name to create one right there
+  and move them into it. Nothing is lost, and restoring the category later does not bring them back.
 - Categories are **soft-deleted** and a deleted name is freed for reuse, so you can recreate or
   restore one later without a clash.
 

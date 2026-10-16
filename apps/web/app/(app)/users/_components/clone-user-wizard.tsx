@@ -52,15 +52,15 @@ import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useAssets } from "@/lib/api/hooks/use-assets";
 import { useCloneUser } from "@/lib/api/hooks/use-user-mutations";
 import {
+  useCurrentUser,
   useUserAssignments,
   useUserGrants,
 } from "@/lib/api/hooks/use-users";
-import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { ManagerField } from "./manager-field";
+import { assignableRoles, notifyUserError } from "./role-ceiling";
 
 const FORM_ID = "clone-user-form";
-const ROLE_VALUES: Role[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 /** The source user the clone is templated from (only the fields the wizard needs). */
 export interface CloneSource {
@@ -152,6 +152,9 @@ export function CloneUserWizard({
   source,
 }: CloneUserWizardProps) {
   const t = useTranslations("users.clone");
+  const tUsers = useTranslations("users");
+  const { data: me } = useCurrentUser();
+  const roleOptions = assignableRoles(me?.role);
   const { date } = useFormatters();
   const tf = useTranslations("users.form");
   const tc = useTranslations("common");
@@ -267,7 +270,7 @@ export function CloneUserWizard({
             }),
           );
         },
-        onError: (error) => notifyError(error, t("toast.error")),
+        onError: (error) => notifyUserError(error, t("toast.error"), tUsers),
       },
     );
   }
@@ -362,7 +365,7 @@ export function CloneUserWizard({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLE_VALUES.map((value) => (
+                    {roleOptions.map((value) => (
                       <SelectItem key={value} value={value}>
                         {t(`roleLabels.${value}`)}
                       </SelectItem>

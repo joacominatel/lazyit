@@ -138,6 +138,10 @@ export function FolderMoveDialog({
             setError(t("folders.errors.duplicateInDestination"));
             return;
           }
+          if (kind === "moveForbidden") {
+            setError(t("folders.errors.moveForbidden"));
+            return;
+          }
           notifyError(err, t("folders.move.error"));
         },
       },

@@ -69,7 +69,10 @@ Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada s
   **Gestionar usuarios**, esas personas solo pueden otorgar su propio rol o uno inferior, y solo pueden
   editar, restablecer, dar de baja o restaurar a usuarios con un rol igual o inferior al suyo. Solo un
   administrador puede crear un administrador, promover a alguien a administrador o actuar sobre un
-  administrador existente. Cualquier otra cosa se rechaza con un mensaje claro.
+  administrador existente. Los selectores de rol solo muestran los roles que puedes otorgar, y en un
+  usuario por encima de tu rol el rol aparece como una etiqueta fija y no se ofrecen **Editar**, el
+  restablecimiento de contraseña ni **Dar de baja** (clonarlo sí). Cualquier otra cosa se rechaza con
+  un mensaje claro.
 - **Solo un administrador edita los permisos y la conexión del directorio.** Dar a Miembro o a Lector
   **Cambiar la configuración de la instancia** les permite ver la matriz de permisos y la conexión del
   directorio, no cambiarlas ni ejecutar una sincronización del directorio.
@@ -82,7 +85,8 @@ Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada s
   propio acceso en silencio. (Sí puedes editar tu propio nombre, correo y otros datos.)
 - **El rol de una persona del directorio no se puede cambiar.** Las personas que llegan por una
   importación o por la sincronización del directorio no tienen inicio de sesión y siguen siendo
-  **Lector** hasta que se las incorpora. Incorpóralas primero y luego cambia el rol.
+  **Lector** hasta que se las incorpora. Su rol aparece bloqueado, con el motivo; incorpóralas primero
+  y luego cambia el rol.
 
 ## Una nota sobre tu proveedor de identidad
 

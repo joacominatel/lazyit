@@ -132,8 +132,8 @@ export function updateAccessGrantNotes(
 
 /**
  * Change a grant's expiry (`PATCH /access-grants/:id/expiry`) — extend, shorten, or clear it.
- * `expiresAt: null` removes the expiry (makes the grant permanent). Informative only: changing it
- * never revokes or reactivates the grant (ADR-0023).
+ * `expiresAt: null` removes the expiry (makes the grant permanent). The edit itself never revokes or
+ * reactivates the grant; the expiry sweep revokes it once the date passes (AUD-097).
  */
 export function updateAccessGrantExpiry(
   id: string,

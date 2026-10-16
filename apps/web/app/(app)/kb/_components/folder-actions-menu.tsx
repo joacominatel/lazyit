@@ -41,11 +41,11 @@ import type { FolderWithRules } from "./folder-tree";
 
 /** The capability gates the menu reads — each item is shown only when its gate holds. */
 export interface FolderPermissions {
-  /** `category:write` — new sub-folder, edit, move (#1291). */
+  /** `category:write` — new sub-folder, edit, and move together with `isAdmin` (#1291). */
   canWrite: boolean;
   /** `category:delete` — the cascade delete (#415). */
   canDelete: boolean;
-  /** `settings:manage` — the access-rule editor (ADR-0060). */
+  /** `settings:manage` — the access-rule editor and folder moves (ADR-0060 §10). */
   isAdmin: boolean;
 }
 
@@ -122,16 +122,17 @@ export function FolderActionsMenu({
             </DropdownMenuItem>
           ) : null}
           {canWrite ? (
-            <>
-              <DropdownMenuItem onSelect={() => setEditOpen(true)}>
-                <PencilIcon className="size-4" aria-hidden />
-                {t("folders.actions.edit")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
-                <ArrowsRightLeftIcon className="size-4" aria-hidden />
-                {t("folders.actions.move")}
-              </DropdownMenuItem>
-            </>
+            <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+              <PencilIcon className="size-4" aria-hidden />
+              {t("folders.actions.edit")}
+            </DropdownMenuItem>
+          ) : null}
+          {/* A move re-scopes who reads the subtree, so the API also wants settings:manage (AUD-001). */}
+          {canWrite && isAdmin ? (
+            <DropdownMenuItem onSelect={() => setMoveOpen(true)}>
+              <ArrowsRightLeftIcon className="size-4" aria-hidden />
+              {t("folders.actions.move")}
+            </DropdownMenuItem>
           ) : null}
           {isAdmin ? (
             <DropdownMenuItem onSelect={() => setAccessOpen(true)}>

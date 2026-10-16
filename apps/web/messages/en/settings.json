@@ -1144,7 +1144,9 @@
         "confirmDescription": "This soft-deletes the selected categories; they can be restored. Records filed under them keep their data but show no category until the category is restored or they are re-filed.",
         "resultAllDeleted": "Deleted {deleted, plural, one {# category} other {# categories}}.",
         "resultPartial": "Deleted {deleted}; {skipped} couldn't be deleted.",
-        "resultAllSkipped": "Couldn't delete {skipped, plural, one {# category} other {# categories}}."
+        "resultAllSkipped": "Couldn't delete {skipped, plural, one {# category} other {# categories}}.",
+        "confirmDescriptionResolvable": "This soft-deletes the selected categories; they can be restored. A category that still has items is not deleted here — delete it on its own to choose where its items go.",
+        "resultNeedsResolution": "{count, plural, one {# category is still in use and was not deleted} other {# categories are still in use and were not deleted}} — delete each one on its own to choose where its items go."
       },
       "form": {
         "editTitle": "Edit {label}",
@@ -1205,7 +1207,8 @@
         "unused": "Nothing is filed under it.",
         "unknown": "Anything filed under it keeps its record but shows no category until it is restored.",
         "bulkUsed": "In use: {names} — {usage} in all will show no category until restored.",
-        "bulkUnused": "None of them is in use."
+        "bulkUnused": "None of them is in use.",
+        "bulkNeedsResolution": "In use: {names} — these are skipped. Delete each one on its own to choose where its items go."
       }
     },
     "models": {

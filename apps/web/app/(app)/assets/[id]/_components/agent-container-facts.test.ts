@@ -47,6 +47,14 @@ describe("getAgentContainerFacts — a container blob is not a custom field (#11
     ]);
   });
 
+  test("keeps the upgrade's `_infraAssetUnlinked` marker out of the dump (#1599)", () => {
+    const specs = {
+      ...CONTAINER_SPECS,
+      _infraAssetUnlinked: { assetId: "asset-1", at: "2026-10-16T00:00:00.000Z", keptByNodeId: "node-2" },
+    };
+    expect(getAgentContainerFacts(specs)?.extras).toEqual([["rack", "A3"]]);
+  });
+
   test("returns null for anything that is not a container blob", () => {
     expect(getAgentContainerFacts(null)).toBeNull();
     expect(getAgentContainerFacts({})).toBeNull();

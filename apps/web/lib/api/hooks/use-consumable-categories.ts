@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  DeleteResolution,
   CreateConsumableCategory,
   UpdateConsumableCategory,
 } from "@lazyit/shared";
 import {
   createConsumableCategory,
   deleteConsumableCategory,
+  getConsumableCategoryDeleteImpact,
   getConsumableCategories,
   updateConsumableCategory,
 } from "../endpoints/consumable-categories";
+import { consumableKeys } from "./use-consumables";
 
 /** Query keys for Consumable categories. */
 export const consumableCategoryKeys = {
@@ -55,8 +58,20 @@ export function useUpdateConsumableCategory() {
 export function useDeleteConsumableCategory() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteConsumableCategory(id),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: consumableCategoryKeys.all }),
+    mutationFn: ({ id, resolution }: { id: string; resolution?: DeleteResolution }) =>
+      deleteConsumableCategory(id, resolution),
+    onSuccess: (_category, { resolution }) => {
+      queryClient.invalidateQueries({ queryKey: consumableCategoryKeys.all });
+      if (resolution) queryClient.invalidateQueries({ queryKey: consumableKeys.all });
+    },
+  });
+}
+
+export function useConsumableCategoryDeleteImpact(id: string | undefined) {
+  return useQuery({
+    queryKey: [...consumableCategoryKeys.all, "delete-impact", id ?? ""],
+    queryFn: () => getConsumableCategoryDeleteImpact(id as string),
+    enabled: Boolean(id),
+    staleTime: 0,
   });
 }

@@ -74,6 +74,7 @@ import { CloneUserWizard } from "./clone-user-wizard";
 import { ManagerDisplay } from "./manager-display";
 import { UserDirectoryBadge } from "./user-directory-badge";
 import { OffboardingSheet } from "./offboarding-sheet";
+import { canManageUser, notifyUserError } from "./role-ceiling";
 import { UserFormDialog } from "./user-form-dialog";
 import { UserRoleSelect } from "./user-role-select";
 import { UserStatusBadge } from "./user-status-badge";
@@ -206,7 +207,7 @@ export function UsersListView() {
   // User administration (create / edit / clone / role-change / offboard / restore) is the single
   // coarse `user:manage` capability on the backend. `isAdmin` still gates the archived (`deleted=only`)
   // slice, which the API keeps ADMIN-only.
-  const { isAdmin } = usePermissions();
+  const { isAdmin, role: myRole } = usePermissions();
   const canManage = useCan("user:manage");
   const {
     q,
@@ -294,7 +295,7 @@ export function UsersListView() {
     const name = `${user.firstName} ${user.lastName}`;
     restoreUserMutation.mutate(user.id, {
       onSuccess: () => toast.success(t("list.toast.restored", { name })),
-      onError: (err) => notifyError(err, t("list.toast.restoreError")),
+      onError: (err) => notifyUserError(err, t("list.toast.restoreError"), t),
     });
   }
 
@@ -710,7 +711,7 @@ export function UsersListView() {
                 }
                 actions={
                   archived ? (
-                    canManage ? (
+                    canManage && canManageUser(myRole, user) ? (
                       <RestoreRowAction
                         onRestore={() => handleRestoreRow(user)}
                         disabled={restoreUserMutation.isPending}
@@ -718,9 +719,13 @@ export function UsersListView() {
                     ) : undefined
                   ) : canManage ? (
                     <RowActions
-                      onEdit={() => openEdit(user)}
+                      onEdit={canManageUser(myRole, user) ? () => openEdit(user) : undefined}
                       onClone={() => openClone(user)}
-                      onDelete={() => dispatchDialogs({ type: "openDelete", user })}
+                      onDelete={
+                        canManageUser(myRole, user)
+                          ? () => dispatchDialogs({ type: "openDelete", user })
+                          : undefined
+                      }
                       deleteLabel={t("list.offboardAction")}
                     />
                   ) : undefined
@@ -825,7 +830,7 @@ export function UsersListView() {
                 actions: (
                   <TableCell key="actions" className="text-right">
                     {archived ? (
-                      canManage ? (
+                      canManage && canManageUser(myRole, user) ? (
                         <div className="flex justify-end">
                           <RestoreRowAction
                             onRestore={() => handleRestoreRow(user)}
@@ -836,9 +841,13 @@ export function UsersListView() {
                     ) : canManage ? (
                       <div className={cn("flex justify-end", rowActionsReveal)}>
                         <RowActions
-                          onEdit={() => openEdit(user)}
+                          onEdit={canManageUser(myRole, user) ? () => openEdit(user) : undefined}
                           onClone={() => openClone(user)}
-                          onDelete={() => dispatchDialogs({ type: "openDelete", user })}
+                          onDelete={
+                            canManageUser(myRole, user)
+                              ? () => dispatchDialogs({ type: "openDelete", user })
+                              : undefined
+                          }
                           deleteLabel={t("list.offboardAction")}
                         />
                       </div>

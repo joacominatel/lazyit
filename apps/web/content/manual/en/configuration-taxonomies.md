@@ -49,9 +49,10 @@ before the server reports counts, the column stays empty rather than guessing.)
 
 - An **application or consumable category** that still has items asks for **one decision for all of
   them** — never item by item — after showing you which ones: **leave them without a category**, or
-  **move them to another category** of the same kind (to file them under a new one, create it first,
-  then move them there). The move and the delete happen together, and restoring the category later
-  does not bring the items back.
+  **move them to another category** of the same kind, or **create a new category** — type its name
+  and lazyit creates it, then moves the items there (offered only if you can also create categories).
+  The move and the delete happen together, and restoring the category later does not bring the items
+  back.
 - An **asset category** in use can still be deleted directly: its records keep all their data but show
   **no category** until the category is restored or you file them under another one. The confirmation
   says how many records that is (*Used by 42 assets — they keep their records but show no category
@@ -62,11 +63,13 @@ administrator can restore one through the API (`POST /api/asset-categories/{id}/
 under `application-categories` and `consumable-categories`).
 
 **Removing several categories at once.** Choose **Select** above the list to show a checkbox on each
-row, tick the ones you want to remove and use **Delete** in the selection bar. The confirmation names
-the selected categories that are in use and how many records will show no category in all. lazyit
-deletes them one by one and reports the result; if a request fails (a lost connection, say), that row
-stays selected and the summary says how many could not be deleted, so you can try again. **Done**
-leaves selection.
+row, tick the ones you want to remove and use **Delete** in the selection bar. For asset categories,
+the confirmation names the selected categories that are in use and how many records will show no
+category in all. An application or consumable category that still has items is **not** deleted in
+bulk, since it needs its own decision about where its items go: it stays selected, and the summary
+tells you to delete it on its own. lazyit deletes the rest one by one and reports the result; if a
+request fails (a lost connection, say), that row stays selected and the summary says how many could
+not be deleted, so you can try again. **Done** leaves selection.
 (Bulk delete requires the category-delete permission; **Select** only appears when you hold it.)
 
 Old links that opened a tab — `?tab=asset`, `?tab=models`, `?tab=statuses` and so on — still open the

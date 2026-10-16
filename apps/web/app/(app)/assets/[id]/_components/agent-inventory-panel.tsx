@@ -65,6 +65,8 @@ const INVENTORY_KEYS = new Set([
   "agentSkew",
   "identityConflict",
   "_infraMergedInto",
+  // Stamped by the one-live-node-per-asset upgrade on the node that lost its asset link (#1599).
+  "_infraAssetUnlinked",
 ]);
 
 /**

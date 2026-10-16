@@ -157,6 +157,38 @@
     "cancel": "Cancel",
     "delete": "Delete"
   },
+  "deleteResolution": {
+    "inUse": "is still in use. Choose what happens to everything below — one choice applies to all of it.",
+    "loading": "Checking what still points at it…",
+    "loadError": "Couldn't check what still points at it.",
+    "retry": "Retry",
+    "groups": {
+      "assets": "{count, plural, one {# asset} other {# assets}}",
+      "childLocations": "{count, plural, one {# child location} other {# child locations}}",
+      "purchaseOrders": "{count, plural, one {# open purchase} other {# open purchases}}",
+      "applications": "{count, plural, one {# application} other {# applications}}",
+      "consumables": "{count, plural, one {# consumable} other {# consumables}}"
+    },
+    "more": "and {count} more",
+    "hidden": "You can't view these, but the choice applies to them too.",
+    "untitledPurchase": "Purchase without a reference",
+    "choiceLabel": "What happens to them",
+    "detach": "{entity, select, location {Leave them without a location} other {Leave them without a category}}",
+    "detachHint": "{entity, select, location {Assets lose their location, child locations become top-level and open purchases lose their delivery location.} other {They stay as they are, with no category.}}",
+    "move": "{entity, select, location {Move them to another location} other {Move them to another category}}",
+    "moveHint": "{entity, select, location {Everything goes to the location you pick.} other {Everything is filed under the category you pick.}}",
+    "movePlaceholder": "{entity, select, location {Choose a location} other {Choose a category}}",
+    "moveSearch": "Search…",
+    "moveEmpty": "Nothing to move to.",
+    "create": "{entity, select, location {Create a new location} other {Create a new category}}",
+    "createLabel": "Name",
+    "createHintLocation": "It is created with the same type and parent as {name}, then everything moves there.",
+    "createHintLocationTopLevel": "It is created at the top level with the same type as {name}, then everything moves there.",
+    "createHintCategory": "It is created first, then everything moves there.",
+    "createdButNotDeleted": "“{target}” was created, but {name} was not deleted, so nothing moved: {error} Try again to move everything to “{target}”.",
+    "confirm": "Delete and apply",
+    "changed": "Something now points at {name}. Review what will be affected and choose what happens to it."
+  },
   "copy": {
     "copied": "Copied",
     "copiedLabel": "{label} — copied",

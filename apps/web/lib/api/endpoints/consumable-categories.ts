@@ -1,9 +1,12 @@
 import type {
   ConsumableCategory,
+  ConsumableCategoryDeleteImpact,
   CreateConsumableCategory,
   UpdateConsumableCategory,
+  DeleteResolution,
 } from "@lazyit/shared";
 import { apiFetch } from "../client";
+import { deleteResolutionQuery } from "../delete-resolution";
 
 /**
  * Data-access for Consumable categories. The list read powers the Consumables list filter and the
@@ -34,11 +37,18 @@ export function updateConsumableCategory(
   });
 }
 
-/** Soft-delete a consumable category (returns the now-archived record). */
+export function getConsumableCategoryDeleteImpact(
+  id: string,
+): Promise<ConsumableCategoryDeleteImpact> {
+  return apiFetch<ConsumableCategoryDeleteImpact>(`/consumable-categories/${id}/delete-impact`);
+}
+
+/** Soft-delete a category; while items are still filed under it, `resolution` says where they go. */
 export function deleteConsumableCategory(
   id: string,
+  resolution?: DeleteResolution,
 ): Promise<ConsumableCategory> {
-  return apiFetch<ConsumableCategory>(`/consumable-categories/${id}`, {
+  return apiFetch<ConsumableCategory>(`/consumable-categories/${id}${deleteResolutionQuery(resolution)}`, {
     method: "DELETE",
   });
 }

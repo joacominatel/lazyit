@@ -38,6 +38,7 @@ import {
   useUpdateUser,
 } from "@/lib/api/hooks/use-user-mutations";
 import { notifyError } from "@/lib/api/notify-error";
+import { notifyUserError } from "./role-ceiling";
 import { ManagerField } from "./manager-field";
 import {
   toResolverInput,
@@ -101,6 +102,7 @@ export function UserFormDialog({
   onCreated,
 }: UserFormDialogProps) {
   const t = useTranslations("users.form");
+  const tUsers = useTranslations("users");
   const tc = useTranslations("common");
   const isEdit = user != null;
   const createUser = useCreateUser();
@@ -157,7 +159,7 @@ export function UserFormDialog({
           },
           // The API's own message takes precedence (surfaced verbatim with the request id) — e.g. a
           // duplicate email (409). The fallback only applies if the response carried no message.
-          onError: (error) => notifyError(error, t("toast.updateError")),
+          onError: (error) => notifyUserError(error, t("toast.updateError"), tUsers),
         },
       );
     } else {

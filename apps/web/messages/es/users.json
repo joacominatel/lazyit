@@ -365,6 +365,7 @@
     },
     "selfSuffix": "(tú)",
     "ariaLabel": "Rol de {name}",
+    "directoryLocked": "Persona solo de directorio: dale de alta para cambiar su rol.",
     "confirmTitle": "¿Cambiar el rol?",
     "confirmBody": "<strong>{name}</strong> pasará a ser <strong>{role}</strong>.",
     "confirmAction": "Cambiar rol",
@@ -560,5 +561,10 @@
     "consumablesMore": "…y {count, plural, =1 {# entrega pendiente más} other {# entregas pendientes más}} que no se listan en esta acta.",
     "consumablesMoreDelivered": "…y {count, plural, =1 {# entrega anterior} other {# entregas anteriores}} que no se listan en esta acta.",
     "consumablesUnavailable": "Los consumibles no figuran en esta acta: no tienes permiso para verlos."
+  },
+  "errors": {
+    "roleCeiling": "Solo puedes gestionar usuarios con un rol igual o inferior al tuyo. Solo un administrador puede gestionar administradores.",
+    "directoryRoleLocked": "Es una persona solo de directorio, sin inicio de sesión, así que su rol no puede cambiar. Dale de alta primero.",
+    "lastAdmin": "No se puede quitar al último administrador que puede iniciar sesión. Otro administrador debe iniciar sesión, o ser promovido, primero."
   }
 }

@@ -17,7 +17,6 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -47,10 +46,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
 import { useLocationList } from "@/lib/api/hooks/use-locations";
-import {
-  useDeleteLocation,
-  useRestoreLocation,
-} from "@/lib/api/hooks/use-location-mutations";
+import { useRestoreLocation } from "@/lib/api/hooks/use-location-mutations";
 import { restoreLocation } from "@/lib/api/endpoints/locations";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
@@ -60,6 +56,7 @@ import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRowSelection } from "@/lib/hooks/use-row-selection";
 import { cn } from "@/lib/utils";
+import { LocationDeleteDialog } from "./location-delete-dialog";
 import { LocationFormDialog } from "./location-form-dialog";
 import {
   LOCATION_FILTER_DEFAULTS as FILTER_DEFAULTS,
@@ -110,7 +107,6 @@ export function LocationsListView() {
     useLocationList(
       deriveLocationParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
     );
-  const deleteLocation = useDeleteLocation();
   const restoreLocationMutation = useRestoreLocation();
 
   const [formOpen, setFormOpen] = useState(false);
@@ -504,14 +500,12 @@ export function LocationsListView() {
         location={editing}
       />
       {deleting ? (
-        <DeleteConfirmDialog
+        <LocationDeleteDialog
           open
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityKey="location"
-          name={deleting.name}
-          onConfirm={() => deleteLocation.mutateAsync(deleting.id)}
+          location={deleting}
         />
       ) : null}
     </div>

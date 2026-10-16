@@ -67,7 +67,7 @@ interface GrantAccessDialogProps {
  * not filtered out by existing grants — instead, when the chosen user already holds active grants on
  * this app, the dialog shows that context (their current access levels) so the grantor doesn't
  * duplicate by accident. `accessLevel` is free-form (each app owns its vocabulary) but surfaced via a
- * combobox of the common values; `expiresAt` is informative only (no auto-revoke — ADR-0023). The
+ * combobox of the common values; once `expiresAt` passes, the expiry sweep revokes the grant (AUD-097). The
  * grantor (`grantedById`) comes from the authenticated user's identity (Bearer token, ADR-0039).
  * Converged onto react-hook-form + zod + the `Field`/`FieldError`/`aria-invalid` contract
  * (validation onTouched; scroll-to-first-error on submit) — public props unchanged.

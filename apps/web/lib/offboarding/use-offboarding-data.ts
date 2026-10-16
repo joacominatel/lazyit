@@ -53,7 +53,7 @@ export interface OffboardGrantRow {
   resolved: boolean;
   appName: string | null;
   accessLevel: string | null;
-  /** ISO string or null — informational only (no scheduler auto-revokes at expiry). */
+  /** ISO string or null — once it passes, the expiry sweep revokes the grant (AUD-097). */
   expiresAt: string | null;
   isCritical: boolean;
 }
