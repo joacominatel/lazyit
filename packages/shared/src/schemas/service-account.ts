@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireAtLeastOneKey } from "./primitives";
-import { PermissionSchema } from "./permission";
+import { PermissionSchema, type Permission } from "./permission";
 
 /**
  * ServiceAccount — a NON-HUMAN principal (ADR-0048). A CI runner, a script, an integration: something
@@ -66,6 +66,16 @@ export const SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS = [
 ] as const;
 
 const UNGRANTABLE = new Set<string>(SERVICE_ACCOUNT_UNGRANTABLE_PERMISSIONS);
+
+/**
+ * Verbs a human with delegated `settings:manage` may hand a service account although their own role lacks
+ * them — the single exemption from the SEC-088 manager ceiling, shared so the API refusal and the web
+ * picker cannot drift. CEO decision: `infra:report` only reports inventory, and installing agents was
+ * already `settings:manage`'s job.
+ */
+export const SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
+  "infra:report",
+]);
 
 /**
  * A non-empty, deduplicated array of catalog `Permission` literals for a service account's direct

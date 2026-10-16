@@ -227,8 +227,8 @@ resolves to the full catalog and is unaffected. The SA-ungrantable verbs and INV
 **One exemption, `infra:report`** (CEO decision, 2026-10-16). No human role holds it, because it is
 machine-only, so without the exemption a delegate could no longer add a server or rotate an agent token.
 The verb only lets an agent report inventory, and installing agents was already `settings:manage`'s job,
-so a delegate keeps doing it as before. It is the single member of `CEILING_EXEMPT_PERMISSIONS`
-(`apps/api/src/service-accounts/permission-ceiling.ts`). `secret:fetch` stays capped, because it reaches
+so a delegate keeps doing it as before. It is the single member of `SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS`
+(`packages/shared/src/schemas/service-account.ts`, read by both the API refusal and the web picker). `secret:fetch` stays capped, because it reaches
 secrets, and so does every other verb.
 
 No data change: existing accounts and their tokens keep working with their current verbs. The cap

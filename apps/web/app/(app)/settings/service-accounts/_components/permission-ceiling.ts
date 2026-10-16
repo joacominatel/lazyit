@@ -1,13 +1,10 @@
-import { type Permission, PERMISSIONS } from "@lazyit/shared";
+import { type Permission, PERMISSIONS, SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS } from "@lazyit/shared";
 import { ApiError } from "@/lib/api/client";
 import { notifyError } from "@/lib/api/notify-error";
 import { permissionLabel, type SettingsTranslator } from "../../_lib/permission-labels";
 
-// Mirrors the API (CEO, SEC-088): infra:report only reports inventory, so a delegate can still install agents.
-export const CEILING_EXEMPT_PERMISSIONS: ReadonlySet<Permission> = new Set(["infra:report"]);
-
 export function withinCeiling(permission: Permission, can: (p: Permission) => boolean): boolean {
-  return can(permission) || CEILING_EXEMPT_PERMISSIONS.has(permission);
+  return can(permission) || SERVICE_ACCOUNT_CEILING_EXEMPT_PERMISSIONS.has(permission);
 }
 
 /** What the picker lists: verbs the caller may grant, plus those the account already holds so they stay removable. */
