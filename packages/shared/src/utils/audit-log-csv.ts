@@ -2,10 +2,10 @@ import type { AuditLogItem } from "../schemas/audit-log-query";
 import { escapeCsvCell } from "./recent-activity-csv";
 
 /**
- * The ONE source of truth for the audit-log CSV shape (issue #871): column order + cell escaping, for
- * the three security audit logs' read/export surface. Both exporters serialize identically — the
- * browser "export visible" path (apps/web `audit-csv.ts`) and the API "export all (filtered)" stream
- * (apps/api `AuditService.streamLogsCsvRows`) — so the security guard can never drift between them.
+ * The audit-log CSV shape (issue #871): column order + cell escaping, for the browser "export visible"
+ * path (apps/web `audit-csv.ts`). The API export (`GET /audit/logs/export`) streams the same header
+ * through the export engine and its stricter typed guard (ADR-0103); the browser path retires with the
+ * shared export button (#1597).
  *
  * RFC-4180 escaping + the spreadsheet formula-injection guard are REUSED from `recent-activity-csv.ts`
  * ({@link escapeCsvCell}) — NOT reimplemented — so a hostile actor/vault/item name (`=cmd|…`) is

@@ -722,8 +722,8 @@ in a file:
 - every export that streams appends one `DataExportLog` row (actor, resource, sanitized filters,
   pre-count) before the first byte; the row is never updated or deleted.
 
-The three exports that predate the engine (assets, Reports › activity, Reports › audit) meet every
-clause but the audit row; they gain it when they move onto the engine (#1597, phase 1b).
+The three exports that predate the engine (assets, Reports › activity, Reports › audit) moved onto it
+in phase 1b (#1597) and meet every clause.
 
 **Why.** An export is a bulk read. If it took any other path than the list it would be the easiest
 side door around field gating and soft-delete scoping, and without an audit row a bulk extraction —
@@ -736,7 +736,10 @@ of the user directory, or of the audit logs themselves — leaves no trace.
 - `prisma/migrations/20261016140000_add_data_export_log` — the table, and the at-most-one-actor CHECK.
 - Tests: `common/export/export.service.spec.ts` (one audit row with the pre-count, nothing written on a
   refusal), `audit/audit.service.spec.ts` (the `export` audit source). Each resource export adds a test
-  pinning its header and its list/export id-set parity (phases 1b–1c, #1597).
+  pinning its header and its list/export parity over real HTTP: `assets/assets.export.http.spec.ts`
+  (VIEWER, purchase-column gate, `deleted=only` refused to non-admins),
+  `dashboard/dashboard-activity-export.spec.ts` and `audit/audit.export.http.spec.ts` (VIEWER and
+  MEMBER refused, as the lists are `logs:read`); phase 1c adds the rest (#1597).
 
 ---
 

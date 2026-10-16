@@ -10,6 +10,7 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { Permission } from '@lazyit/shared';
 import { AssetsService } from './assets.service';
 import { ActorService } from '../common/actor.service';
+import { csvHeaderLine, csvRowLine } from '../common/export/export-column';
 import type { Principal } from '../auth/principal';
 import type { PermissionResolverService } from '../auth/permission-resolver.service';
 
@@ -246,22 +247,18 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
   async function exportCsv(held: readonly Permission[]) {
     const { service, prisma } = setup(held);
     lastFindMany = prisma.asset.findMany;
-    prisma.asset.findMany
-      .mockResolvedValueOnce([linkedRow])
-      .mockResolvedValueOnce([]);
-    let out = '';
-    for await (const chunk of service.streamInventoryCsvRows(
+    prisma.asset.findMany.mockResolvedValueOnce([linkedRow]);
+    const { columns, fetchBatch } = await service.inventoryExport(
       {},
       'active',
       member,
-    )) {
-      out += chunk;
-    }
-    return out.split('\n');
+    );
+    const [row] = await fetchBatch(null, 1000);
+    return [csvHeaderLine(columns), csvRowLine(columns, row)];
   }
 
   it('without purchaseOrder:read: cost and currency only — no supplier, reference or invoice', async () => {
-    const [, header, row] = await exportCsv(['asset:read']);
+    const [header, row] = await exportCsv(['asset:read']);
     // The linked purchase is not even read.
     expect(selectOf(lastFindMany)).not.toHaveProperty('purchaseOrderLine');
     expect(header.endsWith(',purchaseCost,purchaseCurrency')).toBe(true);
@@ -272,10 +269,7 @@ describe('inventory CSV purchase columns (ADR-0099 §8, #1473)', () => {
   });
 
   it('with purchaseOrder:read: the provenance columns are appended', async () => {
-    const [, header, row] = await exportCsv([
-      'asset:read',
-      'purchaseOrder:read',
-    ]);
+    const [header, row] = await exportCsv(['asset:read', 'purchaseOrder:read']);
     expect(selectOf(lastFindMany)).toHaveProperty('purchaseOrderLine');
     expect(header.endsWith(',supplier,purchaseReference,invoiceNumbers')).toBe(
       true,
@@ -352,17 +346,10 @@ describe('list filters by purchase (#1476)', () => {
     await expect(
       service.findPage({ purchase: forged }, page),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    const stream = service.streamInventoryCsvRows(
-      { purchase: forged },
-      'active',
-      member,
-    );
-    // The provenance stamp and header come first; the query (and the refusal) with the first batch.
     await expect(
-      (async () => {
-        for await (const chunk of stream) void chunk;
-      })(),
+      service.inventoryExport({ purchase: forged }, 'active', member),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.asset.findMany).not.toHaveBeenCalled();
+    expect(prisma.asset.count).not.toHaveBeenCalled();
   });
 });

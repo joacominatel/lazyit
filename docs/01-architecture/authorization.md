@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -208,8 +208,8 @@ three roles **except** two tighter tiers:
 > Three decisions are made **in the service**, because a decorator cannot see them: `POST
 > /assets/batch/receive` stays `asset:write`, but a body naming a `purchaseOrderLineId` also needs
 > `purchaseOrder:write` (`403`); `GET /assets/export` appends the supplier, purchase reference and
-> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` filtered by
-> `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
+> invoice numbers columns only for a caller holding `purchaseOrder:read`; and `GET /assets` (or its export)
+> filtered by `purchaseOrderLineId`, `purchaseOrderId` or `purchaseLinked` (#1476) needs `purchaseOrder:read` too
 > (`403`), since the filter itself reveals which assets came from which purchase. All three resolve the
 > principal's permissions through `PermissionResolverService.principalHas` — a human by role, a service
 > account by its grants, no principal never.

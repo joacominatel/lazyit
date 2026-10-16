@@ -1,11 +1,10 @@
 import type { RecentActivityItem } from "../schemas/recent-activity";
 
 /**
- * The ONE source of truth for the recent-activity CSV shape (issue #840): column order, RFC-4180 cell
- * escaping and the spreadsheet formula-injection guard. Both sides export identically — the browser
- * "export visible page" path (apps/web `reports-csv.ts`) and the API "export all (filtered)" stream
- * (apps/api `DashboardService.streamActivityCsvRows`). Keeping the rules here means the security
- * guards can never drift between the two exporters.
+ * The recent-activity CSV shape (issue #840): column order, RFC-4180 cell escaping and the legacy
+ * formula-injection guard, for the browser "export visible page" path (apps/web `reports-csv.ts`). The
+ * API export (`GET /dashboard/activity/export`) streams the same header through the export engine and
+ * its stricter typed guard (ADR-0103); the browser path retires with the shared export button (#1597).
  *
  * Pure + framework-agnostic (no DOM, no Node) → belongs in `@lazyit/shared` per the shared-package
  * contract; unit-testable in isolation.

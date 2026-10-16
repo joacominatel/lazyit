@@ -105,7 +105,9 @@ streamed, audited or truncated. A count of exactly the cap is accepted. The coun
 differ by the rows written between them: the first batch reads with no cursor, so a row inserted (or a
 row whose filtered fields change) between the count and that read can appear, and a row deleted
 mid-export is missing. Rows inserted after the first batch is read are never in the file. There is no
-hard limit on that difference.
+hard limit on that difference. One such row is predictable: the audit row is written after the count and
+before the first read, so an export of the audit log's `export` source includes the row recording that
+export itself (the file holds `rowCount` + 1 rows).
 
 A batch that fails mid-stream aborts the response: the error is logged and the connection destroyed,
 so the client sees a failed download, never a short file that looks complete. The audit row stays.
@@ -147,8 +149,9 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
   LF or the full-width `＝ ＋ － ＠`, then RFC-4180 quoting. `number`, `date` and `money` cells skip the
   guard only when the value is a strict number (`-?digits[.digits]`) or an ISO-8601 date or timestamp,
   so `-5` stays `-5`; anything else in such a column is guarded like text. The helpers are `csvCell()` /
-  `guardCsvFormula()` in `@lazyit/shared`; the legacy `escapeCsvCell()` keeps its narrower guard until
-  the existing exports move onto the engine.
+  `guardCsvFormula()` in `@lazyit/shared`. No server export uses the legacy `escapeCsvCell()` any more
+  (phase 1b); it keeps its narrower guard only for the browser "export visible page" paths until 1d
+  retires them.
 - **The `# lazyit` provenance stamp** ([[0083-versioning-and-releases]]) only on a file an importer reads
   back, today the asset inventory. Activity and audit exports drop it: no importer consumes it there and
   it pushes the header to row 2.

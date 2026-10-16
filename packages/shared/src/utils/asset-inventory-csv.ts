@@ -2,10 +2,10 @@ import type { AssetListItem } from "../schemas/asset-list";
 import { escapeCsvCell } from "./recent-activity-csv";
 
 /**
- * The ONE source of truth for the asset-inventory CSV shape (issue #872): column order + cell escaping,
- * for the Assets screen's filtered export. Clones the audit-log/activity export mold — the API "export
- * all (filtered)" stream (apps/api `AssetsService.streamInventoryCsvRows`) serializes each row through
- * this exact function, so the file can never drift from the on-screen list.
+ * The asset-inventory CSV shape (issue #872): column order + cell escaping. The column names are the
+ * importer contract (ADR-0069): the API export (`GET /assets/export`, ADR-0103) streams its own typed
+ * column set through the export engine and pins its header to {@link assetInventoryCsvHeader} in a test.
+ * Since #1597 the API no longer calls the row serializer below; it keeps the legacy guard.
  *
  * RFC-4180 escaping + the spreadsheet formula-injection guard are REUSED from `recent-activity-csv.ts`
  * ({@link escapeCsvCell}) — NOT reimplemented — so a hostile asset/company/owner name (`=cmd|…`) is

@@ -18,6 +18,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AssetsController } from './assets.controller';
+import { ExportService } from '../common/export';
 import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -144,6 +145,7 @@ describe('Asset money over HTTP — 64-bit minor units (ADR-0100)', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [AssetsController],
       providers: [
+        { provide: ExportService, useValue: {} },
         AssetsService,
         ActorService,
         AiToolDispatcher,

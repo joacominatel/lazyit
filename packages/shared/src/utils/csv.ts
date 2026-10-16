@@ -1,4 +1,4 @@
-// CSV conventions of the export engine (ADR-0103). The legacy escapeCsvCell stays until the old exports move.
+// CSV conventions of the export engine (ADR-0103). The legacy escapeCsvCell stays until the browser "visible page" exports retire.
 
 /** Byte-order mark, so Excel on Windows reads the file as UTF-8. */
 export const CSV_BOM = "\uFEFF";

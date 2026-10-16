@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
-  AssetInventoryCsvItem,
   AssetStatus,
   BatchAssetStatus,
   AssetWarrantyFilter,
@@ -20,14 +19,18 @@ import type {
 import {
   ASSET_STATUS_REQUIRED_MESSAGE,
   applyAssetModelSpecsDefaults,
-  assetInventoryCsvHeader,
-  assetInventoryCsvRow,
   computeAssetBookValue,
   offsetOf,
   pageOf,
   WARRANTY_EXPIRING_WITHIN_DAYS,
 } from '@lazyit/shared';
-import { provenanceStampLine } from '../common/export-provenance';
+import {
+  keysetOrderBy,
+  keysetWhere,
+  type CsvExportSpec,
+  type KeysetCursor,
+} from '../common/export';
+import { assetExportColumns } from './asset-export-columns';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
 import { Prisma } from '../../generated/prisma/client';
@@ -322,7 +325,7 @@ const EXPORT_SELECT_WITH_PURCHASE = {
 } as const satisfies Prisma.AssetSelect;
 
 /** One exported row; `purchaseOrderLine` is only read for a caller holding `purchaseOrder:read`. */
-type ExportRow = Prisma.AssetGetPayload<{
+export type AssetExportRow = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
 }> &
   Partial<
@@ -331,6 +334,12 @@ type ExportRow = Prisma.AssetGetPayload<{
       'purchaseOrderLine'
     >
   >;
+
+/** What `GET /assets/export` hands the export engine, already gated for the caller. */
+export type AssetInventoryExport = Pick<
+  CsvExportSpec<AssetExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;
 
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;
@@ -562,16 +571,6 @@ export class AssetsService {
   }
 
   /**
-   * Rows per round-trip when STREAMING the full filtered inventory export (issue #872). Mirrors the
-   * audit/activity export batch: a bounded skip/take loop over the SAME lean list query so the whole
-   * estate never sits in memory at once.
-   *
-   * ponytail: OFFSET/LIMIT batching (like the other exports). CEILING: deep OFFSET is O(offset) per
-   * page — fine for an admin/audit dump; a keyset cursor is a clean future upgrade if ever needed.
-   */
-  static readonly EXPORT_BATCH_SIZE = 1000;
-
-  /**
    * A single page of assets (the inventory pillar's main, heaviest list), newest first. Uses the
    * LEAN projection ({@link ASSET_LIST_SELECT}): no `specs` blob and trimmed joins — the full
    * relation graph stays on {@link findOne}. Runs the page `findMany(take/skip)` and the `count`
@@ -760,122 +759,40 @@ export class AssetsService {
   }
 
   /**
-   * Bulk CSV export of the WHOLE filtered inventory (issue #872) — not just the visible page. Reuses
-   * the SAME {@link buildWhere} + the SAME lean {@link ASSET_LIST_SELECT} projection as the list read,
-   * and {@link assetInventoryCsvRow} from `@lazyit/shared` (the one place the RFC-4180 escaping +
-   * formula-injection guard live), so the file can NEVER drift from the on-screen list. Streamed as an
-   * async generator (bounded skip/take batches) so a large estate never buffers in memory.
-   *
-   * `deleted` scopes the export to the live (`active`, default) or archived (`only`) slice — exactly as
-   * {@link findPage} does; the controller keeps `only` ADMIN-gated (assertCanListDeleted). `specs` is
-   * omitted (the lean projection has none) — a per-spec-key export is a deferred follow-up.
+   * The inventory export's pieces for the engine (ADR-0103): the list's own {@link buildWhere} and
+   * deleted slice, its lean projection, keyset-paged over `(createdAt, id)`. The purchase provenance
+   * is read, and its columns emitted, only for a caller holding `purchaseOrder:read` (ADR-0099 §8).
    */
-  async *streamInventoryCsvRows(
-    filters: AssetFilters = {},
-    deleted: DeletedFilter = 'active',
-    principal?: Principal,
-  ): AsyncGenerator<string> {
-    // Purchase provenance columns (supplier, reference, invoice numbers) only for a caller holding
-    // `purchaseOrder:read` (ADR-0099 §8, CEO decision D-A); cost and currency are the asset's own fields.
+  async inventoryExport(
+    filters: AssetFilters,
+    deleted: DeletedFilter,
+    principal: Principal,
+  ): Promise<AssetInventoryExport> {
     const includePurchase = await this.holds(principal, 'purchaseOrder:read');
-    // Leading provenance stamp (#909): names the build that wrote the file. The migrator strips it on
-    // re-import and gates on major compatibility; other tools treat it as a leading `#` comment row.
-    yield `${provenanceStampLine()}\n`;
-    yield `${assetInventoryCsvHeader({ includePurchase })}\n`;
-
     const where = {
       ...this.buildWhere(filters),
       ...deletedWhere(deleted),
     };
-    // The `only` slice needs the ADR-0032 escape hatch so the read filter doesn't re-hide soft-deleted
-    // rows (mirrors findPage). `active` doesn't (the filter and `deletedAt: null` agree).
     const escapeHatch: Record<string, unknown> = includeSoftDeletedFor(deleted)
       ? { includeSoftDeleted: true }
       : {};
-
-    let skip = 0;
-    for (;;) {
-      const batch = {
-        where,
-        // A stable TOTAL order for OFFSET batching: createdAt desc with `id` as a unique tiebreaker so
-        // a createdAt tie at a batch boundary can never skip or duplicate a row across pages.
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: AssetsService.EXPORT_BATCH_SIZE,
-        skip,
-        ...escapeHatch,
-      } satisfies Prisma.AssetFindManyArgs;
-      // The list projection (with the asset's cost columns) and — ONLY for a caller holding
-      // `purchaseOrder:read` — the linked purchase's provenance; without it the provenance is never read.
-      // NEVER added to ASSET_LIST_SELECT itself: the list is `asset:read` alone.
-      const rows: ExportRow[] = includePurchase
-        ? await this.prisma.asset.findMany({
-            ...batch,
-            select: EXPORT_SELECT_WITH_PURCHASE,
-          })
-        : await this.prisma.asset.findMany({
-            ...batch,
-            select: ASSET_LIST_SELECT,
-          });
-      if (rows.length === 0) break;
-      yield `${rows
-        .map((row) =>
-          assetInventoryCsvRow(
-            {
-              ...this.toInventoryCsvItem(row),
-              purchaseCost:
-                row.purchaseCost == null ? null : Number(row.purchaseCost),
-              purchaseCurrency: row.purchaseCurrency ?? null,
-              purchase: row.purchaseOrderLine
-                ? {
-                    supplierName:
-                      row.purchaseOrderLine.purchaseOrder.supplier?.name ??
-                      null,
-                    reference: row.purchaseOrderLine.purchaseOrder.reference,
-                    invoiceNumbers:
-                      row.purchaseOrderLine.purchaseOrder.invoiceNumbers,
-                  }
-                : null,
-            },
-            { includePurchase },
-          ),
-        )
-        .join('\n')}\n`;
-      skip += rows.length;
-      // A short batch means the estate is exhausted — stop without an extra empty round-trip.
-      if (rows.length < AssetsService.EXPORT_BATCH_SIZE) break;
-    }
-  }
-
-  /**
-   * Shape one lean Prisma row into the wire {@link AssetInventoryCsvItem} the shared CSV row fn reads —
-   * the SAME lean shaping the list uses, plus the Date → ISO-string conversion the HTTP boundary does
-   * automatically for the JSON list (the CSV builds strings directly, so it must convert explicitly).
-   */
-  private toInventoryCsvItem(row: AssetWithLeanSelect): AssetInventoryCsvItem {
     return {
-      name: row.name,
-      assetTag: row.assetTag,
-      serial: row.serial,
-      status: row.status,
-      company: row.company,
-      purchaseDate: row.purchaseDate?.toISOString() ?? null,
-      warrantyEnd: row.warrantyEnd?.toISOString() ?? null,
-      notes: row.notes,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString(),
-      model: row.model,
-      location: row.location,
-      activeAssignments: row.assignments.map((assignment) => ({
-        id: assignment.id,
-        userId: assignment.userId,
-        user: {
-          id: assignment.user.id,
-          firstName: assignment.user.firstName,
-          lastName: assignment.user.lastName,
-          email: assignment.user.email,
-          deletedAt: assignment.user.deletedAt?.toISOString() ?? null,
-        },
-      })),
+      columns: assetExportColumns(includePurchase),
+      count: () => this.prisma.asset.count({ where, ...escapeHatch }),
+      fetchBatch: (after, take) => {
+        const batch = {
+          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          orderBy: keysetOrderBy(),
+          take,
+          ...escapeHatch,
+        } satisfies Prisma.AssetFindManyArgs;
+        return includePurchase
+          ? this.prisma.asset.findMany({
+              ...batch,
+              select: EXPORT_SELECT_WITH_PURCHASE,
+            })
+          : this.prisma.asset.findMany({ ...batch, select: ASSET_LIST_SELECT });
+      },
     };
   }
 
