@@ -625,8 +625,8 @@
       "consequence": {
         "removedRead": "{who} will no longer be able to {action}.",
         "accessGrantGrant": "{who} will be able to grant and revoke application access for anyone — including to sensitive applications. This is normally an admin-only action.",
-        "userManage": "{who} will be able to administer users: create accounts, change roles (including granting ADMIN) and offboard people. This is normally an admin-only action.",
-        "settingsManage": "{who} will be able to configure the instance and manage taxonomies — the full admin configuration surface. This is normally an admin-only action.",
+        "userManage": "{who} will be able to administer users at or below their own role: create accounts, change roles up to their own and offboard people. Only an admin manages admins. This is normally an admin-only action.",
+        "settingsManage": "{who} will be able to configure the instance and manage taxonomies. Editing this permission matrix and the directory connection stays admin-only. This is normally an admin-only action.",
         "deleteDefault": "{who} will be able to {action} — a destructive action normally reserved for admins.",
         "who": {
           "MEMBER": "Members",
