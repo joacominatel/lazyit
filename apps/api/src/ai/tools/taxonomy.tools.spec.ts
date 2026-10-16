@@ -436,6 +436,8 @@ const contains = (value: unknown, q?: string) =>
   !q ||
   (typeof value === 'string' && value.toLowerCase().includes(q.toLowerCase()));
 
+type ImpactGroup = { total: number; items: Row[] | null };
+
 function categoryFake(kind: keyof typeof catalogs) {
   const find = (id: string) => catalogs[kind].find((c) => c.id === id);
   const liveOr404 = (id: string) => {
@@ -462,25 +464,27 @@ function categoryFake(kind: keyof typeof catalogs) {
       bump(row);
       return Promise.resolve({ ...row });
     }),
-    deleteImpact: jest.fn((id: string) => {
-      liveOr404(id);
-      const rows = filedUnder(kind, id);
-      if (kind === 'asset') {
-        const ofModels = assets.filter(
-          (a) => live(a) && rows.some((m) => m.id === a.modelId),
-        );
+    deleteImpact: jest.fn(
+      (id: string): Promise<Record<string, ImpactGroup>> => {
+        liveOr404(id);
+        const rows = filedUnder(kind, id);
+        if (kind === 'asset') {
+          const ofModels = assets.filter(
+            (a) => live(a) && rows.some((m) => m.id === a.modelId),
+          );
+          return Promise.resolve({
+            assetModels: { total: rows.length, items: rows },
+            assets: { total: ofModels.length, items: ofModels },
+          });
+        }
         return Promise.resolve({
-          assetModels: { total: rows.length, items: rows as Row[] | null },
-          assets: { total: ofModels.length, items: ofModels as Row[] | null },
+          [kind === 'application' ? 'applications' : 'consumables']: {
+            total: rows.length,
+            items: rows,
+          },
         });
-      }
-      return Promise.resolve({
-        [kind === 'application' ? 'applications' : 'consumables']: {
-          total: rows.length,
-          items: rows,
-        },
-      });
-    }),
+      },
+    ),
     remove: jest.fn(
       (id: string, resolution?: { strategy: string; targetId?: string }) => {
         const row = liveOr404(id);
