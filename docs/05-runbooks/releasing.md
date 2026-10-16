@@ -172,7 +172,8 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >     one after the promotion if needed.
 >   - Saving the SMTP settings is ADMIN-only (403 `ADMIN_REQUIRED`), and a service account's
 >     permissions are capped at those of the person who creates or changes it (403
->     `PERMISSION_CEILING_EXCEEDED`).
+>     `PERMISSION_CEILING_EXCEEDED`). `infra:report` is exempt, so a delegate still installs reporting
+>     agents.
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
 
