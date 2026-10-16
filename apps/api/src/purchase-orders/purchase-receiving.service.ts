@@ -28,6 +28,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import type { Principal } from '../auth/principal';
 import { assetMoneyToDb, assetMoneyToWire } from '../common/money';
+import type { KeysetCursor } from '../common/export';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
 import { AssetsService } from '../assets/assets.service';
 import { ConsumablesService } from '../consumables/consumables.service';
@@ -44,6 +45,12 @@ import {
 } from './purchase-order-line-receipt';
 
 type Tx = Prisma.TransactionClient;
+
+/** The Pending units tab's filters. */
+export interface PendingLineFilters {
+  supplierId?: string;
+}
+
 /** An asset row as the wire carries it (money as numbers). */
 type AssetWire = ReturnType<typeof assetMoneyToWire<Asset>>;
 
@@ -767,20 +774,9 @@ export class PurchaseReceivingService {
    * movements) in SQL, and the page and its total share one filter fragment, so pending is filtered and paged
    * in the database rather than over every line in memory.
    */
-  async findPendingLines(filters: { supplierId?: string }, page: PageQuery) {
+  async findPendingLines(filters: PendingLineFilters, page: PageQuery) {
     const { take, skip } = offsetOf(page);
-    const supplier = filters.supplierId
-      ? Prisma.sql`AND po."supplierId" = ${filters.supplierId}`
-      : Prisma.empty;
-    const pending = Prisma.sql`
-        FROM "purchase_order_lines" l
-        JOIN "purchase_orders" po ON po."id" = l."purchaseOrderId"
-       WHERE l."deletedAt" IS NULL
-         AND po."deletedAt" IS NULL
-         AND po."status" NOT IN ('DRAFT', 'CANCELLED')
-         AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})
-         ${supplier}
-         AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0`;
+    const pending = this.pendingLinesFrom(filters);
     const [ids, [{ total }]] = await Promise.all([
       this.prisma.$queryRaw<{ id: string }[]>`
         SELECT l."id" ${pending}
@@ -790,8 +786,66 @@ export class PurchaseReceivingService {
       this.prisma.$queryRaw<{ total: number }[]>`
         SELECT COUNT(*)::int AS "total" ${pending}`,
     ]);
-    const order = ids.map((row) => row.id);
+    return pageOf(
+      await this.pendingLineItems(ids.map((row) => row.id)),
+      total,
+      page,
+    );
+  }
+
+  /**
+   * The pending-units CSV export's reads (ADR-0103): the list's own filter fragment, walked newest line first
+   * by keyset on the line's `(createdAt, id)`.
+   */
+  pendingLinesExportSource(filters: PendingLineFilters) {
+    const pending = this.pendingLinesFrom(filters);
+    return {
+      count: async () => {
+        const [{ total }] = await this.prisma.$queryRaw<{ total: number }[]>`
+          SELECT COUNT(*)::int AS "total" ${pending}`;
+        return total;
+      },
+      fetchBatch: async (after: KeysetCursor<string> | null, take: number) => {
+        // TIMESTAMP(3), no zone: the adapter writes a Date as its UTC wall clock, which is what the column holds.
+        const keyset = after
+          ? Prisma.sql`AND (l."createdAt", l."id") < (${after.createdAt}::timestamp(3), ${after.id})`
+          : Prisma.empty;
+        const ids = await this.prisma.$queryRaw<{ id: string }[]>`
+          SELECT l."id" ${pending} ${keyset}
+           ORDER BY l."createdAt" DESC, l."id" DESC
+           LIMIT ${take}`;
+        // A line archived after the id read must not shorten the batch: a short batch ends the walk.
+        return this.pendingLineItems(
+          ids.map((row) => row.id),
+          { includeSoftDeleted: true },
+        );
+      },
+    };
+  }
+
+  /** The list's filter: countable lines with pending > 0 on live purchases that are neither DRAFT nor CANCELLED. */
+  private pendingLinesFrom(filters: PendingLineFilters): Prisma.Sql {
+    const supplier = filters.supplierId
+      ? Prisma.sql`AND po."supplierId" = ${filters.supplierId}`
+      : Prisma.empty;
+    return Prisma.sql`
+        FROM "purchase_order_lines" l
+        JOIN "purchase_orders" po ON po."id" = l."purchaseOrderId"
+       WHERE l."deletedAt" IS NULL
+         AND po."deletedAt" IS NULL
+         AND po."status" NOT IN ('DRAFT', 'CANCELLED')
+         AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})
+         ${supplier}
+         AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0`;
+  }
+
+  /** The pending rows for `order`, in that order (the findMany order is not trusted), with their purchase header. */
+  private async pendingLineItems(
+    order: string[],
+    escapeHatch: Record<string, unknown> = {},
+  ) {
     const lines = await this.prisma.purchaseOrderLine.findMany({
+      ...escapeHatch,
       where: { id: { in: order } },
       include: {
         purchaseOrder: {
@@ -810,7 +864,7 @@ export class PurchaseReceivingService {
     });
     const received = await receivedByLine(this.prisma, lines);
     const byId = new Map(lines.map((line) => [line.id, line]));
-    const items = order
+    return order
       .filter((id) => byId.has(id))
       .map((id) => {
         const { purchaseOrder, ...line } = byId.get(id) as (typeof lines)[0];
@@ -822,7 +876,6 @@ export class PurchaseReceivingService {
           purchaseOrder,
         };
       });
-    return pageOf(items, total, page);
   }
 
   // ── An asset's provenance ───────────────────────────────────────────────────────────────────────────

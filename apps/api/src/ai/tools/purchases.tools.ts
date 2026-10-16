@@ -2633,7 +2633,7 @@ export const purchasesToolset: AiToolset = {
     ),
     unexposed(
       PurchaseOrdersController,
-      ['export'],
+      ['export', 'exportPendingLines'],
       'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
     ),
     unexposed(
