@@ -4,12 +4,6 @@
     "subtitle": "Todo lo que tu equipo rastrea y posee.",
     "newAsset": "Nuevo activo",
     "scan": "Escanear",
-    "export": {
-      "button": "Exportar (filtrado)",
-      "exporting": "Exportando…",
-      "exportTitle": "Descargar como CSV todos los activos que coinciden con los filtros actuales",
-      "error": "No se pudo exportar el inventario"
-    },
     "import": {
       "button": "Importar",
       "title": "Registra muchos activos a la vez desde un CSV"

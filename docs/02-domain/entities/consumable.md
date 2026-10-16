@@ -3,7 +3,7 @@ title: Consumable
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-14
+updated: 2026-10-16
 ---
 
 # Consumable
@@ -42,6 +42,12 @@ individually), a consumable is a quantity on hand: we care about *how many*, not
 
 - `GET /consumables?lowStock=true` — list (alphabetical); `lowStock=true` returns only items at/under
   their `minStock`.
+- `GET /consumables/export?q=&category=&lowStock=&deleted=` — a CSV of every consumable the list would
+  return for the same filters, under the same `consumable:read` and the same ADMIN-only `deleted=only`
+  (#1597, [[0103-data-export-streaming-path]]). Columns: `name, sku, category, unit, currentStock,
+  minStock, lowStock, createdAt, updatedAt`; quantities are raw numbers, `lowStock` is the list filter's
+  comparison (`true`/`false`), and an archived category is left blank as on screen. Every export is
+  audited ([[data-export-log]]).
 - `GET /consumables/:id` · `POST` · `PATCH /:id` · `DELETE /:id` (soft delete) ·
   `POST /:id/restore` (ADMIN-only — clears `deletedAt`, [[0041-soft-delete-reuse-and-restore]]).
   Create/update do **not** accept `currentStock` (it starts at 0 and changes only via movements).

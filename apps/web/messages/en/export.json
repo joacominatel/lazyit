@@ -1,0 +1,12 @@
+{
+  "button": "Export CSV",
+  "busy": "Exporting…",
+  "title": "Download every row matching the current filters as a CSV, not just this page",
+  "overCap": "This view matches {total, number} rows, more than the {cap, number} an export can hold. Narrow your filters and try again.",
+  "errors": {
+    "overCap": "Too many rows to export. Narrow your filters and try again.",
+    "busy": "An export is already running, or you started too many in the last minute. Wait a moment and try again.",
+    "forbidden": "You don't have permission to export this list.",
+    "generic": "Couldn't export the data"
+  }
+}

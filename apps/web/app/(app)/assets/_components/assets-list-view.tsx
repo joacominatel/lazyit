@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
@@ -28,6 +27,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
@@ -99,6 +99,7 @@ import {
   type BatchVerb,
   notifyBatchResult,
 } from "@/lib/api/notify-batch-result";
+import { ASSET_EXPORT_PATH, assetFilterParams } from "@/lib/api/endpoints/assets";
 import { notifyError } from "@/lib/api/notify-error";
 import type { EntityKey } from "@/lib/entity-key";
 import { useFormatters } from "@/lib/hooks/use-formatters";
@@ -115,7 +116,6 @@ import {
   statusFilterPatch,
   statusLabelFilterId,
 } from "./assets-list-query";
-import { downloadAssetsExport } from "./assets-csv";
 import {
   COLUMN_GROUPS,
   DEFAULT_VISIBLE_COLUMNS,
@@ -265,8 +265,7 @@ export function AssetsListView() {
   // scopes the whole result set instead of just the current page. `deriveAssetFilters` is the SAME
   // URL→query mapping the server prefetch uses, so this hook's key and the SSR-prefetched key are
   // byte-identical (ADR-0067 / #733) — a filtered/paged/searched first paint hits the dehydrated cache
-  // instead of double-fetching. The SAME derived filters drive the CSV export (#872), so the file
-  // serializes exactly the slice on screen.
+  // instead of double-fetching. The SAME derived filters drive the CSV export (#872).
   const assetFilters = deriveAssetFilters(
     { q, sort, dir, offset, limit, filters },
     { isAdmin },
@@ -293,8 +292,6 @@ export function AssetsListView() {
   // The asset whose single active owner is being unassigned, pending confirm (null = closed). The
   // list row already carries `activeAssignments[0].id`, so releasing needs no extra fetch.
   const [unassigning, setUnassigning] = useState<AssetListItem | null>(null);
-  // True while the filtered CSV export is streaming (#872) — disables the button + swaps its label.
-  const [isExportingAll, setIsExportingAll] = useState(false);
 
   // Per-browser column-picker state (#695, ported from Users). `mounted` gates the persisted set so
   // SSR/first paint always renders the full `DEFAULT_VISIBLE_COLUMNS` (the server snapshot) — no
@@ -370,18 +367,6 @@ export function AssetsListView() {
         onError: (err) => notifyError(err, t("statusChangeError")),
       },
     );
-  }
-
-  /** Stream the filtered inventory to a CSV and trigger a browser download (#872). */
-  async function handleExportAll() {
-    setIsExportingAll(true);
-    try {
-      await downloadAssetsExport(assetFilters);
-    } catch (err) {
-      notifyError(err, t("export.error"));
-    } finally {
-      setIsExportingAll(false);
-    }
   }
 
   /** Release the asset's single active owner (the row carries its assignment id — no extra fetch). */
@@ -750,17 +735,13 @@ export function AssetsListView() {
                 {t("scan")}
               </Link>
             </Button>
-            {/* Export the CURRENT filtered slice as a CSV (#872). Disabled while streaming or when
-                there's nothing to export; available to any reader (the export reuses asset:read). */}
-            <Button
-              variant="outline"
-              onClick={handleExportAll}
-              disabled={isExportingAll || total === 0}
-              title={t("export.exportTitle")}
-            >
-              <ArrowDownTrayIcon />
-              {isExportingAll ? t("export.exporting") : t("export.button")}
-            </Button>
+            <ExportButton
+              path={ASSET_EXPORT_PATH}
+              params={assetFilterParams(assetFilters)}
+              total={page?.total}
+              filename="assets"
+              permission="asset:read"
+            />
             {/* Discoverable entry to the bulk Migrator (#950): register many assets from a CSV
                 without hunting through Settings. Gated on `import:run` like the wizard itself. */}
             {canImport ? (

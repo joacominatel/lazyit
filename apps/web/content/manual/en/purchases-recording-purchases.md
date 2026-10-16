@@ -45,6 +45,10 @@ license line changes its application, so it needs **Record & edit purchases** *a
 applications. [Reading a document with AI](#reading-a-document-with-ai) needs **Record & edit purchases**
 *and* the permission to use the AI assistant.
 
+Anyone who can view purchases can download the list with **Export CSV**: one row per purchase matching
+the current search and filters, with its totals and receipt state, for a finance hand-off — see
+[Exporting data](/help/notifications-activity-data-export).
+
 ## Recording a purchase
 
 Choose **New purchase**. The form is built to be quick: only what identifies the purchase is needed — **a

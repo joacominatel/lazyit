@@ -52,6 +52,8 @@ import { UsersService } from '../../users/users.service';
 import { SearchService } from '../../search/search.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
+import { ExportService } from '../../common/export';
 import { AssetHistoryService } from '../../asset-history/asset-history.service';
 import { UserHistoryService } from '../../user-history/user-history.service';
 import { WorkflowTriggerService } from '../../workflow-engine/run/workflow-trigger.service';
@@ -732,6 +734,8 @@ describe('users toolset (W2-9) — user_search, user_get, user_create, user_upda
         },
         { provide: AssetAssignmentsService, useValue: assignments },
         { provide: AccessGrantsService, useValue: grants },
+        { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ApplicationsService, useValue: applications },
         { provide: ArticlesService, useValue: {} },
         { provide: AssetHistoryService, useValue: { record: jest.fn() } },

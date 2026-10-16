@@ -1791,6 +1791,16 @@ export const accessToolset: AiToolset = {
     ),
     unexposed(
       AccessGrantsController,
+      ['export'],
+      'A bulk CSV file export (@Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      ApplicationsController,
+      ['exportGrants'],
+      'A bulk CSV file export (@Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      AccessGrantsController,
       ['batchRevoke', 'updateNotes', 'updateExpiry'],
       'Deferred to v1.1: grant batch revoke (blast radius), notes and expiry edits (tools-and-execution.md §3, §7).',
     ),

@@ -47,8 +47,10 @@ import { ServiceAccountAuthenticator } from '../../auth/service-account-authenti
 import { LocalCredentialService } from '../../auth/local/local-credential.service';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
 import { ApplicationCategoriesController } from '../../application-categories/application-categories.controller';
 import { ApplicationCategoriesService } from '../../application-categories/application-categories.service';
 import { ApplicationsController } from '../../applications/applications.controller';
@@ -1111,12 +1113,14 @@ describe('taxonomy toolset (#1390)', () => {
         { provide: AssetsService, useValue: assetsService },
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: ConsumablesService, useValue: consumablesService },
+        { provide: ExportService, useValue: {} },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         // reference_lookup (registered alongside) also binds the KB folders; unused here.
         { provide: ArticleCategoriesService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         {
           provide: AI_SETTINGS_READER,
           useValue: {

@@ -1,0 +1,12 @@
+{
+  "button": "Exportar CSV",
+  "busy": "Exportando…",
+  "title": "Descarga como CSV todas las filas que coinciden con los filtros actuales, no solo esta página",
+  "overCap": "Esta vista coincide con {total, number} filas, más de las {cap, number} que admite una exportación. Acota los filtros y vuelve a intentarlo.",
+  "errors": {
+    "overCap": "Hay demasiadas filas para exportar. Acota los filtros y vuelve a intentarlo.",
+    "busy": "Ya hay una exportación en curso, o iniciaste demasiadas en el último minuto. Espera un momento y vuelve a intentarlo.",
+    "forbidden": "No tienes permiso para exportar esta lista.",
+    "generic": "No se pudieron exportar los datos"
+  }
+}

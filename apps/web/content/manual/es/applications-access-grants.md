@@ -69,6 +69,9 @@ concesión será revocada.
   de **Historial** muestra las revocadas.
 - Una persona con concesión que luego fue desactivada queda señalada en sus concesiones, para que
   encuentres rápido el acceso que debería limpiarse.
+- Para una revisión de accesos, **Exportar CSV** en el panel de **Acceso activo** descarga todas las
+  concesiones de la aplicación, revocadas incluidas; la pestaña **Accesos** de una persona tiene el mismo
+  botón para sus concesiones. Mira [Exportar datos](/help/notifications-activity-data-export).
 
 ## Buscar una concesión
 

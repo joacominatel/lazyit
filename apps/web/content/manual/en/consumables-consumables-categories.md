@@ -45,6 +45,9 @@ last updated. The stock figure is colour-coded:
 You can search by name or SKU, and filter by **Category** or by **Low stock only**. Each row also
 carries the quick `−1` / `+1` buttons for adjusting the count in place.
 
+**Export CSV** downloads every item matching the current search and filters, with its stock and reorder
+threshold, for a stock count — see [Exporting data](/help/notifications-activity-data-export).
+
 ## Categories
 
 Categories (Cables, Adapters, Peripherals, Office supplies, Other, …) are an optional grouping you

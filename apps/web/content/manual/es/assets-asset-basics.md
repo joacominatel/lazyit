@@ -272,7 +272,7 @@ forma rápida de ver "qué más es este modelo exacto" frente a "qué más hay e
 
 ### Exportar el inventario
 
-El botón **Exportar (filtrado)** en la parte superior de la página de Activos descarga un **CSV** del
+El botón **Exportar CSV** en la parte superior de la página de Activos descarga un **CSV** del
 inventario que coincide con tus **filtros actuales** — todo el conjunto de resultados, no solo la
 página que tienes delante. Ajusta primero el estado, la categoría, la ubicación, la empresa, el
 responsable o la búsqueda que te interesan (por ejemplo *todos los servidores Dell del colo fuera de
@@ -284,6 +284,7 @@ compra** (como un número simple con punto decimal, para que una hoja de cálcul
 **referencia de compra** y los **números de factura** del activo, como últimas columnas. Sin ese permiso
 esas tres columnas no aparecen en el archivo. Es seguro abrirlo en una hoja de cálculo. Los campos **specs** personalizados no se incluyen en esta
 versión. Si tienes abierta la vista *Ver archivados*, la exportación es esa porción archivada.
+Los límites, el registro de auditoría y cómo abrir el archivo en Excel están en [Exportar datos](/help/notifications-activity-data-export).
 
 ### Elegir qué columnas mostrar
 

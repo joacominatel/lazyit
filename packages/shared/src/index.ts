@@ -56,6 +56,7 @@ export * from "./schemas/consumable-movement";
 // On-prem AD/LDAP directory-source config + sync-result wire shapes (issue #839, ADR-0091).
 export * from "./schemas/directory-connection";
 export * from "./schemas/dashboard";
+export * from "./schemas/data-export";
 export * from "./schemas/folder";
 export * from "./schemas/import";
 export * from "./schemas/agent-policy";
@@ -115,6 +116,7 @@ export * from "./schemas/workflow";
 export * from "./utils/asset-depreciation";
 export * from "./utils/asset-inventory-csv";
 export * from "./utils/audit-log-csv";
+export * from "./utils/csv";
 // Money totals grouped by free-text currency label, never summed across labels (ADR-0099 §5).
 export * from "./utils/money-totals";
 export * from "./utils/purchase-line-values";

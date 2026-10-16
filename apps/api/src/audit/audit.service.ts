@@ -7,15 +7,11 @@ import type {
   AuditLogSource,
   Page,
 } from '@lazyit/shared';
-import {
-  AUDIT_LOG_CSV_HEADER,
-  auditLogCsvRow,
-  offsetOf,
-  pageOf,
-} from '@lazyit/shared';
+import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
-import { provenanceStampLine } from '../common/export-provenance';
+import type { CsvExportSpec } from '../common/export';
 import { PrismaService } from '../prisma/prisma.service';
+import { AUDIT_EXPORT_COLUMNS } from './audit-export-columns';
 
 /**
  * Read + filtered CSV export of the three SECURITY audit logs (issue #871, ADR-0081): `SecretAuditLog`,
@@ -38,12 +34,6 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Rows per round-trip when STREAMING the full filtered export: a bounded keyset loop over the
-   * source's list, so the whole range never sits in memory at once.
-   */
-  static readonly EXPORT_BATCH_SIZE = 1000;
-
   /** One paged, filtered page of the chosen source's audit log, newest first (ADR-0030). */
   async getLogs(query: AuditLogQuery): Promise<Page<AuditLogItem>> {
     const { take, skip } = offsetOf(query);
@@ -53,34 +43,26 @@ export class AuditService {
   }
 
   /**
-   * Bulk CSV export of the WHOLE filtered range (not just the visible page). Reuses the SAME source
-   * WHERE + the SAME name resolution as the page read, and {@link auditLogCsvRow} from `@lazyit/shared`
-   * (the one place the RFC-4180 escaping + formula-injection guard live), so the file can never drift
-   * from the on-screen list or from the browser "export visible" path. Streamed as an async generator.
+   * The audit export's pieces for the engine (ADR-0103): the page read's own source WHERE and name
+   * resolution, newest first by the append-only autoincrement `id` (AUD-033) — a row appended
+   * mid-export sorts ahead of the cursor and is never sent twice.
    */
-  async *streamLogsCsvRows(filters: AuditLogFilters): AsyncGenerator<string> {
-    // Leading provenance stamp (#909) — names the build that produced the file (this log has no importer).
-    yield `${provenanceStampLine()}\n`;
-    yield `${AUDIT_LOG_CSV_HEADER}\n`;
-
-    // Keyset, not OFFSET: a row appended mid-export would shift every later page (AUD-033).
-    let beforeId: number | undefined;
-    for (;;) {
-      const [rows] = await this.readPage(
-        filters,
-        AuditService.EXPORT_BATCH_SIZE,
-        0,
-        { withCount: false, beforeId },
-      );
-      if (rows.length === 0) break;
-
-      const items = await this.resolveRows(filters.source, rows);
-      yield `${items.map(auditLogCsvRow).join('\n')}\n`;
-
-      beforeId = rows[rows.length - 1].id;
-      // A short batch means the source is exhausted — stop without an extra empty round-trip.
-      if (rows.length < AuditService.EXPORT_BATCH_SIZE) break;
-    }
+  logsExport(filters: AuditLogFilters): AuditLogExport {
+    return {
+      columns: AUDIT_EXPORT_COLUMNS,
+      count: async () => (await this.readPage(filters, 0, 0))[1],
+      fetchBatch: async (after, take) => {
+        const [rows] = await this.readPage(filters, take, 0, {
+          withCount: false,
+          beforeId: after === null ? undefined : Number(after.id),
+        });
+        const items = await this.resolveRows(filters.source, rows);
+        return items.map((item, i) => ({
+          ...item,
+          createdAt: rows[i].createdAt,
+        }));
+      },
+    };
   }
 
   /**
@@ -204,6 +186,30 @@ export class AuditService {
         ]);
         return [rows.map(rawFromServiceAccount), withCount ? total : 0];
       }
+      case 'export': {
+        const where = { ...this.exportWhere(filters), ...idBound };
+        const [rows, total] = await this.prisma.$transaction([
+          this.prisma.dataExportLog.findMany({
+            where,
+            orderBy,
+            take,
+            skip,
+            select: {
+              id: true,
+              resource: true,
+              actorId: true,
+              serviceAccountId: true,
+              filters: true,
+              rowCount: true,
+              createdAt: true,
+            },
+          }),
+          withCount
+            ? this.prisma.dataExportLog.count({ where })
+            : this.prisma.dataExportLog.count({ where: { id: -1 } }),
+        ]);
+        return [rows.map(rawFromExport), withCount ? total : 0];
+      }
     }
   }
 
@@ -231,6 +237,14 @@ export class AuditService {
       }
       case 'serviceAccount': {
         const rows = await this.prisma.serviceAccountAuditLog.findMany({
+          where: { actorId: { not: null } },
+          select: { actorId: true },
+          distinct: ['actorId'],
+        });
+        return pick(rows);
+      }
+      case 'export': {
+        const rows = await this.prisma.dataExportLog.findMany({
           where: { actorId: { not: null } },
           select: { actorId: true },
           distinct: ['actorId'],
@@ -279,6 +293,18 @@ export class AuditService {
       where.action =
         f.action as Prisma.ServiceAccountAuditLogWhereInput['action'];
     }
+    if (f.actorId !== undefined) where.actorId = f.actorId;
+    if (f.serviceAccountId !== undefined) {
+      where.serviceAccountId = f.serviceAccountId;
+    }
+    const createdAt = dateRange(f);
+    if (createdAt) where.createdAt = createdAt;
+    return where;
+  }
+
+  private exportWhere(f: AuditLogFilters): Prisma.DataExportLogWhereInput {
+    const where: Prisma.DataExportLogWhereInput = {};
+    if (f.action !== undefined) where.resource = f.action;
     if (f.actorId !== undefined) where.actorId = f.actorId;
     if (f.serviceAccountId !== undefined) {
       where.serviceAccountId = f.serviceAccountId;
@@ -486,6 +512,31 @@ function rawFromServiceAccount(row: {
   };
 }
 
+function rawFromExport(row: {
+  id: number;
+  resource: string;
+  actorId: string | null;
+  serviceAccountId: string | null;
+  filters: unknown;
+  rowCount: number;
+  createdAt: Date;
+}): RawAuditRow {
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    action: row.resource,
+    actorId: row.actorId,
+    serviceAccountId: row.serviceAccountId,
+    vaultId: null,
+    itemId: null,
+    targetUserId: null,
+    targetServiceAccountId: null,
+    role: null,
+    permission: null,
+    detail: { rowCount: row.rowCount, filters: row.filters },
+  };
+}
+
 /** Closed-open `[from, to)` `createdAt` window from the filters, or undefined when neither bound is set. */
 function dateRange(f: AuditLogFilters): Prisma.DateTimeFilter | undefined {
   if (f.from === undefined && f.to === undefined) return undefined;
@@ -508,3 +559,12 @@ function compactJson(value: unknown): string {
     return String(value);
   }
 }
+
+/** One exported audit row: the wire row plus its keyset position (the log's own `id`). */
+export type AuditExportRow = AuditLogItem & { createdAt: Date };
+
+/** What `GET /audit/logs/export` hands the export engine. */
+export type AuditLogExport = Pick<
+  CsvExportSpec<AuditExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;

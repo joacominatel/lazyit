@@ -38,6 +38,20 @@ export interface AccessGrantFilters {
   offset?: number;
 }
 
+export const ACCESS_GRANT_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never the page window; the CSV export sends exactly these. */
+export function accessGrantFilterParams(filters: AccessGrantFilters = {}): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.userId) params.set("userId", filters.userId);
+  if (filters.applicationId) params.set("applicationId", filters.applicationId);
+  if (filters.activeOnly !== undefined)
+    params.set("activeOnly", String(filters.activeOnly));
+  if (filters.includeExpired !== undefined)
+    params.set("includeExpired", String(filters.includeExpired));
+  return params;
+}
+
 /**
  * List grants (newest first), filtered and paged. `GET /access-grants` returns a
  * paginated `Page<AccessGrant>` envelope (ADR-0030); we return the whole envelope
@@ -48,13 +62,7 @@ export interface AccessGrantFilters {
 export function getAccessGrants(
   filters: AccessGrantFilters = {},
 ): Promise<AccessGrantListPage> {
-  const params = new URLSearchParams();
-  if (filters.userId) params.set("userId", filters.userId);
-  if (filters.applicationId) params.set("applicationId", filters.applicationId);
-  if (filters.activeOnly !== undefined)
-    params.set("activeOnly", String(filters.activeOnly));
-  if (filters.includeExpired !== undefined)
-    params.set("includeExpired", String(filters.includeExpired));
+  const params = accessGrantFilterParams(filters);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

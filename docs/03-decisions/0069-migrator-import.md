@@ -3,7 +3,7 @@ title: "ADR-0069: Migrator — guided bulk import (phase 1: Asset slice, JSON + 
 tags: [adr, migrator, import, asset, backend, frontend, shared, settings]
 status: accepted
 created: 2026-06-17
-updated: 2026-10-14
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -514,8 +514,10 @@ parsers:
   no meaningful major to vet another build's file against.
 
 The check is a single-major compatibility gate, not a version-negotiation framework: minor/patch
-differences never block. The same `provenanceStampLine()` helper stamps the asset (#872), audit-log
-(#871) and dashboard-activity (#840) CSV exports; only the asset CSV has a round-trip importer here.
+differences never block. The same `provenanceStampLine()` helper stamped the asset (#872), audit-log
+(#871) and dashboard-activity (#840) CSV exports; only the asset CSV has a round-trip importer here, and
+since [[0103-data-export-streaming-path]] (#1597) it is the only one that still carries the stamp. Those
+exports also gained a UTF-8 BOM, which the parser already strips.
 
 ## Amendment — explicit per-column date formats + serial re-import mutates live assets (2026-07-18, #1060 / #1061)
 

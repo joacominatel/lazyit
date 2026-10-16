@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Security invariants — auth & authorization
@@ -25,6 +25,8 @@ not findings or open issues — they are the *baseline a finding is measured aga
 > **Purchases** ([[0099-purchases-scope-model-and-optionality|ADR-0099]], epic #1465) added INV-PO-1 and
 > amended INV-AI-3, -4, -7, -11 and -12 on 2026-10-02 (#1489). Their `file:line` references are to the
 > integration branch at `74a2a485`.
+>
+> **Data export** ([[0103-data-export-streaming-path|ADR-0103]], epic #1597) added INV-EXP-1 on 2026-10-16.
 >
 > **Bundled Zitadel removed** ([[0102-remove-bundled-zitadel|ADR-0102]], epic #1543). On 2026-10-09
 > INV-4 and INV-6 were rewritten, INV-5 was retired, and INV-1, -3, -8, INV-DIR-1 and -2 were corrected.
@@ -702,6 +704,42 @@ checks the permission itself, in the API.
   `purchase-orders/purchase-receiving.service.spec.ts` (a stock receipt's reason names the reference, never the
   supplier or the company), `search/search.controller.spec.ts` and `ai/core/tool-route-parity.spec.ts` (no
   purchase indexes searched without the permission), `search/search.service.spec.ts` (their retrieved fields).
+
+## INV-EXP-1 — A server-side export reads through its list's authorization, carries allowlisted columns only, never a secret, and is always audited
+
+**Rule.** A `GET …/export` route ([[0103-data-export-streaming-path|ADR-0103]]) is the list it exports,
+in a file:
+
+- it carries the list route's `@RequirePermission` and calls the list service's own `where` builder, so
+  it returns exactly the rows the list would for the same principal and filters — soft-delete slices
+  (`deleted=only` stays ADMIN-only), KB folder ACL and draft visibility included;
+- its columns are an explicit `ExportColumn` allowlist mapped from the list projection, gated per
+  principal where the list gates fields (INV-PO-1 purchase provenance, the ADR-0098 delivery-target
+  redaction). Password hashes, `externalId`, session epochs, token hashes, ciphertext and article bodies
+  are never a column;
+- **no secret is ever exported server-side**: Secret Manager items stay a client-side export (INV-10),
+  and workflow secrets, service-account tokens and OAuth grants have no export at all;
+- every export that streams appends one `DataExportLog` row (actor, resource, sanitized filters,
+  pre-count) before the first byte; the row is never updated or deleted.
+
+The three exports that predate the engine (assets, Reports › activity, Reports › audit) moved onto it
+in phase 1b (#1597) and meet every clause.
+
+**Why.** An export is a bulk read. If it took any other path than the list it would be the easiest
+side door around field gating and soft-delete scoping, and without an audit row a bulk extraction —
+of the user directory, or of the audit logs themselves — leaves no trace.
+
+**Where enforced** (2026-10-16; paths relative to `apps/api/src/`).
+- `common/export/export.service.ts` — `exportCsv()` writes the audit row through `recordExport()` after
+  the cap check and before streaming; `sanitizeExportFilters()` flattens what is stored.
+- `common/export/export-column.ts` — `ExportColumn<T>`: a resource can only emit the columns it lists.
+- `prisma/migrations/20261016140000_add_data_export_log` — the table, and the at-most-one-actor CHECK.
+- Tests: `common/export/export.service.spec.ts` (one audit row with the pre-count, nothing written on a
+  refusal), `audit/audit.service.spec.ts` (the `export` audit source). Each resource export adds a test
+  pinning its header and its list/export parity over real HTTP: `assets/assets.export.http.spec.ts`
+  (VIEWER, purchase-column gate, `deleted=only` refused to non-admins),
+  `dashboard/dashboard-activity-export.spec.ts` and `audit/audit.export.http.spec.ts` (VIEWER and
+  MEMBER refused, as the lists are `logs:read`); phase 1c adds the rest (#1597).
 
 ---
 

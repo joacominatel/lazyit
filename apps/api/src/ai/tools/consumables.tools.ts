@@ -677,5 +677,10 @@ export const consumablesToolset: AiToolset = {
       ['findDeliveries'],
       'Deferred: the consumable deliveries read (ADR-0098, #1364) — the AI consumables surface was kept unchanged; extending it with delivery targets, returns and this list is a recorded ADR-0098 follow-up.',
     ),
+    unexposed(
+      ConsumablesController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
   ],
 };

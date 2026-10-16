@@ -287,6 +287,13 @@ shared schemas and documented via Swagger ([[0018-api-documentation-swagger]]). 
 and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their application access
 ([[access-grant]]).
 
+**Export.** `GET /users/export?q=&role=&isActive=&directoryOnly=&deleted=` streams every user the
+list would return for the same filters as CSV ([[0103-data-export-streaming-path]]): same
+`user:read`, same `where`, and `deleted=only` stays ADMIN-only. Columns, from the list row only: ID,
+first and last name, email, username, employee number, role, active, directory person, directory
+source, manager, assets held, active grants, created, archived. Never `externalId`, a credential, an
+epoch or `mustChangePassword`. Every export writes a [[data-export-log]] row.
+
 > [!note] `GET /users` list item — derived activity counts (issue #386)
 > The `GET /users` LIST item is the full `UserSchema` (so it already carries the resolved `manager`
 > descriptor + `legajo`/`username`, [[0058-user-manager-and-clone-actions]]) **plus two OPTIONAL,

@@ -8,14 +8,18 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ConsumableDeliveryPageSchema,
@@ -37,6 +41,8 @@ import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
 import { parsePageQuery } from '../common/parse-page-query';
 import { assertCanListDeleted } from '../common/deleted-filter';
+import { ExportService } from '../common/export';
+import { CONSUMABLE_EXPORT_COLUMNS } from './consumables-export';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { CurrentPrincipal } from '../auth/current-principal.decorator';
 import { RequirePermission } from '../auth/require-permission.decorator';
@@ -58,7 +64,10 @@ class CreateConsumableMovementDto extends createZodDto(
 @ApiTags('consumables')
 @Controller('consumables')
 export class ConsumablesController {
-  constructor(private readonly consumables: ConsumablesService) {}
+  constructor(
+    private readonly consumables: ConsumablesService,
+    private readonly exports: ExportService,
+  ) {}
 
   @Get()
   @RequirePermission('consumable:read')
@@ -154,6 +163,46 @@ export class ConsumablesController {
       },
       pageQuery,
     );
+  }
+
+  // STATIC route declared BEFORE `:id` so `/consumables/export` never resolves as an id.
+  @Get('export')
+  @RequirePermission('consumable:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every consumable matching the list filters (ADR-0103): same permission, filters and rows as GET /consumables, newest first. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. deleted=only is ADMIN only (403 otherwise).',
+  })
+  @ApiQuery({ name: 'lowStock', required: false, type: Boolean })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'category', required: false })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The filtered consumables as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+    @Query('lowStock') lowStock?: string,
+    @Query('q') q?: string,
+    @Query('category') category?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    const filters = {
+      lowStock: parseBooleanQuery(lowStock),
+      q,
+      categoryId: parseCuidQuery(category, 'category'),
+    };
+    return this.exports.exportCsv({
+      resource: 'CONSUMABLES',
+      principal,
+      response: res,
+      filters: { ...filters, deleted: slice },
+      columns: CONSUMABLE_EXPORT_COLUMNS,
+      filename: 'consumables',
+      ...this.consumables.exportSource(filters, slice),
+    });
   }
 
   // Declared BEFORE `:id` so `deliveries` is never captured as a consumable id. Gated on

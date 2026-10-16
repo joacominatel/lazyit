@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
+import { ExportModule } from '../common/export';
 
 /**
  * Security audit-log READ surface (issue #871, ADR-0081). Hosts the reader for the three security
@@ -10,6 +11,7 @@ import { AuditService } from './audit.service';
  * PrismaModule. INV-10-safe: secret refs resolve to metadata display names only.
  */
 @Module({
+  imports: [ExportModule],
   controllers: [AuditController],
   providers: [AuditService],
 })

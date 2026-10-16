@@ -20,6 +20,7 @@ import type { App } from 'supertest/types';
 import { ApplicationsController } from './applications.controller';
 import { ApplicationsService } from './applications.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { ArticlesService } from '../articles/articles.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -111,6 +112,7 @@ describe('Application costPerSeat over HTTP — 64-bit minor units (ADR-0100)', 
           useValue: { upsert: jest.fn(), remove: jest.fn() },
         },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: APP_GUARD, useClass: SignedInGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },

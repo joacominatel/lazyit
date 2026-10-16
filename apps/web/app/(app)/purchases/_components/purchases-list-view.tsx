@@ -15,6 +15,7 @@ import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   ErrorState,
@@ -46,6 +47,10 @@ import {
   useRestorePurchaseOrder,
 } from "@/lib/api/hooks/use-purchase-orders";
 import { useSupplier } from "@/lib/api/hooks/use-suppliers";
+import {
+  PURCHASE_ORDER_EXPORT_PATH,
+  purchaseOrderFilterParams,
+} from "@/lib/api/endpoints/purchase-orders";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
@@ -115,9 +120,9 @@ export function PurchasesListView() {
   const archived = isAdmin && filters.archived === "only";
   // The archived view and a Cancelled filter ignore the receipt filter (see `receiptFilterLifted`).
   const receiptLifted = receiptFilterLifted(filters, { isAdmin });
-  const { data: page, isLoading, isFetching, isError, error, refetch } = usePurchaseOrders(
-    derivePurchaseParams({ q, sort, dir, offset, limit, filters }, { isAdmin }),
-  );
+  const listParams = derivePurchaseParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
+  const { data: page, isLoading, isFetching, isError, error, refetch } =
+    usePurchaseOrders(listParams);
   const total = page?.total ?? 0;
   // The list opens unfiltered, so an empty page with no filter means the area holds no purchase at all.
   const areaEmpty = !isLoading && !isError && total === 0 && !filtersActive;
@@ -257,6 +262,13 @@ export function PurchasesListView() {
                 onCheckedChange={(on) => setFilter("archived", on ? "only" : FILTER_DEFAULTS.archived)}
               />
             ) : null}
+            <ExportButton
+              path={PURCHASE_ORDER_EXPORT_PATH}
+              params={purchaseOrderFilterParams(listParams)}
+              total={page?.total}
+              filename="purchases"
+              permission="purchaseOrder:read"
+            />
             {newPurchaseAction}
           </>
         }
