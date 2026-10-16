@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import {
   HttpException,
   HttpStatus,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -175,6 +176,56 @@ describe('ExportService.exportCsv', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
     await expect(service.exportCsv(spec())).resolves.toBeDefined();
+  });
+});
+
+describe('ExportService.exportCsv — a batch failing mid-stream', () => {
+  it('destroys the response instead of ending it, logs the error and frees the slot', async () => {
+    const { service } = setup();
+    const logged = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const res = response();
+    const destroy = jest.fn(() => res.emit('close'));
+    const end = jest.fn();
+    Object.assign(res, { destroy, end, destroyed: false, headersSent: true });
+
+    const boom = new Error('db down');
+    let calls = 0;
+    const fetchBatch = (_after: KeysetCursor | null, take: number) => {
+      calls += 1;
+      if (calls > 1) return Promise.reject(boom);
+      return Promise.resolve(
+        Array.from({ length: take }, (_, i) => ({
+          id: `r${String(take - i).padStart(5, '0')}`,
+          createdAt: new Date(Date.UTC(2026, 9, 16, 0, 0, 0, take - i)),
+          name: 'row',
+        })),
+      );
+    };
+    const file = await service.exportCsv(spec({ response: res, fetchBatch }));
+
+    // What the Express adapter does with a StreamableFile.
+    const stream = file.getStream();
+    const failed = new Promise<void>((resolve) =>
+      stream.once('error', (err: Error) => {
+        file.errorHandler(err, res);
+        resolve();
+      }),
+    );
+    stream.resume();
+    await failed;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(calls).toBe(2);
+    expect(destroy).toHaveBeenCalledWith(boom);
+    expect(end).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('db down'),
+      boom.stack,
+    );
+    await expect(service.exportCsv(spec())).resolves.toBeDefined();
+    logged.mockRestore();
   });
 });
 

@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { Injectable, StreamableFile } from '@nestjs/common';
+import { Injectable, Logger, StreamableFile } from '@nestjs/common';
 import type { DataExportResource } from '@lazyit/shared';
 import type { Response } from 'express';
 import type { Principal } from '../../auth/principal';
@@ -82,6 +82,8 @@ export function sanitizeExportFilters(
 /** The one server-side export path (ADR-0103): limiter, cap, audit row, then a keyset CSV stream. */
 @Injectable()
 export class ExportService {
+  private readonly logger = new Logger(ExportService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly actors: ActorService,
@@ -134,9 +136,16 @@ export class ExportService {
     else spec.response.once('close', () => body.destroy());
 
     const date = new Date().toISOString().slice(0, 10);
+    // Nest's default ends a started response cleanly: a truncated file would look complete.
     return new StreamableFile(body, {
       type: 'text/csv; charset=utf-8',
       disposition: `attachment; filename="lazyit-${spec.filename}-${date}.csv"`,
+    }).setErrorHandler((err) => {
+      this.logger.error(
+        `${spec.resource} export failed mid-stream: ${err.message}`,
+        err.stack,
+      );
+      spec.response.destroy(err);
     });
   }
 }
