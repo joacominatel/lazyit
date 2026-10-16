@@ -2,7 +2,7 @@
 id: SEC-088
 title: A non-ADMIN role delegated user:manage or settings:manage can make itself ADMIN (no subset rule, matrix self-edit)
 severity: medium
-status: open
+status: fixed
 cwe: CWE-269
 discovered: 2026-10-09
 module: users / config (RBAC delegation)
@@ -286,3 +286,59 @@ password, so this does not reopen the path.
 
 No data change on update. An instance that delegated these verbs keeps its rows. The holders lose only
 what is listed under Fixed.
+
+## Resolution
+
+**Status**: fixed
+**Fixed in**: the role ceiling on `user:manage` in PR #1601 (`18a04017b`); the matrix and directory writes
+ADMIN-only, clone limited to what the caller could grant, and promotion revoking one-time credentials in PR
+#1606 (`9bc75c4f5`); the UI copy in PR #1609 (`cab67672f`); the two remaining `settings:manage` paths in
+PR #1611: `5310b682a` (`fix(api): saving the SMTP settings is ADMIN-only (SEC-088)`) and `584bd45f0`
+(`fix(api): cap service-account verbs at the caller's own permissions (SEC-088)`), with `846acf864`
+(ADR-0079, ADR-0048 and ADR-0046 amendments, INV-SA-3)
+**Fixed by**: 2026-10-10 audit decision round (CEO decisions of 2026-10-15 and 2026-10-16; the last two
+paths by CEO decision of 2026-10-16)
+**Date**: 2026-10-16
+
+### Evidence (on `fix/sec-088-smtp-and-sa-ceiling`, PR #1611)
+- `apps/api/src/smtp/smtp.controller.ts:63`: `PUT /config/smtp` carries `AdminOnlyGuard` next to
+  `settings:manage`, so a delegate gets 403 `ADMIN_REQUIRED` and cannot repoint outbound mail to read an
+  ADMIN's reset link. `GET` and `POST /config/smtp/test` stay on `settings:manage`: the read returns no
+  secret, and the test send persists nothing and uses the relay an ADMIN saved.
+- `apps/api/src/service-accounts/service-accounts.service.ts:356-378` (`assertWithinCallerPermissions`):
+  the caller's verbs resolve DB-first from their role. A verb outside that set is refused with 403
+  `PERMISSION_CEILING_EXCEEDED`, listing the verbs. Call sites:
+  - create (`:88`);
+  - update (`:192`): the verbs it adds, or the whole set when it re-enables the account or extends its
+    expiry;
+  - rotate (`:266`);
+  - restore (`:334`).
+  Narrowing writes are not checked, so a delegate can always disable or revoke an account. ADMIN holds the
+  full catalog.
+- The paths fixed earlier are listed in the 2026-10-16 triage note above.
+
+### Tests
+- `apps/api/src/smtp/smtp.controller.spec.ts`: a delegated MEMBER is refused `PUT` with `ADMIN_REQUIRED`
+  and nothing is saved, a service account is refused, an ADMIN saves, and the read and test send stay
+  available to the delegate.
+- `apps/api/src/service-accounts/service-accounts.service.spec.ts`, block `permission ceiling — a delegate
+  cannot exceed its own verbs (SEC-088)`: create, an added verb, re-enable, clearing or extending the
+  expiry, rotate and restore are refused past the ceiling with nothing written. An unattributed caller
+  fails closed. Narrowing writes pass, and ADMIN is unaffected.
+- The earlier paths' tests are listed in PRs #1601 and #1606.
+
+### Verification
+Re-run on the PR branch on 2026-10-16: `node node_modules/.bin/jest` over all of `apps/api`. 314 suites
+and 7325 tests passed. Without the fixes, the new denial tests fail: 1 in the SMTP suite and 6 in the
+service-account suite.
+
+### Residual risk
+- `settings:manage` stays delegable for the rest of instance configuration. The surfaces that decide who
+  can do what are ADMIN-only until custom roles (#1560) bring a `role:manage`: the matrix, the directory
+  connection and the SMTP save.
+- A service account minted before this change, with verbs above its creator's role, keeps working. The
+  cap applies on the next write that would issue or re-arm its token. An ADMIN who wants it gone revokes
+  or narrows it.
+- The accepted limit from the promotion fix stands: a temporary password the user already replaced
+  cannot be revoked by a promotion.
+- No data change.
