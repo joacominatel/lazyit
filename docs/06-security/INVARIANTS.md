@@ -807,7 +807,8 @@ prompt. Other-authored free text reaches the model wrapped in `<untrusted_conten
 it shows the untrusted-source banner and is never auto-approved. Identity strings a person can edit
 (first and last name, `username`, `legajo`, an external manager's name, an article author's name) count
 as other-authored text and are wrapped too (SEC-090, PRs #1567 and #1592), the caller's own name in
-`session_context` included — so a turn that calls it is never auto-approved (CEO decision, 2026-10-15).
+`session_context` included — so a turn that calls it is never auto-approved (CEO decision, 2026-10-15);
+the system-prompt display name is sanitized, not wrapped (tools-and-execution.md §12).
 Provider web-search results count as untrusted for the rest of the conversation, and so does a purchase
 document read by `purchase_document_read` (#1478): its entity ref of type `purchaseDocument` is a conversation-wide source
 (`AI_CONVERSATION_UNTRUSTED_SOURCE_TYPES`), so every later turn starts untrusted, its proposals carry the
