@@ -3,7 +3,7 @@ title: AssetHistory
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # AssetHistory
@@ -91,6 +91,9 @@ cleared).
   when a location in use is deleted with a resolution, written in **one** `createMany`
   (`AssetHistoryService.recordMany`, which attributes and stamps `aiInvocationId` exactly like `record`)
   in the delete's transaction (AUD-024).
+- [[asset-model]] service — `MODEL_CHANGED` (`{ from, to }`, `to: null` on detach), one row per live asset
+  when a model in use is deleted with a resolution, written the same way in the delete's transaction
+  (SEC-041).
 - [[asset-assignment]] service — `ASSIGNED` (open), `RELEASED` (release) and `ACKNOWLEDGED`
   (self-service acknowledgement of receipt; payload `{ userId }` = the acknowledging owner — #1029).
 - [[consumable]] service — `CONSUMABLE_DELIVERED` (an `OUT` targeting this asset) and

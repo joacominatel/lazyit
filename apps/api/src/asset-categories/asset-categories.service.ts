@@ -1,7 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type { CreateAssetCategory, UpdateAssetCategory } from '@lazyit/shared';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  DELETE_IMPACT_SAMPLE_LIMIT,
+  type AssetCategoryDeleteImpact,
+  type CreateAssetCategory,
+  type DeleteResolution,
+  type UpdateAssetCategory,
+} from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { Principal } from '../auth/principal';
+import { deleteResolutionRequired } from '../common/delete-resolution';
 
 /**
  * The usage of an asset category is reached THROUGH its models (#1540): an asset carries `modelId`, the
@@ -29,9 +42,21 @@ function withUsageCount(row: CategoryWithModelCounts) {
   return { ...category, usageCount };
 }
 
+const liveModelsOf = (categoryId: string) =>
+  ({ categoryId, deletedAt: null }) satisfies Prisma.AssetModelWhereInput;
+
+const liveAssetsOf = (categoryId: string) =>
+  ({
+    deletedAt: null,
+    model: { categoryId, deletedAt: null },
+  }) satisfies Prisma.AssetWhereInput;
+
 @Injectable()
 export class AssetCategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
   /**
    * All categories that have not been soft-deleted, alphabetically (it's a reference list), each with
@@ -78,12 +103,88 @@ export class AssetCategoriesService {
     });
   }
 
-  /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
-  async remove(id: string) {
+  /** The live models a delete would detach or move, and their live assets; each list only for a reader of that kind. */
+  async deleteImpact(
+    id: string,
+    principal?: Principal,
+  ): Promise<AssetCategoryDeleteImpact> {
     await this.findOne(id);
-    return this.prisma.assetCategory.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const [canModels, canAssets] = await Promise.all([
+      this.permissions.principalHas(principal, 'assetModel:read'),
+      this.permissions.principalHas(principal, 'asset:read'),
+    ]);
+    const modelsWhere = liveModelsOf(id);
+    const assetsWhere = liveAssetsOf(id);
+    const [modelTotal, models, assetTotal, assets] = await Promise.all([
+      this.prisma.assetModel.count({ where: modelsWhere }),
+      canModels
+        ? this.prisma.assetModel.findMany({
+            where: modelsWhere,
+            select: { id: true, name: true, manufacturer: true },
+            orderBy: { name: 'asc' },
+            take: DELETE_IMPACT_SAMPLE_LIMIT,
+          })
+        : null,
+      this.prisma.asset.count({ where: assetsWhere }),
+      canAssets
+        ? this.prisma.asset.findMany({
+            where: assetsWhere,
+            select: { id: true, name: true, assetTag: true },
+            orderBy: { name: 'asc' },
+            take: DELETE_IMPACT_SAMPLE_LIMIT,
+          })
+        : null,
+    ]);
+    return {
+      assetModels: { total: modelTotal, items: models },
+      assets: { total: assetTotal, items: assets },
+    };
+  }
+
+  /** Soft delete; live models still filed here need the one `resolution`, applied in the same transaction. */
+  async remove(id: string, resolution?: DeleteResolution) {
+    return this.prisma.$transaction(async (tx) => {
+      const targetId =
+        resolution?.strategy === 'move' ? resolution.targetId : undefined;
+      // Both rows in id order, so two deletes moving into each other cannot deadlock.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "asset_categories"
+         WHERE "id" IN (${Prisma.join(targetId ? [id, targetId] : [id])})
+           AND "deletedAt" IS NULL
+         ORDER BY "id" FOR UPDATE`;
+      if (!locked.some((row) => row.id === id)) {
+        throw new NotFoundException(`AssetCategory ${id} not found`);
+      }
+      const affected = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "asset_models"
+         WHERE "categoryId" = ${id} AND "deletedAt" IS NULL
+         ORDER BY "id" FOR NO KEY UPDATE`;
+      if (affected.length > 0) {
+        if (!resolution) {
+          throw deleteResolutionRequired(`AssetCategory ${id}`, {
+            assetModels: affected.length,
+            assets: await tx.asset.count({ where: liveAssetsOf(id) }),
+          });
+        }
+        if (targetId === id) {
+          throw new BadRequestException(
+            'Choose another category to move to, not the one being deleted.',
+          );
+        }
+        if (targetId && !locked.some((row) => row.id === targetId)) {
+          throw new BadRequestException(
+            `Target category ${targetId} not found (missing or archived).`,
+          );
+        }
+        await tx.assetModel.updateMany({
+          where: { id: { in: affected.map((row) => row.id) }, categoryId: id },
+          data: { categoryId: targetId ?? null },
+        });
+      }
+      return tx.assetCategory.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
     });
   }
 

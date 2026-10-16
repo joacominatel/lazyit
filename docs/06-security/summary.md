@@ -234,6 +234,17 @@ Snapshot of the security review. Updated each sweep. Method:
 
    The last-admin 409 also gained the code `LAST_ADMIN_REQUIRED`.
 
+23. **2026-10-16 — SEC-041 closed.** The CEO confirmed the delete-with-one-resolution pattern for
+   asset categories and asset models ("3. ok"), and #1620 shipped it.
+   [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] is **✅ closed**:
+   - deleting an asset category with live models needs `detach` or `move`, otherwise 409
+     `DELETE_RESOLUTION_REQUIRED`;
+   - deleting a model with live assets or open purchase lines needs the same, with a `MODEL_CHANGED`
+     history row per asset;
+   - a model write that names an archived category is a 400.
+
+   The web dialog for both follows in a separate unit.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -246,9 +257,9 @@ consent page, `/account/ai`).
 | Critical | 0 |
 | High | 0 |
 | Medium | 0 |
-| Low | 5 |
+| Low | 4 |
 | Info | 0 |
-| **Total open** | **5** |
+| **Total open** | **4** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -260,11 +271,15 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-003-markdown-sanitizer-bypass-asymmetric\|SEC-003]] | 🟡 Low | articles | Bypassable, asymmetric markdown sanitizer (latent stored XSS) |
 | [[SEC-007-no-pagination-list-endpoints\|SEC-007]] | 🟡 Low | transversal | List endpoints have no pagination (unbounded responses) |
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
-| [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete). Location part fixed (#1603); asset categories and models remain |
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
 
 ## Top findings
 
+0. **SEC-041 ✅ Closed.** Moved to `closed/` (2026-10-16). Deleting a location, an asset category, an
+   asset model, or an application or consumable category that is still in use takes one resolution for
+   everything affected (`detach` or `move`), applied in the delete's transaction, otherwise 409
+   `DELETE_RESOLUTION_REQUIRED` (#1603, #1608, #1620). Model writes refuse an archived category. No data
+   change: rows archived before the fix keep their references, and nothing is backfilled.
 0. **SEC-088 ✅ Closed.** Moved to `closed/` (2026-10-16, audit decision round). Delegating `user:manage`
    or `settings:manage` to MEMBER or VIEWER no longer reaches ADMIN:
    - a role ceiling on every user write (#1601);
@@ -353,8 +368,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 5. **SEC-021 ✅ Closed.** Moved to `closed/` (deactivating the last active ADMIN now 409s, and the
    last-admin guard counts only active admins; the directory sync skips the last active ADMIN instead
    of offboarding them).
-6. **Systemic soft-delete / nested-relation class (SEC-040/041/060 open; SEC-030, SEC-050, SEC-052 and
-   SEC-071 ✅ closed).**
+6. **Systemic soft-delete / nested-relation class (SEC-040/060 open; SEC-030, SEC-041, SEC-050, SEC-052
+   and SEC-071 ✅ closed).**
    A recurring pattern across six modules: top-level soft-delete filtering (ADR-0032) doesn't reach
    nested relations, FK guards don't check for a *live* parent, and `SetNull` only fires on
    hard-delete. One architectural fix (filter nested includes + a shared live-parent guard + register
@@ -363,8 +378,8 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
    `findOne`/`assertExists`/movement paths (the model deliberately stays out of the set for its
    archived-view slice). SEC-041's location part is fixed (2026-10-16, #1603). A location delete with
    live dependents takes one resolution, detach or move, in the same transaction; otherwise it gets a
-   409 `DELETE_RESOLUTION_REQUIRED`. Application and consumable categories follow the same rule. Asset
-   categories and asset models are still bare soft deletes.
+   409 `DELETE_RESOLUTION_REQUIRED`. Application and consumable categories follow the same rule, and
+   since #1620 asset categories and asset models do too, which closes SEC-041.
 7. **SEC-002 — `.docx` decompression bomb.** ✅ Closed 2026-06-07 by ADR-0053's sandboxed worker
    (PR #251, on `feat/issue-247-async-workers-bullmq-valkey`): the parse runs in a heap-capped forked
    child, so a bomb OOMs the child, not the API. Moved to `closed/`; closes on promotion to `dev`.

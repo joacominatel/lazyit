@@ -352,49 +352,6 @@ async function counted(
   return result === null ? undefined : result.value;
 }
 
-async function categoryImpact(
-  rt: AiToolRuntime,
-  kind: CategoryKind,
-  id: string,
-): Promise<Impact> {
-  const impact: Impact = { impacted: [], unknown: [] };
-  switch (kind) {
-    case 'assetCategory': {
-      collect(
-        impact,
-        'asset models',
-        await counted(async () =>
-          impactOf(
-            'assetModel',
-            await rt.call(AssetModelsController, 'findAll', {
-              query: { categoryId: id, limit: '5' },
-            }),
-            modelLabel,
-          ),
-        ),
-      );
-      collect(
-        impact,
-        'assets',
-        await counted(async () =>
-          impactOf(
-            'asset',
-            await rt.call(AssetsController, 'findAll', {
-              query: { categoryId: id, limit: '5' },
-            }),
-            (a) => str(a.assetTag) ?? undefined,
-          ),
-        ),
-      );
-      break;
-    }
-    case 'applicationCategory':
-    case 'consumableCategory':
-      break;
-  }
-  return impact;
-}
-
 /** The card rows an archive carries: archived false → true, plus what could not be counted. */
 function archiveChanges(impact: Impact): Change[] {
   return [
@@ -708,11 +665,6 @@ function assertResolved(
 
 // ─── category_archive ────────────────────────────────────────────────────────────────────────────────
 
-const RESOLVABLE_KINDS: readonly CategoryKind[] = [
-  'applicationCategory',
-  'consumableCategory',
-];
-
 async function categoryDeleteImpact(
   rt: AiToolRuntime,
   kind: CategoryKind,
@@ -738,15 +690,16 @@ async function categoryDeleteImpact(
         dependents: dependentsOf(response),
       };
     case 'assetCategory':
-      return { ...(await categoryImpact(rt, kind, id)), dependents: {} };
-  }
-}
-
-function assertStrategyKind(kind: CategoryKind, strategy?: string): void {
-  if (strategy !== undefined && !RESOLVABLE_KINDS.includes(kind)) {
-    throw new BadRequestException(
-      '`strategy` applies to application and consumable categories only.',
-    );
+      response = asRow(
+        await rt.call(AssetCategoriesController, 'deleteImpact', shape),
+      );
+      return {
+        ...impactFromDelete(response, [
+          ['assetModels', 'assetModel', modelLabel],
+          ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
+        ]),
+        dependents: dependentsOf(response),
+      };
   }
 }
 
@@ -755,11 +708,11 @@ const categoryArchive = defineTool({
   title: 'Archive a category',
   description:
     'Archive (soft-delete) an asset, application or consumable category by id or exact name; an ' +
-    'administrator can restore it from the lazyit UI. An application or consumable category that still ' +
-    'has live items needs ONE `strategy` for all of them: detach (they keep no category) or move (they go ' +
-    'to `moveTo`, another category of the same kind). What sits under an asset category keeps existing ' +
-    'but shows no live category. The approval card shows what still uses it — check with the person ' +
-    'before archiving one in use.',
+    'administrator can restore it from the lazyit UI. A category that still has live items (asset ' +
+    'models for an asset category, whose assets follow their model) needs ONE `strategy` for all of ' +
+    'them: detach (they keep no category) or move (they go to `moveTo`, another category of the same ' +
+    'kind). The approval card shows what still uses it — ask the person which before archiving one in ' +
+    'use.',
   domain: 'reference',
   class: 'write',
   destructive: true,
@@ -777,13 +730,11 @@ const categoryArchive = defineTool({
     bind(AssetCategoriesController, 'findAll'),
     bind(ApplicationCategoriesController, 'findAll'),
     bind(ConsumableCategoriesController, 'findAll'),
+    bind(AssetCategoriesController, 'deleteImpact'),
     bind(ApplicationCategoriesController, 'deleteImpact'),
     bind(ConsumableCategoriesController, 'deleteImpact'),
-    bind(AssetModelsController, 'findAll'),
-    bind(AssetsController, 'findAll'),
   ],
   async run(input, rt) {
-    assertStrategyKind(input.kind, input.strategy);
     const { id } = await resolveCategory(rt, input.kind, input.category, false);
     const query: Record<string, string> = {};
     if (input.strategy !== undefined) query.strategy = input.strategy;
@@ -805,7 +756,6 @@ const categoryArchive = defineTool({
     };
   },
   async preview(input, rt) {
-    assertStrategyKind(input.kind, input.strategy);
     const { row } = await resolveCategory(rt, input.kind, input.category, true);
     const current = row!;
     const id = String(current.id);
@@ -1053,30 +1003,73 @@ const assetModelUpdate = defineTool({
   },
 });
 
+/**
+ * Open lines shown as the purchases they belong to — the card links a purchase, never a line. The purchases
+ * are counted only when every line was listed; otherwise they are reported as unknown rather than guessed.
+ */
+function collectPurchasesOfLines(impact: Impact, group: Row): void {
+  const total = typeof group.total === 'number' ? group.total : 0;
+  if (total === 0) return;
+  const lines = Array.isArray(group.items) ? asRows(group.items) : [];
+  if (lines.length < total) {
+    impact.unknown.push('purchases');
+    return;
+  }
+  const purchases = new Map<string, string | undefined>();
+  for (const line of lines) {
+    const id = String(line.purchaseOrderId);
+    if (!purchases.has(id)) {
+      purchases.set(
+        id,
+        str(line.reference) ?? str(line.description) ?? undefined,
+      );
+    }
+  }
+  impact.impacted.push({
+    type: 'purchaseOrder',
+    count: purchases.size,
+    sample: [...purchases].slice(0, 5).map(([id, label]) => ({
+      type: 'purchaseOrder' as const,
+      id,
+      op: 'updated' as const,
+      ...(label ? { label } : {}),
+    })),
+  });
+}
+
 const assetModelArchive = defineTool({
   name: 'asset_model_archive',
   title: 'Archive an asset model',
   description:
-    'Archive (soft-delete) an asset model by id or exact name. Its assets keep existing and keep ' +
-    'pointing at it; the model leaves the model lists and can be restored with asset_model_restore. ' +
-    'The approval card shows how many assets still use it — check with the person before archiving ' +
-    'one in use.',
+    'Archive (soft-delete) an asset model by id or exact name; it can be restored later ' +
+    '(asset_model_restore). While live assets or open purchase lines still point at it, give ONE ' +
+    '`strategy` for all of them: detach (the assets keep no model, the purchase lines lose their model) ' +
+    'or move (all of them go to `moveTo`, another live model, in any category). The approval card shows ' +
+    'what still uses it — ask the person which before archiving one in use.',
   domain: 'reference',
   class: 'write',
   destructive: true,
-  input: z.strictObject({
-    model: referenceString('The asset model: its id or exact name.'),
-  }),
+  input: z
+    .strictObject({
+      model: referenceString('The asset model: its id or exact name.'),
+      ...resolutionFields,
+    })
+    .refine(moveToGoesWithMove, MOVE_TO_RULE),
   bindings: [
     bind(AssetModelsController, 'remove'),
+    bind(AssetModelsController, 'deleteImpact'),
     bind(AssetModelsController, 'findOne'),
     bind(AssetModelsController, 'findAll'),
-    bind(AssetsController, 'findAll'),
   ],
   async run(input, rt) {
     const { id } = await resolveModel(rt, input.model, false);
+    const query: Record<string, string> = {};
+    if (input.strategy !== undefined) query.strategy = input.strategy;
+    if (input.moveTo !== undefined) {
+      query.targetId = (await resolveModel(rt, input.moveTo, false)).id;
+    }
     const archived = asRow(
-      await rt.call(AssetModelsController, 'remove', { params: { id } }),
+      await rt.call(AssetModelsController, 'remove', { params: { id }, query }),
     );
     return {
       data: modelResult(archived),
@@ -1095,24 +1088,44 @@ const assetModelArchive = defineTool({
         params: { id: resolved.id },
       }),
     );
-    const impact: Impact = { impacted: [], unknown: [] };
-    collect(
-      impact,
-      'assets',
-      await counted(async () =>
-        impactOf(
-          'asset',
-          await rt.call(AssetsController, 'findAll', {
-            query: { modelId: resolved.id, limit: '5' },
-          }),
-          (a) => str(a.assetTag) ?? undefined,
-        ),
-      ),
+    const id = String(current.id);
+    const response = asRow(
+      await rt.call(AssetModelsController, 'deleteImpact', { params: { id } }),
     );
+    const dependents = dependentsOf(response);
+    assertResolved(
+      `The asset model "${String(untrusted(modelLabel(current)))}"`,
+      dependents,
+      input.strategy,
+    );
+    const impact = impactFromDelete(response, [
+      ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
+    ]);
+    collectPurchasesOfLines(impact, asRow(response.purchaseOrderLines));
+    const changes = archiveChanges(impact);
+    if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
+      const to = await resolveModel(rt, input.moveTo, true);
+      if (to.id === id) {
+        throw new BadRequestException(
+          'moveTo must be another model, not the one being archived.',
+        );
+      }
+      changes.push({
+        field: 'destination',
+        after: entityValue(to),
+        valueKind: 'entity',
+      });
+    } else if (Object.keys(dependents).length > 0) {
+      changes.push({
+        field: 'destination',
+        after: DETACHED,
+        valueKind: 'text',
+      });
+    }
     const target = modelRef(current, 'archived');
     return previewOf({
       target,
-      changes: archiveChanges(impact),
+      changes,
       warnings: ['SOFT_DELETE'],
       impacted: impact.impacted,
       precondition: preconditionOf(target, current),

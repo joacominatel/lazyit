@@ -1,14 +1,20 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AssetCategoriesService } from './asset-categories.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
 
-// Mock the generated Prisma client so the test never loads the real one (no DB). `Prisma` is used
-// only for a type cast (erased at runtime), so an empty object suffices.
+// Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
-  Prisma: {},
+  Prisma: { join: (values: unknown[]) => values },
 }));
+
+type UpdateCall = [{ where: { id: string }; data: { deletedAt: Date } }];
 
 type PrismaCategoryMock = {
   findMany: jest.Mock;
@@ -20,6 +26,20 @@ type PrismaCategoryMock = {
 describe('AssetCategoriesService', () => {
   let service: AssetCategoriesService;
   let assetCategory: PrismaCategoryMock;
+  let assetModel: {
+    count: jest.Mock;
+    findMany: jest.Mock;
+    updateMany: jest.Mock;
+  };
+  let asset: { count: jest.Mock; findMany: jest.Mock };
+  // Live category ids: the row lock only returns these.
+  let liveCategories: Set<string>;
+  // The live models filed under the category being deleted, as the row lock returns them.
+  let liveModelIds: string[];
+  let prismaQueryRaw: () => jest.Mock;
+  let readable: Set<string>;
+  let inTransaction: boolean;
+  let writesOutsideTx: number;
 
   beforeEach(async () => {
     assetCategory = {
@@ -28,11 +48,61 @@ describe('AssetCategoriesService', () => {
       create: jest.fn(),
       update: jest.fn(),
     };
+    liveCategories = new Set(['c1', 'c2']);
+    liveModelIds = [];
+    readable = new Set(['assetModel:read', 'asset:read']);
+    inTransaction = false;
+    writesOutsideTx = 0;
+    assetModel = {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn(() => {
+        if (!inTransaction) writesOutsideTx++;
+        return Promise.resolve({ count: 0 });
+      }),
+    };
+    asset = {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+    const prisma: Record<string, unknown> = {
+      assetCategory,
+      assetModel,
+      asset,
+      $queryRaw: jest.fn((sql: TemplateStringsArray, arg: string[] | string) =>
+        sql.join('?').includes('FROM "asset_models"')
+          ? Promise.resolve(liveModelIds.map((id) => ({ id })))
+          : Promise.resolve(
+              (arg as string[])
+                .filter((id) => liveCategories.has(id))
+                .map((id) => ({ id })),
+            ),
+      ),
+    };
+    prismaQueryRaw = () => prisma.$queryRaw as jest.Mock;
+    prisma.$transaction = jest.fn(
+      async (fn: (tx: unknown) => Promise<unknown>) => {
+        inTransaction = true;
+        try {
+          return await fn(prisma);
+        } finally {
+          inTransaction = false;
+        }
+      },
+    );
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         AssetCategoriesService,
-        { provide: PrismaService, useValue: { assetCategory } },
+        { provide: PrismaService, useValue: prisma },
+        {
+          provide: PermissionResolverService,
+          useValue: {
+            principalHas: jest.fn((_p: unknown, perm: string) =>
+              Promise.resolve(readable.has(perm)),
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -133,27 +203,156 @@ describe('AssetCategoriesService', () => {
     expect(assetCategory.update).not.toHaveBeenCalled();
   });
 
-  it('soft-deletes by setting deletedAt (never hard delete)', async () => {
-    assetCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+  // --- delete with one resolution (SEC-041) --------------------------------
+
+  const softDeleted = () =>
+    (assetCategory.update.mock.calls as UpdateCall[]).some(
+      ([args]) => args.data.deletedAt instanceof Date,
+    );
+
+  it('soft-deletes an unused category without a strategy (never a hard delete)', async () => {
     assetCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
 
     await service.remove('c1');
 
-    expect(assetCategory.update).toHaveBeenCalledTimes(1);
-    const calls = assetCategory.update.mock.calls as Array<
-      [{ where: { id: string }; data: { deletedAt: Date } }]
-    >;
+    const calls = assetCategory.update.mock.calls as UpdateCall[];
     expect(calls[0][0].where).toEqual({ id: 'c1' });
     expect(calls[0][0].data.deletedAt).toBeInstanceOf(Date);
+    expect(assetModel.updateMany).not.toHaveBeenCalled();
   });
 
-  it('does not soft-delete a category that is missing', async () => {
-    assetCategory.findFirst.mockResolvedValue(null);
-
+  it('does not soft-delete a missing or archived category', async () => {
     await expect(service.remove('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(assetCategory.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses (409) while live models are filed under it and no strategy is given, with the model and asset counts', async () => {
+    liveModelIds = ['m1', 'm2'];
+    asset.count.mockResolvedValue(7);
+
+    const err = await service.remove('c1').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: 'DELETE_RESOLUTION_REQUIRED',
+      dependents: { assetModels: 2, assets: 7 },
+    });
+    const modelLock = (
+      prismaQueryRaw().mock.calls as [TemplateStringsArray, ...unknown[]][]
+    ).find(([sql]) => sql.join('?').includes('FROM "asset_models"'))!;
+    expect(modelLock[0].join('?')).toContain('ORDER BY "id" FOR NO KEY UPDATE');
+    expect(modelLock[1]).toBe('c1');
+    expect(asset.count).toHaveBeenCalledWith({
+      where: { deletedAt: null, model: { categoryId: 'c1', deletedAt: null } },
+    });
+    expect(softDeleted()).toBe(false);
+  });
+
+  it('detach clears the category of every live model, in the delete transaction', async () => {
+    liveModelIds = ['m1', 'm2'];
+    assetCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
+
+    await service.remove('c1', { strategy: 'detach' });
+
+    expect(assetModel.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['m1', 'm2'] }, categoryId: 'c1' },
+      data: { categoryId: null },
+    });
+    expect(softDeleted()).toBe(true);
+    expect(writesOutsideTx).toBe(0);
+  });
+
+  it('move re-points every live model to the target category', async () => {
+    liveModelIds = ['m1'];
+    assetCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
+
+    await service.remove('c1', { strategy: 'move', targetId: 'c2' });
+
+    expect(assetModel.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['m1'] }, categoryId: 'c1' },
+      data: { categoryId: 'c2' },
+    });
+    expect(softDeleted()).toBe(true);
+  });
+
+  it.each([
+    ['itself', 'c1'],
+    ['an archived or missing category', 'c9'],
+  ])(
+    'refuses (400) to move to %s, and writes nothing',
+    async (_what, targetId) => {
+      liveModelIds = ['m1'];
+
+      await expect(
+        service.remove('c1', { strategy: 'move', targetId }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(assetModel.updateMany).not.toHaveBeenCalled();
+      expect(softDeleted()).toBe(false);
+    },
+  );
+
+  it('a failed soft delete after the move rejects the whole call (both writes share the transaction)', async () => {
+    liveModelIds = ['m1'];
+    assetCategory.update.mockRejectedValue(new Error('connection lost'));
+
+    await expect(
+      service.remove('c1', { strategy: 'move', targetId: 'c2' }),
+    ).rejects.toThrow('connection lost');
+    expect(writesOutsideTx).toBe(0);
+  });
+
+  it('the delete-impact preview counts live models and their live assets, listing each only for a reader', async () => {
+    assetCategory.findFirst.mockResolvedValue({ id: 'c1', deletedAt: null });
+    assetModel.count.mockResolvedValue(2);
+    assetModel.findMany.mockResolvedValue([
+      { id: 'm1', name: 'Latitude', manufacturer: 'Dell' },
+    ]);
+    asset.count.mockResolvedValue(5);
+    asset.findMany.mockResolvedValue([
+      { id: 'a1', name: 'LT-1', assetTag: 'IT-1' },
+    ]);
+
+    await expect(service.deleteImpact('c1')).resolves.toEqual({
+      assetModels: {
+        total: 2,
+        items: [{ id: 'm1', name: 'Latitude', manufacturer: 'Dell' }],
+      },
+      assets: {
+        total: 5,
+        items: [{ id: 'a1', name: 'LT-1', assetTag: 'IT-1' }],
+      },
+    });
+    expect(assetModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { categoryId: 'c1', deletedAt: null },
+        take: 50,
+      }),
+    );
+
+    readable = new Set(['asset:read']);
+    await expect(service.deleteImpact('c1')).resolves.toEqual({
+      assetModels: { total: 2, items: null },
+      assets: {
+        total: 5,
+        items: [{ id: 'a1', name: 'LT-1', assetTag: 'IT-1' }],
+      },
+    });
+    readable = new Set();
+    await expect(service.deleteImpact('c1')).resolves.toEqual({
+      assetModels: { total: 2, items: null },
+      assets: { total: 5, items: null },
+    });
+  });
+
+  it('the delete-impact preview 404s for an archived category', async () => {
+    assetCategory.findFirst.mockResolvedValue(null);
+
+    await expect(service.deleteImpact('old')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('findAll excludes soft-deleted, ordered by name', async () => {

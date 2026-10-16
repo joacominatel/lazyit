@@ -127,8 +127,9 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 > changes, which need no action unless a line says so:
 >
 > - **AI chats started before the update become read-only.** The AI tool definitions changed (#1603:
->   `location_archive` and `category_archive` take a resolution), so older conversations show the usual
->   "version changed" notice. Start a new chat.
+>   `location_archive` and `category_archive` take a resolution; SEC-041: `category_archive` for asset
+>   categories and `asset_model_archive` too), so older conversations show the usual "version changed"
+>   notice. Start a new chat.
 > - **AI: your own name counts as untrusted text** in the assistant's session context (#1599). A turn
 >   that reads it, usually the first, shows the untrusted-source banner and is never auto-approved.
 > - **Infra: an asset linked to several live nodes is de-duplicated on upgrade** (#1599).
@@ -161,7 +162,10 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   returns 409 `DELETE_RESOLUTION_REQUIRED`** unless the request passes one strategy for everything
 >   affected: `?strategy=detach` or `?strategy=move&targetId=<id>` (#1603). The web dialog asks for it, and
 >   `GET …/:id/delete-impact` previews what is affected. Update any script or API client that deletes these
->   rows. Asset categories and asset models are unchanged.
+>   rows. **Asset categories and asset models follow the same rule** (SEC-041): an asset category with
+>   live models, or a model with live assets or open purchase lines mapped to it, answers the same 409
+>   without a strategy. A model create, or an update that changes its category, is a 400 when the
+>   category is archived, and restoring a model whose category is archived is a 409.
 > - **Delegated administration is narrower** (#1601, #1606, #1611).
 >   - A role delegated `settings:manage` can no longer save the permission matrix, save the directory
 >     connection or start a directory sync: 403 `ADMIN_REQUIRED`.

@@ -3,7 +3,7 @@ title: "ADR-0023: Access management design (Application + AccessGrant)"
 tags: [adr]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -201,8 +201,19 @@ happens to everything affected — never row by row.
 - **"Create another one"** is not an API mode: the client creates the target, then deletes with `move`.
 - **Scope:** application categories, consumable categories ([[0034-consumables-design]]) and locations
   ([[location]]). Asset categories and asset models are unchanged (SEC-041 stays open for them).
+  *Superseded by the 2026-10-16 extension below.*
 
 Rows archived before this change keep their dangling reference; nothing is backfilled.
+
+**Extended 2026-10-16 (SEC-041, CEO "3. ok"):** asset categories ([[asset-category]]) and asset models
+([[asset-model]]) take the same resolution, which closes SEC-041.
+- An asset category's dependents are its live models. Its live assets are counted in the preview and
+  the `409`, because their category follows their model. No history is written.
+- A model's dependents are its live assets and the lines of open purchases mapped to it. Each asset gets
+  a `MODEL_CHANGED` row and each line a `LINE_UPDATED` event.
+- A model's `move` target may sit in any category.
+- A model write that names an archived category is a `400`, and restoring a model whose category is
+  archived is a `409`.
 
 Related: [[application]] · [[access-grant]] · [[access-request]] · [[user]] ·
 [[0019-asset-assignment-integrity]] · [[0006-soft-delete-and-auditing]] · [[0005-id-strategy]] ·

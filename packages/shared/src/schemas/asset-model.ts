@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AssetSpecsWriteSchema } from "./asset";
-import { requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, requireAtLeastOneKey } from "./primitives";
 
 /**
  * AssetModel — the generic make/model an Asset is an instance of (e.g. "Dell Latitude 5520").
@@ -66,6 +66,22 @@ export const UpdateAssetModelSchema = requireAtLeastOneKey(
     .partial(),
 );
 
+// Only lines still expecting units in a DRAFT or ORDERED purchase; any other line keeps the deleted model as history.
+export const AssetModelDeleteImpactSchema = z.object({
+  assets: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), assetTag: z.string().nullable() }),
+  ),
+  purchaseOrderLines: deleteImpactGroup(
+    z.object({
+      id: z.cuid(),
+      purchaseOrderId: z.cuid(),
+      reference: z.string().nullable(),
+      description: z.string(),
+    }),
+  ),
+});
+
 export type AssetModel = z.infer<typeof AssetModelSchema>;
 export type CreateAssetModel = z.infer<typeof CreateAssetModelSchema>;
 export type UpdateAssetModel = z.infer<typeof UpdateAssetModelSchema>;
+export type AssetModelDeleteImpact = z.infer<typeof AssetModelDeleteImpactSchema>;

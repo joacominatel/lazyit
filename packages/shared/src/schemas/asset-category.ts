@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AssetSpecsDictionarySchema } from "./asset-specs-dictionary";
-import { requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, requireAtLeastOneKey } from "./primitives";
 
 /**
  * AssetCategory — classification for AssetModels (Laptop, Server, Switch, …). User-managed:
@@ -53,6 +53,17 @@ export const UpdateAssetCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+// The delete re-points only the models; their live assets are listed because their category follows the model.
+export const AssetCategoryDeleteImpactSchema = z.object({
+  assetModels: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), manufacturer: z.string() }),
+  ),
+  assets: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), assetTag: z.string().nullable() }),
+  ),
+});
+
 export type AssetCategory = z.infer<typeof AssetCategorySchema>;
 export type CreateAssetCategory = z.infer<typeof CreateAssetCategorySchema>;
 export type UpdateAssetCategory = z.infer<typeof UpdateAssetCategorySchema>;
+export type AssetCategoryDeleteImpact = z.infer<typeof AssetCategoryDeleteImpactSchema>;

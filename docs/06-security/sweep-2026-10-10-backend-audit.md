@@ -70,7 +70,7 @@ Updated 2026-10-16 from the decision round (#1598–#1609), verified against the
 - **Still open.** SEC-088, on two `settings:manage` paths outside AUD-002: `PUT /smtp` and
   service-account token verbs (*closed later on 2026-10-16 by #1611: the SMTP save is ADMIN-only and
   service-account verbs are capped at the caller's own*). SEC-041, on its asset-category and asset-model parts, which are outside
-  AUD-024.
+  AUD-024 (*closed later on 2026-10-16 by #1620: asset categories and models take the same resolution*).
 - **Not an entry.** The round also fixed unique-violation handling under `@prisma/adapter-pg` (#1602,
   #1607).
 
@@ -101,7 +101,7 @@ Follow-ups that are not one entry's remainder are tracked outside this note.
 | AUD-021 | Fixed | #1578 |  |
 | AUD-022 | Fixed | #1569 |  |
 | AUD-023 | Fixed | #1569, #1573, #1582 |  |
-| AUD-024 | Fixed | #1603 | A location delete with live dependents takes one resolution for all of them (`detach` or `move`), otherwise 409 `DELETE_RESOLUTION_REQUIRED`; `GET /locations/:id/delete-impact` previews it. Web: #1608. Closes the location part of [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]]; the asset-category and asset-model parts stay open. |
+| AUD-024 | Fixed | #1603 | A location delete with live dependents takes one resolution for all of them (`detach` or `move`), otherwise 409 `DELETE_RESOLUTION_REQUIRED`; `GET /locations/:id/delete-impact` previews it. Web: #1608. Closes the location part of [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]]; the asset-category and asset-model parts followed in #1620, which closes it. |
 | AUD-025 | Fixed | #1584 | [[SEC-052-catalog-attach-to-soft-deleted-category\|SEC-052]] closed. |
 | AUD-026 | Fixed | #1581 |  |
 | AUD-027 | Fixed | #1581 |  |
