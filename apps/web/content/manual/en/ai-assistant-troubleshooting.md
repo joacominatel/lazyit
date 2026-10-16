@@ -153,7 +153,8 @@ whose last decision was refused. **Fix:** decide those on their own page. See
 
 **Cause:** auto-approve never covers critical changes, changes proposed after the assistant read free
 text in the same turn (anyone's, including your own notes), or anything in a chat that searched the web.
-**Fix:** approve it on its card. See [Auto-approve](/help/ai-assistant-approvals#auto-approve).
+Your own name counts as free text, and the assistant reads it at the start of most chats, so that turn is
+never auto-approved. **Fix:** approve it on its card. See [Auto-approve](/help/ai-assistant-approvals#auto-approve).
 
 ## External AI agents (MCP)
 

@@ -159,7 +159,9 @@ cuya última decisión fue rechazada. **Solución:** decidilos en su propia pág
 
 **Causa:** la aprobación automática nunca cubre cambios críticos, cambios propuestos después de que el
 asistente leyó texto libre en el mismo turno (de cualquiera, incluidas tus propias notas), ni nada en un
-chat que buscó en la web. **Solución:** aprobalo en su tarjeta. Mirá
+chat que buscó en la web. Tu propio nombre cuenta como texto libre, y el asistente lo lee al comienzo de
+la mayoría de los chats, así que ese turno nunca se aprueba automáticamente. **Solución:** aprobalo en su
+tarjeta. Mirá
 [Aprobación automática](/help/ai-assistant-approvals#aprobación-automática).
 
 ## Agentes de IA externos (MCP)
