@@ -129,6 +129,9 @@ export, behind the same `logs:read`. Mapping onto the unified row:
   stay secret-only.
 - `detail` is `{"rowCount":…,"filters":{…}}`, compact JSON like the service-account source's.
 
-The wire row and the audit CSV header are unchanged; only `AuditLogSource` widens. Once the audit export moves onto the
-engine (epic #1597, phase 1b), an export of the audit log itself is recorded here too (resource
-`AUDIT`).
+The wire row and the audit CSV header are unchanged; only `AuditLogSource` widens. Since the audit export moved onto
+the engine (epic #1597, phase 1b), an export of any audit source, this one included, is recorded here
+too (resource `AUDIT`). That move also replaced the "one shared CSV util" above for the server path: the
+export streams its own column set (same header) through the engine's typed guard, with a BOM and no
+stamp, and keeps its `id < last` keyset. `utils/audit-log-csv.ts` now serves only the browser "export
+visible" path until it retires.

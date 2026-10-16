@@ -147,8 +147,9 @@ The log is the fourth source of Reports › Audit (§ amendment to [[0081-audit-
   LF or the full-width `＝ ＋ － ＠`, then RFC-4180 quoting. `number`, `date` and `money` cells skip the
   guard only when the value is a strict number (`-?digits[.digits]`) or an ISO-8601 date or timestamp,
   so `-5` stays `-5`; anything else in such a column is guarded like text. The helpers are `csvCell()` /
-  `guardCsvFormula()` in `@lazyit/shared`; the legacy `escapeCsvCell()` keeps its narrower guard until
-  the existing exports move onto the engine.
+  `guardCsvFormula()` in `@lazyit/shared`. No server export uses the legacy `escapeCsvCell()` any more
+  (phase 1b); it keeps its narrower guard only for the browser "export visible page" paths until 1d
+  retires them.
 - **The `# lazyit` provenance stamp** ([[0083-versioning-and-releases]]) only on a file an importer reads
   back, today the asset inventory. Activity and audit exports drop it: no importer consumes it there and
   it pushes the header to row 2.

@@ -3,7 +3,7 @@ title: "ADR-0100: Money as 64-bit integer minor units"
 tags: [adr, money, data-model, validation, contract, migration]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -118,7 +118,8 @@ the keys it names and only when they hold the type it expects, so a partial `sel
   dispatch to the same controller handlers, so they receive the converted row too. Two asset reads carry
   `purchaseCost` outside the full-row mapper (#1511), each converting it in place: the **list row**
   (`GET /assets`, `toLeanListItem`; the `/assets/mine` self-read selects no cost) and the **inventory CSV
-  export** (`streamInventoryCsvRows`, which writes the amount into the file as major units).
+  export** (`GET /assets/export`, whose `money` column writes the amount into the file as major units;
+  [[0103-data-export-streaming-path]]).
 - **Why not a Prisma extension.** A `result` extension that overrides the three fields would convert at
   runtime, but `PrismaService` is typed as the base client, so the generated types would keep saying
   `bigint` while the value is a `number`: types and runtime would disagree on every read. It would also

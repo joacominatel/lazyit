@@ -3,7 +3,7 @@ title: Asset
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Asset
@@ -271,12 +271,12 @@ three stored fields are echoed on create/update.
   look-ahead sweeper emits one heads-up per asset when its warranty enters the window (#1070). Each pass
   sends at most 200 new heads-ups per type, soonest expiry first, so a bulk-imported backlog drains over
   consecutive days.
-  `assetTags` / `serials` (#1387, list only — the CSV export does not take them) are **exact,
+  `assetTags` / `serials` (#1387; the CSV export takes them too) are **exact,
   case-sensitive** value lists, comma-separated, at most 200 distinct values each (more → `400`; a value
   cannot contain a comma): the assets holding any of those tags / serials, as one indexed `IN` per
   field. Tags and serials are unique among live assets, so every match fits one maximum page. The AI
   batch create uses them for its duplicate check.
-  **Purchase filters** (#1476, list only — the CSV export does not take them): `purchaseOrderLineId` (the
+  **Purchase filters** (#1476; the CSV export takes them too, with the same check): `purchaseOrderLineId` (the
   assets linked to that line), `purchaseOrderId` (linked to any line of that purchase) and
   `purchaseLinked` (`true` = linked to some purchase line, `false` = to none), AND-combined; an id that is
   not a cuid is a `400`. They reveal provenance, so any of them needs **`purchaseOrder:read`** on top of the
@@ -292,10 +292,15 @@ three stored fields are echoed on create/update.
   (amounts compare as stored, whatever their currency label; an asset without a purchase date, warranty
   end or cost sorts last in both directions). Every order ends with the unique `id`, so a page boundary is
   stable ([[0030-list-pagination-contract]] §9). The model's manufacturer is not sortable.
-- `GET /assets/export` (`asset:read`) — the **whole** filtered inventory as CSV (#872), streamed
-  newest first in batches, never just one page. It takes the list's filters except `assetTags`,
-  `serials` and the purchase filters, and `deleted=only` is ADMIN-only. Cells are RFC-4180 escaped with
-  a formula-injection guard; `specs` is not exported. See the purchases note for the extra columns.
+- `GET /assets/export` (`asset:read`) — the **whole** filtered inventory as CSV (#872), on the export
+  engine ([[0103-data-export-streaming-path]]): every list filter (the purchase ones behind the same
+  `purchaseOrder:read` check), `deleted=only` ADMIN-only, the list's own `where` and lean projection, read
+  newest first by keyset on `(createdAt, id)` so an asset created mid-export is never sent twice. Over
+  100,000 matching assets → `422`; every export appends a [[data-export-log]] row. The file starts with a
+  UTF-8 BOM and the `# lazyit` provenance line the Migrator reads back ([[0069-migrator-import]]), then
+  the header and CRLF rows. Its column names and order are an importer contract: they only grow at the
+  end. Dates and the cost are typed cells (raw), text cells carry the formula guard; `specs` is not
+  exported. See the purchases note for the extra columns.
 - `GET /assets/mine` — the caller's **own** assets: those with a live assignment to them (#947). A
   self-read like `GET /users/me`, so **no** `asset:read` is needed; any authenticated human may call it
   and a service account gets `403`. The user comes only from the principal. Paginated like the list,

@@ -3,7 +3,7 @@ title: RecentActivity
 tags: [domain, entity, view]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-14
+updated: 2026-10-16
 ---
 
 # RecentActivity
@@ -15,7 +15,7 @@ updated: 2026-10-14
 A **derived, read-only** unified activity feed for the dashboard — one chronological "what happened
 across the IT estate?" stream, newest first. Not a table: it is a **Postgres VIEW**
 (`recent_activity`) that `UNION ALL`s the **five** append-only activity sources. Nothing writes to it;
-it has no id, no timestamps of its own, no soft delete. Requested by the CEO directly ("podemos hacerlo
+it has no id of its own (a derived `sourceKey` names each event), no timestamps of its own, no soft delete. Requested by the CEO directly ("podemos hacerlo
 con una view"). See [[0044-recent-activity-view]] and [[0050-user-history-and-activity-user-entity]]
 (the fifth source).
 
@@ -62,6 +62,11 @@ silent no-match. Keep it in sync with the view if a new source verb is added.
   target on `deletedAt IS NULL`), so a soft-deleted person's name is never surfaced.
 - `targetUserName` (issue #311) — that target user's display name (`firstName lastName`), or `null`.
 
+The view also carries a trailing **`sourceKey`** column (#1597, [[0044-recent-activity-view]] amendment):
+`'<table>:<id>[:<action>]'` — `asset_history:42`, `asset_assignments:<cuid>:assigned` /
+`…:released`, `access_grants:<cuid>:granted` / `…:revoked`, `consumable_movements:7`,
+`user_history:9` — unique per event. It is not on the wire row; the CSV export pages by it.
+
 The subject fields turn the generic line ("Access revoked from a user") into a specific, click-through
 headline ("Access to **\<App\>** revoked from **\<User\>**") on both the dashboard panel and the
 Reports/Informes table. They are resolved purely from each source's EXISTING relations in the view
@@ -92,9 +97,20 @@ query is `RecentActivityQuerySchema` (the optional filters intersected with the 
 the web requests ~20), newest first, read with a typed `$queryRaw` in
 `DashboardService.getActivity`. Rows sharing one `occurredAt` (a batch operation stamps a single instant
 on many rows) are ordered by `entityType`, `entityId`, `action`, `targetUserId`, `actorId` and `summary`,
-so OFFSET pages and the CSV export batches never repeat or drop a tied row. The web renders it as the
+so OFFSET pages never repeat or drop a tied row. The web renders it as the
 dashboard's "Recent activity" panel via the data layer ([[0020-frontend-data-layer]]): `useDashboardActivity` (infinite query) →
 `RecentActivityPanel`, and the Reports/Informes screen.
+
+### CSV export
+
+`GET /dashboard/activity/export` — the same `logs:read` and the same filters (`actorId=me` resolved the
+same way), on the export engine ([[0103-data-export-streaming-path]]). It reads the feed's own `WHERE`,
+newest first by keyset on `(occurredAt DESC, sourceKey DESC)` — an event recorded mid-export is never sent
+twice, and a tie on `occurredAt` cannot drop or repeat a row. Every `occurredAt` source is
+`TIMESTAMP(3)`, so the cursor round-trips through a JS `Date` exactly (a test guards it). Columns:
+`occurredAt,action,entityType,entityId,actorName,summary`; UTF-8 BOM, CRLF, no provenance line. Over
+100,000 matching events → `422`; every export appends a [[data-export-log]] row. The on-screen feed
+keeps OFFSET pages.
 
 ### Filters (issue #181 / DEBT-1)
 
