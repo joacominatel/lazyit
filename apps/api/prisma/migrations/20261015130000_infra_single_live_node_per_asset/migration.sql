@@ -1,21 +1,27 @@
--- One live node per asset (ADR-0070 §5, AUD-030/031): the API already refuses a second link, and this
--- index closes the race that check cannot. Raw SQL because PSL cannot express the WHERE filter
--- (docs/05-runbooks/prisma-migrations.md §3).
---
--- Existing shared links would block the index. For each asset, the OLDEST live node (createdAt, then
--- id) keeps it; the others lose only the link. No row is deleted and no other column is written.
+-- One live node per asset: the oldest live link wins, the others are un-linked (never deleted) and stamped _infraAssetUnlinked.
 WITH ranked AS (
     SELECT "id",
-           ROW_NUMBER() OVER (
-               PARTITION BY "assetId"
-               ORDER BY "createdAt" ASC, "id" ASC
-           ) AS rn
+           ROW_NUMBER() OVER w AS rn,
+           FIRST_VALUE("id") OVER w AS "keptNodeId"
     FROM "infra_nodes"
     WHERE "deletedAt" IS NULL
       AND "assetId" IS NOT NULL
+    WINDOW w AS (PARTITION BY "assetId" ORDER BY "createdAt" ASC, "id" ASC)
 )
 UPDATE "infra_nodes" AS n
-SET "assetId" = NULL
+SET "assetId" = NULL,
+    "specs" = CASE
+        WHEN jsonb_typeof(COALESCE(n."specs", 'null'::jsonb)) IN ('object', 'null')
+        THEN COALESCE(NULLIF(n."specs", 'null'::jsonb), '{}'::jsonb) || jsonb_build_object(
+            '_infraAssetUnlinked',
+            jsonb_build_object(
+                'assetId', n."assetId",
+                'keptByNodeId', ranked."keptNodeId",
+                'at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            )
+        )
+        ELSE n."specs"
+    END
 FROM ranked
 WHERE n."id" = ranked."id"
   AND ranked.rn > 1;

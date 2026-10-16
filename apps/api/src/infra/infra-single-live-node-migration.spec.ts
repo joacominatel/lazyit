@@ -19,8 +19,16 @@ describe('infra_single_live_node_per_asset migration', () => {
     expect(sql).toMatch(
       /PARTITION BY "assetId"\s+ORDER BY "createdAt" ASC, "id" ASC/,
     );
-    expect(sql).toMatch(/SET "assetId" = NULL\s+FROM ranked/);
+    expect(sql).toMatch(/SET "assetId" = NULL,\s+"specs" = CASE/);
     expect(sql).toMatch(/ranked\.rn > 1/);
+  });
+
+  it('stamps each dropped link on the node it was taken from', () => {
+    expect(sql).toMatch(
+      /'_infraAssetUnlinked',\s+jsonb_build_object\(\s+'assetId', n\."assetId",\s+'keptByNodeId', ranked\."keptNodeId"/,
+    );
+    // A non-object blob is kept as it is rather than replaced.
+    expect(sql).toMatch(/ELSE n\."specs"/);
   });
 
   it('resolves existing shared links before building the live-only index', () => {

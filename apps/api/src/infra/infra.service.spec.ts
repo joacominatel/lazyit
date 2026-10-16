@@ -7528,6 +7528,8 @@ describe('InfraService', () => {
         where: { id: 'node-1', state: 'CONFIRMED', assetId: null },
         data: { state: 'PENDING' },
       });
+      // The link never landed, so no AGENT_LINKED row may claim it did.
+      expect(assetHistory.record).not.toHaveBeenCalled();
     });
 
     it('never adopts an Asset another LIVE node already links — that one mints instead (AUD-030)', async () => {
@@ -7600,6 +7602,10 @@ describe('InfraService', () => {
       await service.confirmNode('node-1', {}, HUMAN);
 
       expect(assetHistory.record).toHaveBeenCalledTimes(1);
+      // Recorded only after the node update wrote the link.
+      expect(assetHistory.record.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.infraNode.update.mock.invocationCallOrder[0],
+      );
       const event = (assetHistory.record.mock.calls as unknown[][])[0][1] as {
         assetId: string;
         eventType: string;

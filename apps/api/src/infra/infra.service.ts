@@ -3481,9 +3481,14 @@ export class InfraService {
     // Mint the backing Asset only when tracking AND the node isn't already linked. Reuse the exact
     // createNode path: carry the agent's host facts over + stamp the auto-created provenance marker.
     let assetId = node.assetId ?? undefined;
+    let adopted = false;
     if (trackAsAsset && !node.assetId) {
       try {
-        assetId = await this.resolveBackingAsset(node, label, principal);
+        ({ id: assetId, adopted } = await this.resolveBackingAsset(
+          node,
+          label,
+          principal,
+        ));
       } catch (err) {
         // Hand the node back to the tray so a retry can mint; the claim alone linked nothing.
         await this.prisma.infraNode.updateMany({
@@ -3505,19 +3510,23 @@ export class InfraService {
         },
       })
       .catch(async (err: unknown) => {
-        // Another node linked the adopted asset first: hand this one back to the tray, as above.
+        // Whatever failed, hand the node back to the tray so a retry can confirm it.
         await this.prisma.infraNode.updateMany({
           where: { id, state: 'CONFIRMED', assetId: null },
           data: { state: 'PENDING' },
         });
         return this.rethrowSharedAssetLink(err, assetId, id);
       });
+    // Only once the link is written: a confirm that lost the race must not leave a false AGENT_LINKED row.
+    if (adopted && assetId !== undefined) {
+      await this.recordAgentLink(assetId, node, principal);
+    }
     // Fire-and-forget search re-sync: state/kind/label/asset link may have changed (ADR-0035).
     void this.syncNodeToSearch(updated.id);
     return this.getNodeDetail(id, principal);
   }
 
-  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link. */
+  /** Adopt the corroborated live Asset (ADR-0093 §3) or mint one; returns the id to link and which it was. */
   private async resolveBackingAsset(
     node: {
       id: string;
@@ -3527,7 +3536,7 @@ export class InfraService {
     },
     label: string,
     principal?: Principal,
-  ): Promise<string> {
+  ): Promise<{ id: string; adopted: boolean }> {
     const hostSpecs = (node.specs ?? {}) as Record<string, unknown>;
     // Promote the discovered hardware serial to the canonical `Asset.serial` (#1081) — only a
     // sanitized real serial (dmidecode junk placeholders dropped). The raw value always survives in
@@ -3549,10 +3558,12 @@ export class InfraService {
       // stamping it here would mean a later detach silently deleted the operator's curated
       // inventory row — the opposite of what the #1117 error message promises ("a pre-existing one
       // is left intact and merely un-linked"). See {@link detachAsset}.
-      await this.recordAgentLink(adopted.id, node, principal);
-      return adopted.id;
+      return { id: adopted.id, adopted: true };
     }
-    return this.mintBackingAsset(hostSpecs, serial, label, principal);
+    return {
+      id: await this.mintBackingAsset(hostSpecs, serial, label, principal),
+      adopted: false,
+    };
   }
 
   /**
@@ -3652,7 +3663,7 @@ export class InfraService {
    * report at a five-minute cadence would drown every human edit this row ever received. What MOVED is
    * audited on the NODE instead ([[infra-node-fact-change]], #1143), one join away.
    *
-   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been decided
+   * BEST-EFFORT, never fatal. The link itself is the operator's action and it has already been written
    * by the time this runs; losing the audit row would be a real loss, but failing the confirm over it
    * would be a worse one — and on the auto-confirm path (#1145) it would fail a REPORT.
    */
@@ -5242,6 +5253,8 @@ const REPORT_DIAGNOSTIC_KEYS = [
 const NODE_ONLY_SPECS_KEYS = [
   ...REPORT_DIAGNOSTIC_KEYS,
   'softwareHash',
+  // Stamped by migration 20261015130000 on a node that lost a shared asset link: node provenance.
+  '_infraAssetUnlinked',
 ] as const;
 
 /**
