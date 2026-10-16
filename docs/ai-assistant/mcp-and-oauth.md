@@ -614,6 +614,7 @@ model OAuthGrant {
   mcpCredentialEpoch Int                    // snapshot; mismatch with User.mcpCredentialEpoch = dead (R7)
   expiresAt     DateTime?                   // personal tokens only
   lastUsedAt    DateTime?
+  announcedAt   DateTime?                   // first-use notice sent (AUD-014); null = never announced
   revokeReason  String?                     // 'user' | 'admin' | 'refresh_reuse' | 'revocation_endpoint' | 'client_deleted'
   revokedById   String?   @db.Uuid
   createdAt     DateTime  @default(now())
@@ -1229,11 +1230,13 @@ configured (it is on the emailable allowlist). `dedupeKey` `mcp.client_connected
 once per connection across replicas and restarts; a per-process memo spares the lookups and is set only
 once the notice exists (G3 review F5), so a failed send is retried on the next request. The email copy
 follows the owner's per-type email opt-out: the allowlist has no mandatory types (accepted; the bell copy
-always lands). A grant older
-than the bell's 90-day retention that was already used is not announced again (its notice was sent and
-may have been pruned); one never used before — `lastUsedAt` null when the request verified it, as for a
-personal token minted and kept idle — is announced whatever its age. An OAuth grant counts as used from
-its code exchange, so an old one is never re-announced. Service Accounts
+always lands). Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
+(AUD-014), never inferred from its age or `lastUsedAt`, so the bell's 90-day prune cannot make a grant
+that was never announced look announced — a personal token minted and first used months later is still
+announced. A grant with `announcedAt` null whose notice row exists (sent before the column, or by an older
+replica during a rolling update) counts as announced and gets the column filled in. Two concurrent first
+uses claim the column with a conditional `updateMany` (`announcedAt IS NULL`), so only one sends; a failed
+send releases the claim and the next request retries. Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
 token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).

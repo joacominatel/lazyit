@@ -3,7 +3,7 @@ title: OAuthGrant
 tags: [domain, entity, ai-assistant, mcp, oauth, security]
 status: accepted
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-10-15
 ---
 
 # OAuthGrant
@@ -42,6 +42,11 @@ plain-HTTP `lan` instance. It is what the user sees and revokes under "Connected
   the MCP switch.
 - `kind` `personal` (`lzit_pat_…`) exists only on `lan`, always with an expiry (90 days by default,
   365 at most).
+- **Announced once, recorded on the grant**: the first `/mcp` use sends the owner the
+  `mcp.client_connected` notice ([[notification]]) and sets `announcedAt`. The decision reads
+  `announcedAt` (and, for grants that predate the column, the notice row), never the grant's age, so a
+  token first used long after it was minted is still announced (AUD-014). Two concurrent first uses claim
+  the column with a conditional update and only one sends.
 
 ## Fields
 
@@ -59,6 +64,7 @@ Prisma model `OAuthGrant` → table `oauth_grants`.
 | `sessionEpoch` | `int` | the user's `sessionEpoch` at issuance — informational only since 2026-09-24. |
 | `mcpCredentialEpoch` | `int` | the user's `mcpCredentialEpoch` at issuance; a mismatch means dead. Grants that predate the column were set to 0 when alive and -1 (never matches) when already dead. |
 | `expiresAt` / `lastUsedAt` | `datetime?` | expiry is mandatory for personal tokens. |
+| `announcedAt` | `datetime?` | when the first-use notice was sent; null = never announced. Added 2026-10-15: the migration filled it from the existing `mcp.client_connected` notices, every other grant reads null. |
 | `revokeReason` / `revokedById` | `text?` / `uuid?` | |
 | `createdAt` / `updatedAt` / `deletedAt` | `datetime` | soft delete = revoked. |
 
