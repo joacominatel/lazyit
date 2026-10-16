@@ -9,6 +9,8 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -20,9 +22,11 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
   ArticleAliasSchema,
@@ -46,7 +50,9 @@ import {
   UpdateArticleSchema,
   type ArticleListSort,
 } from '@lazyit/shared';
-import { ArticlesService } from './articles.service';
+import { ArticlesService, type ArticleListFilters } from './articles.service';
+import { ARTICLE_EXPORT_COLUMNS } from './article-export';
+import { ExportService } from '../common/export';
 import { ArticleImportService } from './import/article-import.service';
 import { importUploadOptions } from './article-import';
 import { parseUuidQuery } from '../common/parse-uuid-query';
@@ -85,6 +91,7 @@ export class ArticlesController {
   constructor(
     private readonly articles: ArticlesService,
     private readonly imports: ArticleImportService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
@@ -199,33 +206,17 @@ export class ArticlesController {
   ) {
     return this.articles.findPage(
       {
-        // status / categoryId / linkedTo are multi-select (#198): each value OR-combines within the
-        // filter (union), filters AND-combine. Parsed to arrays here; each element is validated
-        // against its allowlist (unknown element → 400, ADR-0030). A single value still parses.
-        categoryId: parseCuidArrayQuery(categoryId, 'categoryId'),
-        authorId: parseUuidQuery(authorId, 'authorId'),
-        status: parseEnumArrayQuery(status, ArticleStatusSchema, 'status'),
-        q,
-        linked: this.parseSingleEnum(
+        ...this.parseListFilters({
+          categoryId,
+          authorId,
+          status,
+          q,
           linked,
-          ArticleLinkedFilterSchema,
-          'linked',
-        ),
-        linkedTo: parseEnumArrayQuery(
           linkedTo,
-          ArticleLinkedToSchema,
-          'linkedTo',
-        ),
-        // assetId / applicationId are the specific-entity link filters (#213) — multi-value cuids,
-        // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
-        assetId: parseCuidArrayQuery(assetId, 'assetId'),
-        applicationId: parseCuidArrayQuery(applicationId, 'applicationId'),
-        includeSubfolders:
-          this.parseSingleEnum(
-            includeSubfolders,
-            ArticleIncludeSubfoldersSchema,
-            'includeSubfolders',
-          ) === 'true',
+          assetId,
+          applicationId,
+          includeSubfolders,
+        }),
         sort: this.parseSingleEnum<ArticleListSort>(
           sort,
           ArticleListSortSchema,
@@ -236,6 +227,121 @@ export class ArticlesController {
       user,
       principal,
     );
+  }
+
+  // Declared before `:id`, which would otherwise take `export` as an id.
+  @Get('export')
+  @RequirePermission('article:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of the article index matching the GET /articles filters (ADR-0103): metadata only, never a body, excerpt or version. Same permission, same rows: the folder ACL (ADR-0060) and the draft rule (ADR-0022, a draft to its author only) of the list. Audited; above 100,000 rows → 422; a parallel or sixth export in a minute → 429.',
+  })
+  @ApiQuery({ name: 'categoryId', required: false, isArray: true })
+  @ApiQuery({
+    name: 'includeSubfolders',
+    required: false,
+    enum: [...ArticleIncludeSubfoldersSchema.options],
+  })
+  @ApiQuery({ name: 'authorId', required: false })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...ArticleStatusSchema.options],
+    isArray: true,
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({
+    name: 'linked',
+    required: false,
+    enum: [...ArticleLinkedFilterSchema.options],
+  })
+  @ApiQuery({
+    name: 'linkedTo',
+    required: false,
+    enum: [...ArticleLinkedToSchema.options],
+    isArray: true,
+  })
+  @ApiQuery({ name: 'assetId', required: false, isArray: true })
+  @ApiQuery({ name: 'applicationId', required: false, isArray: true })
+  @ApiOkResponse({ description: 'The matching articles as CSV (text/csv).' })
+  async export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
+    @CurrentUser() user?: User,
+    @Query('categoryId') categoryId?: string | string[],
+    @Query('authorId') authorId?: string,
+    @Query('status') status?: string | string[],
+    @Query('q') q?: string,
+    @Query('linked') linked?: string,
+    @Query('linkedTo') linkedTo?: string | string[],
+    @Query('assetId') assetId?: string | string[],
+    @Query('applicationId') applicationId?: string | string[],
+    @Query('includeSubfolders') includeSubfolders?: string,
+  ): Promise<StreamableFile> {
+    const filters = this.parseListFilters({
+      categoryId,
+      authorId,
+      status,
+      q,
+      linked,
+      linkedTo,
+      assetId,
+      applicationId,
+      includeSubfolders,
+    });
+    return this.exports.exportCsv({
+      resource: 'ARTICLES',
+      principal,
+      response,
+      filters: { ...filters },
+      ...(await this.articles.exportSource(filters, user, principal)),
+      columns: ARTICLE_EXPORT_COLUMNS,
+      filename: 'articles',
+    });
+  }
+
+  /** The list's filter parser, shared by GET /articles and its export so both read the same rows. */
+  private parseListFilters(raw: {
+    categoryId?: string | string[];
+    authorId?: string;
+    status?: string | string[];
+    q?: string;
+    linked?: string;
+    linkedTo?: string | string[];
+    assetId?: string | string[];
+    applicationId?: string | string[];
+    includeSubfolders?: string;
+  }): ArticleListFilters {
+    return {
+      // status / categoryId / linkedTo are multi-select (#198): each value OR-combines within the
+      // filter (union), filters AND-combine. Parsed to arrays here; each element is validated
+      // against its allowlist (unknown element → 400, ADR-0030). A single value still parses.
+      categoryId: parseCuidArrayQuery(raw.categoryId, 'categoryId'),
+      authorId: parseUuidQuery(raw.authorId, 'authorId'),
+      status: parseEnumArrayQuery(raw.status, ArticleStatusSchema, 'status'),
+      q: raw.q,
+      linked: this.parseSingleEnum(
+        raw.linked,
+        ArticleLinkedFilterSchema,
+        'linked',
+      ),
+      linkedTo: parseEnumArrayQuery(
+        raw.linkedTo,
+        ArticleLinkedToSchema,
+        'linkedTo',
+      ),
+      // assetId / applicationId are the specific-entity link filters (#213) — multi-value cuids,
+      // same comma-encoded/repeated wire shape + 400-on-unknown-element contract as categoryId.
+      assetId: parseCuidArrayQuery(raw.assetId, 'assetId'),
+      applicationId: parseCuidArrayQuery(raw.applicationId, 'applicationId'),
+      includeSubfolders:
+        this.parseSingleEnum(
+          raw.includeSubfolders,
+          ArticleIncludeSubfoldersSchema,
+          'includeSubfolders',
+        ) === 'true',
+    };
   }
 
   /**

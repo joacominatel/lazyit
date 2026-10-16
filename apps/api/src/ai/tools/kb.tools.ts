@@ -1376,6 +1376,11 @@ export const kbToolset: AiToolset = {
     ),
     unexposed(
       ArticlesController,
+      ['export'],
+      'A bulk CSV file export (@Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      ArticlesController,
       ['importArticle', 'importStatus'],
       'The .docx import: a multipart upload and its job status — no file tools (synthesis §9.2).',
     ),
