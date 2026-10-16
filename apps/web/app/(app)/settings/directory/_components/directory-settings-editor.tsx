@@ -221,6 +221,7 @@ export function DirectorySettingsEditor() {
             {t(`fields.${name}.label`)}
           </SettingLabel>
           <Input
+            disabled={readOnly}
             id={id}
             name={field.name}
             ref={field.ref}
@@ -266,290 +267,293 @@ export function DirectorySettingsEditor() {
       ) : (
         <>
           <form onSubmit={onSubmit} noValidate>
-            <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
-              <SettingsSection
-                title={t("connection.title")}
-                summary={t("connection.summary")}
-                help={<p>{t("connection.help")}</p>}
-                helpHref={MANUAL_HREF}
-                actions={
-                  // The master on/off for the scheduled sweeper — part of this form, saved with Save as it
-                  // always has been (Sync now works while it is off).
-                  <Controller
-                    control={control}
-                    name="enabled"
-                    render={({ field }) => (
-                      <div className="flex items-center gap-2">
-                        <SettingLabel
-                          htmlFor="dir-enabled"
-                          help={<p>{t("fields.enabled.description")}</p>}
-                        >
-                          {t("fields.enabled.label")}
-                        </SettingLabel>
-                        <Switch
-                          id="dir-enabled"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </div>
-                    )}
-                  />
-                }
-                footer={
-                  <SettingsSaveBar
-                    note={
-                      readOnly
-                        ? t("adminOnly")
-                        : formState.isDirty
-                          ? tSettings("section.unsaved")
-                          : tSettings("section.noChanges")
-                    }
-                  >
-                    {/* Not gated on `formState.isDirty`, as before — a re-save is always allowed. */}
-                    <Button type="submit" size="sm" disabled={update.isPending}>
-                      {update.isPending && <ArrowPathIcon className="animate-spin" />}
-                      {t("save")}
-                    </Button>
-                  </SettingsSaveBar>
-                }
-              >
-                <div className="grid gap-4 sm:grid-cols-4">
-                  {textField("host", "dir-host", { className: "sm:col-span-3" })}
+            <SettingsSection
+              title={t("connection.title")}
+              summary={t("connection.summary")}
+              help={<p>{t("connection.help")}</p>}
+              helpHref={MANUAL_HREF}
+              actions={
+                // The master on/off for the scheduled sweeper — part of this form, saved with Save as it
+                // always has been (Sync now works while it is off).
+                <Controller
+                  control={control}
+                  name="enabled"
+                  render={({ field }) => (
+                    <div className="flex items-center gap-2">
+                      <SettingLabel
+                        htmlFor="dir-enabled"
+                        help={<p>{t("fields.enabled.description")}</p>}
+                      >
+                        {t("fields.enabled.label")}
+                      </SettingLabel>
+                      <Switch
+                        disabled={readOnly}
+                        id="dir-enabled"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </div>
+                  )}
+                />
+              }
+              footer={
+                <SettingsSaveBar
+                  note={
+                    readOnly
+                      ? t("adminOnly")
+                      : formState.isDirty
+                        ? tSettings("section.unsaved")
+                        : tSettings("section.noChanges")
+                  }
+                >
+                  {/* Not gated on `formState.isDirty`, as before — a re-save is always allowed. */}
+                  <Button type="submit" size="sm" disabled={update.isPending || readOnly}>
+                    {update.isPending && <ArrowPathIcon className="animate-spin" />}
+                    {t("save")}
+                  </Button>
+                </SettingsSaveBar>
+              }
+            >
+              <div className="grid gap-4 sm:grid-cols-4">
+                {textField("host", "dir-host", { className: "sm:col-span-3" })}
 
-                  <Controller
-                    control={control}
-                    name="port"
-                    render={({ field, fieldState }) => (
-                      <Field data-invalid={fieldState.invalid || undefined}>
-                        <FieldLabel htmlFor="dir-port">
-                          {t("fields.port.label")}
-                        </FieldLabel>
+                <Controller
+                  control={control}
+                  name="port"
+                  render={({ field, fieldState }) => (
+                    <Field data-invalid={fieldState.invalid || undefined}>
+                      <FieldLabel htmlFor="dir-port">
+                        {t("fields.port.label")}
+                      </FieldLabel>
+                      <Input
+                        disabled={readOnly}
+                        id="dir-port"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={65535}
+                        name={field.name}
+                        ref={field.ref}
+                        value={field.value ?? ""}
+                        onBlur={field.onBlur}
+                        onChange={(event) =>
+                          field.onChange(
+                            event.target.value === ""
+                              ? null
+                              : event.target.valueAsNumber,
+                          )
+                        }
+                        placeholder={t("fields.port.placeholder")}
+                        className="font-mono"
+                        aria-invalid={fieldState.invalid || undefined}
+                      />
+                      <FieldError errors={[fieldState.error]} />
+                    </Field>
+                  )}
+                />
+              </div>
+
+              <Controller
+                control={control}
+                name="transport"
+                render={({ field }) => (
+                  <Field>
+                    <SettingLabel
+                      htmlFor="dir-transport"
+                      help={
+                        <ul className="space-y-1">
+                          {DIRECTORY_TRANSPORT_MODES.map((mode) => (
+                            <li key={mode}>
+                              <span className="font-medium">
+                                {transportLabel[mode]}
+                              </span>{" "}
+                              — {t(`fields.transport.hint.${mode}`)}
+                            </li>
+                          ))}
+                        </ul>
+                      }
+                    >
+                      {t("fields.transport.label")}
+                    </SettingLabel>
+                    <Select value={field.value} onValueChange={field.onChange} disabled={readOnly}>
+                      <SelectTrigger id="dir-transport" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DIRECTORY_TRANSPORT_MODES.map((mode) => (
+                          <SelectItem key={mode} value={mode}>
+                            {transportLabel[mode]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {/* Plaintext sends the bind password in the clear — a risk, so it stays visible. */}
+                    {field.value === "plaintext" ? (
+                      <FieldDescription className="text-destructive">
+                        {t("fields.transport.hint.plaintext")}
+                      </FieldDescription>
+                    ) : null}
+                  </Field>
+                )}
+              />
+
+              {textField("baseDN", "dir-base-dn", { help: true, mono: true })}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {textField("bindDN", "dir-bind-dn", { help: true, mono: true })}
+
+                <Controller
+                  control={control}
+                  name="bindPassword"
+                  render={({ field, fieldState }) => (
+                    <Field data-invalid={fieldState.invalid || undefined}>
+                      <SettingLabel
+                        htmlFor="dir-bind-password"
+                        help={<p>{t("fields.bindPassword.help")}</p>}
+                      >
+                        {t("fields.bindPassword.label")}
+                      </SettingLabel>
+                      <Input
+                        disabled={readOnly}
+                        id="dir-bind-password"
+                        type="password"
+                        name={field.name}
+                        ref={field.ref}
+                        value={field.value ?? ""}
+                        onBlur={field.onBlur}
+                        onChange={(event) => field.onChange(event.target.value)}
+                        placeholder={
+                          data?.bindPasswordSet
+                            ? t("fields.bindPassword.placeholderSet")
+                            : t("fields.bindPassword.placeholderUnset")
+                        }
+                        autoComplete="new-password"
+                        aria-invalid={fieldState.invalid || undefined}
+                      />
+                      <FieldError errors={[fieldState.error]} />
+                    </Field>
+                  )}
+                />
+              </div>
+
+              {textField("searchFilter", "dir-search-filter", {
+                help: true,
+                mono: true,
+              })}
+
+              {/* Attribute map — the four recognized profile keys → AD attribute NAMES, assembled into
+                  the wire `attributeMap` at submit (see directory-form.ts). */}
+              <div className="space-y-3 border-t pt-4">
+                <SettingLabel
+                  help={<p>{t("fields.attributeMap.description")}</p>}
+                >
+                  {t("fields.attributeMap.label")}
+                </SettingLabel>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {(
+                    ["firstName", "lastName", "email", "username"] as const
+                  ).map((key) => (
+                    <Controller
+                      key={key}
+                      control={control}
+                      name={`attributeMap.${key}`}
+                      render={({ field }) => (
+                        <Field>
+                          <FieldLabel htmlFor={`dir-attr-${key}`}>
+                            {t(`fields.attributeMap.keys.${key}`)}
+                          </FieldLabel>
+                          <Input
+                            disabled={readOnly}
+                            id={`dir-attr-${key}`}
+                            name={field.name}
+                            ref={field.ref}
+                            value={field.value ?? ""}
+                            onBlur={field.onBlur}
+                            onChange={(event) => field.onChange(event.target.value)}
+                            placeholder={AD_ATTR_PLACEHOLDER[key]}
+                            autoComplete="off"
+                            className="font-mono text-sm"
+                          />
+                        </Field>
+                      )}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-0 border-t pt-4">
+                {/* TLS cert verification — a secure default (on); off allows a self-signed internal
+                    cert. Inert under plaintext (no TLS to verify), so the control is disabled and the
+                    tip says why. */}
+                <Controller
+                  control={control}
+                  name="rejectUnauthorized"
+                  render={({ field }) => (
+                    <SettingRow
+                      label={t("fields.rejectUnauthorized.label")}
+                      htmlFor="dir-reject-unauthorized"
+                      help={
+                        <p>
+                          {transport === "plaintext"
+                            ? t("fields.rejectUnauthorized.plaintextHint")
+                            : t("fields.rejectUnauthorized.description")}
+                        </p>
+                      }
+                    >
+                      <Switch
+                        id="dir-reject-unauthorized"
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={readOnly || transport === "plaintext"}
+                      />
+                    </SettingRow>
+                  )}
+                />
+
+                {/* The offboard grace, read as a sentence (#1533). Same field, bounds and error. */}
+                <Controller
+                  control={control}
+                  name="offboardGraceDays"
+                  render={({ field, fieldState }) => (
+                    <Field
+                      data-invalid={fieldState.invalid || undefined}
+                      className="border-t pt-2.5"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span>{t("fields.offboardGraceDays.before")}</span>
                         <Input
-                          id="dir-port"
+                          disabled={readOnly}
+                          id="dir-offboard-grace"
                           type="number"
                           inputMode="numeric"
-                          min={1}
-                          max={65535}
+                          min={0}
+                          max={365}
                           name={field.name}
                           ref={field.ref}
-                          value={field.value ?? ""}
+                          value={field.value ?? 0}
                           onBlur={field.onBlur}
                           onChange={(event) =>
                             field.onChange(
                               event.target.value === ""
-                                ? null
+                                ? 0
                                 : event.target.valueAsNumber,
                             )
                           }
-                          placeholder={t("fields.port.placeholder")}
-                          className="font-mono"
+                          aria-label={t("fields.offboardGraceDays.label")}
+                          className="w-20 text-center font-mono"
                           aria-invalid={fieldState.invalid || undefined}
                         />
-                        <FieldError errors={[fieldState.error]} />
-                      </Field>
-                    )}
-                  />
-                </div>
-
-                <Controller
-                  control={control}
-                  name="transport"
-                  render={({ field }) => (
-                    <Field>
-                      <SettingLabel
-                        htmlFor="dir-transport"
-                        help={
-                          <ul className="space-y-1">
-                            {DIRECTORY_TRANSPORT_MODES.map((mode) => (
-                              <li key={mode}>
-                                <span className="font-medium">
-                                  {transportLabel[mode]}
-                                </span>{" "}
-                                — {t(`fields.transport.hint.${mode}`)}
-                              </li>
-                            ))}
-                          </ul>
-                        }
-                      >
-                        {t("fields.transport.label")}
-                      </SettingLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger id="dir-transport" className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {DIRECTORY_TRANSPORT_MODES.map((mode) => (
-                            <SelectItem key={mode} value={mode}>
-                              {transportLabel[mode]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {/* Plaintext sends the bind password in the clear — a risk, so it stays visible. */}
-                      {field.value === "plaintext" ? (
-                        <FieldDescription className="text-destructive">
-                          {t("fields.transport.hint.plaintext")}
-                        </FieldDescription>
-                      ) : null}
+                        <span>{t("fields.offboardGraceDays.after")}</span>
+                        <HelpTip topic={t("fields.offboardGraceDays.label")}>
+                          <p>{t("fields.offboardGraceDays.description")}</p>
+                        </HelpTip>
+                      </div>
+                      <FieldError errors={[fieldState.error]} />
                     </Field>
                   )}
                 />
-
-                {textField("baseDN", "dir-base-dn", { help: true, mono: true })}
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {textField("bindDN", "dir-bind-dn", { help: true, mono: true })}
-
-                  <Controller
-                    control={control}
-                    name="bindPassword"
-                    render={({ field, fieldState }) => (
-                      <Field data-invalid={fieldState.invalid || undefined}>
-                        <SettingLabel
-                          htmlFor="dir-bind-password"
-                          help={<p>{t("fields.bindPassword.help")}</p>}
-                        >
-                          {t("fields.bindPassword.label")}
-                        </SettingLabel>
-                        <Input
-                          id="dir-bind-password"
-                          type="password"
-                          name={field.name}
-                          ref={field.ref}
-                          value={field.value ?? ""}
-                          onBlur={field.onBlur}
-                          onChange={(event) => field.onChange(event.target.value)}
-                          placeholder={
-                            data?.bindPasswordSet
-                              ? t("fields.bindPassword.placeholderSet")
-                              : t("fields.bindPassword.placeholderUnset")
-                          }
-                          autoComplete="new-password"
-                          aria-invalid={fieldState.invalid || undefined}
-                        />
-                        <FieldError errors={[fieldState.error]} />
-                      </Field>
-                    )}
-                  />
-                </div>
-
-                {textField("searchFilter", "dir-search-filter", {
-                  help: true,
-                  mono: true,
-                })}
-
-                {/* Attribute map — the four recognized profile keys → AD attribute NAMES, assembled into
-                    the wire `attributeMap` at submit (see directory-form.ts). */}
-                <div className="space-y-3 border-t pt-4">
-                  <SettingLabel
-                    help={<p>{t("fields.attributeMap.description")}</p>}
-                  >
-                    {t("fields.attributeMap.label")}
-                  </SettingLabel>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {(
-                      ["firstName", "lastName", "email", "username"] as const
-                    ).map((key) => (
-                      <Controller
-                        key={key}
-                        control={control}
-                        name={`attributeMap.${key}`}
-                        render={({ field }) => (
-                          <Field>
-                            <FieldLabel htmlFor={`dir-attr-${key}`}>
-                              {t(`fields.attributeMap.keys.${key}`)}
-                            </FieldLabel>
-                            <Input
-                              id={`dir-attr-${key}`}
-                              name={field.name}
-                              ref={field.ref}
-                              value={field.value ?? ""}
-                              onBlur={field.onBlur}
-                              onChange={(event) => field.onChange(event.target.value)}
-                              placeholder={AD_ATTR_PLACEHOLDER[key]}
-                              autoComplete="off"
-                              className="font-mono text-sm"
-                            />
-                          </Field>
-                        )}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-0 border-t pt-4">
-                  {/* TLS cert verification — a secure default (on); off allows a self-signed internal
-                      cert. Inert under plaintext (no TLS to verify), so the control is disabled and the
-                      tip says why. */}
-                  <Controller
-                    control={control}
-                    name="rejectUnauthorized"
-                    render={({ field }) => (
-                      <SettingRow
-                        label={t("fields.rejectUnauthorized.label")}
-                        htmlFor="dir-reject-unauthorized"
-                        help={
-                          <p>
-                            {transport === "plaintext"
-                              ? t("fields.rejectUnauthorized.plaintextHint")
-                              : t("fields.rejectUnauthorized.description")}
-                          </p>
-                        }
-                      >
-                        <Switch
-                          id="dir-reject-unauthorized"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          disabled={transport === "plaintext"}
-                        />
-                      </SettingRow>
-                    )}
-                  />
-
-                  {/* The offboard grace, read as a sentence (#1533). Same field, bounds and error. */}
-                  <Controller
-                    control={control}
-                    name="offboardGraceDays"
-                    render={({ field, fieldState }) => (
-                      <Field
-                        data-invalid={fieldState.invalid || undefined}
-                        className="border-t pt-2.5"
-                      >
-                        <div className="flex flex-wrap items-center gap-2 text-sm">
-                          <span>{t("fields.offboardGraceDays.before")}</span>
-                          <Input
-                            id="dir-offboard-grace"
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            max={365}
-                            name={field.name}
-                            ref={field.ref}
-                            value={field.value ?? 0}
-                            onBlur={field.onBlur}
-                            onChange={(event) =>
-                              field.onChange(
-                                event.target.value === ""
-                                  ? 0
-                                  : event.target.valueAsNumber,
-                              )
-                            }
-                            aria-label={t("fields.offboardGraceDays.label")}
-                            className="w-20 text-center font-mono"
-                            aria-invalid={fieldState.invalid || undefined}
-                          />
-                          <span>{t("fields.offboardGraceDays.after")}</span>
-                          <HelpTip topic={t("fields.offboardGraceDays.label")}>
-                            <p>{t("fields.offboardGraceDays.description")}</p>
-                          </HelpTip>
-                        </div>
-                        <FieldError errors={[fieldState.error]} />
-                      </Field>
-                    )}
-                  />
-                </div>
-              </SettingsSection>
-            </fieldset>
+              </div>
+            </SettingsSection>
           </form>
 
           {/* Sync now + the last run. It runs the SAME read-only reconcile the sweeper runs and doubles
