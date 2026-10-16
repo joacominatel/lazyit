@@ -494,8 +494,9 @@ function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): 
     }
     case "permission":
       return [item.role, item.permission].filter(Boolean).join(" · ") || t("table.noSubject");
-    case "serviceAccount":
     case "export":
+      return item.detail ?? t("table.noSubject");
+    case "serviceAccount":
       return (
         [item.serviceAccountName, item.detail].filter(Boolean).join(" · ") ||
         t("table.noSubject")
