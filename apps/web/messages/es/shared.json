@@ -183,6 +183,7 @@
     "create": "{entity, select, location {Crear una ubicación nueva} other {Crear una categoría nueva}}",
     "createLabel": "Nombre",
     "createHintLocation": "Se crea con el mismo tipo y la misma ubicación padre que {name}, y luego todo se mueve ahí.",
+    "createHintLocationTopLevel": "Se crea en el nivel superior con el mismo tipo que {name}, y luego todo se mueve ahí.",
     "createHintCategory": "Se crea primero y luego todo se mueve ahí.",
     "createdButNotDeleted": "Se creó «{target}», pero {name} no se eliminó, así que nada se movió: {error} Vuelve a intentarlo para mover todo a «{target}».",
     "confirm": "Eliminar y aplicar",

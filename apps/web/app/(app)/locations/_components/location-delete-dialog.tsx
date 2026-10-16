@@ -18,7 +18,7 @@ import {
   useDeleteLocation,
   useLocationDeleteImpact,
 } from "@/lib/api/hooks/use-location-mutations";
-import { useLocations } from "@/lib/api/hooks/use-locations";
+import { useLocation, useLocations } from "@/lib/api/hooks/use-locations";
 import { useCan } from "@/lib/hooks/use-permissions";
 
 export function locationImpactGroups(impact: LocationDeleteImpact): ImpactGroupView[] {
@@ -65,7 +65,11 @@ export function LocationDeleteDialog({
   const { data: locations } = useLocations();
   const remove = useDeleteLocation();
   const create = useCreateLocation();
-  const canCreate = useCan("location:write");
+  const canWrite = useCan("location:write");
+  // Live locations under an archived parent exist (pre-AUD-024 deletes); create refuses that parent, so go top-level.
+  const parent = useLocation(open && location.parentId ? location.parentId : undefined);
+  const parentResolved = !location.parentId || parent.isSuccess || parent.isError;
+  const liveParentId = parent.isSuccess && parent.data.deletedAt == null ? parent.data.id : null;
 
   const groups = useMemo(
     () => (impact.data ? locationImpactGroups(impact.data) : undefined),
@@ -99,15 +103,19 @@ export function LocationDeleteDialog({
           excludeIds={excludeIds}
         />
       )}
-      canCreate={canCreate}
+      canCreate={canWrite && parentResolved}
       nameMaxLength={CreateLocationSchema.shape.name.maxLength ?? undefined}
-      createHint={t("createHintLocation", { name: location.name })}
+      createHint={
+        liveParentId
+          ? t("createHintLocation", { name: location.name })
+          : t("createHintLocationTopLevel", { name: location.name })
+      }
       remove={(resolution) => remove.mutateAsync({ id: location.id, resolution })}
       create={(name) =>
         create.mutateAsync({
           name,
           type: location.type,
-          ...(location.parentId ? { parentId: location.parentId } : {}),
+          ...(liveParentId ? { parentId: liveParentId } : {}),
         })
       }
       onDeleted={onDeleted}

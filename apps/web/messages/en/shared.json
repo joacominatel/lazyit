@@ -183,6 +183,7 @@
     "create": "{entity, select, location {Create a new location} other {Create a new category}}",
     "createLabel": "Name",
     "createHintLocation": "It is created with the same type and parent as {name}, then everything moves there.",
+    "createHintLocationTopLevel": "It is created at the top level with the same type as {name}, then everything moves there.",
     "createHintCategory": "It is created first, then everything moves there.",
     "createdButNotDeleted": "“{target}” was created, but {name} was not deleted, so nothing moved: {error} Try again to move everything to “{target}”.",
     "confirm": "Delete and apply",

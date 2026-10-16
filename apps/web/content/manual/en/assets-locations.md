@@ -83,9 +83,10 @@ you cannot choose item by item:
 - **Move them to another location** — everything goes to the location you pick. It must be a live
   location that is not inside the one you are removing.
 - **Create a new location** — type a name: lazyit creates it with the same type and parent as the
-  one you are removing, then moves everything there. If the new location is created but the removal
-  fails, the dialog says so and offers to move everything to it on the next try, so you never end up
-  with two. This choice appears only if you can also create locations.
+  one you are removing (at the top level when that one has no parent or its parent was removed), then
+  moves everything there. If the new location is created but the removal fails, the dialog says so
+  and offers to move everything to it on the next try, so you never end up with two. This choice
+  appears only if you can also create locations.
 
 The dialog names up to 50 of each kind and counts all of them. If you are not allowed to view a kind
 (purchases, say), you see only how many there are — the decision still applies to them.

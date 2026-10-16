@@ -88,9 +88,10 @@ todo** — no se puede elegir ítem por ítem:
 - **Moverlos a otra ubicación** — todo pasa a la ubicación que elijas. Debe ser una ubicación activa
   que no esté dentro de la que quitas.
 - **Crear una ubicación nueva** — escribe un nombre: lazyit la crea con el mismo tipo y la misma
-  ubicación padre que la que quitas, y luego mueve todo ahí. Si la ubicación nueva se crea pero la
-  baja falla, el diálogo lo dice y en el siguiente intento ofrece mover todo a ella, así nunca quedan
-  dos. Esta opción solo aparece si también puedes crear ubicaciones.
+  ubicación padre que la que quitas (en el nivel superior si esa no tiene padre o su padre fue
+  quitado), y luego mueve todo ahí. Si la ubicación nueva se crea pero la baja falla, el diálogo lo
+  dice y en el siguiente intento ofrece mover todo a ella, así nunca quedan dos. Esta opción solo
+  aparece si también puedes crear ubicaciones.
 
 El diálogo nombra hasta 50 de cada tipo y los cuenta a todos. Si no tienes permiso para ver un tipo
 (las compras, por ejemplo), solo ves cuántos hay — la decisión también se aplica a ellos.
