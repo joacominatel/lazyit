@@ -48,6 +48,7 @@ import { LocalCredentialService } from '../../auth/local/local-credential.servic
 import type { Principal } from '../../auth/principal';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { ConsumablesController } from '../../consumables/consumables.controller';
 import { ConsumablesService } from '../../consumables/consumables.service';
@@ -660,6 +661,7 @@ describe('consumables toolset (W2-7)', () => {
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: ConsumablesService, useValue: consumables },
+        { provide: ExportService, useValue: {} },
         {
           provide: AI_SETTINGS_READER,
           useValue: {

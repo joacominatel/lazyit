@@ -30,6 +30,7 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { ExportService } from '../common/export';
 import { ActorService } from '../common/actor.service';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
@@ -102,6 +103,7 @@ describe('UsersController — legacy SA-ungrantable grant is inert (SEC-073, INV
         },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: { resolve: jest.fn().mockReturnValue(undefined) },

@@ -6,17 +6,22 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { AccessGrantsService } from './access-grants.service';
+import { AccessGrantsExportService } from './access-grants-export.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseUuidQuery } from '../common/parse-uuid-query';
 import { parseCuidQuery } from '../common/parse-cuid-query';
@@ -40,7 +45,10 @@ import type { User } from '../../generated/prisma/client';
 @ApiTags('access-grants')
 @Controller('access-grants')
 export class AccessGrantsController {
-  constructor(private readonly grants: AccessGrantsService) {}
+  constructor(
+    private readonly grants: AccessGrantsService,
+    private readonly grantExports: AccessGrantsExportService,
+  ) {}
 
   @Get()
   @RequirePermission('accessGrant:read')
@@ -99,6 +107,39 @@ export class AccessGrantsController {
         includeExpired: parseBooleanQuery(includeExpired, true),
       },
       parsePageQuery({ limit, offset, page }),
+    );
+  }
+
+  // Declared before `:id`, which would otherwise take `export` as an id.
+  @Get('export')
+  @RequirePermission('accessGrant:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every grant matching the GET /access-grants filters (ADR-0103), with application, user and actor names. Same permission, same rows. Audited; above 100,000 rows → 422; a parallel or sixth export in a minute → 429.',
+  })
+  @ApiQuery({ name: 'userId', required: false })
+  @ApiQuery({ name: 'applicationId', required: false })
+  @ApiQuery({ name: 'activeOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'includeExpired', required: false, type: Boolean })
+  @ApiOkResponse({ description: 'The matching grants as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
+    @Query('userId') userId?: string,
+    @Query('applicationId') applicationId?: string,
+    @Query('activeOnly') activeOnly?: string,
+    @Query('includeExpired') includeExpired?: string,
+  ): Promise<StreamableFile> {
+    return this.grantExports.export(
+      {
+        userId: parseUuidQuery(userId, 'userId'),
+        applicationId: parseCuidQuery(applicationId, 'applicationId'),
+        activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
+      },
+      principal,
+      response,
     );
   }
 

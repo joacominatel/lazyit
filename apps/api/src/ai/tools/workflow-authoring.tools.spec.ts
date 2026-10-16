@@ -63,6 +63,8 @@ import { mintToken } from '../../service-accounts/service-account-token';
 import { ApplicationsController } from '../../applications/applications.controller';
 import { ApplicationsService } from '../../applications/applications.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
+import { ExportService } from '../../common/export';
 import { ArticlesService } from '../../articles/articles.service';
 import { ConfigController } from '../../config/config.controller';
 import { ConfigService } from '../../config/config.service';
@@ -998,6 +1000,8 @@ describe('workflow authoring toolset (W2-14) — chat-only, elevated, outbound-i
         { provide: WorkflowDryRunService, useValue: dryRun },
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: UsersService, useValue: usersService },
         { provide: WorkflowRunsService, useValue: runsService },

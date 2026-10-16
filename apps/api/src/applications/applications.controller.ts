@@ -7,11 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -30,6 +34,7 @@ import {
 } from './applications.service';
 import { ArticlesService } from '../articles/articles.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../access-grants/access-grants-export.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
 import { parseEnumArrayQuery } from '../common/parse-enum-array-query';
@@ -57,6 +62,7 @@ export class ApplicationsController {
     private readonly applications: ApplicationsService,
     private readonly grants: AccessGrantsService,
     private readonly articles: ArticlesService,
+    private readonly grantExports: AccessGrantsExportService,
   ) {}
 
   @Get()
@@ -174,6 +180,35 @@ export class ApplicationsController {
       activeOnly: parseBooleanQuery(activeOnly, true),
       includeExpired: parseBooleanQuery(includeExpired, true),
     });
+  }
+
+  @Get(':id/access-grants/export')
+  @RequirePermission('accessGrant:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      "CSV export of an application's grants, same filters and rows as GET /applications/:id/access-grants (ADR-0103). Audited; above 100,000 rows → 422; a parallel or sixth export in a minute → 429.",
+  })
+  @ApiQuery({ name: 'activeOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'includeExpired', required: false, type: Boolean })
+  @ApiOkResponse({ description: "The application's grants as CSV (text/csv)." })
+  async exportGrants(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
+    @Query('activeOnly') activeOnly?: string,
+    @Query('includeExpired') includeExpired?: string,
+  ): Promise<StreamableFile> {
+    await this.applications.findOne(id); // 404 if the application is missing or soft-deleted
+    return this.grantExports.export(
+      {
+        applicationId: id,
+        activeOnly: parseBooleanQuery(activeOnly, true),
+        includeExpired: parseBooleanQuery(includeExpired, true),
+      },
+      principal,
+      response,
+    );
   }
 
   @Get(':id/articles')

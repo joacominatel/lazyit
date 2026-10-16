@@ -3,7 +3,7 @@ title: Application
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Application
@@ -121,6 +121,8 @@ Indexes: `@@index([categoryId])`.
 - `GET /applications/:id` — one by id (`404` if missing/soft-deleted).
 - `GET /applications/:id/access-grants?activeOnly=&includeExpired=` — this app's grants
   ([[access-grant]]); `404` if the app is missing.
+- `GET /applications/:id/access-grants/export?activeOnly=&includeExpired=` — the same grants as CSV
+  (see [[access-grant]] § Export).
 - `POST /applications` — create.
 - `PATCH /applications/:id` — partial update. `null` clears an optional field (`description`, `url`,
   `vendor`, `notes`, `metadata`, the seat fields); `categoryId: null` detaches the category.

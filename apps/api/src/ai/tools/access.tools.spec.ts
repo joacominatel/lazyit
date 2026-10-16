@@ -54,6 +54,8 @@ import { ApplicationsService } from '../../applications/applications.service';
 import { ArticlesService } from '../../articles/articles.service';
 import { AccessGrantsController } from '../../access-grants/access-grants.controller';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
+import { ExportService } from '../../common/export';
 import { AccessRequestsController } from '../../access-requests/access-requests.controller';
 import { AccessRequestsService } from '../../access-requests/access-requests.service';
 import { WorkflowsController } from '../../workflow-engine/definitions/workflows.controller';
@@ -1031,6 +1033,8 @@ describe('access toolset (W2-6) — applications, access grants, access requests
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: ApplicationsService, useValue: applicationsService },
         { provide: AccessGrantsService, useValue: grantsService },
+        { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: AccessRequestsService, useValue: requestsService },
         { provide: ArticlesService, useValue: articlesService },
         { provide: UsersService, useValue: usersService },

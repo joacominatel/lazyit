@@ -48,6 +48,7 @@ import { LocalCredentialService } from '../../auth/local/local-credential.servic
 import type { Principal } from '../../auth/principal';
 import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ExportService } from '../../common/export';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { PurchaseOrdersController } from '../../purchase-orders/purchase-orders.controller';
 import { PurchaseOrdersService } from '../../purchase-orders/purchase-orders.service';
@@ -66,6 +67,7 @@ import { ExportService } from '../../common/export';
 import { ApplicationsController } from '../../applications/applications.controller';
 import { ApplicationsService } from '../../applications/applications.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
 import { AssetsService } from '../../assets/assets.service';
 import { ArticlesService } from '../../articles/articles.service';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
@@ -1040,6 +1042,7 @@ describe('purchases toolset (#1478)', () => {
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: PurchaseOrdersService, useValue: purchases },
+        { provide: ExportService, useValue: {} },
         { provide: PurchaseReceivingService, useValue: receiving },
         { provide: PurchaseLicenseService, useValue: licenses },
         { provide: PurchaseFromAssetsService, useValue: fromAssets },
@@ -1091,6 +1094,7 @@ describe('purchases toolset (#1478)', () => {
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         {
           provide: ApplicationsService,
           useValue: {

@@ -10,6 +10,7 @@ import { UserHistoryModule } from '../user-history/user-history.module';
 import { WorkflowEngineModule } from '../workflow-engine/workflow-engine.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LocalAuthModule } from '../auth/local/local-auth.module';
+import { ExportModule } from '../common/export';
 
 @Module({
   // UserHistoryModule (DEBT-2, issue #185) provides the append-only User lifecycle log the service
@@ -29,6 +30,7 @@ import { LocalAuthModule } from '../auth/local/local-auth.module';
     // PasswordLifecycleService, which already owns the PasswordResetToken machinery and the reset-mail
     // rendering — reused rather than duplicated. No cycle: LocalAuthModule does not import UsersModule.
     LocalAuthModule,
+    ExportModule,
   ],
   // Issue #1422: the caller's per-user language/theme (`/account/preferences`) lives with the User row.
   controllers: [UsersController, AccountPreferencesController],

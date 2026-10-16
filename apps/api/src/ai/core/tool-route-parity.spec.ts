@@ -58,6 +58,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { AccessGrantsController } from '../../access-grants/access-grants.controller';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { AccessGrantsExportService } from '../../access-grants/access-grants-export.service';
+import { ExportService } from '../../common/export';
 import { AssetsController } from '../../assets/assets.controller';
 import { ExportService } from '../../common/export';
 import { AssetsService } from '../../assets/assets.service';
@@ -469,6 +471,8 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
         { provide: UsersService, useValue: usersService },
         { provide: AssetsService, useValue: assetsService },
         { provide: AccessGrantsService, useValue: grantsService },
+        { provide: ExportService, useValue: {} },
+        { provide: AccessGrantsExportService, useValue: {} },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AssetHistoryService, useValue: {} },
         { provide: ArticlesService, useValue: {} },
