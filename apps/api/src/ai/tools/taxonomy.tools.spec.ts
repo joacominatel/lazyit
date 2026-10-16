@@ -465,6 +465,15 @@ function categoryFake(kind: keyof typeof catalogs) {
     deleteImpact: jest.fn((id: string) => {
       liveOr404(id);
       const rows = filedUnder(kind, id);
+      if (kind === 'asset') {
+        const ofModels = assets.filter(
+          (a) => live(a) && rows.some((m) => m.id === a.modelId),
+        );
+        return Promise.resolve({
+          assetModels: { total: rows.length, items: rows as Row[] | null },
+          assets: { total: ofModels.length, items: ofModels as Row[] | null },
+        });
+      }
       return Promise.resolve({
         [kind === 'application' ? 'applications' : 'consumables']: {
           total: rows.length,
@@ -494,13 +503,13 @@ function categoryFake(kind: keyof typeof catalogs) {
     restore: jest.fn(),
   };
 }
-/** What the route's delete resolves: live applications or consumables (asset categories are unchanged). */
+/** What the route's delete resolves: live models, applications or consumables. */
 const filedUnder = (kind: keyof typeof catalogs, id: string): Row[] =>
   kind === 'application'
     ? applications.filter((a) => a.categoryId === id)
     : kind === 'consumable'
       ? consumables.filter((c) => c.categoryId === id)
-      : [];
+      : models.filter((m) => live(m) && m.categoryId === id);
 const assetCategories = categoryFake('asset');
 const applicationCategories = categoryFake('application');
 const consumableCategories = categoryFake('consumable');
@@ -565,7 +574,38 @@ const modelsService = {
   update: modelLife.update,
   remove: modelLife.remove,
   restore: modelLife.restore,
+  deleteImpact: jest.fn((id: string) => {
+    modelLife.liveOr404(id);
+    const rows = modelAssets(id);
+    return Promise.resolve({
+      assets: { total: rows.length, items: rows },
+      purchaseOrderLines: { total: 0, items: [] as Row[] | null },
+    });
+  }),
 };
+/** The live assets the route's model delete resolves. */
+const modelAssets = (id: string) =>
+  assets.filter((a) => live(a) && a.modelId === id);
+modelLife.remove.mockImplementation(
+  (id: string, resolution?: { strategy: string; targetId?: string }) => {
+    const row = modelLife.liveOr404(id);
+    const rows = modelAssets(id);
+    if (rows.length > 0) {
+      if (!resolution) throw new ConflictException('still in use');
+      const to = resolution.targetId ?? null;
+      if (
+        to !== null &&
+        (to === id || !live(models.find((m) => m.id === to)))
+      ) {
+        throw new BadRequestException('bad target');
+      }
+      for (const a of rows) a.modelId = to;
+    }
+    row.deletedAt = new Date('2026-09-10T00:00:00.000Z');
+    bump(row);
+    return Promise.resolve({ ...row });
+  },
+);
 
 const locationLife = lifecycleFake(() => locations, 'Location');
 /** The live assets and child locations the route's delete resolves. */
@@ -1001,6 +1041,55 @@ const ROUTES: RouteCase[] = [
     verb: 'delete',
     url: `/application-categories/${C.saas}?strategy=detach`,
     shape: { params: { id: C.saas }, query: { strategy: 'detach' } },
+  },
+  // SEC-041: asset categories and models take the same resolution.
+  {
+    controller: 'assetCategories',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-categories/${C.laptops}`,
+    shape: { params: { id: C.laptops } },
+  },
+  {
+    controller: 'assetCategories',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-categories/${C.laptops}?strategy=move&targetId=${C.servers}`,
+    shape: {
+      params: { id: C.laptops },
+      query: { strategy: 'move', targetId: C.servers },
+    },
+  },
+  {
+    controller: 'assetCategories',
+    method: 'deleteImpact',
+    verb: 'get',
+    url: `/asset-categories/${C.laptops}/delete-impact`,
+    shape: { params: { id: C.laptops } },
+  },
+  {
+    controller: 'models',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-models/${M.latitude}?strategy=detach`,
+    shape: { params: { id: M.latitude }, query: { strategy: 'detach' } },
+  },
+  {
+    controller: 'models',
+    method: 'remove',
+    verb: 'delete',
+    url: `/asset-models/${M.latitude}?strategy=move&targetId=${M.latitude}`,
+    shape: {
+      params: { id: M.latitude },
+      query: { strategy: 'move', targetId: M.latitude },
+    },
+  },
+  {
+    controller: 'models',
+    method: 'deleteImpact',
+    verb: 'get',
+    url: `/asset-models/${M.latitude}/delete-impact`,
+    shape: { params: { id: M.latitude } },
   },
   // Custom asset statuses (ADR-0101): the category permissions.
   {
@@ -1482,10 +1571,14 @@ describe('taxonomy toolset (#1390)', () => {
       const action = await propose('category_archive', {
         kind: 'assetCategory',
         category: 'Laptops',
+        strategy: 'detach',
       });
       expect(action.preview).toMatchObject({
         target: { type: 'category', id: C.laptops, op: 'archived' },
-        changes: [{ field: 'archived', before: false, after: true }],
+        changes: [
+          { field: 'archived', before: false, after: true },
+          { field: 'destination', after: 'None (detached)' },
+        ],
         warnings: ['SOFT_DELETE'],
         impacted: [
           {
@@ -1515,6 +1608,43 @@ describe('taxonomy toolset (#1390)', () => {
         },
       });
       expect(catalogs.asset[0].deletedAt).not.toBeNull();
+      expect(assetCategories.remove).toHaveBeenCalledWith(C.laptops, {
+        strategy: 'detach',
+      });
+      expect(models[0].categoryId).toBeNull();
+    });
+
+    it('an asset category with live models is refused before a card until one strategy is given (SEC-041)', async () => {
+      expect(
+        await refused('category_archive', {
+          kind: 'assetCategory',
+          category: 'Laptops',
+        }),
+      ).toMatchObject({
+        code: 'CONFLICT',
+        message: expect.stringMatching(/1 assetModels, 2 assets/) as unknown,
+      });
+      expect(writes()).toBe(0);
+    });
+
+    it('moves the models of an asset category to another one: destination on the card, applied by the route', async () => {
+      const action = await propose('category_archive', {
+        kind: 'assetCategory',
+        category: 'Laptops',
+        strategy: 'move',
+        moveTo: 'Servers',
+      });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: { type: 'category', id: C.servers, label: 'Servers' },
+        valueKind: 'entity',
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(assetCategories.remove).toHaveBeenCalledWith(C.laptops, {
+        strategy: 'move',
+        targetId: C.servers,
+      });
+      expect(models[0].categoryId).toBe(C.servers);
     });
 
     it('application and consumable categories count their applications and consumables', async () => {
@@ -1606,12 +1736,13 @@ describe('taxonomy toolset (#1390)', () => {
       });
     });
 
-    it('refuses a strategy on an asset category, and moveTo without strategy move', async () => {
+    it('refuses moveTo without strategy move, and a move onto the category itself', async () => {
       expect(
         await refused('category_archive', {
           kind: 'assetCategory',
-          category: 'Servers',
-          strategy: 'detach',
+          category: 'Laptops',
+          strategy: 'move',
+          moveTo: 'Laptops',
         }),
       ).toMatchObject({ code: 'INVALID_INPUT' });
       expect(
@@ -1634,31 +1765,20 @@ describe('taxonomy toolset (#1390)', () => {
       expect(action.preview!.changes).toHaveLength(1);
     });
 
-    it('a dependent list the caller may not read is shown as unknown, never as zero', async () => {
-      roleMatrix = {
-        ...WITH_AI_FOR_VIEWERS,
-        MEMBER: [
-          ...WITH_AI_FOR_VIEWERS.MEMBER.filter((p) => p !== 'asset:read'),
-          'category:delete',
-        ],
-      };
-      resolver.invalidate();
-      const action = await propose(
-        'category_archive',
-        { kind: 'assetCategory', category: 'Laptops' },
-        actor('MEMBER'),
-      );
-      expect(action.preview!.impacted).toMatchObject([
-        { type: 'assetModel', count: 1 },
-      ]);
-      expect(action.preview!.changes).toContainEqual({
-        field: 'usedBy',
-        after: 'Unknown to you: assets',
-        afterSentences: [
-          { code: 'taxonomy.usedByUnknown', params: { kinds: 'assets' } },
-        ],
-        valueKind: 'text',
+    it('a dependent kind the caller may not read is still counted, without a sample', async () => {
+      assetCategories.deleteImpact.mockResolvedValueOnce({
+        assetModels: { total: 1, items: [] },
+        assets: { total: 2, items: null },
       });
+      const action = await propose('category_archive', {
+        kind: 'assetCategory',
+        category: 'Laptops',
+        strategy: 'detach',
+      });
+      expect(action.preview!.impacted).toEqual([
+        { type: 'assetModel', count: 1, sample: [] },
+        { type: 'asset', count: 2, sample: [] },
+      ]);
     });
 
     it('is refused before a card for a MEMBER (category:delete is ADMIN-only by default)', async () => {
@@ -1810,17 +1930,124 @@ describe('taxonomy toolset (#1390)', () => {
   });
 
   describe('asset_model_archive / asset_model_restore', () => {
-    it('archive shows the assets still using the model', async () => {
+    it('archive shows the assets still using the model and detaches them all', async () => {
       const action = await propose('asset_model_archive', {
         model: 'Latitude 7440',
+        strategy: 'detach',
       });
       expect(action.preview).toMatchObject({
         target: { type: 'assetModel', id: M.latitude, op: 'archived' },
         warnings: ['SOFT_DELETE'],
         impacted: [{ type: 'asset', count: 2 }],
       });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: 'None (detached)',
+        valueKind: 'text',
+      });
       await tools.approve(action.id, chat(actor('ADMIN')));
       expect(models[0].deletedAt).not.toBeNull();
+      expect(modelLife.remove).toHaveBeenCalledWith(
+        M.latitude,
+        { strategy: 'detach' },
+        expect.anything(),
+      );
+      expect(assets[0].modelId).toBeNull();
+    });
+
+    it('a model still in use is refused before a card until one strategy is given (SEC-041)', async () => {
+      expect(
+        await refused('asset_model_archive', { model: 'Latitude 7440' }),
+      ).toMatchObject({
+        code: 'CONFLICT',
+        message: expect.stringContaining('2 assets') as unknown,
+      });
+      expect(writes()).toBe(0);
+    });
+
+    it('move sends every asset to one other model, in any category', async () => {
+      const action = await propose('asset_model_archive', {
+        model: 'Latitude 7440',
+        strategy: 'move',
+        moveTo: 'Pro 14',
+      });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: { type: 'assetModel', id: M.pro14, label: 'Pro 14 (Lenovo)' },
+        valueKind: 'entity',
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(assets[0].modelId).toBe(M.pro14);
+      expect(assets[1].modelId).toBe(M.pro14);
+    });
+
+    it('never cards a move onto the model itself', async () => {
+      expect(
+        await refused('asset_model_archive', {
+          model: 'Latitude 7440',
+          strategy: 'move',
+          moveTo: M.latitude,
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
+    });
+
+    it('shows open purchase lines as their purchases, without a sample the caller may not read', async () => {
+      modelsService.deleteImpact.mockResolvedValueOnce({
+        assets: { total: 0, items: [] },
+        purchaseOrderLines: {
+          total: 2,
+          items: [
+            {
+              id: cid('tline1'),
+              purchaseOrderId: cid('tpo1'),
+              reference: 'PO-7',
+              description: 'Laptops',
+            },
+            {
+              id: cid('tline2'),
+              purchaseOrderId: cid('tpo2'),
+              reference: null,
+              description: 'Spare laptops',
+            },
+          ],
+        },
+      });
+      const action = await propose('asset_model_archive', {
+        model: 'Pro 14',
+        strategy: 'detach',
+      });
+      expect(action.preview!.impacted).toEqual([
+        {
+          type: 'purchaseOrder',
+          count: 2,
+          sample: [
+            {
+              type: 'purchaseOrder',
+              id: cid('tpo1'),
+              op: 'updated',
+              label: 'PO-7',
+            },
+            {
+              type: 'purchaseOrder',
+              id: cid('tpo2'),
+              op: 'updated',
+              label: 'Spare laptops',
+            },
+          ],
+        },
+      ]);
+      modelsService.deleteImpact.mockResolvedValueOnce({
+        assets: { total: 0, items: [] },
+        purchaseOrderLines: { total: 2, items: null },
+      });
+      const hidden = await propose('asset_model_archive', {
+        model: 'Pro 14',
+        strategy: 'detach',
+      });
+      expect(hidden.preview!.impacted).toEqual([
+        { type: 'purchaseOrder', count: 2, sample: [] },
+      ]);
     });
 
     it('restore finds the archived model by name and brings it back', async () => {
