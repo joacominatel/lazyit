@@ -1288,7 +1288,7 @@ describe('UsersService', () => {
         .update('admin-1', { role: 'MEMBER' }, 'actor-99')
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ConflictException);
-      // The web matches the code; the wording stays for clients that still match it.
+      // The web still matches the wording, so the message must not change alongside the new code.
       expect((err as ConflictException).getResponse()).toEqual({
         statusCode: 409,
         error: 'Conflict',
