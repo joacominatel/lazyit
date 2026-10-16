@@ -1795,6 +1795,11 @@ export const accessToolset: AiToolset = {
       'A bulk CSV file export (@Res stream); use search and list tools instead.',
     ),
     unexposed(
+      AccessRequestsController,
+      ['export'],
+      'A bulk CSV file export (ADR-0103, @Res stream); use search and list tools instead.',
+    ),
+    unexposed(
       ApplicationsController,
       ['exportGrants'],
       'A bulk CSV file export (@Res stream); use search and list tools instead.',
