@@ -41,8 +41,16 @@ describe("csvCell", () => {
     );
   });
 
-  test("still quotes a raw cell that needs it", () => {
-    expect(csvCell("1,5", "number")).toBe(`"1,5"`);
+  test("guards a non-text cell whose value is not a number or a timestamp", () => {
+    expect(csvCell("=1+1", "number")).toBe("'=1+1");
+    expect(csvCell("-cmd", "money")).toBe("'-cmd");
+    expect(csvCell("@SUM(A1)", "date")).toBe("'@SUM(A1)");
+    expect(csvCell("-1,5", "number")).toBe(`"'-1,5"`);
+  });
+
+  test("keeps a plain date and a numeric zero raw", () => {
+    expect(csvCell("2026-10-16", "date")).toBe("2026-10-16");
+    expect(csvCell("0", "number")).toBe("0");
   });
 });
 

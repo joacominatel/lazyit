@@ -21,7 +21,13 @@ function quoteCsv(value: string): string {
   return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-/** One RFC-4180 cell. Only `text` is guarded: a server-formatted number stays `-5`, never `'-5`. */
+const RAW_NUMBER = /^-?\d+(\.\d+)?$/;
+const RAW_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2}))?$/;
+
+/** One RFC-4180 cell. A non-text cell skips the guard only when it really is a number or a timestamp, so `-5` stays `-5`. */
 export function csvCell(value: string, kind: CsvCellKind = "text"): string {
-  return quoteCsv(kind === "text" ? guardCsvFormula(value) : value);
+  const raw =
+    kind !== "text" && (RAW_NUMBER.test(value) || RAW_TIMESTAMP.test(value));
+  return quoteCsv(raw ? value : guardCsvFormula(value));
 }
