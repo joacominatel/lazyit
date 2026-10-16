@@ -460,15 +460,45 @@ function categoryFake(kind: keyof typeof catalogs) {
       bump(row);
       return Promise.resolve({ ...row });
     }),
-    remove: jest.fn((id: string) => {
-      const row = liveOr404(id);
-      row.deletedAt = new Date('2026-09-10T00:00:00.000Z');
-      bump(row);
-      return Promise.resolve({ ...row });
+    deleteImpact: jest.fn((id: string) => {
+      liveOr404(id);
+      const rows = filedUnder(kind, id);
+      return Promise.resolve({
+        [kind === 'application' ? 'applications' : 'consumables']: {
+          total: rows.length,
+          items: rows,
+        },
+      });
     }),
+    remove: jest.fn(
+      (id: string, resolution?: { strategy: string; targetId?: string }) => {
+        const row = liveOr404(id);
+        const rows = filedUnder(kind, id);
+        if (rows.length > 0) {
+          if (!resolution) throw new ConflictException('still in use');
+          if (
+            resolution.targetId === id ||
+            (resolution.targetId && !live(find(resolution.targetId)))
+          ) {
+            throw new BadRequestException('bad target');
+          }
+          for (const r of rows) r.categoryId = resolution.targetId ?? null;
+        }
+        row.deletedAt = new Date('2026-09-10T00:00:00.000Z');
+        bump(row);
+        return Promise.resolve({ ...row });
+      },
+    ),
     restore: jest.fn(),
   };
 }
+/** What the route's delete resolves: live applications or consumables (asset categories are unchanged). */
+const filedUnder = (kind: keyof typeof catalogs, id: string): Row[] =>
+  kind === 'application'
+    ? applications.filter((a) => a.categoryId === id)
+    : kind === 'consumable'
+      ? consumables.filter((c) => c.categoryId === id)
+      : [];
 const assetCategories = categoryFake('asset');
 const applicationCategories = categoryFake('application');
 const consumableCategories = categoryFake('consumable');
@@ -536,6 +566,41 @@ const modelsService = {
 };
 
 const locationLife = lifecycleFake(() => locations, 'Location');
+/** The live assets and child locations the route's delete resolves. */
+const locationDependents = (id: string) => ({
+  assets: assets.filter((a) => live(a) && a.locationId === id),
+  children: locations.filter((l) => live(l) && l.parentId === id),
+});
+const isUnder = (id: string, ancestor: string): boolean => {
+  const parent = locations.find((l) => l.id === id)?.parentId;
+  return (
+    typeof parent === 'string' &&
+    (parent === ancestor || isUnder(parent, ancestor))
+  );
+};
+const locationRemove = jest.fn(
+  (id: string, resolution?: { strategy: string; targetId?: string }) => {
+    const row = locationLife.liveOr404(id);
+    const deps = locationDependents(id);
+    if (deps.assets.length + deps.children.length > 0) {
+      if (!resolution) throw new ConflictException('still in use');
+      const to = resolution.targetId ?? null;
+      if (
+        to !== null &&
+        (to === id ||
+          !live(locations.find((l) => l.id === to)) ||
+          isUnder(to, id))
+      ) {
+        throw new BadRequestException('bad target');
+      }
+      for (const a of deps.assets) a.locationId = to;
+      for (const c of deps.children) c.parentId = to;
+    }
+    row.deletedAt = new Date('2026-09-10T00:00:00.000Z');
+    bump(row);
+    return Promise.resolve({ ...row });
+  },
+);
 const locationsService = {
   findPage: jest.fn((filters: { q?: string }, page: PageQuery) =>
     Promise.resolve(
@@ -566,8 +631,17 @@ const locationsService = {
   }),
   create: jest.fn(),
   update: locationLife.update,
-  remove: locationLife.remove,
+  remove: locationRemove,
   restore: locationLife.restore,
+  deleteImpact: jest.fn((id: string) => {
+    locationLife.liveOr404(id);
+    const deps = locationDependents(id);
+    return Promise.resolve({
+      assets: { total: deps.assets.length, items: deps.assets },
+      childLocations: { total: deps.children.length, items: deps.children },
+      purchaseOrders: { total: 0, items: [] },
+    });
+  }),
 };
 
 const assetsService = {
@@ -615,7 +689,7 @@ const writes = () =>
     applicationCategories,
     consumableCategories,
     modelLife,
-    locationLife,
+    { ...locationLife, remove: locationRemove },
     statusLabelsService,
   ].reduce(
     (n, s) =>
@@ -870,6 +944,62 @@ const ROUTES: RouteCase[] = [
     url: `/locations/${L.old}/restore`,
     shape: { params: { id: L.old } },
   },
+  // Delete with one resolution (AUD-024 / AUD-085): 409 without one while in use, 400 for a bad one.
+  {
+    controller: 'locations',
+    method: 'remove',
+    verb: 'delete',
+    url: `/locations/${L.hq}`,
+    shape: { params: { id: L.hq } },
+  },
+  {
+    controller: 'locations',
+    method: 'remove',
+    verb: 'delete',
+    url: `/locations/${L.hq}?strategy=move&targetId=${L.storage}`,
+    shape: {
+      params: { id: L.hq },
+      query: { strategy: 'move', targetId: L.storage },
+    },
+  },
+  {
+    controller: 'locations',
+    method: 'remove',
+    verb: 'delete',
+    url: `/locations/${L.hq}?strategy=move&targetId=${L.rack}`,
+    shape: {
+      params: { id: L.hq },
+      query: { strategy: 'move', targetId: L.rack },
+    },
+  },
+  {
+    controller: 'locations',
+    method: 'remove',
+    verb: 'delete',
+    url: `/locations/${L.hq}?strategy=move`,
+    shape: { params: { id: L.hq }, query: { strategy: 'move' } },
+  },
+  {
+    controller: 'locations',
+    method: 'deleteImpact',
+    verb: 'get',
+    url: `/locations/${L.hq}/delete-impact`,
+    shape: { params: { id: L.hq } },
+  },
+  {
+    controller: 'applicationCategories',
+    method: 'remove',
+    verb: 'delete',
+    url: `/application-categories/${C.saas}`,
+    shape: { params: { id: C.saas } },
+  },
+  {
+    controller: 'applicationCategories',
+    method: 'remove',
+    verb: 'delete',
+    url: `/application-categories/${C.saas}?strategy=detach`,
+    shape: { params: { id: C.saas }, query: { strategy: 'detach' } },
+  },
   // Custom asset statuses (ADR-0101): the category permissions.
   {
     controller: 'statusLabels',
@@ -1112,7 +1242,9 @@ describe('taxonomy toolset (#1390)', () => {
           seen.add(await viaDispatch(a, c));
         }
       }
-      expect([...seen]).toEqual(expect.arrayContaining([400, 403, 404, 'ok']));
+      expect([...seen]).toEqual(
+        expect.arrayContaining([400, 403, 404, 409, 'ok']),
+      );
     });
   });
 
@@ -1385,6 +1517,7 @@ describe('taxonomy toolset (#1390)', () => {
       const apps = await propose('category_archive', {
         kind: 'applicationCategory',
         category: 'SaaS',
+        strategy: 'detach',
       });
       expect(apps.preview!.impacted).toEqual([
         {
@@ -1409,10 +1542,83 @@ describe('taxonomy toolset (#1390)', () => {
       const cons = await propose('category_archive', {
         kind: 'consumableCategory',
         category: C.toner,
+        strategy: 'detach',
       });
       expect(cons.preview!.impacted).toMatchObject([
         { type: 'consumable', count: 1 },
       ]);
+    });
+
+    it('an application category still in use is refused before a card until one strategy is given', async () => {
+      expect(
+        await refused('category_archive', {
+          kind: 'applicationCategory',
+          category: 'SaaS',
+        }),
+      ).toMatchObject({
+        code: 'CONFLICT',
+        message: expect.stringContaining('2 applications') as unknown,
+      });
+      expect(writes()).toBe(0);
+    });
+
+    it('detach and move are one choice for all of its items, shown on the card and applied by the route', async () => {
+      catalogs.application.push(
+        base(cid('tcatinternal'), { name: 'Internal', icon: null, order: 2 }),
+      );
+      const action = await propose('category_archive', {
+        kind: 'applicationCategory',
+        category: 'SaaS',
+        strategy: 'move',
+        moveTo: 'Internal',
+      });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: {
+          type: 'category',
+          id: cid('tcatinternal'),
+          label: 'Internal',
+        },
+        valueKind: 'entity',
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(applicationCategories.remove).toHaveBeenCalledWith(C.saas, {
+        strategy: 'move',
+        targetId: cid('tcatinternal'),
+      });
+      expect(
+        applications.filter((a) => a.categoryId === cid('tcatinternal')),
+      ).toHaveLength(2);
+
+      const detach = await propose('category_archive', {
+        kind: 'consumableCategory',
+        category: 'Toner',
+        strategy: 'detach',
+      });
+      expect(detach.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: 'None (detached)',
+        valueKind: 'text',
+      });
+    });
+
+    it('refuses a strategy on an asset category, and moveTo without strategy move', async () => {
+      expect(
+        await refused('category_archive', {
+          kind: 'assetCategory',
+          category: 'Servers',
+          strategy: 'detach',
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(
+        await refused('category_archive', {
+          kind: 'applicationCategory',
+          category: 'SaaS',
+          strategy: 'detach',
+          moveTo: 'Internal',
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
     });
 
     it('an unused category has no impact rows', async () => {
@@ -1711,8 +1917,11 @@ describe('taxonomy toolset (#1390)', () => {
   });
 
   describe('location_archive / location_restore', () => {
-    it('archive counts its assets and its child locations', async () => {
-      const action = await propose('location_archive', { location: 'HQ' });
+    it('archive counts its assets and its child locations, and detaches them all', async () => {
+      const action = await propose('location_archive', {
+        location: 'HQ',
+        strategy: 'detach',
+      });
       expect(action.preview).toMatchObject({
         target: { type: 'location', id: L.hq, op: 'archived' },
         warnings: ['SOFT_DELETE'],
@@ -1725,8 +1934,57 @@ describe('taxonomy toolset (#1390)', () => {
           },
         ],
       });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: 'None (detached)',
+        valueKind: 'text',
+      });
       await tools.approve(action.id, chat(actor('ADMIN')));
       expect(locations[0].deletedAt).not.toBeNull();
+      expect(locationsService.remove).toHaveBeenCalledWith(
+        L.hq,
+        { strategy: 'detach' },
+        expect.anything(),
+      );
+      expect(locations[1].parentId).toBeNull();
+      expect(assets[0].locationId).toBeNull();
+    });
+
+    it('a location still in use is refused before a card until one strategy is given (the route would 409)', async () => {
+      expect(
+        await refused('location_archive', { location: 'HQ' }),
+      ).toMatchObject({
+        code: 'CONFLICT',
+        message: expect.stringMatching(/2 assets, 1 childLocations/) as unknown,
+      });
+      expect(writes()).toBe(0);
+    });
+
+    it('move sends everything to one live location outside it', async () => {
+      const action = await propose('location_archive', {
+        location: 'HQ',
+        strategy: 'move',
+        moveTo: 'Storage',
+      });
+      expect(action.preview!.changes).toContainEqual({
+        field: 'destination',
+        after: { type: 'location', id: L.storage, label: 'Storage' },
+        valueKind: 'entity',
+      });
+      await tools.approve(action.id, chat(actor('ADMIN')));
+      expect(locations[1].parentId).toBe(L.storage);
+      expect(assets[0].locationId).toBe(L.storage);
+    });
+
+    it('never cards a move into one of its own descendants', async () => {
+      expect(
+        await refused('location_archive', {
+          location: 'HQ',
+          strategy: 'move',
+          moveTo: 'Rack A',
+        }),
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      expect(writes()).toBe(0);
     });
 
     it('a child count past the bounded scan is reported unknown', async () => {
@@ -1739,7 +1997,10 @@ describe('taxonomy toolset (#1390)', () => {
           }),
         );
       }
-      const action = await propose('location_archive', { location: L.storage });
+      const action = await propose('location_archive', {
+        location: L.storage,
+        strategy: 'detach',
+      });
       expect(action.preview!.changes).toContainEqual({
         field: 'usedBy',
         after: 'Unknown to you: child locations',
