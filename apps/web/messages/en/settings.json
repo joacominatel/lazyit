@@ -400,6 +400,7 @@
     "loadErrorHint": "Check your connection and try again.",
     "retry": "Retry",
     "save": "Save settings",
+    "adminOnly": "Only an administrator can change the email settings. You can view them here and send a test.",
     "fields": {
       "enabled": {
         "label": "Enable outbound email",

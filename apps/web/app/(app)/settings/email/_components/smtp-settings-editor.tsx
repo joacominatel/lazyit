@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { isAdminRequired } from "@/lib/api/admin-required";
 import { ApiError } from "@/lib/api/client";
 import {
   useSendTestEmail,
@@ -44,6 +45,7 @@ import {
   useUpdateSmtpSettings,
 } from "@/lib/api/hooks/use-smtp-settings";
 import { notifyError } from "@/lib/api/notify-error";
+import { usePermissions } from "@/lib/hooks/use-permissions";
 
 /** The Manual page the section's "?" links to. */
 const MANUAL_HREF = "/help/configuration-smtp-email";
@@ -72,6 +74,8 @@ export function SmtpSettingsEditor() {
     useSmtpSettings();
   const update = useUpdateSmtpSettings();
   const test = useSendTestEmail();
+  // SEC-088: delegated settings:manage can view the settings and send a test; saving is ADMIN-only.
+  const readOnly = !usePermissions().isAdmin;
 
   const requestId = error instanceof ApiError ? error.requestId : undefined;
 
@@ -126,7 +130,10 @@ export function SmtpSettingsEditor() {
     update.mutate(payload, {
       onSuccess: () => toast.success(t("toast.saved")),
       // A 409 (password supplied but SMTP_SECRET_KEY unset) surfaces its explanatory message here.
-      onError: (err) => notifyError(err, t("toast.saveError")),
+      onError: (err) => {
+        if (isAdminRequired(err)) toast.error(t("adminOnly"));
+        else notifyError(err, t("toast.saveError"));
+      },
     });
   });
 
@@ -169,6 +176,7 @@ export function SmtpSettingsEditor() {
         >
           <FieldLabel htmlFor={id}>{t(`fields.${name}.label`)}</FieldLabel>
           <Input
+            disabled={readOnly}
             id={id}
             type={extra?.type}
             name={field.name}
@@ -234,6 +242,7 @@ export function SmtpSettingsEditor() {
                         {t("fields.enabled.label")}
                       </SettingLabel>
                       <Switch
+                        disabled={readOnly}
                         id="smtp-enabled"
                         checked={field.value}
                         onCheckedChange={field.onChange}
@@ -245,15 +254,17 @@ export function SmtpSettingsEditor() {
               footer={
                 <SettingsSaveBar
                   note={
-                    formState.isDirty
-                      ? tSettings("section.unsaved")
-                      : tSettings("section.noChanges")
+                    readOnly
+                      ? t("adminOnly")
+                      : formState.isDirty
+                        ? tSettings("section.unsaved")
+                        : tSettings("section.noChanges")
                   }
                 >
                   <Button
                     type="submit"
                     size="sm"
-                    disabled={update.isPending || !formState.isDirty}
+                    disabled={update.isPending || !formState.isDirty || readOnly}
                   >
                     {update.isPending && <ArrowPathIcon className="animate-spin" />}
                     {t("save")}
@@ -275,6 +286,7 @@ export function SmtpSettingsEditor() {
                         {t("fields.port.label")}
                       </FieldLabel>
                       <Input
+                        disabled={readOnly}
                         id="smtp-port"
                         type="number"
                         inputMode="numeric"
@@ -311,7 +323,11 @@ export function SmtpSettingsEditor() {
                       >
                         {t("fields.security.label")}
                       </SettingLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={readOnly}
+                      >
                         <SelectTrigger id="smtp-security" className="w-full">
                           <SelectValue />
                         </SelectTrigger>
@@ -343,6 +359,7 @@ export function SmtpSettingsEditor() {
                         {t("fields.password.label")}
                       </SettingLabel>
                       <Input
+                        disabled={readOnly}
                         id="smtp-password"
                         type="password"
                         name={field.name}
@@ -379,6 +396,7 @@ export function SmtpSettingsEditor() {
                       help={<p>{t("fields.rejectUnauthorized.description")}</p>}
                     >
                       <Switch
+                        disabled={readOnly}
                         id="smtp-reject-unauthorized"
                         checked={field.value}
                         onCheckedChange={field.onChange}

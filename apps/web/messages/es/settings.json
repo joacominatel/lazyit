@@ -400,6 +400,7 @@
     "loadErrorHint": "Verifica tu conexión e inténtalo de nuevo.",
     "retry": "Reintentar",
     "save": "Guardar configuración",
+    "adminOnly": "Solo un administrador puede cambiar la configuración de correo. Aquí puedes verla y enviar una prueba.",
     "fields": {
       "enabled": {
         "label": "Activar correo saliente",
