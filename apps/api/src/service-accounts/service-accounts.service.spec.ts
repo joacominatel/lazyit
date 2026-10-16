@@ -791,6 +791,31 @@ describe('ServiceAccountsService (ADR-0048)', () => {
       expect(updated.expiresAt).toBe(sooner);
     });
 
+    it('infra:report is exempt: a delegate creates and rotates an agent account', async () => {
+      const agent = await service.create(
+        { name: 'agent', permissions: ['infra:report'] },
+        MEMBER,
+      );
+      expect(agent.permissions).toEqual(['infra:report']);
+      const rotated = await service.rotate(agent.id, MEMBER);
+      expect(rotated.token).not.toBe(agent.token);
+    });
+
+    it('only infra:report is exempt: secret:fetch beside it is still refused, alone in the list', async () => {
+      await expect(
+        service.create(
+          { name: 'agent', permissions: ['infra:report', 'secret:fetch'] },
+          MEMBER,
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'PERMISSION_CEILING_EXCEEDED',
+          permissions: ['secret:fetch'],
+        },
+      });
+      expect(prisma.accounts).toHaveLength(0);
+    });
+
     it('ADMIN is unaffected: every verb on create, rotate and restore', async () => {
       const id = await adminCreated();
       await service.rotate(id, ADMIN);

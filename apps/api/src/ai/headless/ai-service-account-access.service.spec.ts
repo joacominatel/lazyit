@@ -149,6 +149,20 @@ describe('AiServiceAccountAccessService — widening stays within the caller (SE
     },
   );
 
+  it('infra:report is exempt from the ceiling when widening', async () => {
+    const { prisma, settings } = fakePrisma(off, ['infra:report']);
+    await new AiServiceAccountAccessService(
+      prisma as unknown as PrismaService,
+      resolver,
+    ).update(
+      LIVE,
+      { access: 'read-write', maxMutationsPerRun: null },
+      'member-1',
+      'MEMBER',
+    );
+    expect(settings).toHaveLength(1);
+  });
+
   it('narrowing an over-ceiling account is always allowed', async () => {
     const { prisma, settings } = fakePrisma({
       ...off,
