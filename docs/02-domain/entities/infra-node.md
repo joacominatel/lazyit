@@ -61,10 +61,12 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   declines (a re-imaged host's new proposal belongs in a merge, not beside its predecessor). Since
   2026-10-15 the database enforces it too — the partial unique index `infra_nodes_assetId_active_key`
   over live linked nodes — so two links racing on one asset end in one link and a `409`. Its migration
-  resolved links already shared: the oldest live node (by `createdAt`, then `id`) kept the asset, the
-  others had their `assetId` cleared and `specs._infraAssetUnlinked` (`{ assetId, keptByNodeId, at }`)
-  stamped, and nothing was deleted. The marker never reaches an Asset; an agent report that rewrites the
-  node's blob replaces it.
+  resolved links already shared: the live node that reported most recently (`lastReportedAt`, with a
+  never-reported node last) kept the asset, falling back to the oldest (`createdAt`, then `id`) on a tie;
+  the others had their `assetId` cleared and `specs._infraAssetUnlinked` (`{ assetId, keptByNodeId, at }`)
+  stamped, and nothing was deleted. After a re-image that puts the marker on the dead predecessor, which
+  no longer reports. The marker never reaches an Asset; an agent report that rewrites the node's blob
+  replaces it.
 - **Confirm is claimed, not checked** (AUD-059). `confirmNode` flips `PENDING → CONFIRMED` with a
   conditional write before it adopts or mints, so of two concurrent confirms of one node (a double
   click, the tray racing an auto-confirm rule) only one creates an Asset; the other is the idempotent

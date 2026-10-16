@@ -552,11 +552,14 @@ attach; detach the Asset from the live node, or merge the two, first.
 (migration `20261015130000_infra_single_live_node_per_asset`). Two attaches, restores or adopting
 confirms racing on one Asset no longer both land; the loser gets the same `409` (a confirm that loses
 returns its node to `PENDING`). Before building the index the migration resolves links already shared:
-for each Asset, the **oldest** live node (by `createdAt`, then `id`) keeps it and the others have their
-`assetId` cleared and a `specs._infraAssetUnlinked` marker `{ assetId, keptByNodeId, at }` stamped — no
-row is deleted, the Asset is untouched, and an archived node is never considered (restoring one later is
-the guarded attach above). The marker is node-only provenance (never copied to an Asset); on an
-agent-reported node the next report that rewrites the blob replaces it.
+for each Asset, the live node that **reported most recently** (`lastReportedAt DESC NULLS LAST`, then
+the oldest by `createdAt`, then `id`) keeps it and the others have their `assetId` cleared and a
+`specs._infraAssetUnlinked` marker `{ assetId, keptByNodeId, at }` stamped — no row is deleted, the Asset
+is untouched, and an archived node is never considered (restoring one later is the guarded attach above).
+*(2026-10-16, CEO decision:)* the reporter wins rather than the oldest because after a re-image the oldest
+node is the dead predecessor: the live host keeps its Asset, and the marker lands on the node no report
+will overwrite. The marker is node-only provenance (never copied to an Asset); on an agent-reported node
+the next report that rewrites the blob replaces it.
 
 **Amendment (2026-07-31, #1136) — correction: ingestion is inline, there is no report queue.** The
 struck bullet above describes a design that was never built, and the one that was built is the right
