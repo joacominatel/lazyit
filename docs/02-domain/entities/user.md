@@ -336,7 +336,7 @@ and `GET /users/:id/access-grants?activeOnly=&includeExpired=` lists their appli
 > [!note] RBAC safety guards (ADR-0040, Round 3; role ceiling 2026-10-15)
 > Changing a `role` is governed by service-level guards. The API **refuses to remove the last
 > remaining usable `ADMIN`** — demoting away from `ADMIN`, deactivating, offboarding or deleting the final
-> administrator returns **409 Conflict** — and **no user can change their own role** (**403 Forbidden**).
+> administrator returns **409 Conflict** (`code: 'LAST_ADMIN_REQUIRED'`) — and **no user can change their own role** (**403 Forbidden**).
 > A **directory-only** person's role cannot change at all (**422** `DIRECTORY_PERSON_ROLE_LOCKED`,
 > INV-DIR-1); onboard them first.
 >

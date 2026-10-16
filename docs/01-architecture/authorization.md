@@ -3,7 +3,7 @@ title: "Authorization — the @RequirePermission single-guard model (Roles & Per
 tags: [architecture, auth, authz, rbac, permissions, service-accounts, security, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-03
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Authorization — `@RequirePermission`, DB-first, two principal kinds
@@ -234,7 +234,7 @@ read-authz gap (the old DEF-001 residual / "reads open to any authenticated user
   400 on an ADMIN/extra key). Transactional + **audited** ([[permission-audit-log]], one append-only row
   per grant/revoke) + cache-coherent (the resolver cache is invalidated on commit). Saved by a human
   ADMIN only (`AdminOnlyGuard`, **403** `ADMIN_REQUIRED`), even when `settings:manage` is delegated
-  (SEC-088); the directory connection writes follow the same rule.
+  (SEC-088); the directory connection writes and the SMTP save (`PUT /config/smtp`) follow the same rule.
 - `GET /config/my-permissions` — any authenticated user; the CALLER's effective set
   `{ role, permissions }` via the same resolver, so the web derives `can('domain:action')` without
   polluting the `User` wire shape.
@@ -262,7 +262,9 @@ authenticates with a lazyit-native token
 `tokenPrefix`, shown once, constant-time-verified). It is authorized by direct
 [[service-account-permission]] grants from the same catalog, never a role, never ADMIN, FAIL-CLOSED.
 Its `/service-accounts` CRUD is `settings:manage`-gated; every mutation is audited
-([[service-account-audit-log]]). See [[0048-service-accounts]].
+([[service-account-audit-log]]). A non-ADMIN holder of a delegated `settings:manage` never gives an
+account a verb its own role lacks: create, an added verb, re-enabling, extending, rotate and restore
+return **403** `PERMISSION_CEILING_EXCEEDED` past that ceiling (SEC-088). See [[0048-service-accounts]].
 
 ## 7. Honest audit attribution (the unified actor model)
 

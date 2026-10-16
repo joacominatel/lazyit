@@ -3,7 +3,7 @@ title: Security invariants (auth / authZ)
 tags: [security, invariants, auth, authz, oidc, rbac, zitadel, ai-assistant, mcp, oauth]
 status: accepted
 created: 2026-06-01
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # Security invariants — auth & authorization
@@ -273,7 +273,8 @@ install. Keeping permissions out of the IdP keeps authZ vendor-neutral and BYOI-
   **the configurable surface (P5):** `GET`/`PUT /config/permissions` (`@RequirePermission('settings:manage')`,
   ADMIN-only) read/replace the MEMBER + VIEWER sets. Since 2026-10-16 (SEC-088) the PUT also carries
   `AdminOnlyGuard`, so a role that was delegated `settings:manage` still cannot widen itself; the
-  directory connection writes (`PUT /directory/connection`, `POST /directory/sync`) carry it too. The **ADMIN-immutable** half of this invariant is
+  directory connection writes (`PUT /directory/connection`, `POST /directory/sync`) and the SMTP save
+  (`PUT /config/smtp`) carry it too. The **ADMIN-immutable** half of this invariant is
   ACTIVELY enforced here: the strict PUT body (`UpdateRolePermissionsSchema` in
   `packages/shared/src/schemas/permission.ts`) accepts ONLY `MEMBER`/`VIEWER` keys, so an `ADMIN`/extra
   key → 400; the service never writes ADMIN rows, and the resolver's ADMIN short-circuit means a row edit
@@ -392,6 +393,10 @@ by a service account, and no bot can accidentally become an administrator.
     principal a workflow run executes AS. `ServiceAccountsService.assertNotReservedName` 409's create()
     and update(name), so an admin can never pre-seat a human-token-backed row as the run actor. Test:
     `apps/api/src/service-accounts/service-accounts.service.spec.ts` ("reserved engine-SA name guard").
+  - **Manager ceiling (SEC-088, 2026-10-16):** a human who manages service accounts through a delegated
+    `settings:manage` never gives one a verb their own role lacks. `ServiceAccountsService` refuses create,
+    an added verb, re-enabling, extending, rotate and restore past the caller's DB-resolved set (**403**
+    `PERMISSION_CEILING_EXCEEDED`). Test: `service-accounts.service.spec.ts` ("permission ceiling").
   - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
     actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
     all — but the `actorSaId` column is still the clean long-term fix; tracked separately.
