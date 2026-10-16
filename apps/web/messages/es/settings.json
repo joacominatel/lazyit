@@ -627,7 +627,7 @@
         "removedRead": "{who} ya no podrán {action}.",
         "accessGrantGrant": "{who} podrán otorgar y revocar el acceso a aplicaciones para cualquiera — incluso a aplicaciones sensibles. Normalmente esta es una acción exclusiva de administradores.",
         "userManage": "{who} podrán administrar usuarios con un rol igual o inferior al suyo: crear cuentas, cambiar roles hasta el suyo y dar de baja a personas. Solo un administrador gestiona administradores. Normalmente esta es una acción exclusiva de administradores.",
-        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos, la conexión del directorio y la configuración de correo (SMTP) sigue siendo exclusivo de administradores, y las cuentas de servicio que gestionen solo pueden tener permisos que su propio rol tiene. Normalmente esta es una acción exclusiva de administradores.",
+        "settingsManage": "{who} podrán configurar la instancia y gestionar taxonomías. Editar esta matriz de permisos, la conexión del directorio y la configuración de correo (SMTP) sigue siendo exclusivo de administradores, y las cuentas de servicio que gestionen solo pueden tener permisos que su propio rol tiene, salvo reportar inventario. Normalmente esta es una acción exclusiva de administradores.",
         "deleteDefault": "{who} podrán {action} — una acción destructiva normalmente reservada a administradores.",
         "who": {
           "MEMBER": "Los Miembros",
