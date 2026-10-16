@@ -81,6 +81,14 @@ describe("getAgentInventory — the report diagnostics are not custom fields (#1
     expect(keys).not.toContain("softwareHash");
   });
 
+  test("keeps the upgrade's `_infraAssetUnlinked` marker out of it too (#1599)", () => {
+    const specs = {
+      ...NODE_SPECS,
+      _infraAssetUnlinked: { assetId: "asset-1", at: "2026-10-16T00:00:00.000Z", keptByNodeId: "node-2" },
+    };
+    expect(getAgentInventory(specs)?.extras).toEqual([["rack", "A3"]]);
+  });
+
   test("a genuinely human-added key still falls through, so nothing else was swallowed", () => {
     expect(getAgentInventory(NODE_SPECS)?.extras).toEqual([["rack", "A3"]]);
   });
