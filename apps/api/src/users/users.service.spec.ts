@@ -57,7 +57,10 @@ type TxMock = {
     create: jest.Mock;
     count: jest.Mock;
     findFirst: jest.Mock;
+    // SEC-088: a promotion clears an outstanding temporary password.
+    updateMany: jest.Mock;
   };
+  passwordResetToken: { updateMany: jest.Mock };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
   // SEC-088: the target row lock that re-reads its role inside the write transaction.
@@ -151,6 +154,10 @@ describe('UsersService', () => {
         create: jest.fn((args: unknown) => user.create(args) as unknown),
         count: jest.fn((args: unknown) => user.count(args) as unknown),
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      passwordResetToken: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
       // Default: the locked row carries whatever role the target read returned.
@@ -1522,6 +1529,97 @@ describe('UsersService', () => {
           service.remove('admin-1', { userId: 'actor-99' }),
         ).rejects.toBeInstanceOf(ConflictException);
         expect(tx.user.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('a promotion revokes one-time credentials (SEC-088)', () => {
+      const target = (role: string) =>
+        user.findFirst.mockResolvedValue({
+          id: 'member-1',
+          role,
+          deletedAt: null,
+        });
+
+      it('promoting MEMBER → ADMIN clears a temp password and kills live reset links in the role-change tx', async () => {
+        target('MEMBER');
+        user.update.mockResolvedValue({ id: 'member-1', role: 'ADMIN' });
+        tx.user.updateMany.mockResolvedValue({ count: 1 });
+        tx.passwordResetToken.updateMany.mockResolvedValue({ count: 2 });
+
+        await service.update('member-1', { role: 'ADMIN' }, 'actor-99');
+
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+        expect(tx.user.updateMany).toHaveBeenCalledWith({
+          where: {
+            id: 'member-1',
+            mustChangePassword: true,
+            passwordHash: { not: null },
+          },
+          data: {
+            passwordHash: null,
+            sessionEpoch: { increment: 1 },
+            mcpCredentialEpoch: { increment: 1 },
+          },
+        });
+        expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith({
+          where: {
+            userId: 'member-1',
+            usedAt: null,
+            expiresAt: { gt: expect.any(Date) as Date },
+          },
+          data: { usedAt: expect.any(Date) as Date },
+        });
+        // Revoked before the role write commits, and recorded on the ROLE_CHANGED row.
+        expect(
+          tx.passwordResetToken.updateMany.mock.invocationCallOrder[0],
+        ).toBeLessThan(tx.user.update.mock.invocationCallOrder[0]);
+        expect(history.record).toHaveBeenCalledWith(tx, {
+          userId: 'member-1',
+          eventType: 'ROLE_CHANGED',
+          payload: { from: 'MEMBER', to: 'ADMIN', credentialsRevoked: true },
+          actor: { userId: 'actor-99' },
+        });
+      });
+
+      it('promoting VIEWER → MEMBER revokes too', async () => {
+        target('VIEWER');
+        user.update.mockResolvedValue({ id: 'member-1', role: 'MEMBER' });
+
+        await service.update('member-1', { role: 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
+        expect(tx.passwordResetToken.updateMany).toHaveBeenCalledTimes(1);
+        // Nothing was outstanding, so the history row says nothing about credentials.
+        expect(history.record).toHaveBeenCalledWith(
+          tx,
+          expect.objectContaining({
+            payload: { from: 'VIEWER', to: 'MEMBER' },
+          }),
+        );
+      });
+
+      it.each([
+        ['a demotion', 'ADMIN', 'MEMBER'],
+        ['a same-role PATCH', 'MEMBER', 'MEMBER'],
+      ])('%s leaves credentials alone', async (_label, from, to) => {
+        target(from);
+        user.count.mockResolvedValue(2);
+        user.update.mockResolvedValue({ id: 'member-1', role: to });
+
+        await service.update('member-1', { role: to as 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).not.toHaveBeenCalled();
+        expect(tx.passwordResetToken.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('judges the promotion against the locked row, not the pre-read', async () => {
+        target('MEMBER');
+        tx.$queryRaw.mockResolvedValueOnce([{ role: 'VIEWER' }]);
+        user.update.mockResolvedValue({ id: 'member-1', role: 'MEMBER' });
+
+        await service.update('member-1', { role: 'MEMBER' }, 'actor-99');
+
+        expect(tx.user.updateMany).toHaveBeenCalledTimes(1);
       });
     });
 

@@ -934,7 +934,17 @@ export class UsersService {
             (demoting || (data.isActive === false && target.isActive)),
         );
       }
-      await this.assertLockedTargetWithinCeiling(tx, id, ceiling);
+      const lockedRole = await this.assertLockedTargetWithinCeiling(
+        tx,
+        id,
+        ceiling,
+      );
+      const promoting =
+        data.role !== undefined &&
+        !canManageRole(lockedRole ?? current.role, data.role);
+      const credentialsRevoked = promoting
+        ? await this.revokeOneTimeCredentials(tx, id)
+        : false;
       // Deactivating revokes every local session (ADR-0086 §3/§8): the guard already refuses an inactive
       // account, but without the epoch bump a later REACTIVATION would revive every token minted before
       // it — including a "keep me signed in" token that never expires by time. Harmless outside local mode.
@@ -969,6 +979,7 @@ export class UsersService {
         await this.recordHistory(tx, id, 'ROLE_CHANGED', actorId, {
           from: current.role,
           to: data.role!,
+          ...(credentialsRevoked ? { credentialsRevoked: true } : {}),
         });
       }
       if (managerChanged) {
@@ -1284,13 +1295,35 @@ export class UsersService {
     tx: Prisma.TransactionClient,
     id: string,
     ceiling: Role | undefined,
-  ): Promise<void> {
+  ): Promise<Role | undefined> {
     const [row] = await tx.$queryRaw<
       { role: Role }[]
     >`SELECT "role" FROM "users" WHERE "id" = ${id} FOR UPDATE`;
     if (row) {
       assertCeiling(ceiling, [row.role]);
     }
+    return row?.role;
+  }
+
+  /** SEC-088: a temp password or reset link a lower-ranked caller may hold must not outlive a promotion. */
+  private async revokeOneTimeCredentials(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<boolean> {
+    const now = new Date();
+    const temporary = await tx.user.updateMany({
+      where: { id, mustChangePassword: true, passwordHash: { not: null } },
+      data: {
+        passwordHash: null,
+        sessionEpoch: { increment: 1 },
+        mcpCredentialEpoch: { increment: 1 },
+      },
+    });
+    const links = await tx.passwordResetToken.updateMany({
+      where: { userId: id, usedAt: null, expiresAt: { gt: now } },
+      data: { usedAt: now },
+    });
+    return temporary.count > 0 || links.count > 0;
   }
 
   /**
