@@ -13,12 +13,14 @@ import {
   Query,
   Req,
   Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -61,7 +63,13 @@ import {
   UpdateInfraNodeSchema,
 } from '@lazyit/shared';
 import { z } from 'zod';
-import { INFRA_NODE_SORT_ALLOWLIST, InfraService } from './infra.service';
+import {
+  INFRA_NODE_SORT_ALLOWLIST,
+  InfraService,
+  type InfraNodeFilters,
+} from './infra.service';
+import { INFRA_NODE_EXPORT_COLUMNS } from './infra-node-export';
+import { ExportService } from '../common/export';
 import { InfraAutoConfirmService } from './infra-auto-confirm.service';
 import { parseBooleanQuery } from '../common/parse-boolean-query';
 import { parseCuidArrayQuery } from '../common/parse-cuid-array-query';
@@ -148,6 +156,17 @@ const INFRA_NODE_PAGE_QUERY_KEYS = new Set([
   'dir',
 ]);
 
+const INFRA_NODE_EXPORT_QUERY_KEYS = new Set([
+  'kind',
+  'status',
+  'state',
+  'source',
+  'role',
+  'ids',
+  'assetIds',
+  'q',
+]);
+
 @ApiTags('infra')
 @Controller('infra')
 export class InfraController {
@@ -160,6 +179,7 @@ export class InfraController {
     // The ADR-0094 assisted-update READ (#1206). Read-only: it computes the version buckets and
     // projects `specs.host.os.family`; it writes nothing and sends nothing toward a host.
     private readonly agentFleet: AgentFleetService,
+    private readonly exports: ExportService,
   ) {}
 
   // ── The agent fleet view (ADR-0094 §4, #1206 — absorbs epic #1146 item 1) ───
@@ -421,12 +441,6 @@ export class InfraController {
   @ApiOkResponse({ type: InfraNodeListPageDto })
   listNodePage(@Query() query: Record<string, unknown>) {
     this.assertAllowedQueryKeys(query, INFRA_NODE_PAGE_QUERY_KEYS);
-    const kind = this.parseStringQuery(query.kind, 'kind');
-    const status = this.parseStringQuery(query.status, 'status');
-    const state = this.parseStringQuery(query.state, 'state');
-    const source = this.parseStringQuery(query.source, 'source');
-    const role = this.parseStringQuery(query.role, 'role');
-    const q = this.parseStringQuery(query.q, 'q');
     const limit = this.parseStringQuery(query.limit, 'limit');
     const offset = this.parseStringQuery(query.offset, 'offset');
     const page = this.parseStringQuery(query.page, 'page');
@@ -434,18 +448,64 @@ export class InfraController {
     const dir = this.parseStringQuery(query.dir, 'dir');
 
     return this.infra.listNodePage(
-      {
-        kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
-        status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
-        state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
-        source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
-        role: this.parseEnum(role, InfraNodeListRoleSchema, 'role'),
-        ids: this.parseIdBatch(query.ids, 'ids'),
-        assetIds: this.parseIdBatch(query.assetIds, 'assetIds'),
-        q,
-      },
+      this.parseNodeFilters(query),
       parsePageQuery({ limit, offset, page, sort, dir }),
     );
+  }
+
+  // STATIC route declared BEFORE `nodes/:id` so `/infra/nodes/export` never resolves as an id.
+  @Get('nodes/export')
+  @RequirePermission('infra:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every node matching the Servers page filters (ADR-0103): same permission, filters and rows as GET /infra/nodes/page, newest first. Never the specs blob or agent identity keys. Refused above 100,000 rows (422); one running export and five a minute per caller (429). Every export is audited. Unknown query keys are rejected.',
+  })
+  @ApiQuery({
+    name: 'kind',
+    required: false,
+    enum: [...InfraNodeKindSchema.options],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: [...InfraNodeStatusSchema.options],
+  })
+  @ApiQuery({
+    name: 'state',
+    required: false,
+    enum: [...InfraNodeStateSchema.options],
+  })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    enum: [...InfraNodeSourceSchema.options],
+  })
+  @ApiQuery({
+    name: 'role',
+    required: false,
+    enum: [...InfraNodeListRoleSchema.options],
+  })
+  @ApiQuery({ name: 'ids', required: false })
+  @ApiQuery({ name: 'assetIds', required: false })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiOkResponse({ description: 'The filtered nodes as CSV (text/csv).' })
+  exportNodes(
+    @Query() query: Record<string, unknown>,
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    this.assertAllowedQueryKeys(query, INFRA_NODE_EXPORT_QUERY_KEYS);
+    const filters = this.parseNodeFilters(query);
+    return this.exports.exportCsv({
+      resource: 'INFRA_NODES',
+      principal,
+      response: res,
+      filters: { ...filters },
+      columns: INFRA_NODE_EXPORT_COLUMNS,
+      filename: 'servers',
+      ...this.infra.nodeExportSource(filters),
+    });
   }
 
   @Get('graph/nodes')
@@ -813,6 +873,25 @@ export class InfraController {
       );
     }
     return ids;
+  }
+
+  /** The Servers filters, parsed once for the page and its export. */
+  private parseNodeFilters(query: Record<string, unknown>): InfraNodeFilters {
+    const kind = this.parseStringQuery(query.kind, 'kind');
+    const status = this.parseStringQuery(query.status, 'status');
+    const state = this.parseStringQuery(query.state, 'state');
+    const source = this.parseStringQuery(query.source, 'source');
+    const role = this.parseStringQuery(query.role, 'role');
+    return {
+      kind: this.parseEnum(kind, InfraNodeKindSchema, 'kind'),
+      status: this.parseEnum(status, InfraNodeStatusSchema, 'status'),
+      state: this.parseEnum(state, InfraNodeStateSchema, 'state'),
+      source: this.parseEnum(source, InfraNodeSourceSchema, 'source'),
+      role: this.parseEnum(role, InfraNodeListRoleSchema, 'role'),
+      ids: this.parseIdBatch(query.ids, 'ids'),
+      assetIds: this.parseIdBatch(query.assetIds, 'assetIds'),
+      q: this.parseStringQuery(query.q, 'q'),
+    };
   }
 
   private assertAllowedQueryKeys(
