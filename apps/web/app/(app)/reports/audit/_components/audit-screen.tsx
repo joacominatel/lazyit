@@ -36,6 +36,7 @@ import {
 import { useAuditLogFilters, useAuditLogsPage } from "@/lib/api/hooks/use-audit";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useListParams } from "@/lib/hooks/use-list-params";
+import { exportAuditDetailLine, type ExportDetailTranslate } from "./export-audit-detail";
 
 /** Stable empty breadcrumb for the audit PageHeader. */
 const BREADCRUMB = <Breadcrumb />;
@@ -404,6 +405,8 @@ function AuditTape({
   onOffsetChange: (offset: number) => void;
 }) {
   const t = useTranslations("audit");
+  const tExportDetail = useTranslations("audit.exportDetail");
+  const exportDetail: ExportDetailTranslate = (key, values) => tExportDetail(key, values);
   const { dateTime, relative } = useFormatters();
 
   return (
@@ -440,7 +443,7 @@ function AuditTape({
                 <span aria-hidden className="font-mono text-muted-foreground/60">
                   →
                 </span>
-                <span className="min-w-0 truncate">{detailLine(item, t)}</span>
+                <span className="min-w-0 truncate">{detailLine(item, t, exportDetail)}</span>
               </span>
             </li>
           );
@@ -459,7 +462,11 @@ function AuditTape({
 }
 
 /** A source-specific one-line detail for a row (metadata only — never a value). */
-function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): string {
+function detailLine(
+  item: AuditLogItem,
+  t: ReturnType<typeof useTranslations>,
+  exportDetail: ExportDetailTranslate,
+): string {
   switch (item.source) {
     case "secret": {
       const parts = [item.vaultName, item.itemLabel].filter(Boolean);
@@ -470,7 +477,7 @@ function detailLine(item: AuditLogItem, t: ReturnType<typeof useTranslations>): 
     case "permission":
       return [item.role, item.permission].filter(Boolean).join(" · ") || t("table.noSubject");
     case "export":
-      return item.detail ?? t("table.noSubject");
+      return exportAuditDetailLine(item.detail, exportDetail) ?? item.detail ?? t("table.noSubject");
     case "serviceAccount":
       return (
         [item.serviceAccountName, item.detail].filter(Boolean).join(" · ") ||

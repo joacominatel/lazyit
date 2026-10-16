@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Registro de auditoría",
-    "subtitle": "Rastro de auditoría de seguridad — eventos de secretos, permisos y cuentas de servicio.",
+    "subtitle": "Rastro de auditoría de seguridad — eventos de secretos, permisos, cuentas de servicio y exportaciones de datos.",
     "accessDeniedTitle": "El registro de auditoría es solo para administradores",
     "accessDeniedDescription": "El rastro de auditoría de seguridad requiere el permiso de Informes. Consultá con un administrador si necesitás acceso a esta vista.",
     "accessDeniedAction": "Volver a Informes"
@@ -30,6 +30,10 @@
   "table": {
     "system": "Sistema",
     "noSubject": "—"
+  },
+  "exportDetail": {
+    "rows": "{count, plural, one {# fila} other {# filas}}",
+    "noFilters": "sin filtros"
   },
   "export": {
     "print": "Imprimir",
