@@ -152,7 +152,9 @@ describe('PersonalTokensController — a user without ai:connect (AUD-083)', () 
   let app: INestApplication<App>;
   const service = {
     create: jest.fn(),
-    listMine: jest.fn().mockResolvedValue([{ id: 'ckgrant000000000000000000' }]),
+    listMine: jest
+      .fn()
+      .mockResolvedValue([{ id: 'ckgrant000000000000000000' }]),
     revokeMine: jest.fn(),
   };
 
