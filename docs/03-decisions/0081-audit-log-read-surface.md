@@ -133,7 +133,9 @@ The wire row and the audit CSV header are unchanged; only `AuditLogSource` widen
 the engine (epic #1597, phase 1b), an export of any audit source, this one included, is recorded here
 too (resource `AUDIT`). That move also replaced the "one shared CSV util" above for the server path: the
 export streams its own column set (same header) through the engine's typed guard, with a BOM and no
-stamp, and keeps its `id < last` keyset. `utils/audit-log-csv.ts` now serves only the browser "export
-visible" path until it retires. An export of the `export` source includes the row recording that export
-itself, since the row is written after the count and before the first read (its `rowCount` is one less
+stamp, and keeps its `id < last` keyset. The browser "export visible" path retired in phase 1d, so
+`utils/audit-log-csv.ts` now holds only the header the API pins; the screen exports through the shared
+export button (every matching row, never the page). On screen, an `export` row's detail reads as its row
+count and filters ("1,204 rows · q: dell"), not raw JSON; a detail that is not that shape shows as stored.
+An export of the `export` source includes the row recording that export itself, since the row is written after the count and before the first read (its `rowCount` is one less
 than the file's rows; [[0103-data-export-streaming-path]] §4).
