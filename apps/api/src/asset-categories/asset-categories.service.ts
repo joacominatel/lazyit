@@ -155,10 +155,10 @@ export class AssetCategoriesService {
       if (!locked.some((row) => row.id === id)) {
         throw new NotFoundException(`AssetCategory ${id} not found`);
       }
-      const affected = await tx.assetModel.findMany({
-        where: liveModelsOf(id),
-        select: { id: true },
-      });
+      const affected = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "asset_models"
+         WHERE "categoryId" = ${id} AND "deletedAt" IS NULL
+         ORDER BY "id" FOR NO KEY UPDATE`;
       if (affected.length > 0) {
         if (!resolution) {
           throw deleteResolutionRequired(`AssetCategory ${id}`, {

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -249,6 +250,12 @@ export class AssetModelsService {
         SELECT "id" FROM "assets"
          WHERE "modelId" = ${id} AND "deletedAt" IS NULL
          ORDER BY "id" FOR UPDATE`;
+        // Purchase before line, as every purchase write locks; SHARE also waits out a status change or archive in flight.
+        await tx.$queryRaw`
+        SELECT "id" FROM "purchase_orders"
+         WHERE "id" IN (SELECT "purchaseOrderId" FROM "purchase_order_lines"
+                         WHERE "assetModelId" = ${id} AND "deletedAt" IS NULL)
+         ORDER BY "id" FOR SHARE`;
         const lines = await this.openLines(tx, id, true);
         if (assets.length + lines.length > 0) {
           if (!resolution) {
@@ -285,24 +292,40 @@ export class AssetModelsService {
    * Restore a soft-deleted model: clear `deletedAt` (ADR-0041). Found via the `includeSoftDeleted`
    * escape hatch (the read filter would hide it). 404 if it never existed; idempotent if already
    * live. The partial unique index frees `sku` on delete, so a restore can 409 if another live model
-   * took the sku in the meantime (mapped by the global PrismaExceptionFilter).
+   * took the sku in the meantime (mapped by the global PrismaExceptionFilter). A model whose category is
+   * still archived is a 409 too: restores do not cascade, so restore the category first.
    */
   async restore(id: string) {
-    const model = await this.prisma.assetModel.findFirst({
-      where: { id },
-      includeSoftDeleted: true,
-    } as Prisma.AssetModelFindFirstArgs);
-    if (!model) {
-      throw new NotFoundException(`AssetModel ${id} not found`);
-    }
-    if (model.deletedAt === null) {
-      return model; // already live — idempotent
-    }
-    return this.prisma.assetModel.update({
-      where: { id },
-      data: { deletedAt: null },
+    return this.prisma.$transaction(async (tx) => {
+      const model = await tx.assetModel.findFirst({
+        where: { id },
+        includeSoftDeleted: true,
+      } as Prisma.AssetModelFindFirstArgs);
+      if (!model) {
+        throw new NotFoundException(`AssetModel ${id} not found`);
+      }
+      if (model.deletedAt === null) {
+        return model; // already live — idempotent
+      }
+      if (model.categoryId !== null) {
+        // SHARE waits out a category delete in flight, which then sees this model as live.
+        const category = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "asset_categories"
+           WHERE "id" = ${model.categoryId} AND "deletedAt" IS NULL
+           FOR SHARE`;
+        if (category.length === 0) {
+          throw new ConflictException(
+            `Cannot restore asset model ${id}: its category ${model.categoryId} is archived. Restore the category first.`,
+          );
+        }
+      }
+      return tx.assetModel.update({
+        where: { id },
+        data: { deletedAt: null },
+      });
     });
   }
+
   // --- delete resolution (SEC-041) -----------------------------------------
 
   private async resolveDependents(

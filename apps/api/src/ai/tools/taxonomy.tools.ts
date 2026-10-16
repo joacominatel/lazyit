@@ -1003,6 +1003,40 @@ const assetModelUpdate = defineTool({
   },
 });
 
+/**
+ * Open lines shown as the purchases they belong to — the card links a purchase, never a line. The purchases
+ * are counted only when every line was listed; otherwise they are reported as unknown rather than guessed.
+ */
+function collectPurchasesOfLines(impact: Impact, group: Row): void {
+  const total = typeof group.total === 'number' ? group.total : 0;
+  if (total === 0) return;
+  const lines = Array.isArray(group.items) ? asRows(group.items) : [];
+  if (lines.length < total) {
+    impact.unknown.push('purchases');
+    return;
+  }
+  const purchases = new Map<string, string | undefined>();
+  for (const line of lines) {
+    const id = String(line.purchaseOrderId);
+    if (!purchases.has(id)) {
+      purchases.set(
+        id,
+        str(line.reference) ?? str(line.description) ?? undefined,
+      );
+    }
+  }
+  impact.impacted.push({
+    type: 'purchaseOrder',
+    count: purchases.size,
+    sample: [...purchases].slice(0, 5).map(([id, label]) => ({
+      type: 'purchaseOrder' as const,
+      id,
+      op: 'updated' as const,
+      ...(label ? { label } : {}),
+    })),
+  });
+}
+
 const assetModelArchive = defineTool({
   name: 'asset_model_archive',
   title: 'Archive an asset model',
@@ -1064,30 +1098,10 @@ const assetModelArchive = defineTool({
       dependents,
       input.strategy,
     );
-    // The card links a purchase, not a line: each line is shown as the purchase it belongs to.
-    const lines = asRow(response.purchaseOrderLines);
-    const impact = impactFromDelete(
-      {
-        ...response,
-        purchaseOrderLines: {
-          total: lines.total,
-          items: Array.isArray(lines.items)
-            ? asRows(lines.items).map((line) => ({
-                id: line.purchaseOrderId,
-                label: str(line.reference) ?? str(line.description),
-              }))
-            : null,
-        },
-      },
-      [
-        ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
-        [
-          'purchaseOrderLines',
-          'purchaseOrder',
-          (p) => str(p.label) ?? undefined,
-        ],
-      ],
-    );
+    const impact = impactFromDelete(response, [
+      ['assets', 'asset', (a) => str(a.assetTag) ?? undefined],
+    ]);
+    collectPurchasesOfLines(impact, asRow(response.purchaseOrderLines));
     const changes = archiveChanges(impact);
     if (Object.keys(dependents).length > 0 && input.moveTo !== undefined) {
       const to = await resolveModel(rt, input.moveTo, true);

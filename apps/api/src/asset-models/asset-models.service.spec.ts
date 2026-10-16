@@ -460,7 +460,9 @@ describe('AssetModelsService', () => {
     expect(modelLock[0].join('?')).toContain('ORDER BY "id" FOR UPDATE');
     expect(modelLock[1]).toEqual(['m1', 'm2']);
     expect(rawCalls('assets')[0][0].join('?')).toContain('FOR UPDATE');
-    const lineQueries = rawCalls('purchase_order_lines');
+    const lineQueries = (queryRaw.mock.calls as RawCall[]).filter(([strings]) =>
+      strings.join('?').includes('FROM "purchase_order_lines" l'),
+    );
     const lockOf = (values: unknown[]) =>
       values.some(
         (v) =>
@@ -476,6 +478,31 @@ describe('AssetModelsService', () => {
     expect(lockOf(lineQueries[0].slice(1))).toBe(true);
     expect(lockOf(lineQueries[1].slice(1))).toBe(false);
     expect(lineQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
+  });
+
+  it('locks the purchases of the mapped lines, in id order, after the assets and before the lines', async () => {
+    seedDependents({
+      assets: ['a1'],
+      lines: [{ id: 'l1', purchaseOrderId: 'po1' }],
+    });
+    assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: new Date() });
+
+    await service.remove('m1', { strategy: 'detach' }, ADMIN);
+
+    const sqls = (queryRaw.mock.calls as RawCall[]).map(([strings]) =>
+      strings.join('?'),
+    );
+    const purchaseLock = sqls.findIndex((sql) =>
+      sql.includes('SELECT "id" FROM "purchase_orders"'),
+    );
+    const lineLock = sqls.findIndex((sql) =>
+      sql.includes('FROM "purchase_order_lines" l'),
+    );
+    const assetLock = sqls.findIndex((sql) => sql.includes('FROM "assets"'));
+    expect(sqls[purchaseLock]).toContain('ORDER BY "id" FOR SHARE');
+    expect(sqls[purchaseLock]).toContain('"assetModelId" = ?');
+    expect(assetLock).toBeLessThan(purchaseLock);
+    expect(purchaseLock).toBeLessThan(lineLock);
   });
 
   it('gives the delete transaction more than the 5 s default, so a model with many assets can still be deleted', async () => {
@@ -528,6 +555,61 @@ describe('AssetModelsService', () => {
       assets: { total: 4, items: null },
       purchaseOrderLines: { total: 1, items: null },
     });
+  });
+
+  // --- restore needs a live category (SEC-041) -------------------------------
+
+  const archivedModel = (categoryId: string | null) => ({
+    id: 'm1',
+    categoryId,
+    deletedAt: new Date('2026-09-01T00:00:00.000Z'),
+  });
+  const categoryLockReturns = (live: boolean) =>
+    queryRaw.mockImplementation((strings: TemplateStringsArray) =>
+      Promise.resolve(
+        strings.join('?').includes('FROM "asset_categories"') && live
+          ? [{ id: 'cat-1' }]
+          : [],
+      ),
+    );
+
+  it('refuses (409) to restore a model while its category is archived, and writes nothing', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel('cat-1'));
+    categoryLockReturns(false);
+
+    const err = await service.restore('m1').catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).message).toContain(
+      'Restore the category first',
+    );
+    expect(assetModel.update).not.toHaveBeenCalled();
+  });
+
+  it('restores a model whose category is live, locking the category FOR SHARE', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel('cat-1'));
+    categoryLockReturns(true);
+    assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: null });
+
+    await service.restore('m1');
+
+    const [sql, categoryId] = (queryRaw.mock.calls as RawCall[])[0];
+    expect(sql.join('?')).toContain('FOR SHARE');
+    expect(categoryId).toBe('cat-1');
+    expect(assetModel.update).toHaveBeenCalledWith({
+      where: { id: 'm1' },
+      data: { deletedAt: null },
+    });
+  });
+
+  it('restores an uncategorized model without reading any category', async () => {
+    assetModel.findFirst.mockResolvedValue(archivedModel(null));
+    assetModel.update.mockResolvedValue({ id: 'm1', deletedAt: null });
+
+    await service.restore('m1');
+
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(assetModel.update).toHaveBeenCalledTimes(1);
   });
 
   it('the delete-impact preview 404s for an archived model', async () => {
