@@ -64,7 +64,8 @@ on purpose**: no platform-specific kinds (a k8s pod is a `CONTAINER`, a namespac
   resolved links already shared: the live node that reported most recently (`lastReportedAt`, with a
   never-reported node last) kept the asset, falling back to the oldest (`createdAt`, then `id`) on a tie;
   the others had their `assetId` cleared and `specs._infraAssetUnlinked` (`{ assetId, keptByNodeId, at }`)
-  stamped, and nothing was deleted. After a re-image that puts the marker on the dead predecessor, which
+  stamped (a node whose `specs` is not a JSON object is un-linked but not stamped), and nothing was
+  deleted. After a re-image that puts the marker on the dead predecessor, which
   no longer reports. The marker never reaches an Asset; an agent report that rewrites the node's blob
   replaces it.
 - **Confirm is claimed, not checked** (AUD-059). `confirmNode` flips `PENDING → CONFIRMED` with a
