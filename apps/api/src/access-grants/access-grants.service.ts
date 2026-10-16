@@ -109,11 +109,11 @@ export class AccessGrantsService {
     return {
       count: () => this.prisma.accessGrant.count({ where }),
       fetchBatch: (
-        after: KeysetCursor | null,
+        after: KeysetCursor<string> | null,
         take: number,
       ): Promise<AccessGrantExportRow[]> =>
         this.prisma.accessGrant.findMany({
-          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          where: keysetWhere(where, after),
           orderBy: keysetOrderBy(),
           take,
           select: ACCESS_GRANT_EXPORT_SELECT,

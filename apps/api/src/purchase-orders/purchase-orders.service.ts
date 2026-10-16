@@ -255,13 +255,10 @@ export class PurchaseOrdersService {
           where: await listWhere(),
           ...escapeHatch,
         }),
-      fetchBatch: async (after: KeysetCursor | null, take: number) =>
+      fetchBatch: async (after: KeysetCursor<string> | null, take: number) =>
         this.toListItems(
           await this.prisma.purchaseOrder.findMany({
-            where: keysetWhere(
-              await listWhere(),
-              after as KeysetCursor<string> | null,
-            ),
+            where: keysetWhere(await listWhere(), after),
             orderBy: keysetOrderBy(),
             take,
             include: PURCHASE_ORDER_INCLUDE,
