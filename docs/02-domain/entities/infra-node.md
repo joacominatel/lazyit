@@ -3,7 +3,7 @@ title: InfraNode
 tags: [domain, entity, infra, topology]
 status: accepted
 created: 2026-06-23
-updated: 2026-10-15
+updated: 2026-10-16
 ---
 
 # InfraNode
@@ -273,6 +273,14 @@ Raw-SQL partial uniques: `infra_nodes_reporting_source_external_id_key` (the age
     page-route allowlist is exact:
     `kind,status,state,source,role,ids,assetIds,q,limit,offset,page,sort,dir`; any other key, including
     `deleted` or a typo, returns 400 before the service is called.
+- `GET /infra/nodes/export?kind=&status=&state=&source=&role=&ids=&assetIds=&q=` — a CSV of every node
+  the page would return for the same filters, under the same `infra:read` (#1597,
+  [[0103-data-export-streaming-path]]). The filter keys are the page's minus paging and sort; any other
+  key is a 400. Columns, from the page row: `Label, Kind, Status, State, Source, IP address, Chassis,
+  Asset, Owners, Agent version, Last reported at, Created at, Updated at, Asset ID, Node ID`. `Asset` and
+  `Owners` (names, `; `-separated) are blank for an archived Asset, as on screen. Never `specs`,
+  `externalId`, `reportingSource`, `shortcuts` or the canvas position. Newest first by
+  `(createdAt, id)`. Every export is audited ([[data-export-log]]).
 - `GET /infra/graph/nodes` — **the topology canvas's own read** (#1152, same `infra:read` gate).
   Returns `{ items, total, limit, truncated }` — **not** a `Page<T>`, and deliberately so: there is no
   `offset`, because a map missing a node is a *wrong* map rather than a shorter one (the node takes
