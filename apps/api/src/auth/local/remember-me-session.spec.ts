@@ -213,6 +213,8 @@ describe('remember-me session lifecycle (ADR-0086 §8)', () => {
       secretAuditLog: { createMany: jest.fn() },
       // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
       $executeRaw: jest.fn().mockResolvedValue(0),
+      // The SEC-088 row lock re-reads the subject's role.
+      $queryRaw: jest.fn(() => Promise.resolve([{ role: row.role }])),
     };
     prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) =>
       Promise.resolve(fn(prisma)),

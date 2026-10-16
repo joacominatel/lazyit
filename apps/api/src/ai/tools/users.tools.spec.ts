@@ -454,6 +454,11 @@ const prisma = {
   },
   // The last-admin guard takes an advisory lock inside its transaction (AUD-041).
   $executeRaw: jest.fn().mockResolvedValue(0),
+  // The SEC-088 row lock re-reads the target's role.
+  $queryRaw: jest.fn((_sql: TemplateStringsArray, id: string) => {
+    const row = users.get(id);
+    return Promise.resolve(row ? [{ role: row.role }] : []);
+  }),
   /** Array form (reads) or an interactive transaction: all or nothing over the in-memory tables. */
   $transaction: jest.fn(async (arg: unknown): Promise<unknown> => {
     if (Array.isArray(arg)) return Promise.all(arg);

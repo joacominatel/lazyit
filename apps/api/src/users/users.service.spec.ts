@@ -59,6 +59,8 @@ type TxMock = {
   };
   // AUD-041: the last-admin guard takes a transaction-scoped advisory lock before it counts.
   $executeRaw: jest.Mock;
+  // SEC-088: the target row lock that re-reads its role inside the write transaction.
+  $queryRaw: jest.Mock;
   accessGrant: { updateMany: jest.Mock; create: jest.Mock };
   assetAssignment: { create: jest.Mock };
   workflowRun: { create: jest.Mock };
@@ -148,6 +150,13 @@ describe('UsersService', () => {
         findFirst: jest.fn((args: unknown) => user.findFirst(args) as unknown),
       },
       $executeRaw: jest.fn().mockResolvedValue(0),
+      // Default: the locked row carries whatever role the target read returned.
+      $queryRaw: jest.fn(async (_sql: TemplateStringsArray, id: string) => {
+        const row = (await user.findFirst({ where: { id } })) as {
+          role?: string;
+        } | null;
+        return row ? [{ role: row.role }] : [];
+      }),
       accessGrant: {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         // Echo the persisted shape the clone reads back (id + applicationId + accessLevel) so the
@@ -346,7 +355,7 @@ describe('UsersService', () => {
     expect(createCalls[0][0].data.role).toBe('VIEWER');
   });
 
-  it('honours an explicit role on create (ADMIN-gated controller may pass any role)', async () => {
+  it('honours an explicit role on create (an ADMIN caller may grant any role)', async () => {
     const dto = {
       email: 'a@b.com',
       firstName: 'Ada',
@@ -355,7 +364,7 @@ describe('UsersService', () => {
     };
     user.create.mockResolvedValue({ id: 'uuid-a', ...dto });
 
-    await service.create(dto);
+    await service.create(dto, 'admin-1');
 
     // An explicitly-supplied role is preserved (not overridden by the VIEWER default).
     expect(user.create).toHaveBeenCalledWith({
@@ -891,6 +900,7 @@ describe('UsersService', () => {
     it('bumps sessionEpoch and mcpCredentialEpoch when an active user is deactivated', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         deletedAt: null,
       });
@@ -911,6 +921,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         deletedAt: null,
       });
@@ -919,6 +930,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -939,6 +951,7 @@ describe('UsersService', () => {
     it('clears directoryOffboardedAt when an active user is deactivated by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -959,6 +972,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         directoryOffboardedAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -967,6 +981,7 @@ describe('UsersService', () => {
 
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -986,6 +1001,7 @@ describe('UsersService', () => {
     it('marks directoryReenabledAt when an inactive user is re-enabled by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: false,
         directoryReenabledAt: null,
         deletedAt: null,
@@ -1002,6 +1018,7 @@ describe('UsersService', () => {
     it('clears the mark when an active user is deactivated by hand', async () => {
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         directoryReenabledAt: new Date('2026-01-01T00:00:00.000Z'),
         deletedAt: null,
@@ -1021,6 +1038,7 @@ describe('UsersService', () => {
       user.update.mockResolvedValue({ id: 'uuid-1' });
       user.findFirst.mockResolvedValue({
         id: 'uuid-1',
+        role: 'VIEWER',
         isActive: true,
         lastName: 'Lovelace',
         deletedAt: null,
@@ -1117,7 +1135,11 @@ describe('UsersService', () => {
   });
 
   it('re-indexes the user on update (upsert with the updated row)', async () => {
-    user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+    user.findFirst.mockResolvedValue({
+      id: 'uuid-1',
+      role: 'VIEWER',
+      deletedAt: null,
+    });
     user.update.mockResolvedValue({
       id: 'uuid-1',
       firstName: 'Ada',
@@ -1636,18 +1658,22 @@ describe('UsersService', () => {
 
       await service.remove('u-1', { userId: 'actor-99' });
 
-      // Call 1 is the admin-set advisory lock, call 2 the user row lock.
-      expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+      // The admin-set advisory lock first, then the user row lock that re-reads the role (SEC-088).
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
       const calls = tx.$executeRaw.mock.calls as Array<
         [TemplateStringsArray, ...unknown[]]
       >;
       expect(calls[0][0].join('?')).toContain('pg_advisory_xact_lock');
       expect(calls[0][1]).toBe('lazyit.admin_set');
-      expect(calls[1][0].join('?')).toBe(
-        'SELECT 1 FROM "users" WHERE "id" = ? FOR UPDATE',
+      const lockCalls = tx.$queryRaw.mock.calls as Array<
+        [TemplateStringsArray, ...unknown[]]
+      >;
+      expect(lockCalls[0][0].join('?')).toBe(
+        'SELECT "role" FROM "users" WHERE "id" = ? FOR UPDATE',
       );
-      expect(calls[1][1]).toBe('u-1');
-      const rowLock = tx.$executeRaw.mock.invocationCallOrder[1];
+      expect(lockCalls[0][1]).toBe('u-1');
+      const rowLock = tx.$queryRaw.mock.invocationCallOrder[0];
+      expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(rowLock);
       expect(rowLock).toBeLessThan(
         tx.vaultMembership.findMany.mock.invocationCallOrder[0],
       );
@@ -1890,6 +1916,79 @@ describe('UsersService', () => {
         service.update('target-1', { firstName: 'X' }, 'ghost-1'),
       ).rejects.toMatchObject(ceiling);
     });
+
+    // A concurrent promotion lands between the pre-check and the write: the row lock re-reads ADMIN.
+    describe('the target is re-checked under its row lock', () => {
+      beforeEach(() => {
+        callerIs('MEMBER');
+        tx.$queryRaw.mockResolvedValue([{ role: 'ADMIN' }]);
+      });
+
+      it('update refuses and writes nothing', async () => {
+        target('MEMBER');
+
+        await expect(
+          service.update('target-1', { firstName: 'X' }, 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+        expect(history.record).not.toHaveBeenCalled();
+      });
+
+      it('a local password reset refuses and never stores the temporary password', async () => {
+        process.env.AUTH_MODE = 'local';
+        target('MEMBER');
+
+        await expect(
+          service.requestPasswordReset('target-1', 'member-1'),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+        expect(history.record).not.toHaveBeenCalled();
+      });
+
+      it('offboarding refuses before revoking or releasing anything', async () => {
+        target('MEMBER');
+
+        await expect(
+          service.remove('target-1', { userId: 'member-1' }),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.accessGrant.updateMany).not.toHaveBeenCalled();
+        expect(assignments.releaseAllForUser).not.toHaveBeenCalled();
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+
+      it('restore refuses and leaves the row soft-deleted', async () => {
+        target('MEMBER', { deletedAt: new Date() });
+
+        await expect(
+          service.restore('target-1', { userId: 'member-1' }),
+        ).rejects.toMatchObject(ceiling);
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+    });
+
+    it('a MEMBER cannot onboard a directory row that already holds ADMIN (local mode)', async () => {
+      process.env.AUTH_MODE = 'local';
+      callerIs('MEMBER');
+      target('ADMIN', { directoryOnly: true });
+
+      await expect(
+        service.provisionLocalAccount('target-1', 'member-1'),
+      ).rejects.toMatchObject(ceiling);
+      expect(provisioning.generateTempPassword).not.toHaveBeenCalled();
+    });
+
+    it('no actor fails closed at VIEWER: it can neither grant nor touch a higher role', async () => {
+      await expect(
+        service.create({ ...profile, role: 'MEMBER' }),
+      ).rejects.toMatchObject(ceiling);
+
+      target('MEMBER');
+      await expect(
+        service.update('target-1', { firstName: 'X' }),
+      ).rejects.toMatchObject(ceiling);
+      expect(user.findUnique).not.toHaveBeenCalled();
+      expect(user.create).not.toHaveBeenCalled();
+    });
   });
 
   // AUD-040: the last-admin guard counts only admins who can actually sign in.
@@ -1994,6 +2093,22 @@ describe('UsersService', () => {
         isActive: true,
         directoryOnly: false,
         passwordHash: 'h2',
+        externalId: null,
+      };
+      user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
+
+      await service.update('admin-1', { role: 'MEMBER' }, 'actor-99');
+
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('the dev shim needs no credential: a password-less, unlinked ADMIN still counts', async () => {
+      process.env.AUTH_MODE = 'shim';
+      rows['admin-2'] = {
+        role: 'ADMIN',
+        isActive: true,
+        directoryOnly: false,
+        passwordHash: null,
         externalId: null,
       };
       user.update.mockResolvedValue({ id: 'admin-1', role: 'MEMBER' });
@@ -2580,7 +2695,11 @@ describe('UsersService', () => {
   // --- restore (re-onboard) (ADR-0041) -------------------------------------
   describe('restore', () => {
     it('clears deletedAt for a soft-deleted user and re-indexes them', async () => {
-      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: new Date() });
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'VIEWER',
+        deletedAt: new Date(),
+      });
       user.update.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
 
       const restored = await service.restore('uuid-1');
@@ -2608,7 +2727,11 @@ describe('UsersService', () => {
     });
 
     it('is idempotent (no update) when the user is already live', async () => {
-      user.findFirst.mockResolvedValue({ id: 'uuid-1', deletedAt: null });
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        role: 'VIEWER',
+        deletedAt: null,
+      });
 
       await service.restore('uuid-1');
 
