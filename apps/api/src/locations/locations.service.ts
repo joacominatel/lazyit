@@ -7,18 +7,28 @@ import {
 } from '@nestjs/common';
 import type {
   CreateLocation,
+  DeleteResolution,
   LocationBreadcrumb,
+  LocationDeleteImpact,
   LocationType,
   PageQuery,
   UpdateLocation,
 } from '@lazyit/shared';
-import { offsetOf, pageOf } from '@lazyit/shared';
+import { DELETE_IMPACT_SAMPLE_LIMIT, offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { projectLocation } from '../search/search.documents';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
 import { deletedWhere, includeSoftDeletedFor } from '../common/deleted-filter';
+import { deleteResolutionRequired } from '../common/delete-resolution';
+import { ActorService, type ActorAttribution } from '../common/actor.service';
+import { AssetHistoryService } from '../asset-history/asset-history.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { Principal } from '../auth/principal';
+import { COUNTABLE_LINE_KINDS } from '../purchase-orders/purchase-order-derived';
+import { recordPurchaseOrderEvents } from '../purchase-orders/purchase-order-events';
+import { receivedUnitsSql } from '../purchase-orders/purchase-order-line-receipt';
 
 /** Optional filters for listing locations. */
 export interface LocationFilters {
@@ -49,6 +59,12 @@ const MAX_HIERARCHY_DEPTH = 32;
 // Every tree-shape write checks and writes under this lock, or two opposing moves both pass and close a cycle.
 export const LOCATION_TREE_LOCK = 'lazyit.location_tree';
 
+/** A delete may re-point thousands of assets and write their history; allow it more than the 5 s default. */
+export const LOCATION_DELETE_TX_TIMEOUT_MS = 30_000;
+
+// Only these stored statuses still expect units; CANCELLED and any status a newer build adds keep their location.
+const OPEN_PURCHASE_STATUSES = ['DRAFT', 'ORDERED'];
+
 @Injectable()
 export class LocationsService {
   private readonly logger = new Logger(LocationsService.name);
@@ -56,6 +72,9 @@ export class LocationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly search: SearchService,
+    private readonly actor: ActorService,
+    private readonly history: AssetHistoryService,
+    private readonly permissions: PermissionResolverService,
   ) {}
 
   /**
@@ -177,16 +196,98 @@ export class LocationsService {
     return location;
   }
 
-  /** Soft delete: set deletedAt. Never hard-delete (auditability is a first principle). */
-  async remove(id: string) {
-    const location = await this.prisma.$transaction(async (tx) => {
-      await this.lockLocationTree(tx);
-      await this.assertLocationLive(tx, id);
-      return tx.location.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-    });
+  /** What a delete would re-point or detach; item lists only for the kinds the caller may read. */
+  async deleteImpact(
+    id: string,
+    principal?: Principal,
+  ): Promise<LocationDeleteImpact> {
+    await this.findOne(id);
+    const [canAssets, canLocations, canPurchases] = await Promise.all([
+      this.permissions.principalHas(principal, 'asset:read'),
+      this.permissions.principalHas(principal, 'location:read'),
+      this.permissions.principalHas(principal, 'purchaseOrder:read'),
+    ]);
+    const assetsWhere = { locationId: id, deletedAt: null };
+    const childrenWhere = { parentId: id };
+    const [assetTotal, assets, childTotal, children, purchases] =
+      await Promise.all([
+        this.prisma.asset.count({ where: assetsWhere }),
+        canAssets
+          ? this.prisma.asset.findMany({
+              where: assetsWhere,
+              select: { id: true, name: true, assetTag: true },
+              orderBy: { name: 'asc' },
+              take: DELETE_IMPACT_SAMPLE_LIMIT,
+            })
+          : null,
+        this.prisma.location.count({ where: childrenWhere }),
+        canLocations
+          ? this.prisma.location.findMany({
+              where: childrenWhere,
+              select: { id: true, name: true, type: true },
+              orderBy: { name: 'asc' },
+              take: DELETE_IMPACT_SAMPLE_LIMIT,
+            })
+          : null,
+        this.openPurchases(this.prisma, id),
+      ]);
+    return {
+      assets: { total: assetTotal, items: assets },
+      childLocations: { total: childTotal, items: children },
+      purchaseOrders: {
+        total: purchases.length,
+        items: canPurchases
+          ? purchases.slice(0, DELETE_IMPACT_SAMPLE_LIMIT)
+          : null,
+      },
+    };
+  }
+
+  /** Soft delete; anything still pointing here needs the one `resolution`, applied in the same transaction. */
+  async remove(
+    id: string,
+    resolution?: DeleteResolution,
+    principal?: Principal,
+  ) {
+    const actor = this.actor.resolveActor(principal);
+    const location = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockLocationTree(tx);
+        await this.assertLocationLive(tx, id);
+        const assets = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "assets"
+         WHERE "locationId" = ${id} AND "deletedAt" IS NULL
+         ORDER BY "id" FOR UPDATE`;
+        const children = await tx.location.findMany({
+          where: { parentId: id },
+          select: { id: true },
+        });
+        const purchases = await this.openPurchases(tx, id, true);
+        if (assets.length + children.length + purchases.length > 0) {
+          if (!resolution) {
+            throw deleteResolutionRequired(`Location ${id}`, {
+              assets: assets.length,
+              childLocations: children.length,
+              purchaseOrders: purchases.length,
+            });
+          }
+          const to =
+            resolution.strategy === 'move'
+              ? await this.assertMoveTarget(tx, resolution.targetId, id)
+              : null;
+          await this.resolveDependents(tx, id, to, actor, {
+            assetIds: assets.map((a) => a.id),
+            childIds: children.map((c) => c.id),
+            purchaseIds: purchases.map((p) => p.id),
+          });
+        }
+        return tx.location.update({
+          where: { id },
+          data: { deletedAt: new Date() },
+        });
+      },
+      { timeout: LOCATION_DELETE_TX_TIMEOUT_MS },
+    );
     // Drop from the index so soft-deleted locations never surface in search (ADR-0035).
     this.search.remove('locations', id);
     return location;
@@ -233,6 +334,96 @@ export class LocationsService {
     // Re-index the restored location (ADR-0035).
     if (changed) this.search.upsert('locations', projectLocation(restored));
     return restored;
+  }
+
+  // --- delete resolution (AUD-024) ------------------------------------------
+
+  private async resolveDependents(
+    tx: Prisma.TransactionClient,
+    from: string,
+    to: string | null,
+    actor: ActorAttribution,
+    rows: { assetIds: string[]; childIds: string[]; purchaseIds: string[] },
+  ): Promise<void> {
+    if (rows.assetIds.length > 0) {
+      await tx.asset.updateMany({
+        where: { id: { in: rows.assetIds } },
+        data: { locationId: to },
+      });
+      await this.history.recordMany(
+        tx,
+        rows.assetIds.map((assetId) => ({
+          assetId,
+          eventType: 'LOCATION_CHANGED' as const,
+          payload: { from, to },
+          actor,
+        })),
+      );
+    }
+    if (rows.childIds.length > 0) {
+      await tx.location.updateMany({
+        where: { id: { in: rows.childIds } },
+        data: { parentId: to },
+      });
+    }
+    if (rows.purchaseIds.length > 0) {
+      await tx.purchaseOrder.updateMany({
+        where: { id: { in: rows.purchaseIds } },
+        data: { deliveryLocationId: to },
+      });
+      await recordPurchaseOrderEvents(tx, rows.purchaseIds, 'UPDATED', actor, {
+        fields: ['deliveryLocationId'],
+        changes: { deliveryLocationId: { from, to } },
+      });
+    }
+  }
+
+  /** Live purchases delivering here in an open status with a pending countable line, or no countable line. */
+  private openPurchases(
+    client: Prisma.TransactionClient | PrismaService,
+    locationId: string,
+    lock = false,
+  ): Promise<{ id: string; reference: string | null }[]> {
+    const countable = Prisma.sql`l."purchaseOrderId" = po."id" AND l."deletedAt" IS NULL
+           AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})`;
+    return client.$queryRaw<{ id: string; reference: string | null }[]>`
+      SELECT po."id", po."reference" FROM "purchase_orders" po
+       WHERE po."deliveryLocationId" = ${locationId}
+         AND po."deletedAt" IS NULL
+         AND po."status" IN (${Prisma.join(OPEN_PURCHASE_STATUSES)})
+         AND (NOT EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable})
+              OR EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable}
+                           AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0))
+       ORDER BY po."createdAt" ASC, po."id" ASC
+       ${lock ? Prisma.sql`FOR UPDATE OF po` : Prisma.empty}`;
+  }
+
+  /** 400 unless the target is live, not the location being deleted, and not below it. */
+  private async assertMoveTarget(
+    tx: Prisma.TransactionClient,
+    targetId: string,
+    deletingId: string,
+  ): Promise<string> {
+    if (targetId === deletingId) {
+      throw new BadRequestException(
+        'Choose another location to move to, not the one being deleted.',
+      );
+    }
+    const target = await tx.location.findFirst({
+      where: { id: targetId },
+      select: { id: true, parentId: true },
+    });
+    if (!target) {
+      throw new BadRequestException(
+        `Target location ${targetId} not found (missing or archived).`,
+      );
+    }
+    if (await this.hasAncestor(tx, target, deletingId)) {
+      throw new BadRequestException(
+        'Cannot move to a location inside the one being deleted.',
+      );
+    }
+    return target.id;
   }
 
   // --- hierarchy (#845) ----------------------------------------------------
@@ -284,24 +475,33 @@ export class LocationsService {
     if (!parent) {
       throw new BadRequestException(`Parent location ${parentId} not found.`);
     }
-    if (!selfId) return;
-    const visited = new Set<string>([parentId]);
-    let cursor: string | null = parent.parentId;
+    if (selfId && (await this.hasAncestor(tx, parent, selfId))) {
+      throw new BadRequestException(
+        'A location cannot be moved under one of its own descendants.',
+      );
+    }
+  }
+
+  /** Whether `ancestorId` is above `node`, walking through archived links and stopping on a loop. */
+  private async hasAncestor(
+    tx: Prisma.TransactionClient,
+    node: { id: string; parentId: string | null },
+    ancestorId: string,
+  ): Promise<boolean> {
+    const visited = new Set<string>([node.id]);
+    let cursor = node.parentId;
     while (cursor && !visited.has(cursor)) {
-      if (cursor === selfId) {
-        throw new BadRequestException(
-          'A location cannot be moved under one of its own descendants.',
-        );
-      }
+      if (cursor === ancestorId) return true;
       visited.add(cursor);
-      const node: { parentId: string | null } | null =
+      const next: { parentId: string | null } | null =
         await tx.location.findFirst({
           where: { id: cursor },
           select: { parentId: true },
           includeSoftDeleted: true,
         } as Prisma.LocationFindFirstArgs);
-      cursor = node?.parentId ?? null;
+      cursor = next?.parentId ?? null;
     }
+    return false;
   }
 
   /**

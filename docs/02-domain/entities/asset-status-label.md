@@ -3,7 +3,7 @@ title: AssetStatusLabel
 tags: [domain, entity]
 status: accepted
 created: 2026-10-05
-updated: 2026-10-05
+updated: 2026-10-15
 ---
 
 # AssetStatusLabel (custom asset status)
@@ -48,7 +48,8 @@ location types stay a fixed enum ([[0017-location-type-enum]]).
   status (`reassignStatus`) — exactly one, else `400`. In **one transaction**: every carrying asset (live and
   archived) moves there (`statusLabelId` and `status`), each with a `STATUS_CHANGED` [[asset-history]] row,
   then the label is soft-deleted. So no asset ever points at an archived label (unlike the bare soft delete
-  of categories, models and locations — SEC-041). An unused label needs no destination.
+  of asset categories and models — SEC-041; locations and application / consumable categories now ask for
+  one resolution too, live rows only — [[location]]). An unused label needs no destination.
 - **Restore** brings the label back with no assets; a live label holding its name meanwhile is a `409`.
 - **Concurrency.** The invariant spans two tables, so writes serialize on the label row: an asset write that
   sets a label locks it `FOR SHARE`; a kind change and a delete lock it `FOR UPDATE`.

@@ -1,10 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type {
-  CreateApplicationCategory,
-  UpdateApplicationCategory,
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  DELETE_IMPACT_SAMPLE_LIMIT,
+  type ApplicationCategoryDeleteImpact,
+  type CreateApplicationCategory,
+  type DeleteResolution,
+  type UpdateApplicationCategory,
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionResolverService } from '../auth/permission-resolver.service';
+import type { Principal } from '../auth/principal';
+import { deleteResolutionRequired } from '../common/delete-resolution';
 
 /**
  * Live applications only (#1540): `usageCount` counts what an operator sees in the catalog. A relation
@@ -25,7 +35,10 @@ function withUsageCount(row: CategoryWithCount) {
 
 @Injectable()
 export class ApplicationCategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly permissions: PermissionResolverService,
+  ) {}
 
   /**
    * All non-deleted categories, ordered by `order` (nulls last) then name, each with the computed
@@ -60,16 +73,70 @@ export class ApplicationCategoriesService {
     return this.prisma.applicationCategory.update({ where: { id }, data });
   }
 
-  /**
-   * Soft delete: set deletedAt. No 409 guard like ArticleCategory — `Application.categoryId` is an
-   * optional FK with `onDelete: SetNull`, so deleting a category simply detaches its applications
-   * (it never orphans a required relation). See ADR-0023.
-   */
-  async remove(id: string) {
+  /** The live applications a delete would detach or move; the list only when the caller may read applications. */
+  async deleteImpact(
+    id: string,
+    principal?: Principal,
+  ): Promise<ApplicationCategoryDeleteImpact> {
     await this.findOne(id);
-    return this.prisma.applicationCategory.update({
-      where: { id },
-      data: { deletedAt: new Date() },
+    const where = { categoryId: id, deletedAt: null };
+    const [total, items] = await Promise.all([
+      this.prisma.application.count({ where }),
+      (await this.permissions.principalHas(principal, 'application:read'))
+        ? this.prisma.application.findMany({
+            where,
+            select: { id: true, name: true },
+            orderBy: { name: 'asc' },
+            take: DELETE_IMPACT_SAMPLE_LIMIT,
+          })
+        : null,
+    ]);
+    return { applications: { total, items } };
+  }
+
+  /** Soft delete; live applications still filed here need the one `resolution`, applied in the same transaction. */
+  async remove(id: string, resolution?: DeleteResolution) {
+    return this.prisma.$transaction(async (tx) => {
+      const targetId =
+        resolution?.strategy === 'move' ? resolution.targetId : undefined;
+      // Both rows in id order, so two deletes moving into each other cannot deadlock.
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "application_categories"
+         WHERE "id" IN (${Prisma.join(targetId ? [id, targetId] : [id])})
+           AND "deletedAt" IS NULL
+         ORDER BY "id" FOR UPDATE`;
+      if (!locked.some((row) => row.id === id)) {
+        throw new NotFoundException(`ApplicationCategory ${id} not found`);
+      }
+      const affected = await tx.application.findMany({
+        where: { categoryId: id, deletedAt: null },
+        select: { id: true },
+      });
+      if (affected.length > 0) {
+        if (!resolution) {
+          throw deleteResolutionRequired(`ApplicationCategory ${id}`, {
+            applications: affected.length,
+          });
+        }
+        if (targetId === id) {
+          throw new BadRequestException(
+            'Choose another category to move to, not the one being deleted.',
+          );
+        }
+        if (targetId && !locked.some((row) => row.id === targetId)) {
+          throw new BadRequestException(
+            `Target category ${targetId} not found (missing or archived).`,
+          );
+        }
+        await tx.application.updateMany({
+          where: { id: { in: affected.map((row) => row.id) }, categoryId: id },
+          data: { categoryId: targetId ?? null },
+        });
+      }
+      return tx.applicationCategory.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
     });
   }
 

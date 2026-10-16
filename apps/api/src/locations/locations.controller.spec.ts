@@ -120,3 +120,61 @@ describe('LocationsController — deleted=only ADMIN gate (ADR-0041)', () => {
     expect(findPage).not.toHaveBeenCalled();
   });
 });
+
+describe('LocationsController — DELETE resolution query (AUD-024)', () => {
+  let app: INestApplication;
+  const remove = jest.fn();
+  const TARGET = 'clh1abc0000xyz0000000abcd';
+
+  beforeAll(async () => {
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      controllers: [LocationsController],
+      providers: [
+        { provide: LocationsService, useValue: { remove } },
+        { provide: APP_GUARD, useClass: FakeAuthGuard },
+      ],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    remove.mockReset();
+    remove.mockResolvedValue({ id: 'hq' });
+  });
+
+  it('no query is no resolution (the service then refuses while anything is left)', async () => {
+    const res = await request(app.getHttpServer()).delete('/locations/hq');
+    expect(res.status).toBe(200);
+    expect(remove).toHaveBeenCalledWith('hq', undefined, undefined);
+  });
+
+  it('forwards detach, and move with its target', async () => {
+    await request(app.getHttpServer()).delete('/locations/hq?strategy=detach');
+    await request(app.getHttpServer()).delete(
+      `/locations/hq?strategy=move&targetId=${TARGET}`,
+    );
+    expect(remove.mock.calls.map((c: unknown[]) => c[1])).toEqual([
+      { strategy: 'detach' },
+      { strategy: 'move', targetId: TARGET },
+    ]);
+  });
+
+  it.each([
+    '?strategy=move',
+    '?strategy=detach&targetId=' + TARGET,
+    '?strategy=create',
+    '?targetId=' + TARGET,
+    '?strategy=move&targetId=not-a-cuid',
+  ])('400s %s before the service', async (query) => {
+    const res = await request(app.getHttpServer()).delete(
+      `/locations/hq${query}`,
+    );
+    expect(res.status).toBe(400);
+    expect(remove).not.toHaveBeenCalled();
+  });
+});

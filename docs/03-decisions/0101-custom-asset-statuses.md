@@ -3,7 +3,7 @@ title: "ADR-0101: Custom asset statuses — operator-named labels mapped to the 
 tags: [adr, assets, data-model, taxonomy, ai]
 status: accepted
 created: 2026-10-05
-updated: 2026-10-05
+updated: 2026-10-15
 deciders: [Joaquín Minatel]
 ---
 
@@ -63,8 +63,10 @@ stay optional — a team that never configures it must see no change.
    built-in status (`reassignStatus`). In **one transaction** every carrying asset (live and archived — so no
    asset ever points at an archived label) moves there, each with a `STATUS_CHANGED` history row, and the
    label is soft-deleted. A restored label comes back with no assets. This is deliberately the opposite of
-   the bare soft delete of categories, models and locations, whose children keep pointing at an invisible
-   parent (SEC-041): a label is part of the asset's status, so a dangling one would misreport it.
+   the bare soft delete of asset categories and models, whose children keep pointing at an invisible
+   parent (SEC-041): a label is part of the asset's status, so a dangling one would misreport it. (Since
+   2026-10-15 locations and application / consumable categories also take one resolution on delete, for
+   live rows — [[0023-access-management-design]] amendment.)
 6. **Concurrency.** The invariant spans two tables, so the writes serialize on the label row: an asset write
    that sets a label locks it `FOR SHARE`; a kind change and a delete lock it `FOR UPDATE`.
 7. **History.** `STATUS_CHANGED` is also written when only the label changes (same built-in status). Its

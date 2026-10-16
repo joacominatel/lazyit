@@ -78,13 +78,25 @@ un único conteo de stock por consumible, no un conteo por lugar. Consulta
 
 ## Quitar una ubicación
 
-Las ubicaciones se **borran de forma lógica**, nunca se destruyen. Quitar una ubicación **no** borra
-los activos que la referencian — esos activos simplemente quedan sin ubicación en ese vínculo, y el
-registro se conserva para el historial. lazyit prioriza la auditabilidad por sobre la prolijidad
-estricta.
+Las ubicaciones se **borran de forma lógica**, nunca se destruyen, y quitar una nunca borra lo que la
+referencia. Cuando la ubicación todavía tiene **activos**, **ubicaciones hijas** o **compras abiertas**
+que se entregan ahí, lazyit primero te muestra qué se verá afectado y te pide **una sola decisión para
+todo** — no se puede elegir ítem por ítem:
 
-Un administrador puede recuperar una ubicación quitada desde la vista de archivados. Restaurar una
-ubicación cuyo padre sigue quitado se rechaza: restaura primero el padre.
+- **Dejarlos sin ubicación** — los activos quedan sin ubicación, las ubicaciones hijas pasan a ser de
+  nivel superior y las compras abiertas quedan sin ubicación de entrega.
+- **Moverlos a otra ubicación** — todo pasa a la ubicación que elijas. Debe ser una ubicación activa
+  que no esté dentro de la que quitas.
+- **Crear una ubicación nueva** — créala primero y luego mueve todo ahí.
+
+El movimiento y la baja ocurren juntos, y cada activo movido registra el cambio de ubicación en su
+historial. Lo que ya es historial sigue apuntando a la ubicación quitada: los consumibles entregados
+ahí, las compras canceladas o recibidas por completo y los activos archivados. Una ubicación a la que
+nada apunta se quita directamente.
+
+Un administrador puede recuperar una ubicación quitada desde la vista de archivados. Restaurarla no
+devuelve lo que se movió. Restaurar una ubicación cuyo padre sigue quitado se rechaza: restaura primero
+el padre.
 
 ## Qué sigue
 
