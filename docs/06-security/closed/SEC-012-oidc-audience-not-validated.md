@@ -2,7 +2,7 @@
 id: SEC-012
 title: OIDC token audience is not validated when OIDC_CLIENT_ID is unset (token-audience confusion on a shared issuer)
 severity: low
-status: open
+status: accepted
 cwe: CWE-287
 discovered: 2026-06-06
 module: auth (identity / jwt-auth.guard)
@@ -133,3 +133,37 @@ The residual risk is accepted at **Low**: an operator who ignores the warning on
 other apps keeps the exposure described above. The guided install and the `/setup` snippet still write
 the variable. A configurable audience list (`OIDC_AUDIENCE`) remains a possible future hardening, not
 planned.
+
+## Resolution
+
+**Status**: accepted (risk accepted by the CEO on 2026-10-15, see the Decision above)
+**Mitigated in**: commit `e0da5dd42` (`fix(api): warn at boot when OIDC audience validation is off (#SEC-012)`),
+with `038ab860c` (this file's decision record) and `e95de7747` (the identity-provider Manual page), merged to
+`dev` in PR #1598 (`b3db55713`)
+**Closed by**: 2026-10-10 audit decision round (AUD-012; closure recorded by the final docs step)
+**Date**: 2026-10-16
+
+Moved to `closed/` as an accepted risk rather than a fix: the finding's condition (no audience check
+without `OIDC_CLIENT_ID`) still exists by decision, but it is no longer a silent default.
+
+### Evidence (on `dev` at `cab67672f`)
+- `apps/api/src/auth/boot-config.ts:66`: `OIDC_CLIENT_ID` stays optional in OIDC mode, so no live install
+  stops booting.
+- `apps/api/src/auth/boot-config.ts:150-152`: under `AUTH_MODE=oidc` with `OIDC_CLIENT_ID` unset or empty,
+  boot logs `OIDC_AUDIENCE_DISABLED_WARNING` (`:41-42`) once, naming the variable and the risk.
+- `apps/api/src/auth/jwt-auth.guard.ts`: unchanged; the audience is pinned whenever `OIDC_CLIENT_ID` is set.
+- [[0102-remove-bundled-zitadel|ADR-0102]] §2 and the identity-provider Manual page (en, es) describe the
+  warning.
+
+### Tests
+- `apps/api/src/auth/boot-config.spec.ts:306`: `still boots, with one warning that audience validation is
+  off`; `:319`: `stays silent when OIDC_CLIENT_ID is set, and in the modes that never verify an OIDC token`.
+
+### Verification
+Re-run on `dev` at `cab67672f` on 2026-10-16: the `src/auth/boot-config` suite passed, within the 39-suite,
+906-test run recorded on [[SEC-089-kb-folder-reparent-widens-read-access|SEC-089]].
+
+### Residual risk
+Accepted at **Low**: an operator who ignores the boot warning on an issuer shared with other apps keeps
+the exposure described above. A configurable audience (`OIDC_AUDIENCE`) remains possible future hardening,
+not planned. No data change.

@@ -1,7 +1,7 @@
 ---
 title: Releasing lazyit
 tags: [runbook, release, versioning, deploy]
-updated: 2026-10-14
+updated: 2026-10-16
 ---
 
 # Releasing lazyit
@@ -122,5 +122,55 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   Do not run `update.sh` across this release; follow [[migrate-off-bundled-zitadel]].
 > - From **v2.1.0** with local or BYOI auth, the previous note still applies: take this release with
 >   `start.sh`.
+>
+> The same release carries the 2026-10-10 audit decisions (#1598–#1609). Its notes also list these
+> changes, which need no action unless a line says so:
+>
+> - **AI chats started before the update become read-only.** The AI tool definitions changed (#1603:
+>   `location_archive` and `category_archive` take a resolution), so older conversations show the usual
+>   "version changed" notice. Start a new chat.
+> - **AI: your own name counts as untrusted text** in the assistant's session context (#1599). A turn
+>   that reads it, usually the first, shows the untrusted-source banner and is never auto-approved.
+> - **Infra: an asset linked to several live nodes is de-duplicated on upgrade** (#1599).
+>   - **Who keeps it:** the node that reported most recently. When none reported, or on a tie, the
+>     oldest node wins, then the lowest id.
+>   - **What happens to the others:** they lose only the link, not the node, and get a
+>     `specs._infraAssetUnlinked` marker (`assetId`, `keptByNodeId`, `at`). A node whose `specs` is not a
+>     JSON object loses the link without a marker. Nothing is deleted.
+>   - **Finding them:** run the query below soon after the update, because a node that still reports
+>     overwrites the marker on its next report.
+>
+>     ```sql
+>     SELECT id, label, specs->'_infraAssetUnlinked' FROM infra_nodes
+>      WHERE specs ? '_infraAssetUnlinked' AND "deletedAt" IS NULL;
+>     ```
+>
+>   - **Fixing them:** merge a duplicate of the same machine into the kept node; attach another asset to
+>     a different machine.
+>   - **Search:** no reindex is needed. An un-linked node's search entry keeps the old asset name until
+>     the hourly search reconcile (`SEARCH_RECONCILE_INTERVAL_MS`) rebuilds it. Run `reindex:all`
+>     ([[backups]]) to refresh it at once.
+> - **OIDC without `OIDC_CLIENT_ID` logs a boot warning** that token audience validation is disabled
+>   (#1598). It still boots. Set the variable to the audience your tokens carry, usually the client id.
+> - **First-use AI connection notices** (#1598).
+>   - The new `OAuthGrant.announcedAt` column is backfilled from the notices already sent, and those
+>     grants are not announced again.
+>   - A grant whose notice was already pruned by the 90-day retention is announced once more on its
+>     next use.
+> - **Deleting a location, an application category or a consumable category that is still in use now
+>   returns 409 `DELETE_RESOLUTION_REQUIRED`** unless the request passes one strategy for everything
+>   affected: `?strategy=detach` or `?strategy=move&targetId=<id>` (#1603). The web dialog asks for it, and
+>   `GET …/:id/delete-impact` previews what is affected. Update any script or API client that deletes these
+>   rows. Asset categories and asset models are unchanged.
+> - **Delegated administration is narrower** (#1601, #1606).
+>   - A role delegated `settings:manage` can no longer save the permission matrix, save the directory
+>     connection or start a directory sync: 403 `ADMIN_REQUIRED`.
+>   - A role delegated `user:manage` manages users only up to its own role. Only an ADMIN creates,
+>     promotes to or acts on an ADMIN (403 `ROLE_CEILING_EXCEEDED`).
+>   - A clone copies only the assignments and grants the caller could create by hand.
+>   - Promoting a user cancels their pending temporary password and password-reset links. Issue a new
+>     one after the promotion if needed.
+> - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
+>   Creating a connection or a token still does.
 
 See also: [[deploy-self-hosted]], [[backups]].
