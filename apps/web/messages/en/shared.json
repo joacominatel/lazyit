@@ -167,7 +167,8 @@
       "childLocations": "{count, plural, one {# child location} other {# child locations}}",
       "purchaseOrders": "{count, plural, one {# open purchase} other {# open purchases}}",
       "applications": "{count, plural, one {# application} other {# applications}}",
-      "consumables": "{count, plural, one {# consumable} other {# consumables}}"
+      "consumables": "{count, plural, one {# consumable} other {# consumables}}",
+      "assetModels": "{count, plural, one {# model} other {# models}}"
     },
     "more": "and {count} more",
     "hidden": "You can't view these, but the choice applies to them too.",
@@ -185,6 +186,7 @@
     "createHintLocation": "It is created with the same type and parent as {name}, then everything moves there.",
     "createHintLocationTopLevel": "It is created at the top level with the same type as {name}, then everything moves there.",
     "createHintCategory": "It is created first, then everything moves there.",
+    "assetsFollowModel": "Only the models are moved or left without a category. Their assets are listed because an asset's category comes from its model.",
     "createdButNotDeleted": "“{target}” was created, but {name} was not deleted, so nothing moved: {error} Try again to move everything to “{target}”.",
     "confirm": "Delete and apply",
     "changed": "Something now points at {name}. Review what will be affected and choose what happens to it."

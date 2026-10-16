@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  type AssetCategoryDeleteImpact,
   CreateApplicationCategorySchema,
+  CreateAssetCategorySchema,
   CreateConsumableCategorySchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
@@ -18,6 +20,12 @@ import {
   useDeleteApplicationCategory,
 } from "@/lib/api/hooks/use-application-categories";
 import {
+  useAssetCategories,
+  useAssetCategoryDeleteImpact,
+  useCreateAssetCategory,
+  useDeleteAssetCategory,
+} from "@/lib/api/hooks/use-asset-categories";
+import {
   useConsumableCategories,
   useConsumableCategoryDeleteImpact,
   useCreateConsumableCategory,
@@ -25,8 +33,32 @@ import {
 } from "@/lib/api/hooks/use-consumable-categories";
 import { useCan } from "@/lib/hooks/use-permissions";
 
-/** The category kinds whose delete takes one resolution for their items (AUD-085). */
-type ResolvableCategoryKind = "application" | "consumable";
+/** The category kinds whose delete takes one resolution for their items (AUD-085, SEC-041). */
+type ResolvableCategoryKind = "application" | "consumable" | "asset";
+
+/** Only the models are re-pointed; their assets are listed because an asset's category comes from its model. */
+export function assetCategoryImpactGroups(impact: AssetCategoryDeleteImpact): ImpactGroupView[] {
+  return [
+    {
+      key: "assetModels",
+      total: impact.assetModels.total,
+      items:
+        impact.assetModels.items?.map((model) => ({
+          id: model.id,
+          label: `${model.manufacturer} ${model.name}`,
+        })) ?? null,
+    },
+    {
+      key: "assets",
+      total: impact.assets.total,
+      items:
+        impact.assets.items?.map((asset) => ({
+          id: asset.id,
+          label: asset.assetTag ? `${asset.name} (${asset.assetTag})` : asset.name,
+        })) ?? null,
+    },
+  ];
+}
 
 export function CategoryDeleteDialog({
   kind,
@@ -46,21 +78,34 @@ export function CategoryDeleteDialog({
   const consumableImpact = useConsumableCategoryDeleteImpact(
     open && kind === "consumable" ? category.id : undefined,
   );
+  const assetImpact = useAssetCategoryDeleteImpact(
+    open && kind === "asset" ? category.id : undefined,
+  );
   const appCategories = useApplicationCategories();
   const consumableCategories = useConsumableCategories();
+  const assetCategories = useAssetCategories();
   const removes = {
     application: useDeleteApplicationCategory(),
     consumable: useDeleteConsumableCategory(),
+    asset: useDeleteAssetCategory(),
   };
   const creates = {
     application: useCreateApplicationCategory(),
     consumable: useCreateConsumableCategory(),
+    asset: useCreateAssetCategory(),
   };
   const canCreate = useCan("category:write");
-  const impact = kind === "application" ? appImpact : consumableImpact;
-  const list = kind === "application" ? appCategories.data : consumableCategories.data;
+  const impact = { application: appImpact, consumable: consumableImpact, asset: assetImpact }[kind];
+  const list = {
+    application: appCategories.data,
+    consumable: consumableCategories.data,
+    asset: assetCategories.data,
+  }[kind];
 
   const groups = useMemo<ImpactGroupView[] | undefined>(() => {
+    if (kind === "asset") {
+      return assetImpact.data ? assetCategoryImpactGroups(assetImpact.data) : undefined;
+    }
     if (kind === "application") {
       const data = appImpact.data;
       return data
@@ -88,7 +133,7 @@ export function CategoryDeleteDialog({
           },
         ]
       : undefined;
-  }, [kind, appImpact.data, consumableImpact.data]);
+  }, [kind, appImpact.data, consumableImpact.data, assetImpact.data]);
 
   const targets = useMemo(
     () =>
@@ -125,12 +170,14 @@ export function CategoryDeleteDialog({
       )}
       canCreate={canCreate}
       nameMaxLength={
-        (kind === "application"
-          ? CreateApplicationCategorySchema
-          : CreateConsumableCategorySchema
-        ).shape.name.maxLength ?? undefined
+        {
+          application: CreateApplicationCategorySchema,
+          consumable: CreateConsumableCategorySchema,
+          asset: CreateAssetCategorySchema,
+        }[kind].shape.name.maxLength ?? undefined
       }
       createHint={t("createHintCategory")}
+      impactNote={kind === "asset" ? t("assetsFollowModel") : undefined}
       remove={(resolution) => removes[kind].mutateAsync({ id: category.id, resolution })}
       create={(name) => creates[kind].mutateAsync({ name })}
     />

@@ -8,7 +8,6 @@ import {
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import {
   BatchActionBar,
   ErrorState,
@@ -56,7 +55,7 @@ import {
   UsageText,
 } from "./taxonomy-list";
 import type { AnyCategory, CategoryKind } from "./taxonomy-types";
-import { bulkUsage, filterTaxonomy, type UsageNoun, usageLabel } from "./taxonomy-usage";
+import { bulkUsage, filterTaxonomy, type UsageNoun } from "./taxonomy-usage";
 
 /** The category kinds Settings → Taxonomies manages. KB folders (the `article` kind) live in the KB. */
 export type ManagedCategoryKind = Exclude<CategoryKind, "article">;
@@ -98,7 +97,7 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
   };
   const { data, isLoading, isError, error, refetch } = queries[kind];
   const create = creates[kind];
-  // Application and consumable categories in use need one resolution for their items (AUD-085); asset categories do not yet.
+  // The bulk confirmation for asset categories still describes the old detach-on-delete.
   const resolvable = kind !== "asset";
   const label = t(`taxonomies.kindLabel.${kind}`);
   const canWrite = useCan("category:write");
@@ -150,9 +149,7 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
   }
 
   function deleteOne(id: string): Promise<unknown> {
-    return kind === "asset"
-      ? deletes.asset.mutateAsync(id)
-      : deletes[kind].mutateAsync({ id });
+    return deletes[kind].mutateAsync({ id });
   }
 
   // No batch endpoint: a row that fails stays selected; in-use resolvable ones are reported apart, never resolved in bulk.
@@ -299,7 +296,7 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
         category={editing}
         cloneSource={cloning}
       />
-      {deleting && kind !== "asset" ? (
+      {deleting ? (
         <CategoryDeleteDialog
           kind={kind}
           category={deleting}
@@ -308,21 +305,6 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
             if (!open) setDeleting(undefined);
           }}
         />
-      ) : deleting ? (
-        <DeleteConfirmDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setDeleting(undefined);
-          }}
-          entityKey="category"
-          name={deleting.name}
-          onConfirm={() => deleteOne(deleting.id)}
-        >
-          <DeleteImpact
-            noun={USAGE_NOUN[kind]}
-            count={"usageCount" in deleting ? deleting.usageCount : undefined}
-          />
-        </DeleteConfirmDialog>
       ) : null}
 
       <AlertDialog
@@ -364,22 +346,6 @@ export function CategoryManager({ kind, title }: { kind: ManagedCategoryKind; ti
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-/**
- * What deleting one category does to the records filed under it, when the list read sent a count: it
- * is a restorable soft delete, nothing is refused, and those records simply show no category.
- */
-function DeleteImpact({ noun, count }: { noun: UsageNoun; count: number | null | undefined }) {
-  const t = useTranslations("settings.taxonomies");
-  const label = usageLabel(noun, count);
-  if (!label) return <>{t("categories.deleteImpact.unknown")}</>;
-  if (label.key === "unused") return <>{t("categories.deleteImpact.unused")}</>;
-  return (
-    <>
-      {t("categories.deleteImpact.used", { usage: t(`usage.${label.key}`, { count: label.count }) })}
-    </>
   );
 }
 

@@ -1205,9 +1205,6 @@
       "inlinePlaceholder": "New category…",
       "empty": "No categories yet.",
       "deleteImpact": {
-        "used": "Used by {usage} — they keep their records but show no category until it is restored.",
-        "unused": "Nothing is filed under it.",
-        "unknown": "Anything filed under it keeps its record but shows no category until it is restored.",
         "bulkUsed": "In use: {names} — {usage} in all will show no category until restored.",
         "bulkUnused": "None of them is in use.",
         "bulkNeedsResolution": "In use: {names} — these are skipped. Delete each one on its own to choose where its items go."

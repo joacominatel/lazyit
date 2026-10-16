@@ -36,7 +36,8 @@ type ImpactGroupKey =
   | "childLocations"
   | "purchaseOrders"
   | "applications"
-  | "consumables";
+  | "consumables"
+  | "assetModels";
 
 /** One kind of affected row; `items` is null when the caller may not read that kind. A null label is an untitled purchase. */
 export interface ImpactGroupView {
@@ -72,6 +73,8 @@ interface DeleteResolutionDialogProps {
   /** The create permission for this kind; without it "create a new one" is not offered. */
   canCreate: boolean;
   createHint: string;
+  /** Shown under the impact list, e.g. that some listed rows are informational. */
+  impactNote?: string;
   /** The create schema's name limit for this kind. */
   nameMaxLength: number | undefined;
   remove: (resolution?: DeleteResolution) => Promise<unknown>;
@@ -90,6 +93,7 @@ export function DeleteResolutionDialog({
   renderTargetPicker,
   canCreate,
   createHint,
+  impactNote,
   nameMaxLength,
   remove,
   create,
@@ -191,6 +195,7 @@ export function DeleteResolutionDialog({
         ) : needsResolution ? (
           <div className="space-y-4">
             <ImpactList groups={groups} />
+            {impactNote ? <p className="text-sm text-muted-foreground">{impactNote}</p> : null}
 
             <fieldset className="space-y-2">
               <legend className="mb-2 text-sm font-medium">
