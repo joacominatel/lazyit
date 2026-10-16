@@ -72,5 +72,5 @@ simples.
 El archivo de activos empieza con una línea como `# lazyit v2.1.0 — 2026-10-16T…` que indica la versión
 que lo escribió. Conserva esa línea si editas el archivo para volver a cargarlo con la
 [importación masiva](/help/assets-bulk-import): el importador la lee para comprobar que el archivo viene de
-una versión compatible. Los archivos de actividad y de auditoría no la llevan, así que los nombres de sus
-columnas están en la primera línea.
+una versión compatible. Ninguna otra exportación la lleva, así que todos los demás archivos tienen los
+nombres de sus columnas en la primera línea.

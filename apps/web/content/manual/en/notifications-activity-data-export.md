@@ -67,4 +67,4 @@ formula. Numbers and dates are written as plain values.
 The assets file starts with a line like `# lazyit v2.1.0 — 2026-10-16T…` naming the version that wrote
 it. Keep that line when you edit the file to bring it back through the
 [bulk import](/help/assets-bulk-import): the importer reads it to check the file comes from a compatible
-version. Activity and audit files do not carry it, so their column names are on the first line.
+version. No other export carries it, so every other file has its column names on the first line.
