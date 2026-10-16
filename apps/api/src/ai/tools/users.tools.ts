@@ -1154,6 +1154,11 @@ export const usersToolset: AiToolset = {
   unexposed: [
     unexposed(
       UsersController,
+      ['export'],
+      'A bulk CSV file export (@Res stream); use search and list tools instead.',
+    ),
+    unexposed(
+      UsersController,
       ['roleCounts'],
       'Not in the v1 cut (tools-and-execution.md §7): user_search with a role filter returns the same count as its total.',
     ),

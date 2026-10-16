@@ -12,6 +12,7 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { ExportService } from '../common/export';
 import { ActorService } from '../common/actor.service';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
 
@@ -70,6 +71,7 @@ describe('UsersController PATCH /users/me (issue #1421)', () => {
         },
         { provide: AssetAssignmentsService, useValue: {} },
         { provide: AccessGrantsService, useValue: {} },
+        { provide: ExportService, useValue: {} },
         {
           provide: ActorService,
           useValue: { resolve: jest.fn(), resolveActor: jest.fn() },

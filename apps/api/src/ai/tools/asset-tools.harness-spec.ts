@@ -34,6 +34,7 @@ import { ArticlesService } from '../../articles/articles.service';
 import { UsersController } from '../../users/users.controller';
 import { UsersService } from '../../users/users.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
+import { ExportService } from '../../common/export';
 import { ActorService } from '../../common/actor.service';
 import { VaultSetupNudgeService } from '../../notifications/vault-setup-nudge.service';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
@@ -1097,6 +1098,7 @@ export async function bootHarness(): Promise<Harness> {
       { provide: ArticlesService, useValue: articlesService },
       { provide: UsersService, useValue: usersService },
       { provide: AccessGrantsService, useValue: {} },
+      { provide: ExportService, useValue: {} },
       { provide: ActorService, useValue: {} },
       {
         provide: VaultSetupNudgeService,

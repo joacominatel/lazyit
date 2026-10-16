@@ -13,14 +13,17 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import {
   ApiBody,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
@@ -67,6 +70,8 @@ import { AssetAssignmentDto } from '../asset-assignments/asset-assignment.dto';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { AccessGrantDto } from '../access-grants/access-grant.dto';
 import { VaultSetupNudgeService } from '../notifications/vault-setup-nudge.service';
+import { ExportService } from '../common/export';
+import { USER_EXPORT_COLUMNS } from './user-export';
 
 // DTOs from the shared zod schemas: validation (global ZodValidationPipe), TS types and the
 // OpenAPI schema, all from one definition. See docs/03-decisions/0018-api-documentation-swagger.md.
@@ -101,6 +106,7 @@ export class UsersController {
     private readonly grants: AccessGrantsService,
     private readonly actor: ActorService,
     private readonly vaultSetupNudge: VaultSetupNudgeService,
+    private readonly exports: ExportService,
   ) {}
 
   @Get()
@@ -277,6 +283,53 @@ export class UsersController {
       );
     }
     return result.data;
+  }
+
+  // Declared before `:id`, which would otherwise take `export` as an id.
+  @Get('export')
+  @RequirePermission('user:read')
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary:
+      'CSV export of every user matching the GET /users filters (ADR-0103). Same permission, same rows; deleted=only is ADMIN-only. Audited; above 100,000 rows → 422; a parallel or sixth export in a minute → 429.',
+  })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'role', required: false, enum: RoleSchema.options })
+  @ApiQuery({ name: 'isActive', required: false, enum: ['true', 'false'] })
+  @ApiQuery({ name: 'directoryOnly', required: false, type: Boolean })
+  @ApiQuery({ name: 'deleted', required: false, enum: ['active', 'only'] })
+  @ApiOkResponse({ description: 'The matching users as CSV (text/csv).' })
+  export(
+    @CurrentPrincipal() principal: Principal,
+    @Res({ passthrough: true }) response: Response,
+    @Query('q') q?: string,
+    @Query('role') role?: string,
+    @Query('isActive') isActive?: string,
+    @Query('directoryOnly') directoryOnly?: string,
+    @Query('deleted') deleted?: string,
+    @CurrentUser() user?: User,
+  ): Promise<StreamableFile> {
+    const { deleted: slice } = parsePageQuery({ deleted });
+    assertCanListDeleted(slice, user);
+    const filters = {
+      q,
+      role: role !== undefined ? this.parseRoleQuery(role) : undefined,
+      isActive:
+        isActive !== undefined ? this.parseIsActiveQuery(isActive) : undefined,
+      directoryOnly:
+        directoryOnly !== undefined
+          ? parseBooleanQuery(directoryOnly, true)
+          : undefined,
+    };
+    return this.exports.exportCsv({
+      resource: 'USERS',
+      principal,
+      response,
+      filters: { ...filters, deleted: slice },
+      ...this.users.exportSource(filters, slice),
+      columns: USER_EXPORT_COLUMNS,
+      filename: 'users',
+    });
   }
 
   // The Settings → Roles cards' real per-role counts (issue #693): one lightweight server-side

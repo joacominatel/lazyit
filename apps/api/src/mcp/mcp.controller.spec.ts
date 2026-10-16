@@ -43,6 +43,7 @@ import {
   type McpRpc,
 } from '../../test/mcp/mcp-rpc';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
+import { ExportService } from '../common/export';
 import { AiActionLogService } from '../ai/core/action-log.service';
 import { AiToolService } from '../ai/core/ai-tool.service';
 import { AiToolDispatcher } from '../ai/core/tool-dispatcher';
@@ -288,6 +289,7 @@ describe('/mcp end to end — listing, calls, errors and the critical-applicatio
         { provide: APP_PIPE, useClass: ZodValidationPipe },
         { provide: UsersService, useValue: usersService },
         { provide: AccessGrantsService, useValue: grantsService },
+        { provide: ExportService, useValue: {} },
         { provide: ApplicationsService, useValue: applicationsService },
         {
           provide: AssetAssignmentsService,
