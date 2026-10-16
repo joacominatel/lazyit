@@ -32,6 +32,7 @@ import {
 import type { User } from '../../generated/prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { Public } from '../auth/public.decorator';
+import { AdminOnlyGuard } from '../auth/admin-only.guard';
 import { RequirePermission } from '../auth/require-permission.decorator';
 import { ServicePrincipalForbiddenGuard } from '../auth/service-principal-forbidden.guard';
 import { ConfigService } from './config.service';
@@ -153,12 +154,13 @@ export class ConfigController {
   }
 
   @RequirePermission('settings:manage')
-  @UseGuards(ServicePrincipalForbiddenGuard)
+  @UseGuards(ServicePrincipalForbiddenGuard, AdminOnlyGuard)
   @Put('permissions')
   @ApiOperation({
     summary:
-      'Replace the MEMBER + VIEWER permission sets (ADMIN — settings:manage)',
+      'Replace the MEMBER + VIEWER permission sets (ADMIN only, even when settings:manage is delegated — SEC-088)',
     description:
+      'A non-ADMIN caller is refused with 403 `ADMIN_REQUIRED`, whatever the matrix grants it (SEC-088). ' +
       'Replaces the MEMBER and VIEWER permission sets wholesale (a full PUT). The ADMIN row is ' +
       'IMMUTABLE — the strict body cannot name it (an ADMIN/extra key → 400); every permission must ' +
       'be in the @lazyit/shared catalog (unknown → 400). Applied transactionally; every added/removed ' +
