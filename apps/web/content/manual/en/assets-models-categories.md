@@ -116,7 +116,8 @@ assets and models, purchase lines already received, and the lines of cancelled p
 category nothing points to is removed straight away.
 
 An admin can bring a removed model back from the archived view. Restoring a model or category does not
-bring back what was moved off it.
+bring back what was moved off it. Restoring a model whose category is still removed is refused — restore
+the category first.
 
 ## What's next
 

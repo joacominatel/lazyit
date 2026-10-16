@@ -120,7 +120,8 @@ modelos archivados, las líneas de compra ya recibidas y las líneas de compras 
 una categoría a los que nada apunta se quitan directamente.
 
 Un administrador puede recuperar un modelo quitado desde la vista de archivados. Restaurar un modelo o
-una categoría no devuelve lo que se movió.
+una categoría no devuelve lo que se movió. Restaurar un modelo cuya categoría sigue quitada se rechaza:
+restaura primero la categoría.
 
 ## Qué sigue
 
