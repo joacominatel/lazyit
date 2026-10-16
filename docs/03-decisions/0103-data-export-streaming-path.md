@@ -105,7 +105,9 @@ streamed, audited or truncated. A count of exactly the cap is accepted. The coun
 differ by the rows written between them: the first batch reads with no cursor, so a row inserted (or a
 row whose filtered fields change) between the count and that read can appear, and a row deleted
 mid-export is missing. Rows inserted after the first batch is read are never in the file. There is no
-hard limit on that difference.
+hard limit on that difference. One such row is predictable: the audit row is written after the count and
+before the first read, so an export of the audit log's `export` source includes the row recording that
+export itself (the file holds `rowCount` + 1 rows).
 
 A batch that fails mid-stream aborts the response: the error is logged and the connection destroyed,
 so the client sees a failed download, never a short file that looks complete. The audit row stays.
