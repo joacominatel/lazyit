@@ -87,6 +87,11 @@ registros o conceder acceso a aplicaciones— lazyit lo marca con claridad y te 
 porque es una delegación importante. No te lo impide: dar a un Miembro de confianza la capacidad de
 eliminar es una decisión legítima. El Administrador, en cambio, nunca es editable.
 
+Delegar **Gestionar usuarios** tiene un techo: un Miembro o Lector que la tenga solo puede otorgar su
+propio rol o uno inferior, y solo puede actuar sobre usuarios con un rol igual o inferior al suyo. Solo
+un administrador gestiona administradores. Consulta
+[Roles](/help/users-permissions-roles#reglas-de-seguridad-incorporadas).
+
 > Los permisos son por **área**, no por registro individual. lazyit no tiene control de acceso por
 > registro como función general — si un rol puede leer activos, puede leer todos los activos. (Las
 > carpetas de la Base de Conocimiento y las bóvedas del Gestor de Secretos son las dos excepciones

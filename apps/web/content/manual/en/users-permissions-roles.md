@@ -53,14 +53,23 @@ may do is described in [Permission configuration](/help/users-permissions-permis
 
 ## Built-in safety rules
 
-Two guardrails protect the instance from being locked out or quietly escalated:
+These guardrails protect the instance from being locked out or quietly escalated:
 
 - **The last admin cannot be removed.** lazyit refuses to demote, deactivate or offboard the final
   remaining admin — there must always be at least one. You will see a clear message instead of the
-  change going through.
+  change going through. Only admins who can actually sign in count: an admin who has never signed in
+  through your identity provider, an admin without a password on a local-accounts install, or a
+  directory person does not keep the instance administrable.
+- **Nobody manages users above their own role.** If you give Member or Viewer the **Manage users**
+  capability, those people can only hand out their own role or a lower one, and can only edit, reset,
+  offboard or restore users whose role is at or below theirs. Only an admin can create an admin,
+  promote someone to admin, or act on an existing admin. Anything else is refused with a clear
+  message.
 - **You cannot change your own role.** An admin cannot promote or demote themselves; a role change
   must be made by one admin on another. This prevents a single person quietly elevating their own
   access. (You can still edit your own name, email and other details.)
+- **A directory person's role cannot change.** People added by an import or the directory sync have no
+  login and stay **Viewer** until they are onboarded. Onboard them first, then change the role.
 
 ## A note on your identity provider
 
