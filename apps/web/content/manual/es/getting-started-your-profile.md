@@ -23,7 +23,7 @@ con **tu propia** cuenta. Todos pueden abrirla; muestra solo lo que te correspon
 
 - **Vos** — tu nombre, email, rol y fecha de alta, con un atajo a **Mi perfil**.
 - **Tus páginas** — tarjetas para **Mi perfil**, [Correos de notificación](/help/notifications-activity-email-preferences),
-  **IA y apps conectadas** (solo si podés conectar apps de IA y tu instancia tiene el asistente — ver
+  **IA y apps conectadas** (solo si tu instancia tiene el asistente — ver
   [Apps conectadas](/help/ai-assistant-connected-apps)) y el **Secret Manager** (solo si podés leer
   secretos — ahí está tu contraseña personal de bóveda).
 - **Contraseña y sesiones** — quién gestiona tu contraseña (lazyit o el proveedor de inicio de sesión de

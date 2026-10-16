@@ -23,7 +23,7 @@ account. Everyone can open it; it shows only what applies to you:
 
 - **You** — your name, email, role and join date, with a shortcut to **My profile**.
 - **Your pages** — cards for **My profile**, [Notification emails](/help/notifications-activity-email-preferences),
-  **AI & connected apps** (only if you may connect AI apps and your instance has the assistant — see
+  **AI & connected apps** (only if your instance has the assistant — see
   [Connected apps](/help/ai-assistant-connected-apps)) and the **Secret Manager** (only if you can read
   secrets — your personal vault password lives there).
 - **Password & sessions** — who owns your password (lazyit, or your organization's sign-in provider),
