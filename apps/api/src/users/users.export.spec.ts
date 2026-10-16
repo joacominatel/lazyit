@@ -30,7 +30,9 @@ import {
   csvHeader,
   csvRows,
   inMemoryDelegate,
+  splitsATie,
 } from '../common/in-memory-where.harness-spec';
+import { keysetBatches } from '../common/export/keyset';
 
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -72,7 +74,7 @@ function user(over: Record<string, unknown>) {
     notificationEmailOptOutTypes: [],
     locale: null,
     theme: null,
-    // Two rows share a timestamp so the keyset tie-break is exercised.
+    // Pairs share a createdAt; the batch-of-2 walk below splits one across a batch boundary.
     createdAt: new Date(Date.UTC(2026, 0, 1 + Math.floor(seq / 2))),
     updatedAt: new Date(Date.UTC(2026, 0, 1)),
     deletedAt: null,
@@ -213,6 +215,7 @@ describe('GET /users/export (ADR-0103)', () => {
     '%s with "%s": the export holds exactly the ids the list returns',
     async (role, query) => {
       const listed = await listIds(role, query);
+      expect(listed.length).toBeGreaterThan(0);
       const res = await exportCsv(role, query);
       expect(res.status).toBe(200);
       const exported = csvRows(res.text).map((cells) => cells[0]);
@@ -265,6 +268,28 @@ describe('GET /users/export (ADR-0103)', () => {
       }) as unknown,
     });
   });
+
+  it.each([['active'], ['only']] as const)(
+    'exportSource(deleted=%s) walked in batches of 2 sends every matching user once',
+    async (deleted) => {
+      const source = app.get(UsersService).exportSource({}, deleted);
+      const batches: { id: string; createdAt: Date }[][] = [];
+      for await (const batch of keysetBatches(source.fetchBatch, 2)) {
+        batches.push(batch);
+      }
+      const sent = batches.flat().map((u) => u.id);
+      const expected = USERS.filter((u) =>
+        deleted === 'only' ? u.deletedAt !== null : u.deletedAt === null,
+      ).map((u) => u.id);
+      expect(sent).toHaveLength(new Set(sent).size);
+      expect(new Set(sent)).toEqual(new Set(expected));
+      expect(await source.count()).toBe(expected.length);
+      if (deleted === 'active') {
+        expect(batches.length).toBeGreaterThan(1);
+        expect(splitsATie(batches)).toBe(true);
+      }
+    },
+  );
 
   it('renders the manager, the counts and the booleans readably', async () => {
     const rows = csvRows((await exportCsv('ADMIN', 'q=dario')).text);

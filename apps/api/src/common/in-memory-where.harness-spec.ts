@@ -9,6 +9,8 @@ function comparable(value: unknown): unknown {
 }
 
 function matchesField(value: unknown, cond: unknown): boolean {
+  // Prisma ignores a field whose condition is undefined.
+  if (cond === undefined) return true;
   if (cond === null) return value === null || value === undefined;
   if (cond instanceof Date || typeof cond !== 'object') {
     return comparable(value) === comparable(cond);
@@ -17,9 +19,11 @@ function matchesField(value: unknown, cond: unknown): boolean {
   return Object.entries(ops).every(([op, operand]) => {
     switch (op) {
       case 'not':
-        return operand === null
-          ? value !== null && value !== undefined
-          : comparable(value) !== comparable(operand);
+        if (operand === null) return value !== null && value !== undefined;
+        if (typeof operand === 'object' && !(operand instanceof Date)) {
+          throw new Error('in-memory where: unsupported operator not: {…}');
+        }
+        return comparable(value) !== comparable(operand);
       case 'in':
         return (operand as unknown[]).includes(value);
       case 'lt':
@@ -120,4 +124,14 @@ export function csvRows(body: string): string[][] {
 
 export function csvHeader(body: string): string {
   return body.replace(/^\uFEFF/, '').split('\r\n')[0];
+}
+
+/** Whether two consecutive batches split rows that share a `createdAt`, so the id tie-break decided the cut. */
+export function splitsATie(batches: { createdAt: Date }[][]): boolean {
+  return batches.some(
+    (batch, i) =>
+      i > 0 &&
+      batches[i - 1][batches[i - 1].length - 1].createdAt.getTime() ===
+        batch[0].createdAt.getTime(),
+  );
 }

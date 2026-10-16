@@ -31,7 +31,9 @@ import {
   csvHeader,
   csvRows,
   inMemoryDelegate,
+  splitsATie,
 } from '../common/in-memory-where.harness-spec';
+import { keysetBatches } from '../common/export/keyset';
 
 jest.mock('../../generated/prisma/client', () => ({
   PrismaClient: class {},
@@ -84,7 +86,7 @@ function grant(over: {
     grantedBySaId: null as string | null,
     revokedBySaId: null as string | null,
     notes: `note ${seq}`,
-    // Pairs share a createdAt so the keyset tie-break is exercised.
+    // Pairs share a createdAt; the batch-of-2 walk below splits them across batch boundaries.
     createdAt: new Date(NOW - (20 - Math.floor(seq / 2)) * DAY),
     updatedAt: new Date(NOW),
     ...over,
@@ -245,6 +247,7 @@ describe('Access-grant CSV exports (ADR-0103)', () => {
       const listed = (list.body as { items: { id: string }[] }).items.map(
         (g) => g.id,
       );
+      expect(listed.length).toBeGreaterThan(0);
       const res = await get(`/access-grants/export?${query}`, role);
       expect(res.status).toBe(200);
       const exported = exportedIds(res.text);
@@ -266,6 +269,7 @@ describe('Access-grant CSV exports (ADR-0103)', () => {
       );
       expect(list.status).toBe(200);
       const listed = (list.body as { id: string }[]).map((g) => g.id);
+      expect(listed.length).toBeGreaterThan(0);
       const res = await get(
         `/applications/${APP1}/access-grants/export?${query}`,
         'ADMIN',
@@ -344,6 +348,30 @@ describe('Access-grant CSV exports (ADR-0103)', () => {
     expect(first.slice(0, 2)).toEqual([APP1, ANA]);
     expect(first[5]).toBe(ADMIN_ID);
   });
+
+  it.each([
+    [{ activeOnly: false }, GRANTS.map((g) => g.id), true],
+    [
+      { applicationId: APP1, activeOnly: false },
+      GRANTS.filter((g) => g.applicationId === APP1).map((g) => g.id),
+      false,
+    ],
+  ] as const)(
+    'exportSource(%o) walked in batches of 2 sends every matching grant once',
+    async (filters, expected, splitsTie) => {
+      const source = app.get(AccessGrantsService).exportSource(filters);
+      const batches: { id: string; createdAt: Date }[][] = [];
+      for await (const batch of keysetBatches(source.fetchBatch, 2)) {
+        batches.push(batch);
+      }
+      const sent = batches.flat().map((g) => g.id);
+      expect(sent).toHaveLength(new Set(sent).size);
+      expect(new Set(sent)).toEqual(new Set(expected));
+      expect(await source.count()).toBe(expected.length);
+      expect(batches.length).toBeGreaterThan(1);
+      expect(splitsATie(batches)).toBe(splitsTie);
+    },
+  );
 
   it('audits each export as ACCESS_GRANTS with its filters', async () => {
     await get(
