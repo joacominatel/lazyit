@@ -349,15 +349,14 @@ paths by CEO decision of 2026-10-16)
 - The earlier paths' tests are listed in PRs #1601 and #1606.
 
 ### Verification
-Re-run on the PR branch on 2026-10-16, after the review fixes: `node node_modules/.bin/jest` over all of
-`apps/api`. 313 of 314 suites and 7333 of 7334 tests passed. The one failure was
-`ai/tools/access.tools.spec.ts`, an intermittent suite this change does not touch; it passed 192/192
-when re-run alone.
+Re-run on the PR branch on 2026-10-16, after the review fixes and the `infra:report` exemption:
+`node node_modules/.bin/jest` over all of `apps/api`. 314 suites and 7337 tests passed.
 
 Without the fixes, the new denial tests fail:
 - 1 in the SMTP suite;
 - 6 in the service-account suite, plus 2 for the stale-read cases against the first ceiling commit;
-- 3 in the AI access suite.
+- 3 in the AI access suite;
+- 3 for the `infra:report` exemption.
 
 ### Residual risk
 - `settings:manage` stays delegable for the rest of instance configuration. The surfaces that decide who
