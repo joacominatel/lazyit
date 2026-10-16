@@ -59,6 +59,12 @@ const MAX_HIERARCHY_DEPTH = 32;
 // Every tree-shape write checks and writes under this lock, or two opposing moves both pass and close a cycle.
 export const LOCATION_TREE_LOCK = 'lazyit.location_tree';
 
+/** A delete may re-point thousands of assets and write their history; allow it more than the 5 s default. */
+export const LOCATION_DELETE_TX_TIMEOUT_MS = 30_000;
+
+// Only these stored statuses still expect units; CANCELLED and any status a newer build adds keep their location.
+const OPEN_PURCHASE_STATUSES = ['DRAFT', 'ORDERED'];
+
 @Injectable()
 export class LocationsService {
   private readonly logger = new Logger(LocationsService.name);
@@ -244,41 +250,44 @@ export class LocationsService {
     principal?: Principal,
   ) {
     const actor = this.actor.resolveActor(principal);
-    const location = await this.prisma.$transaction(async (tx) => {
-      await this.lockLocationTree(tx);
-      await this.assertLocationLive(tx, id);
-      const assets = await tx.$queryRaw<{ id: string }[]>`
+    const location = await this.prisma.$transaction(
+      async (tx) => {
+        await this.lockLocationTree(tx);
+        await this.assertLocationLive(tx, id);
+        const assets = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "assets"
          WHERE "locationId" = ${id} AND "deletedAt" IS NULL
          ORDER BY "id" FOR UPDATE`;
-      const children = await tx.location.findMany({
-        where: { parentId: id },
-        select: { id: true },
-      });
-      const purchases = await this.openPurchases(tx, id);
-      if (assets.length + children.length + purchases.length > 0) {
-        if (!resolution) {
-          throw deleteResolutionRequired(`Location ${id}`, {
-            assets: assets.length,
-            childLocations: children.length,
-            purchaseOrders: purchases.length,
+        const children = await tx.location.findMany({
+          where: { parentId: id },
+          select: { id: true },
+        });
+        const purchases = await this.openPurchases(tx, id, true);
+        if (assets.length + children.length + purchases.length > 0) {
+          if (!resolution) {
+            throw deleteResolutionRequired(`Location ${id}`, {
+              assets: assets.length,
+              childLocations: children.length,
+              purchaseOrders: purchases.length,
+            });
+          }
+          const to =
+            resolution.strategy === 'move'
+              ? await this.assertMoveTarget(tx, resolution.targetId, id)
+              : null;
+          await this.resolveDependents(tx, id, to, actor, {
+            assetIds: assets.map((a) => a.id),
+            childIds: children.map((c) => c.id),
+            purchaseIds: purchases.map((p) => p.id),
           });
         }
-        const to =
-          resolution.strategy === 'move'
-            ? await this.assertMoveTarget(tx, resolution.targetId, id)
-            : null;
-        await this.resolveDependents(tx, id, to, actor, {
-          assetIds: assets.map((a) => a.id),
-          childIds: children.map((c) => c.id),
-          purchaseIds: purchases.map((p) => p.id),
+        return tx.location.update({
+          where: { id },
+          data: { deletedAt: new Date() },
         });
-      }
-      return tx.location.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-    });
+      },
+      { timeout: LOCATION_DELETE_TX_TIMEOUT_MS },
+    );
     // Drop from the index so soft-deleted locations never surface in search (ADR-0035).
     this.search.remove('locations', id);
     return location;
@@ -341,14 +350,15 @@ export class LocationsService {
         where: { id: { in: rows.assetIds } },
         data: { locationId: to },
       });
-      for (const assetId of rows.assetIds) {
-        await this.history.record(tx, {
+      await this.history.recordMany(
+        tx,
+        rows.assetIds.map((assetId) => ({
           assetId,
-          eventType: 'LOCATION_CHANGED',
+          eventType: 'LOCATION_CHANGED' as const,
           payload: { from, to },
           actor,
-        });
-      }
+        })),
+      );
     }
     if (rows.childIds.length > 0) {
       await tx.location.updateMany({
@@ -368,10 +378,11 @@ export class LocationsService {
     }
   }
 
-  /** The live purchases delivering here that are not cancelled and still wait for units. */
+  /** Live purchases delivering here in an open status with a pending countable line, or no countable line. */
   private openPurchases(
     client: Prisma.TransactionClient | PrismaService,
     locationId: string,
+    lock = false,
   ): Promise<{ id: string; reference: string | null }[]> {
     const countable = Prisma.sql`l."purchaseOrderId" = po."id" AND l."deletedAt" IS NULL
            AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})`;
@@ -379,11 +390,12 @@ export class LocationsService {
       SELECT po."id", po."reference" FROM "purchase_orders" po
        WHERE po."deliveryLocationId" = ${locationId}
          AND po."deletedAt" IS NULL
-         AND po."status" <> 'CANCELLED'
+         AND po."status" IN (${Prisma.join(OPEN_PURCHASE_STATUSES)})
          AND (NOT EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable})
               OR EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable}
                            AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0))
-       ORDER BY po."createdAt" ASC, po."id" ASC`;
+       ORDER BY po."createdAt" ASC, po."id" ASC
+       ${lock ? Prisma.sql`FOR UPDATE OF po` : Prisma.empty}`;
   }
 
   /** 400 unless the target is live, not the location being deleted, and not below it. */

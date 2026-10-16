@@ -20,6 +20,7 @@ jest.mock('../../generated/prisma/client', () => ({
       values,
     }),
     join: (values: unknown[]) => values,
+    empty: { strings: [''], values: [] },
   },
 }));
 // LocationsService transitively imports the ESM `meilisearch` package (via SearchService); jest
@@ -47,8 +48,9 @@ describe('LocationsService', () => {
   let asset: { count: jest.Mock; findMany: jest.Mock; updateMany: jest.Mock };
   let purchaseOrder: { updateMany: jest.Mock };
   let purchaseOrderEvent: { createMany: jest.Mock };
-  let history: { record: jest.Mock };
+  let history: { record: jest.Mock; recordMany: jest.Mock };
   let readable: Set<string>;
+  let prismaTransaction: () => jest.Mock;
   // Every write records whether it ran inside the $transaction callback.
   let inTransaction: boolean;
   let writesOutsideTx: string[];
@@ -78,7 +80,10 @@ describe('LocationsService', () => {
     purchaseOrderEvent = {
       createMany: write('purchaseOrderEvent.createMany'),
     };
-    history = { record: write('history.record') };
+    history = {
+      record: write('history.record'),
+      recordMany: write('history.recordMany'),
+    };
     readable = new Set(['asset:read', 'location:read', 'purchaseOrder:read']);
     search = { upsert: jest.fn(), remove: jest.fn(), search: jest.fn() };
 
@@ -92,6 +97,7 @@ describe('LocationsService', () => {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     };
+    prismaTransaction = () => prisma.$transaction as jest.Mock;
     prisma.$transaction = jest.fn(
       async (arg: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) => {
         if (typeof arg !== 'function') return Promise.all(arg);
@@ -772,13 +778,23 @@ describe('LocationsService', () => {
       where: { id: { in: ['a1', 'a2'] } },
       data: { locationId: null },
     });
-    expect(history.record).toHaveBeenCalledTimes(2);
-    expect(history.record).toHaveBeenCalledWith(expect.anything(), {
-      assetId: 'a1',
-      eventType: 'LOCATION_CHANGED',
-      payload: { from: 'hq', to: null },
-      actor: { userId: 'admin-1' },
-    });
+    // One batched insert for every moved asset, never one round-trip per asset.
+    expect(history.record).not.toHaveBeenCalled();
+    expect(history.recordMany).toHaveBeenCalledTimes(1);
+    expect(history.recordMany).toHaveBeenCalledWith(expect.anything(), [
+      {
+        assetId: 'a1',
+        eventType: 'LOCATION_CHANGED',
+        payload: { from: 'hq', to: null },
+        actor: { userId: 'admin-1' },
+      },
+      {
+        assetId: 'a2',
+        eventType: 'LOCATION_CHANGED',
+        payload: { from: 'hq', to: null },
+        actor: { userId: 'admin-1' },
+      },
+    ]);
     expect(location.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['room'] } },
       data: { parentId: null },
@@ -822,10 +838,9 @@ describe('LocationsService', () => {
       where: { id: { in: ['a1'] } },
       data: { locationId: 'warehouse' },
     });
-    expect(history.record).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(history.recordMany).toHaveBeenCalledWith(expect.anything(), [
       expect.objectContaining({ payload: { from: 'hq', to: 'warehouse' } }),
-    );
+    ]);
     expect(location.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['room'] } },
       data: { parentId: 'warehouse' },
@@ -871,9 +886,7 @@ describe('LocationsService', () => {
       { id: 'warehouse', parentId: null },
     ]);
     seedDependents({ assets: ['a1', 'a2'], children: ['room'] });
-    history.record
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('connection lost'));
+    history.recordMany.mockRejectedValueOnce(new Error('connection lost'));
 
     await expect(
       service.remove('hq', { strategy: 'move', targetId: 'warehouse' }, ADMIN),
@@ -938,5 +951,53 @@ describe('LocationsService', () => {
     await expect(service.deleteImpact('old', ADMIN)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('gives the delete transaction more than the 5 s default, so a large location can still be deleted', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ assets: Array.from({ length: 3000 }, (_, i) => `a${i}`) });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+
+    expect(asset.updateMany).toHaveBeenCalledTimes(1);
+    expect(history.recordMany).toHaveBeenCalledTimes(1);
+    expect(
+      (history.recordMany.mock.calls[0] as [unknown, unknown[]])[1],
+    ).toHaveLength(3000);
+    const txCalls = (prismaTransaction().mock.calls as unknown[][]).filter(
+      (c) => typeof c[0] === 'function',
+    );
+    expect(txCalls[0][1]).toEqual({ timeout: 30_000 });
+  });
+
+  it('locks the open purchases it re-points (FOR UPDATE OF po) and only those in an open status', async () => {
+    seedTree([{ id: 'hq', parentId: null }]);
+    seedDependents({ purchases: ['po1'] });
+    location.update.mockResolvedValue({ id: 'hq', deletedAt: new Date() });
+
+    await service.remove('hq', { strategy: 'detach' }, ADMIN);
+    await service.deleteImpact('hq', ADMIN);
+
+    const purchaseQueries = (
+      queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]
+    ).filter(([strings]) =>
+      strings.join('?').includes('FROM "purchase_orders"'),
+    );
+    const lockOf = (values: unknown[]) =>
+      values.some(
+        (v) =>
+          typeof v === 'object' &&
+          v !== null &&
+          'strings' in v &&
+          (v as { strings: string[] }).strings
+            .join('')
+            .includes('FOR UPDATE OF po'),
+      );
+    expect(purchaseQueries).toHaveLength(2);
+    // The delete locks them; the read-only preview does not.
+    expect(lockOf(purchaseQueries[0].slice(1))).toBe(true);
+    expect(lockOf(purchaseQueries[1].slice(1))).toBe(false);
+    expect(purchaseQueries[0].slice(1)).toContainEqual(['DRAFT', 'ORDERED']);
   });
 });
