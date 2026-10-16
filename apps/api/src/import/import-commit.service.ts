@@ -28,6 +28,7 @@ import {
 } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import { AssetsService } from '../assets/assets.service';
 import { AssetModelsService } from '../asset-models/asset-models.service';
 import { AssetCategoriesService } from '../asset-categories/asset-categories.service';
@@ -156,15 +157,9 @@ const SPECS_RESERVED_KEYS: ReadonlySet<string> = new Set([
 /**
  * The live partial-unique index on `Asset.serial` — the discriminator that tells a serial-collision `P2002`
  * (a re-import row racing another writer for the same serial → route to the UPDATE path, #1061) apart from
- * an `assetTag` collision (which must stay a FAILED row). Prisma's `meta.target` is a string on Postgres,
- * but a driver can surface an array, so accept both.
+ * an `assetTag` collision (which must stay a FAILED row).
  */
 const SERIAL_ACTIVE_KEY = 'assets_serial_active_key';
-function isSerialActiveKeyTarget(target: unknown): boolean {
-  return Array.isArray(target)
-    ? target.includes(SERIAL_ACTIVE_KEY)
-    : target === SERIAL_ACTIVE_KEY;
-}
 
 /**
  * Re-build a specs object with a NULL prototype and the reserved prototype-pollution keys skipped
@@ -766,7 +761,7 @@ export class ImportCommitService {
           parsed.data.serial !== undefined &&
           err instanceof Prisma.PrismaClientKnownRequestError &&
           err.code === 'P2002' &&
-          isSerialActiveKeyTarget(err.meta?.target)
+          uniqueViolationTargets(err).includes(SERIAL_ACTIVE_KEY)
         ) {
           const existing = await this.prisma.asset.findFirst({
             where: { serial: parsed.data.serial },

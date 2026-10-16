@@ -22,6 +22,7 @@ import {
   type RecordAssetEvent,
 } from '../asset-history/asset-history.service';
 import { ActorService } from '../common/actor.service';
+import { uniqueViolationTargets } from '../common/prisma-unique-violation';
 import type { Principal } from '../auth/principal';
 
 /** The int4-ceiling freeze (ADR-0063): a clean 400 instead of an integer overflow. */
@@ -730,9 +731,8 @@ export function nextFreeNumber(occupied: Set<number>, from: number): number {
 /**
  * The name of the raw partial-unique index that enforces live-tag uniqueness (created in raw SQL in
  * migration 20260601130000, NOT a PSL `@unique` — Prisma can't express the `WHERE deletedAt IS NULL`
- * partial). Because Prisma doesn't know this index from the schema, a P2002 raised by it surfaces
- * `meta.target` as the INDEX NAME string here (rather than a `["assetTag"]` column array). We still
- * match the column-array shape defensively in case the surfaced shape ever changes.
+ * partial). adapter-pg reports it by NAME in the P2002's driver-adapter cause; the `assetTag` column
+ * is also accepted in case a driver reports fields instead.
  */
 const ASSET_TAG_UNIQUE_INDEX = 'assets_assetTag_active_key';
 const ASSET_TAG_COLUMN = 'assetTag';
@@ -744,12 +744,7 @@ const ASSET_TAG_COLUMN = 'assetTag';
  * otherwise be misclassified as a tag collision and spin the whole retry budget (burning ~50 counter
  * numbers) before a misleading 409. Only an assetTag collision advances-and-retries; any other P2002
  * (serial, or anything else) returns false and propagates immediately to the global filter as a
- * prompt, correct 409 — no counter waste.
- *
- * `meta.target` is inspected following the established shape in `prisma-exception.filter.ts`. We match
- * BOTH the raw-index shape (a string equal to / containing the index name — what adapter-pg surfaces
- * for this raw partial index) AND the column-array shape (an array including `assetTag`), so the guard
- * is robust to either.
+ * prompt, correct 409 — no counter waste. A P2002 that names no constraint is not retried either.
  */
 export function isUniqueTagCollision(err: unknown): boolean {
   if (
@@ -758,19 +753,7 @@ export function isUniqueTagCollision(err: unknown): boolean {
   ) {
     return false;
   }
-  const target = err.meta?.target;
-  if (typeof target === 'string') {
-    // Raw partial index: adapter-pg surfaces the index NAME (e.g. "assets_assetTag_active_key").
-    return (
-      target === ASSET_TAG_UNIQUE_INDEX || target.includes(ASSET_TAG_COLUMN)
-    );
-  }
-  if (Array.isArray(target)) {
-    // Column-array shape (defensive): a P2002 whose target lists the assetTag column / index name.
-    return target.some(
-      (t) => t === ASSET_TAG_COLUMN || t === ASSET_TAG_UNIQUE_INDEX,
-    );
-  }
-  // No usable target (e.g. a bare P2002) → cannot confirm it is the assetTag index, so DON'T retry.
-  return false;
+  return uniqueViolationTargets(err).some(
+    (t) => t === ASSET_TAG_UNIQUE_INDEX || t === ASSET_TAG_COLUMN,
+  );
 }

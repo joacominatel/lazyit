@@ -47,6 +47,7 @@ jest.mock('../../generated/prisma/client', () => {
 });
 
 import { Prisma } from '../../generated/prisma/client';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 
 /**
  * Unit tests for the migrator COMMIT ENGINE (ADR-0069 wave 4a, #633). Drives `commit()` with fixture
@@ -689,7 +690,9 @@ describe('ImportCommitService.commit', () => {
     const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
       code: 'P2002',
       clientVersion: 'test',
-      meta: { target: 'assets_serial_active_key' },
+      meta: adapterPgUniqueViolationMeta({
+          index: 'assets_serial_active_key',
+        }),
     });
     const assets = makeAssets({
       failOn: (d) => (d.name === 'COLLIDE' ? p2002 : undefined),
@@ -2280,7 +2283,9 @@ describe('ImportCommitService.commit', () => {
       const p2002 = new Prisma.PrismaClientKnownRequestError('dupe', {
         code: 'P2002',
         clientVersion: 'test',
-        meta: { target: 'assets_serial_active_key' },
+        meta: adapterPgUniqueViolationMeta({
+          index: 'assets_serial_active_key',
+        }),
       });
       const assets = makeAssets({ failOn: () => p2002 });
       const { service, prisma } = makeService(state, { assets });
@@ -2311,7 +2316,9 @@ describe('ImportCommitService.commit', () => {
       const p2002tag = new Prisma.PrismaClientKnownRequestError('dupe', {
         code: 'P2002',
         clientVersion: 'test',
-        meta: { target: 'assets_assetTag_active_key' },
+        meta: adapterPgUniqueViolationMeta({
+          index: 'assets_assetTag_active_key',
+        }),
       });
       const assets = makeAssets({ failOn: () => p2002tag });
       const { service, prisma } = makeService(state, { assets });

@@ -9,6 +9,7 @@ import { AccessRequestsService } from './access-requests.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccessGrantsService } from '../access-grants/access-grants.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { adapterPgUniqueViolationMeta } from '../../test/prisma/unique-violation';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for the P2002 error class + erased types; the stand-in is defined INSIDE the factory
@@ -16,8 +17,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 jest.mock('../../generated/prisma/client', () => {
   class KnownRequestError extends Error {
     code: string;
-    meta?: { target?: string | string[] };
-    constructor(code: string, meta?: { target?: string | string[] }) {
+    meta?: Record<string, unknown>;
+    constructor(code: string, meta?: Record<string, unknown>) {
       super(code);
       this.code = code;
       this.meta = meta;
@@ -36,7 +37,7 @@ const FakeKnownRequestError = (
     Prisma: {
       PrismaClientKnownRequestError: new (
         code: string,
-        meta?: { target?: string | string[] },
+        meta?: Record<string, unknown>,
       ) => Error;
     };
   }
@@ -183,14 +184,22 @@ describe('AccessRequestsService', () => {
       application.findFirst.mockResolvedValue({ id: APP_ID });
       accessRequest.findFirst.mockResolvedValue(null);
       accessRequest.create.mockRejectedValue(
-        new FakeKnownRequestError('P2002', {
-          target: 'access_requests_requester_application_pending_key',
-        }),
+        new FakeKnownRequestError(
+          'P2002',
+          adapterPgUniqueViolationMeta(
+            { index: 'access_requests_requester_application_pending_key' },
+            'AccessRequest',
+          ),
+        ),
       );
 
       await expect(
         service.create(REQUESTER, { applicationId: APP_ID }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).rejects.toThrow(
+        new ConflictException(
+          'You already have a pending access request for this application.',
+        ),
+      );
     });
 
     it('400s when the application is not live', async () => {
