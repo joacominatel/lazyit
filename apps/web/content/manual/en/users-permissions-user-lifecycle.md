@@ -71,8 +71,10 @@ skipped (and why). A selected asset or application that has since been **deleted
 than copied, so the clone never revives a retired asset or a decommissioned application.
 
 A clone only carries over what you could hand out yourself: assets need **Add & edit inventory**, and
-application access needs **Grant & revoke access**. If your role lacks one, those items are listed as
-skipped for that reason and the new user is created without them.
+application access needs **Grant & revoke access**. If your role lacks one, the clone dialog does not
+offer that list (and, without **Grant & revoke access**, not the provisioning switch either) and says
+which permission it needs; the new user is created without those items. Anything the server still
+refuses, say because your permissions changed meanwhile, is listed as skipped for that reason.
 
 ## Reset a password
 
