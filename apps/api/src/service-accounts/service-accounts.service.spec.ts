@@ -210,6 +210,17 @@ class FakePrisma {
     return this.client.serviceAccountAuditLog;
   }
 
+  locks: string[] = [];
+
+  // The row lock (`SELECT … FOR UPDATE`): the id is the only interpolated value.
+  $queryRaw(_sql: TemplateStringsArray, id: string) {
+    this.locks.push(id);
+    const row = this.accounts.find((a) => a.id === id);
+    return Promise.resolve(
+      row ? [{ isActive: row.isActive, expiresAt: row.expiresAt }] : [],
+    );
+  }
+
   $transaction<T>(fn: (tx: FakePrisma) => Promise<T>): Promise<T> {
     return fn(this);
   }
@@ -718,6 +729,66 @@ describe('ServiceAccountsService (ADR-0048)', () => {
       expect(
         prisma.accounts.find((a) => a.id === id)!.deletedAt,
       ).not.toBeNull();
+    });
+
+    it('update: judges the grants read under the row lock, not the stale pre-read', async () => {
+      const id = await adminCreated();
+      // A concurrent narrowing commits between the pre-read and the transaction.
+      jest
+        .spyOn(prisma.serviceAccountPermission, 'findMany')
+        .mockResolvedValueOnce([{ permission: 'asset:read' }]);
+      await expect(
+        service.update(
+          id,
+          { permissions: ['asset:read', 'asset:write'] },
+          MEMBER,
+        ),
+      ).rejects.toMatchObject(ceiling);
+      expect(prisma.locks).toContain(id);
+      expect(prisma.audit.map((a) => a.action)).toEqual(['MINT']);
+    });
+
+    it('rotate: judges the grants read under the row lock', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      const before = prisma.accounts.find((a) => a.id === own.id)!.tokenHash;
+      // A concurrent widening commits after the pre-read.
+      jest
+        .spyOn(prisma.serviceAccountPermission, 'findMany')
+        .mockResolvedValueOnce([
+          { permission: 'asset:read' },
+          { permission: 'asset:write' },
+        ]);
+      await expect(service.rotate(own.id, MEMBER)).rejects.toMatchObject(
+        ceiling,
+      );
+      expect(prisma.locks).toContain(own.id);
+      expect(prisma.accounts.find((a) => a.id === own.id)!.tokenHash).toBe(
+        before,
+      );
+    });
+
+    it('rotate: an inert legacy grant (SEC-073) does not count against the ceiling', async () => {
+      const own = await service.create(
+        { name: 'bot', permissions: ['asset:read'] },
+        MEMBER,
+      );
+      prisma.perms.push({
+        serviceAccountId: own.id,
+        permission: 'user:manage',
+      });
+      const rotated = await service.rotate(own.id, MEMBER);
+      expect(rotated.token).not.toBe(own.token);
+    });
+
+    it('update: shortening the expiry of an over-ceiling account is allowed', async () => {
+      const later = new Date(Date.now() + 3_600_000).toISOString();
+      const id = await adminCreated({ expiresAt: later });
+      const sooner = new Date(Date.now() + 60_000).toISOString();
+      const updated = await service.update(id, { expiresAt: sooner }, MEMBER);
+      expect(updated.expiresAt).toBe(sooner);
     });
 
     it('ADMIN is unaffected: every verb on create, rotate and restore', async () => {

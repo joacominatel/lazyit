@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -21,6 +20,7 @@ import type {
 import { PermissionResolverService } from '../auth/permission-resolver.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EngineServiceAccountService } from '../workflow-engine/engine-service-account.service';
+import { assertWithinPermissionCeiling } from './permission-ceiling';
 import { mintToken, randomHash } from './service-account-token';
 
 /** A ServiceAccount row joined with its permission grants — the shape every read/write returns. */
@@ -85,7 +85,10 @@ export class ServiceAccountsService {
         ? this.parseFutureExpiry(dto.expiresAt)
         : null;
     const permissions = this.cleanPermissions(dto.permissions);
-    await this.assertWithinCallerPermissions(actorId, permissions);
+    assertWithinPermissionCeiling(
+      await this.callerPermissions(actorId),
+      permissions,
+    );
 
     const result = await this.prisma.$transaction(async (tx) => {
       // 1) Create the row so Prisma allocates the cuid the token must embed. The placeholder tokenHash
@@ -181,33 +184,37 @@ export class ServiceAccountsService {
       dto.permissions !== undefined
         ? this.cleanPermissions(dto.permissions)
         : undefined;
-    const currentPermissions = this.cleanPermissions(
-      account.permissions.map((p) => p.permission),
-    );
-    const rearms =
-      (dto.isActive === true && !account.isActive) ||
-      (nextExpiry !== undefined &&
-        account.expiresAt !== null &&
-        (nextExpiry === null || nextExpiry > account.expiresAt));
-    await this.assertWithinCallerPermissions(
-      actorId,
-      rearms
-        ? (nextPermissions ?? currentPermissions)
-        : (nextPermissions ?? []).filter(
-            (p) => !currentPermissions.includes(p),
-          ),
-    );
+    const held = await this.callerPermissions(actorId);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      // The ceiling is judged against the row as it stands under the lock, never the pre-read snapshot.
+      const locked = await this.lockAccount(tx, id);
+      const currentRows = await tx.serviceAccountPermission.findMany({
+        where: { serviceAccountId: id },
+        select: { permission: true },
+      });
+      const currentPermissions = this.cleanPermissions(
+        currentRows.map((r) => r.permission),
+      );
+      const rearms =
+        (dto.isActive === true && !locked.isActive) ||
+        (nextExpiry !== undefined &&
+          locked.expiresAt !== null &&
+          (nextExpiry === null || nextExpiry > locked.expiresAt));
+      assertWithinPermissionCeiling(
+        held,
+        rearms
+          ? (nextPermissions ?? currentPermissions)
+          : (nextPermissions ?? []).filter(
+              (p) => !currentPermissions.includes(p),
+            ),
+      );
+
       if (Object.keys(data).length > 0) {
         await tx.serviceAccount.update({ where: { id }, data });
       }
 
       if (nextPermissions !== undefined) {
-        const currentRows = await tx.serviceAccountPermission.findMany({
-          where: { serviceAccountId: id },
-          select: { permission: true },
-        });
         const current = new Set(currentRows.map((r) => r.permission));
         const next = new Set<string>(nextPermissions);
         const toRevoke = [...current].filter((p) => !next.has(p));
@@ -263,13 +270,11 @@ export class ServiceAccountsService {
     // The engine SA's token is a throwaway it never authenticates with — rotating it is meaningless and
     // forbidden (#304).
     this.assertNotSystemManaged(account, 'rotated');
-    await this.assertWithinCallerPermissions(
-      actorId,
-      this.cleanPermissions(account.permissions.map((p) => p.permission)),
-    );
+    const held = await this.callerPermissions(actorId);
     const minted = mintToken(id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertGrantsWithin(tx, id, held);
       const account = await tx.serviceAccount.update({
         where: { id },
         data: { tokenHash: minted.tokenHash, tokenPrefix: minted.tokenPrefix },
@@ -320,23 +325,20 @@ export class ServiceAccountsService {
     id: string,
     actorId: string | null,
   ): Promise<ServiceAccountWire> {
-    const account = (await this.prisma.serviceAccount.findFirst({
+    const account = await this.prisma.serviceAccount.findFirst({
       where: { id },
-      include: WITH_PERMISSIONS,
       includeSoftDeleted: true,
-    } as PrismaTypes.ServiceAccountFindFirstArgs)) as ServiceAccountWithPermissions | null;
+    } as PrismaTypes.ServiceAccountFindFirstArgs);
     if (!account) {
       throw new NotFoundException(`Service account ${id} not found`);
     }
     if (account.deletedAt === null) {
       return this.findOne(id); // already live — idempotent
     }
-    await this.assertWithinCallerPermissions(
-      actorId,
-      this.cleanPermissions(account.permissions.map((p) => p.permission)),
-    );
+    const held = await this.callerPermissions(actorId);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertGrantsWithin(tx, id, held);
       const restored = await tx.serviceAccount.update({
         where: { id },
         data: { deletedAt: null },
@@ -352,30 +354,48 @@ export class ServiceAccountsService {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  // SEC-088: whatever issues or re-arms a token stays within the caller's own verbs; narrowing never trips it.
-  private async assertWithinCallerPermissions(
+  /** The human caller's verbs, DB-first from their role; an unattributed caller holds none. */
+  private async callerPermissions(
     actorId: string | null,
-    verbs: readonly Permission[],
-  ): Promise<void> {
-    if (verbs.length === 0) return;
+  ): Promise<ReadonlySet<Permission>> {
     const caller = actorId
       ? await this.prisma.user.findUnique({
           where: { id: actorId },
           select: { role: true },
         })
       : null;
-    const held: ReadonlySet<Permission> = caller
-      ? await this.rolePermissions.resolve(caller.role)
-      : new Set();
-    const exceeded = verbs.filter((p) => !held.has(p));
-    if (exceeded.length === 0) return;
-    throw new ForbiddenException({
-      statusCode: 403,
-      code: 'PERMISSION_CEILING_EXCEEDED',
-      message:
-        'A service account can only hold permissions your own role holds.',
-      permissions: exceeded,
+    return caller ? this.rolePermissions.resolve(caller.role) : new Set();
+  }
+
+  /** Lock the account row for the rest of `tx`, so ceiling checks and grant writes serialise. */
+  private async lockAccount(
+    tx: PrismaTypes.TransactionClient,
+    id: string,
+  ): Promise<{ isActive: boolean; expiresAt: Date | null }> {
+    const [row] = await tx.$queryRaw<
+      { isActive: boolean; expiresAt: Date | null }[]
+    >`SELECT "isActive", "expiresAt" FROM "service_accounts" WHERE "id" = ${id} FOR UPDATE`;
+    if (!row) {
+      throw new NotFoundException(`Service account ${id} not found`);
+    }
+    return row;
+  }
+
+  /** SEC-088: rotate and restore hand back a working token, so its grants, read under the lock, must fit. */
+  private async assertGrantsWithin(
+    tx: PrismaTypes.TransactionClient,
+    id: string,
+    held: ReadonlySet<Permission>,
+  ): Promise<void> {
+    await this.lockAccount(tx, id);
+    const rows = await tx.serviceAccountPermission.findMany({
+      where: { serviceAccountId: id },
+      select: { permission: true },
     });
+    assertWithinPermissionCeiling(
+      held,
+      this.cleanPermissions(rows.map((r) => r.permission)),
+    );
   }
 
   /** Fetch a LIVE service account (with grants) or 404. The read filter already excludes revoked rows. */
