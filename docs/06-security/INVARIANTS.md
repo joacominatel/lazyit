@@ -397,7 +397,9 @@ by a service account, and no bot can accidentally become an administrator.
     `settings:manage` never gives one a verb their own role lacks. `ServiceAccountsService` refuses create,
     an added verb, re-enabling, extending, rotate and restore past the caller's DB-resolved set (**403**
     `PERMISSION_CEILING_EXCEEDED`), judged under a row lock; `AiServiceAccountAccessService` refuses
-    widening an account's AI access the same way. Tests: `service-accounts.service.spec.ts` ("permission
+    widening an account's AI access the same way. `infra:report` alone is exempt
+    (`CEILING_EXEMPT_PERMISSIONS`, CEO decision): it only reports inventory, and installing agents was
+    already `settings:manage`'s job. Tests: `service-accounts.service.spec.ts` ("permission
     ceiling") and `ai-service-account-access.service.spec.ts` ("widening stays within the caller").
   - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
     actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at

@@ -58,7 +58,9 @@ SAME frozen catalog humans use ([[service-account-permission]]) — never a `Rol
   and restore judge the grants read under a row lock (`FOR UPDATE`). Past it: **403** `PERMISSION_CEILING_EXCEEDED`, with the offending verbs
   in `permissions`, and nothing is written. Narrowing writes (rename, removing verbs, disabling,
   shortening the expiry, revoke) are never refused by it. ADMIN holds the full catalog, so only a
-  delegated `settings:manage` is affected ([[0048-service-accounts]]).
+  delegated `settings:manage` is affected ([[0048-service-accounts]]). `infra:report` is exempt: it only
+  reports inventory and no human role holds it, so a delegate still installs agents. `secret:fetch` stays
+  capped.
 - **Optional expiry + one-click rotate.** `expiresAt` is optional (no forced expiry in v1); `isActive`
   toggles it off without deleting; `POST /:id/rotate` mints a new secret (shown once) and invalidates
   the old.

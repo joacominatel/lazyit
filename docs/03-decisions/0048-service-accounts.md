@@ -224,6 +224,13 @@ nothing is written. Writes that only narrow are never refused by the cap: rename
 verbs, disabling, shortening the expiry and revoke. A delegate can always shut an account down. ADMIN
 resolves to the full catalog and is unaffected. The SA-ungrantable verbs and INV-SA-3 are unchanged.
 
+**One exemption, `infra:report`** (CEO decision, 2026-10-16). No human role holds it, because it is
+machine-only, so without the exemption a delegate could no longer add a server or rotate an agent token.
+The verb only lets an agent report inventory, and installing agents was already `settings:manage`'s job,
+so a delegate keeps doing it as before. It is the single member of `CEILING_EXEMPT_PERMISSIONS`
+(`apps/api/src/service-accounts/permission-ceiling.ts`). `secret:fetch` stays capped, because it reaches
+secrets, and so does every other verb.
+
 No data change: existing accounts and their tokens keep working with their current verbs. The cap
 applies the next time a non-ADMIN rotates, restores, re-enables or extends one that holds more than
 their role.

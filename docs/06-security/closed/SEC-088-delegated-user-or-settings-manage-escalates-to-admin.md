@@ -295,7 +295,8 @@ ADMIN-only, clone limited to what the caller could grant, and promotion revoking
 #1606 (`9bc75c4f5`); the UI copy in PR #1609 (`cab67672f`); the two remaining `settings:manage` paths in
 PR #1611: `5310b682a` (`fix(api): saving the SMTP settings is ADMIN-only (SEC-088)`) and `584bd45f0`
 (`fix(api): cap service-account verbs at the caller's own permissions (SEC-088)`), hardened after review by
-`f8f579bd6` (the ceiling judged under a row lock) and `2ba5d3773` (widening AI access capped), with
+`f8f579bd6` (the ceiling judged under a row lock), `2ba5d3773` (widening AI access capped) and
+`aa3256904` (the `infra:report` exemption, CEO decision), with
 `846acf864` (ADR-0079, ADR-0048 and ADR-0046 amendments, INV-SA-3)
 **Fixed by**: 2026-10-10 audit decision round (CEO decisions of 2026-10-15 and 2026-10-16; the last two
 paths by CEO decision of 2026-10-16)
@@ -308,6 +309,10 @@ paths by CEO decision of 2026-10-16)
   secret, and the test send persists nothing and uses the relay an ADMIN saved.
 - `apps/api/src/service-accounts/permission-ceiling.ts` (`assertWithinPermissionCeiling`): a verb outside
   the caller's set is refused with 403 `PERMISSION_CEILING_EXCEEDED`, listing the verbs.
+  `CEILING_EXEMPT_PERMISSIONS` holds only `infra:report`, by CEO decision. The verb is machine-only, so
+  no human role holds it, and the cap would have stopped a delegate adding a server or rotating an agent
+  token. It only reports inventory, and installing agents was already `settings:manage`'s job.
+  `secret:fetch` stays capped because it reaches secrets.
 - `apps/api/src/service-accounts/service-accounts.service.ts`: the caller's verbs resolve DB-first from
   their role, once per request. Call sites:
   - create (`:88`);
@@ -335,6 +340,8 @@ paths by CEO decision of 2026-10-16)
   - A grant set read under the lock that differs from the pre-read is the one judged, on update and on
     rotate.
   - An inert legacy grant (SEC-073) does not block a rotate.
+  - A delegate creates and rotates an account holding only `infra:report`. With `infra:report` plus
+    `secret:fetch`, the create is refused and lists only `secret:fetch`.
 - `apps/api/src/ai/headless/ai-service-account-access.service.spec.ts`, block `widening stays within the
   caller (SEC-088)`: a higher level, a higher cap and a cleared cap are refused on an over-ceiling
   account, with nothing written. Narrowing passes, and so do widening within the caller and any ADMIN
