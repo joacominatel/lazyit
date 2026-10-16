@@ -17,7 +17,7 @@ void mock.module(CLIENT, () => ({
 const { assetFilterParams, getAssets } = await import("./assets");
 const { activityFilterParams, getDashboardActivity } = await import("./dashboard");
 const { auditLogFilterParams, getAuditLogs } = await import("./audit");
-const { getUsers, userFilterParams } = await import("./users");
+const { getUserGrants, getUsers, userFilterParams } = await import("./users");
 const { deriveUserParams } = await import("@/app/(app)/users/_components/users-list-query");
 const { accessGrantFilterParams, getAccessGrants } = await import("./access-grants");
 const { applicationGrantFilterParams, getApplicationGrants } = await import("./applications");
@@ -133,6 +133,16 @@ describe("each list and its CSV export send identical filter params (ADR-0103)",
       () => getAccessGrants({ ...filters, limit: 25, offset: 50 }),
       accessGrantFilterParams(filters),
     );
+  });
+
+  test("a person's grants: the person page's list and its export (the export names the user)", async () => {
+    const exported = accessGrantFilterParams({ userId: UUID, activeOnly: false });
+    expect(exported.get("userId")).toBe(UUID);
+    exported.delete("userId");
+    calls.length = 0;
+    await getUserGrants(UUID, false);
+    expect(calls[0]).toStartWith(`/users/${UUID}/access-grants?`);
+    expect(await listFilters(() => getUserGrants(UUID, false))).toEqual(entries(exported));
   });
 
   test("access grants of one application", async () => {
