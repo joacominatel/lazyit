@@ -34,6 +34,9 @@ describe('AssetCategoriesService', () => {
   let asset: { count: jest.Mock; findMany: jest.Mock };
   // Live category ids: the row lock only returns these.
   let liveCategories: Set<string>;
+  // The live models filed under the category being deleted, as the row lock returns them.
+  let liveModelIds: string[];
+  let prismaQueryRaw: () => jest.Mock;
   let readable: Set<string>;
   let inTransaction: boolean;
   let writesOutsideTx: number;
@@ -46,6 +49,7 @@ describe('AssetCategoriesService', () => {
       update: jest.fn(),
     };
     liveCategories = new Set(['c1', 'c2']);
+    liveModelIds = [];
     readable = new Set(['assetModel:read', 'asset:read']);
     inTransaction = false;
     writesOutsideTx = 0;
@@ -65,12 +69,17 @@ describe('AssetCategoriesService', () => {
       assetCategory,
       assetModel,
       asset,
-      $queryRaw: jest.fn((_sql: TemplateStringsArray, ids: string[]) =>
-        Promise.resolve(
-          ids.filter((id) => liveCategories.has(id)).map((id) => ({ id })),
-        ),
+      $queryRaw: jest.fn((sql: TemplateStringsArray, arg: string[] | string) =>
+        sql.join('?').includes('FROM "asset_models"')
+          ? Promise.resolve(liveModelIds.map((id) => ({ id })))
+          : Promise.resolve(
+              (arg as string[])
+                .filter((id) => liveCategories.has(id))
+                .map((id) => ({ id })),
+            ),
       ),
     };
+    prismaQueryRaw = () => prisma.$queryRaw as jest.Mock;
     prisma.$transaction = jest.fn(
       async (fn: (tx: unknown) => Promise<unknown>) => {
         inTransaction = true;
@@ -220,7 +229,7 @@ describe('AssetCategoriesService', () => {
   });
 
   it('refuses (409) while live models are filed under it and no strategy is given, with the model and asset counts', async () => {
-    assetModel.findMany.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+    liveModelIds = ['m1', 'm2'];
     asset.count.mockResolvedValue(7);
 
     const err = await service.remove('c1').catch((e: unknown) => e);
@@ -230,10 +239,11 @@ describe('AssetCategoriesService', () => {
       code: 'DELETE_RESOLUTION_REQUIRED',
       dependents: { assetModels: 2, assets: 7 },
     });
-    expect(assetModel.findMany).toHaveBeenCalledWith({
-      where: { categoryId: 'c1', deletedAt: null },
-      select: { id: true },
-    });
+    const modelLock = (
+      prismaQueryRaw().mock.calls as [TemplateStringsArray, ...unknown[]][]
+    ).find(([sql]) => sql.join('?').includes('FROM "asset_models"'))!;
+    expect(modelLock[0].join('?')).toContain('ORDER BY "id" FOR NO KEY UPDATE');
+    expect(modelLock[1]).toBe('c1');
     expect(asset.count).toHaveBeenCalledWith({
       where: { deletedAt: null, model: { categoryId: 'c1', deletedAt: null } },
     });
@@ -241,7 +251,7 @@ describe('AssetCategoriesService', () => {
   });
 
   it('detach clears the category of every live model, in the delete transaction', async () => {
-    assetModel.findMany.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+    liveModelIds = ['m1', 'm2'];
     assetCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
 
     await service.remove('c1', { strategy: 'detach' });
@@ -255,7 +265,7 @@ describe('AssetCategoriesService', () => {
   });
 
   it('move re-points every live model to the target category', async () => {
-    assetModel.findMany.mockResolvedValue([{ id: 'm1' }]);
+    liveModelIds = ['m1'];
     assetCategory.update.mockResolvedValue({ id: 'c1', deletedAt: new Date() });
 
     await service.remove('c1', { strategy: 'move', targetId: 'c2' });
@@ -273,7 +283,7 @@ describe('AssetCategoriesService', () => {
   ])(
     'refuses (400) to move to %s, and writes nothing',
     async (_what, targetId) => {
-      assetModel.findMany.mockResolvedValue([{ id: 'm1' }]);
+      liveModelIds = ['m1'];
 
       await expect(
         service.remove('c1', { strategy: 'move', targetId }),
@@ -285,7 +295,7 @@ describe('AssetCategoriesService', () => {
   );
 
   it('a failed soft delete after the move rejects the whole call (both writes share the transaction)', async () => {
-    assetModel.findMany.mockResolvedValue([{ id: 'm1' }]);
+    liveModelIds = ['m1'];
     assetCategory.update.mockRejectedValue(new Error('connection lost'));
 
     await expect(
