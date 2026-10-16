@@ -124,3 +124,33 @@ export const PasswordPolicySchema = z
   .regex(/[a-z]/, "Must include a lowercase letter.")
   .regex(/[0-9]/, "Must include a number.")
   .regex(/[^A-Za-z0-9]/, "Must include a symbol.");
+
+// One decision for every live row still pointing at the deleted row, never one per row (AUD-024 / AUD-085).
+export const DeleteResolutionSchema = z.discriminatedUnion("strategy", [
+  z.strictObject({ strategy: z.literal("detach") }),
+  z.strictObject({ strategy: z.literal("move"), targetId: z.cuid() }),
+]);
+
+export const DELETE_IMPACT_SAMPLE_LIMIT = 50;
+
+// `items` is null when the caller may not read that kind; `total` is always given, since the decision covers those rows too.
+export function deleteImpactGroup<T extends z.ZodType>(item: T) {
+  return z.object({
+    total: z.number().int().min(0),
+    items: z.array(item).nullable(),
+  });
+}
+
+export const DELETE_RESOLUTION_REQUIRED = "DELETE_RESOLUTION_REQUIRED";
+
+// `dependents` uses the same keys as the entity's delete-impact groups.
+export const DeleteResolutionRequiredErrorSchema = z.object({
+  statusCode: z.literal(409),
+  error: z.string().optional(),
+  code: z.literal(DELETE_RESOLUTION_REQUIRED),
+  message: z.string(),
+  dependents: z.record(z.string(), z.number().int().min(0)),
+});
+
+export type DeleteResolution = z.infer<typeof DeleteResolutionSchema>;
+export type DeleteResolutionRequiredError = z.infer<typeof DeleteResolutionRequiredErrorSchema>;

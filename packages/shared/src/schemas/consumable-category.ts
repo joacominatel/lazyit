@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { int4, requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, int4, requireAtLeastOneKey } from "./primitives";
 
 /**
  * ConsumableCategory — user-managed grouping for Consumables (Cables, Adapters, Peripherals, …).
@@ -48,6 +48,10 @@ export const UpdateConsumableCategorySchema = requireAtLeastOneKey(
     .partial(),
 );
 
+export const ConsumableCategoryDeleteImpactSchema = z.object({
+  consumables: deleteImpactGroup(z.object({ id: z.cuid(), name: z.string(), sku: z.string().nullable() })),
+});
+
 export type ConsumableCategory = z.infer<typeof ConsumableCategorySchema>;
 export type CreateConsumableCategory = z.infer<
   typeof CreateConsumableCategorySchema
@@ -55,3 +59,4 @@ export type CreateConsumableCategory = z.infer<
 export type UpdateConsumableCategory = z.infer<
   typeof UpdateConsumableCategorySchema
 >;
+export type ConsumableCategoryDeleteImpact = z.infer<typeof ConsumableCategoryDeleteImpactSchema>;

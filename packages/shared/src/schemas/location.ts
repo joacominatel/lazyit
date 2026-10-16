@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { optionalText, requireAtLeastOneKey } from "./primitives";
+import { deleteImpactGroup, optionalText, requireAtLeastOneKey } from "./primitives";
 
 /**
  * Location — where an asset physically lives.
@@ -96,9 +96,19 @@ export const UpdateLocationSchema = requireAtLeastOneKey(
     .partial(),
 );
 
+// Received deliveries and closed purchases keep pointing at a deleted location as history, so they are not listed.
+export const LocationDeleteImpactSchema = z.object({
+  assets: deleteImpactGroup(
+    z.object({ id: z.cuid(), name: z.string(), assetTag: z.string().nullable() }),
+  ),
+  childLocations: deleteImpactGroup(LocationBreadcrumbSchema),
+  purchaseOrders: deleteImpactGroup(z.object({ id: z.cuid(), reference: z.string().nullable() })),
+});
+
 export type LocationType = z.infer<typeof LocationTypeSchema>;
 export type Location = z.infer<typeof LocationSchema>;
 export type LocationBreadcrumb = z.infer<typeof LocationBreadcrumbSchema>;
 export type LocationDetail = z.infer<typeof LocationDetailSchema>;
 export type CreateLocation = z.infer<typeof CreateLocationSchema>;
 export type UpdateLocation = z.infer<typeof UpdateLocationSchema>;
+export type LocationDeleteImpact = z.infer<typeof LocationDeleteImpactSchema>;
