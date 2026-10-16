@@ -1233,10 +1233,12 @@ follows the owner's per-type email opt-out: the allowlist has no mandatory types
 always lands). Whether a connection was announced is stored on the grant, `OAuthGrant.announcedAt`
 (AUD-014), never inferred from its age or `lastUsedAt`, so the bell's 90-day prune cannot make a grant
 that was never announced look announced — a personal token minted and first used months later is still
-announced. A grant with `announcedAt` null whose notice row exists (sent before the column, or by an older
-replica during a rolling update) counts as announced and gets the column filled in. Two concurrent first
-uses claim the column with a conditional `updateMany` (`announcedAt IS NULL`), so only one sends; a failed
-send releases the claim and the next request retries. Service Accounts
+announced. The column is set only once the notice row exists: two concurrent first uses both emit, the
+unique `dedupeKey` makes the loser a no-op (no row, no email), and both then stamp. A failed send stamps
+nothing, so the next request retries. A grant with `announcedAt` null whose notice row exists (sent
+before the column, or by an older replica during a rolling update) counts as announced and gets the
+column filled in. A legacy grant whose notice was already pruned by the 90-day retention before it was
+stamped is announced once more on its next use — an extra notice, never a missed one. Service Accounts
 have no bell. **Choice:** the notice fires at first use rather than at consent or at token creation:
 the grant is created by W2-4's code exchange, and first use is when an agent really acts — a personal
 token minted and never used is not announced (its creation is audited, `PERSONAL_TOKEN_CREATED`).

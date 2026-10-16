@@ -28,7 +28,7 @@ class CreatePersonalTokenDto extends createZodDto(CreatePersonalTokenSchema) {}
 
 /**
  * Personal MCP tokens (`lan` instances; ADR-0097 decision 9; mcp-and-oauth.md §5.4; synthesis §4.7).
- * Human sessions holding `ai:connect` only — a Service Account never mints a personal token.
+ * Human sessions only; minting needs `ai:connect` — a Service Account never mints a personal token.
  * Browser path: `/api/oauth/personal-tokens…` (Caddy strips `/api`).
  *   - `POST /oauth/personal-tokens` → 201 `PersonalTokenCreated` — the cleartext `token` EXACTLY ONCE,
  *     `Cache-Control: no-store`. 403 `{ code: "OAUTH_INSTANCE" }` on an HTTPS instance (OAuth is the only

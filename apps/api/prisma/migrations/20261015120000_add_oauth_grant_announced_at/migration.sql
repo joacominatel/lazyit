@@ -2,10 +2,10 @@
 -- the grant's age. ADDITIVE ONLY: one nullable column, no default, no index.
 --
 -- WHAT HAPPENS TO EXISTING DATA ON UPDATE: a grant whose notice row still exists (dedupe key
--- `mcp.client_connected:<grantId>`) is marked announced at that notice's time, so it is never announced
--- again. Every other grant reads NULL and is announced on its next /mcp use. The notice shipped with /mcp
--- itself less than 90 days ago, so no notice has been pruned yet and every connection already used has
--- its row; the API also treats a surviving notice row as announced at read time.
+-- `mcp.client_connected:<grantId>`) is marked announced at that notice's time. Every other grant reads
+-- NULL and is announced on its next /mcp use. A grant whose notice was already pruned by the 90-day
+-- retention is therefore announced once more: an extra notice, never a missed one. The API also treats a
+-- surviving notice row as announced at read time, which covers notices sent by an older replica.
 
 -- AlterTable
 ALTER TABLE "oauth_grants" ADD COLUMN     "announcedAt" TIMESTAMP(3);
