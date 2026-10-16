@@ -3,7 +3,7 @@ title: PurchaseOrderLine
 tags: [domain, entity, purchases]
 status: accepted
 created: 2026-10-01
-updated: 2026-10-14
+updated: 2026-10-16
 ---
 
 # PurchaseOrderLine
@@ -28,7 +28,9 @@ line, the units that came out of it.
 
 - **belongs to** one [[purchase-order]] (`purchaseOrderId`, `onDelete: Restrict`).
 - **maps to** an optional [[asset-model]] (`assetModelId`, `SetNull`). Optional on purpose: a draft line
-  does not force anyone to create a model; it is mapped when units are received.
+  does not force anyone to create a model; it is mapped when units are received. Deleting a model in use
+  detaches or re-points the lines of open purchases that still expect units, with a `LINE_UPDATED`
+  event each; other lines keep the archived model as history ([[asset-model]], SEC-041).
 - **produced** N [[asset]]s (`Asset.purchaseOrderLineId`, nullable). At most one line per asset.
 - **maps to** an optional [[consumable]] (`consumableId`, `SetNull`) — a `CONSUMABLE` line only (#1476).
   It is received as `IN` [[consumable-movement]]s that reference the line (`ConsumableMovement.purchaseOrderLineId`).

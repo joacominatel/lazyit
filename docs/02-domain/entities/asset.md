@@ -90,8 +90,8 @@ concrete instance of a generic [[asset-model]].
   **detach** assets, never delete them (auditability > strict referential integrity). The API only
   soft-deletes, which fires no referential action. Deleting a **location** with live assets needs one
   resolution for all of them — detach or move, each with a `LOCATION_CHANGED` history row (see
-  [[location]], AUD-024). An archived **model** still keeps its assets pointing at it; whether that
-  delete should be refused or detach is open (SEC-041).
+  [[location]], AUD-024). Deleting a **model** in use takes the same one resolution, each asset with a
+  `MODEL_CHANGED` row (see [[asset-model]], SEC-041).
 - Ownership is **never a column** on the asset — it is the [[asset-assignment]] join, so
   ownership history is automatic ([[0019-asset-assignment-integrity]]).
 
