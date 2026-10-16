@@ -167,6 +167,15 @@ describe('ExportService.exportCsv', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await expect(service.exportCsv(spec())).resolves.toBeDefined();
   });
+
+  it('frees the slot when the client left before the stream was built', async () => {
+    const { service } = setup();
+    const res = Object.assign(response(), { destroyed: true });
+    await service.exportCsv(spec({ response: res }));
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(service.exportCsv(spec())).resolves.toBeDefined();
+  });
 });
 
 describe('ExportLimiter', () => {

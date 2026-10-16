@@ -129,7 +129,9 @@ export class ExportService {
       { objectMode: false },
     );
     body.once('close', release);
-    spec.response.once('close', () => body.destroy());
+    // A client gone during the count already fired its close.
+    if (spec.response.destroyed) body.destroy();
+    else spec.response.once('close', () => body.destroy());
 
     const date = new Date().toISOString().slice(0, 10);
     return new StreamableFile(body, {
