@@ -59,7 +59,7 @@ export class AuditController {
     required: true,
     enum: AUDIT_LOG_SOURCES,
     description:
-      'Which audit log to read (secret | permission | serviceAccount).',
+      'Which audit log to read (secret | permission | serviceAccount | export).',
   })
   @ApiOkResponse({ type: AuditLogFilterOptionsDto })
   async filters(@Query('source') source?: string) {
@@ -70,7 +70,7 @@ export class AuditController {
   @RequirePermission('logs:read')
   @ApiOperation({
     summary:
-      'Paged, filtered read of one security audit log (issue #871), newest first, gated on logs:read. `source` selects the log (secret | permission | serviceAccount). Optional filters: action (validated against the source enum), actorId (a human uuid), serviceAccountId, date-range from/to, and — for the secret source only — vaultId/itemId (the per-vault / per-item timeline). Secret rows resolve vault/item to METADATA display names ONLY (INV-10) — never a value.',
+      'Paged, filtered read of one security audit log (issue #871), newest first, gated on logs:read. `source` selects the log (secret | permission | serviceAccount | export). Optional filters: action (validated against the source enum), actorId (a human uuid), serviceAccountId, date-range from/to, and — for the secret source only — vaultId/itemId (the per-vault / per-item timeline). Secret rows resolve vault/item to METADATA display names ONLY (INV-10) — never a value.',
   })
   @ApiQuery({
     name: 'source',
