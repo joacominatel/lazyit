@@ -266,12 +266,14 @@ export function LocationDetailView({ id }: { id: string }) {
         onOpenChange={setEditOpen}
         location={location}
       />
-      <LocationDeleteDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        location={location}
-        onDeleted={() => router.push("/locations")}
-      />
+      {deleteOpen ? (
+        <LocationDeleteDialog
+          open
+          onOpenChange={setDeleteOpen}
+          location={location}
+          onDeleted={() => router.push("/locations")}
+        />
+      ) : null}
     </div>
   );
 }
