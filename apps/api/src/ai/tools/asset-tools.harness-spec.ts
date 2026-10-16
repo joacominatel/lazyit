@@ -26,6 +26,7 @@ import type { DelegatedIdentity } from '../../auth/delegated-identity';
 import { PrismaService } from '../../prisma/prisma.service';
 import { mintToken } from '../../service-accounts/service-account-token';
 import { AssetsController } from '../../assets/assets.controller';
+import { ExportService } from '../../common/export';
 import { AssetsService } from '../../assets/assets.service';
 import { AssetAssignmentsController } from '../../asset-assignments/asset-assignments.controller';
 import { AssetAssignmentsService } from '../../asset-assignments/asset-assignments.service';
@@ -1070,6 +1071,7 @@ export async function bootHarness(): Promise<Harness> {
       ArticleCategoriesController,
     ],
     providers: [
+      { provide: ExportService, useValue: {} },
       { provide: PrismaService, useValue: prisma },
       {
         provide: LocalCredentialService,

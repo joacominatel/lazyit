@@ -62,6 +62,7 @@ import { PurchaseOrderAttachmentsController } from '../../attachments/purchase-o
 import { AttachmentsService } from '../../attachments/attachments.service';
 import { AssetModelsController } from '../../asset-models/asset-models.controller';
 import { AssetsController } from '../../assets/assets.controller';
+import { ExportService } from '../../common/export';
 import { ApplicationsController } from '../../applications/applications.controller';
 import { ApplicationsService } from '../../applications/applications.service';
 import { AccessGrantsService } from '../../access-grants/access-grants.service';
@@ -1016,6 +1017,7 @@ describe('purchases toolset (#1478)', () => {
         AssetStatusLabelsController,
       ],
       providers: [
+        { provide: ExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         {
           provide: LocalCredentialService,

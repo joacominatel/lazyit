@@ -65,6 +65,7 @@ import { AssetModelsService } from '../../asset-models/asset-models.service';
 import { AssetStatusLabelsController } from '../../asset-status-labels/asset-status-labels.controller';
 import { AssetStatusLabelsService } from '../../asset-status-labels/asset-status-labels.service';
 import { AssetsController } from '../../assets/assets.controller';
+import { ExportService } from '../../common/export';
 import { AssetsService } from '../../assets/assets.service';
 import { ConsumableCategoriesController } from '../../consumable-categories/consumable-categories.controller';
 import { ConsumableCategoriesService } from '../../consumable-categories/consumable-categories.service';
@@ -1075,6 +1076,7 @@ describe('taxonomy toolset (#1390)', () => {
         ArticleCategoriesController,
       ],
       providers: [
+        { provide: ExportService, useValue: {} },
         { provide: PrismaService, useValue: prisma },
         {
           provide: LocalCredentialService,

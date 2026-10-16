@@ -18,6 +18,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { DEFAULT_ROLE_PERMISSIONS, type Role } from '@lazyit/shared';
 import { AssetsController } from './assets.controller';
+import { ExportService } from '../common/export';
 import { AssetsService } from './assets.service';
 import { AssetAssignmentsService } from '../asset-assignments/asset-assignments.service';
 import { AssetHistoryService } from '../asset-history/asset-history.service';
@@ -67,6 +68,7 @@ describe('GET /assets — purchase filters (#1476)', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [AssetsController],
       providers: [
+        { provide: ExportService, useValue: {} },
         Reflector,
         AssetsService,
         ActorService,
