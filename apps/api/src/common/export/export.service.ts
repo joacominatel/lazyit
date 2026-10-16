@@ -31,7 +31,10 @@ export interface CsvExportSpec<T extends KeysetCursor> {
   /** `count(where)` over the same `where` the batches read. */
   count: () => Promise<number>;
   /** One batch of the list's own `where`, through {@link keysetWhere} and {@link keysetOrderBy}. */
-  fetchBatch: (after: KeysetCursor | null, take: number) => Promise<T[]>;
+  fetchBatch: (
+    after: KeysetCursor<T['id']> | null,
+    take: number,
+  ) => Promise<T[]>;
   /** Already gated for this principal. */
   columns: readonly ExportColumn<T>[];
   /** `lazyit-<name>-YYYY-MM-DD.csv`. */

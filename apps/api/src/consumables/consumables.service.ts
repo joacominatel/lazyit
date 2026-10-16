@@ -225,9 +225,9 @@ export class ConsumablesService {
       : {};
     return {
       count: () => this.prisma.consumable.count({ where, ...escapeHatch }),
-      fetchBatch: (after: KeysetCursor | null, take: number) =>
+      fetchBatch: (after: KeysetCursor<string> | null, take: number) =>
         this.prisma.consumable.findMany({
-          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          where: keysetWhere(where, after),
           orderBy: keysetOrderBy(),
           take,
           include: CONSUMABLE_EXPORT_INCLUDE,

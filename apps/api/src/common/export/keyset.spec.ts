@@ -5,33 +5,13 @@ import {
   keysetWhere,
   type KeysetCursor,
 } from './keyset';
+import { matchesWhere } from '../in-memory-where.harness-spec';
 
-interface Row {
+type Row = {
   id: string;
   createdAt: Date;
   live: boolean;
-}
-
-type Where = Record<string, unknown>;
-
-// Evaluates the subset of Prisma's where language keysetWhere emits, so the real predicate is under test.
-function matches(row: Row, where: Where): boolean {
-  return Object.entries(where).every(([key, cond]) => {
-    if (key === 'AND') return (cond as Where[]).every((w) => matches(row, w));
-    if (key === 'OR') return (cond as Where[]).some((w) => matches(row, w));
-    const value = row[key as keyof Row];
-    if (cond && typeof cond === 'object' && 'lt' in cond) {
-      const lt = cond.lt;
-      return value instanceof Date
-        ? value.getTime() < (lt as Date).getTime()
-        : (value as string) < (lt as string);
-    }
-    if (cond instanceof Date) {
-      return (value as Date).getTime() === cond.getTime();
-    }
-    return value === cond;
-  });
-}
+};
 
 function newestFirst(a: Row, b: Row): number {
   const t = b.createdAt.getTime() - a.createdAt.getTime();
@@ -44,7 +24,7 @@ function table(rows: Row[]) {
     (after: KeysetCursor | null, take: number): Promise<Row[]> =>
       Promise.resolve(
         rows
-          .filter((r) => matches(r, keysetWhere({ live: true }, after)))
+          .filter((r) => matchesWhere(r, keysetWhere({ live: true }, after)))
           .sort(newestFirst)
           .slice(0, take),
       ),

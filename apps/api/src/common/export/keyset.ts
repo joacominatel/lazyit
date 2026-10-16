@@ -41,10 +41,13 @@ export function keysetWhere<W extends object, I extends string | number>(
 
 /** Newest first, `batchSize` rows at a time; a row inserted after the first batch sorts ahead of the cursor. */
 export async function* keysetBatches<T extends KeysetCursor>(
-  fetchBatch: (after: KeysetCursor | null, take: number) => Promise<T[]>,
+  fetchBatch: (
+    after: KeysetCursor<T['id']> | null,
+    take: number,
+  ) => Promise<T[]>,
   batchSize: number = EXPORT_BATCH_SIZE,
 ): AsyncGenerator<T[]> {
-  let after: KeysetCursor | null = null;
+  let after: KeysetCursor<T['id']> | null = null;
   for (;;) {
     const rows = await fetchBatch(after, batchSize);
     if (rows.length === 0) return;

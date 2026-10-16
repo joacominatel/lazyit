@@ -1288,7 +1288,7 @@ describe('UsersService', () => {
         .update('admin-1', { role: 'MEMBER' }, 'actor-99')
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ConflictException);
-      // The web still matches the wording, so the message must not change alongside the new code.
+      // The web keys on LAST_ADMIN_REQUIRED (#1619), not on this wording.
       expect((err as ConflictException).getResponse()).toEqual({
         statusCode: 409,
         error: 'Conflict',

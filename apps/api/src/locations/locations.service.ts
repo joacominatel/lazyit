@@ -379,23 +379,29 @@ export class LocationsService {
   }
 
   /** Live purchases delivering here in an open status with a pending countable line, or no countable line. */
-  private openPurchases(
+  private async openPurchases(
     client: Prisma.TransactionClient | PrismaService,
     locationId: string,
     lock = false,
   ): Promise<{ id: string; reference: string | null }[]> {
     const countable = Prisma.sql`l."purchaseOrderId" = po."id" AND l."deletedAt" IS NULL
            AND l."kind" IN (${Prisma.join([...COUNTABLE_LINE_KINDS])})`;
-    return client.$queryRaw<{ id: string; reference: string | null }[]>`
-      SELECT po."id", po."reference" FROM "purchase_orders" po
+    const rows = await client.$queryRaw<
+      { id: string; reference: string | null; createdAt: Date }[]
+    >`
+      SELECT po."id", po."reference", po."createdAt" FROM "purchase_orders" po
        WHERE po."deliveryLocationId" = ${locationId}
          AND po."deletedAt" IS NULL
          AND po."status" IN (${Prisma.join(OPEN_PURCHASE_STATUSES)})
          AND (NOT EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable})
               OR EXISTS (SELECT 1 FROM "purchase_order_lines" l WHERE ${countable}
                            AND l."quantity" - l."cancelledQuantity" - ${receivedUnitsSql()} > 0))
-       ORDER BY po."createdAt" ASC, po."id" ASC
+       ORDER BY po."id" ASC
        ${lock ? Prisma.sql`FOR UPDATE OF po` : Prisma.empty}`;
+    // Locked in id order like the model delete and supplier merge, so they cannot deadlock; listed oldest first.
+    return rows
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map(({ id, reference }) => ({ id, reference }));
   }
 
   /** 400 unless the target is live, not the location being deleted, and not below it. */

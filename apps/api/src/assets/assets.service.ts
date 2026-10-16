@@ -28,7 +28,6 @@ import {
   keysetOrderBy,
   keysetWhere,
   type CsvExportSpec,
-  type KeysetCursor,
 } from '../common/export';
 import { assetExportColumns } from './asset-export-columns';
 import { resolveSortOrBadRequest } from '../common/resolve-sort';
@@ -781,7 +780,7 @@ export class AssetsService {
       count: () => this.prisma.asset.count({ where, ...escapeHatch }),
       fetchBatch: (after, take) => {
         const batch = {
-          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          where: keysetWhere(where, after),
           orderBy: keysetOrderBy(),
           take,
           ...escapeHatch,

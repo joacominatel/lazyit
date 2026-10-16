@@ -292,11 +292,11 @@ export class UsersService {
     return {
       count: () => this.prisma.user.count({ where, ...escapeHatch }),
       fetchBatch: async (
-        after: KeysetCursor | null,
+        after: KeysetCursor<string> | null,
         take: number,
       ): Promise<SerializedUserListItem[]> => {
         const rows = await this.prisma.user.findMany({
-          where: keysetWhere(where, after as KeysetCursor<string> | null),
+          where: keysetWhere(where, after),
           orderBy: keysetOrderBy(),
           take,
           ...escapeHatch,

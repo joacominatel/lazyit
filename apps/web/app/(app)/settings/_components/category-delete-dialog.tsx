@@ -37,7 +37,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 type ResolvableCategoryKind = "application" | "consumable" | "asset";
 
 /** Only the models are re-pointed; their assets are listed because an asset's category comes from its model. */
-export function assetCategoryImpactGroups(impact: AssetCategoryDeleteImpact): ImpactGroupView[] {
+function assetCategoryImpactGroups(impact: AssetCategoryDeleteImpact): ImpactGroupView[] {
   return [
     {
       key: "assetModels",

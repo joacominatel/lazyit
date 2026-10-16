@@ -65,18 +65,18 @@ describe("filterTaxonomy", () => {
 });
 
 describe("bulkUsage", () => {
-  test("names the rows in use and sums their counts", () => {
+  test("names the rows in use", () => {
     expect(
       bulkUsage([
         { name: "Laptop", count: 42 },
         { name: "UPS", count: 0 },
         { name: "Server", count: 9 },
       ]),
-    ).toEqual({ inUse: ["Laptop", "Server"], total: 51, known: true });
+    ).toEqual({ inUse: ["Laptop", "Server"], known: true });
   });
 
   test("nothing in use, all counts known", () => {
-    expect(bulkUsage([{ name: "UPS", count: 0 }])).toEqual({ inUse: [], total: 0, known: true });
+    expect(bulkUsage([{ name: "UPS", count: 0 }])).toEqual({ inUse: [], known: true });
   });
 
   test("a missing count marks the summary as incomplete but keeps what is known", () => {
@@ -85,6 +85,6 @@ describe("bulkUsage", () => {
         { name: "Laptop", count: 3 },
         { name: "Old", count: null },
       ]),
-    ).toEqual({ inUse: ["Laptop"], total: 3, known: false });
+    ).toEqual({ inUse: ["Laptop"], known: false });
   });
 });

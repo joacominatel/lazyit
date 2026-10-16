@@ -243,7 +243,7 @@ Snapshot of the security review. Updated each sweep. Method:
      history row per asset;
    - a model write that names an archived category is a 400.
 
-   The web dialog for both follows in a separate unit.
+   The web dialog for both shipped in #1621 (2026-10-16).
 
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
