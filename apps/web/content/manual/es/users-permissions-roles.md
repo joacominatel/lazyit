@@ -78,8 +78,9 @@ Estas salvaguardas protegen la instancia de quedar bloqueada o de una escalada s
   directorio, no cambiarlas ni ejecutar una sincronización del directorio.
 - **Promover a alguien cancela sus credenciales de acceso pendientes.** Cuando el rol de una persona
   sube, se cancelan la contraseña temporal que todavía no reemplazó y cualquier enlace de
-  restablecimiento pendiente, así que una entregada con el rol inferior deja de funcionar. Si la
-  necesita, emite una nueva contraseña temporal o un nuevo enlace después de la promoción.
+  restablecimiento pendiente, así que una entregada con el rol inferior deja de funcionar. La
+  confirmación del cambio de rol te avisa antes y el mensaje de éxito te lo recuerda. Si la necesita,
+  emite una nueva contraseña temporal o un nuevo enlace después de la promoción.
 - **No puedes cambiar tu propio rol.** Un administrador no puede promoverse ni degradarse a sí mismo; un
   cambio de rol debe hacerlo un administrador sobre otro. Esto evita que una sola persona eleve su
   propio acceso en silencio. (Sí puedes editar tu propio nombre, correo y otros datos.)

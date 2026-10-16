@@ -72,8 +72,9 @@ These guardrails protect the instance from being locked out or quietly escalated
   them or run a directory sync.
 - **Promoting someone cancels their pending sign-in credentials.** When a person's role goes up, a
   temporary password they have not replaced yet and any password-reset link still waiting are cancelled,
-  so one handed out at the lower role stops working. If they need one, issue a new temporary password or
-  reset link after the promotion.
+  so one handed out at the lower role stops working. The role-change confirmation warns you first, and
+  the success message reminds you. If they need one, issue a new temporary password or reset link
+  after the promotion.
 - **You cannot change your own role.** An admin cannot promote or demote themselves; a role change
   must be made by one admin on another. This prevents a single person quietly elevating their own
   access. (You can still edit your own name, email and other details.)

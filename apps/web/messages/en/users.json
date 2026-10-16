@@ -372,8 +372,10 @@
     "confirmTitle": "Change role?",
     "confirmBody": "<strong>{name}</strong> will become <strong>{role}</strong>.",
     "confirmAction": "Change role",
+    "promotionNote": "Any temporary password or password-reset link they have not used yet will stop working.",
     "toast": {
       "changed": "{name} is now {role}",
+      "credentialsCancelled": "Their pending temporary password or reset link, if any, was cancelled. Issue a new one if they still need it.",
       "error": "Couldn't change role"
     }
   },

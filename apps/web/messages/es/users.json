@@ -372,8 +372,10 @@
     "confirmTitle": "¿Cambiar el rol?",
     "confirmBody": "<strong>{name}</strong> pasará a ser <strong>{role}</strong>.",
     "confirmAction": "Cambiar rol",
+    "promotionNote": "Cualquier contraseña temporal o enlace de restablecimiento que aún no hayan usado dejará de funcionar.",
     "toast": {
       "changed": "{name} ahora es {role}",
+      "credentialsCancelled": "Si tenía una contraseña temporal o un enlace de restablecimiento pendiente, se canceló. Emite uno nuevo si todavía lo necesita.",
       "error": "No se pudo cambiar el rol"
     }
   },

@@ -12,6 +12,11 @@ export function canManageUser(callerRole: Role | undefined, target: { role: Role
   return callerRole !== undefined && canManageRole(callerRole, target.role);
 }
 
+// A promotion cancels the person's pending temporary password and reset links (SEC-088); the PATCH carries no flag.
+export function isPromotion(from: Role, to: Role): boolean {
+  return canManageRole(to, from) && !canManageRole(from, to);
+}
+
 export type UserMutationErrorKind = "roleCeiling" | "directoryRoleLocked" | "lastAdmin";
 
 export function userMutationErrorKind(error: unknown): UserMutationErrorKind | null {

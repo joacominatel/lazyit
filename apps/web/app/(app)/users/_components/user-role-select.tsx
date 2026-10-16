@@ -25,7 +25,7 @@ import {
 import { useUpdateUserRole } from "@/lib/api/hooks/use-user-mutations";
 import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { useCan } from "@/lib/hooks/use-permissions";
-import { assignableRoles, canManageUser, notifyUserError } from "./role-ceiling";
+import { assignableRoles, canManageUser, isPromotion, notifyUserError } from "./role-ceiling";
 import { UserRoleBadge } from "./user-role-badge";
 
 interface UserRoleSelectProps {
@@ -93,6 +93,7 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
   function handleConfirm() {
     if (pendingRole == null) return;
     const role = pendingRole;
+    const promoted = isPromotion(user.role, role);
     updateRole.mutate(
       { id: user.id, role },
       {
@@ -102,6 +103,7 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
               name: `${user.firstName} ${user.lastName}`,
               role: roleLabel(role),
             }),
+            promoted ? { description: t("toast.credentialsCancelled") } : undefined,
           );
           setPendingRole(null);
         },
@@ -159,6 +161,9 @@ export function UserRoleSelect({ user, size = "md" }: UserRoleSelectProps) {
                 ),
               })}{" "}
               {pendingRole ? t(`hints.${pendingRole}`) : ""}
+              {pendingRole && isPromotion(user.role, pendingRole) ? (
+                <> {t("promotionNote")}</>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
