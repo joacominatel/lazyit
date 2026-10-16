@@ -2,6 +2,7 @@
 
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { DeleteResolution } from "@lazyit/shared";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
@@ -37,13 +38,14 @@ type ImpactGroupKey =
   | "purchaseOrders"
   | "applications"
   | "consumables"
-  | "assetModels";
+  | "assetModels"
+  | "purchaseOrderLines";
 
 /** One kind of affected row; `items` is null when the caller may not read that kind. A null label is an untitled purchase. */
 export interface ImpactGroupView {
   key: ImpactGroupKey;
   total: number;
-  items: { id: string; label: string | null }[] | null;
+  items: { id: string; label: string | null; href?: string }[] | null;
 }
 
 
@@ -62,7 +64,7 @@ interface TargetPickerProps {
 interface DeleteResolutionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  entityKey: "location" | "category";
+  entityKey: "location" | "category" | "model";
   name: string;
   /** Undefined while the delete-impact read is loading. */
   groups: ImpactGroupView[] | undefined;
@@ -314,7 +316,13 @@ function ImpactList({ groups }: { groups: ImpactGroupView[] }) {
                 <ul className="space-y-0.5 text-sm text-muted-foreground">
                   {shown.map((item) => (
                     <li key={item.id} className="truncate">
-                      {item.label ?? t("untitledPurchase")}
+                      {item.href ? (
+                        <Link href={item.href} className="underline-offset-4 hover:underline">
+                          {item.label ?? t("untitledPurchase")}
+                        </Link>
+                      ) : (
+                        (item.label ?? t("untitledPurchase"))
+                      )}
                     </li>
                   ))}
                   {more > 0 ? <li>{t("more", { count: more })}</li> : null}

@@ -4,15 +4,12 @@ import { PlusIcon } from "@heroicons/react/24/outline";
 import type { AssetModel } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { DeleteConfirmDialog } from "@/components/delete-confirm-dialog";
 import { ErrorState, RowActions } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import { useAssetCategories } from "@/lib/api/hooks/use-asset-categories";
-import {
-  useAssetModels,
-  useDeleteAssetModel,
-} from "@/lib/api/hooks/use-asset-models";
+import { useAssetModels } from "@/lib/api/hooks/use-asset-models";
 import { useCan } from "@/lib/hooks/use-permissions";
+import { AssetModelDeleteDialog } from "./asset-model-delete-dialog";
 import { AssetModelFormDialog } from "./asset-model-form-dialog";
 import {
   TaxonomyList,
@@ -34,7 +31,6 @@ export function AssetModelManager({ title }: { title: string }) {
   const t = useTranslations("settings");
   const { data, isLoading, isError, error, refetch } = useAssetModels();
   const { data: categories } = useAssetCategories();
-  const remove = useDeleteAssetModel();
   const canWrite = useCan("assetModel:write");
   const canDelete = useCan("assetModel:delete");
 
@@ -143,14 +139,12 @@ export function AssetModelManager({ title }: { title: string }) {
         cloneSource={cloning}
       />
       {deleting ? (
-        <DeleteConfirmDialog
+        <AssetModelDeleteDialog
+          model={deleting}
           open
           onOpenChange={(open) => {
             if (!open) setDeleting(undefined);
           }}
-          entityKey="model"
-          name={deleting.name}
-          onConfirm={() => remove.mutateAsync(deleting.id)}
         />
       ) : null}
     </div>

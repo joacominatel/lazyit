@@ -1,4 +1,5 @@
 import {
+  type CreateAssetModel,
   DELETE_RESOLUTION_REQUIRED,
   type DeleteResolution,
 } from "@lazyit/shared";
@@ -82,6 +83,17 @@ export async function runDeleteResolution(
   } catch (error) {
     throw new CreatedTargetDeleteError({ id: target.id, name: target.name }, error);
   }
+}
+
+// The API refuses an archived category on a model write, so a replacement under one is created without it.
+export function replacementModelInput(
+  removed: { manufacturer: string; categoryId: string | null },
+  name: string,
+  liveCategoryIds: ReadonlySet<string>,
+): CreateAssetModel {
+  return removed.categoryId && liveCategoryIds.has(removed.categoryId)
+    ? { name, manufacturer: removed.manufacturer, categoryId: removed.categoryId }
+    : { name, manufacturer: removed.manufacturer };
 }
 
 // The API refuses a move into the deleted location or anything below it.
