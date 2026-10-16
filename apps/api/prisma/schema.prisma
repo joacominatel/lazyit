@@ -218,6 +218,9 @@ model User {
   serviceAccountsCreated     ServiceAccount[]         @relation("ServiceAccountCreator")
   serviceAccountAuditEntries ServiceAccountAuditLog[] @relation("ServiceAccountAuditActor")
 
+  // Data exports this user ran (DataExportLog.actorId, SetNull: the append-only row survives). ADR-0103.
+  dataExports DataExportLog[] @relation("DataExportActor")
+
   // Applications Workflow Engine (ADR-0054, epic #248). The human-actor sides of the engine's
   // attribution columns — all SetNull, so deleting the user never blocks deletion and the
   // append-only run/version rows survive: workflow definitions this user authored
@@ -461,6 +464,9 @@ model ServiceAccount {
   aiActionLogActed AiActionLog[]             @relation("AiActionSaActor")
   aiSettings       AiServiceAccountSettings?
 
+  // Data exports this SA ran (DataExportLog.serviceAccountId, SetNull). ADR-0103.
+  dataExports DataExportLog[] @relation("DataExportSaActor")
+
   @@index([isActive])
   @@map("service_accounts")
 }
@@ -517,6 +523,31 @@ enum ServiceAccountAuditAction {
   REVOKE
   RESTORE
   PERMISSION_CHANGE
+}
+
+/// One server-side data export (ADR-0103): who pulled which list, with which filters, how many rows.
+/// Append-only (ADR-0006); read as the `export` source of Reports › Audit (ADR-0081).
+model DataExportLog {
+  // autoincrement: a log table, never exposed externally (ADR-0005).
+  id               Int             @id @default(autoincrement())
+  // At most one actor, human XOR service account (CHECK data_export_logs_one_actor, INV-SA-4).
+  actorId          String?         @db.Uuid
+  actor            User?           @relation("DataExportActor", fields: [actorId], references: [id], onDelete: SetNull)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation("DataExportSaActor", fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  // A DATA_EXPORT_RESOURCES label from @lazyit/shared. Text, so a new resource needs no migration.
+  resource         String
+  // The list filters the export applied, sanitized to flat JSON (never a secret).
+  filters          Json
+  // Matching rows counted before the first byte was sent.
+  rowCount         Int
+  createdAt        DateTime        @default(now())
+
+  @@index([actorId, id])
+  @@index([serviceAccountId, id])
+  @@index([resource, id])
+  @@index([createdAt])
+  @@map("data_export_logs")
 }
 
 /// Where an asset physically lives — office, datacenter, rack, warehouse or
