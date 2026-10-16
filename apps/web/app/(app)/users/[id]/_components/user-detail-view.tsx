@@ -14,6 +14,7 @@ import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { DetailPanel, DetailSkeleton } from "@/components/detail-panel";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import { Breadcrumb } from "@/components/breadcrumb";
 import {
@@ -41,6 +42,10 @@ import { ConsumableDeliveriesPanel } from "@/components/consumables/consumable-d
 import type { DeliveryTargetRef } from "@/lib/consumables/deliveries";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
+import {
+  ACCESS_GRANT_EXPORT_PATH,
+  accessGrantFilterParams,
+} from "@/lib/api/endpoints/access-grants";
 import { useApplications } from "@/lib/api/hooks/use-applications";
 import { useArticles } from "@/lib/api/hooks/use-articles";
 import { useAssets } from "@/lib/api/hooks/use-assets";
@@ -413,7 +418,21 @@ export function UserDetailView({ id }: { id: string }) {
 
             {canReadGrants ? (
               <TabsContent value="access" className="pt-2">
-                <UserAccessTab active={activeGrants} appNameById={appNameById} now={now} />
+                <UserAccessTab
+                  active={activeGrants}
+                  appNameById={appNameById}
+                  now={now}
+                  actions={
+                    <ExportButton
+                      path={ACCESS_GRANT_EXPORT_PATH}
+                      params={accessGrantFilterParams({ userId: user.id, activeOnly: false })}
+                      total={grants?.length}
+                      filename="access-grants"
+                      permission="accessGrant:read"
+                      size="sm"
+                    />
+                  }
+                />
               </TabsContent>
             ) : null}
 

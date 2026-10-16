@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ArchivedToggle } from "@/components/archived-toggle";
 import { EmptyState } from "@/components/empty-state";
+import { ExportButton } from "@/components/export-button";
 import { PageHeader } from "@/components/page-header";
 import {
   BatchActionBar,
@@ -54,7 +55,7 @@ import { TableCell } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
 import { useUserList } from "@/lib/api/hooks/use-users";
 import { useRestoreUser } from "@/lib/api/hooks/use-user-mutations";
-import { restoreUser } from "@/lib/api/endpoints/users";
+import { restoreUser, USER_EXPORT_PATH, userFilterParams } from "@/lib/api/endpoints/users";
 import { notifyBatchResult } from "@/lib/api/notify-batch-result";
 import { notifyError } from "@/lib/api/notify-error";
 import { runPerIdBatch } from "@/lib/api/per-id-batch";
@@ -234,8 +235,13 @@ export function UsersListView() {
   // `deriveUserParams` is the SAME URL→query mapping the server prefetch uses — `directory`→
   // `directoryOnly`, `role`→`?role=`, archived→`deleted` (#693) — so this hook's key and the
   // SSR-prefetched key are byte-identical (ADR-0067 / #733). `status` stays a client-side post-filter.
-  const { data: page, isLoading, isFetching, isError, error, refetch } =
-    useUserList(deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin }));
+  const listParams = deriveUserParams({ q, sort, dir, offset, limit, filters }, { isAdmin });
+  const { data: page, isLoading, isFetching, isError, error, refetch } = useUserList(listParams);
+  // The export filters status on the server, so the file holds every match, not one page's.
+  const exportParams = userFilterParams({
+    ...listParams,
+    isActive: statusFilter === "ALL" ? undefined : statusFilter === "ACTIVE",
+  });
   const restoreUserMutation = useRestoreUser();
 
   // The server-orchestrated clone wizard (ADR-0058) is `cloning` — distinct from the create/edit form.
@@ -498,6 +504,13 @@ export function UsersListView() {
                 }}
               />
             ) : null}
+            <ExportButton
+              path={USER_EXPORT_PATH}
+              params={exportParams}
+              total={page?.total}
+              filename="users"
+              permission="user:read"
+            />
             {canManage ? (
               <Button asChild>
                 <Link href="/users/new">
