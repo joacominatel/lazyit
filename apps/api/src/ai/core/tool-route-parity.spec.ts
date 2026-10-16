@@ -619,8 +619,8 @@ describe('AI tools — route equivalence through the real Nest pipeline (INV-AI-
       const data = (result as { data: Record<string, unknown> }).data;
       expect(data.user).toEqual({
         id: ID.member,
-        firstName: 'MEMBER',
-        lastName: 'User',
+        firstName: '<untrusted_content>MEMBER</untrusted_content>',
+        lastName: '<untrusted_content>User</untrusted_content>',
         email: 'member@example.com',
         role: 'MEMBER',
       });
