@@ -1996,24 +1996,21 @@ describe('taxonomy toolset (#1390)', () => {
       expect(writes()).toBe(0);
     });
 
-    it('shows open purchase lines as their purchases, without a sample the caller may not read', async () => {
+    it('shows open purchase lines as the distinct purchases they belong to, and as unknown when not all are listed', async () => {
+      const line = (n: number, po: string, reference: string | null) => ({
+        id: cid(`tline${n}`),
+        purchaseOrderId: cid(po),
+        reference,
+        description: `Laptops ${n}`,
+      });
       modelsService.deleteImpact.mockResolvedValueOnce({
         assets: { total: 0, items: [] },
         purchaseOrderLines: {
-          total: 2,
+          total: 3,
           items: [
-            {
-              id: cid('tline1'),
-              purchaseOrderId: cid('tpo1'),
-              reference: 'PO-7',
-              description: 'Laptops',
-            },
-            {
-              id: cid('tline2'),
-              purchaseOrderId: cid('tpo2'),
-              reference: null,
-              description: 'Spare laptops',
-            },
+            line(1, 'tpo1', 'PO-7'),
+            line(2, 'tpo1', 'PO-7'),
+            line(3, 'tpo2', null),
           ],
         },
       });
@@ -2036,11 +2033,12 @@ describe('taxonomy toolset (#1390)', () => {
               type: 'purchaseOrder',
               id: cid('tpo2'),
               op: 'updated',
-              label: 'Spare laptops',
+              label: 'Laptops 3',
             },
           ],
         },
       ]);
+
       modelsService.deleteImpact.mockResolvedValueOnce({
         assets: { total: 0, items: [] },
         purchaseOrderLines: { total: 2, items: null },
@@ -2049,9 +2047,15 @@ describe('taxonomy toolset (#1390)', () => {
         model: 'Pro 14',
         strategy: 'detach',
       });
-      expect(hidden.preview!.impacted).toEqual([
-        { type: 'purchaseOrder', count: 2, sample: [] },
-      ]);
+      expect(hidden.preview!.impacted).toEqual([]);
+      expect(hidden.preview!.changes).toContainEqual(
+        expect.objectContaining({
+          field: 'usedBy',
+          afterSentences: [
+            { code: 'taxonomy.usedByUnknown', params: { kinds: 'purchases' } },
+          ],
+        }),
+      );
     });
 
     it('restore finds the archived model by name and brings it back', async () => {
