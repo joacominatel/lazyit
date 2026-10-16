@@ -20,7 +20,7 @@ import {
   LIKE_ESCAPE_CHAR,
   escapeLikePattern,
 } from '../common/escape-like-pattern';
-import type { ExportColumn, KeysetCursor } from '../common/export';
+import type { CsvExportSpec } from '../common/export';
 import { PrismaService } from '../prisma/prisma.service';
 import { ACTIVITY_EXPORT_COLUMNS } from './activity-export-columns';
 
@@ -504,11 +504,7 @@ export type ActivityExportRow = RecentActivityRow & {
 };
 
 /** What `GET /dashboard/activity/export` hands the export engine. */
-export interface ActivityExport {
-  columns: readonly ExportColumn<ActivityExportRow>[];
-  count: () => Promise<number>;
-  fetchBatch: (
-    after: KeysetCursor | null,
-    take: number,
-  ) => Promise<ActivityExportRow[]>;
-}
+export type ActivityExport = Pick<
+  CsvExportSpec<ActivityExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;

@@ -27,7 +27,7 @@ import {
 import {
   keysetOrderBy,
   keysetWhere,
-  type ExportColumn,
+  type CsvExportSpec,
   type KeysetCursor,
 } from '../common/export';
 import { assetExportColumns } from './asset-export-columns';
@@ -336,14 +336,10 @@ export type AssetExportRow = Prisma.AssetGetPayload<{
   >;
 
 /** What `GET /assets/export` hands the export engine, already gated for the caller. */
-export interface AssetInventoryExport {
-  columns: readonly ExportColumn<AssetExportRow>[];
-  count: () => Promise<number>;
-  fetchBatch: (
-    after: KeysetCursor | null,
-    take: number,
-  ) => Promise<AssetExportRow[]>;
-}
+export type AssetInventoryExport = Pick<
+  CsvExportSpec<AssetExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;
 
 type AssetWithLeanSelect = Prisma.AssetGetPayload<{
   select: typeof ASSET_LIST_SELECT;

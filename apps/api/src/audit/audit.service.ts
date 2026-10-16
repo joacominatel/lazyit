@@ -9,7 +9,7 @@ import type {
 } from '@lazyit/shared';
 import { offsetOf, pageOf } from '@lazyit/shared';
 import { Prisma } from '../../generated/prisma/client';
-import type { ExportColumn, KeysetCursor } from '../common/export';
+import type { CsvExportSpec } from '../common/export';
 import { PrismaService } from '../prisma/prisma.service';
 import { AUDIT_EXPORT_COLUMNS } from './audit-export-columns';
 
@@ -564,11 +564,7 @@ function compactJson(value: unknown): string {
 export type AuditExportRow = AuditLogItem & { createdAt: Date };
 
 /** What `GET /audit/logs/export` hands the export engine. */
-export interface AuditLogExport {
-  columns: readonly ExportColumn<AuditExportRow>[];
-  count: () => Promise<number>;
-  fetchBatch: (
-    after: KeysetCursor | null,
-    take: number,
-  ) => Promise<AuditExportRow[]>;
-}
+export type AuditLogExport = Pick<
+  CsvExportSpec<AuditExportRow>,
+  'columns' | 'count' | 'fetchBatch'
+>;
