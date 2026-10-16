@@ -3,7 +3,7 @@ title: Entities — MOC
 tags: [moc, domain]
 status: draft
 created: 2026-05-25
-updated: 2026-10-05
+updated: 2026-10-16
 ---
 
 # Entities — Map of Content
@@ -72,6 +72,7 @@ Servers list + Meili search); the reporting agent is a future major. See [[0070-
 - 🟢 [[service-account]] — a non-human principal (lazyit-native token + direct grants). [[0048-service-accounts]]
 - 🟢 [[service-account-permission]] — a service account's direct permission grants. [[0048-service-accounts]]
 - 🟢 [[service-account-audit-log]] — append-only trail of service-account lifecycle. [[0048-service-accounts]]
+- 🟢 [[data-export-log]] — append-only trail of server-side data exports (who, which list, which filters, how many rows); the `export` source of Reports › Audit. [[0103-data-export-streaming-path]]
 
 ## Access
 

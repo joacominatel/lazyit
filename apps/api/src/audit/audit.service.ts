@@ -204,6 +204,30 @@ export class AuditService {
         ]);
         return [rows.map(rawFromServiceAccount), withCount ? total : 0];
       }
+      case 'export': {
+        const where = { ...this.exportWhere(filters), ...idBound };
+        const [rows, total] = await this.prisma.$transaction([
+          this.prisma.dataExportLog.findMany({
+            where,
+            orderBy,
+            take,
+            skip,
+            select: {
+              id: true,
+              resource: true,
+              actorId: true,
+              serviceAccountId: true,
+              filters: true,
+              rowCount: true,
+              createdAt: true,
+            },
+          }),
+          withCount
+            ? this.prisma.dataExportLog.count({ where })
+            : this.prisma.dataExportLog.count({ where: { id: -1 } }),
+        ]);
+        return [rows.map(rawFromExport), withCount ? total : 0];
+      }
     }
   }
 
@@ -231,6 +255,14 @@ export class AuditService {
       }
       case 'serviceAccount': {
         const rows = await this.prisma.serviceAccountAuditLog.findMany({
+          where: { actorId: { not: null } },
+          select: { actorId: true },
+          distinct: ['actorId'],
+        });
+        return pick(rows);
+      }
+      case 'export': {
+        const rows = await this.prisma.dataExportLog.findMany({
           where: { actorId: { not: null } },
           select: { actorId: true },
           distinct: ['actorId'],
@@ -279,6 +311,18 @@ export class AuditService {
       where.action =
         f.action as Prisma.ServiceAccountAuditLogWhereInput['action'];
     }
+    if (f.actorId !== undefined) where.actorId = f.actorId;
+    if (f.serviceAccountId !== undefined) {
+      where.serviceAccountId = f.serviceAccountId;
+    }
+    const createdAt = dateRange(f);
+    if (createdAt) where.createdAt = createdAt;
+    return where;
+  }
+
+  private exportWhere(f: AuditLogFilters): Prisma.DataExportLogWhereInput {
+    const where: Prisma.DataExportLogWhereInput = {};
+    if (f.action !== undefined) where.resource = f.action;
     if (f.actorId !== undefined) where.actorId = f.actorId;
     if (f.serviceAccountId !== undefined) {
       where.serviceAccountId = f.serviceAccountId;
@@ -483,6 +527,31 @@ function rawFromServiceAccount(row: {
     role: null,
     permission: null,
     detail: row.detail ?? null,
+  };
+}
+
+function rawFromExport(row: {
+  id: number;
+  resource: string;
+  actorId: string | null;
+  serviceAccountId: string | null;
+  filters: unknown;
+  rowCount: number;
+  createdAt: Date;
+}): RawAuditRow {
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    action: row.resource,
+    actorId: row.actorId,
+    serviceAccountId: row.serviceAccountId,
+    vaultId: null,
+    itemId: null,
+    targetUserId: null,
+    targetServiceAccountId: null,
+    role: null,
+    permission: null,
+    detail: { rowCount: row.rowCount, filters: row.filters },
   };
 }
 

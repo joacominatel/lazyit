@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DATA_EXPORT_RESOURCES } from "./data-export";
 import { pageSchema, PageQuerySchema } from "./pagination";
 
 /**
@@ -22,11 +23,12 @@ import { pageSchema, PageQuerySchema } from "./pagination";
  * single-org tool.
  */
 
-/** The three security audit logs this surface reads. The `source` discriminator selects one. */
+/** The audit logs this surface reads. The `source` discriminator selects one. `export` is DataExportLog (ADR-0103). */
 export const AUDIT_LOG_SOURCES = [
   "secret",
   "permission",
   "serviceAccount",
+  "export",
 ] as const;
 export const AuditLogSourceSchema = z.enum(AUDIT_LOG_SOURCES);
 export type AuditLogSource = z.infer<typeof AuditLogSourceSchema>;
@@ -37,7 +39,7 @@ export type AuditLogSource = z.infer<typeof AuditLogSourceSchema>;
  * them here means a new DB enum value (e.g. #870's `ITEM_REVEALED`) appears in the filter dropdown the
  * moment it is added to this array — no frontend edit. Keep in sync with the prisma schema enums.
  *
- * The wire is the DB-native uppercase for ALL THREE sources so the read needs no case transform in
+ * The wire is the DB-native uppercase for EVERY source so the read needs no case transform in
  * either direction. NOTE: this is distinct from the pre-existing lowercase `PermissionAuditActionSchema`
  * in schemas/permission.ts, which types the PUT /config/permissions EDIT surface — a different concern
  * from this read surface; the two intentionally do not share a symbol.
@@ -105,6 +107,8 @@ export const AUDIT_ACTIONS_BY_SOURCE = {
   secret: SECRET_AUDIT_ACTIONS,
   permission: PERMISSION_AUDIT_LOG_ACTIONS,
   serviceAccount: SERVICE_ACCOUNT_AUDIT_ACTIONS,
+  // An export row's action is the resource it exported.
+  export: DATA_EXPORT_RESOURCES,
 } as const satisfies Record<AuditLogSource, readonly string[]>;
 
 /* ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -116,13 +120,13 @@ export const AUDIT_ACTIONS_BY_SOURCE = {
 /** The optional, additive audit-log filters (source-scoped). */
 export const AuditLogFiltersSchema = z
   .object({
-    // REQUIRED — which of the three logs to read.
+    // REQUIRED — which log to read.
     source: AuditLogSourceSchema,
     // One action label valid for the chosen `source` (validated in the refine → 400 otherwise).
     action: z.string().trim().min(1).optional(),
     // A concrete HUMAN actor uuid (the User who acted). Not resolved to "me" — this is an admin review.
     actorId: z.uuid().optional(),
-    // A SERVICE-ACCOUNT id (cuid). On `secret` it filters the SA ACTOR (ITEMS_FETCHED); on
+    // A SERVICE-ACCOUNT id (cuid). On `secret` and `export` it filters the SA ACTOR; on
     // `serviceAccount` it filters the SUBJECT SA (the per-SA timeline). Invalid on `permission`.
     serviceAccountId: z.string().trim().min(1).optional(),
     // Secret-only: the per-vault timeline (exact match). Invalid on the other sources.
@@ -182,7 +186,7 @@ export const AuditLogQuerySchema = z.intersection(
 export type AuditLogQuery = z.infer<typeof AuditLogQuerySchema>;
 
 /* ──────────────────────────────────────────────────────────────────────────────────────────────
- * The response row — a UNIFIED, flat shape across the three sources. Fields not relevant to a given
+ * The response row — a UNIFIED, flat shape across the sources. Fields not relevant to a given
  * source are null (a permission row has no vault; a secret row has no permission). Soft-refs are
  * resolved to METADATA display names server-side; a dangling ref degrades to its raw id (never null vs
  * crash), and a secret row NEVER carries plaintext/ciphertext (INV-10).
@@ -217,8 +221,8 @@ export const AuditLogItemSchema = z.object({
   // Permission-source metadata: the role whose set changed and the permission literal edited.
   role: z.string().nullable(),
   permission: z.string().nullable(),
-  // ServiceAccount-source non-secret context (e.g. the permission delta), pre-serialized to a compact
-  // one-line string for display/CSV. NEVER a secret (the SA audit never records one).
+  // Non-secret context pre-serialized to a compact one-line string for display/CSV: the permission
+  // delta on `serviceAccount`, `{"rowCount":…,"filters":{…}}` on `export`. NEVER a secret.
   detail: z.string().nullable(),
 });
 export type AuditLogItem = z.infer<typeof AuditLogItemSchema>;

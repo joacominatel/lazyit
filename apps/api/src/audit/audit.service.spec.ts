@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { BadRequestException } from '@nestjs/common';
 import { AUDIT_LOG_CSV_HEADER } from '@lazyit/shared';
 import { AuditService } from './audit.service';
 import { AuditController } from './audit.controller';
@@ -28,6 +29,7 @@ interface FakePrisma {
   secretAuditLog: { findMany: jest.Mock; count: jest.Mock };
   permissionAuditLog: { findMany: jest.Mock; count: jest.Mock };
   serviceAccountAuditLog: { findMany: jest.Mock; count: jest.Mock };
+  dataExportLog: { findMany: jest.Mock; count: jest.Mock };
   user: { findMany: jest.Mock };
   serviceAccount: { findMany: jest.Mock };
   secretVault: { findMany: jest.Mock };
@@ -48,6 +50,10 @@ function makePrisma(): FakePrisma {
       count: jest.fn().mockResolvedValue(0),
     },
     serviceAccountAuditLog: {
+      findMany: emptyList(),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    dataExportLog: {
       findMany: emptyList(),
       count: jest.fn().mockResolvedValue(0),
     },
@@ -247,6 +253,128 @@ describe('AuditService.getLogs — permission + serviceAccount sources', () => {
       serviceAccountName: 'deploy (lzit_sa_dep)',
       detail: JSON.stringify({ added: ['asset:read'], removed: [] }),
     });
+  });
+});
+
+describe('AuditService — export source (DataExportLog, ADR-0103)', () => {
+  it('reads an export row: the resource is the action, the row count and filters are the detail', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValue([
+      {
+        id: 4,
+        resource: 'USERS',
+        actorId: null,
+        serviceAccountId: 'sa3',
+        filters: { role: 'VIEWER' },
+        rowCount: 12,
+        createdAt: new Date('2026-10-16T09:00:00.000Z'),
+      },
+    ]);
+    prisma.dataExportLog.count.mockResolvedValue(1);
+    prisma.serviceAccount.findMany.mockResolvedValue([
+      { id: 'sa3', name: 'hr-sync', tokenPrefix: 'lzit_sa_hr' },
+    ]);
+
+    const page = await svc(prisma).getLogs({
+      source: 'export',
+      action: 'USERS',
+      serviceAccountId: 'sa3',
+      from: '2026-10-01T00:00:00.000Z',
+      limit: 50,
+      offset: 0,
+      deleted: 'active',
+    } as never);
+
+    expect(firstArg(prisma.dataExportLog.findMany).where).toEqual({
+      resource: 'USERS',
+      serviceAccountId: 'sa3',
+      createdAt: { gte: new Date('2026-10-01T00:00:00.000Z') },
+    });
+    expect(firstArg(prisma.dataExportLog.findMany).orderBy).toEqual({
+      id: 'desc',
+    });
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      source: 'export',
+      action: 'USERS',
+      actorId: null,
+      serviceAccountName: 'hr-sync (lzit_sa_hr)',
+      detail: JSON.stringify({ rowCount: 12, filters: { role: 'VIEWER' } }),
+    });
+    // The other sources are not read.
+    expect(prisma.secretAuditLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it('offers the export actors in the actor menu', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValue([{ actorId: ACTOR }]);
+    prisma.user.findMany.mockResolvedValue([
+      { id: ACTOR, firstName: 'Ada', lastName: 'Lovelace' },
+    ]);
+
+    await expect(svc(prisma).getFilterOptions('export')).resolves.toEqual({
+      actors: [{ id: ACTOR, name: 'Ada Lovelace' }],
+    });
+  });
+
+  it('streams export rows through the existing audit CSV with the keyset cursor', async () => {
+    const prisma = makePrisma();
+    prisma.dataExportLog.findMany.mockResolvedValueOnce([
+      {
+        id: 7,
+        resource: 'ASSETS',
+        actorId: null,
+        serviceAccountId: null,
+        filters: {},
+        rowCount: 3,
+        createdAt: new Date('2026-10-16T09:00:00.000Z'),
+      },
+    ]);
+
+    let csv = '';
+    for await (const chunk of svc(prisma).streamLogsCsvRows({
+      source: 'export',
+    } as never)) {
+      csv += chunk;
+    }
+
+    expect(csv).toContain('2026-10-16T09:00:00.000Z,export,ASSETS,');
+  });
+});
+
+describe('AuditController — export source', () => {
+  function controller() {
+    const getLogs = jest.fn().mockResolvedValue({ items: [], total: 0 });
+    const ctrl = new AuditController({ getLogs } as unknown as AuditService);
+    return { ctrl, getLogs };
+  }
+
+  it('accepts source=export with a resource as the action filter', async () => {
+    const { ctrl, getLogs } = controller();
+    await ctrl.logs('export', undefined, undefined, undefined, 'USERS');
+    expect(getLogs).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'export', action: 'USERS' }),
+    );
+  });
+
+  it('rejects an action that is not an export resource, and the secret-only filters', async () => {
+    const { ctrl, getLogs } = controller();
+    await expect(
+      ctrl.logs('export', undefined, undefined, undefined, 'GRANT'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      ctrl.logs(
+        'export',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'v1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(getLogs).not.toHaveBeenCalled();
   });
 });
 

@@ -3,7 +3,7 @@ title: "ADR-0030: List endpoint pagination contract (offset; implementation defe
 tags: [adr, security, api]
 status: accepted
 created: 2026-05-25
-updated: 2026-08-09
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -537,6 +537,16 @@ The estate-wide `GET /infra/nodes/:id/impact` traversal is **not computed from t
 payload** and remains estate-wide. If the graph-node cap is exceeded, only canvas highlighting can omit
 nodes that were not delivered to the browser; the impact API's count/list remains complete. The
 canvas's required truncation warning must make that visualization limit explicit.
+
+## Amendment (2026-10-16) — exports page by keyset, never OFFSET ([[0103-data-export-streaming-path]])
+
+This contract governs the **on-screen** list. A bulk export of the same list does not use `limit` /
+`offset`: it walks the whole filtered set newest first over the immutable `(createdAt, id)` pair, with
+an explicit `createdAt < c OR (createdAt = c AND id < i)` predicate and no Prisma `cursor`
+(`keysetBatches` in `apps/api/src/common/export/`). OFFSET would send a boundary row twice when a row is
+inserted mid-export, and costs O(offset) on deep batches. An export also ignores `sort` / `dir`: its
+order is fixed so scripts and the importer see a stable file. The list keeps offset paging; moving the
+activity feed to keyset is possible later with the view's new `sourceKey` but is not decided here.
 
 ## References
 

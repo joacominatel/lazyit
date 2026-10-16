@@ -3,7 +3,7 @@ title: "ADR-0044: Dashboard recent-activity feed backed by a unified DB view"
 tags: [adr, api, dashboard, database]
 status: accepted
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -79,6 +79,17 @@ rendered on the web). We want one merged stream, newest first, paginated.
 - **Residual:** the view re-derives soft-delete filtering in SQL (it can't reuse the Prisma
   extension) — a documented duplication to keep in step if the soft-delete columns ever move.
   Offset pagination's deep-page cost is accepted at this scale ([[0030-list-pagination-contract]]).
+
+## Amendment (2026-10-16) — a `sourceKey` column for keyset paging ([[0103-data-export-streaming-path]])
+
+The view has no row id, so the activity export pages with LIMIT/OFFSET and a row inserted mid-export
+shifts later batches (AUD-032 fixed the ordering, not the shift). Decision: an additive
+`CREATE OR REPLACE VIEW` appends a trailing `sourceKey` text column, `'<table>:<id>[:<action>]'` (an
+assignment or a grant yields two events, so the action disambiguates them). The export orders by
+`(occurredAt DESC, sourceKey DESC)` and pages with `(occurredAt, sourceKey) < ($t, $k)`. No table
+changes and no data is touched; the read, the count and the existing columns are unchanged. The view
+change itself lands with the activity export's move onto the engine (epic #1597, phase 1b), which also
+checks the predicate's plan on a seeded database.
 
 ## References
 

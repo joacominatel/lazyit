@@ -3,7 +3,7 @@ title: "ADR-0081: In-app read + CSV export for the security audit logs"
 tags: [adr, security, audit, secrets, reports, logs]
 status: accepted
 created: 2026-07-01
-updated: 2026-07-01
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -114,3 +114,21 @@ Print buttons, and the server-side filter bar. A new **Audit log** nav item sits
   - The `vaultId`/`itemId`/`serviceAccountId` filters are URL/deep-link driven (surfaced as active-filter
     chips), not pickers — sufficient for the "timeline" use; a vault/item picker is a later nicety.
 - NOT #840: no streaming SIEM sink, no retention policy, no embedded per-entity widget.
+
+## Amendment (2026-10-16) — a fourth source: data exports ([[0103-data-export-streaming-path]])
+
+`DataExportLog` ([[data-export-log]]) is the fourth source, `export`, read like the other three:
+source-scoped, newest first by its autoincrement `id`, offset on screen, keyset (`id < last`) in the CSV
+export, behind the same `logs:read`. Mapping onto the unified row:
+
+- `action` is the exported resource, the uppercase `DATA_EXPORT_RESOURCES` label (`ASSETS`, `USERS`,
+  `ACCESS_GRANTS`, …). The action filter therefore filters by resource, enum-driven from
+  `AUDIT_ACTIONS_BY_SOURCE.export` like the others.
+- `actorId` / `actorName` is the human who exported; `serviceAccountId` / `serviceAccountName` the
+  service account, so the `serviceAccountId` filter is valid on this source. `vaultId` / `itemId`
+  stay secret-only.
+- `detail` is `{"rowCount":…,"filters":{…}}`, compact JSON like the service-account source's.
+
+The wire row and the audit CSV header are unchanged; only `AuditLogSource` widens. Once the audit export moves onto the
+engine (epic #1597, phase 1b), an export of the audit log itself is recorded here too (resource
+`AUDIT`).
