@@ -28,7 +28,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
-import { notifyError } from "@/lib/api/notify-error";
 import {
   useRestoreServiceAccount,
   useRevokeServiceAccount,
@@ -38,6 +37,7 @@ import { useCan } from "@/lib/hooks/use-permissions";
 import { useFormatters } from "@/lib/hooks/use-formatters";
 import { permissionLabel } from "../../_lib/permission-labels";
 import { AiAccessDialog } from "./ai-access-dialog";
+import { notifyServiceAccountError } from "./permission-ceiling";
 import { RotateDialog } from "./rotate-dialog";
 import { ServiceAccountFormDialog } from "./service-account-form-dialog";
 import {
@@ -139,7 +139,11 @@ export function ServiceAccountsManager() {
     restore.mutate(account.id, {
       onSuccess: () => toast.success(t("serviceAccounts.toast.restored")),
       onError: (err) =>
-        notifyError(err, t("serviceAccounts.toast.restoreError")),
+        notifyServiceAccountError(
+          err,
+          t("serviceAccounts.toast.restoreError"),
+          t,
+        ),
     });
   }
 

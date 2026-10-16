@@ -13,8 +13,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { notifyError } from "@/lib/api/notify-error";
 import { useRotateServiceAccount } from "@/lib/api/hooks/use-service-accounts";
+import { notifyServiceAccountError } from "./permission-ceiling";
 import { SaKeypairSetup } from "./sa-keypair-setup";
 import { SecretReveal } from "./secret-reveal";
 
@@ -83,7 +83,8 @@ function RotateBody({
         toast.success(t("serviceAccounts.toast.rotated"));
         setToken(result.token);
       },
-      onError: (err) => notifyError(err, t("serviceAccounts.toast.rotateError")),
+      onError: (err) =>
+        notifyServiceAccountError(err, t("serviceAccounts.toast.rotateError"), t),
     });
   }
 

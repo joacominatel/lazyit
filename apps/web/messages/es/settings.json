@@ -718,6 +718,9 @@
       "aiAccess": "Acceso a IA"
     },
     "revokeExplanation": "Su token deja de autenticar de inmediato. Puedes restaurarla desde la vista «Mostrar revocadas» (rota para generar un token nuevo). Revocar suspende el token pero no elimina el acceso a las bóvedas — usa la lista de Miembros de la bóveda para revocar por bóveda y eliminar el material de clave.",
+    "errors": {
+      "ceilingExceeded": "Tu rol no tiene {permissions}. Una cuenta de servicio solo puede tener permisos que tu propio rol tiene."
+    },
     "toast": {
       "restored": "Cuenta de servicio restaurada",
       "restoreError": "No se pudo restaurar la cuenta de servicio",
@@ -846,7 +849,9 @@
       "sectionAria": "Permisos de {label}",
       "selectAllAria": "Seleccionar todos los permisos de {label}",
       "all": "Todos",
-      "adminLevel": "Nivel administrador"
+      "adminLevel": "Nivel administrador",
+      "outsideRole": "Fuera de tu rol",
+      "outsideRoleHint": "Tu rol no tiene este permiso. Puedes quitárselo a esta cuenta, pero una vez guardada sin él no puedes volver a otorgarlo."
     },
     "lastUsed": "Usada {when}",
     "neverUsed": "Nunca usada",
