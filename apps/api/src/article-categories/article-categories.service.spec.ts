@@ -757,6 +757,9 @@ describe('ArticleCategoriesService', () => {
         ],
       });
       // The article rows are locked before their versions are read, so a concurrent edit cannot collide.
+      expect(
+        (queryRaw.mock.calls[0] as [readonly string[]])[0].join('?'),
+      ).toContain('FOR NO KEY UPDATE');
       expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         articleVersion.groupBy.mock.invocationCallOrder[0],
       );

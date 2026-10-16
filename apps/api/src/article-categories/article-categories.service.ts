@@ -282,8 +282,8 @@ export class ArticleCategoriesService {
       [folderId],
       await this.loadFolderEdges(tx),
     );
-    // Holds off a concurrent article edit between its version read and insert, so numbers cannot collide.
-    await tx.$queryRaw`SELECT "id" FROM "articles" WHERE "categoryId" = ANY(${subtree}::text[]) AND "deletedAt" IS NULL ORDER BY "id" FOR UPDATE`;
+    // Blocks concurrent version writers; NO KEY UPDATE, not UPDATE, so FK inserts' KEY SHARE cannot deadlock.
+    await tx.$queryRaw`SELECT "id" FROM "articles" WHERE "categoryId" = ANY(${subtree}::text[]) AND "deletedAt" IS NULL ORDER BY "id" FOR NO KEY UPDATE`;
     const articles = await tx.article.findMany({
       where: { categoryId: { in: subtree }, deletedAt: null },
       select: {
@@ -330,7 +330,7 @@ export class ArticleCategoriesService {
     return this.prisma.$transaction(async (tx) => {
       await this.lockFolderTree(tx);
       await this.lockFolderRows(tx, [id]);
-      await this.assertFolderLive(tx, id);
+      await this.loadLiveFolder(tx, id);
       const liveArticles = await tx.article.count({
         where: { categoryId: id, deletedAt: null },
       });
@@ -379,7 +379,7 @@ export class ArticleCategoriesService {
       await this.prisma.$transaction(async (tx) => {
         await this.lockFolderTree(tx);
         // 404 if the root folder doesn't exist or is already soft-deleted.
-        await this.assertFolderLive(tx, id);
+        await this.loadLiveFolder(tx, id);
 
         // Soft-deleted branches too: their aliases still need cleaning up.
         const subtreeIds = expandFolderSubtrees(
@@ -545,13 +545,6 @@ export class ArticleCategoriesService {
   }
 
   /** 404 if the folder is missing or soft-deleted. */
-  private async assertFolderLive(
-    tx: Prisma.TransactionClient,
-    id: string,
-  ): Promise<void> {
-    await this.loadLiveFolder(tx, id);
-  }
-
   private async loadLiveFolder(
     tx: Prisma.TransactionClient,
     id: string,
