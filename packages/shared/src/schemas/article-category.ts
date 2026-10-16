@@ -69,7 +69,7 @@ export const CreateArticleCategorySchema = z.strictObject({
 /**
  * Partial update; any subset of the editable fields (an empty body is rejected). `parentId` is
  * nullable here (unlike create): pass `null` to MOVE this folder to the root, or a cuid to reparent
- * it. The service rejects a move that would create a cycle (a folder may not be its own ancestor).
+ * it. A change needs `settings:manage` (403), and a move that would create a cycle is a 400 (ADR-0060 §10).
  */
 export const UpdateArticleCategorySchema = requireAtLeastOneKey(
   z

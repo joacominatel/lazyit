@@ -33,7 +33,9 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
   con la tarjeta punteada **Nueva carpeta** de la página de inicio de la Base de conocimiento.
 - **Crea una subcarpeta** desde el menú **⋯** de la carpeta dentro de la que la quieres → **Nueva
   subcarpeta aquí**, o con **Subcarpeta** en la página de esa carpeta. No hay límite de profundidad:
-  anida tanto como necesite tu documentación. La carpeta nueva se abre en cuanto se crea.
+  anida tanto como necesite tu documentación. La carpeta nueva se abre en cuanto se crea. Solo puedes
+  crear una subcarpeta dentro de una carpeta que puedes leer; la nueva queda restringida igual que su
+  padre.
 - **El menú ⋯** aparece cuando pasas el puntero por una fila de carpeta, cuando llegas a ella con el
   teclado y siempre en la carpeta seleccionada; en una pantalla táctil está siempre visible. Contiene
   **Nueva subcarpeta aquí**, **Editar**, **Mover a…**, **Acceso…** (administradores) y **Eliminar
@@ -45,7 +47,10 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
   todavía no quitar: si vacías el campo, el diálogo te lo indica y se mantiene el valor actual.
 - **Mueve una carpeta** con **Mover a…** en el mismo menú. Elige cualquier otra carpeta como nuevo
   padre, o **Primer nivel (sin padre)** para devolverla a la raíz; sus subcarpetas y sus artículos se
-  mueven con ella.
+  mueven con ella. Como mover una carpeta cambia quién puede leer todo lo que contiene, hace falta el
+  permiso de *gestionar configuración* (lo tienen los administradores); cualquier otra persona recibe
+  un error de permisos y nada se mueve. Cada movimiento queda registrado en el historial de versiones
+  de cada artículo que arrastra.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
   `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no. Si el nombre ya está
   ocupado donde estás creando o moviendo, la app te lo dice y no se cambia nada.

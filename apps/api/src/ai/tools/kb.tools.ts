@@ -219,7 +219,7 @@ function isNotFound(err: unknown): boolean {
 
 /**
  * Read ONE article by id or slug through the bound read handlers, as the caller. A folder-hidden article
- * or another person's draft is a 404 there, so it is simply "not found" here — never a hint that it
+ * or another person's draft (a manager's excepted) is a 404 there, so it is simply "not found" here — never a hint that it
  * exists. Any other refusal (a 403 for a caller without `article:read`) propagates as the route's own.
  */
 async function readArticle(
@@ -955,7 +955,7 @@ const kbUpdateArticle = defineTool({
     const warnings: AiPreviewWarningCode[] = [];
     // An edit of a published article goes live to its readers at once, and a published article moved
     // to another folder goes live to that folder's readers (another author's included — a foreign
-    // article the caller can read at all is published: someone else's draft is a 404).
+    // article is published unless the caller manages articles, the only role that can read a foreign draft).
     if (published && (edits || moves)) warnings.push('PUBLISHES_TO_READERS');
     if (moves) warnings.push('VISIBILITY_CHANGE');
     const elevated = moves || foreign || (published && edits) || clipped;

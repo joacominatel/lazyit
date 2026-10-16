@@ -80,7 +80,7 @@ export class ArticleAttachmentsController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      "List an article's live attachments (metadata only, newest first). 404 when the article itself isn't readable (missing, soft-deleted, a foreign draft, or folder-hidden).",
+      "List an article's live attachments (metadata only, newest first). 404 when the article itself isn't readable (missing, soft-deleted, a foreign draft the caller may not manage, or folder-hidden).",
   })
   @ApiOkResponse({ type: [AttachmentDto] })
   list(

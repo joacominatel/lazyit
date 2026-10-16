@@ -12,6 +12,7 @@ import {
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -89,18 +90,35 @@ export class ArticleCategoriesController {
 
   @Post()
   @RequirePermission('category:write')
-  @ApiOperation({ summary: 'Create an article category (ADMIN or MEMBER)' })
+  @ApiOperation({
+    summary:
+      'Create an article category (ADMIN or MEMBER). A parentId must be a live folder the caller can read (ADR-0060 §10).',
+  })
   @ApiCreatedResponse({ type: ArticleCategoryDto })
-  create(@Body() dto: CreateArticleCategoryDto) {
-    return this.categories.create(dto);
+  create(
+    @Body() dto: CreateArticleCategoryDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.categories.create(dto, principal);
   }
 
   @Patch(':id')
   @RequirePermission('category:write')
-  @ApiOperation({ summary: 'Update an article category (ADMIN or MEMBER)' })
+  @ApiOperation({
+    summary:
+      'Update an article category (ADMIN or MEMBER). Changing parentId moves the folder and also needs settings:manage (ADR-0060 §10).',
+  })
   @ApiOkResponse({ type: ArticleCategoryDto })
-  update(@Param('id') id: string, @Body() dto: UpdateArticleCategoryDto) {
-    return this.categories.update(id, dto);
+  @ApiForbiddenResponse({
+    description:
+      'The body changes parentId and the caller lacks settings:manage.',
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateArticleCategoryDto,
+    @CurrentPrincipal() principal?: Principal,
+  ) {
+    return this.categories.update(id, dto, principal);
   }
 
   @Delete(':id')

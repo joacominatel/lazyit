@@ -293,7 +293,7 @@ export class ArticlesController {
   @RequirePermission('article:read')
   @ApiOperation({
     summary:
-      "List an article's version history (append-only; newest first; paginated). Drafts visible only to their author. (ADR-0042)",
+      "List an article's version history (append-only; newest first; paginated). A draft's history is visible only to its author, an ADMIN or an article:manage holder (AUD-086). (ADR-0042)",
   })
   @ApiQuery({
     name: 'limit',

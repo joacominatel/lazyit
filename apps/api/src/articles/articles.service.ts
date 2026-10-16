@@ -390,7 +390,7 @@ export class ArticlesService {
   }
 
   /**
-   * A readable article by id. 404 if missing, soft-deleted, a draft the caller doesn't own (ADR-0022),
+   * A readable article by id. 404 if missing, soft-deleted, a draft the caller neither owns nor manages (ADR-0022),
    * OR in a home folder the caller can't see (ADR-0060 §4 — folder-hidden → 404, NOT 403, so the
    * server never leaks the existence of a restricted article). The three layers compose
    * most-restrictive-wins (folder access AND draft visibility, both 404 on failure). `article:read`
@@ -410,7 +410,7 @@ export class ArticlesService {
       where: { id },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article ${id} not found`);
     }
     await this.assertFolderVisible(
@@ -424,6 +424,19 @@ export class ArticlesService {
     return article;
   }
 
+  // The #877 edit gate already lets a manager write a foreign draft; reading it directly must match (AUD-086).
+  private async isHiddenDraft(
+    article: Pick<Article, 'status' | 'authorId'>,
+    currentUserId: string | undefined,
+    principal?: Principal,
+  ): Promise<boolean> {
+    return (
+      article.status === 'DRAFT' &&
+      article.authorId !== currentUserId &&
+      !(await this.canManageAny(principal))
+    );
+  }
+
   /** Same visibility rules as findOne (draft + folder access — ADR-0022/0060), looked up by slug. */
   async findBySlug(slug: string, currentUser?: User, principal?: Principal) {
     const cu = this.resolveCurrentUser(currentUser);
@@ -431,7 +444,7 @@ export class ArticlesService {
       where: { slug },
       include: ARTICLE_AUTHOR_INCLUDE,
     });
-    if (!article || (article.status === 'DRAFT' && article.authorId !== cu)) {
+    if (!article || (await this.isHiddenDraft(article, cu, principal))) {
       throw new NotFoundException(`Article with slug "${slug}" not found`);
     }
     await this.assertFolderVisible(article.categoryId, principal, () => {
@@ -706,9 +719,10 @@ export class ArticlesService {
 
   /**
    * A page of an article's version history, newest version first (ADR-0030/0042). Visibility
-   * mirrors the article reads: a DRAFT's history is only visible to its author (404 otherwise), so
-   * snapshots never leak a private draft's content. Runs the page `findMany(take/skip)` and the
-   * `count` over the same `where` inside one `$transaction` so `total` can't drift from the page.
+   * mirrors the article reads: a DRAFT's history is only visible to its author, an ADMIN or an
+   * `article:manage` holder (AUD-086; 404 otherwise), so snapshots never leak a private draft's
+   * content. Runs the page `findMany(take/skip)` and the `count` over the same `where` inside one
+   * `$transaction` so `total` can't drift from the page.
    */
   async listVersions(
     articleId: string,
