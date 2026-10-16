@@ -37,7 +37,8 @@ class DirectorySyncResultDto extends createZodDto(DirectorySyncResultSchema) {}
  * All handlers are gated by `settings:manage` (the instance-config admin permission) and forbidden to
  * service principals (a bot must never reconfigure the org-wide directory or trigger a bulk person upsert),
  * matching the SMTP/config posture. The two writes are ADMIN-only on top (SEC-088): the sync can offboard
- * an AD-sourced admin, so a delegated `settings:manage` must not steer it. The bind password is WRITE-ONLY: `GET` returns only `bindPasswordSet`.
+ * an AD-sourced admin, so a delegated `settings:manage` must not steer it. The bind password is
+ * WRITE-ONLY: `GET` returns only `bindPasswordSet`.
  */
 @ApiTags('directory')
 @Controller('directory')
