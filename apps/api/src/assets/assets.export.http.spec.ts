@@ -205,7 +205,7 @@ describe('GET /assets/export (ADR-0103)', () => {
     ];
     const csv = await exportCsv('role=VIEWER');
 
-    expect(csv.startsWith('﻿# lazyit ')).toBe(true);
+    expect(csv.startsWith('\uFEFF# lazyit ')).toBe(true);
     const [, header, newest, oldest] = lines(csv);
     expect(header).toBe(
       'name,assetTag,serial,status,category,manufacturer,model,location,company,purchaseDate,warrantyEnd,owners,notes,createdAt,updatedAt,purchaseCost,purchaseCurrency',
