@@ -36,9 +36,9 @@ import {
   useAiServiceAccountSettings,
   useUpdateAiServiceAccountSettings,
 } from "@/lib/api/hooks/use-ai-config";
-import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { aiAccessBody, aiAccessNotes } from "./ai-access";
+import { notifyServiceAccountError } from "./permission-ceiling";
 
 /**
  * A Service Account's AI access (ADR-0097 decision 4; frontend.md §5.3 "Headless"; K2
@@ -107,6 +107,7 @@ function AiAccessForm({
   onDone: () => void;
 }) {
   const t = useTranslations("settings.serviceAccounts.aiAccess");
+  const tSettings = useTranslations("settings");
   const tc = useTranslations("common");
   const id = useId();
   const save = useUpdateAiServiceAccountSettings(account.id);
@@ -128,7 +129,8 @@ function AiAccessForm({
         toast.success(t("saved", { name: account.name }));
         onDone();
       },
-      onError: (error) => notifyError(error, t("errors.save")),
+      onError: (error) =>
+        notifyServiceAccountError(error, t("errors.save"), tSettings),
     });
   }
 

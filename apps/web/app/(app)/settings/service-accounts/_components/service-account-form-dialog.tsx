@@ -5,15 +5,13 @@ import {
   type CreateServiceAccount,
   CreateServiceAccountSchema,
   type Permission,
-  type PermissionPillar,
-  PERMISSION_META,
   PERMISSIONS,
   type ServiceAccount,
   type UpdateServiceAccount,
   UpdateServiceAccountSchema,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,11 +31,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { notifyError } from "@/lib/api/notify-error";
 import {
   useCreateServiceAccount,
   useUpdateServiceAccount,
 } from "@/lib/api/hooks/use-service-accounts";
+import { useMyPermissions } from "@/lib/hooks/use-permissions";
+import { notifyServiceAccountError } from "./permission-ceiling";
 import { PermissionPicker } from "./permission-picker";
 import { SaKeypairSetup } from "./sa-keypair-setup";
 import { SecretReveal } from "./secret-reveal";
@@ -162,6 +161,11 @@ function ServiceAccountForm({
   const create = useCreateServiceAccount();
   const update = useUpdateServiceAccount();
   const isPending = create.isPending || update.isPending;
+  const { can } = useMyPermissions();
+  const held = useMemo(
+    () => new Set<Permission>(account?.permissions ?? []),
+    [account],
+  );
 
   const [values, setValues] = useState<FormState>(() => initialState(account));
   const [error, setError] = useState<string | undefined>(undefined);
@@ -186,14 +190,12 @@ function ServiceAccountForm({
     });
   }
 
-  function togglePillar(pillar: PermissionPillar, on: boolean) {
+  function togglePillar(permissions: Permission[], on: boolean) {
     setValues((prev) => {
       const next = new Set(prev.permissions);
-      for (const p of PERMISSIONS) {
-        if (PERMISSION_META[p].pillar === pillar) {
-          if (on) next.add(p);
-          else next.delete(p);
-        }
+      for (const p of permissions) {
+        if (on) next.add(p);
+        else next.delete(p);
       }
       return { ...prev, permissions: next };
     });
@@ -235,7 +237,11 @@ function ServiceAccountForm({
             onClose();
           },
           onError: (err) =>
-            notifyError(err, t("serviceAccounts.toast.updateError")),
+            notifyServiceAccountError(
+              err,
+              t("serviceAccounts.toast.updateError"),
+              t,
+            ),
         },
       );
       return;
@@ -266,7 +272,11 @@ function ServiceAccountForm({
         });
       },
       onError: (err) =>
-        notifyError(err, t("serviceAccounts.toast.createError")),
+        notifyServiceAccountError(
+          err,
+          t("serviceAccounts.toast.createError"),
+          t,
+        ),
     });
   }
 
@@ -385,6 +395,8 @@ function ServiceAccountForm({
               value={values.permissions}
               onToggle={togglePermission}
               onTogglePillar={togglePillar}
+              can={can}
+              held={held}
               disabled={isPending}
             />
           </Field>
