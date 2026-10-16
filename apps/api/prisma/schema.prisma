@@ -31,7 +31,7 @@ model User {
   // users AND non-first JIT users land read-only until an ADMIN promotes them. The first JIT user /
   // seed still becomes ADMIN so a fresh install is never un-administrable. The RolesGuard gates
   // Access-grant writes, Users administration and destructive deletes to ADMIN; VIEWER is read-only.
-  // Only an ADMIN (via the ADMIN-gated Users controller) can change a role.
+  // A user:manage holder assigns roles only up to their own (role ceiling, SEC-088); only an ADMIN acts on ADMIN.
   role           Role      @default(VIEWER)
   // Maps to the IdP `sub` once auth is integrated; null until then (no auth yet).
   // Nullable + unique: many users may be unlinked, but a linked sub is 1:1. See ADR-0016.
