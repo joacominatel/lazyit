@@ -6,6 +6,7 @@ import {
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useMemo } from "react";
+import { Combobox } from "@/components/combobox";
 import {
   DeleteResolutionDialog,
   type ImpactGroupView,
@@ -106,7 +107,22 @@ export function CategoryDeleteDialog({
       groups={groups}
       impactError={impact.error}
       onRetryImpact={() => void impact.refetch()}
-      targets={targets}
+      renderTargetPicker={(picker) => (
+        <Combobox
+          id={picker.id}
+          value={picker.value}
+          onValueChange={picker.onValueChange}
+          disabled={picker.disabled}
+          placeholder={picker.placeholder}
+          searchPlaceholder={picker.searchPlaceholder}
+          emptyText={picker.emptyText}
+          items={
+            picker.created && !targets.some((item) => item.value === picker.created?.id)
+              ? [...targets, { value: picker.created.id, label: picker.created.name }]
+              : targets
+          }
+        />
+      )}
       canCreate={canCreate}
       nameMaxLength={
         (kind === "application"

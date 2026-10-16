@@ -23,6 +23,7 @@ export function LocationCombobox({
   placeholder,
   searchPlaceholder,
   emptyText,
+  excludeIds,
 }: {
   id?: string;
   value?: string;
@@ -32,6 +33,8 @@ export function LocationCombobox({
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
+  /** Locations never offered, e.g. the one being deleted and its subtree. */
+  excludeIds?: ReadonlySet<string>;
 }) {
   const tc = useTranslations("common");
   const [query, setQuery] = useState("");
@@ -43,11 +46,13 @@ export function LocationCombobox({
 
   const items = useMemo(
     () =>
-      (data?.items ?? []).map((location) => ({
-        value: location.id,
-        label: location.name,
-      })),
-    [data],
+      (data?.items ?? [])
+        .filter((location) => !excludeIds?.has(location.id))
+        .map((location) => ({
+          value: location.id,
+          label: location.name,
+        })),
+    [data, excludeIds],
   );
 
   // Quick View (ADR-0072): the eye reads the ALREADY-LOADED list row — zero extra fetch. The row is

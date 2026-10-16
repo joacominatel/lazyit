@@ -3,9 +3,8 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { DeleteResolution } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
-import { Combobox, type ComboboxItem } from "@/components/combobox";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -47,6 +46,18 @@ export interface ImpactGroupView {
 }
 
 
+export interface TargetPickerProps {
+  id: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  disabled: boolean;
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  /** A target this dialog created, which a cached list may not hold yet. */
+  created: { id: string; name: string } | null;
+}
+
 export interface DeleteResolutionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,8 +67,8 @@ export interface DeleteResolutionDialogProps {
   groups: ImpactGroupView[] | undefined;
   impactError: unknown;
   onRetryImpact: () => void;
-  /** Live move targets, already without the row itself (and, for a location, its subtree). */
-  targets: ComboboxItem[];
+  /** The move-target picker; it must leave out the row itself (and, for a location, its subtree). */
+  renderTargetPicker: (picker: TargetPickerProps) => ReactNode;
   /** The create permission for this kind; without it "create a new one" is not offered. */
   canCreate: boolean;
   createHint: string;
@@ -76,7 +87,7 @@ export function DeleteResolutionDialog({
   groups,
   impactError,
   onRetryImpact,
-  targets,
+  renderTargetPicker,
   canCreate,
   createHint,
   nameMaxLength,
@@ -147,11 +158,6 @@ export function DeleteResolutionDialog({
       setIsPending(false);
     }
   }
-
-  const moveItems =
-    created && !targets.some((item) => item.value === created.id)
-      ? [...targets, { value: created.id, label: created.name }]
-      : targets;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -239,16 +245,16 @@ export function DeleteResolutionDialog({
                 <label htmlFor={`${id}-target`} className="sr-only">
                   {t("deleteResolution.movePlaceholder", { entity: entityKey })}
                 </label>
-                <Combobox
-                  id={`${id}-target`}
-                  value={targetId}
-                  onValueChange={setTargetId}
-                  items={moveItems}
-                  disabled={isPending}
-                  placeholder={t("deleteResolution.movePlaceholder", { entity: entityKey })}
-                  searchPlaceholder={t("deleteResolution.moveSearch")}
-                  emptyText={t("deleteResolution.moveEmpty")}
-                />
+                {renderTargetPicker({
+                  id: `${id}-target`,
+                  value: targetId,
+                  onValueChange: setTargetId,
+                  disabled: isPending,
+                  placeholder: t("deleteResolution.movePlaceholder", { entity: entityKey }),
+                  searchPlaceholder: t("deleteResolution.moveSearch"),
+                  emptyText: t("deleteResolution.moveEmpty"),
+                  created,
+                })}
               </>
             ) : null}
             {kind === "create" ? (

@@ -11,6 +11,7 @@ import {
   DeleteResolutionDialog,
   type ImpactGroupView,
 } from "@/components/delete-resolution-dialog";
+import { LocationCombobox } from "@/components/location-combobox";
 import { locationSubtreeIds } from "@/lib/api/delete-resolution";
 import {
   useCreateLocation,
@@ -70,13 +71,12 @@ export function LocationDeleteDialog({
     () => (impact.data ? locationImpactGroups(impact.data) : undefined),
     [impact.data],
   );
-  const targets = useMemo(() => {
-    const all = locations ?? [];
-    const excluded = locationSubtreeIds(all, location.id);
-    return all
-      .filter((candidate) => !excluded.has(candidate.id))
-      .map((candidate) => ({ value: candidate.id, label: candidate.name }));
-  }, [locations, location.id]);
+  // The subtree known from the cached directory plus the direct children the impact read listed.
+  const excludeIds = useMemo(() => {
+    const excluded = locationSubtreeIds(locations ?? [], location.id);
+    for (const child of impact.data?.childLocations.items ?? []) excluded.add(child.id);
+    return excluded;
+  }, [locations, location.id, impact.data]);
 
   return (
     <DeleteResolutionDialog
@@ -87,7 +87,18 @@ export function LocationDeleteDialog({
       groups={groups}
       impactError={impact.error}
       onRetryImpact={() => void impact.refetch()}
-      targets={targets}
+      renderTargetPicker={(picker) => (
+        <LocationCombobox
+          id={picker.id}
+          value={picker.value}
+          onValueChange={picker.onValueChange}
+          disabled={picker.disabled}
+          placeholder={picker.placeholder}
+          searchPlaceholder={picker.searchPlaceholder}
+          emptyText={picker.emptyText}
+          excludeIds={excludeIds}
+        />
+      )}
       canCreate={canCreate}
       nameMaxLength={CreateLocationSchema.shape.name.maxLength ?? undefined}
       createHint={t("createHintLocation", { name: location.name })}
