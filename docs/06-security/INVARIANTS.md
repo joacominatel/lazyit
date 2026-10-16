@@ -396,7 +396,9 @@ by a service account, and no bot can accidentally become an administrator.
   - **Manager ceiling (SEC-088, 2026-10-16):** a human who manages service accounts through a delegated
     `settings:manage` never gives one a verb their own role lacks. `ServiceAccountsService` refuses create,
     an added verb, re-enabling, extending, rotate and restore past the caller's DB-resolved set (**403**
-    `PERMISSION_CEILING_EXCEEDED`). Test: `service-accounts.service.spec.ts` ("permission ceiling").
+    `PERMISSION_CEILING_EXCEEDED`), judged under a row lock; `AiServiceAccountAccessService` refuses
+    widening an account's AI access the same way. Tests: `service-accounts.service.spec.ts` ("permission
+    ceiling") and `ai-service-account-access.service.spec.ts` ("widening stays within the caller").
   - **Residual risk (unchanged):** the SA-actor audit gap (`actorId = null` for SA-performed management
     actions, issue #141) is narrowed by Layer 2 — SAs can no longer perform those management actions at
     all — but the `actorSaId` column is still the clean long-term fix; tracked separately.

@@ -263,8 +263,8 @@ authenticates with a lazyit-native token
 [[service-account-permission]] grants from the same catalog, never a role, never ADMIN, FAIL-CLOSED.
 Its `/service-accounts` CRUD is `settings:manage`-gated; every mutation is audited
 ([[service-account-audit-log]]). A non-ADMIN holder of a delegated `settings:manage` never gives an
-account a verb its own role lacks: create, an added verb, re-enabling, extending, rotate and restore
-return **403** `PERMISSION_CEILING_EXCEEDED` past that ceiling (SEC-088). See [[0048-service-accounts]].
+account a verb its own role lacks: create, an added verb, re-enabling, extending, rotate, restore and
+widening its AI access return **403** `PERMISSION_CEILING_EXCEEDED` past that ceiling (SEC-088). See [[0048-service-accounts]].
 
 ## 7. Honest audit attribution (the unified actor model)
 

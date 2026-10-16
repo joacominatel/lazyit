@@ -211,7 +211,13 @@ resolved DB-first from the caller's role (`PermissionResolverService`):
 - create — the requested set;
 - update — the verbs it adds; and the whole resulting set when it re-enables the account
   (`isActive: true` on an inactive one) or extends its expiry (clears it, or moves it later);
-- rotate and restore — the account's current set, because each hands back a working credential.
+- rotate and restore — the account's current set, because each hands back a working credential;
+- widening the account's AI access (`PUT /config/ai/service-accounts/:id`: a higher access level, or a
+  higher or cleared write cap) — its current set, because it puts those verbs back to work.
+
+Update, rotate and restore lock the account row (`SELECT … FOR UPDATE`) at the start of their
+transaction and judge the ceiling against the grants, `isActive` and `expiresAt` read under that lock,
+so a stale read cannot re-grant a verb a concurrent write just removed.
 
 A violation is **403** `PERMISSION_CEILING_EXCEEDED`, with the offending verbs in `permissions`, and
 nothing is written. Writes that only narrow are never refused by the cap: rename, description, removing
