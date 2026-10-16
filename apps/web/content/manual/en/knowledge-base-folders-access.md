@@ -34,8 +34,8 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
   sub-folder inside a folder you can read; the new folder is restricted exactly like its parent.
 - **The ⋯ menu** appears when you point at a folder row, when you move to it with the keyboard, and
   always on the selected folder; on a touch screen it is always visible. It holds **New sub-folder
-  here**, **Edit**, **Move to…**, **Access…** (administrators) and **Delete folder**, each shown only
-  to people allowed to use it.
+  here**, **Edit**, **Move to…** (administrators), **Access…** (administrators) and **Delete
+  folder**, each shown only to people allowed to use it.
 - **Edit a folder** from the **⋯** menu → **Edit**. You can change its **name**, its **description**
   (a sentence shown on its card and on its page) and its **order** — an optional whole number: lower
   numbers sort first, and folders without one sort after, by name. Editing never moves the folder or
@@ -44,8 +44,9 @@ the **Folders** section of the Knowledge Base sidebar, below the views (see
 - **Move a folder** with **Move to…** in the same menu. Pick any other folder as the new parent, or
   **Top level (no parent)** to pull it back out to the root; the folder's sub-folders and its
   articles move with it. Because a move changes who can read everything inside the folder, it needs
-  the *manage settings* permission (administrators have it); anyone else gets a permission error and
-  nothing moves. Each move is recorded in the version history of every article it carries.
+  the *manage settings* permission (administrators have it), and **Move to…** only appears for people
+  who hold it. If that permission is taken away while the dialog is open, the move is refused with a
+  message saying so and nothing moves. Each move is recorded in the version history of every article it carries.
 - **Names are unique within their parent.** `Servers / Linux` and `Workstations / Linux` can both
   exist; two folders named `Linux` under the *same* parent cannot. If a name is already taken where
   you are creating or moving to, the app says so and nothing is changed.
@@ -78,8 +79,8 @@ The header's actions:
 - **New article here** opens the article editor with this folder already chosen as the
   **Category**. You can still pick another folder before saving.
 - **Subfolder** creates a folder inside this one.
-- **⋯** offers **Edit**, **Move to…**, **Access…** (administrators) and **Delete folder** — the same
-  menu as in the sidebar.
+- **⋯** offers **Edit**, **Move to…** (administrators), **Access…** (administrators) and **Delete
+  folder** — the same menu as in the sidebar.
 
 Under the header, the folder's **sub-folders** appear as a row of chips — select one to open it.
 Then comes **In this folder**: the folder's articles, in the same table as the home page but without

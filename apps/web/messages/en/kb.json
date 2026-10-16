@@ -293,7 +293,8 @@
       "cycle": "A folder can't be moved into itself or into one of its own sub-folders.",
       "deadParent": "That folder no longer exists — someone may have deleted it. Reload the page and try again.",
       "duplicateName": "A folder with this name already exists here. Pick a different name.",
-      "duplicateInDestination": "The destination already has a folder with this name. Rename one of them first."
+      "duplicateInDestination": "The destination already has a folder with this name. Rename one of them first.",
+      "moveForbidden": "Moving a folder changes who can read its articles, so it needs the settings:manage permission. Ask an administrator to move it."
     },
     "delete": {
       "action": "Delete folder",

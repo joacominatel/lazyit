@@ -45,8 +45,18 @@ describe("folderMutationErrorKind", () => {
     expect(folderMutationErrorKind(new ApiError(400, "name must be shorter"))).toBeNull();
   });
 
-  test("statuses outside 400/409 are not classified", () => {
-    expect(folderMutationErrorKind(new ApiError(403, "Forbidden"))).toBeNull();
+  test("403 is a move without settings:manage (AUD-001)", () => {
+    expect(
+      folderMutationErrorKind(
+        new ApiError(
+          403,
+          "Moving a folder changes who can read its articles and requires the settings:manage permission",
+        ),
+      ),
+    ).toBe("moveForbidden");
+  });
+
+  test("other statuses are not classified", () => {
     expect(folderMutationErrorKind(new ApiError(404, "Record not found"))).toBeNull();
     expect(folderMutationErrorKind(new ApiError(500, "cycle"))).toBeNull();
   });

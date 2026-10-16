@@ -293,7 +293,8 @@
       "cycle": "Una carpeta no puede moverse dentro de sí misma ni de una de sus subcarpetas.",
       "deadParent": "Esa carpeta ya no existe; puede que alguien la haya eliminado. Recarga la página e inténtalo de nuevo.",
       "duplicateName": "Ya existe una carpeta con este nombre aquí. Elige otro nombre.",
-      "duplicateInDestination": "El destino ya tiene una carpeta con este nombre. Renombra una de las dos primero."
+      "duplicateInDestination": "El destino ya tiene una carpeta con este nombre. Renombra una de las dos primero.",
+      "moveForbidden": "Mover una carpeta cambia quién puede leer sus artículos, así que requiere el permiso settings:manage. Pide a un administrador que la mueva."
     },
     "delete": {
       "action": "Eliminar carpeta",

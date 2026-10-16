@@ -38,8 +38,8 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
   padre.
 - **El menú ⋯** aparece cuando pasas el puntero por una fila de carpeta, cuando llegas a ella con el
   teclado y siempre en la carpeta seleccionada; en una pantalla táctil está siempre visible. Contiene
-  **Nueva subcarpeta aquí**, **Editar**, **Mover a…**, **Acceso…** (administradores) y **Eliminar
-  carpeta**, cada opción visible solo para quien puede usarla.
+  **Nueva subcarpeta aquí**, **Editar**, **Mover a…** (administradores), **Acceso…**
+  (administradores) y **Eliminar carpeta**, cada opción visible solo para quien puede usarla.
 - **Edita una carpeta** desde el menú **⋯** → **Editar**. Puedes cambiar su **nombre**, su
   **descripción** (una frase que se muestra en su tarjeta y en su página) y su **orden** — un número
   entero opcional: los más bajos van primero, y las carpetas sin orden van después, por nombre. Editar
@@ -48,8 +48,9 @@ lateral de la Base de conocimiento, debajo de las vistas (consulta
 - **Mueve una carpeta** con **Mover a…** en el mismo menú. Elige cualquier otra carpeta como nuevo
   padre, o **Primer nivel (sin padre)** para devolverla a la raíz; sus subcarpetas y sus artículos se
   mueven con ella. Como mover una carpeta cambia quién puede leer todo lo que contiene, hace falta el
-  permiso de *gestionar configuración* (lo tienen los administradores); cualquier otra persona recibe
-  un error de permisos y nada se mueve. Cada movimiento queda registrado en el historial de versiones
+  permiso de *gestionar configuración* (lo tienen los administradores), y **Mover a…** solo aparece para
+  quien lo tiene. Si ese permiso se retira con el diálogo abierto, el movimiento se rechaza con un
+  mensaje que lo explica y nada se mueve. Cada movimiento queda registrado en el historial de versiones
   de cada artículo que arrastra.
 - **Los nombres son únicos dentro de su carpeta padre.** Pueden coexistir `Servidores / Linux` y
   `Estaciones / Linux`; dos carpetas llamadas `Linux` bajo el *mismo* padre no. Si el nombre ya está
@@ -83,8 +84,8 @@ Las acciones del encabezado:
 - **Artículo aquí** abre el editor de artículos con esta carpeta ya elegida como **Categoría**.
   Puedes elegir otra carpeta antes de guardar.
 - **Subcarpeta** crea una carpeta dentro de esta.
-- **⋯** ofrece **Editar**, **Mover a…**, **Acceso…** (administradores) y **Eliminar carpeta** — el
-  mismo menú que en la barra lateral.
+- **⋯** ofrece **Editar**, **Mover a…** (administradores), **Acceso…** (administradores) y
+  **Eliminar carpeta** — el mismo menú que en la barra lateral.
 
 Debajo del encabezado, las **subcarpetas** aparecen como una fila de chips: selecciona una para
 abrirla. Después viene **En esta carpeta**: los artículos de la carpeta, en la misma tabla que la
