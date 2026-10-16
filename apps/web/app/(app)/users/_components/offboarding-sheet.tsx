@@ -23,7 +23,7 @@ import {
 import { UserAvatar } from "@/components/user-avatar";
 import type { OffboardResult } from "@/lib/api/endpoints/users";
 import { useOffboardUser } from "@/lib/api/hooks/use-user-mutations";
-import { notifyError } from "@/lib/api/notify-error";
+import { notifyUserError } from "./role-ceiling";
 import { useLocalStorage } from "@/lib/hooks/use-local-storage";
 import {
   DEFAULT_OFFBOARDING_MESSAGE,
@@ -81,6 +81,7 @@ export function OffboardingSheet({
   user,
 }: OffboardingSheetProps) {
   const t = useTranslations("users.offboarding");
+  const tUsers = useTranslations("users");
   const tRole = useTranslations("users.role.labels");
   const tc = useTranslations("common");
   const router = useRouter();
@@ -205,7 +206,7 @@ export function OffboardingSheet({
         window.setTimeout(finish, 1100);
       }
     } catch (error) {
-      notifyError(error, t("toast.error"));
+      notifyUserError(error, t("toast.error"), tUsers);
     }
   }
 

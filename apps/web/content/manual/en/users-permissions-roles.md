@@ -63,13 +63,16 @@ These guardrails protect the instance from being locked out or quietly escalated
 - **Nobody manages users above their own role.** If you give Member or Viewer the **Manage users**
   capability, those people can only hand out their own role or a lower one, and can only edit, reset,
   offboard or restore users whose role is at or below theirs. Only an admin can create an admin,
-  promote someone to admin, or act on an existing admin. Anything else is refused with a clear
-  message.
+  promote someone to admin, or act on an existing admin. The role pickers only list the roles you can
+  hand out, and on a user above your role the role shows as a plain badge and **Edit**, the password
+  reset and **Offboard** are not offered (cloning them still is). Anything else is refused with a
+  clear message.
 - **You cannot change your own role.** An admin cannot promote or demote themselves; a role change
   must be made by one admin on another. This prevents a single person quietly elevating their own
   access. (You can still edit your own name, email and other details.)
 - **A directory person's role cannot change.** People added by an import or the directory sync have no
-  login and stay **Viewer** until they are onboarded. Onboard them first, then change the role.
+  login and stay **Viewer** until they are onboarded. Their role shows as locked, with the reason;
+  onboard them first, then change the role.
 
 ## A note on your identity provider
 

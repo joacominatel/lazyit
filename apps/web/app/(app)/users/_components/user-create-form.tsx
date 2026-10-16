@@ -14,7 +14,6 @@ import {
   CreateUserSchema,
   type ManagerFormValue,
   type Role,
-  RoleSchema,
   toManagerInput,
 } from "@lazyit/shared";
 import { useRouter } from "next/navigation";
@@ -49,17 +48,18 @@ import { useConfigStatus } from "@/lib/api/hooks/use-config-status";
 import { useGrantAccess } from "@/lib/api/hooks/use-access-grant-mutations";
 import { useAssignUser } from "@/lib/api/hooks/use-asset-assignment-mutations";
 import { useCreateUser } from "@/lib/api/hooks/use-user-mutations";
+import { useCurrentUser } from "@/lib/api/hooks/use-users";
 import { useMounted } from "@/lib/hooks/use-mounted";
 import { notifyError } from "@/lib/api/notify-error";
 import { cn } from "@/lib/utils";
 import { scrollToFirstError } from "@/lib/utils/scroll-to-error";
 import { ManagerField } from "./manager-field";
+import { assignableRoles, notifyUserError } from "./role-ceiling";
 import { wireShapeResolver } from "./user-form-payload";
 
 const FORM_ID = "user-create-form";
 
 /** Role values shown in the create Select (the shared enum's order; labels resolved via i18n). */
-const ROLE_VALUES: readonly Role[] = RoleSchema.options;
 
 /** A blank manager picker (no manager recorded). */
 const EMPTY_MANAGER: ManagerFormValue = { kind: "none" };
@@ -190,7 +190,10 @@ export function UserCreateForm() {
   const t = useTranslations("users.create");
   const tForm = useTranslations("users.form");
   const tRole = useTranslations("users.role");
+  const tUsers = useTranslations("users");
   const tc = useTranslations("common");
+  const { data: me } = useCurrentUser();
+  const roleOptions = assignableRoles(me?.role);
   const router = useRouter();
 
   // `requiresAdminPassword` is true when lazyit owns credentials (local mode). The status may be warm on
@@ -269,7 +272,7 @@ export function UserCreateForm() {
     try {
       created = await createUser.mutateAsync(payload);
     } catch (error) {
-      notifyError(error, t("toast.createError"));
+      notifyUserError(error, t("toast.createError"), tUsers);
       setSubmitting(false);
       return;
     }
@@ -446,7 +449,7 @@ export function UserCreateForm() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ROLE_VALUES.map((value) => (
+                      {roleOptions.map((value) => (
                         <SelectItem key={value} value={value}>
                           {tRole(`labels.${value}`)}
                         </SelectItem>

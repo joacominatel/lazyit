@@ -365,6 +365,7 @@
     },
     "selfSuffix": "(you)",
     "ariaLabel": "Role for {name}",
+    "directoryLocked": "Directory-only person: onboard them to change the role.",
     "confirmTitle": "Change role?",
     "confirmBody": "<strong>{name}</strong> will become <strong>{role}</strong>.",
     "confirmAction": "Change role",
@@ -560,5 +561,10 @@
     "consumablesMore": "…and {count, plural, =1 {# more outstanding delivery} other {# more outstanding deliveries}} not listed on this act.",
     "consumablesMoreDelivered": "…and {count, plural, =1 {# older delivery} other {# older deliveries}} not listed on this act.",
     "consumablesUnavailable": "Consumables are not listed on this act — you don't have permission to view them."
+  },
+  "errors": {
+    "roleCeiling": "You can only manage users whose role is at or below your own. Only an administrator can manage administrators.",
+    "directoryRoleLocked": "This is a directory-only person with no login, so their role cannot change. Onboard them first.",
+    "lastAdmin": "Cannot remove the last administrator who can sign in. Another administrator must sign in, or be promoted, first."
   }
 }

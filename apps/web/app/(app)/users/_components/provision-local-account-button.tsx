@@ -7,7 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useProvisionLocalUserAccount } from "@/lib/api/hooks/use-user-mutations";
-import { notifyError } from "@/lib/api/notify-error";
+import { notifyUserError } from "./role-ceiling";
 import { TemporaryPasswordReveal } from "./temporary-password-reveal";
 
 /**
@@ -40,7 +40,7 @@ export function ProvisionLocalAccountButton({ user }: { user: User }) {
           }),
         );
       },
-      onError: (error) => notifyError(error, t("directory.provisionLocal.error")),
+      onError: (error) => notifyUserError(error, t("directory.provisionLocal.error"), t),
     });
   }
 
