@@ -68,10 +68,9 @@ const ACTIVITY_FROM = Prisma.sql`
 /**
  * Newest first, then a fixed order over the columns that tell rows apart (AUD-032). A batch operation
  * stamps one `occurredAt` on many rows (an offboarding revokes every grant at the same instant), and
- * Postgres orders ties arbitrarily, so OFFSET pages could repeat or drop rows at a boundary. The export
- * pages by keyset on the view's `sourceKey` instead ({@link DashboardService.activityExport}). The view has no source row id; every other output column (`actorName`, `subjectName`,
- * `targetUserName`) is derived from these keys, so rows still tied are byte-identical and their order
- * cannot change what a page or the CSV shows.
+ * Postgres orders ties arbitrarily, so OFFSET pages could repeat or drop rows at a boundary.
+ * The feed breaks ties on its output columns, not `sourceKey`: rows tied on all of them render identically.
+ * The export pages by keyset on `sourceKey` instead ({@link DashboardService.activityExport}).
  */
 const ACTIVITY_ORDER_BY = Prisma.sql`
   ORDER BY ra."occurredAt" DESC, ra."entityType", ra."entityId", ra."action",
