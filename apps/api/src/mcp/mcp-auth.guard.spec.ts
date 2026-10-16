@@ -736,6 +736,7 @@ describe('/mcp authentication matrix', () => {
           severity: 'warning',
         }),
       );
+      expect(grant.announcedAt).toBeInstanceOf(Date);
       expect(JSON.stringify(notifications.emit.mock.calls)).not.toContain(
         token,
       );

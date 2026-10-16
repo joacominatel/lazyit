@@ -107,9 +107,10 @@ OIDC-compliant IdP through its discovery document and JWKS, with no vendor SDK, 
 environment variables:
 
 - **API:** `AUTH_MODE=oidc`, `OIDC_ISSUER` and `OIDC_JWKS_URI` (both required at boot,
-  `apps/api/src/auth/boot-config.ts:98-105`), and an optional `OIDC_CLIENT_ID` that, when set, is the
-  expected token audience (`apps/api/src/auth/jwt-auth.guard.ts:409-411`). The API is a resource server
-  only: it never reads `OIDC_CLIENT_SECRET`.
+  `apps/api/src/auth/boot-config.ts:101-108`), and an optional `OIDC_CLIENT_ID` that, when set, is the
+  expected token audience (`apps/api/src/auth/jwt-auth.guard.ts:410-414`). When it is unset the API still
+  boots but logs a warning that audience validation is disabled (SEC-012, accepted 2026-10-15). The API
+  is a resource server only: it never reads `OIDC_CLIENT_SECRET`.
 - **Web:** `AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET` (Auth.js, [[0039-authjs-v5-frontend-oidc]]).
 
 The `/setup` wizard keeps showing the BYOI environment snippet so an operator can wire, or later move to,

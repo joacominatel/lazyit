@@ -38,6 +38,9 @@ const BUNDLED_ZITADEL_MESSAGE =
 const LEGACY_IDP_TYPE_WARNING =
   'IDENTITY_PROVIDER_TYPE=zitadel is no longer supported (the bundled Zitadel was removed, ADR-0102) and is ignored; remove the variable to silence this warning.';
 
+export const OIDC_AUDIENCE_DISABLED_WARNING =
+  "WARNING: OIDC_CLIENT_ID is not set, so OIDC token audience validation is DISABLED and any token signed by OIDC_ISSUER is accepted, including one issued to another app on the same IdP. Set OIDC_CLIENT_ID to the audience lazyit's tokens carry, usually its client id (SEC-012).";
+
 function pointsAtBundledZitadel(url: string | undefined): boolean {
   if (!url) return false;
   try {
@@ -142,6 +145,10 @@ export function validateBootConfig(
       env.IDENTITY_PROVIDER_TYPE?.trim().toLowerCase() === 'zitadel'
     ) {
       console.warn(LEGACY_IDP_TYPE_WARNING);
+    }
+    // Optional on purpose (some IdPs put a resource audience in access tokens), but never silently off.
+    if (result.data.AUTH_MODE === 'oidc' && !result.data.OIDC_CLIENT_ID) {
+      console.warn(OIDC_AUDIENCE_DISABLED_WARNING);
     }
     return result.data;
   }
