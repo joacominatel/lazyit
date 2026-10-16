@@ -47,7 +47,7 @@ became configurable is the *permissions* each role grants. This is **not** dynam
   the holder grants and acts on roles at or below its own only, so it never reaches ADMIN through the
   Users API ([[user]] → *RBAC safety guards*). A delegated `settings:manage` reads the matrix but cannot
   save it: `PUT /config/permissions` is ADMIN-only (SEC-088, 2026-10-16), as are the directory connection
-  writes.
+  writes and the SMTP save. It manages [[service-account]]s only within its own role's verbs.
 - **Seeded behavior-preserving, with two pre-tightened reads.** The seed is derived 1:1 from a single
   source-of-truth constant `DEFAULT_ROLE_PERMISSIONS` ([[shared-package]]) so the documented matrix and
   the seeded rows can never drift (a wrong seed fails the golden test). The seeded matrix:

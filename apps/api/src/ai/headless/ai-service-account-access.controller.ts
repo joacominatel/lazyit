@@ -56,7 +56,9 @@ export class AiServiceAccountAccessController {
     description:
       '`off` refuses every headless run of the account; `read-only` lists read tools only; `read-write` ' +
       'allows every tool its grants allow. `maxMutationsPerRun` caps executed writes per run (null = none). ' +
-      'Applies at the next step of a running run. Audited.',
+      'Applies at the next step of a running run. Audited. Widening it (a higher access level, a higher ' +
+      "or cleared cap) on an account holding a verb the caller's role lacks is refused with 403 " +
+      '`PERMISSION_CEILING_EXCEEDED` (SEC-088).',
   })
   @ApiOkResponse({ type: AiServiceAccountSettingsDto })
   @ApiNotFoundResponse({ description: 'No such (live) Service Account.' })
@@ -65,6 +67,11 @@ export class AiServiceAccountAccessController {
     @Body() dto: AiServiceAccountSettingsDto,
     @CurrentUser() user?: User,
   ): Promise<AiServiceAccountSettings> {
-    return this.service.update(aiEntityId(id), dto, user?.id ?? null);
+    return this.service.update(
+      aiEntityId(id),
+      dto,
+      user?.id ?? null,
+      user?.role,
+    );
   }
 }

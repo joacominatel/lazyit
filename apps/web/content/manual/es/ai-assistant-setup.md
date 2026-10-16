@@ -252,7 +252,9 @@ El acceso a IA solo acota lo que ya permiten los permisos de la cuenta; nunca ot
 además necesita **Usar el asistente de IA** para ejecuciones headless y **Conectar agentes de IA
 externos (MCP)** para MCP. A una cuenta que tiene **Reportar inventario de servidores (agente)** — la
 credencial de reporte de los agentes — se le niega el uso de IA elijas lo que elijas; creá una cuenta
-aparte para la IA. Mirá también [Cuentas de servicio](/help/users-permissions-service-accounts).
+aparte para la IA. Si un administrador le dio a tu rol **Cambiar la configuración de la instancia**,
+siempre podés acotar el acceso a IA de una cuenta, pero solo podés ampliarlo (un nivel mayor, o un límite
+de escrituras mayor o ninguno) cuando la cuenta no tiene ningún permiso que le falte a tu rol. Mirá también [Cuentas de servicio](/help/users-permissions-service-accounts).
 
 ## Desactivarlo
 

@@ -186,6 +186,8 @@ already-ADMIN-gated Users API and adds the safety guards the original ADR deferr
   advisory lock on the admin set, re-reads the target and re-counts, so the second request waits, sees
   the first one's result and gets the 409. Who counts as an admin is unchanged.
   *Amended 2026-10-15 (AUD-040):* who counts is now a **usable** admin — see the amendment below.
+  *Amended 2026-10-16 (SEC-088 follow-up):* the 409 body carries `code: 'LAST_ADMIN_REQUIRED'`, so a
+  client matches the code instead of the wording. The message is unchanged.
 - **No self-role-change** (`users.service.ts`) — an ADMIN cannot change their OWN role (**403
   Forbidden**, "You cannot change your own role"). Privilege changes must be made by one admin on
   another, so a single admin can never quietly elevate/strip their own role. The controller passes

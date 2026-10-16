@@ -26,7 +26,9 @@ En **Activos › Topología** el encabezado de la página lleva un botón **Agre
 en la Tabla; elegí **Instalar un agente de reporte**. En la vista **Servidores** (la Tabla), mientras
 todavía no tenés agentes, aparece además arriba una tarjeta **Creá tu primer agente** que explica qué
 es un agente. (Necesitás el permiso de gestión de configuración en cualquiera de los dos casos,
-porque esto crea un token.)
+porque esto crea un token. Un Miembro o Lector al que un administrador le dio ese permiso también puede
+instalar agentes: el permiso de reporte del agente es el único que una cuenta de servicio puede tener
+más allá de tu propio rol.)
 
 Cualquiera de los dos abre un asistente guiado y breve, de tres pasos:
 

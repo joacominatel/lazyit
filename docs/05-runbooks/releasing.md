@@ -166,7 +166,7 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   live models, or a model with live assets or open purchase lines mapped to it, answers the same 409
 >   without a strategy. A model create, or an update that changes its category, is a 400 when the
 >   category is archived.
-> - **Delegated administration is narrower** (#1601, #1606).
+> - **Delegated administration is narrower** (#1601, #1606, #1611).
 >   - A role delegated `settings:manage` can no longer save the permission matrix, save the directory
 >     connection or start a directory sync: 403 `ADMIN_REQUIRED`.
 >   - A role delegated `user:manage` manages users only up to its own role. Only an ADMIN creates,
@@ -174,6 +174,10 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   - A clone copies only the assignments and grants the caller could create by hand.
 >   - Promoting a user cancels their pending temporary password and password-reset links. Issue a new
 >     one after the promotion if needed.
+>   - Saving the SMTP settings is ADMIN-only (403 `ADMIN_REQUIRED`), and a service account's
+>     permissions are capped at those of the person who creates or changes it (403
+>     `PERMISSION_CEILING_EXCEEDED`). `infra:report` is exempt, so a delegate still installs reporting
+>     agents.
 > - **Listing your own AI connections and personal tokens no longer needs `ai:connect`** (#1598, #1605).
 >   Creating a connection or a token still does.
 > - **Data export** (#1597, ADR-0103). Users, access grants, consumables and purchases gain an

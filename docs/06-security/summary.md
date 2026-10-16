@@ -226,6 +226,14 @@ Snapshot of the security review. Updated each sweep. Method:
    - Not a finding: #1602 and #1607 fixed unique-violation handling that never matched under
      `@prisma/adapter-pg`, because `meta.target` is never set.
 
+22. **2026-10-16 — SEC-088 closed.** The CEO decided the last two `settings:manage` paths, and #1611
+   shipped them. [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] is
+   **✅ closed**:
+   - saving the SMTP settings is ADMIN-only (`ADMIN_REQUIRED`);
+   - service-account tokens are capped at the caller's own verbs (`PERMISSION_CEILING_EXCEEDED`).
+
+   The last-admin 409 also gained the code `LAST_ADMIN_REQUIRED`.
+
 Frontend (`apps/web`) and dependency auditing remain **out of scope** for the general sweeps. SEC-079 is a
 one-off dependency triage, SEC-084 a one-off web finding from a dependency upgrade, and sweep 11
 covered only the AI web surfaces (chat renderer, approval cards,
@@ -237,10 +245,10 @@ consent page, `/account/ai`).
 | --- | --- |
 | Critical | 0 |
 | High | 0 |
-| Medium | 1 |
+| Medium | 0 |
 | Low | 5 |
 | Info | 0 |
-| **Total open** | **6** |
+| **Total open** | **5** |
 
 Deferred (accepted ADR debt, not findings): **3** active (DEF-001 ✅ — incl. its read-authz **residual**,
 now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — see [[deferred]].
@@ -254,10 +262,18 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 | [[SEC-040-soft-deleted-parent-leaks-via-asset-includes\|SEC-040]] | 🟡 Low | transversal | Soft-deleted model/location/category leaks via nested asset includes |
 | [[SEC-041-soft-delete-no-child-reconciliation-dangling-fk\|SEC-041]] | 🟡 Low | transversal | Soft-delete doesn't reconcile children (dangling FK to invisible parent; `SetNull` only on hard-delete). Location part fixed (#1603); asset categories and models remain |
 | [[SEC-060-article-restore-skips-category-usable-guard\|SEC-060]] | 🟡 Low | articles | `restore()` skips `assertCategoryUsable` → live article on a soft-deleted category |
-| [[SEC-088-delegated-user-or-settings-manage-escalates-to-admin\|SEC-088]] | 🟠 Medium | users / config | A non-ADMIN role delegated `user:manage` or `settings:manage` can make itself ADMIN (no subset rule, matrix self-edit). Mostly fixed (#1601, #1606, #1609); `PUT /smtp` and service-account token verbs remain |
 
 ## Top findings
 
+0. **SEC-088 ✅ Closed.** Moved to `closed/` (2026-10-16, audit decision round). Delegating `user:manage`
+   or `settings:manage` to MEMBER or VIEWER no longer reaches ADMIN:
+   - a role ceiling on every user write (#1601);
+   - the matrix and directory writes are ADMIN-only, and a clone copies only what the caller could grant
+     (#1606);
+   - the UI copy (#1609);
+   - the SMTP save is ADMIN-only, and service-account verbs are capped at the caller's own (#1611).
+
+   No data change: existing service accounts keep their verbs until a non-ADMIN next re-arms them.
 0. **SEC-089 ✅ Closed.** Moved to `closed/` (2026-10-16, audit decision round). A folder move with a changed
    `parentId` needs `settings:manage`. Without it the request gets a 403 and nothing changes. Each move
    writes one version on every live article in the subtree, attributed to the mover. A create under a
@@ -282,20 +298,6 @@ now closed by [[0046-roles-permissions-v2]] — and DEF-003 ✅ resolved) — se
 0. **SEC-030 ✅ Closed.** Moved to `closed/` (2026-10-14, recorded by the 2026-10-10 audit): asset
    create, receive and move refuse an archived location or model since #1476, and an unchanged legacy
    reference stays editable. No data change.
-0. **SEC-088 — open (Medium).** Delegating `user:manage` or `settings:manage` to MEMBER or VIEWER hands
-   that role ADMIN: nothing bounds the roles a user administrator assigns, and a matrix editor can widen
-   their own role. It is not exposed on the shipped defaults. The fix direction is a subset rule on
-   `user:manage` writes (only ADMIN assigns or acts on ADMIN) and an ADMIN-only `role:manage` for the
-   matrix. It ships standalone or with #1560.
-   *Update 2026-10-16:* mostly fixed, still open.
-   - #1601 added the role ceiling: only an ADMIN creates, promotes to or acts on an ADMIN.
-   - #1606 made the matrix and directory writes ADMIN-only (`ADMIN_REQUIRED`), limited a clone to what
-     the caller could grant, and made a promotion revoke pending temporary passwords and reset links.
-   - #1609 corrected the UI copy.
-
-   Two delegated `settings:manage` paths remain, pending a CEO decision:
-   - `PUT /smtp`, which can route an ADMIN's forgot-password link to the delegate;
-   - service-account tokens minted with verbs above the delegate's own role.
 0. **SEC-022 ✅ Closed (no longer applicable).** Moved to `closed/` (2026-10-09, epic #1543): the Zitadel
    write-back and its field-scoped revert were removed (PR #1552), so `update` is one local write and a
    co-PATCHed `isActive` can no longer survive a "your change was not saved" 503. No data change.

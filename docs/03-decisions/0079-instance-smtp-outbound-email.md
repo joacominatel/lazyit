@@ -3,7 +3,7 @@ title: "ADR-0079: Instance SMTP + outbound email for notifications"
 tags: [adr, notifications, email, smtp, settings, security, async, worker]
 status: proposed
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-10-16
 deciders: [Joaquín Minatel]
 ---
 
@@ -15,6 +15,9 @@ deciders: [Joaquín Minatel]
 channel behind `NotificationsService.emit()`) and [[0053-async-workers-bullmq-valkey]] (delivery rides
 BullMQ). Relates to [[0028-secrets-and-config]] / [[0054-applications-workflow-engine]] (the encrypted
 server-secret precedent). Awaiting CTO/CEO ratification of the forks in §Decision.
+
+**Amended** — 2026-10-16 (SEC-088, CEO decision): saving the SMTP settings is ADMIN-only. See
+*Amendment — saving SMTP is ADMIN-only* below.
 
 > **Note on ADR-0052:** the brief flagged a possible "stale ADR-0052 SMTP draft". There is none —
 > [[0052-ci-parallel-docker-and-decoupled-verify]] is about CI Docker parallelization. This ADR does not
@@ -119,6 +122,17 @@ not just `verify()`. A bad relay yields `ok:false` + a short non-secret error, n
 `rejectUnauthorized` defaults **true** (secure — reject an unverifiable cert), with an admin toggle to
 allow a self-signed cert on a self-hosted relay (opt-in insecurity). `security` maps to nodemailer as:
 `tls`→`secure:true`, `starttls`→`secure:false`+`requireTLS:true`, `none`→plaintext.
+
+## Amendment — saving SMTP is ADMIN-only (SEC-088, 2026-10-16)
+
+§1 gated all three routes on `settings:manage`, which an ADMIN can delegate to MEMBER or VIEWER
+([[0046-roles-permissions-v2]] P5). A delegate could then point outbound mail at a relay they control
+and request a password reset for an ADMIN through the public forgot-password flow: the reset link
+travels through their relay, and the ADMIN account is theirs (local mode). By CEO decision, `PUT
+/config/smtp` keeps `@RequirePermission('settings:manage')` and adds `AdminOnlyGuard`, which refuses any
+caller that is not a human ADMIN with **403** `ADMIN_REQUIRED`. `GET /config/smtp` and `POST
+/config/smtp/test` stay on `settings:manage`: the read returns no secret, and the test send persists
+nothing and goes through the relay an ADMIN saved. No data change: the saved row is untouched.
 
 ## Forks requiring CTO/CEO ratification
 

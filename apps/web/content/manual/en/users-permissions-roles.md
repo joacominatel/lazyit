@@ -67,9 +67,10 @@ These guardrails protect the instance from being locked out or quietly escalated
   hand out, and on a user above your role the role shows as a plain badge and **Edit**, the password
   reset and **Offboard** are not offered (cloning them still is). Anything else is refused with a
   clear message.
-- **Only an admin edits permissions and the directory connection.** Giving Member or Viewer **Change
-  instance settings** lets them view the permission matrix and the directory connection, not change
-  them or run a directory sync.
+- **Only an admin edits permissions, the directory connection and the email settings.** Giving Member
+  or Viewer **Change instance settings** lets them view the permission matrix, the directory connection
+  and the email (SMTP) settings, not change them or run a directory sync. The service accounts they
+  manage can hold only permissions their own role has.
 - **Promoting someone cancels their pending sign-in credentials.** When a person's role goes up, a
   temporary password they have not replaced yet and any password-reset link still waiting are cancelled,
   so one handed out at the lower role stops working. The role-change confirmation warns you first, and

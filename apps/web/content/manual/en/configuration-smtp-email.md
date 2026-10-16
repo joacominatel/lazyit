@@ -12,6 +12,10 @@ not just the in-app **notification bell**. You point lazyit at your existing mai
 **Settings → Email** (administrators only; in the Settings side menu it sits under **Integrations**). It
 is **off until you turn it on**, and the page header shows **On** or **Off**.
 
+Only an admin can **save** these settings, even when a Member or Viewer was given **Change instance
+settings**: whoever controls the relay could read every password-reset email it carries, an admin's
+included. A Member or Viewer with that capability can still open the page and send a test email.
+
 ## Configuring the connection
 
 The **SMTP server** section has these fields. Each one keeps its longer explanation behind the **?**
