@@ -204,45 +204,64 @@ asset categories and models, 2026-10-16)
 **Date**: 2026-10-16
 
 ### Evidence (on `fix/sec-041-asset-category-model-delete`)
-- `apps/api/src/asset-categories/asset-categories.service.ts:145-189` (`remove`): locks the category, and
-  the move target, `FOR UPDATE` in id order. While live models are filed under it, a delete without a
-  resolution is a 409 `DELETE_RESOLUTION_REQUIRED` with `{ assetModels, assets }`. `detach` clears
-  `categoryId`, and `move` re-points it to a live category that is not this one (400 otherwise). Both run
-  in the soft delete's transaction. `:107-143` (`deleteImpact`) counts the models and their live assets,
-  and lists each kind only for a reader.
-- `apps/api/src/asset-models/asset-models.service.ts:229-282` (`remove`): locks both models, the live
-  assets and the open purchase lines (`:348-364`, live lines of a live `DRAFT`/`ORDERED` purchase that still
-  expect units; `FOR UPDATE OF l`). Without a resolution while any exist it is the same 409, with
-  `{ assets, purchaseOrderLines }`. `:308-346` re-points or detaches them, writes one `MODEL_CHANGED`
-  history row per asset in a single insert and one `LINE_UPDATED` event per line. The transaction has a
-  30 s timeout.
-- `:164-194` and `:367-380` (`assertCategoryLive`): a model create, or an update that changes `categoryId`,
+- `apps/api/src/asset-categories/asset-categories.service.ts:145-189` (`remove`):
+  - locks the category and the move target `FOR UPDATE` in id order, then the live models `FOR NO KEY
+    UPDATE` in id order;
+  - while live models are filed under it, a delete without a resolution is a 409
+    `DELETE_RESOLUTION_REQUIRED` with `{ assetModels, assets }`;
+  - `detach` clears `categoryId`, and `move` re-points it to a live category that is not this one (400
+    otherwise), in the soft delete's transaction.
+
+  `:107-143` (`deleteImpact`) counts the models and their live assets, and lists each kind only for a
+  reader.
+- `apps/api/src/asset-models/asset-models.service.ts:230-289` (`remove`), with a 30 s transaction timeout:
+  - locks, in order: both models and the live assets `FOR UPDATE`; the purchases of the mapped lines
+    `FOR SHARE` in id order (purchase before line, like every purchase write); then the open lines
+    `FOR UPDATE OF l` (`:371-387`: live lines of a live `DRAFT`/`ORDERED` purchase that still expect units);
+  - without a resolution while any exist, it is the same 409 with `{ assets, purchaseOrderLines }`;
+  - `:331-368` re-points or detaches them, writes one `MODEL_CHANGED` history row per asset in a single
+    insert, and one `LINE_UPDATED` event per line.
+- `:165-195` and `:390-403` (`assertCategoryLive`): a model create, or an update that changes `categoryId`,
   is a 400 when the category is missing or archived. An update that keeps a legacy archived category is
   accepted.
+- `:298-327` (`restore`): restoring a model whose category is archived is a 409 ("restore the category
+  first"), checked under a `FOR SHARE` lock on the category.
 - The controllers expose `GET /asset-categories/:id/delete-impact` and `GET /asset-models/:id/delete-impact`,
   and parse `?strategy=` / `?targetId=` with the shared `parseDeleteResolution`. `category_archive` and
   `asset_model_archive` take `strategy` / `moveTo`.
 - Restoring a category or model re-links nothing.
 
 ### Tests
-- `apps/api/src/asset-categories/asset-categories.service.spec.ts:222` (`refuses (409) while live models are
-  filed under it and no strategy is given, with the model and asset counts`), `:243` (detach) and `:257`
-  (move). Also covered: the target refusals, the shared transaction and the permission-gated impact.
-- `apps/api/src/asset-models/asset-models.service.spec.ts:338` (409 with the counts), `:355` (detach with
-  the `MODEL_CHANGED` rows and the `LINE_UPDATED` event), `:401` (move into a model of another category),
-  `:448` (the locks and the open-status filter) and `:481` (3,000 assets within the 30 s timeout). `:211`
-  and `:220` cover the archived category refused on create and update.
-- The controller specs cover the query parsing, and `apps/api/src/ai/tools/taxonomy.tools.spec.ts` covers
-  the tool previews, the refusals and the route parity.
+- `apps/api/src/asset-categories/asset-categories.service.spec.ts`:
+  - `:231`: the 409 with the model and asset counts, and the id-ordered model lock;
+  - `:253` (detach) and `:267` (move);
+  - also covered: the target refusals, the shared transaction and the permission-gated impact.
+- `apps/api/src/asset-models/asset-models.service.spec.ts`:
+  - `:338`: the 409 with the counts;
+  - `:355`: detach, with the `MODEL_CHANGED` rows and the `LINE_UPDATED` event;
+  - `:401`: a move into a model of another category;
+  - `:448`: the model, asset and line locks, and the open-status filter;
+  - `:483`: the purchases are locked after the assets and before the lines;
+  - `:508`: the transaction is opened with the 30 s timeout option. It runs 3,000 mocked assets through
+    one update and one history insert, but no database, so it does not measure the time;
+  - `:211` and `:220`: an archived category is refused on create and update;
+  - `:576`–`:605`: the restore refusal under an archived category, and the restores that go through.
+- The controller specs cover the query parsing. `apps/api/src/ai/tools/taxonomy.tools.spec.ts` covers the
+  tool previews, the refusals, the open lines shown as distinct purchases, and the route parity.
 
 ### Verification
-Run on the branch on 2026-10-16 after merging `dev` at `044ed55d3`: `node node_modules/.bin/jest` in
-`apps/api` passed 326 suites and 7535 tests.
+Run on the branch on 2026-10-16, after merging `dev` at `044ed55d3`: `node node_modules/.bin/jest` in
+`apps/api` passed 326 suites and 7539 tests.
 
 ### Residual risk
-- Rows archived before the fix keep their dangling references, and nothing is backfilled. Deleting a
+- **Rows archived before the fix** keep their dangling references, and nothing is backfilled. Deleting a
   restored parent again goes through the resolution. The read-side leak through nested includes is
   [[SEC-040-soft-deleted-parent-leaks-via-asset-includes|SEC-040]], which stays open.
-- A model write checks the category with a plain read, not under `FOR SHARE`, like the other parent
-  liveness checks. A write racing a concurrent category delete can still land on the archived category.
-  That class is tracked in #1604.
+- **Parent checks are plain reads.** A model write checks the category with a plain read, not under
+  `FOR SHARE`, like the other parent liveness checks. A write racing a concurrent category delete can
+  still land on the archived category.
+- **A receipt in progress during a model delete.** Each received unit is its own transaction. A unit
+  whose insert is waiting on the model row (its foreign key's `KEY SHARE` against the delete's
+  `FOR UPDATE`) succeeds once the delete commits. That one unit lands on the archived model, and the
+  remaining units fail the live-model check. The second and third points are the same class, tracked
+  in #1604.

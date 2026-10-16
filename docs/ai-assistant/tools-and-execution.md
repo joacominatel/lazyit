@@ -1088,8 +1088,10 @@ Accounts holding the route's permission are admitted, exactly as over HTTP.
   route takes `categoryId: null` since #1315, CEO 2026-09-25; `sku: null` / `description: null` clear
   those fields the same way — a before → none row, a no-op when already empty, #1441), `asset_model_archive`·D
   (in use — live assets or open purchase lines — it needs `strategy` `detach`, or `move` with `moveTo`, another
-  model in any category; the card counts each kind from `GET /asset-models/:id/delete-impact`, shows each
-  line as its purchase, and shows a `destination` row), `asset_model_restore`; `location_update`·D
+  model in any category; the card counts each kind from `GET /asset-models/:id/delete-impact`, shows the open
+  lines as the distinct purchases they belong to — counted only when every line is listed, otherwise reported
+  as unknown — and shows a `destination` row), `asset_model_restore` (a `409` while the model's category is
+  archived); `location_update`·D
   (name, type, description, address, floor, notes, and `parent` by id or exact name — `null` makes it
   top-level), `location_archive`·D (in use — live assets, child locations or open purchases — it needs
   `strategy` `detach`, or `move` with `moveTo`, one choice for all of them; the card counts each kind from

@@ -40,12 +40,16 @@ The generic make/model definition an [[asset]] is an instance of — e.g. "Dell 
 
   Without a resolution the delete is a `409` `DELETE_RESOLUTION_REQUIRED` with
   `{ assets, purchaseOrderLines }`. The resolution and the soft delete run in **one transaction**
-  (30 s timeout; both models, the assets and the lines locked `FOR UPDATE`). Each moved asset gets a
+  (30 s timeout). Locks, in order: both models and the assets `FOR UPDATE`, the purchases of the mapped
+  lines `FOR SHARE` (purchase before line, like every purchase write, and settled against a status change
+  or archive in flight), then the open lines `FOR UPDATE`. Each moved asset gets a
   `MODEL_CHANGED` [[asset-history]] row (`{ from, to }`, `to: null` on detach), all written in one
   insert, and each line a `LINE_UPDATED` [[purchase-order-event]] for `assetModelId`. History keeps its
   reference: archived assets, received lines and the lines of cancelled purchases still point at the
   archived model. Restoring the model re-links nothing. The FK's `onDelete: SetNull` only matters for a
   hard delete, which the API never issues.
+- **Restore needs a live category.** Restoring a model whose category is still archived is a `409`:
+  restore the category first. Restores do not cascade, as for a [[location]] under an archived parent.
 - **Models archived before the delete resolution** still have their assets and lines pointing at them.
   Restoring one brings those links back; deleting it again goes through the resolution.
 - **A live category on write (SEC-041).** A create with a `categoryId`, or an update that changes it, is

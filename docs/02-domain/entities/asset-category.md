@@ -34,7 +34,8 @@ Drives grouping and filtering, and — via an optional **advisory specs dictiona
   all go to another live asset category, not the one being deleted — `400` otherwise). Their live
   assets follow their model, so the preview and the `409` count them too. Without a resolution the
   delete is a `409` `DELETE_RESOLUTION_REQUIRED` with `{ assetModels, assets }`. The re-point and the
-  soft delete share one transaction under a `FOR UPDATE` lock on both categories; models have no history
+  soft delete share one transaction under a `FOR UPDATE` lock on both categories, with the live models
+  locked `FOR NO KEY UPDATE` in id order; models have no history
   table, so nothing else is written. Archived models keep their reference, and restoring the category
   re-links nothing. The `SetNull` FK only matters for a hard delete, which the API never issues.
 - **Categories archived before the delete resolution** still have their models pointing at them; a

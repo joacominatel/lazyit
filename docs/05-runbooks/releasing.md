@@ -165,7 +165,7 @@ records the script's own run. Like every `update.sh` fix, this applies from the 
 >   rows. **Asset categories and asset models follow the same rule** (SEC-041): an asset category with
 >   live models, or a model with live assets or open purchase lines mapped to it, answers the same 409
 >   without a strategy. A model create, or an update that changes its category, is a 400 when the
->   category is archived.
+>   category is archived, and restoring a model whose category is archived is a 409.
 > - **Delegated administration is narrower** (#1601, #1606, #1611).
 >   - A role delegated `settings:manage` can no longer save the permission matrix, save the directory
 >     connection or start a directory sync: 403 `ADMIN_REQUIRED`.
