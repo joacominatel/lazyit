@@ -170,7 +170,6 @@ const dashboard = {
   getSummary: jest.fn(),
   getActivity: jest.fn(),
   getActivityFilterOptions: jest.fn(),
-  streamActivityCsvRows: jest.fn(),
 };
 
 function resetDashboard() {
