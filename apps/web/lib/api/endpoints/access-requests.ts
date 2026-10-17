@@ -36,13 +36,21 @@ export interface AccessRequestFilters {
  * `accessRequest:read`). Returns the whole `Page<AccessRequest>` envelope so callers can read both
  * `items` and the `total`/`limit`/`offset` metadata.
  */
-export async function getAccessRequests(
-  filters: AccessRequestFilters = {},
-): Promise<AccessRequestListPage> {
+export const ACCESS_REQUEST_EXPORT_PATH = `${BASE}/export`;
+
+/** The managers' list filters, never the page window; the CSV export sends exactly these. */
+export function accessRequestFilterParams(filters: AccessRequestFilters = {}): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.applicationId) params.set("applicationId", filters.applicationId);
   if (filters.requesterId) params.set("requesterId", filters.requesterId);
+  return params;
+}
+
+export async function getAccessRequests(
+  filters: AccessRequestFilters = {},
+): Promise<AccessRequestListPage> {
+  const params = accessRequestFilterParams(filters);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));

@@ -42,21 +42,29 @@ export interface ApplicationListParams {
  * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
  * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
+export const APPLICATION_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function applicationFilterParams(params: ApplicationListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 export function getApplications(
   params: ApplicationListParams = {},
   signal?: AbortSignal,
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<Page<Application>> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = applicationFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Application>>(
     search ? `${BASE}?${search}` : BASE,

@@ -49,22 +49,30 @@ export interface LocationListParams {
  * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
  * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
  */
+export const LOCATION_EXPORT_PATH = `${BASE}/export`;
+
+/** The list's filters, never paging or sort; the CSV export sends exactly these. */
+export function locationFilterParams(params: LocationListParams = {}): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.type) qs.set("type", params.type);
+  if (params.deleted) qs.set("deleted", params.deleted);
+  return qs;
+}
+
 export function getLocations(
   params: LocationListParams = {},
   signal?: AbortSignal,
   // Optional Bearer override for SSR server-prefetch (ADR-0067) — see `getAssets`.
   token?: string,
 ): Promise<Page<Location>> {
-  const qs = new URLSearchParams();
-  if (params.q) qs.set("q", params.q);
+  const qs = locationFilterParams(params);
   if (params.sort) {
     qs.set("sort", params.sort);
     if (params.dir) qs.set("dir", params.dir);
   }
-  if (params.type) qs.set("type", params.type);
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
-  if (params.deleted) qs.set("deleted", params.deleted);
   const search = qs.toString();
   return apiFetch<Page<Location>>(
     search ? `${BASE}?${search}` : BASE,
