@@ -60,12 +60,14 @@ function accessRequest(over: {
   requesterId: string;
   applicationId: string;
   status?: 'PENDING' | 'APPROVED' | 'DENIED';
+  filedById?: string;
 }) {
   seq += 1;
   const status = over.status ?? 'PENDING';
   const decided = status !== 'PENDING';
   const row = {
     id: `creq${String(seq).padStart(21, '0')}`,
+    filedById: null as string | null,
     accessLevel: seq % 2 ? 'admin' : null,
     justification: `because ${seq}`,
     decidedById: decided ? ADA : null,
@@ -83,6 +85,7 @@ function accessRequest(over: {
     requester: PEOPLE[row.requesterId],
     application: { name: APPS[row.applicationId] },
     decidedBy: row.decidedById ? PEOPLE[row.decidedById] : null,
+    filedBy: row.filedById ? PEOPLE[row.filedById] : null,
   };
 }
 
@@ -90,7 +93,7 @@ const REQUESTS = [
   accessRequest({ requesterId: ANA, applicationId: APP1 }),
   accessRequest({ requesterId: ANA, applicationId: APP2, status: 'APPROVED' }),
   accessRequest({ requesterId: BEN, applicationId: APP1, status: 'DENIED' }),
-  accessRequest({ requesterId: BEN, applicationId: APP2 }),
+  accessRequest({ requesterId: BEN, applicationId: APP2, filedById: ADA }),
   accessRequest({ requesterId: BEN, applicationId: APP1, status: 'APPROVED' }),
   accessRequest({ requesterId: ANA, applicationId: APP1, status: 'DENIED' }),
 ];
@@ -174,7 +177,7 @@ describe('GET /access-requests/export (ADR-0103)', () => {
     csvRows(text).map((cells) => cells[cells.length - 1]);
 
   const FULL_HEADER =
-    'Application,Requester,Requester email,Access level,Justification,Status,Requested at,' +
+    'Application,Requester,Requester email,Access level,Justification,Status,Filed by,Requested at,' +
     'Decided by,Decided at,Denial reason,Grant ID,Request ID';
 
   it('pins the header for a caller who can read users and applications', async () => {
@@ -225,7 +228,7 @@ describe('GET /access-requests/export (ADR-0103)', () => {
 
   it('renders names, the decision and the grant readably', async () => {
     const res = await get('/access-requests/export', 'ADMIN');
-    const byId = new Map(csvRows(res.text).map((cells) => [cells[11], cells]));
+    const byId = new Map(csvRows(res.text).map((cells) => [cells[12], cells]));
     const approved = byId.get(REQUESTS[1].id)!;
     expect(approved.slice(0, 3)).toEqual([
       'GitHub',
@@ -233,12 +236,16 @@ describe('GET /access-requests/export (ADR-0103)', () => {
       'ana@lazyit.local',
     ]);
     expect(approved[5]).toBe('APPROVED');
-    expect(approved[7]).toBe('Ada Admin');
-    expect(approved[10]).toBe(REQUESTS[1].grantId);
+    expect(approved[6]).toBe('');
+    expect(approved[8]).toBe('Ada Admin');
+    expect(approved[11]).toBe(REQUESTS[1].grantId);
     const denied = byId.get(REQUESTS[2].id)!;
-    expect(denied[9]).toBe('not needed');
+    expect(denied[10]).toBe('not needed');
     const pending = byId.get(REQUESTS[0].id)!;
-    expect(pending[7]).toBe('');
+    expect(pending[8]).toBe('');
+    const onBehalf = byId.get(REQUESTS[3].id)!;
+    expect(onBehalf[1]).toBe('Ben Ruiz');
+    expect(onBehalf[6]).toBe('Ada Admin');
   });
 
   it('a caller with accessRequest:read alone gets ids, not names, and no email column', async () => {
@@ -253,10 +260,14 @@ describe('GET /access-requests/export (ADR-0103)', () => {
     expect(res.text).not.toContain('Ana Diaz');
     expect(res.text).not.toContain('Jira');
     const approved = csvRows(res.text).find(
-      (cells) => cells[10] === REQUESTS[1].id,
+      (cells) => cells[11] === REQUESTS[1].id,
     )!;
     expect(approved.slice(0, 2)).toEqual([APP2, ANA]);
-    expect(approved[6]).toBe(ADA);
+    expect(approved[7]).toBe(ADA);
+    const onBehalf = csvRows(res.text).find(
+      (cells) => cells[11] === REQUESTS[3].id,
+    )!;
+    expect(onBehalf[5]).toBe(ADA);
   });
 
   it('a service account without accessRequest:read is refused', async () => {

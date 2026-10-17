@@ -197,7 +197,7 @@ describe('ConsumablesService', () => {
       // Consumable is NOT in the ADR-0032 SOFT_DELETABLE_MODELS set, so the `active` slice scopes to
       // live rows EXPLICITLY here (the read filter does not auto-scope it) — ADR-0041 addendum.
       where: { deletedAt: null },
-      orderBy: { name: 'asc' },
+      orderBy: [{ name: 'asc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
     });
@@ -291,11 +291,9 @@ describe('ConsumablesService', () => {
       },
     );
     const call = (
-      consumable.findMany.mock.calls as Array<
-        [{ orderBy: Record<string, unknown> }]
-      >
+      consumable.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(call.orderBy).toEqual({ currentStock: 'desc' });
+    expect(call.orderBy).toEqual([{ currentStock: 'desc' }, { id: 'desc' }]);
 
     await expect(
       service.findPage(
@@ -316,7 +314,7 @@ describe('ConsumablesService', () => {
 
     expect(consumable.findMany).toHaveBeenCalledWith({
       where: { deletedAt: { not: null } },
-      orderBy: { name: 'asc' },
+      orderBy: [{ name: 'asc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       includeSoftDeleted: true,

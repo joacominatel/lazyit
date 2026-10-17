@@ -188,7 +188,7 @@ describe('NotificationsService', () => {
       // The per-caller read include scopes to THIS user (the fan-out-on-read anti-join).
       expect(notification.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           include: {
             reads: {
               where: { userId: ADMIN_A },

@@ -237,7 +237,7 @@ export class ConsumablesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.consumable.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,

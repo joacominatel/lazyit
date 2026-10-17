@@ -182,6 +182,16 @@ export interface OffboardResult {
   rotationVaults: { vaultId: string; name: string; itemCount: number }[];
 }
 
+const DIRECTORY_PROFILE_ATTRS = ['jobTitle', 'department'] as const;
+
+function directoryAttrsOf(
+  value: Prisma.JsonValue | null,
+): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? { ...value }
+    : {};
+}
+
 /** The attribution of the human-only routes, which pass the caller's id (`undefined` = server caller). */
 function humanActor(actorId: string | undefined): ActorAttribution {
   return actorId != null ? { userId: actorId } : {};
@@ -268,7 +278,13 @@ export class UsersService {
       ? { includeSoftDeleted }
       : {};
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({ where, orderBy, take, skip, ...escapeHatch }),
+      this.prisma.user.findMany({
+        where,
+        orderBy: [orderBy, { id: 'desc' }],
+        take,
+        skip,
+        ...escapeHatch,
+      }),
       this.prisma.user.count({ where, ...escapeHatch }),
     ]);
     // Resolve the manager descriptor for every row on the page in ONE batched query (ADR-0058), so the
@@ -822,6 +838,18 @@ export class UsersService {
       ...(data.legajo !== undefined ? { legajo: data.legajo } : {}),
       ...(data.username !== undefined ? { username: data.username } : {}),
       ...(managerWrite ?? {}),
+      ...(data.jobTitle !== undefined || data.department !== undefined
+        ? {
+            directoryAttrs: {
+              ...(data.jobTitle !== undefined
+                ? { jobTitle: data.jobTitle }
+                : {}),
+              ...(data.department !== undefined
+                ? { department: data.department }
+                : {}),
+            },
+          }
+        : {}),
     };
   }
 
@@ -921,6 +949,24 @@ export class UsersService {
     const usernameChanged =
       data.username !== undefined &&
       data.username !== (current.username ?? null);
+    // The AD/LDAP sync rewrites directoryAttrs on every run, so it owns these two for the people it syncs.
+    const attrs = directoryAttrsOf(current.directoryAttrs);
+    const attrChanges = DIRECTORY_PROFILE_ATTRS.filter(
+      (key) => data[key] !== undefined && data[key] !== (attrs[key] ?? null),
+    );
+    if (attrChanges.length > 0 && current.directorySource != null) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PROFILE_MANAGED_BY_DIRECTORY',
+        message:
+          'Department and job title come from the company directory, so they cannot be changed here. Change them in the directory.',
+      });
+    }
+    const nextAttrs = { ...attrs };
+    for (const key of attrChanges) {
+      if (data[key] === null) delete nextAttrs[key];
+      else nextAttrs[key] = data[key];
+    }
 
     // Resolve the manager either/or → DB columns (ADR-0058): validates the FK is live, rejects a
     // self-manager and a CYCLE (DFS up the chain, with `id` as the subject). `undefined` when manager
@@ -934,8 +980,8 @@ export class UsersService {
     // The `manager` INPUT union is NOT a column — separate it out (rest keeps only the real scalar
     // columns) and substitute the resolved columns. legajo / username ARE columns (normalized by the
     // schema); they pass through. `manager` is voided so the rest-destructure isn't flagged unused.
-    const { manager, ...scalarData } = data;
-    void manager;
+    const { manager, jobTitle, department, ...scalarData } = data;
+    void [manager, jobTitle, department];
     // Emit UserHistory (DEBT-2, issue #185) for what changed. An activation flip, a role change, a
     // manager change and a profile edit can all happen in one PATCH, so emit each that fired (a
     // DEACTIVATED / REACTIVATED has no payload; a ROLE_CHANGED carries { from, to }; a MANAGER_CHANGED
@@ -952,6 +998,7 @@ export class UsersService {
       ...(nameChanged ? (['name'] as const) : []),
       ...(emailChanged ? (['email'] as const) : []),
       ...identifierFields,
+      ...attrChanges,
     ];
 
     // The last-admin check, the row write and its history rows commit together (ADR-0033): a change is
@@ -985,6 +1032,9 @@ export class UsersService {
         data: {
           ...scalarData,
           ...(managerWrite ?? {}),
+          ...(attrChanges.length > 0
+            ? { directoryAttrs: nextAttrs as Prisma.InputJsonValue }
+            : {}),
           // …and every MCP connection / personal token (ADR-0097 decision 8, amended 2026-09-24).
           ...(deactivating
             ? {

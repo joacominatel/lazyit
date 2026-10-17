@@ -114,7 +114,7 @@ export class LocationsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.location.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         ...escapeHatch,

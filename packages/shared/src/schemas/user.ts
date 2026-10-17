@@ -59,6 +59,9 @@ export const LegajoSchema = z.string().trim().min(1).max(100);
  */
 export const UsernameSchema = z.string().trim().toLowerCase().min(1).max(100);
 
+/** A free-text directory attribute such as a job title or department (ADR-0069 REDESIGN §3). */
+export const DirectoryAttributeSchema = z.string().trim().min(1).max(200);
+
 /**
  * The TEMPORARY-password policy for admin user-provisioning (ADR-0064, issue #411). It is the SHARED
  * {@link PasswordPolicySchema} (`schemas/primitives.ts`) — min 8, max 70, upper + lower + digit + symbol
@@ -152,9 +155,9 @@ export const UserSchema = z.object({
   // this row (ADR-0038). Always present on the wire (server default false); a directory person shows a
   // "Directory" badge and can be filtered via `?directoryOnly` (CEO §0 #2).
   directoryOnly: z.boolean(),
-  // Free-form directory attributes for a directory-only person (jobTitle, department, phone, and any
-  // person sub-field with no native home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb,
-  // unvalidated per-field in this MVP); null/absent for normal accounts.
+  // Free-form directory attributes (jobTitle, department, phone, and any person sub-field with no native
+  // home — ADR-0069 REDESIGN §3). Same posture as Asset.specs (jsonb, unvalidated per-field in this MVP).
+  // A manual create or edit writes `jobTitle` / `department` here too (#1646).
   directoryAttrs: z.record(z.string(), z.unknown()).nullable().optional(),
   // AD/LDAP directory-source discriminator (ADR-0091): "ad" for a person the directory sync owns, null
   // otherwise. OPTIONAL on the wire (additive). Non-null means the directory owns the name, so
@@ -215,6 +218,9 @@ export const CreateUserSchema = z.strictObject({
   username: UsernameSchema.optional(),
   // The manager input union (or null). Omit for "no manager". Cross-field refined above.
   manager: ManagerInputSchema.nullable().optional(),
+  // Stored in `directoryAttrs` under the keys the importer uses (#1646).
+  jobTitle: DirectoryAttributeSchema.optional(),
+  department: DirectoryAttributeSchema.optional(),
   // The TEMPORARY password an admin may set when provisioning a user (ADR-0064, issue #411). OPTIONAL on
   // the wire — omit it for the unchanged no-credential create. It is HONORED ONLY in local mode
   // (ADR-0086): the API stores its hash with `mustChangePassword`, so the user must change it at first
@@ -255,8 +261,8 @@ export const CreateDirectoryPersonSchema = z
     // Directory/display handle (ADR-0058). Optional + normalized; live-unique. An identity key (CEO Q5).
     username: UsernameSchema.optional(),
     // Free-form directory attributes routed into `directoryAttrs` (jsonb) by the backend.
-    jobTitle: z.string().trim().min(1).max(200).optional(),
-    department: z.string().trim().min(1).max(200).optional(),
+    jobTitle: DirectoryAttributeSchema.optional(),
+    department: DirectoryAttributeSchema.optional(),
     // The supervisor's name, routed into `managerName` (free-text) by the backend — `managerId` only when
     // it matches a live non-directory User (REDESIGN §3.6 / §10 #9).
     supervisor: z.string().trim().min(1).max(200).optional(),
@@ -304,6 +310,9 @@ export const UpdateUserSchema = requireAtLeastOneKey(
       username: UsernameSchema.nullable(),
       // The manager input union, or `null` to clear. Cross-field refined (never both id + name).
       manager: ManagerInputSchema.nullable(),
+      // `null` clears. A change on a person the AD/LDAP sync owns is a 409 PROFILE_MANAGED_BY_DIRECTORY.
+      jobTitle: DirectoryAttributeSchema.nullable(),
+      department: DirectoryAttributeSchema.nullable(),
     })
     .partial(),
 );

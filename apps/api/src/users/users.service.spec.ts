@@ -22,6 +22,10 @@ import {
   PasswordLifecycleService,
 } from '../auth/local/password-lifecycle.service';
 import { PermissionResolverService } from '../auth/permission-resolver.service';
+import {
+  postgresLikeFindMany,
+  walkAllPages,
+} from '../../test/prisma/offset-window';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB).
 jest.mock('../../generated/prisma/client', () => ({
@@ -391,6 +395,29 @@ describe('UsersService', () => {
     // An explicitly-supplied role is preserved (not overridden by the VIEWER default).
     expect(user.create).toHaveBeenCalledWith({
       data: { ...dto, role: 'ADMIN' },
+    });
+  });
+
+  it('stores a manual job title and department in directoryAttrs (#1646)', async () => {
+    const dto = {
+      email: 'a@b.com',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      jobTitle: 'Engineer',
+      department: 'IT',
+    };
+    user.create.mockResolvedValue({ id: 'uuid-a', email: dto.email });
+
+    await service.create(dto, 'admin-1');
+
+    expect(user.create).toHaveBeenCalledWith({
+      data: {
+        email: 'a@b.com',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        role: 'VIEWER',
+        directoryAttrs: { jobTitle: 'Engineer', department: 'IT' },
+      },
     });
   });
 
@@ -1153,6 +1180,82 @@ describe('UsersService', () => {
       history.record.mockClear();
       await service.update('uuid-1', { legajo: 'L-1', username: null }, ACTOR);
       expect(history.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('department and job title (#1646)', () => {
+    const ACTOR = 'actor-uuid';
+    type UpdateCall = [{ data: Record<string, unknown> }];
+    const updateData = () =>
+      (user.update.mock.calls as UpdateCall[])[0][0].data;
+
+    it('sets and clears them on a local user, keeping the other attributes', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'MEMBER',
+        deletedAt: null,
+        directorySource: null,
+        directoryAttrs: { jobTitle: 'Intern', phone: '555' },
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update(
+        'uuid-1',
+        { jobTitle: null, department: 'Finance' },
+        ACTOR,
+      );
+
+      expect(updateData()).toEqual({
+        directoryAttrs: { phone: '555', department: 'Finance' },
+      });
+      expect(history.record).toHaveBeenCalledWith(tx, {
+        userId: 'uuid-1',
+        eventType: 'UPDATED',
+        payload: { fields: ['jobTitle', 'department'] },
+        actor: { userId: ACTOR },
+      });
+    });
+
+    it('refuses a change on a person the AD/LDAP sync owns with 409 PROFILE_MANAGED_BY_DIRECTORY', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'VIEWER',
+        deletedAt: null,
+        directorySource: 'ad',
+        directoryAttrs: { department: 'IT' },
+      });
+
+      const err: unknown = await service
+        .update('uuid-1', { department: 'Finance' }, ACTOR)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'PROFILE_MANAGED_BY_DIRECTORY',
+      });
+      expect(user.update).not.toHaveBeenCalled();
+    });
+
+    it('accepts the unchanged values a full form resends for a directory-synced person', async () => {
+      user.findFirst.mockResolvedValue({
+        id: 'uuid-1',
+        isActive: true,
+        role: 'VIEWER',
+        deletedAt: null,
+        directorySource: 'ad',
+        directoryAttrs: { department: 'IT' },
+      });
+      user.update.mockResolvedValue({ id: 'uuid-1' });
+
+      await service.update(
+        'uuid-1',
+        { firstName: 'Ana', department: 'IT', jobTitle: null },
+        ACTOR,
+      );
+
+      expect(updateData()).toEqual({ firstName: 'Ana' });
     });
   });
 
@@ -2317,7 +2420,7 @@ describe('UsersService', () => {
       expect(user.findMany).toHaveBeenCalledWith({
         // The default `active` slice scopes the list to live users (ADR-0041).
         where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 50,
         skip: 0,
       });
@@ -2408,11 +2511,9 @@ describe('UsersService', () => {
         { limit: 50, offset: 0, sort: 'email', dir: 'asc', deleted: 'active' },
       );
       const call = (
-        user.findMany.mock.calls as Array<
-          [{ orderBy: Record<string, unknown> }]
-        >
+        user.findMany.mock.calls as Array<[{ orderBy: unknown }]>
       )[0][0];
-      expect(call.orderBy).toEqual({ email: 'asc' });
+      expect(call.orderBy).toEqual([{ email: 'asc' }, { id: 'desc' }]);
 
       await expect(
         service.findPage(
@@ -2428,6 +2529,27 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
+    it('serves every user exactly once across pages when they share a createdAt (#1644)', async () => {
+      const createdAt = new Date('2026-10-01T00:00:00Z');
+      const rows = Array.from({ length: 23 }, (_, i) => ({
+        id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        createdAt,
+        managerId: null,
+        managerName: null,
+      }));
+      user.findMany.mockImplementation(postgresLikeFindMany(rows));
+      user.count.mockResolvedValue(rows.length);
+
+      const served = await walkAllPages(
+        (offset) =>
+          service.findPage({}, { limit: 5, offset, deleted: 'active' }),
+        5,
+      );
+
+      expect(served).toHaveLength(rows.length);
+      expect(new Set(served)).toEqual(new Set(rows.map((r) => r.id)));
+    });
+
     it('deleted=only returns soft-deleted (offboarded) users via the includeSoftDeleted escape hatch (ADR-0041)', async () => {
       user.findMany.mockResolvedValue([{ id: 'gone' }]);
       user.count.mockResolvedValue(1);
@@ -2439,7 +2561,7 @@ describe('UsersService', () => {
 
       expect(user.findMany).toHaveBeenCalledWith({
         where: { deletedAt: { not: null } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 50,
         skip: 0,
         includeSoftDeleted: true,

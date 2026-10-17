@@ -489,3 +489,23 @@ describe("UI preferences (#1422)", () => {
     expect(UserSchema.safeParse({ ...READ_BASE, locale: "es", theme: "dark" }).success).toBe(true);
   });
 });
+
+describe("job title and department on manual create and edit (#1646)", () => {
+  const base = { email: "ada@x.com", firstName: "Ada", lastName: "Lovelace" };
+
+  test("create accepts both, trimmed", () => {
+    const parsed = CreateUserSchema.parse({ ...base, jobTitle: " Engineer ", department: "IT" });
+    expect(parsed.jobTitle).toBe("Engineer");
+    expect(parsed.department).toBe("IT");
+  });
+
+  test("create rejects an empty or over-long value", () => {
+    expect(CreateUserSchema.safeParse({ ...base, jobTitle: "  " }).success).toBe(false);
+    expect(CreateUserSchema.safeParse({ ...base, department: "x".repeat(201) }).success).toBe(false);
+  });
+
+  test("update sets a value or clears it with null", () => {
+    expect(UpdateUserSchema.parse({ department: "Finance" }).department).toBe("Finance");
+    expect(UpdateUserSchema.parse({ jobTitle: null }).jobTitle).toBeNull();
+  });
+});

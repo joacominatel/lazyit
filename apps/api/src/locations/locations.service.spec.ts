@@ -264,7 +264,7 @@ describe('LocationsService', () => {
     expect(location.findMany).toHaveBeenCalledWith({
       // The default `active` slice scopes the list to live rows (ADR-0041).
       where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
     });
@@ -332,11 +332,9 @@ describe('LocationsService', () => {
       { limit: 50, offset: 0, sort: 'name', dir: 'asc', deleted: 'active' },
     );
     const call = (
-      location.findMany.mock.calls as Array<
-        [{ orderBy: Record<string, unknown> }]
-      >
+      location.findMany.mock.calls as Array<[{ orderBy: unknown }]>
     )[0][0];
-    expect(call.orderBy).toEqual({ name: 'asc' });
+    expect(call.orderBy).toEqual([{ name: 'asc' }, { id: 'desc' }]);
 
     await expect(
       service.findPage(
@@ -359,7 +357,7 @@ describe('LocationsService', () => {
     // read filter doesn't re-hide them.
     expect(location.findMany).toHaveBeenCalledWith({
       where: { deletedAt: { not: null } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       includeSoftDeleted: true,

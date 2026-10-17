@@ -9,6 +9,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActorService } from '../common/actor.service';
 import { WorkflowTriggerService } from '../workflow-engine/run/workflow-trigger.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  postgresLikeFindMany,
+  walkAllPages,
+} from '../../test/prisma/offset-window';
 
 // Mock the generated Prisma client so the test never loads the real one (no DB). The service uses
 // `Prisma` only for types (erased at runtime), so an empty object is enough.
@@ -322,7 +326,7 @@ describe('AccessGrantsService', () => {
     // take/skip come from the page window.
     expect(findManyArgs).toEqual({
       where: { userId: USER_ID, revokedAt: null },
-      orderBy: { grantedAt: 'desc' },
+      orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
       take: 2,
       skip: 4,
     });
@@ -348,10 +352,28 @@ describe('AccessGrantsService', () => {
     )[0][0];
     expect(findManyArgs).toMatchObject({
       where: { revokedAt: null },
-      orderBy: { grantedAt: 'desc' },
+      orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
     });
+  });
+
+  it('findPage serves every grant exactly once across pages when they share a grantedAt (#1644)', async () => {
+    const grantedAt = new Date('2026-10-01T00:00:00Z');
+    const rows = Array.from({ length: 23 }, (_, i) => ({
+      id: `grant_${String(i).padStart(3, '0')}`,
+      grantedAt,
+    }));
+    accessGrant.findMany.mockImplementation(postgresLikeFindMany(rows));
+    accessGrant.count.mockResolvedValue(rows.length);
+
+    const served = await walkAllPages(
+      (offset) => service.findPage({}, { limit: 5, offset, deleted: 'active' }),
+      5,
+    );
+
+    expect(served).toHaveLength(rows.length);
+    expect(new Set(served)).toEqual(new Set(rows.map((r) => r.id)));
   });
 
   // --- findOne ------------------------------------------------------------

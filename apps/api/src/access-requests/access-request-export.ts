@@ -5,6 +5,7 @@ export const ACCESS_REQUEST_EXPORT_SELECT = {
   id: true,
   createdAt: true,
   requesterId: true,
+  filedById: true,
   applicationId: true,
   accessLevel: true,
   justification: true,
@@ -16,6 +17,7 @@ export const ACCESS_REQUEST_EXPORT_SELECT = {
   requester: { select: { firstName: true, lastName: true, email: true } },
   application: { select: { name: true } },
   decidedBy: { select: { firstName: true, lastName: true } },
+  filedBy: { select: { firstName: true, lastName: true } },
 } as const satisfies Prisma.AccessRequestSelect;
 
 export type AccessRequestExportRow = Prisma.AccessRequestGetPayload<{
@@ -24,7 +26,7 @@ export type AccessRequestExportRow = Prisma.AccessRequestGetPayload<{
 
 /** Which joined names this principal may read; without one, the cell keeps the id the list returns. */
 export interface AccessRequestExportGates {
-  /** `user:read`: requester and decider names, and the requester's email column. */
+  /** `user:read`: requester, filer and decider names, and the requester's email column. */
   users: boolean;
   /** `application:read`: the application name. */
   applications: boolean;
@@ -61,6 +63,11 @@ export function accessRequestExportColumns(
     { header: 'Access level', kind: 'text', value: (r) => r.accessLevel },
     { header: 'Justification', kind: 'text', value: (r) => r.justification },
     { header: 'Status', kind: 'text', value: (r) => r.status },
+    {
+      header: 'Filed by',
+      kind: 'text',
+      value: (r) => person(r.filedById, r.filedBy),
+    },
     { header: 'Requested at', kind: 'date', value: (r) => r.createdAt },
     {
       header: 'Decided by',

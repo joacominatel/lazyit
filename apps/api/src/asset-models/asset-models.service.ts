@@ -120,7 +120,7 @@ export class AssetModelsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.assetModel.findMany({
         where,
-        orderBy,
+        orderBy: [orderBy, { id: 'desc' }],
         take,
         skip,
         include: LIVE_ASSET_COUNT,

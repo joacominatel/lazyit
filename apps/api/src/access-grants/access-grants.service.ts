@@ -92,7 +92,7 @@ export class AccessGrantsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.accessGrant.findMany({
         where,
-        orderBy: { grantedAt: 'desc' },
+        orderBy: [{ grantedAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
       }),

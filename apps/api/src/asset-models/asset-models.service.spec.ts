@@ -630,7 +630,7 @@ describe('AssetModelsService', () => {
 
     expect(assetModel.findMany).toHaveBeenCalledWith({
       where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
       skip: 0,
       include: {
@@ -688,7 +688,7 @@ describe('AssetModelsService', () => {
     await service.findPage({}, { ...PAGE, sort: 'name', dir: 'asc' });
 
     expect(assetModel.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { name: 'asc' } }),
+      expect.objectContaining({ orderBy: [{ name: 'asc' }, { id: 'desc' }] }),
     );
   });
 

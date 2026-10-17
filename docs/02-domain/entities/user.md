@@ -3,7 +3,7 @@ title: User
 tags: [domain, entity]
 status: accepted
 created: 2026-05-25
-updated: 2026-10-16
+updated: 2026-10-17
 ---
 
 # User
@@ -156,7 +156,7 @@ Implemented in `apps/api/prisma/schema.prisma` (`User` → table `users`). Valid
 | `updatedAt` | `datetime` | `@updatedAt`. |
 | `deletedAt` | `datetime?` | Soft delete — `null` while live; reads filter `deletedAt: null` ([[0006-soft-delete-and-auditing]]). |
 | `directoryOnly` | `boolean` | `@default(false)`. `true` = a **directory person** created by the bulk import ([[0069-migrator-import]] §A.3): no login, role forced VIEWER, `externalId` stays `null`. Flips to `false` on first OIDC login (JIT promotion, [[0038-jit-user-provisioning]] amendment) or, in local mode, via `POST /users/:id/provision-local-account` (ADMIN onboarding). See **Directory mode** note below. |
-| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column) for `directoryOnly = true` rows. Same posture as `Asset.specs` (ADR-0007): jsonb, optional, only populated on directory rows. Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
+| `directoryAttrs` | `json?` | Free-form directory attributes (`jobTitle`, `department`, `phone`, and any person sub-field without a native column). Same posture as `Asset.specs` (ADR-0007): jsonb, optional. The import and the AD/LDAP sync fill it for directory people; a manual create or edit writes `jobTitle` / `department` here for any user (#1646). Not validated per-field in MVP. Upgrade path: promote to real columns if SQL filter/sort by field is needed. The AD/LDAP reconcile ([[0091-on-prem-ad-ldap-directory-source]]) also stashes `mail`/`username` **hints**, the entry's `memberOf` group DNs **inert** (#846), and a `lastSeenAt` heartbeat here. |
 | `directorySource` | `string?` | AD/LDAP directory-source discriminator ([[0091-on-prem-ad-ldap-directory-source]]): `"ad"` for a person reconciled from an on-prem AD/LDAP directory; `null` for a login user or an import-sourced directory person. Mirrors infra `reportingSource` (a string, not a bool) so a second source can coexist additively. |
 | `directorySourceId` | `string?` | The AD `objectGUID` (canonical GUID string) — the **immutable natural key** the reconcile upserts on ([[0091-on-prem-ad-ldap-directory-source]]). **Never `externalId`** (that is the OIDC-sub/account-linking key, INV-2). Live-scoped **partial unique** (`WHERE "deletedAt" IS NULL AND "directorySourceId" IS NOT NULL`, raw SQL in the migration, ADR-0041). |
 | `locale` | `string?` | Per-user UI language (issue #1422) — `en` \| `es` (`UiLocaleSchema`), validated on write; `null` = never chosen (every pre-existing row). A stored value outside the catalog reads as `null`. No DB enum. See the preferences note below. |
@@ -328,6 +328,19 @@ epoch or `mustChangePassword`. Every export writes a [[data-export-log]] row.
 >   Resending the stored name is not a change and writes nothing. The name is local only (lazyit never
 >   writes to the IdP, [[0102-remove-bundled-zitadel]]), and a later sign-in does **not** overwrite it — the JIT
 >   path only refreshes a name that still looks like a seed placeholder ([[0038-jit-user-provisioning]]).
+
+> [!note] Department and job title — manual create and edit (issue #1646)
+> The CEO decided both are editable by hand **unless the directory owns the person**. `CreateUserSchema`
+> and `UpdateUserSchema` accept `jobTitle` and `department` (trimmed, 1-200 characters; on update `null`
+> clears one). They are stored in `directoryAttrs` under the same keys the importer uses, so the
+> quick view and the AI user tools read them unchanged; the other keys in the blob are kept.
+> - **AD/LDAP-synced people are refused** with **409 `{ code: 'PROFILE_MANAGED_BY_DIRECTORY' }`** when
+>   `directorySource` is set and a value actually changes: the sync rewrites `directoryAttrs` on every run
+>   ([[0091-on-prem-ad-ldap-directory-source]]), so an edit would silently revert. Resending the stored
+>   value is accepted and writes nothing, so a full edit form still saves the other fields.
+> - People from a spreadsheet import (`directoryOnly`, no `directorySource`) are editable: nothing
+>   re-syncs them.
+> - A change writes one **`UPDATED`** [[user-history]] row whose `fields` name `jobTitle` / `department`.
 
 > [!note] Per-user language and theme — `/account/preferences` (issue #1422)
 > The CEO chose **"the browser's value wins"**. `GET /account/preferences` returns `{ locale, theme }`

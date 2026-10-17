@@ -179,7 +179,7 @@ export class NotificationsService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take,
         skip,
         // Only the CALLER's read row (if any) — the anti-join that yields the per-caller `read` flag.
