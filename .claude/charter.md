@@ -126,6 +126,9 @@ bunx tsc --noEmit -p apps/agent/tsconfig.json  # compile does not typecheck it (
 (cd apps/web && bun run check:message-parity)
 ```
 
+API jest binds ephemeral test servers to `127.0.0.1` (`apps/api/test/jest.env-setup.ts`): on macOS
+a local app holding an IPv4 wildcard port otherwise resets the connection (`socket hang up`).
+
 Repo-wide `bun run lint` is **report-only** in CI and reformats outside your scope locally — do
 not run it. The blocking gate is the changed-files lint above.
 
