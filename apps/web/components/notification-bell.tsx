@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  ArrowPathIcon,
   ArrowUpCircleIcon,
   BellIcon,
   BoltIcon,
   CheckBadgeIcon,
+  ChevronDownIcon,
   CubeIcon,
   DocumentDuplicateIcon,
   ExclamationTriangleIcon,
@@ -15,10 +17,14 @@ import {
   UserPlusIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import type { Notification, NotificationType } from "@lazyit/shared";
-import { useTranslations } from "next-intl";
+import type {
+  Notification,
+  NotificationGroup,
+  NotificationType,
+} from "@lazyit/shared";
+import { useFormatter, useNow, useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState, type ComponentType, type MouseEvent } from "react";
+import { useId, useState, type ComponentType, type MouseEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,16 +33,27 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DEFAULT_TIME_ZONE } from "@/i18n/config";
 import {
   useDismissAllNotifications,
   useDismissNotification,
   useMarkAllNotificationsRead,
+  useMarkNotificationGroupRead,
   useMarkNotificationRead,
-  useNotifications,
+  useNotificationGroupItems,
+  useNotificationGroups,
   useUnreadNotificationCount,
+  type GroupRef,
 } from "@/lib/api/hooks/use-notifications";
 import { notifyError } from "@/lib/api/notify-error";
 import { useFormatters } from "@/lib/hooks/use-formatters";
+import {
+  formatBadgeCount,
+  groupKey,
+  groupSummaryKey,
+  relativeDayKey,
+  singleNotification,
+} from "@/lib/notification-groups";
 import { cn } from "@/lib/utils";
 
 /**
@@ -56,6 +73,8 @@ import { cn } from "@/lib/utils";
  *
  * When SSE lands (Phase 2) the same hooks push live behind the same endpoints — this component does not
  * change shape.
+ *
+ * The list reads the grouped feed (#1649): one row per (type, day), expandable to its items.
  */
 
 /** Per-type icon + the pillar tone (matching activity-row's chip grammar) and the deep-link builder. */
@@ -191,8 +210,16 @@ function metaFor(type: NotificationType) {
   return TYPE_META[type] ?? FALLBACK_META;
 }
 
+interface RowActions {
+  onActivate: () => void;
+  onDismiss: () => void;
+}
+
+type RowActionsFor = (n: Notification, group: GroupRef) => RowActions;
+
 export function NotificationBell() {
   const t = useTranslations("notifications");
+  const tc = useTranslations("common");
   const [open, setOpen] = useState(false);
 
   // The badge always polls (a cheap COUNT, per-caller scoped server-side); the heavier list polls only
@@ -200,15 +227,36 @@ export function NotificationBell() {
   // and the API scopes visibility (a non-admin sees only their own targeted rows). A user with zero
   // notifications simply sees a clean bell: the badge renders only when `unread > 0`.
   const { data: count } = useUnreadNotificationCount(true);
-  const { data: page, isLoading } = useNotifications(open);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useNotificationGroups(open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
+  const markGroup = useMarkNotificationGroupRead();
   const dismiss = useDismissNotification();
   const dismissAll = useDismissAllNotifications();
 
   const unread = count?.unread ?? 0;
-  const items = page?.items ?? [];
+  const groups = data?.groups ?? [];
   const hasUnread = unread > 0;
+
+  const rowActions: RowActionsFor = (n, group) => ({
+    onActivate: () => {
+      if (!n.read) markRead.mutate(n.id);
+      setOpen(false);
+    },
+    onDismiss: () =>
+      dismiss.mutate(
+        { notification: n, group },
+        { onError: (error) => notifyError(error, t("dismissFailed")) },
+      ),
+  });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -220,18 +268,13 @@ export function NotificationBell() {
           className="relative"
         >
           <BellIcon className="size-5" />
-          {hasUnread && (
-            <Badge
-              variant="destructive"
-              className="absolute -right-0.5 -top-0.5 size-4 min-w-4 rounded-full px-1 tabular-nums"
-              aria-hidden
-            >
-              {unread > 99 ? "99+" : unread}
-            </Badge>
-          )}
+          {hasUnread && <UnreadBadge unread={unread} />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
+      <PopoverContent
+        align="end"
+        className="w-[min(24rem,calc(100vw-2rem))] p-0"
+      >
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           <p className="text-sm font-medium">{t("title")}</p>
           <div className="flex items-center gap-3">
@@ -245,7 +288,7 @@ export function NotificationBell() {
                 {t("markAllRead")}
               </button>
             )}
-            {items.length > 0 && (
+            {groups.length > 0 && (
               <button
                 type="button"
                 onClick={(event) => {
@@ -255,7 +298,7 @@ export function NotificationBell() {
                     .closest<HTMLElement>('[data-slot="popover-content"]')
                     ?.focus();
                   // Only the rows shown here: anything that arrived since stays in the bell.
-                  dismissAll.mutate(items, {
+                  dismissAll.mutate(groups, {
                     onError: (error) => notifyError(error, t("clearAllFailed")),
                   });
                 }}
@@ -267,35 +310,256 @@ export function NotificationBell() {
             )}
           </div>
         </div>
-        <div className="max-h-96 overflow-y-auto overscroll-contain">
+        <div className="max-h-[min(28rem,70vh)] overflow-y-auto overscroll-contain">
           {isLoading ? (
             <NotificationSkeleton />
-          ) : items.length === 0 ? (
+          ) : isError && groups.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                <ArrowPathIcon />
+                {tc("retry")}
+              </Button>
+            </div>
+          ) : groups.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">
               {t("empty")}
             </p>
           ) : (
-            <ul className="divide-y divide-border">
-              {items.map((n) => (
-                <NotificationListItem
-                  key={n.id}
-                  notification={n}
-                  onActivate={() => {
-                    if (!n.read) markRead.mutate(n.id);
-                    setOpen(false);
-                  }}
-                  onDismiss={() =>
-                    dismiss.mutate(n.id, {
-                      onError: (error) => notifyError(error, t("dismissFailed")),
-                    })
-                  }
+            <>
+              <ul className="divide-y divide-border">
+                {groups.map((group) => {
+                  const ref = { type: group.type, day: group.day };
+                  const single = singleNotification(group);
+                  return single ? (
+                    <NotificationListItem
+                      key={groupKey(group)}
+                      notification={single}
+                      {...rowActions(single, ref)}
+                    />
+                  ) : (
+                    <NotificationGroupItem
+                      key={groupKey(group)}
+                      group={group}
+                      rowActions={rowActions}
+                      onMarkRead={() =>
+                        markGroup.mutate(ref, {
+                          onError: (error) =>
+                            notifyError(error, t("markGroupReadFailed")),
+                        })
+                      }
+                    />
+                  );
+                })}
+              </ul>
+              {hasNextPage && (
+                <LoadMore
+                  onClick={() => fetchNextPage()}
+                  loading={isFetchingNextPage}
                 />
-              ))}
-            </ul>
+              )}
+            </>
           )}
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// The exact count is in the trigger's aria-label; this pill only has room for three characters.
+export function UnreadBadge({ unread }: { unread: number }) {
+  return (
+    <Badge
+      variant="destructive"
+      className="absolute -right-1 -top-0.5 h-4 min-w-4 px-1 py-0 text-[10px] leading-none tabular-nums"
+      aria-hidden
+    >
+      {formatBadgeCount(unread)}
+    </Badge>
+  );
+}
+
+function LoadMore({
+  onClick,
+  loading,
+}: {
+  onClick: () => void;
+  loading: boolean;
+}) {
+  const t = useTranslations("notifications");
+  return (
+    <div className="border-t border-border p-2">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full"
+        onClick={onClick}
+        disabled={loading}
+      >
+        {loading && <ArrowPathIcon className="animate-spin" />}
+        {t("loadMore")}
+      </Button>
+    </div>
+  );
+}
+
+export function NotificationGroupItem({
+  group,
+  rowActions,
+  onMarkRead,
+}: {
+  group: NotificationGroup;
+  rowActions: RowActionsFor;
+  onMarkRead: () => void;
+}) {
+  const t = useTranslations("notifications");
+  const format = useFormatter();
+  const now = useNow({ updateInterval: 60 * 1000 });
+  const [expanded, setExpanded] = useState(false);
+  const itemsId = useId();
+  const meta = metaFor(group.type);
+  const Icon = meta.icon;
+  const ref = { type: group.type, day: group.day };
+  const summaryKey = groupSummaryKey(group.type);
+  const summary = t.has(summaryKey)
+    ? t(summaryKey, { count: group.count })
+    : t("groupSummary.fallback", { count: group.count });
+  const relativeDay = relativeDayKey(group.day, now, DEFAULT_TIME_ZONE);
+  // `day` is already a calendar date in the instance zone; formatting it in UTC keeps it from shifting.
+  const dayLabel = relativeDay
+    ? t(`day.${relativeDay}`)
+    : format.dateTime(new Date(`${group.day}T00:00:00Z`), {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+  const hasUnread = group.unread > 0;
+
+  return (
+    <li className={cn(hasUnread && "bg-primary/[0.03]")}>
+      <div className="flex gap-3 py-3 pl-4 pr-4">
+        <span
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-lg",
+            meta.tone,
+          )}
+          aria-hidden
+        >
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={expanded ? itemsId : undefined}
+            onClick={() => setExpanded((value) => !value)}
+            className="flex w-full items-start gap-2 rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <span
+              className={cn(
+                "min-w-0 flex-1 text-sm",
+                hasUnread ? "font-medium" : "font-normal text-foreground/90",
+              )}
+            >
+              {summary}
+            </span>
+            <ChevronDownIcon
+              className={cn(
+                "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-[var(--dur-fast)] motion-reduce:transition-none",
+                expanded && "rotate-180",
+              )}
+              aria-hidden
+            />
+          </button>
+          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            <time dateTime={group.day}>{dayLabel}</time>
+            {hasUnread && <> · {t("groupUnread", { count: group.unread })}</>}
+          </p>
+          {!expanded && group.latest.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5">
+              {group.latest.map((n) => (
+                <li
+                  key={n.id}
+                  className="truncate text-xs text-muted-foreground"
+                  title={n.title}
+                >
+                  {n.title}
+                </li>
+              ))}
+            </ul>
+          )}
+          {hasUnread && (
+            <button
+              type="button"
+              onClick={onMarkRead}
+              className="mt-2 rounded-sm text-xs font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:underline"
+            >
+              {t("markGroupRead")}
+            </button>
+          )}
+        </div>
+        {hasUnread && (
+          <span
+            className="mt-1.5 size-2 shrink-0 rounded-full bg-primary"
+            aria-hidden
+          />
+        )}
+      </div>
+      {expanded && (
+        <GroupItems id={itemsId} group={ref} rowActions={rowActions} />
+      )}
+    </li>
+  );
+}
+
+function GroupItems({
+  id,
+  group,
+  rowActions,
+}: {
+  id: string;
+  group: GroupRef;
+  rowActions: RowActionsFor;
+}) {
+  const t = useTranslations("notifications");
+  const tc = useTranslations("common");
+  const {
+    data: items = [],
+    isLoading,
+    isError,
+    refetch,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useNotificationGroupItems(group, true);
+
+  return (
+    <div id={id} className="ml-7 border-l border-border">
+      {isLoading ? (
+        <NotificationSkeleton />
+      ) : isError && items.length === 0 ? (
+        <div className="flex items-center gap-3 px-4 py-3">
+          <p className="text-xs text-muted-foreground">{t("loadFailed")}</p>
+          <Button variant="outline" size="xs" onClick={() => refetch()}>
+            {tc("retry")}
+          </Button>
+        </div>
+      ) : (
+        <ul className="divide-y divide-border border-t border-border">
+          {items.map((n) => (
+            <NotificationListItem
+              key={n.id}
+              notification={n}
+              {...rowActions(n, group)}
+            />
+          ))}
+        </ul>
+      )}
+      {hasNextPage && (
+        <LoadMore onClick={() => fetchNextPage()} loading={isFetchingNextPage} />
+      )}
+    </div>
   );
 }
 
@@ -332,7 +596,7 @@ export function NotificationListItem({
       const row = button.closest("li");
       const neighbour = row?.nextElementSibling ?? row?.previousElementSibling;
       const target =
-        neighbour?.querySelector<HTMLElement>("a") ??
+        neighbour?.querySelector<HTMLElement>("a, button") ??
         button.closest<HTMLElement>('[data-slot="popover-content"]');
       target?.focus();
     }

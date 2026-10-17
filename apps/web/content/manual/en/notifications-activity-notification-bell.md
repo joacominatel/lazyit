@@ -55,13 +55,34 @@ spam the bell.
 
 ## Reading notifications
 
-Open the bell to see the most recent notifications, newest first. Each row carries an icon, a short
-title, an optional one-line summary, and a relative time.
+Open the bell to see your notifications, newest first. Each row carries an icon, a short title, an
+optional one-line summary, and a relative time.
 
 - **Click a row** to open what it is about — the application, the consumable, or the workflow task
   inbox — and the row is marked read.
 - **Mark all read** clears the unread badge in one click.
-- The **red badge** counts unread notifications; it shows `99+` past ninety-nine.
+- The **red badge** counts unread notifications; it shows `99+` past ninety-nine. The exact number is
+  still read out to screen readers.
+
+### Grouped by type and day
+
+A bulk operation — an import, a large batch of grants, an offboarding — can raise hundreds of
+notifications of one kind in a day. So the bell groups notifications **by type and day**: everything of
+one kind that happened on one day is a single row, such as "312 grants on critical applications ·
+Today".
+
+- A group with **one** notification shows as that notification, exactly as above.
+- A larger group shows how many notifications it holds, the day (**Today**, **Yesterday**, or the
+  date), how many are still unread, and a preview of the newest few.
+- **Select the group** to expand it in place and see each notification in it; select it again to
+  collapse it. Long groups load more as you ask for them with **Load more**.
+- **Mark group as read** marks every notification in that group read at once, including the ones not
+  loaded yet. Other groups are untouched.
+
+Days follow the instance's display time zone (see
+[Time zone & formats](/help/configuration-time-zone-formats)), so "Today" means today where your
+team works. When there are more groups than fit, **Load more** at the bottom of the bell brings the
+next ones; the bell itself stays a fixed height and scrolls.
 
 Read state is per person: marking a broadcast read clears it for you only, not for other
 administrators.
@@ -71,10 +92,11 @@ administrators.
 Once you have dealt with a notification, you can remove it from your bell instead of waiting for it to
 age out:
 
-- **Dismiss one** — hover a row and select the **×** at its right edge. On a phone or tablet the × is
+- **Dismiss one** — hover a notification and select the **×** at its right edge. Inside an expanded
+  group, each notification has its own **×**. On a phone or tablet the × is
   always shown; with a keyboard, tab to it. Dismissing does not open the notification.
 - **Clear all** — in the bell's header, removes every notification up to the newest one shown, all at once —
-  including older ones further down the list than the bell loads. Anything
+  including every notification inside each group, and older ones further down the list than the bell loads. Anything
   newer stays: a notification that arrived after you opened the bell is not cleared, and it stays unread.
   When the bell is empty it reads "You're all caught up."
 
