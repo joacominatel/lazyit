@@ -200,13 +200,18 @@ listings), `@@index([status, publishedAt])` (latest published).
   The lean list item adds two card-UI affordances computed in the query (no body load, no N+1):
   `linkCount` (relation `_count` of links; `>0` ⇔ linked) and `readingMinutes` (the maintained
   metric). The owner is already exposed as `authorId`.
+  `?deleted=only` (#1647) lists the **archived** (soft-deleted) articles instead, newest-updated first,
+  and is **ADMIN-only** (`403` otherwise, `assertCanListDeleted` — the same slice as the other lists,
+  [[0030-list-pagination-contract]] §7); `deleted=active` is the default. Every other filter, the folder
+  pin and the draft rule still apply, so an admin sees archived PUBLISHED articles plus their **own**
+  archived drafts. The row carries `deletedAt`; restore is `POST /articles/:id/restore`.
 - `GET /articles/export` — a CSV of the article **index** the list would return for the same filters
   (`categoryId`, `includeSubfolders`, `authorId`, `status`, `q`, `linked`, `linkedTo`, `assetId`,
   `applicationId`; `sort` is ignored, the file walks newest-created first) — #1597,
   [[0103-data-export-streaming-path]]. Same `article:read` and the same `where`: the folder pin
   ([[0060-kb-folder-access-control]] §4) and the list's draft rule ([[0022-draft-visibility-auth-shim]]:
-  a draft only to its author — the AUD-086 manager read is by link and does not reach the file). There
-  is no `deleted` slice, as on the list. Columns, from the lean list row: ID, title, slug, status,
+  a draft only to its author — the AUD-086 manager read is by link and does not reach the file). The
+  export has no `deleted` slice: it always walks live articles, unlike the list's ADMIN `deleted=only`. Columns, from the lean list row: ID, title, slug, status,
   folder, author (`(former member)` when offboarded), links, reading minutes, created, updated,
   published. **Never the body, the excerpt or a version.** The folder cell is the path through the
   folders the caller can read, and only with `category:read` (the folder list's permission); without

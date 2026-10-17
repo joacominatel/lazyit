@@ -271,6 +271,10 @@ carries `deletedAt`, so the web can render an archived badge + a Restore button.
 Shared helper: `apps/api/src/common/deleted-filter.ts` (`assertCanListDeleted` + `deletedWhere` +
 `includeSoftDeletedFor`). Shape: `DeletedFilterSchema` (`active` | `only`) on `PageQuerySchema`.
 
+`GET /articles` joined the slice on 2026-10-17 (#1647), with the same ADMIN gate and helpers. Its folder
+access ([[0060-kb-folder-access-control]] §4) and draft rule ([[0022-draft-visibility-auth-shim]]) still
+apply on top, so an archived draft is listed to its author only.
+
 ### 8. `GET /asset-models` migrated onto `Page<T>` + server-side `q` + the searchable Combobox (issue #199)
 
 `GET /asset-models` was the last entity-picker list still returning a **raw `AssetModel[]`** (it only
