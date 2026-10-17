@@ -1,35 +1,42 @@
 import { describe, expect, test } from "bun:test";
-import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import type {
   DismissNotificationsResult,
+  MarkNotificationGroupRead,
   Notification,
+  NotificationGroup,
   Page,
   UnreadCount,
 } from "@lazyit/shared";
+import { DEFAULT_TIME_ZONE } from "@/i18n/config";
 import {
   dismissAllNotificationsOptions,
   dismissNotificationOptions,
-  NOTIFICATION_PAGE_SIZE,
-  newestCreatedAt,
+  markNotificationGroupReadOptions,
   notificationKeys,
+  type GroupRef,
 } from "./use-notifications";
 
-/**
- * The bell's dismiss lifecycle (#1309) — exercised through a real `QueryClient` + `MutationObserver`
- * (the same machinery `useMutation` drives) with a stubbed endpoint, so no DOM is needed:
- * optimistic hide, rollback on error, the badge taken from the server's `unread`, and "Clear all".
- */
+// The bell's cache lifecycle over the grouped feed (#1309, #1649), driven through a real QueryClient.
 
-const LIST_KEY = notificationKeys.list({ limit: NOTIFICATION_PAGE_SIZE });
+const GRANTS: GroupRef = { type: "critical_app_access", day: "2026-10-17" };
+const STOCK: GroupRef = { type: "low_stock", day: "2026-10-16" };
+const GROUPS_KEY = notificationKeys.groups();
+const GRANT_ITEMS_KEY = notificationKeys.groupItems(GRANTS.type, GRANTS.day);
 
 function notification(
   id: string,
   read: boolean,
-  createdAt = "2026-09-23T10:00:00.000Z",
+  createdAt: string,
+  type: Notification["type"] = "critical_app_access",
 ): Notification {
   return {
     id,
-    type: "low_stock",
+    type,
     severity: "warning",
     title: `Notification ${id}`,
     summary: null,
@@ -43,30 +50,56 @@ function notification(
   };
 }
 
+const A = notification("a", false, "2026-10-17T10:00:00.000Z");
+const B = notification("b", true, "2026-10-17T09:00:00.000Z");
+const C = notification("c", false, "2026-10-17T08:00:00.000Z");
+const D = notification("d", false, "2026-10-16T09:00:00.000Z", "low_stock");
+
+function group(
+  ref: GroupRef,
+  items: Notification[],
+  latestAt = items[0].createdAt,
+): NotificationGroup {
+  return {
+    ...ref,
+    count: items.length,
+    unread: items.filter((n) => !n.read).length,
+    latestAt,
+    latest: items.slice(0, 3),
+  };
+}
+
+function infinite<T>(items: T[]): InfiniteData<Page<T>, number> {
+  return {
+    pages: [{ items, total: items.length, limit: 20, offset: 0 }],
+    pageParams: [0],
+  };
+}
+
 function seededClient() {
   const qc = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });
-  qc.setQueryData<Page<Notification>>(LIST_KEY, {
-    items: [
-      notification("a", false),
-      notification("b", true),
-      notification("c", false),
-    ],
-    total: 3,
-    limit: NOTIFICATION_PAGE_SIZE,
-    offset: 0,
-  });
-  qc.setQueryData<UnreadCount>(notificationKeys.unreadCount(), { unread: 2 });
+  qc.setQueryData(
+    GROUPS_KEY,
+    infinite([group(GRANTS, [A, B, C]), group(STOCK, [D])]),
+  );
+  qc.setQueryData(GRANT_ITEMS_KEY, infinite([A, B, C]));
+  qc.setQueryData<UnreadCount>(notificationKeys.unreadCount(), { unread: 3 });
   return qc;
 }
 
-const listIds = (qc: QueryClient) =>
-  qc.getQueryData<Page<Notification>>(LIST_KEY)?.items.map((n) => n.id);
+const groupsPage = (qc: QueryClient) =>
+  qc.getQueryData<InfiniteData<Page<NotificationGroup>>>(GROUPS_KEY)!.pages[0];
+const grantGroup = (qc: QueryClient) =>
+  groupsPage(qc).items.find((g) => g.type === GRANTS.type);
+const itemIds = (qc: QueryClient) =>
+  qc
+    .getQueryData<InfiniteData<Page<Notification>>>(GRANT_ITEMS_KEY)!
+    .pages[0].items.map((n) => n.id);
 const badge = (qc: QueryClient) =>
   qc.getQueryData<UnreadCount>(notificationKeys.unreadCount())?.unread;
 
-/** A controllable endpoint stub: the test decides when the request resolves. */
 function deferred() {
   let resolve!: (value: DismissNotificationsResult) => void;
   const promise = new Promise<DismissNotificationsResult>((res) => {
@@ -76,27 +109,32 @@ function deferred() {
 }
 
 describe("dismiss one notification", () => {
-  test("hides the row and drops the badge before the server answers", async () => {
+  test("hides the row from its group and drops the badge before the server answers", async () => {
     const qc = seededClient();
     const request = deferred();
+    const sent: string[] = [];
     const observer = new MutationObserver(
       qc,
-      dismissNotificationOptions(qc, () => request.promise),
+      dismissNotificationOptions(qc, (id) => {
+        sent.push(id);
+        return request.promise;
+      }),
     );
 
-    const pending = observer.mutate("a");
+    const pending = observer.mutate({ notification: A, group: GRANTS });
     await Bun.sleep(0);
 
-    expect(listIds(qc)).toEqual(["b", "c"]);
-    expect(qc.getQueryData<Page<Notification>>(LIST_KEY)?.total).toBe(2);
-    // "a" was unread, and dismiss implies read.
-    expect(badge(qc)).toBe(1);
+    expect(sent).toEqual(["a"]);
+    expect(itemIds(qc)).toEqual(["b", "c"]);
+    expect(grantGroup(qc)).toMatchObject({ count: 2, unread: 1 });
+    expect(grantGroup(qc)?.latest.map((n) => n.id)).toEqual(["b", "c"]);
+    expect(badge(qc)).toBe(2);
 
-    request.resolve({ dismissed: 1, unread: 1 });
+    request.resolve({ dismissed: 1, unread: 2 });
     await pending;
   });
 
-  test("dismissing a READ row leaves the badge untouched", async () => {
+  test("dismissing a READ row leaves the unread counts untouched", async () => {
     const qc = seededClient();
     const request = deferred();
     const observer = new MutationObserver(
@@ -104,10 +142,29 @@ describe("dismiss one notification", () => {
       dismissNotificationOptions(qc, () => request.promise),
     );
 
-    const pending = observer.mutate("b");
+    const pending = observer.mutate({ notification: B, group: GRANTS });
     await Bun.sleep(0);
 
-    expect(listIds(qc)).toEqual(["a", "c"]);
+    expect(grantGroup(qc)).toMatchObject({ count: 2, unread: 2 });
+    expect(badge(qc)).toBe(3);
+
+    request.resolve({ dismissed: 1, unread: 3 });
+    await pending;
+  });
+
+  test("dismissing the last row of a group removes the group", async () => {
+    const qc = seededClient();
+    const request = deferred();
+    const observer = new MutationObserver(
+      qc,
+      dismissNotificationOptions(qc, () => request.promise),
+    );
+
+    const pending = observer.mutate({ notification: D, group: STOCK });
+    await Bun.sleep(0);
+
+    expect(groupsPage(qc).items.map((g) => g.type)).toEqual([GRANTS.type]);
+    expect(groupsPage(qc).total).toBe(1);
     expect(badge(qc)).toBe(2);
 
     request.resolve({ dismissed: 1, unread: 2 });
@@ -118,17 +175,15 @@ describe("dismiss one notification", () => {
     const qc = seededClient();
     const observer = new MutationObserver(
       qc,
-      // Another notification arrived meanwhile: the server's count wins over the optimistic guess.
       dismissNotificationOptions(qc, async () => ({ dismissed: 1, unread: 5 })),
     );
 
-    await observer.mutate("a");
+    await observer.mutate({ notification: A, group: GRANTS });
 
     expect(badge(qc)).toBe(5);
-    expect(listIds(qc)).toEqual(["b", "c"]);
   });
 
-  test("rolls the row and the badge back when the request fails", async () => {
+  test("rolls the group, its items and the badge back when the request fails", async () => {
     const qc = seededClient();
     const observer = new MutationObserver(
       qc,
@@ -137,24 +192,26 @@ describe("dismiss one notification", () => {
       }),
     );
 
-    await expect(observer.mutate("a")).rejects.toThrow("network down");
+    await expect(
+      observer.mutate({ notification: A, group: GRANTS }),
+    ).rejects.toThrow("network down");
 
-    expect(listIds(qc)).toEqual(["a", "b", "c"]);
-    expect(qc.getQueryData<Page<Notification>>(LIST_KEY)?.total).toBe(3);
-    expect(badge(qc)).toBe(2);
+    expect(itemIds(qc)).toEqual(["a", "b", "c"]);
+    expect(grantGroup(qc)).toMatchObject({ count: 3, unread: 2 });
+    expect(badge(qc)).toBe(3);
   });
 
-  test("reconciles the list with the server after it settles", async () => {
+  test("reconciles the feed with the server after it settles, not the badge", async () => {
     const qc = seededClient();
     const observer = new MutationObserver(
       qc,
-      dismissNotificationOptions(qc, async () => ({ dismissed: 1, unread: 1 })),
+      dismissNotificationOptions(qc, async () => ({ dismissed: 1, unread: 2 })),
     );
 
-    await observer.mutate("a");
+    await observer.mutate({ notification: A, group: GRANTS });
 
-    expect(qc.getQueryState(LIST_KEY)?.isInvalidated).toBe(true);
-    // The badge came from the response, so it is not refetched.
+    expect(qc.getQueryState(GROUPS_KEY)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(GRANT_ITEMS_KEY)?.isInvalidated).toBe(true);
     expect(
       qc.getQueryState(notificationKeys.unreadCount())?.isInvalidated,
     ).toBe(false);
@@ -170,59 +227,76 @@ describe("dismiss one notification", () => {
       () => requests.shift()!.promise,
     );
 
-    const pendingA = new MutationObserver(qc, options).mutate("a");
+    const pendingA = new MutationObserver(qc, options).mutate({
+      notification: A,
+      group: GRANTS,
+    });
     await Bun.sleep(0);
-    const pendingC = new MutationObserver(qc, options).mutate("c");
+    const pendingC = new MutationObserver(qc, options).mutate({
+      notification: C,
+      group: GRANTS,
+    });
     await Bun.sleep(0);
 
-    first.resolve({ dismissed: 1, unread: 1 });
+    first.resolve({ dismissed: 1, unread: 2 });
     await pendingA;
-    // "c" is still in flight: a refetch now could briefly bring it back.
-    expect(qc.getQueryState(LIST_KEY)?.isInvalidated).toBe(false);
-    expect(listIds(qc)).toEqual(["b"]);
+    expect(qc.getQueryState(GROUPS_KEY)?.isInvalidated).toBe(false);
+    expect(itemIds(qc)).toEqual(["b"]);
 
-    second.resolve({ dismissed: 1, unread: 0 });
+    second.resolve({ dismissed: 1, unread: 1 });
     await pendingC;
-    expect(qc.getQueryState(LIST_KEY)?.isInvalidated).toBe(true);
-    expect(badge(qc)).toBe(0);
+    expect(qc.getQueryState(GROUPS_KEY)?.isInvalidated).toBe(true);
+    expect(badge(qc)).toBe(1);
   });
 });
 
-const cachedItems = (qc: QueryClient) =>
-  qc.getQueryData<Page<Notification>>(LIST_KEY)!.items;
+const renderedGroups = (qc: QueryClient) => groupsPage(qc).items;
 
 describe("Clear all", () => {
-  test("sends the newest createdAt among the rendered rows as `upTo`", async () => {
+  test("sends the newest latestAt among the rendered groups as `upTo`", async () => {
     const qc = seededClient();
     const sent: Array<string | undefined> = [];
     const observer = new MutationObserver(
       qc,
       dismissAllNotificationsOptions(qc, async (upTo) => {
         sent.push(upTo);
-        return { dismissed: 3, unread: 0 };
+        return { dismissed: 4, unread: 0 };
       }),
     );
 
-    await observer.mutate([
-      notification("x", false, "2026-09-23T09:00:00.000Z"),
-      notification("y", false, "2026-09-23T11:30:00.250Z"),
-      notification("z", true, "2026-09-23T10:00:00.000Z"),
-    ]);
+    await observer.mutate(renderedGroups(qc));
 
-    expect(sent).toEqual(["2026-09-23T11:30:00.250Z"]);
+    expect(sent).toEqual(["2026-10-17T10:00:00.000Z"]);
   });
 
-  test("keeps a cached row newer than `upTo` — only the rendered rows leave, matching the server", async () => {
+  test("empties the groups and their items and zeroes the badge optimistically", async () => {
     const qc = seededClient();
-    const rendered = cachedItems(qc);
-    // A poll landed after the bell rendered: "d" is newer than anything the user saw.
-    qc.setQueryData<Page<Notification>>(LIST_KEY, {
-      items: [notification("d", false, "2026-09-23T10:00:00.001Z"), ...rendered],
-      total: 4,
-      limit: NOTIFICATION_PAGE_SIZE,
-      offset: 0,
-    });
-    qc.setQueryData<UnreadCount>(notificationKeys.unreadCount(), { unread: 3 });
+    const request = deferred();
+    const observer = new MutationObserver(
+      qc,
+      dismissAllNotificationsOptions(qc, () => request.promise),
+    );
+
+    const pending = observer.mutate(renderedGroups(qc));
+    await Bun.sleep(0);
+
+    expect(groupsPage(qc).items).toEqual([]);
+    expect(groupsPage(qc).total).toBe(0);
+    expect(itemIds(qc)).toEqual([]);
+    expect(badge(qc)).toBe(0);
+
+    request.resolve({ dismissed: 4, unread: 0 });
+    await pending;
+  });
+
+  test("keeps a group that got newer after render, with its unread on the badge", async () => {
+    const qc = seededClient();
+    const rendered = renderedGroups(qc);
+    const fresh = notification("e", false, "2026-10-17T11:00:00.000Z");
+    qc.setQueryData(
+      GROUPS_KEY,
+      infinite([group(GRANTS, [fresh, A, B, C]), group(STOCK, [D])]),
+    );
     const request = deferred();
     const observer = new MutationObserver(
       qc,
@@ -232,38 +306,16 @@ describe("Clear all", () => {
     const pending = observer.mutate(rendered);
     await Bun.sleep(0);
 
-    expect(listIds(qc)).toEqual(["d"]);
-    expect(qc.getQueryData<Page<Notification>>(LIST_KEY)?.total).toBe(1);
-    // "d" is unread and was not dismissed.
-    expect(badge(qc)).toBe(1);
+    expect(renderedGroups(qc).map((g) => g.type)).toEqual([GRANTS.type]);
+    expect(itemIds(qc)).toEqual([]);
+    expect(badge(qc)).toBe(3);
 
-    request.resolve({ dismissed: 3, unread: 1 });
+    request.resolve({ dismissed: 4, unread: 1 });
     await pending;
     expect(badge(qc)).toBe(1);
   });
 
-  test("empties the list and zeroes the badge optimistically", async () => {
-    const qc = seededClient();
-    const request = deferred();
-    const observer = new MutationObserver(
-      qc,
-      dismissAllNotificationsOptions(qc, () => request.promise),
-    );
-
-    const pending = observer.mutate(cachedItems(qc));
-    await Bun.sleep(0);
-
-    expect(listIds(qc)).toEqual([]);
-    expect(qc.getQueryData<Page<Notification>>(LIST_KEY)?.total).toBe(0);
-    expect(badge(qc)).toBe(0);
-
-    request.resolve({ dismissed: 3, unread: 0 });
-    await pending;
-    expect(listIds(qc)).toEqual([]);
-    expect(badge(qc)).toBe(0);
-  });
-
-  test("restores every row when the request fails", async () => {
+  test("restores every group when the request fails", async () => {
     const qc = seededClient();
     const observer = new MutationObserver(
       qc,
@@ -272,27 +324,43 @@ describe("Clear all", () => {
       }),
     );
 
-    await expect(observer.mutate(cachedItems(qc))).rejects.toThrow(
+    await expect(observer.mutate(renderedGroups(qc))).rejects.toThrow(
       "server error",
     );
 
-    expect(listIds(qc)).toEqual(["a", "b", "c"]);
-    expect(badge(qc)).toBe(2);
+    expect(renderedGroups(qc)).toHaveLength(2);
+    expect(itemIds(qc)).toEqual(["a", "b", "c"]);
+    expect(badge(qc)).toBe(3);
   });
 });
 
-describe("newestCreatedAt", () => {
-  test("is undefined for no rows", () => {
-    expect(newestCreatedAt([])).toBeUndefined();
-  });
+describe("mark a group read", () => {
+  test("sends the group with the instance zone and takes the badge from the server", async () => {
+    const qc = seededClient();
+    const sent: MarkNotificationGroupRead[] = [];
+    const observer = new MutationObserver(
+      qc,
+      markNotificationGroupReadOptions(qc, async (body) => {
+        sent.push(body);
+        return { marked: 2, unread: 1 };
+      }),
+    );
 
-  test("compares instants, not list order", () => {
+    await observer.mutate(GRANTS);
+
+    expect(sent).toEqual([{ ...GRANTS, tz: DEFAULT_TIME_ZONE }]);
+    expect(badge(qc)).toBe(1);
+    expect(grantGroup(qc)?.unread).toBe(0);
+    expect(grantGroup(qc)?.latest.every((n) => n.read)).toBe(true);
     expect(
-      newestCreatedAt([
-        notification("a", false, "2026-09-23T10:00:00.000Z"),
-        notification("b", false, "2026-09-24T08:00:00.000Z"),
-        notification("c", false, "2026-09-23T23:59:59.999Z"),
-      ]),
-    ).toBe("2026-09-24T08:00:00.000Z");
+      qc
+        .getQueryData<InfiniteData<Page<Notification>>>(GRANT_ITEMS_KEY)!
+        .pages[0].items.every((n) => n.read),
+    ).toBe(true);
+    // The other group is untouched, and the feed is refetched to confirm.
+    expect(
+      groupsPage(qc).items.find((g) => g.type === STOCK.type)?.unread,
+    ).toBe(1);
+    expect(qc.getQueryState(GROUPS_KEY)?.isInvalidated).toBe(true);
   });
 });

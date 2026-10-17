@@ -1,26 +1,34 @@
 import {
-  keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
+  type InfiniteData,
   type QueryClient,
   type QueryKey,
   type UseMutationOptions,
 } from "@tanstack/react-query";
 import type {
   DismissNotificationsResult,
+  MarkNotificationGroupRead,
+  MarkReadResult,
   Notification,
+  NotificationGroup,
+  NotificationType,
   Page,
   UnreadCount,
 } from "@lazyit/shared";
+import { DEFAULT_TIME_ZONE } from "@/i18n/config";
+import { flattenGroupPages, newestLatestAt } from "@/lib/notification-groups";
 import {
   dismissAllNotifications,
   dismissNotification,
-  getNotifications,
+  getNotificationGroupItems,
+  getNotificationGroups,
   getUnreadCount,
   markAllNotificationsRead,
+  markNotificationGroupRead,
   markNotificationRead,
-  type NotificationListParams,
 } from "../endpoints/notifications";
 import { createQueryKeys } from "../query-keys";
 
@@ -35,16 +43,31 @@ import { createQueryKeys } from "../query-keys";
 const baseKeys = createQueryKeys("notifications");
 export const notificationKeys = {
   ...baseKeys,
-  list: (params: NotificationListParams) =>
-    [...baseKeys.all, "list", params] as const,
+  groups: () => [...baseKeys.all, "groups"] as const,
+  allGroupItems: () => [...baseKeys.all, "group-items"] as const,
+  groupItems: (type: NotificationType, day: string) =>
+    [...baseKeys.all, "group-items", type, day] as const,
   unreadCount: () => [...baseKeys.all, "unread-count"] as const,
 };
+
+export interface GroupRef {
+  type: NotificationType;
+  day: string;
+}
+
+type GroupPages = InfiniteData<Page<NotificationGroup>, number>;
+type ItemPages = InfiniteData<Page<Notification>, number>;
 
 /** Poll cadence (ADR-0056 §2 poll-floor) — 45s, in the 30–60s band the engine inbox uses. */
 export const NOTIFICATION_POLL_INTERVAL_MS = 45000;
 
-/** How many notifications the dropdown shows (the most recent page). */
-export const NOTIFICATION_PAGE_SIZE = 20;
+export const NOTIFICATION_GROUPS_PAGE_SIZE = 20;
+export const NOTIFICATION_GROUP_ITEMS_PAGE_SIZE = 20;
+
+function nextOffset(last: Page<unknown>): number | undefined {
+  const next = last.offset + last.items.length;
+  return next < last.total ? next : undefined;
+}
 
 /**
  * The unread BADGE count — a tiny, frequently-polled query so the bell badge stays live. The bell enables
@@ -61,18 +84,45 @@ export function useUnreadNotificationCount(enabled: boolean) {
   });
 }
 
-/**
- * The dropdown LIST — the most-recent page of notifications, each with its per-caller `read` flag.
- * Polled while the bell is mounted+enabled so the list stays current; `enabled` is the dropdown's open
- * state, so a closed bell doesn't poll the heavier list.
- */
-export function useNotifications(enabled: boolean) {
-  return useQuery({
-    queryKey: notificationKeys.list({ limit: NOTIFICATION_PAGE_SIZE }),
-    queryFn: () => getNotifications({ limit: NOTIFICATION_PAGE_SIZE }),
+// Polled only while the dropdown is open, so a closed bell costs one COUNT per interval.
+export function useNotificationGroups(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: notificationKeys.groups(),
+    queryFn: ({ pageParam }) =>
+      getNotificationGroups(DEFAULT_TIME_ZONE, {
+        limit: NOTIFICATION_GROUPS_PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: nextOffset,
+    select: (data) => ({
+      groups: flattenGroupPages(data.pages),
+      total: data.pages[0]?.total ?? 0,
+    }),
     enabled,
-    placeholderData: keepPreviousData,
     refetchInterval: enabled ? NOTIFICATION_POLL_INTERVAL_MS : false,
+  });
+}
+
+export function useNotificationGroupItems(group: GroupRef, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: notificationKeys.groupItems(group.type, group.day),
+    queryFn: ({ pageParam }) =>
+      getNotificationGroupItems(group, DEFAULT_TIME_ZONE, {
+        limit: NOTIFICATION_GROUP_ITEMS_PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: nextOffset,
+    select: (data) => data.pages.flatMap((page) => page.items),
+    enabled,
+  });
+}
+
+function invalidateFeeds(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: notificationKeys.groups() });
+  void queryClient.invalidateQueries({
+    queryKey: notificationKeys.allGroupItems(),
   });
 }
 
@@ -104,89 +154,94 @@ export function useMarkAllNotificationsRead() {
 /** Shared by both dismiss mutations so concurrent ones can see each other (see `onSettled`). */
 const DISMISS_MUTATION_KEY = [...notificationKeys.all, "dismiss"] as const;
 
-/**
- * What a dismiss hides: one notification by id, or — for "Clear all" — every row created at or before
- * `upTo`, the same bound the server applies (every row when `upTo` is absent).
- */
-type DismissTarget = string | { upTo: string | undefined };
+// The row and the group it was rendered in: the group's day comes from the API, never recomputed here.
+export interface DismissOne {
+  notification: Notification;
+  group: GroupRef;
+}
 
-/**
- * The newest `createdAt` among the rows the bell rendered — the `upTo` "Clear all" sends, so it only
- * dismisses what the user has seen. `undefined` for no rows.
- */
-export function newestCreatedAt(
-  items: readonly Notification[],
-): string | undefined {
-  let newest: string | undefined;
-  for (const n of items) {
-    if (newest === undefined || Date.parse(n.createdAt) > Date.parse(newest)) {
-      newest = n.createdAt;
-    }
+// "Clear all" hides every row created at or before `upTo`, the bound the server applies.
+type DismissTarget = DismissOne | { upTo: string | undefined };
+
+type DismissSnapshot = Array<[QueryKey, unknown]>;
+
+function mapPages<T>(
+  data: InfiniteData<Page<T>, number> | undefined,
+  keep: (item: T) => T | null,
+): InfiniteData<Page<T>, number> | undefined {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => {
+      const items = page.items.flatMap((item) => {
+        const next = keep(item);
+        return next === null ? [] : [next];
+      });
+      return {
+        ...page,
+        items,
+        total: Math.max(0, page.total - (page.items.length - items.length)),
+      };
+    }),
+  };
+}
+
+function hideOne(queryClient: QueryClient, { notification: n, group }: DismissOne) {
+  queryClient.setQueryData<GroupPages>(notificationKeys.groups(), (data) =>
+    mapPages(data, (g) => {
+      if (g.type !== group.type || g.day !== group.day) return g;
+      if (g.count <= 1) return null;
+      return {
+        ...g,
+        count: g.count - 1,
+        unread: n.read ? g.unread : Math.max(0, g.unread - 1),
+        latest: g.latest.filter((x) => x.id !== n.id),
+      };
+    }),
+  );
+  queryClient.setQueryData<ItemPages>(
+    notificationKeys.groupItems(group.type, group.day),
+    (data) => mapPages(data, (x) => (x.id === n.id ? null : x)),
+  );
+  const count = queryClient.getQueryData<UnreadCount>(
+    notificationKeys.unreadCount(),
+  );
+  if (count && !n.read) {
+    queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
+      unread: Math.max(0, count.unread - 1),
+    });
   }
-  return newest;
 }
 
-/** The pre-mutation cache a dismiss restores on error: every cached list page + the badge count. */
-interface DismissSnapshot {
-  lists: Array<[QueryKey, Page<Notification> | undefined]>;
-  count: UnreadCount | undefined;
+function hideUpTo(queryClient: QueryClient, upTo: string | undefined) {
+  const bound = upTo === undefined ? Number.POSITIVE_INFINITY : Date.parse(upTo);
+  const groups = queryClient.setQueryData<GroupPages>(
+    notificationKeys.groups(),
+    (data) => mapPages(data, (g) => (Date.parse(g.latestAt) <= bound ? null : g)),
+  );
+  queryClient.setQueriesData<ItemPages>(
+    { queryKey: notificationKeys.allGroupItems() },
+    (data) =>
+      mapPages(data, (x) => (Date.parse(x.createdAt) <= bound ? null : x)),
+  );
+  if (queryClient.getQueryData(notificationKeys.unreadCount())) {
+    // A group newer than `upTo` (a poll landed after render) keeps its unread until the server answers.
+    const kept = groups ? flattenGroupPages(groups.pages) : [];
+    queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
+      unread: kept.reduce((sum, g) => sum + g.unread, 0),
+    });
+  }
 }
 
-/**
- * Optimistically hide notifications from every cached list page and drop the badge by the unread ones
- * hidden (dismiss implies read, ADR-0056 §7 amendment). "Clear all" hides the rows at or before its
- * `upTo` and sets the badge to the unread rows it kept — none when every rendered row is cleared, since
- * the server also dismisses the older rows beyond the loaded page. Returns the snapshot to roll back to.
- */
 async function hideFromCache(
   queryClient: QueryClient,
   target: DismissTarget,
 ): Promise<DismissSnapshot> {
   // Cancel in-flight polls so a response that predates the dismiss can't resurrect the row.
   await queryClient.cancelQueries({ queryKey: notificationKeys.all });
-  const snapshot: DismissSnapshot = {
-    lists: queryClient.getQueriesData<Page<Notification>>({
-      queryKey: notificationKeys.lists(),
-    }),
-    count: queryClient.getQueryData<UnreadCount>(notificationKeys.unreadCount()),
-  };
-
-  const hidden =
-    typeof target === "string"
-      ? (n: Notification) => n.id === target
-      : (n: Notification) =>
-          target.upTo === undefined ||
-          Date.parse(n.createdAt) <= Date.parse(target.upTo);
-  // The list caches the `Page<Notification>` ENVELOPE (ADR-0030), not a bare array — preserve it.
-  let unreadHidden = 0;
-  let unreadKept = 0;
-  let counted = false;
-  queryClient.setQueriesData<Page<Notification>>(
-    { queryKey: notificationKeys.lists() },
-    (page) => {
-      if (!page) return page;
-      const removed = page.items.filter(hidden);
-      // Several list pages may hold the same row; count its unread once for the badge.
-      if (!counted) {
-        unreadHidden = removed.filter((n) => !n.read).length;
-        unreadKept = page.items.filter((n) => !hidden(n) && !n.read).length;
-        counted = removed.length > 0;
-      }
-      return {
-        ...page,
-        items: page.items.filter((n) => !hidden(n)),
-        total: Math.max(0, page.total - removed.length),
-      };
-    },
-  );
-  if (snapshot.count) {
-    queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
-      unread:
-        typeof target === "string"
-          ? Math.max(0, snapshot.count.unread - unreadHidden)
-          : unreadKept,
-    });
-  }
+  const snapshot = queryClient.getQueriesData({ queryKey: notificationKeys.all });
+  if ("notification" in target) hideOne(queryClient, target);
+  else hideUpTo(queryClient, target.upTo);
   return snapshot;
 }
 
@@ -211,10 +266,9 @@ function dismissMutationOptions<TVariables>(
     onMutate: (vars) => hideFromCache(queryClient, target(vars)),
     onError: (_error, _vars, snapshot) => {
       if (!snapshot) return;
-      for (const [key, page] of snapshot.lists) {
-        queryClient.setQueryData(key, page);
+      for (const [key, data] of snapshot) {
+        queryClient.setQueryData(key, data);
       }
-      queryClient.setQueryData(notificationKeys.unreadCount(), snapshot.count);
     },
     onSuccess: ({ unread }) => {
       queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
@@ -232,9 +286,11 @@ function dismissMutationOptions<TVariables>(
       }
       // On success the badge is already authoritative; only the list needs the server's view. On error
       // the rolled-back count may be stale too, so reconcile everything.
-      queryClient.invalidateQueries({
-        queryKey: error ? notificationKeys.all : notificationKeys.lists(),
-      });
+      if (error) {
+        void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+      } else {
+        invalidateFeeds(queryClient);
+      }
     },
   };
 }
@@ -244,24 +300,24 @@ export function dismissNotificationOptions(
   queryClient: QueryClient,
   mutationFn: (id: string) => Promise<DismissNotificationsResult> = dismissNotification,
 ) {
-  return dismissMutationOptions(queryClient, mutationFn, (id) => id);
+  return dismissMutationOptions<DismissOne>(
+    queryClient,
+    (target) => mutationFn(target.notification.id),
+    (target) => target,
+  );
 }
 
-/**
- * Options for "Clear all". The variables are the rows the bell rendered: the request sends the newest
- * of their `createdAt` as `upTo`, and the optimistic removal hides exactly the rows the server will
- * dismiss — in practice every rendered row. Exported for the same reason.
- */
+// The variables are the groups the bell rendered; their newest `latestAt` is the `upTo` sent.
 export function dismissAllNotificationsOptions(
   queryClient: QueryClient,
   mutationFn: (
     upTo: string | undefined,
   ) => Promise<DismissNotificationsResult> = dismissAllNotifications,
 ) {
-  return dismissMutationOptions<readonly Notification[]>(
+  return dismissMutationOptions<readonly NotificationGroup[]>(
     queryClient,
-    (items) => mutationFn(newestCreatedAt(items)),
-    (items) => ({ upTo: newestCreatedAt(items) }),
+    (groups) => mutationFn(newestLatestAt(groups)),
+    (groups) => ({ upTo: newestLatestAt(groups) }),
   );
 }
 
@@ -271,11 +327,44 @@ export function useDismissNotification() {
   return useMutation(dismissNotificationOptions(queryClient));
 }
 
-/**
- * Dismiss the rendered notifications from the caller's own bell ("Clear all", #1309) — pass the rows
- * the bell shows; anything newer stays. Optimistic.
- */
+// "Clear all" (#1309): pass the groups the bell shows; anything newer stays. Optimistic.
 export function useDismissAllNotifications() {
   const queryClient = useQueryClient();
   return useMutation(dismissAllNotificationsOptions(queryClient));
+}
+
+// The group's unread drops at once; the refetch then brings the server's view of every row.
+export function markNotificationGroupReadOptions(
+  queryClient: QueryClient,
+  mutationFn: (
+    body: MarkNotificationGroupRead,
+  ) => Promise<MarkReadResult> = markNotificationGroupRead,
+): UseMutationOptions<MarkReadResult, Error, GroupRef> {
+  return {
+    mutationFn: (group) =>
+      mutationFn({ type: group.type, day: group.day, tz: DEFAULT_TIME_ZONE }),
+    onSuccess: ({ unread }, group) => {
+      queryClient.setQueryData<UnreadCount>(notificationKeys.unreadCount(), {
+        unread,
+      });
+      const markRead = (n: Notification) => ({ ...n, read: true });
+      queryClient.setQueryData<GroupPages>(notificationKeys.groups(), (data) =>
+        mapPages(data, (g) =>
+          g.type === group.type && g.day === group.day
+            ? { ...g, unread: 0, latest: g.latest.map(markRead) }
+            : g,
+        ),
+      );
+      queryClient.setQueryData<ItemPages>(
+        notificationKeys.groupItems(group.type, group.day),
+        (data) => mapPages(data, markRead),
+      );
+      invalidateFeeds(queryClient);
+    },
+  };
+}
+
+export function useMarkNotificationGroupRead() {
+  const queryClient = useQueryClient();
+  return useMutation(markNotificationGroupReadOptions(queryClient));
 }
