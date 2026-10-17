@@ -52,6 +52,8 @@
     "title": "My access requests",
     "empty": "You haven't requested access to any applications.",
     "requestedOn": "Requested {date}",
-    "deniedReason": "Reason: {reason}"
+    "deniedReason": "Reason: {reason}",
+    "filedForYouBy": "Filed for you by {name}",
+    "filedForYou": "Filed for you by an approver"
   }
 }

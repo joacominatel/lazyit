@@ -174,7 +174,24 @@
     "submit": "Enviar solicitud",
     "submittedToast": "Solicitud de acceso enviada.",
     "alreadyPending": "Ya tenés una solicitud pendiente para esta aplicación.",
-    "error": "No se pudo enviar tu solicitud. Probá de nuevo."
+    "error": "No se pudo enviar tu solicitud. Probá de nuevo.",
+    "applicationLabel": "Aplicación",
+    "applicationPlaceholder": "Elegí una aplicación",
+    "applicationSearch": "Buscar aplicaciones…",
+    "applicationEmpty": "No se encontraron aplicaciones.",
+    "applicationRequired": "Elegí una aplicación.",
+    "onBehalfLabel": "En nombre de",
+    "onBehalfPlaceholder": "Yo",
+    "onBehalfSearch": "Buscar personas…",
+    "onBehalfEmpty": "No se encontraron personas activas con cuenta.",
+    "onBehalfDescription": "Opcional — cargá la solicitud para otra persona. Dejalo vacío para pedir acceso para vos.",
+    "submittedOnBehalfToast": "Solicitud de acceso cargada en su nombre.",
+    "alreadyPendingOnBehalf": "Esta persona ya tiene una solicitud pendiente para esta aplicación.",
+    "errors": {
+      "onBehalfForbidden": "Solo podés cargar una solicitud para otra persona si podés aprobar solicitudes de acceso.",
+      "targetUnavailable": "Solo podés cargar una solicitud para una persona activa que tenga cuenta.",
+      "alreadyPending": "Ya hay una solicitud pendiente para esta aplicación."
+    }
   },
   "requests": {
     "title": "Solicitudes de acceso",
@@ -186,6 +203,8 @@
     "emptyDescription": "No hay nada esperando una decisión en este momento.",
     "wantsAccessTo": "pide acceso a",
     "requestedOn": "Solicitado {date}",
+    "filedBy": "Cargada por {name}",
+    "fileRequest": "Cargar una solicitud",
     "unknownUser": "Usuario desconocido",
     "unknownApplication": "Aplicación desconocida",
     "approve": "Aprobar",

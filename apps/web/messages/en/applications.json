@@ -174,7 +174,24 @@
     "submit": "Send request",
     "submittedToast": "Access request sent.",
     "alreadyPending": "You already have a pending request for this application.",
-    "error": "Couldn't send your request. Please try again."
+    "error": "Couldn't send your request. Please try again.",
+    "applicationLabel": "Application",
+    "applicationPlaceholder": "Select an application",
+    "applicationSearch": "Search applications…",
+    "applicationEmpty": "No applications found.",
+    "applicationRequired": "Select an application.",
+    "onBehalfLabel": "On behalf of",
+    "onBehalfPlaceholder": "Me",
+    "onBehalfSearch": "Search people…",
+    "onBehalfEmpty": "No active people with an account found.",
+    "onBehalfDescription": "Optional — file the request for someone else. Leave empty to request access for yourself.",
+    "submittedOnBehalfToast": "Access request filed on their behalf.",
+    "alreadyPendingOnBehalf": "This person already has a pending request for this application.",
+    "errors": {
+      "onBehalfForbidden": "You can only file a request for someone else if you can approve access requests.",
+      "targetUnavailable": "You can only file a request for an active person who has an account.",
+      "alreadyPending": "There is already a pending request for this application."
+    }
   },
   "requests": {
     "title": "Access requests",
@@ -186,6 +203,8 @@
     "emptyDescription": "There's nothing waiting for a decision right now.",
     "wantsAccessTo": "wants access to",
     "requestedOn": "Requested {date}",
+    "filedBy": "Filed by {name}",
+    "fileRequest": "File a request",
     "unknownUser": "Unknown user",
     "unknownApplication": "Unknown application",
     "approve": "Approve",

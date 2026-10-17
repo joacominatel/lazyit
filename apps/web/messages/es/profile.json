@@ -52,6 +52,8 @@
     "title": "Mis solicitudes de acceso",
     "empty": "Todavía no solicitaste acceso a ninguna aplicación.",
     "requestedOn": "Solicitado {date}",
-    "deniedReason": "Motivo: {reason}"
+    "deniedReason": "Motivo: {reason}",
+    "filedForYouBy": "Cargada para vos por {name}",
+    "filedForYou": "Cargada para vos por un aprobador"
   }
 }
