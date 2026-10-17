@@ -43,12 +43,6 @@ export interface LocationListParams {
   deleted?: "only";
 }
 
-/**
- * List locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
- * the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
- * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
- * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
- */
 export const LOCATION_EXPORT_PATH = `${BASE}/export`;
 
 /** The list's filters, never paging or sort; the CSV export sends exactly these. */
@@ -60,6 +54,12 @@ export function locationFilterParams(params: LocationListParams = {}): URLSearch
   return qs;
 }
 
+/**
+ * List locations, paged. `GET /locations` returns a `Page<Location>` envelope; we return
+ * the whole envelope (`items` + `total`/`limit`/`offset`) so the list can paginate. Only
+ * server-supported params are forwarded (extra client-only filter keys are ignored). Default is
+ * active-only; pass `deleted: "only"` (ADMIN) for the archived view.
+ */
 export function getLocations(
   params: LocationListParams = {},
   signal?: AbortSignal,

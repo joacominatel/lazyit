@@ -31,11 +31,6 @@ export interface AccessRequestFilters {
   offset?: number;
 }
 
-/**
- * List access requests (newest first), filtered and paged (`GET /access-requests`,
- * `accessRequest:read`). Returns the whole `Page<AccessRequest>` envelope so callers can read both
- * `items` and the `total`/`limit`/`offset` metadata.
- */
 export const ACCESS_REQUEST_EXPORT_PATH = `${BASE}/export`;
 
 /** The managers' list filters, never the page window; the CSV export sends exactly these. */
@@ -47,6 +42,11 @@ export function accessRequestFilterParams(filters: AccessRequestFilters = {}): U
   return params;
 }
 
+/**
+ * List access requests (newest first), filtered and paged (`GET /access-requests`,
+ * `accessRequest:read`). Returns the whole `Page<AccessRequest>` envelope so callers can read both
+ * `items` and the `total`/`limit`/`offset` metadata.
+ */
 export async function getAccessRequests(
   filters: AccessRequestFilters = {},
 ): Promise<AccessRequestListPage> {
