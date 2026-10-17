@@ -10,7 +10,7 @@ subcategory: concepts
 La automatización de accesos permite que lazyit **actúe en otro sistema** cuando concedes o revocas
 el acceso a una aplicación. Cuando concedes acceso a alguien, un flujo de trabajo puede crear su
 cuenta en la herramienta externa; cuando lo revocas, un flujo puede desactivar esa cuenta. lazyit los
-llama **flujos de trabajo**, y los configuras por aplicación desde la pestaña **Flujos de trabajo**
+llama **flujos de trabajo**, y los configuras por aplicación desde la pestaña **Automatización**
 de cada aplicación.
 
 Es **estrictamente opcional.** Una aplicación sin ningún flujo activado se comporta como siempre:

@@ -17,7 +17,8 @@ se otorga acceso**.
 
 Al crear o editar una aplicación, activa **Crítica**. lazyit entonces:
 
-- Muestra una insignia **Crítica** en la fila de la aplicación y en su página de detalle.
+- Muestra una insignia **Crítica** en la fila de la aplicación y en su página. La columna lateral de
+  la página también recuerda la regla de abajo para el asistente de IA.
 - Te permite **filtrar** el listado de Acceso a *solo críticas* (o *no críticas*), para que
   revises por separado tus sistemas más sensibles.
 - Resalta el número de acceso activo en aplicaciones críticas para una revisión de un vistazo.
@@ -44,6 +45,14 @@ acceso más tarde se señala de nuevo.
 > La campana de notificaciones y cómo leer y descartar alertas se explican en **Notificaciones y
 > actividad** en esta Ayuda. Las alertas de criticidad son uno de los eventos seleccionados que
 > llegan ahí.
+
+## Aplicaciones críticas y el asistente de IA
+
+Todo cambio que el asistente de IA hace en una aplicación crítica — otorgar o revocar acceso, o tocar
+su automatización — ocurre solo en el chat de lazyit, después de que confirmes tu contraseña. Claude
+Code y los demás clientes MCP se rechazan. Las personas que trabajan en lazyit no se ven afectadas:
+otorgan, revocan y gestionan flujos en una aplicación crítica igual que en cualquier otra. Mira
+[Aprobar cambios](/help/ai-assistant-approvals).
 
 ## Lo que la criticidad no hace
 

@@ -34,8 +34,8 @@ reconocerla y encontrarla:
 ## Agregar y editar aplicaciones
 
 Desde el listado de **Acceso**, elige **Nueva aplicación**, completa al menos un nombre y créala.
-Abre cualquier aplicación para ver sus **Detalles** y editarla. Dos atajos agilizan la
-configuración repetitiva:
+Abre cualquier aplicación para ver su página (más abajo) y elige **Editar** arriba. Dos atajos
+agilizan la configuración repetitiva:
 
 - **Clonar** crea una nueva aplicación precargada a partir de una existente — útil para sistemas
   similares. El clon es una aplicación *aparte*; le otorgas acceso de forma independiente.
@@ -44,6 +44,37 @@ configuración repetitiva:
 
 Crear y editar aplicaciones es trabajo de catálogo cotidiano, disponible para administradores y
 miembros. **Eliminar** una aplicación es una acción solo de administrador.
+
+## La página de la aplicación
+
+Al abrir una aplicación ves todo sobre ella en una sola página, con la misma estructura que un
+activo o una persona:
+
+- **El encabezado** — el nombre, un distintivo **Crítica** cuando la aplicación está marcada como
+  crítica, y el fabricante, la categoría y la URL. La acción principal está a la derecha: **Otorgar
+  acceso** para administradores, o **Solicitar acceso** para el resto (se convierte en *Acceso
+  solicitado* o *Tienes acceso* cuando eso ya aplica). **Editar** está al lado; **Clonar** y
+  **Eliminar aplicación** están en el menú **⋯**.
+- **Requiere atención** — una fila corta con lo que necesita seguimiento, lo más urgente primero:
+  accesos vencidos que esperan ser revocados, más personas que asientos comprados, una renovación de
+  licencia en los próximos 30 días o ya pasada, accesos que vencen en los próximos 30 días, personas
+  desactivadas que todavía tienen acceso y solicitudes que esperan una decisión. Cuando nada requiere
+  atención, la fila no aparece.
+- **Datos clave** — **Personas con acceso** (personas distintas, con la cantidad de accesos
+  activos), **Asientos** (usados / comprados, con una barra), **Renovación** y **Solicitudes
+  pendientes**. Personas con acceso y Solicitudes pendientes abren su pestaña al hacer clic.
+- **Pestañas** — **Accesos** (quién tiene acceso, ver [Concesiones de acceso](/help/applications-access-grants)),
+  **Solicitudes** (las solicitudes de acceso de esta aplicación, ver
+  [Solicitudes de acceso](/help/applications-access-requests)), **Automatización** (sus flujos,
+  ejecuciones recientes y conexión, ver [Automatización de accesos](/help/access-automation-concepts)),
+  **Actividad** (cada otorgamiento y revocación, lo más reciente primero) e **Información**
+  (descripción, notas y datos de licencia). Una pestaña aparece solo si puedes ver lo que lista: de
+  forma predeterminada los miembros ven Accesos y Solicitudes, y solo los administradores ven
+  Automatización y Actividad. La pestaña abierta queda en la dirección, así que un enlace compartido
+  abre en la misma pestaña.
+- **La columna lateral** — los detalles (fabricante, categoría, URL, criticidad, cuándo se dio de
+  alta y cuándo se actualizó) y los artículos de la base de conocimiento vinculados a la aplicación.
+  En un teléfono, la columna lateral pasa debajo de las pestañas.
 
 ## Categorías
 
@@ -88,9 +119,10 @@ acceso activo a la aplicación en este momento. Como una misma persona puede ten
 concesión sobre la misma app, lazyit cuenta *personas*, no concesiones — así el número refleja el
 consumo real de la licencia.
 
-El listado de Acceso y los **Detalles** de cada aplicación muestran **usados / comprados**. Cuando
-más personas tienen acceso que los asientos comprados, lazyit marca la aplicación como
-**sobreasignada** — un aviso para comprar más asientos o revocar accesos que ya no hacen falta. La
+El listado de Acceso y el dato clave **Asientos** de cada aplicación muestran **usados /
+comprados**; la pestaña **Información** lista los tres campos de licencia. Cuando más personas tienen
+acceso que los asientos comprados, lazyit marca la aplicación como **sobreasignada**, en el listado y
+en la fila *Requiere atención* de la página — un aviso para comprar más asientos o revocar accesos que ya no hacen falta. La
 advertencia es informativa: lazyit nunca bloquea una concesión por la cantidad de asientos.
 
 Todos los campos de licencia son opcionales — déjalos en blanco para aplicaciones que no licencias

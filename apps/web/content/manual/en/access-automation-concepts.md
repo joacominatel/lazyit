@@ -10,7 +10,7 @@ subcategory: concepts
 Access Automation lets lazyit **act in another system** when you grant or revoke application access.
 When you grant someone access to an application, a workflow can create their account in the external
 tool; when you revoke it, a workflow can deactivate that account. lazyit calls these **workflows**,
-and you configure them per application from the application's **Workflows** tab.
+and you configure them per application from the application's **Automation** tab.
 
 It is **strictly opt-in.** An application with no enabled workflow behaves exactly as it always has:
 granting access just records the grant, and nothing is provisioned automatically. You only get
