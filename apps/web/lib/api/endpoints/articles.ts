@@ -74,6 +74,8 @@ export interface ArticleFilters {
   applicationId?: string[];
   sort?: ArticleListSort;
   includeSubfolders?: boolean;
+  // ADMIN only; sent by getArticles alone because the export is live-only.
+  deleted?: "only";
   limit?: number;
   offset?: number;
 }
@@ -116,6 +118,7 @@ export function getArticles(
 ): Promise<ArticleListPage> {
   const params = articleFilterParams(filters);
   if (filters.sort) params.set("sort", filters.sort);
+  if (filters.deleted) params.set("deleted", filters.deleted);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined)
     params.set("offset", String(filters.offset));
@@ -135,6 +138,11 @@ export function getArticleBySlug(slug: string, token?: string): Promise<Article>
   return apiFetch<Article>(`${BASE}/by-slug/${encodeURIComponent(slug)}`, {
     token,
   });
+}
+
+// 409 when another article took the slug while this one was archived.
+export function restoreArticle(id: string): Promise<Article> {
+  return apiFetch<Article>(`${BASE}/${id}/restore`, { method: "POST" });
 }
 
 /** Transition DRAFT -> PUBLISHED (author only). Sets publishedAt on first publish. */

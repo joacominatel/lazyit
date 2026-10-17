@@ -11,15 +11,17 @@ import {
 import {
   type ArticleHit,
   type ArticleLinkedTo,
+  type ArticleListItem,
   type ArticleListSort,
   type ArticleStatus,
   type Folder,
 } from "@lazyit/shared";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ActiveFilters, ClearFiltersLink } from "@/components/active-filters";
 import { ApplicationMultiSelect } from "@/components/application-multi-select";
+import { ArchivedToggle } from "@/components/archived-toggle";
 import { AssetMultiSelect } from "@/components/asset-multi-select";
 import { EmptyState } from "@/components/empty-state";
 import { ExportButton } from "@/components/export-button";
@@ -28,7 +30,7 @@ import {
   type MultiSelectOption,
 } from "@/components/multi-select-filter";
 import { PageHeader } from "@/components/page-header";
-import { ErrorState, Pagination } from "@/components/resource-table";
+import { ErrorState, Pagination, RestoreRowAction } from "@/components/resource-table";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -49,12 +51,13 @@ import {
 } from "@/lib/api/hooks/use-articles";
 import { useAsset } from "@/lib/api/hooks/use-assets";
 import { useSearch } from "@/lib/api/hooks/use-search";
-import { useCan } from "@/lib/hooks/use-permissions";
+import { useCan, usePermissions } from "@/lib/hooks/use-permissions";
 import { useListParams } from "@/lib/hooks/use-list-params";
 import { useRecentArticles } from "@/lib/hooks/use-recent-articles";
 import {
   type KbBrowseMode,
   type KbStatusSegment,
+  kbArchivedListActive,
   kbBrowseMode,
   kbNarrowedBeyondView,
   kbSortParam,
@@ -67,6 +70,7 @@ import { articleFolderTrail } from "@/lib/utils/kb-reading";
 import { resolveKbSearchMode } from "@/lib/utils/kb-search";
 import { singleCategoryId } from "@/lib/utils/kb-shell-route";
 import { type FolderIndex, useFolderIndex } from "../_lib/use-folder-index";
+import { ArticleRestoreDialog } from "./article-restore-dialog";
 import { ArticleHitRow } from "./article-row";
 import {
   ArticleTable,
@@ -176,6 +180,10 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     clearFilters,
   } = useListParams({ filters: FILTER_DEFAULTS });
 
+  const { isAdmin } = usePermissions();
+  const canRestore = useCan("article:delete");
+  const [restoring, setRestoring] = useState<ArticleListItem | null>(null);
+
   const sort = parseKbSort(searchParams.get("sort"));
   const statusValues = getFilterValues("status") as ArticleStatus[];
   const categoryValues = getFilterValues("categoryId");
@@ -210,6 +218,8 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     searchErrored: searchQuery.isError,
   });
   const fallbackActive = searchMode === "fallback";
+  // Search runs on the live index, so the archived list is a browse-only slice.
+  const archived = !searching && kbArchivedListActive(searchParams.get("archived"), isAdmin);
 
   // The list scope minus status and paging — shared by the list read and the segment counts.
   const linkedScope: Pick<ArticleFilters, "linked" | "linkedTo" | "assetId" | "applicationId"> = {
@@ -225,6 +235,7 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
     categoryId: fallbackActive ? undefined : categoryValues.length > 0 ? categoryValues : undefined,
     includeSubfolders: includeSubfolders && !fallbackActive ? true : undefined,
     ...linkedScope,
+    deleted: archived ? "only" : undefined,
   };
 
   const articleFilters = {
@@ -437,7 +448,11 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
               id="kb-articles-heading"
               className="mr-auto text-xs font-semibold tracking-wide text-muted-foreground uppercase"
             >
-              {mode === "folder" ? t("folderView.listTitle") : t("home.articlesTitle")}
+              {archived
+                ? t("archived.listTitle")
+                : mode === "folder"
+                  ? t("folderView.listTitle")
+                  : t("home.articlesTitle")}
             </h2>
             {searching ? null : (
               <>
@@ -470,14 +485,23 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
                   }
                 />
                 {filterPopover}
-                <ExportButton
-                  path={ARTICLE_EXPORT_PATH}
-                  params={articleFilterParams(articleFilters)}
-                  total={page?.total}
-                  filename="articles"
-                  permission="article:read"
-                  size="sm"
-                />
+                {isAdmin ? (
+                  <ArchivedToggle
+                    id="kb-show-archived"
+                    checked={archived}
+                    onCheckedChange={(on) => setFilters({ archived: on ? "only" : "" })}
+                  />
+                ) : null}
+                {archived ? null : (
+                  <ExportButton
+                    path={ARTICLE_EXPORT_PATH}
+                    params={articleFilterParams(articleFilters)}
+                    total={page?.total}
+                    filename="articles"
+                    permission="article:read"
+                    size="sm"
+                  />
+                )}
               </>
             )}
           </div>
@@ -491,6 +515,7 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
           ) : total === 0 ? (
             <EmptyList
               mode={mode}
+              archived={archived}
               filtered={kbNarrowedBeyondView(searchParams)}
               onClear={searching ? () => setQ("") : clearNarrowing}
             />
@@ -501,6 +526,14 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
                 folderOf={index.folderOf}
                 showFolder={mode !== "folder"}
                 subfolderOf={subfolderOf}
+                archivedAction={
+                  archived
+                    ? (article) =>
+                        canRestore ? (
+                          <RestoreRowAction onRestore={() => setRestoring(article)} />
+                        ) : null
+                    : undefined
+                }
               />
               <Pagination
                 total={total}
@@ -514,6 +547,8 @@ function BrowseView({ mode }: { mode: Exclude<KbBrowseMode, "recent"> }) {
           )}
         </section>
       )}
+
+      <ArticleRestoreDialog article={restoring} onClose={() => setRestoring(null)} />
     </div>
   );
 }
@@ -549,16 +584,25 @@ function MissingFolderHeader({ loaded }: { loaded: boolean }) {
 /** The empty list for each layout: no articles at all, an empty folder, or nothing matching. */
 function EmptyList({
   mode,
+  archived,
   filtered,
   onClear,
 }: {
   mode: Exclude<KbBrowseMode, "recent">;
+  archived: boolean;
   filtered: boolean;
   onClear: () => void;
 }) {
   const t = useTranslations("kb");
   const canWrite = useCan("article:write");
   if (mode === "search" || filtered) return <NoMatches onClear={onClear} />;
+  if (archived) {
+    return (
+      <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+        {t("archived.empty")}
+      </p>
+    );
+  }
   if (mode === "folder") {
     return (
       <p className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">

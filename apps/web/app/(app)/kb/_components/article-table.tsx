@@ -59,6 +59,12 @@ type LayoutKey = keyof typeof LAYOUT;
 const ROW =
   "group block gap-x-4 px-3 py-2.5 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset @xl:items-center";
 
+// An archived article has no reading page to open, so its row is not a link.
+const STATIC_ROW = "block min-w-0 flex-1 gap-x-4 px-3 py-2.5 @xl:items-center";
+
+// The header reserves the same width so its columns line up with the rows'.
+const ACTION_COLUMN = "flex w-28 shrink-0 justify-end";
+
 /** The card around a table: hairline-divided rows on the card surface. */
 function TableFrame({ children }: { children: ReactNode }) {
   return (
@@ -69,12 +75,28 @@ function TableFrame({ children }: { children: ReactNode }) {
 }
 
 /** The column-header row — visual only (`aria-hidden`); hidden while rows are stacked. */
-function HeaderRow({ layout, cells }: { layout: LayoutKey; cells: { label: string; wide?: boolean; align?: "end" }[] }) {
+function HeaderRow({
+  layout,
+  cells,
+  withAction = false,
+}: {
+  layout: LayoutKey;
+  cells: { label: string; wide?: boolean; align?: "end" }[];
+  withAction?: boolean;
+}) {
+  if (withAction) {
+    return (
+      <div aria-hidden className="hidden items-center gap-3 pr-3 @xl:flex">
+        <HeaderRow layout={layout} cells={cells} />
+        <span className={ACTION_COLUMN} />
+      </div>
+    );
+  }
   return (
     <div
       aria-hidden
       className={cn(
-        "hidden gap-x-4 px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
+        "hidden min-w-0 flex-1 gap-x-4 px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase",
         LAYOUT[layout].grid,
       )}
     >
@@ -121,17 +143,20 @@ function FolderPath({ folder, className }: { folder: FolderDisplay; className?: 
  * `showFolder={false}` inside a folder view, where the column would repeat the header. `subfolderOf`
  * (folder view with "Include subfolders") names the sub-folder an article lives in, shown before its
  * excerpt; it returns `null` for the open folder's own articles.
+ * `archivedAction` turns it into the archived list (#1647).
  */
 export function ArticleTable({
   articles,
   folderOf,
   showFolder = true,
   subfolderOf,
+  archivedAction,
 }: {
   articles: ArticleListItem[];
   folderOf: (categoryId: string) => FolderDisplay;
   showFolder?: boolean;
   subfolderOf?: (categoryId: string) => string | null;
+  archivedAction?: (article: ArticleListItem) => ReactNode;
 }) {
   const t = useTranslations("kb");
   const layout: LayoutKey = showFolder ? "withFolder" : "withoutFolder";
@@ -139,12 +164,13 @@ export function ArticleTable({
     <TableFrame>
       <HeaderRow
         layout={layout}
+        withAction={archivedAction !== undefined}
         cells={[
           { label: t("table.article") },
           ...(showFolder ? [{ label: t("table.folder") }] : []),
           { label: t("table.author"), wide: true },
           { label: t("table.reading"), wide: true },
-          { label: t("table.updated") },
+          { label: archivedAction ? t("table.archived") : t("table.updated") },
         ]}
       />
       <ul>
@@ -156,6 +182,8 @@ export function ArticleTable({
               folder={folderOf(article.categoryId)}
               showFolder={showFolder}
               subfolder={subfolderOf?.(article.categoryId) ?? null}
+              action={archivedAction?.(article)}
+              archived={archivedAction !== undefined}
             />
           </li>
         ))}
@@ -170,12 +198,16 @@ function ArticleTableRow({
   folder,
   showFolder,
   subfolder,
+  action,
+  archived,
 }: {
   article: ArticleListItem;
   layout: LayoutKey;
   folder: FolderDisplay;
   showFolder: boolean;
   subfolder: string | null;
+  action: ReactNode;
+  archived: boolean;
 }) {
   const t = useTranslations("kb");
   const { relative, dateTime } = useFormatters();
@@ -183,14 +215,15 @@ function ArticleTableRow({
   const author = article.author;
   const authorName = author ? `${author.firstName} ${author.lastName}`.trim() : null;
   const isFormerMember = author?.deletedAt != null;
+  const when = archived ? (article.deletedAt ?? article.updatedAt) : article.updatedAt;
   const updated = (
-    <span className="font-mono text-xs text-muted-foreground tabular-nums" title={dateTime(article.updatedAt)}>
-      {relative(article.updatedAt)}
+    <span className="font-mono text-xs text-muted-foreground tabular-nums" title={dateTime(when)}>
+      {relative(when)}
     </span>
   );
 
-  return (
-    <Link href={`/kb/${article.slug}`} className={cn(ROW, LAYOUT[layout].grid)}>
+  const cells = (
+    <>
       {/* Article */}
       <div className="flex min-w-0 items-start gap-3 @xl:items-center">
         <DocGlyph />
@@ -279,7 +312,21 @@ function ArticleTableRow({
 
       {/* Updated */}
       <span className="hidden @xl:block">{updated}</span>
-    </Link>
+    </>
+  );
+
+  if (!archived) {
+    return (
+      <Link href={`/kb/${article.slug}`} className={cn(ROW, LAYOUT[layout].grid)}>
+        {cells}
+      </Link>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3 pr-3">
+      <div className={cn(STATIC_ROW, LAYOUT[layout].grid)}>{cells}</div>
+      <div className={ACTION_COLUMN}>{action}</div>
+    </div>
   );
 }
 
